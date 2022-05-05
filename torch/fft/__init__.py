@@ -396,6 +396,8 @@ Note:
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
     However it only supports powers of 2 signal length in every transformed dimension.
+    With default arguments, the size of last dimension should be (2^n + 1) as argument
+    `n` defaults to even output size = 2 * (last_dim_size - 1)
 
 Args:
     input (Tensor): the input tensor representing a half-Hermitian signal
@@ -533,6 +535,8 @@ Note:
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
     However it only supports powers of 2 signal length in every transformed dimensions.
+    With default arguments, the size of last dimension should be (2^n + 1) as argument
+    `s` defaults to even output size = 2 * (last_dim_size - 1)
 
 Args:
     input (Tensor): the input tensor
@@ -673,6 +677,8 @@ Note:
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
     However it only supports powers of 2 signal length in every transformed dimensions.
+    With default arguments, the size of last dimension should be (2^n + 1) as argument
+    `s` defaults to even output size = 2 * (last_dim_size - 1)
 
 Args:
     input (Tensor): the input tensor
@@ -758,6 +764,8 @@ Note:
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
     However it only supports powers of 2 signal length in every transformed dimension.
+    With default arguments, the size of last dimension should be (2^n + 1) as argument
+    `n` defaults to even output size = 2 * (last_dim_size - 1)
 
 Args:
     input (Tensor): the input tensor representing a half-Hermitian signal
@@ -875,6 +883,8 @@ domain. By the Hermitian property, the Fourier transform will be real-valued.
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
     However it only supports powers of 2 signal length in every transformed dimensions.
+    With default arguments, the size of last dimension should be (2^n + 1) as argument
+    `s` defaults to even output size = 2 * (last_dim_size - 1)
 
 Args:
     input (Tensor): the input tensor
@@ -1025,6 +1035,8 @@ Note:
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
     However it only supports powers of 2 signal length in every transformed dimensions.
+    With default arguments, the size of last dimension should be (2^n + 1) as argument
+    `s` defaults to even output size = 2 * (last_dim_size - 1)
 
 Args:
     input (Tensor): the input tensor
