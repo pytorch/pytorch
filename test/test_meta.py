@@ -1,3 +1,5 @@
+# Owner(s): ["module: primTorch"]
+
 import torch
 from torch.utils._pytree import tree_map, tree_flatten
 from torch.testing._internal.common_utils import (
@@ -609,6 +611,8 @@ meta_exclude_set = {
     torch._pack_padded_sequence,
     torch._pad_packed_sequence,
     torch.sparse_coo_tensor,
+    torch.linalg.ldl_factor,
+    torch._index_reduce,
     # RuntimeError: Expected 3D or 4D (batch mode) tensor with optional 0 dim
     # batch size for input, but got:[1, 1, 0]
     # in test_nn.py TestNNDeviceTypeCPU.test_max_pool1d_corner_cases_cpu_float64
@@ -825,8 +829,10 @@ class TestMeta(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
-    def test_comprehensive(self, device, dtype, op):
+    def test_meta(self, device, dtype, op):
         func = op.get_op()
+        if func in meta_exclude_set:
+            self.skipTest('meta known not to be implemented')
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
