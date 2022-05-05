@@ -22,6 +22,7 @@
 #include <ATen/ops/_conj_physical_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
@@ -981,7 +982,7 @@ Tensor _csr_to_block_csr(const Tensor& self, IntArrayRef blocksize) {
   Tensor self_crow_indices = self.crow_indices();
   Tensor self_col_indices = self.col_indices();
   Tensor cpu_result = _csr_to_block_csr_cpu(
-      _sparse_csr_tensor_unsafe(self_crow_indices.cpu(),
+      _sparse_bsr_tensor_unsafe(self_crow_indices.cpu(),
                                 self_col_indices.cpu(),
                                 self_values.cpu(),
                                 self.sizes(),
@@ -992,7 +993,7 @@ Tensor _csr_to_block_csr(const Tensor& self, IntArrayRef blocksize) {
   Tensor result_values = cpu_result.values().to(self_values.options());
   Tensor result_crow_indices = cpu_result.crow_indices().to(self_crow_indices.options());
   Tensor result_col_indices = cpu_result.col_indices().to(self_col_indices.options());
-  return at::native::_sparse_csr_tensor_unsafe(
+  return at::native::_sparse_bsr_tensor_unsafe(
       result_crow_indices,
       result_col_indices,
       result_values,
