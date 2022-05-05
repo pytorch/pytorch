@@ -24,7 +24,7 @@ void record_function_enter(
     at::RecordFunction &rec) {
   if (rec.isActive()) {
     if (rec.needsInputs() && args.has_value()) {
-      rec.before(name, std::vector<c10::IValue>{c10::IValue{args.value()}});
+      rec.before(name, c10::ArrayRef<const c10::IValue>{c10::IValue{args.value()}});
     } else {
       rec.before(name);
     }

@@ -11,7 +11,7 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
-void InputOutputEncoder::push(const std::vector<c10::IValue>& values) {
+void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
   for (const auto& value : values) {
     if (value.isTensor()) {
       push(value.toTensor());

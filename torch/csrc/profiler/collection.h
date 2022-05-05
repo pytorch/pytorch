@@ -105,7 +105,7 @@ constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;
 // Those vectors can be created during post-processing.
 class InputOutputEncoder final {
  public:
-  void push(const std::vector<c10::IValue>& values);
+  void push(c10::ArrayRef<const c10::IValue> values);
 
   // Used during post-processing to create vectors for shapes and dtype.
   auto getNextShapesAndDtypes();
