@@ -1414,7 +1414,7 @@ void nnc_aten_triangular_solve(
 
 #if AT_MKLDNN_ENABLED()
 
-void nnc_mkldnn_prepacked_conv2d_run(
+void nnc_mkldnn_prepacked_conv_run(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1616,9 +1616,9 @@ const static RegisterNNCExternalFunction nnc_embedding(
     nnc_aten_embedding);
 
 #if AT_MKLDNN_ENABLED()
-const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv2d_run(
-    "nnc_mkldnn_prepacked_conv2d_run",
-    nnc_mkldnn_prepacked_conv2d_run);
+const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv_run(
+    "nnc_mkldnn_prepacked_conv_run",
+    nnc_mkldnn_prepacked_conv_run);
 #endif // AT_MKLDNN_ENABLED()
 
 #ifdef USE_XNNPACK

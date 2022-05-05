@@ -274,7 +274,7 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
 
 // For MKLDNN conv fusion OP, the fuser only supports the MKLDNN OP context to
 // be a Constant
-bool mkldnnConv2dFusionIsSupported(const torch::jit::Node* node) {
+bool mkldnnConvFusionIsSupported(const torch::jit::Node* node) {
   constexpr int CONTEXT_POS = 1;
   return node->input(CONTEXT_POS)->node()->kind() == prim::Constant;
 }

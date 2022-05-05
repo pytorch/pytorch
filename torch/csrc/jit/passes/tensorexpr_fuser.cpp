@@ -121,7 +121,7 @@ bool isSupported(Node* node) {
       node->isMemberOf(supported_misc_set) ||
       node->isMemberOf(getCustomOperatorSet()) ||
       (node->isMemberOf(supported_mkldnn_fusion_op_set()) &&
-       mkldnnConv2dFusionIsSupported(node)) ||
+       mkldnnConvFusionIsSupported(node)) ||
       (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
     // We only insert guards on Tensor types, so we rely on the output
     // of a node being uniquely determined by its input types.

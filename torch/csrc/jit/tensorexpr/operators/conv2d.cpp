@@ -427,7 +427,7 @@ Tensor computePrepackedLinearClampRun(
   return Tensor(ResultBuf.node(), s);
 }
 
-Tensor computeMkldnnPrepackedConv2dRun(
+Tensor computeMkldnnPrepackedConvRun(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
@@ -437,11 +437,11 @@ Tensor computeMkldnnPrepackedConv2dRun(
     dtype = Dtype(*outputType);
   }
 
-  BufHandle ResultBuf("mkldnn_prepacked_conv2d_run", outputShape, dtype);
+  BufHandle ResultBuf("mkldnn_prepacked_conv_run", outputShape, dtype);
   const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
-      ResultBuf, "nnc_mkldnn_prepacked_conv2d_run", {inp, prepacked}, {});
+      ResultBuf, "nnc_mkldnn_prepacked_conv_run", {inp, prepacked}, {});
   return Tensor(ResultBuf.node(), s);
 }
 

@@ -46,7 +46,7 @@ int nnc_lowerings_lazy_registration() {
 
   RegisterNNCLoweringsFunction mkldnn_prepacked_conv2d_run(
       {"mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.ConvOpContext W_prepack) -> (Tensor Y)"},
-      computeMkldnnPrepackedConv2dRun);
+      computeMkldnnPrepackedConvRun);
 
   RegisterNNCLoweringsFunction aten_sub(
       {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> (Tensor)",
