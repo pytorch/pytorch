@@ -1952,7 +1952,7 @@ class NativeFunctionsViewGroup:
             assert not gets_generated_view_copy(self.view), (
                 f"{str(self.view.func.name)} appears to be a new operator that aliases its inputs."
                 " The codegen expects you to add a corresponding operator to native_functions.yaml:"
-                " {str(get_view_copy_name(self.view)}."
+                f" {get_view_copy_name(self.view):!s}."
                 " See Note [view_copy NativeFunctions] for details."
             )
         else:
