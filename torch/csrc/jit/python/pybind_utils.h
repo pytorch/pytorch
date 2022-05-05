@@ -697,10 +697,10 @@ inline py::object toPyObject(IValue ivalue) {
       TORCH_INTERNAL_ASSERT(tensor.device().is_cpu());
       auto scalar_type = tensor.scalar_type();
       switch (scalar_type) {
-        case ScalarType::Bool: return py::cast(*tensor.data_ptr<bool>());
-        case ScalarType::Long: return py::cast(*tensor.data_ptr<int64_t>());
-        case ScalarType::Double: return py::cast(*tensor.data_ptr<double>());
-        case ScalarType::ComplexDouble: return py::cast(*tensor.data_ptr<c10::complex<double>>());
+        case at::ScalarType::Bool: return py::cast(*tensor.data_ptr<bool>());
+        case at::ScalarType::Long: return py::cast(*tensor.data_ptr<int64_t>());
+        case at::ScalarType::Double: return py::cast(*tensor.data_ptr<double>());
+        case at::ScalarType::ComplexDouble: return py::cast(*tensor.data_ptr<c10::complex<double>>());
         default:
           TORCH_CHECK(false,
               "Missing cases in 'toPyObject' wrapped number handling! Can't convert ",
