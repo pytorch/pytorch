@@ -27,34 +27,34 @@ __host__ __device__ static inline c10::complex<T> angle_wrapper(c10::complex<T> 
 const char angle_name[] = "angle_kernel";
 void angle_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
-  if(isComplexType(dtype)) {
+  if(at::isComplexType(dtype)) {
 #if AT_USE_JITERATOR()
-  static const auto angle_string = jiterator_stringify(
-      template <typename T>
-      T angle_kernel(T v) {
+    static const auto angle_string = jiterator_stringify(
+        template <typename T>
+        T angle_kernel(T v) {
           return std::arg(v);
-      }
-  ); // angle string
-  AT_DISPATCH_COMPLEX_TYPES(dtype, "angle_cuda", [&]() {
-      jitted_gpu_kernel<
-        /*name=*/ angle_name,
-        /*return_dtype=*/ scalar_t,
-        /*common_dtype=*/ scalar_t,
-        /*arity=*/ 1>(iter, angle_string);
-  });
-#else
-  AT_DISPATCH_COMPLEX_TYPES(dtype, "angle_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return angle_wrapper(a);
+        }
+    ); // angle string
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "angle_cuda", [&]() {
+        jitted_gpu_kernel<
+          /*name=*/ angle_name,
+          /*return_dtype=*/ scalar_t,
+          /*common_dtype=*/ scalar_t,
+          /*arity=*/ 1>(iter, angle_string);
     });
-  });
+#else
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "angle_cuda", [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return angle_wrapper(a);
+        });
+    });
 #endif
   } else {
-  AT_DISPATCH_FLOATING_TYPES(dtype, "angle_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return angle_wrapper(a);
+    AT_DISPATCH_FLOATING_TYPES(dtype, "angle_cuda", [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return angle_wrapper(a);
+        });
     });
-  });
   }
 }
 
