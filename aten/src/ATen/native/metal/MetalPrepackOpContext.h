@@ -146,7 +146,7 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
 
   ~LinearOpContext() {
     if (releaseCallback_) {
-      releaseCallback(opaqueOpPtr_);
+      releaseCallback_(opaqueOpPtr_);
     }
   }
 

@@ -290,7 +290,6 @@ class intrusive_ptr final {
         const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
       }
     }
-    target_ = NullType::singleton();
   }
 
   // raw pointer constructors are not public because we shouldn't make
@@ -414,6 +413,7 @@ class intrusive_ptr final {
 
   void reset() noexcept {
     reset_();
+    target_ = NullType::singleton();
   }
 
   void swap(intrusive_ptr& rhs) noexcept {
