@@ -552,7 +552,7 @@ REGISTER_OPERATOR_FUNCTOR(
           }
           auto& out = p_node->Output(0).toTensor();
           fastResizeToZero(out);
-          at::native::clamp_max_out(self, max, out);
+          at::cpu::clamp_max_out(out, self, max);
         };
       }
       LogAndDumpSchema(n);

@@ -1906,7 +1906,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        at::native::clamp_min_out(in0_t, in1_s, out_t);
+        at::cpu::clamp_min_out(out_t, in0_t, in1_s);
       };
     });
 

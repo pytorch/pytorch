@@ -1211,6 +1211,7 @@
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  structured_delegate: clamp_max.out
   dispatch:
     CompositeExplicitAutograd: clamp_max
 
@@ -1222,6 +1223,7 @@
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  structured_delegate: clamp_max.out
   dispatch:
     CompositeExplicitAutograd: clamp_max_
 
@@ -1232,6 +1234,8 @@
 
 - func: clamp_max.out(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: clamp_max_out
 
@@ -1242,6 +1246,7 @@
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  structured_delegate: clamp_min.out
   dispatch:
     CompositeExplicitAutograd: clamp_min
 
@@ -1253,6 +1258,7 @@
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  structured_delegate: clamp_min.out
   dispatch:
     CompositeExplicitAutograd: clamp_min_
 
@@ -1263,6 +1269,8 @@
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: true
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: clamp_min_out
 
