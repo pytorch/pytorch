@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
-from functools import reduce
-import threading
 
 import torch
 from torch.fx import Node
@@ -41,31 +39,19 @@ NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
 
 
-class TensorMeta_Meta(type):
-    def __init__(cls, *args, **kwargs):
-
-        _tls = threading.local()
-        cls._tls = _tls
-        cls._tls.ctx = None
-
-    @property
-    def ctx(cls):
-        return cls._tls.ctx
-
-    @ctx.setter
-    def ctx(cls, value):
-        cls._tls.ctx = value
-
-
-class TensorMeta(object, metaclass=TensorMeta_Meta):
+class TensorMeta(torch.Tensor):
     """
-    Temporary helper class to model tensor metadata.
-
-    Likely to be replaced with an actual meta tensor subclass.
+    Model tensor metadata.  Not a stock meta tensor because device is modeled
+    as the original device (not meta device), also we have different behavior
+    for some high level Python bindings
     """
 
-    def __init__(
-        self,
+    node: Optional[Node]
+    tname: str
+
+    @staticmethod
+    def __new__(
+        cls,
         tensorlike: Optional[Union[TensorMeta, NumberType, torch.Tensor]] = None,
         *,
         shape: Optional[ShapeType] = None,
@@ -74,26 +60,22 @@ class TensorMeta(object, metaclass=TensorMeta_Meta):
         device: Optional[torch.device] = None,
     ):
 
-        self.shape: Tuple[int, ...]
-        self.strides: Tuple[int, ...]
-        self.dtype: torch.dtype
-        self.device: torch.device
-        self.name: str = ""
-        self.node: Optional[Node] = None
-
         if isinstance(tensorlike, Number):
             assert not shape and (shape is None or isinstance(shape, Sequence))
             assert not strides and (strides is None or isinstance(strides, Sequence))
-            self.shape = ()
-            self.strides = ()
-            self.dtype = type_to_dtype(type(tensorlike))
-            self.device = torch.device("cpu")
+            inferred_shape: Tuple[int, ...] = ()
+            inferred_strides: Tuple[int, ...] = ()
+            inferred_dtype = type_to_dtype(type(tensorlike))
+            inferred_device = torch.device("cpu")
+            # TODO: This looks wrong, a number that is wrapped into a tensor
+            # needs to behave differently than a scalar tensor for type
+            # promotion purposes
         elif tensorlike is not None:
             assert isinstance(tensorlike, (TensorMeta, torch.Tensor))
-            self.shape = tuple(tensorlike.shape)
-            self.strides = tuple(tensorlike.stride())
-            self.dtype = tensorlike.dtype
-            self.device = tensorlike.device
+            inferred_shape = tuple(tensorlike.shape)
+            inferred_strides = tuple(tensorlike.stride())
+            inferred_dtype = tensorlike.dtype
+            inferred_device = tensorlike.device
         else:
             # If no tensorlike "example" is given then all metadata
             # must be provided explicitly
@@ -102,15 +84,24 @@ class TensorMeta(object, metaclass=TensorMeta_Meta):
             assert dtype is not None
             assert device is not None
 
-        # Sets metadata from kwargs, possibly overriding metadata from
-        # the example tensorlike
-        self.shape = self.shape if shape is None else tuple(shape)
-        self.strides = self.strides if strides is None else tuple(strides)
-        self.dtype = self.dtype if dtype is None else dtype
-        self.device = self.device if device is None else device
+        shape = inferred_shape if shape is None else tuple(shape)
+        strides = inferred_strides if strides is None else tuple(strides)
+        dtype = inferred_dtype if dtype is None else dtype
+        device = inferred_device if device is None else device
 
-        # Computes derived properties
-        self.ndim = len(self.shape)
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls,
+            shape,
+            strides=strides,
+            storage_offset=0,  # TODO: this is inaccurate
+            dtype=dtype,
+            device=device,
+            requires_grad=False
+        )
+
+        r.tname = ""
+        r.node = None
+        return r
 
     @classmethod
     def __torch_function__(
@@ -123,27 +114,38 @@ class TensorMeta(object, metaclass=TensorMeta_Meta):
         if kwargs is None:
             kwargs = {}
 
-        if cls.ctx is not None:
-            return cls.ctx.handle_torch_function(func, types, args, kwargs)
+        if func in {
+            torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
+            torch.Tensor.numel,
+            torch.Tensor.stride,
+            torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
+            torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
+            torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+        }:
+            return super().__torch_function__(func, types, args, kwargs)
 
         if not hasattr(func, "meta"):
-            raise ValueError("Callable {0} has no meta function!".format(func.__name__))
+            raise ValueError(f"Callable {func} has no meta function!")
 
         return func.meta(*args, **kwargs)  # type: ignore[attr-defined]
 
+    @classmethod
+    def __torch_dispatch__(
+        cls,
+        func,
+        types,
+        args=(),
+        kwargs=None,
+    ):
+        raise RuntimeError("this should be unreachable")
+
     # TODO: fx uses dunder repr to print objects in code
     def __repr__(self):
-        return self.name
-        # return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.strides})"
+        return self.tname
+        # return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.stride()})"
 
-    def stride(self):
-        return self.strides
-
-    def numel(self):
-        if len(self.shape) == 0:
-            return 1
-
-        return reduce(lambda x, acc: x * acc, self.shape, 1)
+    def __format__(self, format_spec):
+        return self.tname
 
 
 TensorLikeType = Union[torch.Tensor, TensorMeta]
@@ -376,9 +378,20 @@ _complex_to_real_dtype_map = {
     torch.complex32: torch.float16,
 }
 
+_real_to_complex_dtype_map = {
+    torch.float16: torch.complex32,
+    torch.bfloat16: torch.complex64,
+    torch.float32: torch.complex64,
+    torch.float64: torch.complex128,
+}
+
 
 def corresponding_real_dtype(dtype: torch.dtype) -> torch.dtype:
     return _complex_to_real_dtype_map[dtype]
+
+
+def corresponding_complex_dtype(dtype: torch.dtype) -> torch.dtype:
+    return _real_to_complex_dtype_map[dtype]
 
 
 def dtype_to_type(dtype: torch.dtype) -> type:
@@ -444,21 +457,23 @@ def get_higher_type(a: type, b: type) -> type:
 #   are not ordered relative to each other, the next
 #   higher datatype
 def get_higher_dtype(
-    a: Union[torch.dtype, TensorLikeType, NumberType],
-    b: Union[torch.dtype, TensorLikeType, NumberType],
-) -> torch.dtype:
+    a: Optional[Union[torch.dtype, TensorLikeType, NumberType]],
+    b: Optional[Union[torch.dtype, TensorLikeType, NumberType]],
+) -> Optional[torch.dtype]:
     """
     Computes the "lowest" datatype that is weakly
     "higher" than both a and b.
     """
 
     # Type checking
-    assert isinstance(a, (torch.dtype, TensorLike, Number))
-    assert isinstance(b, (torch.dtype, TensorLike, Number))
+    assert a is None or isinstance(a, (torch.dtype, TensorLike, Number))
+    assert b is None or isinstance(b, (torch.dtype, TensorLike, Number))
 
     def _extract_dtype(
-        x: Union[torch.dtype, TensorLikeType, NumberType]
-    ) -> torch.dtype:
+        x: Optional[Union[torch.dtype, TensorLikeType, NumberType]]
+    ) -> Optional[torch.dtype]:
+        if x is None:
+            return None
         if isinstance(x, torch.dtype):
             return x
         if isinstance(x, TensorLike):
@@ -471,6 +486,12 @@ def get_higher_dtype(
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
+        return a
+
+    if a is None:
+        return b
+
+    if b is None:
         return a
 
     ordered_datatypes = (
