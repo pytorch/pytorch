@@ -7,6 +7,10 @@ from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
 from torch.distributed._shard.sharded_tensor._ops.math_ops import binary_math_op_impl
 
+from ._common import (
+    _chunk_sharding_spec_check,
+)
+
 def register_math_op(op):
     @custom_sharding_spec_op(ChunkShardingSpec, op)
     def binary_math_op(types, args=(), kwargs=None):
@@ -24,9 +28,8 @@ def register_math_op(op):
         if isinstance(lhs, ShardedTensor) and isinstance(rhs, ShardedTensor):
             lhs_spec = lhs.sharding_spec()
             rhs_spec = rhs.sharding_spec()
-            if not isinstance(lhs_spec, ChunkShardingSpec) or not isinstance(rhs_spec, ChunkShardingSpec):
-                raise TypeError("Only ShardedTensor with ChunkShardingSpec supports"
-                                " two ShardedTensor together")
+            _chunk_sharding_spec_check(lhs_spec, op)
+            _chunk_sharding_spec_check(rhs_spec, op)
 
             if lhs.size() == rhs.size() and lhs_spec.dim == rhs_spec.dim:
                 # perform local element-wise math op

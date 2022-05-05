@@ -27,6 +27,7 @@ from torch.fx.experimental.partitioner_utils import (
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.fx.experimental.meta_tracer import MetaTracer
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -689,6 +690,14 @@ class TestFXExperimental(JitTestCase):
             gm = torch.fx.GraphModule(mttm, graph)
             torch.testing.assert_close(gm(x), mttm(x))
 
+    def test_proxy_tensor(self):
+        def f(x):
+            val = x.cos().cos().sum()
+            return torch.autograd.grad(val, x)
+
+        traced_graph = make_fx(f)(torch.randn(3, requires_grad=True))
+        inp = torch.randn(3, requires_grad=True)
+        torch.testing.assert_close(traced_graph(inp), f(inp))
 
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
@@ -1641,6 +1650,33 @@ class TestModule(torch.nn.Module):
 
             test_out = traced(*param_values)
             self.assertEqual(test_out, ref_out)
+
+    def test_normalize_quantized_eb(self):
+        target = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
+        args = (
+            torch.empty((2, 3), dtype=torch.uint8),
+            torch.empty((2,), dtype=torch.int64),
+            torch.empty((2,), dtype=torch.int64),
+        )
+        norm_args_and_kwargs = normalize_function(
+            target, args, normalize_to_only_use_kwargs=True
+        )
+        self.assertTrue(norm_args_and_kwargs is not None)
+        self.assertEqual(
+            set(norm_args_and_kwargs.kwargs.keys()),
+            {
+                "weight",
+                "indices",
+                "offsets",
+                "scale_grad_by_freq",
+                "mode",
+                "pruned_weights",
+                "per_sample_weights",
+                "compressed_indices_mapping",
+                "include_last_offset",
+            },
+        )
+        self.assertEqual(norm_args_and_kwargs.args, tuple())
 
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
