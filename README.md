@@ -2,12 +2,6 @@
 
 ---
 
-sdfasdfasfdsdfsssss
-sdfasdfasfdsdfs
-sdfasdfasfdsdfsasfdasfasf
-aaaaaaaaaa
-sdfasdfasfdsdfs
-
 PyTorch is a Python package that provides two high-level features:
 
 -   Tensor computation (like NumPy) with strong GPU acceleration
@@ -45,8 +39,6 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
 -   [Releases and Contributing](#releases-and-contributing)
 -   [The Team](#the-team)
 -   [License](#license)
-
-adsasdsdsd
 
 <!-- tocstop -->
 
@@ -86,7 +78,7 @@ And they are fast!
 ### Dynamic Neural Networks: Tape-Based Autograd
 
 PyTorch has a unique way of building neural networks: using and replaying a tape recorder.
-
+This is a new line
 Most frameworks such as TensorFlow, Theano, Caffe, and CNTK have a static view of the world.
 One has to build a neural network and reuse the same structure again and again.
 Changing the way the network behaves means that one has to start from scratch.
