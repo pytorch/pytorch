@@ -26,6 +26,7 @@ class OptionalArrayRef;
 namespace at {
 
 class Tensor;
+class OptionalTensorRef;
 struct Dimname;
 struct Generator;
 using TensorList = c10::ArrayRef<Tensor>;
