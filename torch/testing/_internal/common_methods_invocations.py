@@ -6414,13 +6414,13 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
 
     batches = ((), (0, ), (2, ))
     ns = (5, 3, 0)
-    nrhs = ((0,), (1,), (6,))
+    nrhs = (0, 1, 6)
 
     for n, batch, rhs in product(ns, batches, nrhs):
         A = make_a(*(batch + (n, n)))
         LU, pivots = torch.linalg.lu_factor(A)
 
-        B = make_b(batch + (n,) + rhs)
+        B = make_b(batch + (n, rhs))
 
         grads = (False,) if not requires_grad else (True, False)
         # we try all possible combinations of requires_grad for each input
