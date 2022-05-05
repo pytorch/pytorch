@@ -443,6 +443,14 @@ def _convert_dtype(*args, dtype: torch.dtype):
     return tuple(map(lambda x: _convert(x), args))
 
 
+def _unwrap_cpu_scalars(a, b):
+    if type(a) is torch.Tensor and a.device.type == 'cpu' and len(a.shape) == 0:
+        a = a.item()
+    elif type(b) is torch.Tensor and b.device.type == 'cpu' and len(b.shape) == 0:
+        b = b.item()
+    return a, b
+
+
 # TODO: handle tuples of tensors
 def _maybe_resize_out(out: TensorLikeType, shape):
     if out.numel() == 0:
@@ -630,7 +638,7 @@ tan = _make_elementwise_unary_reference(
 )
 
 
-def _make_elementwise_binary_reference(prim: Callable, *, type_promotion, aten_op=infer_aten_op) -> Callable:
+def _make_elementwise_binary_reference(prim: Callable, *, type_promotion, unwrap_cpu_scalars=False, aten_op=infer_aten_op) -> Callable:
     def _ref(
         a: Union[Tensor, NumberType],
         b: Union[Tensor, NumberType],
@@ -652,10 +660,8 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion, aten_o
         a, b = _convert_dtype(a, b, dtype=computation_dtype)
 
         # Special case CPU scalar tensors to be eligible for device transfer
-        if isinstance(a, TensorLike) and a.device.type == 'cpu' and len(a.shape) == 0:
-            a = a.item()
-        elif isinstance(b, TensorLike) and b.device.type == 'cpu' and len(b.shape) == 0:
-            b = b.item()
+        if unwrap_cpu_scalars:
+            a, b = _unwrap_cpu_scalars(a, b)
 
         # Broadcasting
         a, b = broadcast(a, b)
@@ -706,6 +712,8 @@ def add(
         a, b, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH
     )
     a, b = _convert_dtype(a, b, dtype=computation_dtype)
+
+    a, b = _unwrap_cpu_scalars(a, b)
 
     a, b = broadcast(a, b)
 
@@ -850,7 +858,8 @@ minimum = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 mul = _make_elementwise_binary_reference(
-    prims.mul, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH
+    prims.mul, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    unwrap_cpu_scalars=True
 )
 
 # TODO: add docstring
@@ -899,6 +908,8 @@ def sub(
     )
     a, b = _convert_dtype(a, b, dtype=computation_dtype)
 
+    a, b = _unwrap_cpu_scalars(a, b)
+
     a, b = broadcast(a, b)
 
     if alpha is not None:
@@ -922,7 +933,8 @@ def sub(
 # TODO: add docstring
 true_divide = _make_elementwise_binary_reference(
     prims.div, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=None  # CompositeImplicitAutograd
+    aten_op=None,  # CompositeImplicitAutograd
+    unwrap_cpu_scalars=True
 )
 
 #
