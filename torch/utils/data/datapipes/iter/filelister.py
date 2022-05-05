@@ -1,8 +1,11 @@
 from typing import Iterator, List, Sequence, Union
 
-from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.iter import IterableWrapper
 from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
+
+__all__ = ["FileListerIterDataPipe", ]
+
 
 class FileListerIterDataPipe(IterDataPipe[str]):
     r"""

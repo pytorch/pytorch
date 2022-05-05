@@ -27,6 +27,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     override_qengines,
     qengine_is_qnnpack,
+    qengine_is_onednn,
 )
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -99,7 +100,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                                              zero_points=zero_point_tensor,
                                              axis=0, dtype=torch.qint8)
         else:
-            W_q = torch.quantize_per_tensor(W, 0.1, 4, torch.qint8)
+            # ONEDNN only supports symmetric quantization of weight
+            W_zp = 0 if qengine_is_onednn() else 4
+            W_q = torch.quantize_per_tensor(W, 0.1, W_zp, torch.qint8)
 
         X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_per_tensor(X, 0.2, 10, torch.quint8)
@@ -434,7 +437,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             X_scale = 1.3
             X_zero_point = 2
             W_scale = [0.5]
-            W_zero_point = [3]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
             Y_scale = 5.0
             Y_zero_point = 4
             if torch.backends.quantized.engine == 'qnnpack':
@@ -501,7 +504,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             X_scale = 1.3
             X_zero_point = 2
             W_scale = [0.5]
-            W_zero_point = [3]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
             Y_scale = 5.0
             Y_zero_point = 4
             # use_fused -> quantized class
@@ -570,7 +573,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             X_scale = 1.3
             X_zero_point = 2
             W_scale = [0.5]
-            W_zero_point = [3]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
             Y_scale = 5.0
             Y_zero_point = 4
             # use_fused -> quantized class
@@ -1200,7 +1203,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
     def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_default_observer):
         """test API functionality for nn.quantized.dynamic.Linear"""
         W = torch.rand(out_features, in_features).float()
-        W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8)
+        qscheme = torch.per_tensor_symmetric if qengine_is_onednn() else torch.per_tensor_affine
+        W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8, qscheme=qscheme)
         W_q = torch.quantize_per_tensor(W, W_scale, W_zp, torch.qint8)
         X = torch.rand(batch_size, in_features).float()
         B = torch.rand(out_features).float() if use_bias else None
@@ -1311,8 +1315,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 bias_keys.append(key_name1)
                 bias_keys.append(key_name2)
 
-        if not (dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack"):
-            # fp16 dynamic quant is not supported for qnnpack
+        if not (dtype == torch.float16 and torch.backends.quantized.engine in ("qnnpack", "onednn")):
+            # fp16 dynamic quant is not supported for qnnpack or onednn
             x = torch.randn(seq_len, batch, input_size)
             h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
             c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
@@ -1362,8 +1366,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # instantiated for all engines and dtypes
 
         for dtype in [torch.qint8, torch.float16]:
-            if dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack":
-                # fp16 dynamic quant is not supported for qnnpack
+            if dtype == torch.float16 and torch.backends.quantized.engine in ("qnnpack", "onednn"):
+                # fp16 dynamic quant is not supported for qnnpack or onednn
                 continue
                 # Test default instantiation
             seq_len = 4
@@ -1435,8 +1439,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                     'RNNReLU': torch.ops.quantized.quantized_rnn_relu_cell_dynamic}
 
         for rnn_type in cell_dict.keys():
-            if not (dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack"):
-                # fp16 dynamic quant is not supported for qnnpack
+            if not (dtype == torch.float16 and torch.backends.quantized.engine in ("qnnpack", "onednn")):
+                # fp16 dynamic quant is not supported for qnnpack or onednn
                 kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias, 'dtype': dtype}
                 if rnn_type == 'RNNReLU':
                     kwargs['nonlinearity'] = "relu"

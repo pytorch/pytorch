@@ -575,10 +575,9 @@ class TestRecordHistogramObserver(QuantizationTestCase):
                 self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0],
                                  model(self.calib_data[0][0]))
 
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_observer_scriptable(self, qdtype, qscheme):
-        obs = RecordingObserver(dtype=qdtype, qscheme=qscheme)
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)))
+    def test_observer_scriptable(self, qdtype):
+        obs = RecordingObserver(dtype=qdtype)
         scripted = torch.jit.script(obs)
 
         x = torch.rand(3, 4)
@@ -757,6 +756,17 @@ class TestFakeQuantize(TestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
+
+    def test_quant_min_max_override(self):
+        observer = default_per_channel_weight_observer
+        # test no override
+        fq_module = FakeQuantize(observer)
+        self.assertEqual(fq_module.activation_post_process.quant_min, -128)
+        self.assertEqual(fq_module.activation_post_process.quant_max, 127)
+        # test quant_min/quant_max override
+        fq_module = FakeQuantize(observer, quant_min=0, quant_max=127)
+        self.assertEqual(fq_module.activation_post_process.quant_min, 0)
+        self.assertEqual(fq_module.activation_post_process.quant_max, 127)
 
 def _get_buffer_ids(module):
     """

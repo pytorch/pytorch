@@ -143,8 +143,7 @@ Reducer::Reducer(
   // This can be reinitialized later after capturing runtime information.
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    initialize_buckets(
-        std::move(bucket_indices), std::move(per_bucket_size_limits));
+    initialize_buckets(std::move(bucket_indices));
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
@@ -928,9 +927,7 @@ void Reducer::install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>>
   }
 }
 
-void Reducer::initialize_buckets(
-    std::vector<std::vector<size_t>> bucket_indices,
-    std::vector<size_t> per_bucket_sizes) {
+void Reducer::initialize_buckets(std::vector<std::vector<size_t>> bucket_indices) {
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
@@ -960,10 +957,8 @@ void Reducer::initialize_buckets(
   // Iterate over buckets.
   const auto bucket_count = bucket_indices.size();
   buckets_.reserve(bucket_count);
-  TORCH_INTERNAL_ASSERT(bucket_count == per_bucket_sizes.size());
   for (const auto bucket_index : c10::irange(bucket_count)) {
     Bucket bucket;
-    bucket.bucket_size_limit = per_bucket_sizes[bucket_index];
 
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
@@ -1697,8 +1692,7 @@ bool Reducer::rebuild_buckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  initialize_buckets(
-      std::move(rebuilt_bucket_indices), std::move(per_bucket_size_limits));
+  initialize_buckets(std::move(rebuilt_bucket_indices));
 
   return true;
 }
@@ -2052,6 +2046,47 @@ void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
     const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
+
+  // First verify number of parameters to avoid inconsistent inputs into
+  // broadcast which can cause a crash.
+  // See https://github.com/pytorch/pytorch/issues/73547
+
+  at::TensorOptions param_size_options;
+  param_size_options = param_size_options.dtype(at::kLong);
+  param_size_options = param_size_options.device(params[0].device());
+  // Note: Not using tensor building API because of
+  // https://github.com/pytorch/pytorch/issues/74114
+  at::Tensor param_size_tensor = at::tensor(
+    {static_cast<int64_t>(params.size())}, param_size_options);
+
+  // Allgather and verify parameter size.
+  std::vector<std::vector<at::Tensor>> param_size_output_tensors;
+  param_size_output_tensors.emplace_back(std::vector<at::Tensor>{});
+  auto world_size = process_group->getSize();
+  for (size_t i = 0 ; i < world_size ; ++i) {
+    param_size_output_tensors.front().emplace_back(
+      at::empty_like(param_size_tensor)
+    );
+  }
+
+  std::vector<at::Tensor> param_size_vec{param_size_tensor};
+  process_group->allgather(param_size_output_tensors, param_size_vec)->wait();
+  auto result_size_tensors = param_size_output_tensors.front();
+  for (size_t i = 0; i < world_size ; ++i ) {
+    auto param_size_for_rank = result_size_tensors[i][0].item<int>();
+    TORCH_CHECK(
+      param_size_for_rank == params.size(),
+      c10::str(
+        "DDP expects same model across all ranks, but Rank ",
+        process_group->getRank(),
+        " has ", params.size(), " params, while rank ", i,
+        " has inconsistent ", param_size_for_rank,
+        " params."
+      )
+    );
+  }
+
+  // Continue with parameter shape verification.
   size_t i = 0;
   for (const auto& t : params) {
     i += 2 * t.dim();
@@ -2085,10 +2120,9 @@ void verify_params_across_processes(
   i = 0;
   for (const auto p : c10::irange(params.size())) {
     const auto& t = params[p];
-    // I'd like to include which process we are in the message,
-    // but ProcessGroup::getRank is not public!
     for (const auto& sz : t.sizes()) {
-      auto msg = c10::str("params[", p, "] in this process",
+      auto msg = c10::str("[", process_group->getRank(),
+                        "]: params[", p, "] in this process",
                         " with sizes ",
                         t.sizes(),
                         " appears not to match sizes of the same param in process 0.");

@@ -67,6 +67,10 @@ getOperatorVersionMapForMobile() {
                     std::vector<Upgrader>({
                         Upgrader({0, 8, "logspace_out_0_8", 10})
                     })},
+                {std::string("aten::stft"),
+                    std::vector<Upgrader>({
+                        Upgrader({0, 10, "stft_0_10", 11})
+                    })},
       });
   return operatorVersionMapForMobile;
 }
@@ -527,14 +531,42 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                                    OperatorString({"prim::unchecked_cast", "", 1}),
                            }), // operators list
                    }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
+                               "stft_0_10",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 8},
+                                           Instruction{OpCode::MOVE, 1, 0},
+                                           Instruction{OpCode::MOVE, 2, 0},
+                                           Instruction{OpCode::MOVE, 3, 0},
+                                           Instruction{OpCode::MOVE, 4, 0},
+                                           Instruction{OpCode::MOVE, 5, 0},
+                                           Instruction{OpCode::LOADC, 1, 0},
+                                           Instruction{OpCode::LOADC, 0, 0},
+                                           Instruction{OpCode::MOVE, 6, 0},
+                                           Instruction{OpCode::MOVE, 7, 0},
+                                           Instruction{OpCode::MOVE, 8, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>({
+                                           c10::IValue("reflect"),
+                                           c10::IValue(false),
+                                   }), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               8
+                           ),
+                           std::vector<OperatorString>({
+                                   OperatorString({"aten::stft", "", 10}),
+                           }), // operators list
+                   }),
             });
     for (const auto& upgrader_function : upgrader_function_list) {
       for (const auto& op : upgrader_function.operators) {
         upgrader_function.function.append_operator(
             op.name,
             op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
+            op.num_specified_args);
       }
     }
     return upgrader_function_list;

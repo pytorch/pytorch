@@ -88,7 +88,8 @@ TORCH_CUDA_CU_API TensorView* reductionOp(
     const std::vector<int>& axes,
     Val* init,
     TensorView* v1,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 //! Auxiliary Struct holding result of
 //! a single welford op in ternsorview
@@ -161,9 +162,6 @@ TORCH_CUDA_CU_API TensorView* floor(TensorView*);
 // frac
 TORCH_CUDA_CU_API Val* frac(Val*);
 TORCH_CUDA_CU_API TensorView* frac(TensorView*);
-// gelu
-TORCH_CUDA_CU_API Val* gelu(Val*);
-TORCH_CUDA_CU_API TensorView* gelu(TensorView*);
 // silu
 TORCH_CUDA_CU_API Val* silu(Val*);
 TORCH_CUDA_CU_API TensorView* silu(TensorView*);
@@ -362,7 +360,8 @@ TORCH_CUDA_CU_API TensorView* xorOp(TensorView* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* sum(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 TORCH_CUDA_CU_API TensorView* max(
     TensorView* v1,
@@ -560,6 +559,28 @@ TORCH_CUDA_CU_API TensorView* gather(
     const std::vector<std::vector<int>>& pad_width,
     const std::vector<int>& strides = {},
     bool trim_out_of_bounds = false);
+
+//! A fused pointwise multiply and sum
+//!  operator that instantiates the following
+//!  fused pattern:
+//!     c = mul(tv_a, tv_b);
+//!     return sum(c, axes)
+//!
+//! \param tv_a first multiply operand
+//! \param tv_b second multiply operand
+//! \param axes axes to sum over
+//! \param init sum initial value
+//!
+//! Note & TODO:
+//!   currently only support lowering to a mma op
+//!   through this interface and only support fp16 inputs.
+//!   will support converting back to multiply and reduce in
+//!   a follow up.
+TORCH_CUDA_CU_API TensorView* fusedMultiplySum(
+    TensorView* tv_a,
+    TensorView* tv_b,
+    const std::vector<int>& axes,
+    Val* init = nullptr);
 
 } // namespace cuda
 } // namespace fuser

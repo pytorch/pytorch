@@ -168,15 +168,10 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         ]
         self._test_function_import('fx.fusion_patterns', function_list)
 
-    def test_package_import_fx_quantization_types(self):
-        self._test_package_import('fx.quantization_types')
-
-    def test_function_import_fx_quantization_types(self):
-        function_list = [
-            'Pattern',
-            'QuantizerCls'
-        ]
-        self._test_function_import('fx.quantization_types', function_list)
+    # we removed matching test for torch.quantization.fx.quantization_types
+    # old: torch.quantization.fx.quantization_types
+    # new: torch.ao.quantization.quantization_types
+    # both are valid, but we'll deprecate the old path in the future
 
     def test_package_import_fx_utils(self):
         self._test_package_import('fx.utils')
@@ -197,7 +192,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
             'create_qparam_nodes',
             'all_node_args_have_no_tensors',
             'node_return_type_is_int',
-            'node_bool_tensor_arg_indexes',
+            'get_non_observable_arg_indexes_and_types',
             'is_get_tensor_info_node',
             'maybe_get_next_module'
         ]
