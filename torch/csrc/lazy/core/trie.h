@@ -17,12 +17,13 @@ struct TORCH_API TrieNode {
   }
 
   size_t unique_id;
+  size_t hit_counter;
   NodePtr ir_node;
   std::deque<std::shared_ptr<TrieNode>> successors;
 
-  TrieNode() : unique_id(GetNextUniqueId()), ir_node(nullptr) {}
+  TrieNode() : unique_id(GetNextUniqueId()), hit_counter(0), ir_node(nullptr) {}
   explicit TrieNode(NodePtr node)
-      : unique_id(GetNextUniqueId()), ir_node(std::move(node)) {}
+      : unique_id(GetNextUniqueId()), hit_counter(0), ir_node(std::move(node)) {}
 };
 
 class TORCH_API TrieCache {
@@ -40,6 +41,9 @@ class TORCH_API TrieCache {
   void Insert(NodePtr ir_node);
 
   // Clear all TrieCache nodes
+  // TODO: Because we don't expect user to explicitly call this function via
+  // a Python API, we may need to introduce a threshold on the size of the cache
+  // to avoid holding tensors for too long.
   void Clear();
 
   void DumpToDotFile(const std::string& file_name);
@@ -59,6 +63,7 @@ NodePtr LookupNodeFromTrieCache(Args&&... args) {
     const T* concrete_node = NodeCast<T>(ir_node.get());
     if (concrete_node && concrete_node->Equal(std::forward<Args>(args)...)) {
       TORCH_LAZY_COUNTER("IrNodeReused::" + std::string(typeid(T).name()), 1);
+      (*it)->hit_counter++;
       TrieCache::Get()->SetCurrent(it);
       return ir_node;
     }

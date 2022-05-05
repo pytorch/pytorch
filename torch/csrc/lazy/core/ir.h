@@ -219,6 +219,10 @@ struct TORCH_API Output {
   bool operator==(const Output& rhs) const {
     return node == rhs.node && index == rhs.index;
   }
+
+  // To compare the operands of to-be-constructed node and to-be-reused node
+  bool operator==(const Value& rhs) const;
+
   bool operator!=(const Output& rhs) const {
     return !operator==(rhs);
   }

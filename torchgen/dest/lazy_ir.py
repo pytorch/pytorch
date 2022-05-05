@@ -393,6 +393,7 @@ class GenLazyNativeFuncDefinition:
         if (!node) {{
             {self.shape_inference(func, schema)}
             node = torch::lazy::MakeNode<{schema.node_name}>({node_ctor_input_str}, std::move(shapes));
+            CacheNode(node);
         }}
         """
 

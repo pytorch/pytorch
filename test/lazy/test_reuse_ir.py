@@ -3,38 +3,98 @@
 import torch
 import torch._lazy
 import torch._lazy.config
+import torch._lazy.ir_cache
 import torch._lazy.ts_backend
 import torch._lazy.metrics as metrics
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 torch._lazy.ts_backend.init()
 torch._lazy.config.set_reuse_ir(True)
 
-def testAddSub():
-    device = 'cuda'
-    x = torch.randn(2, 3, 4, device=device)
-    y = torch.randn(2, 3, 4, device=device)
-    z = torch.zeros(2, 3, 4, device=device)
+class TestLazyReuseIr(TestCase):
+    def testAdd(self):
+        device = 'cuda'
+        x = torch.randn(2, 3, 4, device=device)
+        y = torch.randn(2, 3, 4, device=device)
+        z = torch.zeros(2, 3, 4, device=device)
 
-    device = 'lazy'
-    x_lazy = x.detach().clone().to(device=device)
-    y_lazy = y.detach().clone().to(device=device)
-    z_lazy = z.detach().clone().to(device=device)
+        device = 'lazy'
+        x_lazy = x.detach().clone().to(device=device)
+        y_lazy = y.detach().clone().to(device=device)
+        z_lazy = z.detach().clone().to(device=device)
 
-    for i in range(10):
-        if i < 5:
+        for i in range(10):
             z += (x + y)
-        else:
-            z += (x - y)
 
-    for i in range(10):
-        if i < 5:
+        for i in range(10):
             z_lazy += (x_lazy + y_lazy)
-        else:
-            z_lazy += (x_lazy - y_lazy)
-        torch._lazy.mark_step()
+            torch._lazy.mark_step()
 
-    torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-    # print({name: metrics.counter_value(name) for name in metrics.counter_names()})
+        torch.testing.assert_close(z.cpu(), z_lazy.cpu())
+        assert metrics.counter_value("IrNodeReused::N5torch4lazy9AddTensorE") >= 16
+        metrics.reset()
+        torch._lazy.ir_cache.reset()
+
+    def testAddSub(self):
+        device = 'cuda'
+        x = torch.randn(2, 3, 4, device=device)
+        y = torch.randn(2, 3, 4, device=device)
+        z = torch.zeros(2, 3, 4, device=device)
+
+        device = 'lazy'
+        x_lazy = x.detach().clone().to(device=device)
+        y_lazy = y.detach().clone().to(device=device)
+        z_lazy = z.detach().clone().to(device=device)
+
+        for i in range(10):
+            if i < 5:
+                z += (x + y)
+            else:
+                z += (x - y)
+
+        for i in range(10):
+            if i < 5:
+                z_lazy += (x_lazy + y_lazy)
+            else:
+                z_lazy += (x_lazy - y_lazy)
+            torch._lazy.mark_step()
+
+        torch.testing.assert_close(z.cpu(), z_lazy.cpu())
+        assert metrics.counter_value("IrNodeReused::N5torch4lazy9AddTensorE") >= 10
+        assert metrics.counter_value("IrNodeReused::N5torch4lazy9SubTensorE") >= 4
+        metrics.reset()
+        torch._lazy.ir_cache.reset()
+
+    def testAddSubFallback(self):
+        torch._lazy.config.set_force_fallback("aten::sub")
+        device = 'cuda'
+        x = torch.randn(2, 3, 4, device=device)
+        y = torch.randn(2, 3, 4, device=device)
+        z = torch.zeros(2, 3, 4, device=device)
+
+        device = 'lazy'
+        x_lazy = x.detach().clone().to(device=device)
+        y_lazy = y.detach().clone().to(device=device)
+        z_lazy = z.detach().clone().to(device=device)
+
+        for i in range(10):
+            if i < 5:
+                z += (x + y)
+            else:
+                z += (x - y)
+
+        for i in range(10):
+            if i < 5:
+                z_lazy += (x_lazy + y_lazy)
+            else:
+                z_lazy += (x_lazy - y_lazy)
+            torch._lazy.mark_step()
+
+        torch.testing.assert_close(z.cpu(), z_lazy.cpu())
+        assert metrics.counter_value("IrNodeReused::N5torch4lazy9AddTensorE") >= 11
+        metrics.reset()
+        torch._lazy.ir_cache.reset()
+        torch._lazy.config.set_force_fallback("")
 
 if __name__ == '__main__':
-    testAddSub()
+    run_tests()

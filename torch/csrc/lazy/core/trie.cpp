@@ -10,13 +10,14 @@
 namespace torch {
 namespace lazy {
 namespace {
+
 void TraverseTrie(TrieNode* node, std::stringstream& ss) {
   if (!node) {
     return;
   }
   if (node->ir_node) {
     ss << node->unique_id << "[label=\"" << node->ir_node->op().ToString()
-        << "\"]\n";
+        << ", " << node->hit_counter << " hits\"]\n";
   }
   for (auto& successor : node->successors) {
     ss << node->unique_id << " -> " << successor->unique_id << "\n";
