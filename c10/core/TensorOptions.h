@@ -673,8 +673,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::XLA;
         case DeviceType::Lazy:
           return DispatchKey::Lazy;
-        case DeviceType::MLC:
-          return DispatchKey::MLC;
+        case DeviceType::MPS:
+          return DispatchKey::MPS;
         case DeviceType::Vulkan:
           return DispatchKey::Vulkan;
         case DeviceType::Metal:
@@ -719,6 +719,9 @@ inline DispatchKey computeDispatchKey(
               device_.type());
       }
     case Layout::SparseCsr:
+    case Layout::SparseCsc:
+    case Layout::SparseBsr:
+    case Layout::SparseBsc:
       switch (device_.type()) {
         case DeviceType::CPU:
           return DispatchKey::SparseCsrCPU;
@@ -726,7 +729,9 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::SparseCsrCUDA;
         default:
           AT_ERROR(
-              "Unsupported device type for sparse CSR layout: ",
+              "Unsupported device type for ",
+              layout_,
+              " layout: ",
               device_.type());
       }
     default:
@@ -741,9 +746,14 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     case DispatchKey::SparseHIP:
     case DispatchKey::SparseVE:
     case DispatchKey::SparseXPU:
+      return Layout::Sparse;
     case DispatchKey::SparseCsrCPU:
     case DispatchKey::SparseCsrCUDA:
-      return Layout::Sparse;
+      TORCH_CHECK(
+          false,
+          "Cannot map DispatchKey ",
+          dispatch_key,
+          " to a unique layout.");
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
     default:
@@ -791,9 +801,9 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::QuantizedXPU:
     case DispatchKey::AutogradXPU:
       return DeviceType::XPU;
-    case DispatchKey::MLC:
-    case DispatchKey::AutogradMLC:
-      return DeviceType::MLC;
+    case DispatchKey::MPS:
+    case DispatchKey::AutogradMPS:
+      return DeviceType::MPS;
     case DispatchKey::HPU:
     case DispatchKey::AutogradHPU:
       return DeviceType::HPU;
