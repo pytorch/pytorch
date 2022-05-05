@@ -73,6 +73,7 @@ runs:
           exit 1
         fi
 
+        #
         # PREVIOUS_DOCKER_TAG=$(git rev-parse "$MERGE_BASE:.circleci/docker")
         # # If no image exists but the hash is the same as the previous hash then we should error out here
         # if [[ "${PREVIOUS_DOCKER_TAG}" = "${DOCKER_TAG}" ]]; then
