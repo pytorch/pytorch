@@ -618,7 +618,7 @@ tan = _make_elementwise_unary_reference(
 )
 
 
-def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Callable:
+def _make_elementwise_binary_reference(prim: Callable, *, type_promotion, wrap_scalars=False) -> Callable:
     def _ref(
         a: Union[Tensor, NumberType],
         b: Union[Tensor, NumberType],
@@ -631,7 +631,10 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Cal
 
         # Special-cases Number x Number case
         if isinstance(a, Number) and isinstance(b, Number):
-            a, b = utils.wrap_scalars(a, b)
+            if wrap_scalars:
+                a, b = utils.wrap_scalars(a, b)
+            else:
+                raise RuntimeError("got two scalar arguments, while expected at least one TensorLike")
 
         # Handles type promotion
         computation_dtype, result_dtype = _elementwise_dtypes(
@@ -754,10 +757,6 @@ def float_power(
     assert isinstance(b, (TensorLike, Number))
     assert out is None or isinstance(out, TensorLike)
 
-    # Special-cases Number x Number case
-    if isinstance(a, Number) and isinstance(b, Number):
-        a, b = utils.wrap_scalars(a, b)
-
     # Handles type promotion
     dtype = utils.get_higher_dtype(a, b)
     assert dtype is not None
@@ -822,7 +821,8 @@ minimum = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 mul = _make_elementwise_binary_reference(
-    prims.mul, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH
+    prims.mul, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    wrap_scalars=True
 )
 
 # TODO: add docstring
@@ -892,7 +892,8 @@ def sub(
 
 # TODO: add docstring
 true_divide = _make_elementwise_binary_reference(
-    prims.div, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.div, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    wrap_scalars=True
 )
 
 #

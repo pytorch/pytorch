@@ -17875,10 +17875,14 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.maximum",
         torch_opinfo_name="maximum",
+        supports_rhs_python_scalar=True,
+        supports_one_python_scalar=True
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.minimum",
         torch_opinfo_name="minimum",
+        supports_rhs_python_scalar=True,
+        supports_one_python_scalar=True
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.mul",
