@@ -390,7 +390,8 @@ void IrPrinter::handle(const TernaryOp* top) {
 }
 
 void IrPrinter::handle(const ReductionOp* rop) {
-  indent() << rop->out() << " = reduction( " << rop->in()
+  indent() << rop->out() << "\n";
+  indent() << "   = reduction( " << rop->in()
            << ", op = " << rop->getReductionOpType()
            << ", initial value = " << rop->init()
            << ", allreduce = " << rop->isAllreduce() << " )\n";
@@ -430,7 +431,8 @@ void IrPrinter::handle(const WelfordOp* wop) {
 }
 
 void IrPrinter::handle(const BroadcastOp* bop) {
-  indent() << bop->out() << " = broadcast( " << bop->in() << " )\n";
+  indent() << bop->out() << "\n";
+  indent() << "   = broadcast( " << bop->in() << " )\n";
 }
 
 void IrPrinter::handle(const Split* s) {

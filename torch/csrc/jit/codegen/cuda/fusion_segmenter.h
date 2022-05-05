@@ -608,6 +608,7 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   const at::ArrayRef<IValue>& runtime_inputs_;
 };
 
+// TODO: Make as member functions on classes instead of global scope
 TORCH_CUDA_CU_API std::string toString(const SegmentedGroup* group);
 TORCH_CUDA_CU_API std::string toString(const SegmentedEdge* edge);
 TORCH_CUDA_CU_API std::string toString(const SegmentedFusion* segmented_fusion);
