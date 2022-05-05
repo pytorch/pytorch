@@ -602,6 +602,26 @@ def create_a_shadows_b(
                 subgraph_a, ref_name, ref_node_type_a, ref_node_type_b = \
                     end_node_b_to_matched_subgraph_a_and_name[node_b]
 
+            if len(node_b.args) == 0:
+                print(
+                    f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
+                    f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
+                    ', kwargs-only node not handled yet')
+                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                continue
+
+            all_op_types_support_shadowing = (
+                op_type_supports_shadowing(subgraph_a.start_node) and
+                op_type_supports_shadowing(node_b)
+            )
+            if not all_op_types_support_shadowing:
+                print(
+                    f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
+                    f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
+                    ', unsupported')
+                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                continue
+
             # For both start_node and end_node verify that we know how to do
             # the dtype cast. If we do not, skip.
             node_input_type_a, node_output_type_a = \
@@ -623,18 +643,6 @@ def create_a_shadows_b(
                     f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
                     f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
                     ', unknown dtype cast')
-                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
-                continue
-
-            all_op_types_support_shadowing = (
-                op_type_supports_shadowing(subgraph_a.start_node) and
-                op_type_supports_shadowing(node_b)
-            )
-            if not all_op_types_support_shadowing:
-                print(
-                    f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
-                    f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
-                    ', unsupported')
                 env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
                 continue
 
