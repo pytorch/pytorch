@@ -67,11 +67,9 @@ class TORCH_API LazyGraphExecutor {
       bool wait,
       bool sync_ltc_data);
 
-  static bool InMarkStep();
-
   // Marks an execution step, which allows the tensor framework to understand
   // the computation boundaries.
-  void MarkStep(const BackendDevice& device, const std::vector<std::string>& devices, bool wait);
+  void MarkStep(const BackendDevice& device);
 
   // Waits for all the outstanding operations on all the supplied devices.
   // If devices is empty, the wait will happen for all local devices.

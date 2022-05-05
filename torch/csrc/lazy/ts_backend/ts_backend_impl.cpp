@@ -2,7 +2,6 @@
 
 #include <ATen/Functions.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
-#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
@@ -129,7 +128,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       const torch::lazy::Shape& shape) const override;
 
   std::vector<torch::lazy::ComputationPtr> Compile(
-      std::vector<torch::lazy::ComputationPtr> instances) const override;
+      std::vector<torch::lazy::ComputationPtr> instances, bool force_ltc_data=true) const override;
 
   std::vector<torch::lazy::BackendDataPtr> ExecuteComputation(
       torch::lazy::Computation& computation,
@@ -182,8 +181,8 @@ torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
 }
 
 std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
-    std::vector<torch::lazy::ComputationPtr> instances) const {
-  if (!LazyGraphExecutor::InMarkStep()) {
+    std::vector<torch::lazy::ComputationPtr> instances, bool force_ltc_data) const {
+  if (!force_ltc_data) {
     LOG(WARNING) << "Compile outside of mark step";
   }
 

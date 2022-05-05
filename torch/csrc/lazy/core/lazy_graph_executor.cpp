@@ -468,20 +468,8 @@ void LazyGraphExecutor::SyncTensorsGraph(
   }
 }
 
-struct MarkStepContext {
-  static bool in_context;
-  MarkStepContext() { in_context = true; }
-  ~MarkStepContext() { in_context = false; }
-};
-
-bool MarkStepContext::in_context = false;
-
-bool LazyGraphExecutor::InMarkStep(){ return MarkStepContext::in_context; }
-
-void LazyGraphExecutor::MarkStep(const BackendDevice& device, const std::vector<std::string>& devices, bool wait) {
+void LazyGraphExecutor::MarkStep(const BackendDevice& device) {
   TORCH_LAZY_COUNTER("MarkStep", 1);
-  auto context = MarkStepContext();
-  SyncLiveTensorsGraph(&device, devices, wait);
   DeviceContextArena::Get()->MarkStep(device);
   ScopePusher::ResetScopes();
   g_tls_data.Reset();
@@ -821,7 +809,7 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
   VLOG(3) << "Compiling IR graph hash " << HashToString(coll.hash)
           << " on device " << coll.device << " ...";
   std::vector<ComputationPtr> computations =
-      getBackend()->Compile({computation});
+      getBackend()->Compile({computation}, coll.config.force_ltc_data);
   VLOG(3) << "Compiling IR graph hash " << HashToString(coll.hash)
           << " on device " << coll.device << " done!";
   if (computation) {
