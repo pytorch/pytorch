@@ -7,6 +7,6 @@ if not errorlevel 0 (
 )
 
 pushd test
-python run_test.py --exclude-jit-executor --verbose
+python run_test.py --exclude-jit-executor --exclude-distributed-tests  --verbose
 popd
 if ERRORLEVEL 1 exit /b 1
