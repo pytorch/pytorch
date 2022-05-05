@@ -1218,43 +1218,53 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
   return mask_selected.view(sizes);
 }
 
-Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& L, bool upper) {
+Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
   at::NoTF32Guard disable_tf32;
-  // Differentiation of the Cholesky decomposition, Iain Murray
-  // https://arxiv.org/abs/1602.07527
-  // equation 8
-  auto input_tangent_ = upper ? input_tangent.mH() : input_tangent;
-  auto L_ = upper ? L.mH() : L;
+  // Let A = LL^H
+  // dA = dLL^H + L(dL)^H
+  // L^{-1}dA(L^{-H}) = L^{-1}dL + (L^{-1}dL)^H
+  //               = sym(L^{-1}dL)
+  // where sym(X) = X + X^H
+  // A short computaiton gives that the inverse of sym is given by
+  // \pi(X) = X.tril() - 0.5*diag(X)
+  // so
+  // dL = L\pi(L^{-1}dA(L^{-H}))
 
-  auto L_inverse = at::linalg_solve_triangular(L_, at::eye(L.size(-1), L.options()), /*upper=*/false);
-  auto phi = at::matmul(at::matmul(L_inverse, input_tangent_), L_inverse.mH());
-  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
-  auto L_tangent = L_.matmul(phi);
-  return upper ? L_tangent.mH() : L_tangent;
+  // Precondition: dA is symmetric/Hermitian
+  auto L_ = upper ? L.mH() : L;
+  auto dL = at::linalg_solve_triangular(L_, dA, /*upper=*/false, /*left=*/true);
+  dL = at::linalg_solve_triangular(L_.mH(), dL, /*upper=*/true, /*left=*/false);
+  dL = dL.tril() - dL.diagonal(0, -2, -1).mul(0.5).diag_embed();
+  dL = L_.matmul(dL);
+  return upper ? dL.mH() : dL;
 }
 
-Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
+Tensor cholesky_backward(const Tensor& gL, bool upper, const Tensor& L) {
   at::NoTF32Guard disable_tf32;
-  // cf. Iain Murray (2016); arXiv 1602.07527
-  // This gradient is symmetric, and not triangular.
-  // Cholesky additionally assumes that the input is symmetric, which is a subspace of
-  // R^{n x n}, and hence the derivative is not well-defined for off-diagonal
-  // elements. We resolve this by taking the gradient of the functionally independent
-  // elements of the matrix (i.e., the lower triangular portion of the input) and then
-  // reflect it on the upper triangular portion, thereby symmetrizing the gradient of
-  // the cholesky operation. The motivation behind this choice is that symmetric gradient
-  // leads to stable gradient updates, and retains symmetry of the updated matrix if it
-  // were updated by a gradient based algorithm.
-  if (upper) {
-    L = L.mH();
-    grad = grad.mH();
-  }
-  auto L_inverse = at::linalg_solve_triangular(L, at::eye(L.size(-1), L.options()), /*upper=*/false);
-  auto phi = at::matmul(L.mH(), grad);
-  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
+  // From cholesky_jvp we have that
+  // dL = L\pi(L^{-1}dA(L^-H))
+  //
+  // Let gL be the projection into the lower-triangular gradient wrt L. Taking adjoints we have
+  // gA = L^{-H}\pi^*((L^HgL).tril())L^{-1}
+  // where \pi^*(X) = 0.5 * (X + X^H - diag(X))
+  // The only non-standard point of this derivation is noting that the adjoint to multiplying
+  // on the left by a lower triangular matrix L is multiplying by L^H and then projecting back to
+  // the lower triangular matrices (hence the .tril() projection)
+  // Note that the gradient is symmetric and not triangular.
+  auto L_ = upper ? L.mH() : L;
+  auto gL_ = upper ? gL.mH() : gL;
 
-  auto grad_input = at::matmul(at::matmul(L_inverse.mH(), phi), L_inverse);
-  return grad_input.add(grad_input.mH()).mul_(0.5);  // Symmetrizing the gradient
+  // Nb. We don't need to compute gL_ = gL.tril() as
+  // tril(L^H gL) = tril(L^H (triu(gL, 1) + tril(gL)))
+  //              = tril(L^H tril(gL)) + tril(L^H triu(gL, 1))
+  //              = tril(L^H tril(gL))
+  // since tril(L^H triu(gL, 1)) = 0, as L^H triu(gL, 1) is upper triangular
+  auto gA = L_.mH().matmul(gL_).tril();
+  // Equivalent to 0.5 * (gA + gA^H - diag(gA))
+  gA = 0.5 * (gA + gA.tril(-1).mH());
+  gA = at::linalg_solve_triangular(L_.mH(), gA, /*upper=*/true, /*left=*/true);
+  gA = at::linalg_solve_triangular(L_, gA, /*upper=*/false, /*left=*/false);
+  return gA;
 }
 
 Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {
@@ -1603,8 +1613,8 @@ Tensor binary_cross_entropy_with_logits_jvp(const Tensor& input_t, const Tensor&
   }
 
   if (weight.defined()) {
-    grad_input.mul_(weight);
-    grad_target.mul_(weight);
+    grad_input = grad_input.mul(weight);
+    grad_target = grad_target.mul(weight);
   }
   return apply_loss_reduction(grad_target + grad_input, reduction);
 }
@@ -3069,12 +3079,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
   // E_{ij} = L_j - L_i if i != j
   //          1         otherwise
 
-  // Note: The Hermitian case is a simplification of this formula using that V^{-1} = V^H and that L is real
-  if (is_hermitian) {
-    TORCH_CHECK(at::allclose(dA, dA.mH(), /*rtol=*/1e-2, /*atol=*/1e-2),
-                "linalg_eig_jvp: The tangent part of the matrix A should also be ", (dA.is_complex() ? "Hermitian" : "symmetric."));
-  }
-
+  // Precondition: if is_hermitian == true, then dA is Hermitian
   const auto to_complex = [](const Tensor& A){ return A.to(c10::toComplexType(A.scalar_type())); };
 
   const auto dP = is_hermitian ? at::matmul(at::matmul(V.mH(), dA), V)
@@ -3810,7 +3815,7 @@ Tensor fft_r2c_backward(const Tensor& grad, IntArrayRef dim, int64_t normalizati
   new_grad_shape[last_dim] = last_dim_size;
 
   const auto zero_length = last_dim_size - grad.size(dim.back());
-  auto complex_full_grad = zero_length > 0 ? at::zeros(new_grad_shape, grad.options()) : grad;
+  auto complex_full_grad = zero_length > 0 ? grad.new_zeros(new_grad_shape) : grad;
   if (zero_length > 0) {
     complex_full_grad.slice(last_dim, 0, half_sizes[last_dim]).copy_(grad);
   }
@@ -5402,6 +5407,58 @@ Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_opt
 
   return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
 }
+
+std::tuple<Tensor, Tensor> _index_reduce_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  int dim,
+  const Tensor& index,
+  const Tensor& source,
+  c10::string_view reduce,
+  bool include_self,
+  const Tensor& result) {
+  Tensor grad_self, grad_src;
+
+  // FIXME: index_add's backward formula has a special case for source.dim == 0
+  // but this case seems to throw the error "IndexError: dimension specified as 0 but tensor has no dimensions"
+  // look into whether this case is reachable and should be covered here
+
+  if (!grad.defined()) {
+    return std::make_tuple(grad_self, grad_src);
+  }
+
+  if (reduce == "prod") {
+    grad_self = (grad * result) / self;
+    grad_self.masked_fill_(self == 0, 0);
+    grad_src = (grad * result).index_select(dim, index) / source;
+    grad_src.masked_fill_(source == 0, 0);
+  } else if (reduce == "mean") {
+    Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
+    N = N.index_add(dim, index, ones_like(source));
+    N.masked_fill_(N == 0, 1);
+    grad_self = grad / N;
+    Tensor N_src = N.index_select(dim, index);
+    grad_src = grad.index_select(dim, index) / N_src;
+  } else if (reduce == "amax" || reduce == "amin") {
+    Tensor value = result.index_select(dim, index);
+    Tensor self_is_result = (self == result).to(self.scalar_type());
+    Tensor source_is_result = (source == value).to(self.scalar_type());
+    Tensor N_to_distribute = self_is_result.index_add(dim, index, source_is_result);
+    Tensor grad_distributed = grad / N_to_distribute;
+    grad_self = self_is_result * grad_distributed;
+    grad_src = source_is_result * grad_distributed.index_select(dim, index);
+  } else {
+    AT_ERROR("Expected 'reduce' to be one of 'prod', 'amax', 'amin' or 'mean' but got ", reduce, ".");
+  }
+
+  if (!include_self) {
+    grad_self = grad_self.index_fill(dim, index, 0);
+  }
+
+  return std::make_tuple(grad_self, grad_src);
+
+}
+
 
 } // namespace details
 } // namespace generated
