@@ -53,9 +53,9 @@ from torch.utils.data.datapipes.utils.decoder import (
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
-
 try:
     import dill
+
     # XXX: By default, dill writes the Pickler dispatch table to inject its
     # own logic there. This globally affects the behavior of the standard library
     # pickler for any user who transitively depends on this module!
@@ -68,6 +68,7 @@ skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
 try:
     import pandas  # type: ignore[import] # noqa: F401 F403
+
     HAS_PANDAS = True
 except ImportError:
     HAS_PANDAS = False
@@ -481,6 +482,7 @@ class TestCaptureDataFrame(TestCase):
             df['c'] = df.b + df['a'] * 7
             # somehow swallows pandas UserWarning when `df.c = df.b + df['a'] * 7`
             return df
+
         self.compare_capture_and_eager(operations)
 
 
@@ -499,8 +501,8 @@ class TestDataFramesPipes(TestCase):
         return NumbersDataset(range) \
             .map(lambda i: (i, i % 3)) \
             ._to_dataframes_pipe(
-                columns=['i', 'j'],
-                dataframe_size=dataframe_size)
+            columns=['i', 'j'],
+            dataframe_size=dataframe_size)
 
     @skipIfNoDataFrames
     @skipIfNoDill  # TODO(VitalyFedyunin): Decouple tests from dill by avoiding lambdas in map
@@ -643,8 +645,8 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Forker, None, (2,), {}),
             (dp.iter.Grouper, None, (_fake_filter_fn,), {"group_size": 2}),
             (dp.iter.IterableWrapper, range(10), (), {}),
-            (dp.iter.Mapper, None, (_fake_fn, ), {}),
-            (dp.iter.Mapper, None, (partial(_fake_add, 1), ), {}),
+            (dp.iter.Mapper, None, (_fake_fn,), {}),
+            (dp.iter.Mapper, None, (partial(_fake_add, 1),), {}),
             (dp.iter.Multiplexer, None, (dp.iter.IterableWrapper(range(10)),), {}),
             (dp.iter.Sampler, None, (), {}),
             (dp.iter.Shuffler, dp.iter.IterableWrapper([0] * 10), (), {}),
@@ -679,7 +681,7 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Demultiplexer, (2, lambda x: x % 2,), {}),
             (dp.iter.Filter, (lambda x: x >= 5,), {}),
             (dp.iter.Grouper, (lambda x: x >= 5,), {}),
-            (dp.iter.Mapper, (lambda x: x, ), {}),
+            (dp.iter.Mapper, (lambda x: x,), {}),
         ]
         dp_compare_children = {dp.iter.Demultiplexer}
         if HAS_DILL:
@@ -1409,7 +1411,8 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(x, i)
 
         # RandomSampler
-        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, sampler_kwargs={'replacement': True})  # type: ignore[var-annotated] # noqa: B950
+        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, sampler_kwargs={
+            'replacement': True})  # type: ignore[var-annotated] # noqa: B950
 
         # Requires `__len__` to build SamplerDataPipe
         input_dp_nolen = IDP_NoLen(range(10))
@@ -1524,8 +1527,8 @@ class TestFunctionalMapDataPipe(TestCase):
             (dp.map.Batcher, None, (2,), {}),
             (dp.map.Concater, None, (dp.map.SequenceWrapper(range(10)),), {}),
             (dp.map.Mapper, None, (), {}),
-            (dp.map.Mapper, None, (_fake_fn, ), {}),
-            (dp.map.Mapper, None, (partial(_fake_add, 1), ), {}),
+            (dp.map.Mapper, None, (_fake_fn,), {}),
+            (dp.map.Mapper, None, (partial(_fake_add, 1),), {}),
             (dp.map.SequenceWrapper, range(10), (), {}),
             (dp.map.Shuffler, dp.map.SequenceWrapper([0] * 5), (), {}),
             (dp.map.Zipper, None, (dp.map.SequenceWrapper(range(10)),), {}),
@@ -1837,7 +1840,7 @@ class TestTyping(TestCase):
         with self.assertRaisesRegex(TypeError, r"Expected return type of '__iter__'"):
             class InvalidDP3(IterDataPipe[Tuple[int, str]]):
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
-                    yield (0, )
+                    yield (0,)
 
         if _generic_namedtuple_allowed:
             with self.assertRaisesRegex(TypeError, r"is not supported by Python typing"):
@@ -1861,7 +1864,7 @@ class TestTyping(TestCase):
         with self.assertRaisesRegex(TypeError, r"is not a generic class"):
             class InvalidDP5(DP1[tuple]):  # type: ignore[type-arg]
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
-                    yield (0, )
+                    yield (0,)
 
         class DP2(IterDataPipe[T_co]):
             def __iter__(self) -> Iterator[T_co]:
@@ -2081,7 +2084,6 @@ class TestGraph(TestCase):
 
 
 class TestCircularSerialization(TestCase):
-
     class CustomIterDataPipe(IterDataPipe):
 
         @staticmethod
@@ -2092,10 +2094,14 @@ class TestCircularSerialization(TestCase):
         def classify(cls, x):
             return 0
 
+        def add_v(self, x):
+            return x + self.v
+
         def __init__(self, fn, source_dp=None):
             self.fn = fn
             self.source_dp = source_dp if source_dp else dp.iter.IterableWrapper([1, 2, 4])
-            self._dp = self.source_dp.map(self.add_one).demux(2, self.classify)[0]
+            self._dp = self.source_dp.map(self.add_one).map(self.add_v).demux(2, self.classify)[0]
+            self.v = 1
 
         def __iter__(self):
             yield from self._dp
@@ -2112,16 +2118,26 @@ class TestCircularSerialization(TestCase):
                         list(pickle.loads(pickle.dumps(TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn)))))
         res1 = traverse(source_dp, only_datapipe=True)
         res2 = traverse(source_dp, only_datapipe=False)
-        expected_str = str({source_dp:
+        expected_str1 = str({source_dp:
                             {_get_name(dp.iter.IterableWrapper): {},
                                 _get_name(_ChildDataPipe):
                                     {_get_name(_DemultiplexerIterDataPipe):
                                         {_get_name(dp.iter.Mapper):
-                                            {_get_name(dp.iter.IterableWrapper): {}}}}}}
-                           ).replace("'", "")
+                                            {_get_name(dp.iter.Mapper):
+                                                {_get_name(dp.iter.IterableWrapper): {}}}}}}}
+                            ).replace("'", "")
+        expected_str2 = str({source_dp:
+                            {_get_name(dp.iter.IterableWrapper): {},
+                                _get_name(_ChildDataPipe):
+                                    {_get_name(_DemultiplexerIterDataPipe):
+                                        {_get_name(dp.iter.Mapper):
+                                            {_get_name(dp.iter.Mapper):
+                                                {_get_name(dp.iter.IterableWrapper): {}},
+                                             _get_name(dp.iter.IterableWrapper): {}}}}}}
+                            ).replace("'", "")
         # For simplicity, compare the resulting string instead of trying to recreate the object
-        self.assertEqual(expected_str, str(res1))
-        self.assertEqual(expected_str, str(res2))
+        self.assertEqual(expected_str1, str(res1))
+        self.assertEqual(expected_str2, str(res2))
 
         dp1 = TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn)
         dp2 = TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn, source_dp=dp1)
@@ -2141,12 +2157,16 @@ class TestCircularSerialization(TestCase):
         def classify(cls, x):
             return 0
 
+        def add_v(self, x):
+            return x + self.v
+
         def __init__(self, fn, source_dp=None):
+            self.v = 1
             self.container = [lambda x: x + 1, ]
             self.fn = fn
             self.lambda_fn = lambda x: x + 1
             self.source_dp = source_dp if source_dp else dp.iter.IterableWrapper([1, 2, 4])
-            self._dp = self.source_dp.map(self.add_one).map(self.lambda_fn).demux(2, self.classify)[0]
+            self._dp = self.source_dp.map(self.add_one).map(self.lambda_fn).map(self.add_v).demux(2, self.classify)[0]
 
         def __iter__(self):
             yield from self._dp
@@ -2164,17 +2184,28 @@ class TestCircularSerialization(TestCase):
         source_dp = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn)
         res1 = traverse(source_dp, only_datapipe=True)
         res2 = traverse(source_dp, only_datapipe=False)
-        expected_str = str({source_dp:
-                           {_get_name(dp.iter.IterableWrapper): {},
-                            _get_name(_ChildDataPipe):
-                                {_get_name(_DemultiplexerIterDataPipe):
-                                    {_get_name(dp.iter.Mapper):
+        expected_str1 = str({source_dp:
+                            {_get_name(dp.iter.IterableWrapper): {},
+                             _get_name(_ChildDataPipe):
+                                 {_get_name(_DemultiplexerIterDataPipe):
+                                     {_get_name(dp.iter.Mapper):
+                                         {_get_name(dp.iter.Mapper):
+                                             {_get_name(dp.iter.Mapper):
+                                                 {_get_name(dp.iter.IterableWrapper): {}}}}}}}}
+                            ).replace("'", "")
+        expected_str2 = str({source_dp:
+                            {_get_name(dp.iter.IterableWrapper): {},
+                                _get_name(_ChildDataPipe):
+                                    {_get_name(_DemultiplexerIterDataPipe):
                                         {_get_name(dp.iter.Mapper):
-                                            {_get_name(dp.iter.IterableWrapper): {}}}}}}}
-                           ).replace("'", "")
+                                            {_get_name(dp.iter.Mapper):
+                                                {_get_name(dp.iter.Mapper):
+                                                    {_get_name(dp.iter.IterableWrapper): {}}},
+                                             _get_name(dp.iter.IterableWrapper): {}}}}}}
+                            ).replace("'", "")
         # For simplicity, compare the resulting string instead of trying to recreate the object
-        self.assertEqual(expected_str, str(res1))
-        self.assertEqual(expected_str, str(res2))
+        self.assertEqual(expected_str1, str(res1))
+        self.assertEqual(expected_str2, str(res2))
 
         dp1 = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn)
         dp2 = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn, source_dp=dp1)
@@ -2202,7 +2233,6 @@ class TestSharding(TestCase):
         dp1_upd = dp1.filter(lambda x: x % 3 == 1)
         combined_dp = dp0_upd.mux(dp1_upd)
         return combined_dp
-
 
     def test_simple_sharding(self):
         sharded_dp = self._get_pipeline().sharding_filter()
@@ -2239,7 +2269,6 @@ class TestSharding(TestCase):
         torch.utils.data.graph_settings.apply_sharding(sharded_dp1, 2, 1)
         self.assertEqual(1, len(sharded_dp0))
         self.assertEqual(0, len(sharded_dp1))
-
 
     def test_old_dataloader(self):
         dp0 = self._get_pipeline()
