@@ -651,6 +651,12 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion, aten_o
         )
         a, b = _convert_dtype(a, b, dtype=computation_dtype)
 
+        # Special case CPU scalar tensors to be eligible for device transfer
+        if isinstance(a, TensorLike) and a.device.type == 'cpu' and len(a.shape) == 0:
+            a = a.item()
+        elif isinstance(b, TensorLike) and b.device.type == 'cpu' and len(b.shape) == 0:
+            b = b.item()
+
         # Broadcasting
         a, b = broadcast(a, b)
 
