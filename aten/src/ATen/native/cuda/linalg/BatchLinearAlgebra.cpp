@@ -24,7 +24,6 @@
 #include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/_linalg_inv_out_helper_native.h>
 #include <ATen/ops/_linalg_qr_helper_native.h>
-#include <ATen/ops/_solve_helper_native.h>
 #include <ATen/ops/_symeig_helper_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
