@@ -5,6 +5,7 @@ import torch
 from torch.fx import GraphModule
 from torch._prims.utils import TensorMeta, getnvFuserDtype
 from torch._prims.context import PrimContext
+import torch.overrides
 
 if torch.cuda.is_available():
     from torch._C._nvfuser import Fusion, FusionDefinition  # type: ignore[import]
@@ -94,8 +95,8 @@ def make_traced(fn: Callable):
     """
 
     def _traced(*args, executor="aten"):
-        ctx = PrimContext()
-        with ctx:
+        ctx: PrimContext
+        with torch.overrides.push_torch_function_mode(PrimContext) as ctx:  # type: ignore[attr-defined, assignment]
             placeholders = []
             for arg in args:
                 if isinstance(arg, torch.Tensor):
