@@ -263,6 +263,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "windows.4xlarge" },
         ]}
 
+  # please ensure that this and its corresponding job in trunk.yml are the same
   win-vs2019-cuda11_3-py3-build:
     name: win-vs2019-cuda11.3-py3
     uses: ./.github/workflows/_win-build.yml

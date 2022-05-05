@@ -225,6 +225,7 @@ jobs:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
+  # please ensure that this and its corresponding job in pull.yml are the same
   win-vs2019-cuda11_3-py3-build:
     name: win-vs2019-cuda11.3-py3
     uses: ./.github/workflows/_win-build.yml
