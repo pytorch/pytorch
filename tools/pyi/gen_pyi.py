@@ -111,6 +111,7 @@ blocklist = [
     "chain_matmul",
     "stft",
     "tensordot",
+    "split",
     "unique_consecutive",
     "atleast_1d",
     "atleast_2d",
@@ -658,6 +659,10 @@ def gen_pyi(
             "set_": [
                 "def set_(self, storage: Union[Storage, _TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
                 "def set_(self, storage: Union[Storage, _TypedStorage]) -> Tensor: ...",
+            ],
+            "split": [
+                "def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...",
+                "def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...",
             ],
             "div": [
                 "def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ..."
