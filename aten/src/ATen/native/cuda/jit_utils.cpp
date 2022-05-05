@@ -1121,16 +1121,10 @@ NvrtcFunction jit_pwise_function(
 
   // Just-in-time compiles the program
 
-  std::cout<< "\nnvrtcCreateProgram begins\n";
-  std::chrono::steady_clock::time_point begin0 = std::chrono::steady_clock::now();
-
   // Creates the NVRTC program
   nvrtcProgram program;
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
-
-  std::chrono::steady_clock::time_point end0 = std::chrono::steady_clock::now();
-  std::cout << "nvrtcCreateProgram time = " << std::chrono::duration_cast<std::chrono::microseconds>(end0 - begin0).count() << "[µs]" << std::endl;
 
   // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
