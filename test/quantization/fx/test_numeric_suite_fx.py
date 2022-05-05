@@ -1954,6 +1954,20 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mq = convert_fx(mp, is_reference=True)
         mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
 
+    def test_mul_add_skips_shadowing(self):
+        class M(nn.Module):
+            def forward(self, x):
+                x = x * x
+                x = torch.mul(x, x)
+                x = x + x
+                x = torch.add(x, x)
+                return x
+
+        m = M().eval()
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 1, 4, 4),),
+            results_len=0)
+
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """

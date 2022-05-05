@@ -4243,7 +4243,7 @@
                             },
                             {
                               "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (distributed, 1, 1, linux.8xlarge.nvidia.gpu)",
-                              "conclusion": null
+                              "conclusion": "SUCCESS"
                             },
                             {
                               "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (deploy, 1, 1, linux.4xlarge.nvidia.gpu)",
@@ -4259,11 +4259,11 @@
                             },
                             {
                               "name": "win-vs2019-cuda11.3-py3 / test (default, 1, 2, windows.8xlarge.nvidia.gpu)",
-                              "conclusion": null
+                              "conclusion": "SUCCESS"
                             },
                             {
                               "name": "win-vs2019-cuda11.3-py3 / test (default, 2, 2, windows.8xlarge.nvidia.gpu)",
-                              "conclusion": null
+                              "conclusion": "SUCCESS"
                             }
                           ],
                           "pageInfo": {
@@ -4271,7 +4271,7 @@
                             "hasNextPage": true
                           }
                         },
-                        "conclusion": null
+                        "conclusion": "SUCCESS"
                       }
                     ],
                     "pageInfo": {
@@ -4648,6 +4648,386 @@
             "pageInfo": {
               "startCursor": "Y3Vyc29yOnYyOpHOQdD4zA==",
               "hasPreviousPage": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=9a7ea963024cb39819e4a560d8d95f41bb3e0dad12c6f05539a994d6f7c38c34 cursor=MTAw name=pytorch number=76118 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "clee2000"
+                    },
+                    "email": "csl@fb.com",
+                    "name": "Catherine Lee"
+                  },
+                  "oid": "7f560351ae04ea43e58fbfda885bcf216aa26cde"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "pytorchmergebot"
+                    },
+                    "email": "pytorchmergebot@users.noreply.github.com",
+                    "name": "PyTorch MergeBot"
+                  },
+                  "oid": "e8677ed168a036bc7e590d800fe98dd15f10581b"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "robieta"
+                    },
+                    "email": "taylorrobie@fb.com",
+                    "name": "Taylor Robie"
+                  },
+                  "oid": "ac5611caa13642ef8dbe0db453b283b42cbd900b"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "robieta"
+                    },
+                    "email": "taylorrobie@fb.com",
+                    "name": "Taylor Robie"
+                  },
+                  "oid": "1184afbd3bfde0f46133aef09e55e18d3bfb3c3e"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "msi@fb.com",
+                    "name": "Min Si"
+                  },
+                  "oid": "1c05604f3d049c67dc678d0295c0add470bff3dc"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "eellison@devfair044.h1.fair",
+                    "name": "Elias Ellison"
+                  },
+                  "oid": "76ab5101bd36e8d73637d31bbea125240b7b27f0"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "eellison@devfair044.h1.fair",
+                    "name": "Elias Ellison"
+                  },
+                  "oid": "c774050e92c3d8e52968e1eb635dd3e9491104b3"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "guoyejun"
+                    },
+                    "email": "yejun.guo@intel.com",
+                    "name": "Guo Yejun"
+                  },
+                  "oid": "8981595c5361f07186f4534f3be71f1d829a3046"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "BowenBao"
+                    },
+                    "email": "bowbao@microsoft.com",
+                    "name": "BowenBao"
+                  },
+                  "oid": "036f362904024ac9481248965009f312bec6656b"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "janeyx99"
+                    },
+                    "email": "janeyx@fb.com",
+                    "name": "Jane Xu"
+                  },
+                  "oid": "457d994933f164a9fd70da5ca2733dd6c046a28b"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "janeyx99"
+                    },
+                    "email": "janeyx@fb.com",
+                    "name": "Jane Xu"
+                  },
+                  "oid": "f49ebc77520774e71722111d554a0215a26956df"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mikeiovine"
+                    },
+                    "email": "mikeiovine@fb.com",
+                    "name": "Mike Iovine"
+                  },
+                  "oid": "f069e1a4a5f98d3fe961e4fc562ede59f59b4026"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "salilsdesai"
+                    },
+                    "email": "salilsdesai@fb.com",
+                    "name": "Salil Desai"
+                  },
+                  "oid": "30bccf58393b288412a0f5a2423a1a41ffce258e"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "angelayi"
+                    },
+                    "email": "angelayi@fb.com",
+                    "name": "Angela Yi"
+                  },
+                  "oid": "f4ba440fe8a632c1ee88e01f7746a8a92c8f3902"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "shirong@fb.com",
+                    "name": "Shirong Wu"
+                  },
+                  "oid": "d203346c93ba96d626c6c02910888198c789ba69"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "jamesr66a"
+                    },
+                    "email": "jamesreed@fb.com",
+                    "name": "James Reed"
+                  },
+                  "oid": "73a4e34963e212b799a191fd031d2fa31d17e0ac"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "Krovatkin"
+                    },
+                    "email": "korovaikon@gmail.com",
+                    "name": "Nikolay Korovaiko"
+                  },
+                  "oid": "b9d5206dfb46f09f953aba3ffb0e1e33a99032ee"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ngimel"
+                    },
+                    "email": "ngimel@fb.com",
+                    "name": "Natalia Gimelshein"
+                  },
+                  "oid": "12114e6937573fead54e11ae6cdebe5b31dee302"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "s4ayub"
+                    },
+                    "email": "shababayub@fb.com",
+                    "name": "Shabab Ayub"
+                  },
+                  "oid": "f2323f76ad6f7f590285bf9c6d20c14a79542563"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "jaglinux"
+                    },
+                    "email": "jagdish.krishna@gmail.com",
+                    "name": "Jagadish Krishnamoorthy"
+                  },
+                  "oid": "acd4b5abe2739c09c1a02524eceda46ff93fd385"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "cccclai"
+                    },
+                    "email": "chenlai@fb.com",
+                    "name": "Chen Lai"
+                  },
+                  "oid": "04179f533283132fa334a9f91a070b1712f7323d"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "zaxtax"
+                    },
+                    "email": "rob@zinkov.com",
+                    "name": "Rob Zinkov"
+                  },
+                  "oid": "5097cdcd6994ad82b3cec942b70e75dbeaee8ca4"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "5015ecb5a2b86943f457d71f5a977444dd062732"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "1c42b7789d3966cd541b08fce359b9738fee69f6"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "albanD"
+                    },
+                    "email": "albandes@fb.com",
+                    "name": "Alban Desmaison"
+                  },
+                  "oid": "893ac3d334fd3e85e22423a06fe986ce453fe304"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "emcastillo"
+                    },
+                    "email": "ecastill@preferred.jp",
+                    "name": "Emilio Castillo"
+                  },
+                  "oid": "aa5d1b6b031ee2b8bb85f793a842ac1327ae4a19"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "dzdang"
+                    },
+                    "email": "dzdang@umich.edu",
+                    "name": "dzdang"
+                  },
+                  "oid": "0707a1d00f33d7098f56de339cb30436e8c2ea44"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "NivekT"
+                    },
+                    "email": "ktse@fb.com",
+                    "name": "Kevin Tse"
+                  },
+                  "oid": "ccb082d42af99f6374183cf914cc712bac585f0f"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ryandaryl"
+                    },
+                    "email": "ryandarylmills@gmail.com",
+                    "name": "ryandaryl"
+                  },
+                  "oid": "4f2909cc8747808786a1871b0a6825cc4566f48c"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "clee2000"
+                    },
+                    "email": "csl@fb.com",
+                    "name": "Catherine Lee"
+                  },
+                  "oid": "f764010648a29223d9ed4b955073d9d2fb1b2f43"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nshulga@fb.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "5696e8357cf38f852ef3d680381513e26f202371"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MTMx",
+              "hasNextPage": false
             }
           }
         }
@@ -9972,9 +10352,6 @@
                 "login": "tenpercent"
               },
               {
-                "login": "spaugh"
-              },
-              {
                 "login": "bertmaher"
               },
               {
@@ -10156,26 +10533,26 @@
               },
               {
                 "login": "helunwencser"
+              },
+              {
+                "login": "xw285cornell"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOAHYzbA=="
+              "endCursor": "Y3Vyc29yOnYyOpHOAHb0AA=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAHYzbA== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAHb0AA== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
-              {
-                "login": "xw285cornell"
-              },
               {
                 "login": "hhbyyh"
               },
@@ -10472,26 +10849,26 @@
               },
               {
                 "login": "knottb"
+              },
+              {
+                "login": "jbitton"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOASQc6g=="
+              "endCursor": "Y3Vyc29yOnYyOpHOASYQlQ=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOASQc6g== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOASYQlQ== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
-              {
-                "login": "jbitton"
-              },
               {
                 "login": "jdsgomes"
               },
@@ -10631,6 +11008,9 @@
                 "login": "liuchen9494"
               },
               {
+                "login": "drisspg"
+              },
+              {
                 "login": "jramseyer"
               },
               {
@@ -10662,9 +11042,6 @@
               },
               {
                 "login": "mruberry"
-              },
-              {
-                "login": "mja314"
               },
               {
                 "login": "HDCharles"
@@ -10787,30 +11164,27 @@
                 "login": "byterover"
               },
               {
-                "login": "changjishi"
+                "login": "ejguan"
+              },
+              {
+                "login": "nimaelyasi"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOA_PyPA=="
+              "endCursor": "Y3Vyc29yOnYyOpHOBC3inw=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOA_PyPA== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOBC3inw== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
-              {
-                "login": "ejguan"
-              },
-              {
-                "login": "nimaelyasi"
-              },
               {
                 "login": "nikithamalgifb"
               },
@@ -10854,6 +11228,9 @@
                 "login": "woo-kim"
               },
               {
+                "login": "yuguo68"
+              },
+              {
                 "login": "chowarfb"
               },
               {
@@ -10879,11 +11256,17 @@
               },
               {
                 "login": "henryliu-bluehills"
+              },
+              {
+                "login": "madhu-fb"
+              },
+              {
+                "login": "muchulee8"
               }
             ],
             "pageInfo": {
               "hasNextPage": false,
-              "endCursor": "Y3Vyc29yOnYyOpHOBftYGg=="
+              "endCursor": "Y3Vyc29yOnYyOpHOBjjUZQ=="
             }
           }
         }
@@ -11260,6 +11643,798 @@
       }
     }
   },
+  "query_sha=0a34acb829d8aca9dd28a8ba388dfa52f6ecdde7e903ace1caabdcfaba87de98 cursor=MTAw name=pytorch number=76118 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "files": {
+            "nodes": [
+              {
+                "path": "docs/source/quantization.rst"
+              },
+              {
+                "path": "docs/source/scripts/build_quantization_configs.py"
+              },
+              {
+                "path": "test/allowlist_for_publicAPI.json"
+              },
+              {
+                "path": "test/cpp/jit/source_range_test.cpp"
+              },
+              {
+                "path": "test/cpp/jit/test_backend.cpp"
+              },
+              {
+                "path": "test/cpp/jit/test_flatbuffer.cpp"
+              },
+              {
+                "path": "test/cpp/jit/test_misc.cpp"
+              },
+              {
+                "path": "test/cpp/jit/test_utils.h"
+              },
+              {
+                "path": "test/cpp/jit/upgrader_models/test_versioned_div_scalar_float_v2.ptl.ff"
+              },
+              {
+                "path": "test/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_float_v2.ptl.ff"
+              },
+              {
+                "path": "test/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_int_v2.ptl.ff"
+              },
+              {
+                "path": "test/cpp/jit/upgrader_models/test_versioned_div_scalar_int_v2.ptl.ff"
+              },
+              {
+                "path": "test/cpp/jit/upgrader_models/test_versioned_div_scalar_reciprocal_float_v2.ptl.ff"
+              },
+              {
+                "path": "test/cpp/jit/upgrader_models/test_versioned_div_scalar_reciprocal_int_v2.ptl.ff"
+              },
+              {
+                "path": "test/cpp/jit/upgrader_models/test_versioned_div_scalar_scalar_v2.ptl.ff"
+              },
+              {
+                "path": "test/cpp/jit/upgrader_models/test_versioned_div_tensor_inplace_v2.ptl.ff"
+              },
+              {
+                "path": "test/cpp/jit/upgrader_models/test_versioned_div_tensor_out_v2.ptl.ff"
+              },
+              {
+                "path": "test/cpp/jit/upgrader_models/test_versioned_div_tensor_v2.ptl.ff"
+              },
+              {
+                "path": "test/cpp/profiler/record_function.cpp"
+              },
+              {
+                "path": "test/distributed/_shard/sharded_tensor/test_sharded_tensor.py"
+              },
+              {
+                "path": "test/distributed/_shard/test_replicated_tensor.py"
+              },
+              {
+                "path": "test/distributed/fsdp/test_fsdp_comm.py"
+              },
+              {
+                "path": "test/distributed/fsdp/test_fsdp_optim_state.py"
+              },
+              {
+                "path": "test/distributed/optim/test_zero_redundancy_optimizer.py"
+              },
+              {
+                "path": "test/jit/test_export_modes.py"
+              },
+              {
+                "path": "test/jit/test_if_hoisting.py"
+              },
+              {
+                "path": "test/jit/test_tracer.py"
+              },
+              {
+                "path": "test/jit/test_upgraders.py"
+              },
+              {
+                "path": "test/mobile/test_lite_script_type.py"
+              },
+              {
+                "path": "test/onnx/expect/TestOperators.test_layer_norm_aten.expect"
+              },
+              {
+                "path": "test/onnx/test_operators.py"
+              },
+              {
+                "path": "test/onnx/test_pytorch_onnx_onnxruntime.py"
+              },
+              {
+                "path": "test/quantization/ao_migration/test_quantization_fx.py"
+              },
+              {
+                "path": "test/quantization/core/test_quantized_op.py"
+              },
+              {
+                "path": "test/quantization/core/test_quantized_tensor.py"
+              },
+              {
+                "path": "test/quantization/fx/test_numeric_suite_fx.py"
+              },
+              {
+                "path": "test/quantization/fx/test_quantize_fx.py"
+              },
+              {
+                "path": "test/test_autograd.py"
+              },
+              {
+                "path": "test/test_binary_ufuncs.py"
+              },
+              {
+                "path": "test/test_expanded_weights.py"
+              },
+              {
+                "path": "test/test_functionalization.py"
+              },
+              {
+                "path": "test/test_fx_experimental.py"
+              },
+              {
+                "path": "test/test_jit.py"
+              },
+              {
+                "path": "test/test_jit_cuda_fuser.py"
+              },
+              {
+                "path": "test/test_linalg.py"
+              },
+              {
+                "path": "test/test_nestedtensor.py"
+              },
+              {
+                "path": "test/test_nn.py"
+              },
+              {
+                "path": "test/test_ops.py"
+              },
+              {
+                "path": "test/test_ops_gradients.py"
+              },
+              {
+                "path": "test/test_ops_jit.py"
+              },
+              {
+                "path": "test/test_optim.py"
+              },
+              {
+                "path": "test/test_overrides.py"
+              },
+              {
+                "path": "test/test_profiler.py"
+              },
+              {
+                "path": "test/test_public_bindings.py"
+              },
+              {
+                "path": "test/test_pytree.py"
+              },
+              {
+                "path": "test/test_reductions.py"
+              },
+              {
+                "path": "test/test_sort_and_select.py"
+              },
+              {
+                "path": "test/test_sparse.py"
+              },
+              {
+                "path": "test/test_sparse_csr.py"
+              },
+              {
+                "path": "test/test_spectral_ops.py"
+              },
+              {
+                "path": "test/test_tensor_creation_ops.py"
+              },
+              {
+                "path": "test/test_tensorboard.py"
+              },
+              {
+                "path": "test/test_testing.py"
+              },
+              {
+                "path": "test/test_torch.py"
+              },
+              {
+                "path": "test/test_unary_ufuncs.py"
+              },
+              {
+                "path": "third_party/BUCK.github"
+              },
+              {
+                "path": "third_party/fbgemm"
+              },
+              {
+                "path": "tools/autograd/derivatives.yaml"
+              },
+              {
+                "path": "tools/autograd/gen_inplace_or_view_type.py"
+              },
+              {
+                "path": "tools/autograd/load_derivatives.py"
+              },
+              {
+                "path": "tools/build_variables.bzl"
+              },
+              {
+                "path": "tools/codegen/api/autograd.py"
+              },
+              {
+                "path": "tools/codegen/api/cpp.py"
+              },
+              {
+                "path": "tools/codegen/api/dispatcher.py"
+              },
+              {
+                "path": "tools/codegen/api/functionalization.py"
+              },
+              {
+                "path": "tools/codegen/api/lazy.py"
+              },
+              {
+                "path": "tools/codegen/api/meta.py"
+              },
+              {
+                "path": "tools/codegen/api/native.py"
+              },
+              {
+                "path": "tools/codegen/api/python.py"
+              },
+              {
+                "path": "tools/codegen/api/structured.py"
+              },
+              {
+                "path": "tools/codegen/api/translate.py"
+              },
+              {
+                "path": "tools/codegen/api/types.py"
+              },
+              {
+                "path": "tools/codegen/api/ufunc.py"
+              },
+              {
+                "path": "tools/codegen/api/unboxing.py"
+              },
+              {
+                "path": "tools/codegen/code_template.py"
+              },
+              {
+                "path": "tools/codegen/context.py"
+              },
+              {
+                "path": "tools/codegen/decompositions/gen_jit_decompositions.py"
+              },
+              {
+                "path": "tools/codegen/dest/__init__.py"
+              },
+              {
+                "path": "tools/codegen/dest/lazy_ir.py"
+              },
+              {
+                "path": "tools/codegen/dest/lazy_ts_lowering.py"
+              },
+              {
+                "path": "tools/codegen/dest/native_functions.py"
+              },
+              {
+                "path": "tools/codegen/dest/register_dispatch_key.py"
+              },
+              {
+                "path": "tools/codegen/dest/ufunc.py"
+              },
+              {
+                "path": "tools/codegen/gen.py"
+              },
+              {
+                "path": "tools/codegen/gen_backend_stubs.py"
+              },
+              {
+                "path": "tools/codegen/gen_functionalization_type.py"
+              },
+              {
+                "path": "tools/codegen/gen_lazy_tensor.py"
+              },
+              {
+                "path": "tools/codegen/local.py"
+              },
+              {
+                "path": "tools/codegen/model.py"
+              },
+              {
+                "path": "tools/codegen/operator_versions/gen_mobile_upgraders.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MjAw",
+              "hasNextPage": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=0a34acb829d8aca9dd28a8ba388dfa52f6ecdde7e903ace1caabdcfaba87de98 cursor=MjAw name=pytorch number=76118 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "files": {
+            "nodes": [
+              {
+                "path": "tools/codegen/selective_build/operator.py"
+              },
+              {
+                "path": "tools/codegen/selective_build/selector.py"
+              },
+              {
+                "path": "tools/codegen/shape_functions/gen_jit_shape_functions.py"
+              },
+              {
+                "path": "tools/codegen/static_runtime/config.py"
+              },
+              {
+                "path": "tools/codegen/static_runtime/gen_static_runtime_ops.py"
+              },
+              {
+                "path": "tools/codegen/static_runtime/gen_structured.py"
+              },
+              {
+                "path": "tools/codegen/utils.py"
+              },
+              {
+                "path": "tools/linter/adapters/circleci_linter.py"
+              },
+              {
+                "path": "tools/linter/adapters/clangformat_linter.py"
+              },
+              {
+                "path": "tools/linter/adapters/grep_linter.py"
+              },
+              {
+                "path": "tools/linter/adapters/nativefunctions_linter.py"
+              },
+              {
+                "path": "tools/setup_helpers/BUILD.bazel"
+              },
+              {
+                "path": "tools/setup_helpers/generate_code.py"
+              },
+              {
+                "path": "torch/_C/__init__.pyi.in"
+              },
+              {
+                "path": "torch/amp/autocast_mode.py"
+              },
+              {
+                "path": "torch/ao/ns/fx/pattern_utils.py"
+              },
+              {
+                "path": "torch/ao/quantization/backend_config/README.md"
+              },
+              {
+                "path": "torch/ao/quantization/backend_config/__init__.py"
+              },
+              {
+                "path": "torch/ao/quantization/backend_config/native.py"
+              },
+              {
+                "path": "torch/ao/quantization/backend_config/observation_type.py"
+              },
+              {
+                "path": "torch/ao/quantization/backend_config/tensorrt.py"
+              },
+              {
+                "path": "torch/ao/quantization/backend_config/utils.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/__init__.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/backend_config/fuse_handler.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/backend_config/quantize_handler.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/backend_config_utils.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/convert.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/fuse.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/fusion_patterns.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/match_utils.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/pattern_utils.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/prepare.py"
+              },
+              {
+                "path": "torch/ao/quantization/fx/quantization_patterns.py"
+              },
+              {
+                "path": "torch/ao/quantization/qconfig.py"
+              },
+              {
+                "path": "torch/ao/quantization/quantization_types.py"
+              },
+              {
+                "path": "torch/ao/quantization/quantize_fx.py"
+              },
+              {
+                "path": "torch/autograd/__init__.py"
+              },
+              {
+                "path": "torch/csrc/Module.cpp"
+              },
+              {
+                "path": "torch/csrc/autograd/FunctionsManual.cpp"
+              },
+              {
+                "path": "torch/csrc/autograd/FunctionsManual.h"
+              },
+              {
+                "path": "torch/csrc/autograd/engine.cpp"
+              },
+              {
+                "path": "torch/csrc/autograd/function.h"
+              },
+              {
+                "path": "torch/csrc/autograd/functions/accumulate_grad.h"
+              },
+              {
+                "path": "torch/csrc/autograd/init.cpp"
+              },
+              {
+                "path": "torch/csrc/autograd/python_torch_functions_manual.cpp"
+              },
+              {
+                "path": "torch/csrc/autograd/python_variable.cpp"
+              },
+              {
+                "path": "torch/csrc/autograd/record_function_ops.h"
+              },
+              {
+                "path": "torch/csrc/autograd/utils/grad_layout_contract.h"
+              },
+              {
+                "path": "torch/csrc/deploy/CMakeLists.txt"
+              },
+              {
+                "path": "torch/csrc/distributed/c10d/logger.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/codegen/cuda/graph_fuser.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/codegen/cuda/parser.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/frontend/function_schema_parser.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/frontend/lexer.h"
+              },
+              {
+                "path": "torch/csrc/jit/frontend/parser.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/frontend/parser.h"
+              },
+              {
+                "path": "torch/csrc/jit/frontend/script_type_parser.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/frontend/source_range.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/frontend/source_range.h"
+              },
+              {
+                "path": "torch/csrc/jit/frontend/source_ref.h"
+              },
+              {
+                "path": "torch/csrc/jit/frontend/tracer.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/frontend/tracer.h"
+              },
+              {
+                "path": "torch/csrc/jit/mobile/debug_info.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/mobile/debug_info.h"
+              },
+              {
+                "path": "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/mobile/module.h"
+              },
+              {
+                "path": "torch/csrc/jit/passes/common_expression_hoisting.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/passes/common_expression_hoisting.h"
+              },
+              {
+                "path": "torch/csrc/jit/passes/frozen_graph_optimizations.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/passes/onnx/scalar_type_analysis.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/python/init.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/python/python_tree_views.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/python/script_init.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/graph_executor.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/interpreter.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/script_profile.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/serialized_shape_function_registry.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/serialized_shape_function_registry.h"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/shape_function_registry.h"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/shape_functions.h"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/shape_functions_1.h"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/static/impl.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/static/passes.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/symbolic_shape_registry.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/runtime/symbolic_shape_registry.h"
+              },
+              {
+                "path": "torch/csrc/jit/serialization/export_module.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/serialization/flatbuffer_serializer.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/serialization/import.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/serialization/import_export_helpers.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/serialization/import_export_helpers.h"
+              },
+              {
+                "path": "torch/csrc/jit/serialization/import_source.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/serialization/import_source.h"
+              },
+              {
+                "path": "torch/csrc/jit/serialization/source_range_serialization.cpp"
+              },
+              {
+                "path": "torch/csrc/jit/serialization/source_range_serialization.h"
+              },
+              {
+                "path": "torch/csrc/jit/testing/file_check.cpp"
+              },
+              {
+                "path": "torch/csrc/lazy/core/dynamic_ir.cpp"
+              },
+              {
+                "path": "torch/csrc/lazy/core/dynamic_ir.h"
+              },
+              {
+                "path": "torch/csrc/lazy/ts_backend/ts_eager_fallback.cpp"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MzAw",
+              "hasNextPage": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=0a34acb829d8aca9dd28a8ba388dfa52f6ecdde7e903ace1caabdcfaba87de98 cursor=MzAw name=pytorch number=76118 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "files": {
+            "nodes": [
+              {
+                "path": "torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
+              },
+              {
+                "path": "torch/csrc/utils/python_arg_parser.cpp"
+              },
+              {
+                "path": "torch/csrc/utils/python_arg_parser.h"
+              },
+              {
+                "path": "torch/csrc/utils/tensor_list.cpp"
+              },
+              {
+                "path": "torch/csrc/utils/tensor_new.cpp"
+              },
+              {
+                "path": "torch/csrc/utils/tensor_new.h"
+              },
+              {
+                "path": "torch/distributed/_shard/__init__.py"
+              },
+              {
+                "path": "torch/distributed/_shard/api.py"
+              },
+              {
+                "path": "torch/distributed/_shard/replicated_tensor.py"
+              },
+              {
+                "path": "torch/distributed/_shard/sharded_tensor/__init__.py"
+              },
+              {
+                "path": "torch/distributed/_shard/sharded_tensor/api.py"
+              },
+              {
+                "path": "torch/distributed/_shard/sharded_tensor/utils.py"
+              },
+              {
+                "path": "torch/distributed/algorithms/ddp_comm_hooks/debugging_hooks.py"
+              },
+              {
+                "path": "torch/distributed/algorithms/model_averaging/utils.py"
+              },
+              {
+                "path": "torch/distributed/fsdp/_optim_utils.py"
+              },
+              {
+                "path": "torch/distributed/fsdp/fully_sharded_data_parallel.py"
+              },
+              {
+                "path": "torch/distributed/nn/__init__.py"
+              },
+              {
+                "path": "torch/distributed/nn/functional.py"
+              },
+              {
+                "path": "torch/distributed/optim/functional_adagrad.py"
+              },
+              {
+                "path": "torch/fx/experimental/meta_tracer.py"
+              },
+              {
+                "path": "torch/fx/graph.py"
+              },
+              {
+                "path": "torch/jit/_shape_functions.py"
+              },
+              {
+                "path": "torch/nn/parallel/_replicated_tensor_ddp_interop.py"
+              },
+              {
+                "path": "torch/nn/parallel/_replicated_tensor_ddp_utils.py"
+              },
+              {
+                "path": "torch/nn/parallel/distributed.py"
+              },
+              {
+                "path": "torch/nn/utils/_expanded_weights/__init__.py"
+              },
+              {
+                "path": "torch/nn/utils/_expanded_weights/instance_norm_expanded_weights.py"
+              },
+              {
+                "path": "torch/onnx/symbolic_opset11.py"
+              },
+              {
+                "path": "torch/onnx/symbolic_opset12.py"
+              },
+              {
+                "path": "torch/onnx/symbolic_opset9.py"
+              },
+              {
+                "path": "torch/optim/adagrad.py"
+              },
+              {
+                "path": "torch/optim/lr_scheduler.py"
+              },
+              {
+                "path": "torch/overrides.py"
+              },
+              {
+                "path": "torch/quantization/fx/pattern_utils.py"
+              },
+              {
+                "path": "torch/quantization/fx/quantization_patterns.py"
+              },
+              {
+                "path": "torch/quantization/fx/quantization_types.py"
+              },
+              {
+                "path": "torch/return_types.py"
+              },
+              {
+                "path": "torch/testing/_internal/common_device_type.py"
+              },
+              {
+                "path": "torch/testing/_internal/common_distributed.py"
+              },
+              {
+                "path": "torch/testing/_internal/common_fx2trt.py"
+              },
+              {
+                "path": "torch/testing/_internal/common_methods_invocations.py"
+              },
+              {
+                "path": "torch/testing/_internal/common_utils.py"
+              },
+              {
+                "path": "torch/testing/_internal/composite_compliance.py"
+              },
+              {
+                "path": "torch/testing/_internal/distributed/distributed_test.py"
+              },
+              {
+                "path": "torch/testing/_internal/jit_metaprogramming_utils.py"
+              },
+              {
+                "path": "torch/utils/cpp_extension.py"
+              },
+              {
+                "path": "torch/utils/data/datapipes/_typing.py"
+              },
+              {
+                "path": "torch/utils/model_dump/__init__.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MzQ4",
+              "hasNextPage": false
+            }
+          }
+        }
+      }
+    }
+  },
   "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=None name=pytorch-dev-infra org=pytorch": {
     "data": {
       "organization": {
@@ -11307,386 +12482,6 @@
     "data": {
       "organization": {
         "team": null
-      }
-    }
-  },
-  "query_sha=9a7ea963024cb39819e4a560d8d95f41bb3e0dad12c6f05539a994d6f7c38c34 cursor=MTAw name=pytorch number=76118 owner=pytorch": {
-    "data": {
-      "repository": {
-        "pullRequest": {
-          "commits_with_authors": {
-            "nodes": [
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "clee2000"
-                    },
-                    "email": "csl@fb.com",
-                    "name": "Catherine Lee"
-                  },
-                  "oid": "7f560351ae04ea43e58fbfda885bcf216aa26cde"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "pytorchmergebot"
-                    },
-                    "email": "pytorchmergebot@users.noreply.github.com",
-                    "name": "PyTorch MergeBot"
-                  },
-                  "oid": "e8677ed168a036bc7e590d800fe98dd15f10581b"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "robieta"
-                    },
-                    "email": "taylorrobie@fb.com",
-                    "name": "Taylor Robie"
-                  },
-                  "oid": "ac5611caa13642ef8dbe0db453b283b42cbd900b"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "robieta"
-                    },
-                    "email": "taylorrobie@fb.com",
-                    "name": "Taylor Robie"
-                  },
-                  "oid": "1184afbd3bfde0f46133aef09e55e18d3bfb3c3e"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": null,
-                    "email": "msi@fb.com",
-                    "name": "Min Si"
-                  },
-                  "oid": "1c05604f3d049c67dc678d0295c0add470bff3dc"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": null,
-                    "email": "eellison@devfair044.h1.fair",
-                    "name": "Elias Ellison"
-                  },
-                  "oid": "76ab5101bd36e8d73637d31bbea125240b7b27f0"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": null,
-                    "email": "eellison@devfair044.h1.fair",
-                    "name": "Elias Ellison"
-                  },
-                  "oid": "c774050e92c3d8e52968e1eb635dd3e9491104b3"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "guoyejun"
-                    },
-                    "email": "yejun.guo@intel.com",
-                    "name": "Guo Yejun"
-                  },
-                  "oid": "8981595c5361f07186f4534f3be71f1d829a3046"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "BowenBao"
-                    },
-                    "email": "bowbao@microsoft.com",
-                    "name": "BowenBao"
-                  },
-                  "oid": "036f362904024ac9481248965009f312bec6656b"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "janeyx99"
-                    },
-                    "email": "janeyx@fb.com",
-                    "name": "Jane Xu"
-                  },
-                  "oid": "457d994933f164a9fd70da5ca2733dd6c046a28b"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "janeyx99"
-                    },
-                    "email": "janeyx@fb.com",
-                    "name": "Jane Xu"
-                  },
-                  "oid": "f49ebc77520774e71722111d554a0215a26956df"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "mikeiovine"
-                    },
-                    "email": "mikeiovine@fb.com",
-                    "name": "Mike Iovine"
-                  },
-                  "oid": "f069e1a4a5f98d3fe961e4fc562ede59f59b4026"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "salilsdesai"
-                    },
-                    "email": "salilsdesai@fb.com",
-                    "name": "Salil Desai"
-                  },
-                  "oid": "30bccf58393b288412a0f5a2423a1a41ffce258e"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "angelayi"
-                    },
-                    "email": "angelayi@fb.com",
-                    "name": "Angela Yi"
-                  },
-                  "oid": "f4ba440fe8a632c1ee88e01f7746a8a92c8f3902"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": null,
-                    "email": "shirong@fb.com",
-                    "name": "Shirong Wu"
-                  },
-                  "oid": "d203346c93ba96d626c6c02910888198c789ba69"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "jamesr66a"
-                    },
-                    "email": "jamesreed@fb.com",
-                    "name": "James Reed"
-                  },
-                  "oid": "73a4e34963e212b799a191fd031d2fa31d17e0ac"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "Krovatkin"
-                    },
-                    "email": "korovaikon@gmail.com",
-                    "name": "Nikolay Korovaiko"
-                  },
-                  "oid": "b9d5206dfb46f09f953aba3ffb0e1e33a99032ee"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "ngimel"
-                    },
-                    "email": "ngimel@fb.com",
-                    "name": "Natalia Gimelshein"
-                  },
-                  "oid": "12114e6937573fead54e11ae6cdebe5b31dee302"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "s4ayub"
-                    },
-                    "email": "shababayub@fb.com",
-                    "name": "Shabab Ayub"
-                  },
-                  "oid": "f2323f76ad6f7f590285bf9c6d20c14a79542563"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "jaglinux"
-                    },
-                    "email": "jagdish.krishna@gmail.com",
-                    "name": "Jagadish Krishnamoorthy"
-                  },
-                  "oid": "acd4b5abe2739c09c1a02524eceda46ff93fd385"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "cccclai"
-                    },
-                    "email": "chenlai@fb.com",
-                    "name": "Chen Lai"
-                  },
-                  "oid": "04179f533283132fa334a9f91a070b1712f7323d"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "zaxtax"
-                    },
-                    "email": "rob@zinkov.com",
-                    "name": "Rob Zinkov"
-                  },
-                  "oid": "5097cdcd6994ad82b3cec942b70e75dbeaee8ca4"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "ezyang"
-                    },
-                    "email": "ezyang@fb.com",
-                    "name": "Edward Z. Yang"
-                  },
-                  "oid": "5015ecb5a2b86943f457d71f5a977444dd062732"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "ezyang"
-                    },
-                    "email": "ezyang@fb.com",
-                    "name": "Edward Z. Yang"
-                  },
-                  "oid": "1c42b7789d3966cd541b08fce359b9738fee69f6"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "albanD"
-                    },
-                    "email": "albandes@fb.com",
-                    "name": "Alban Desmaison"
-                  },
-                  "oid": "893ac3d334fd3e85e22423a06fe986ce453fe304"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "emcastillo"
-                    },
-                    "email": "ecastill@preferred.jp",
-                    "name": "Emilio Castillo"
-                  },
-                  "oid": "aa5d1b6b031ee2b8bb85f793a842ac1327ae4a19"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "dzdang"
-                    },
-                    "email": "dzdang@umich.edu",
-                    "name": "dzdang"
-                  },
-                  "oid": "0707a1d00f33d7098f56de339cb30436e8c2ea44"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "NivekT"
-                    },
-                    "email": "ktse@fb.com",
-                    "name": "Kevin Tse"
-                  },
-                  "oid": "ccb082d42af99f6374183cf914cc712bac585f0f"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "ryandaryl"
-                    },
-                    "email": "ryandarylmills@gmail.com",
-                    "name": "ryandaryl"
-                  },
-                  "oid": "4f2909cc8747808786a1871b0a6825cc4566f48c"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "clee2000"
-                    },
-                    "email": "csl@fb.com",
-                    "name": "Catherine Lee"
-                  },
-                  "oid": "f764010648a29223d9ed4b955073d9d2fb1b2f43"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "malfet"
-                    },
-                    "email": "nshulga@fb.com",
-                    "name": "Nikita Shulga"
-                  },
-                  "oid": "5696e8357cf38f852ef3d680381513e26f202371"
-                }
-              }
-            ],
-            "pageInfo": {
-              "endCursor": "MTMx",
-              "hasNextPage": false
-            }
-          }
-        }
       }
     }
   }
