@@ -595,6 +595,17 @@ class OpInfo(object):
     # if None, then the OpInfo specifies no method variant
     inplace_variant: Callable = _NOTHING
 
+    # explicitly specifies the operator(module) variant of the operator
+    # if _NOTHING (default), the operator variant will be autopopulated
+    # if None, then the OpInfo specifies no operator variant
+    operator_variant: Callable = _NOTHING
+
+    # explicitly specifies the inplace operator variant of the
+    # operator if _NOTHING (default), the inplace operator variant
+    # will be autopopulated if None, then the OpInfo specifies no
+    # inplace operator variant
+    inplace_operator_variant: Callable = _NOTHING
+
     # the following metadata are test directives for skipping or modifying tests
 
     # information about which tests to skip
@@ -762,6 +773,7 @@ class OpInfo(object):
         assert self.dtypes is not None, "OpInfo for {0} has no dtypes!".format(self.name)
 
         dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
+
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
@@ -817,7 +829,15 @@ class OpInfo(object):
             inplace_name = self.name + "_"
             self.inplace_variant = getattr(torch.Tensor, inplace_name, None)
 
-        self.operator_variant = getattr(operator, self.name, None)
+        if self.operator_variant is _NOTHING:
+            self.operator_variant = getattr(operator, self.name, None)
+
+        if self.inplace_operator_variant is _NOTHING:
+            if self.inplace_variant is not None:
+                inplace_operator_name = "i" + self.name
+                self.inplace_operator_variant = getattr(operator, inplace_operator_name, None)
+            else:
+                self.inplace_operator_variant = None
 
         self.decorators = (*self.decorators, *self.skips)
 
@@ -912,11 +932,16 @@ class OpInfo(object):
         """
         return self.inplace_variant
 
-    def get_operator_variant(self):
+    def get_operator(self):
         """Returns operator variant of the operator, e.g. operator.neg
         Returns None if the operator has no operator variant.
         """
         return self.operator_variant
+
+    def get_inplace_operator(self):
+        """Returns the inplace operator variant of the operator, e.g operator.iadd
+        Returns None if the operator has no inplace operator variant"""
+        return self.inplace_operator_variant
 
     def conjugate_sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs but with the tensor input or first
@@ -9826,6 +9851,8 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('bitwise_and',
                     dtypes=integral_types_and(torch.bool),
                     supports_autograd=False,
+                    operator_variant=operator.and_,
+                    inplace_operator_variant=operator.iand,
                     skips=(
                         # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
@@ -9837,6 +9864,8 @@ op_db: List[OpInfo] = [
                    supports_autograd=False),
     BinaryUfuncInfo('bitwise_left_shift',
                     op=torch.bitwise_left_shift,
+                    operator_variant=operator.lshift,
+                    inplace_operator_variant=operator.ilshift,
                     dtypes=all_types(),
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
                     supports_autograd=False,
@@ -9847,6 +9876,8 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('bitwise_right_shift',
                     op=torch.bitwise_right_shift,
+                    operator_variant=operator.rshift,
+                    inplace_operator_variant=operator.irshift,
                     dtypes=all_types(),
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
                     supports_autograd=False,
