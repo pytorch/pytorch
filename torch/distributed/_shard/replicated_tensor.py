@@ -74,7 +74,7 @@ class ReplicatedTensor(torch.Tensor):
         def dispatch_arg(arg):
             # This function returns a tuple, first element represents whether the op been
             # executed, the second element represents the result of the execution
-            nonlocal replicated_pg, all_replicated
+            nonlocal replicated_pg, all_replicated, replicated_with_non_tensor
             if isinstance(arg, ShardedTensor):
                 # redispatch to ShardedTensor
                 # TODO: handle ShardedTensor/PartialTensor inter-op with ReplicatedTensor
@@ -89,6 +89,7 @@ class ReplicatedTensor(torch.Tensor):
                         f"ReplicatedTensor operands in different process groups! ")
             elif isinstance(arg, torch.Tensor):
                 replicated_with_non_tensor = False
+                all_replicated = False
             else:
                 all_replicated = False
 
@@ -112,8 +113,12 @@ class ReplicatedTensor(torch.Tensor):
             rs = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return rs
-            if (all_replicated and isinstance(rs, torch.Tensor) and not isinstance(rs, cls)) or \
-                    (replicated_with_non_tensor and func in _REPLICATED_WITH_NON_TENSOR_ALLOWLIST):
+
+            result_not_replicated = isinstance(rs, torch.Tensor) and not isinstance(rs, ReplicatedTensor)
+            should_convert_to_replicated = all_replicated or (
+                replicated_with_non_tensor and func in _REPLICATED_WITH_NON_TENSOR_ALLOWLIST
+            )
+            if result_not_replicated and should_convert_to_replicated:
                 # if all operands are ReplicatedTensors and does not get dispatched to ShardedTensor
                 # __torch_function__, result is a torch.Tensor, then we convert and return a
                 # ReplicatedTensor according to our inter-op rule

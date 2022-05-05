@@ -29,7 +29,7 @@ COMMON_COPTS = [
     "-DUSE_CUDNN",
 ])
 
-aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
+aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
 
 generated_cpu_cpp = [
     "aten/src/ATen/RegisterBackendSelect.cpp",
@@ -148,32 +148,15 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_return_types.cpp",
 ]
 
-genrule(
-    name = "all_generated_code",
-    srcs = [
-        "aten/src/ATen/native/native_functions.yaml",
-        "aten/src/ATen/native/ts_native_functions.yaml",
-        "torch/csrc/lazy/core/shape_inference.h",
-        "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
-        "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
-        "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
-        "aten/src/ATen/templates/RegisterDispatchKey.cpp",
-        "aten/src/ATen/templates/LazyIr.h",
-    ],
-    outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location //tools/setup_helpers:generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --gen_lazy_ts_backend",
-    tools = ["//tools/setup_helpers:generate_code"],
-)
-
 filegroup(
     name = "cpp_generated_code",
-    data = [":all_generated_code"],
+    data = [":generate-code"],
     srcs = libtorch_cpp_generated_sources,
 )
 
 filegroup(
     name = "python_generated_code",
-    data = [":all_generated_code"],
+    data = [":generate-code"],
     srcs = libtorch_python_generated_sources,
 )
 
@@ -1917,4 +1900,18 @@ test_suite(
         "torch_dist_autograd_test",
         "//c10/test:tests",
     ],
+)
+
+# An internal genrule that we are converging with refers to these file
+# as if they are from this package, so we alias them for
+# compatibility.
+
+alias(
+    name = "native_functions.yaml",
+    actual = "aten/src/ATen/native/native_functions.yaml",
+)
+
+alias(
+    name = "tags.yaml",
+    actual = "aten/src/ATen/native/tags.yaml",
 )

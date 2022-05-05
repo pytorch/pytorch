@@ -833,6 +833,137 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
   });
 }
 
+template <typename scalar_t>
+void apply_ldl_factor(
+    const Tensor& A,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian) {
+#if !AT_BUILD_WITH_LAPACK()
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.ldl_factor on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
+  auto batch_size = batchCount(A);
+  auto n = A.size(-2);
+  auto leading_dim = A.stride(-1);
+  auto uplo = upper ? 'U' : 'L';
+
+  auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+
+  auto a_data = A.data_ptr<scalar_t>();
+  auto pivots_data = pivots.data_ptr<int>();
+  auto info_data = info.data_ptr<int>();
+
+  auto ldl_func =
+      hermitian ? lapackLdlHermitian<scalar_t> : lapackLdlSymmetric<scalar_t>;
+
+  scalar_t wkopt;
+  ldl_func(uplo, n, a_data, leading_dim, pivots_data, &wkopt, -1, info_data);
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  int lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
+  Tensor work = at::empty({lwork}, A.dtype());
+  auto work_data = work.data_ptr<scalar_t>();
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* a_working_ptr = &a_data[i * a_stride];
+    auto* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    auto* info_working_ptr = &info_data[i];
+    ldl_func(
+        uplo,
+        n,
+        a_working_ptr,
+        leading_dim,
+        pivots_working_ptr,
+        work_data,
+        lwork,
+        info_working_ptr);
+  }
+#endif
+}
+
+void ldl_factor_kernel(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      LD.scalar_type(), "ldl_factor_kernel_cpu", [&] {
+        apply_ldl_factor<scalar_t>(LD, pivots, info, upper, hermitian);
+      });
+}
+
+template <typename scalar_t>
+void apply_ldl_solve(
+    const Tensor& A,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper,
+    bool hermitian) {
+#if !AT_BUILD_WITH_LAPACK()
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.ldl_factor on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(pivots.unsqueeze(-1)) > 0);
+  auto batch_size = batchCount(B);
+  auto n = A.size(-2);
+  auto nrhs = B.size(-1);
+  auto lda = A.stride(-1);
+  auto ldb = B.stride(-1);
+  auto uplo = upper ? 'U' : 'L';
+
+  auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
+  auto b_stride = B.dim() > 2 ? B.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+
+  auto a_data = A.data_ptr<scalar_t>();
+  auto b_data = B.data_ptr<scalar_t>();
+  auto pivots_ = pivots.to(kInt);
+  auto pivots_data = pivots_.data_ptr<int>();
+
+  auto ldl_solve_func = hermitian ? lapackLdlSolveHermitian<scalar_t>
+                                  : lapackLdlSolveSymmetric<scalar_t>;
+
+  int info = 0;
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* a_working_ptr = &a_data[i * a_stride];
+    scalar_t* b_working_ptr = &b_data[i * b_stride];
+    auto* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    ldl_solve_func(
+        uplo,
+        n,
+        nrhs,
+        a_working_ptr,
+        lda,
+        pivots_working_ptr,
+        b_working_ptr,
+        ldb,
+        &info);
+  }
+  TORCH_INTERNAL_ASSERT(info == 0);
+#endif
+}
+
+void ldl_solve_kernel(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& result,
+    bool upper,
+    bool hermitian) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      LD.scalar_type(), "ldl_solve_kernel_cpu", [&] {
+        apply_ldl_solve<scalar_t>(LD, pivots, result, upper, hermitian);
+      });
+}
+
 /*
   Computes the LU decomposition of a m×n matrix or batch of matrices in 'input' tensor.
   This is an in-place routine, content of 'input', 'pivots', and 'infos' is overwritten.
@@ -1097,6 +1228,18 @@ REGISTER_AVX512_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 REGISTER_AVX2_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 REGISTER_VSX_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 REGISTER_ZVECTOR_DISPATCH(lu_factor_stub, &lu_factor_kernel);
+
+REGISTER_ARCH_DISPATCH(ldl_factor_stub, DEFAULT, &ldl_factor_kernel);
+REGISTER_AVX512_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
+REGISTER_AVX2_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
+REGISTER_VSX_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
+REGISTER_ZVECTOR_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
+
+REGISTER_ARCH_DISPATCH(ldl_solve_stub, DEFAULT, &ldl_solve_kernel);
+REGISTER_AVX512_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
+REGISTER_AVX2_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
+REGISTER_VSX_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
+REGISTER_ZVECTOR_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
 REGISTER_AVX512_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);

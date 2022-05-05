@@ -14,7 +14,7 @@ from ._internals import (
     get_split_size,
 )
 
-from . import ShardingSpec
+from .api import ShardingSpec
 
 if TYPE_CHECKING:
     # Only include ShardedTensor when do type checking, exclude it
@@ -113,7 +113,7 @@ class ChunkShardingSpec(ShardingSpec):
 
 
     def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
-                # relative imports to avoid circular dependency
+        # relative imports to avoid circular dependency
         from torch.distributed._shard.sharded_tensor import (
             ShardedTensor
         )
