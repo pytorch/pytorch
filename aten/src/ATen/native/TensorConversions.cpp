@@ -451,4 +451,17 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
       coalesced_self.device());
 }
 
+Tensor csr_to_sparse_bsr(const Tensor& self) {
+  TORCH_CHECK(false, "Not implemented.");
+}
+
+Tensor coo_to_sparse_bsr(const Tensor& self) {
+  TORCH_CHECK(false, "Not implemented.");
+  return self;
+}
+
+Tensor dense_to_sparse_csr(const Tensor& self, ) {
+  return self.to_sparse().to_sparse_bsr();
+}
+
 }} // namespace at::native
