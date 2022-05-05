@@ -1905,7 +1905,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data(const caffe2::TypeMeta meta) {
-    // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(
           static_cast<char*>(storage_.data()) +
@@ -1916,7 +1915,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       data_type_ = meta;
       // NB: device is not changed
 
-      // We can reuse the existing buffer if the current data does not have
+      // For 0-size tensors it's fine to return any pointer (including nullptr)
+      // We can also reuse the existing buffer if the current data does not have
       // a special destructor and the new data doesn't have a special
       // constructor.
       if (numel_ == 0 ||
