@@ -1,5 +1,5 @@
 import torch
-import torch.jit
+import torch.jit  # this is needed to avoid a circular import
 from torch import nn
 import torch.nn.functional as nnF
 
@@ -74,6 +74,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         # Functionals
         self.q_scaling_product = torch.nn.quantized.FloatFunctional()
+        # note: importing torch.nn.quantized at top creates a circular import
 
         # Quant/Dequant
         self.quant_attn_output = torch.ao.quantization.QuantStub()
