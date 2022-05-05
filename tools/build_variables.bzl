@@ -410,6 +410,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
     "torch/csrc/lazy/core/thread_pool.cpp",
+    "torch/csrc/lazy/core/trie.cpp",
 ]
 
 # We can't build all of the ts backend under certain build configurations, e.g. mobile,
