@@ -49,7 +49,8 @@ class TestShardedTensorChunkOps(ShardedTensorTestBase):
         local_tensor_chunked = torch.chunk(local_tensor, chunk_num, dim=-1)
         chunked_st = torch.chunk(st_tensor, chunk_num, dim=-1)
         self._compare_chunk_result(local_tensor_chunked, chunked_st)
-        # TODO: Add sharded tensor chunk test cases back after making st a subclass of Tensor.
+        chunked_st = st_tensor.chunk(chunk_num, dim=-1)
+        self._compare_chunk_result(local_tensor_chunked, chunked_st)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
