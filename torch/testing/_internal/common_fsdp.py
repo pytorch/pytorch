@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import os
 import sys
 from contextlib import suppress
 from copy import deepcopy
