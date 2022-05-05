@@ -4339,7 +4339,7 @@ Supports real-valued and complex-valued inputs.
     and will be removed in a future PyTorch release.
     :func:`torch.linalg.solve` has its arguments reversed and does not return the
     LU factorization of the input. To get the LU factorization see :func:`torch.linalg.lu_factor`,
-    which may be used with :func:`torch.lu_solve`.
+    which may be used with :func:`torch.linalg.lu_solve`.
 
     ``X = torch.solve(B, A).solution`` should be replaced with
 
@@ -5812,6 +5812,16 @@ Returns the LU solve of the linear system :math:`Ax = b` using the partially piv
 LU factorization of A from :func:`~linalg.lu_factor`.
 
 This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
+
+.. warning::
+
+    :func:`torch.lu_solve` is deprecated in favor of :func:`torch.linalg.lu_solve`.
+    :func:`torch.lu_solve` will be removed in a future PyTorch release.
+    ``X = torch.lu_solve(B, LU, pivots)`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.lu_solve(LU, pivots, B)
 
 Arguments:
     b (Tensor): the RHS tensor of size :math:`(*, m, k)`, where :math:`*`
