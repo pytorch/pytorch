@@ -7067,7 +7067,8 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
     def test_scatter_reduce_prod_gradgrad_error(self, device):
-        # test that double backward raises an error
+        # test that double backward raises an error for the case where 2 zeros in src
+        # are scattered to the same position in self
         input = torch.tensor([1.], device=device, dtype=torch.float64, requires_grad=True)
         src = torch.tensor([0., 0.], device=device, dtype=torch.float64, requires_grad=True)
         idx = torch.tensor([0, 0], device=device, dtype=torch.long)
@@ -7075,7 +7076,7 @@ class TestAutogradDeviceType(TestCase):
         def fn(input, src):
             return input.scatter_reduce(0, idx, src, 'prod')
 
-        # check that gradcheck doesn't raise an error
+        # check that this case passes on gradcheck
         gradcheck(fn, [input, src], check_batched_grad=False)
         with self.assertRaisesRegex(RuntimeError, "Double backward is unsupported for src when"):
             gradgradcheck(fn, [input, src])
