@@ -557,6 +557,8 @@ code = 'BLACK'
 include_patterns = [
     'torchgen/**/*.py',
     'tools/**/*.py',
+    'torch/onnx/**/*.py',
+    'test/onnx/**/*.py',
 ]
 command = [
     'python3',
