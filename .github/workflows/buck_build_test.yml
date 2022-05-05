@@ -63,10 +63,13 @@ jobs:
           wget https://github.com/facebook/buck/releases/download/v2021.01.12.01/buck.2021.01.12.01_all.deb
           sudo apt install ./buck.2021.01.12.01_all.deb
 
-      - name: Build Buck target
+      - name: Code Generation
         run: |
-          echo -e "" > .buckconfig
           cd third_party
           python generate-xnnpack-wrappers.py
           cd ..
+
+      - name: Build Buck target
+        run: |
+          echo -e "" > .buckconfig
           buck build --config-file oss.buckconfig c10:c10 third_party: --keep-going
