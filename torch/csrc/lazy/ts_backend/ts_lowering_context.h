@@ -1,8 +1,11 @@
 #pragma once
 
+#include <sstream>
+
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
+#include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
 namespace torch {
@@ -53,6 +56,12 @@ class TORCH_API TSComputation : public Computation {
     throw std::runtime_error(
         "TODO(whc) implement TS computation shapes or change interface");
     return result_shape_;
+  }
+
+  const std::string to_string() const override {
+    std::ostringstream oss;
+    oss << *graph_;
+    return oss.str();
   }
 
   std::shared_ptr<torch::jit::Graph> graph() const {
