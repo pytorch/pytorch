@@ -206,7 +206,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
-    "distributed/_shard/sharded_tensor/test_partial_tensor",
+    "distributed/_shard/sharded_tensor/ops/test_chunk",
     "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
@@ -214,8 +214,10 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
+    "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_partial_tensor",
     "distributed/_shard/test_replicated_tensor",
 ] + FSDP_TEST
 
@@ -229,7 +231,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
-    "distributed/_shard/sharded_tensor/test_partial_tensor",
+    "distributed/_shard/sharded_tensor/ops/test_chunk",
     "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
@@ -237,8 +239,10 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
+    "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_partial_tensor",
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
@@ -534,6 +538,7 @@ def test_distributed(test_module, test_directory, options):
                         backend, with_init
                     )
                 )
+            old_environ = dict(os.environ)
             os.environ["TEMP_DIR"] = tmp_dir
             os.environ["BACKEND"] = backend
             os.environ["INIT_METHOD"] = "env://"
@@ -584,6 +589,8 @@ def test_distributed(test_module, test_directory, options):
                     return return_code
             finally:
                 shutil.rmtree(tmp_dir)
+                os.environ.clear()
+                os.environ.update(old_environ)
     return 0
 
 

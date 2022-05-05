@@ -3,6 +3,10 @@ load("@rules_cuda//cuda:defs.bzl", "requires_cuda_enabled")
 load("//c10/macros:cmake_configure_file.bzl", "cmake_configure_file")
 load("//tools/config:defs.bzl", "if_cuda")
 
+def _genrule(**kwds):
+    if _enabled(**kwds):
+        native.genrule(**kwds)
+
 def _py_library(name, **kwds):
     deps = [dep for dep in kwds.pop("deps", []) if dep != None]
     native.py_library(name = name, deps = deps, **kwds)
@@ -19,7 +23,7 @@ rules = struct(
     cc_test = cc_test,
     cmake_configure_file = cmake_configure_file,
     filegroup = native.filegroup,
-    genrule = native.genrule,
+    genrule = _genrule,
     glob = native.glob,
     if_cuda = if_cuda,
     py_binary = native.py_binary,
@@ -29,3 +33,7 @@ rules = struct(
     select = select,
     test_suite = native.test_suite,
 )
+
+def _enabled(tags = [], **_kwds):
+    """Determines if the target is enabled."""
+    return "-bazel" not in tags

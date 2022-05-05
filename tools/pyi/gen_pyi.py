@@ -109,7 +109,6 @@ blocklist = [
     "block_diag",
     "norm",
     "chain_matmul",
-    "stft",
     "tensordot",
     "split",
     "unique_consecutive",
@@ -321,7 +320,12 @@ def gen_nn_functional(fm: FileManager) -> None:
     )
 
 
-def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -> None:
+def gen_pyi(
+    native_yaml_path: str,
+    tags_yaml_path: str,
+    deprecated_yaml_path: str,
+    fm: FileManager,
+) -> None:
     """gen_pyi()
 
     This function generates a pyi file for torch.
@@ -341,6 +345,32 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     unsorted_function_hints: Dict[str, List[str]] = collections.defaultdict(list)
+
+    for n, n1, n2 in [
+        ("csr", "crow", "col"),
+        ("csc", "ccol", "row"),
+        ("bsr", "crow", "col"),
+        ("bsc", "ccol", "row"),
+    ]:
+        unsorted_function_hints.update(
+            {
+                f"sparse_{n}_tensor": [
+                    f"def sparse_{n}_tensor({n1}_indices: Union[Tensor, List],"
+                    f"{n2}_indices: Union[Tensor, List],"
+                    " values: Union[Tensor, List], size: Optional[_size]=None,"
+                    " *, dtype: Optional[_dtype]=None,"
+                    " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
+                ],
+                f"_sparse_{n}_tensor_unsafe": [
+                    f"def _sparse_{n}_tensor_unsafe({n1}_indices: Union[Tensor, List],"
+                    f"{n2}_indices: Union[Tensor, List],"
+                    " values: Union[Tensor, List], size: List[int],"
+                    " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
+                    " requires_grad: bool = False) -> Tensor: ..."
+                ],
+            }
+        )
+
     unsorted_function_hints.update(
         {
             "set_flush_denormal": ["def set_flush_denormal(mode: _bool) -> _bool: ..."],
@@ -378,23 +408,24 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                 " size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,"
                 " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
             ],
-            "sparse_csr_tensor": [
-                "def sparse_csr_tensor(crow_indices: Union[Tensor, List],"
-                "col_indices: Union[Tensor, List],"
-                " values: Union[Tensor, List], size: Optional[_size]=None,"
-                " *, dtype: Optional[_dtype]=None,"
-                " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
-            ],
             "_sparse_coo_tensor_unsafe": [
                 "def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],"
                 " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
                 " requires_grad: bool = False) -> Tensor: ..."
             ],
-            "_sparse_csr_tensor_unsafe": [
-                "def _sparse_csr_tensor_unsafe(crow_indices: Union[Tensor, List],"
-                "col_indices: Union[Tensor, List],"
+            "sparse_compressed_tensor": [
+                "def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],"
+                "plain_indices: Union[Tensor, List],"
+                " values: Union[Tensor, List], size: Optional[_size]=None,"
+                " *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,"
+                " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
+            ],
+            "_sparse_compressed_tensor_unsafe": [
+                "def _sparse_compressed_tensor_unsafe(comp_indices: Union[Tensor, List],"
+                "plain_indices: Union[Tensor, List],"
                 " values: Union[Tensor, List], size: List[int],"
-                " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
+                " dtype: Optional[_dtype] = None, layout: Optional[_layout] = None,"
+                " device: Optional[_device] = None,"
                 " requires_grad: bool = False) -> Tensor: ..."
             ],
             "range": [
@@ -512,7 +543,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
             )
         )
 
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = parse_native_yaml(
+        native_yaml_path, tags_yaml_path
+    ).native_functions
     native_functions = list(filter(should_generate_py_binding, native_functions))
 
     function_signatures = load_signatures(
@@ -901,6 +934,12 @@ def main() -> None:
         help="path to native_functions.yaml",
     )
     parser.add_argument(
+        "--tags-path",
+        metavar="TAGS",
+        default="aten/src/ATen/native/tags.yaml",
+        help="path to tags.yaml",
+    )
+    parser.add_argument(
         "--deprecated-functions-path",
         metavar="DEPRECATED",
         default="tools/autograd/deprecated.yaml",
@@ -911,7 +950,9 @@ def main() -> None:
     )
     args = parser.parse_args()
     fm = FileManager(install_dir=args.out, template_dir=".", dry_run=False)
-    gen_pyi(args.native_functions_path, args.deprecated_functions_path, fm)
+    gen_pyi(
+        args.native_functions_path, args.tags_path, args.deprecated_functions_path, fm
+    )
 
 
 if __name__ == "__main__":
