@@ -1,6 +1,5 @@
 import torch._C._lazy
 
-
 def dump(dot_file_name: str):
     """Return a text dump of the TrieCache in dot format"""
     return torch._C._lazy._dump_ir_cache(dot_file_name)
