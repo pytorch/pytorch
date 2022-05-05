@@ -39,7 +39,7 @@ def make_tensor_from_type(inp_type: torch._C.TensorType):
     return torch.empty_strided(size=size, stride=stride, device=device, dtype=dtype)
 
 def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
-    graph = torch._C.parse_ir(ir, True)
+    graph = torch._C.parse_ir(ir, parse_tensor_constants=True)
     graph.makeMultiOutputIntoTuple()
     inputs = []
     for inp in graph.inputs():
