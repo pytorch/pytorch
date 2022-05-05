@@ -104,12 +104,12 @@ void cat_contig_firstdim_impl(
       scalar_t* result_ptr = result_data;
       for (const Tensor& tensor : tensors) {
         scalar_t* input_data = tensor.data_ptr<scalar_t>();
-        int64_t input_slice_size = tensor.numel(); // try sizes[dim] * inner_size
+        int64_t input_slice_size = tensor.numel();
         copy_stub(result_ptr, input_data, input_slice_size);
         result_ptr += input_slice_size;
       }
-    } else {
-      // for parallel case, calculate input offset first
+    } else if (ninputs < 64) {
+      // for parallel case, for short input list, calculate input offset first
       std::vector<InputMeta> inputs;
       inputs.reserve(dim_size);
       for (const Tensor& tensor : tensors) {
@@ -125,6 +125,28 @@ void cat_contig_firstdim_impl(
           scalar_t* result_ptr = result_data + i * inner_size;
           scalar_t* input_ptr = (scalar_t*)(inputs[i].data_ptr);
           copy_stub(result_ptr, input_ptr, inner_size);
+        }
+      });
+    } else {
+      // for parallel case, for long input list, parallel on ninputs.
+      // prefix sum the offsets.
+      std::vector<std::pair<int64_t, int64_t>> inputs_offset;
+      inputs_offset.reserve(ninputs);
+      int64_t sum = 0;
+      for (const Tensor& tensor : tensors) {
+        int64_t input_slice_size = tensor.numel();
+        inputs_offset.emplace_back(sum, input_slice_size);
+        sum += input_slice_size;
+      }
+      int64_t average_input_slice_size = dim_size * inner_size / ninputs;
+      at::parallel_for(0, ninputs, internal::GRAIN_SIZE / average_input_slice_size, [&](int64_t begin, int64_t end) {
+        for (const auto n : c10::irange(begin, end)) {
+          int64_t input_offset = std::get<0>(inputs_offset[n]);
+          int64_t input_slice_size = std::get<1>(inputs_offset[n]);
+          scalar_t* result_ptr = result_data + input_offset;
+          const Tensor& input = tensors[n];
+          scalar_t* input_data = input.data_ptr<scalar_t>();
+          copy_stub(result_ptr, input_data, input_slice_size);
         }
       });
     }

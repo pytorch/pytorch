@@ -856,7 +856,12 @@ class TestTensorCreation(TestCase):
         # fistdim: inputs have different shape, parallel
         helper([[1, 128, 32, 32, 64], [1, 256, 32, 32, 64]], 1, -1)
         helper([[1, 128, 32, 32, 64], [1, 256, 32, 32, 64]], 1, -1, memory_format=torch.channels_last_3d)
-
+        # fistdim: inputs have different shape, parallel, long input tensor list list
+        input_shapes = []
+        for _ in range(100):
+            input_shapes.append([401])
+            input_shapes.append([399])
+        helper(input_shapes, 0, -1)
         # non-firstdim: most inner size = 1; most inner size = 2
         helper([13, 47, 1], 2, 2)
         helper([13, 47, 2], 2, 2)
