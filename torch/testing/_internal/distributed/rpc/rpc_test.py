@@ -4724,6 +4724,22 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_my_parameter_server(self):
         self._my_parameter_server(False)
 
+    @staticmethod
+    def meta_tensor_method(meta_tensor: torch.Tensor, meta_tensor_rref: RRef):
+        return RRef(meta_tensor), meta_tensor_rref.to_here()
+
+    @dist_init
+    def test_meta_tensor(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        t = torch.ones(n, device='meta')
+        meta_tensor_rref, meta_tensor = rpc.rpc_sync(
+            worker_name(dst_rank), RpcTest.meta_tensor_method, args=(torch.ones(n, device='meta'), RRef(t))
+        )
+        meta_tensor_from_rref = meta_tensor_rref.to_here()
+        self.assertEqual(meta_tensor_from_rref.device.type, 'meta')
+        self.assertEqual(meta_tensor.device.type, 'meta')
+
 
 class CudaRpcTest(RpcAgentTestFixture):
 
