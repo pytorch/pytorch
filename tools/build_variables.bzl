@@ -46,19 +46,19 @@ libtorch_nvfuser_generated_headers = ["{}.h".format(name.split("/")[-1].split(".
 
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
-        "autograd/generated/Functions.cpp",
-        "autograd/generated/VariableType_0.cpp",
-        "autograd/generated/VariableType_1.cpp",
-        "autograd/generated/VariableType_2.cpp",
-        "autograd/generated/VariableType_3.cpp",
-        "autograd/generated/VariableType_4.cpp",
-        "autograd/generated/TraceType_0.cpp",
-        "autograd/generated/TraceType_1.cpp",
-        "autograd/generated/TraceType_2.cpp",
-        "autograd/generated/TraceType_3.cpp",
-        "autograd/generated/TraceType_4.cpp",
-        "autograd/generated/ADInplaceOrViewType_0.cpp",
-        "autograd/generated/ADInplaceOrViewType_1.cpp",
+        "torch/csrc/autograd/generated/Functions.cpp",
+        "torch/csrc/autograd/generated/VariableType_0.cpp",
+        "torch/csrc/autograd/generated/VariableType_1.cpp",
+        "torch/csrc/autograd/generated/VariableType_2.cpp",
+        "torch/csrc/autograd/generated/VariableType_3.cpp",
+        "torch/csrc/autograd/generated/VariableType_4.cpp",
+        "torch/csrc/autograd/generated/TraceType_0.cpp",
+        "torch/csrc/autograd/generated/TraceType_1.cpp",
+        "torch/csrc/autograd/generated/TraceType_2.cpp",
+        "torch/csrc/autograd/generated/TraceType_3.cpp",
+        "torch/csrc/autograd/generated/TraceType_4.cpp",
+        "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
+        "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
     ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
@@ -961,21 +961,21 @@ libtorch_python_distributed_sources = libtorch_python_distributed_core_sources +
 
 def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     _libtorch_python_sources = [gencode_pattern.format(name) for name in [
-        "autograd/generated/python_functions_0.cpp",
-        "autograd/generated/python_functions_1.cpp",
-        "autograd/generated/python_functions_2.cpp",
-        "autograd/generated/python_functions_3.cpp",
-        "autograd/generated/python_functions_4.cpp",
-        "autograd/generated/python_nn_functions.cpp",
-        "autograd/generated/python_fft_functions.cpp",
-        "autograd/generated/python_linalg_functions.cpp",
-        "autograd/generated/python_return_types.cpp",
-        "autograd/generated/python_sparse_functions.cpp",
-        "autograd/generated/python_special_functions.cpp",
-        "autograd/generated/python_torch_functions_0.cpp",
-        "autograd/generated/python_torch_functions_1.cpp",
-        "autograd/generated/python_torch_functions_2.cpp",
-        "autograd/generated/python_variable_methods.cpp",
+        "torch/csrc/autograd/generated/python_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_functions_2.cpp",
+        "torch/csrc/autograd/generated/python_functions_3.cpp",
+        "torch/csrc/autograd/generated/python_functions_4.cpp",
+        "torch/csrc/autograd/generated/python_nn_functions.cpp",
+        "torch/csrc/autograd/generated/python_fft_functions.cpp",
+        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+        "torch/csrc/autograd/generated/python_return_types.cpp",
+        "torch/csrc/autograd/generated/python_sparse_functions.cpp",
+        "torch/csrc/autograd/generated/python_special_functions.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
+        "torch/csrc/autograd/generated/python_variable_methods.cpp",
     ]]
 
     _libtorch_python_sources.extend(libtorch_python_core_sources)
