@@ -50,6 +50,8 @@ def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
         elif isinstance(inp.type(), torch._C.TensorType):
             tensorType = cast(torch._C.TensorType, inp.type())
             inputs.append(make_tensor_from_type(tensorType))
+        elif isinstance(inp.type(), torch._C.BoolType):
+            inputs.append(random.randint(0, 1) == 1)
         else:
             raise NotImplementedError(f"A default value is not implemented for type {inp.type()}")
 
