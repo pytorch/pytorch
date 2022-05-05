@@ -41,6 +41,11 @@ class TestAsync(JitTestCase):
         # assert nothing, just to make sure python type parsing works
         foo(torch.randn(3, 4))
 
+        # My favorite function to fail flakily
+        import random
+        if random.randint(0, 4) > 1:
+            self.assertFalse(True)
+
     def test_async_parsing(self):
         @torch.jit.script
         def foo(x: Tensor) -> List[Tensor]:
