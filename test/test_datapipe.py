@@ -234,16 +234,16 @@ class TestStreamWrapper(TestCase):
         self.assertTrue(fd.closed)
 
     def test_pickle(self):
-        f = tempfile.TemporaryFile()
-        with self.assertRaises(TypeError) as ctx1:
-            pickle.dumps(f)
+        with tempfile.TemporaryFile() as f:
+            with self.assertRaises(TypeError) as ctx1:
+                pickle.dumps(f)
 
-        wrap_f = StreamWrapper(f)
-        with self.assertRaises(TypeError) as ctx2:
-            pickle.dumps(wrap_f)
+            wrap_f = StreamWrapper(f)
+            with self.assertRaises(TypeError) as ctx2:
+                pickle.dumps(wrap_f)
 
-        # Same exception when pickle
-        self.assertEqual(str(ctx1.exception), str(ctx2.exception))
+            # Same exception when pickle
+            self.assertEqual(str(ctx1.exception), str(ctx2.exception))
 
         fd = TestStreamWrapper._FakeFD("")
         wrap_fd = StreamWrapper(fd)
@@ -254,9 +254,9 @@ class TestStreamWrapper(TestCase):
         wrap_fd = StreamWrapper(fd)
         self.assertEqual(str(wrap_fd), "StreamWrapper<FakeFD>")
 
-        f = tempfile.TemporaryFile()
-        wrap_f = StreamWrapper(f)
-        self.assertEqual(str(wrap_f), "StreamWrapper<" + str(f) + ">")
+        with tempfile.TemporaryFile() as f:
+            wrap_f = StreamWrapper(f)
+            self.assertEqual(str(wrap_f), "StreamWrapper<" + str(f) + ">")
 
 
 class TestIterableDataPipeBasic(TestCase):
@@ -331,10 +331,10 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual(count, len(self.temp_files))
 
         # functional API
-        datapipe2 = datapipe1.open_files(mode='b')
+        datapipe3 = datapipe1.open_files(mode='b')
 
         count = 0
-        for rec in datapipe2:
+        for rec in datapipe3:
             count = count + 1
             self.assertTrue(rec[0] in self.temp_files)
             with open(rec[0], 'rb') as f:
@@ -344,7 +344,7 @@ class TestIterableDataPipeBasic(TestCase):
 
         # __len__ Test
         with self.assertRaises(TypeError):
-            len(datapipe2)
+            len(datapipe3)
 
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
@@ -596,6 +596,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _ = next(it)
         self._serialization_test_helper(dp)
         # 3. Testing for serialization after DataPipe is fully read
+        it = iter(dp)
         _ = list(it)
         self._serialization_test_helper(dp)
 
@@ -623,12 +624,12 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Batcher, None, (3, True,), {}),
             (dp.iter.Collator, None, (_fake_fn,), {}),
             (dp.iter.Concater, None, (dp.iter.IterableWrapper(range(5)),), {}),
-            (dp.iter.Demultiplexer, None, (2, _fake_filter_fn), {}),
+            # (dp.iter.Demultiplexer, None, (2, _fake_filter_fn), {}),  # Temporarily disabled until next PR
             (dp.iter.FileLister, ".", (), {}),
             (dp.iter.FileOpener, None, (), {}),
             (dp.iter.Filter, None, (_fake_filter_fn,), {}),
             (dp.iter.Filter, None, (partial(_fake_filter_fn_constant, 5),), {}),
-            (dp.iter.Forker, None, (2,), {}),
+            # (dp.iter.Forker, None, (2,), {}),  # Temporarily disabled until next PR
             (dp.iter.Grouper, None, (_fake_filter_fn,), {"group_size": 2}),
             (dp.iter.IterableWrapper, range(10), (), {}),
             (dp.iter.Mapper, None, (_fake_fn, ), {}),
@@ -664,7 +665,7 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp = dp.iter.IterableWrapper(range(10))
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
             (dp.iter.Collator, (lambda x: x,), {}),
-            (dp.iter.Demultiplexer, (2, lambda x: x % 2,), {}),
+            # (dp.iter.Demultiplexer, (2, lambda x: x % 2,), {}),  # Temporarily disabled until next PR
             (dp.iter.Filter, (lambda x: x >= 5,), {}),
             (dp.iter.Grouper, (lambda x: x >= 5,), {}),
             (dp.iter.Mapper, (lambda x: x, ), {}),
@@ -836,6 +837,10 @@ class TestFunctionalIterDataPipe(TestCase):
                     i1 = iter(dp1)  # Reset both all child DataPipe
                     self.assertEqual(len(wa), 1)
                     self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
+                break
+        for i, (n1, n2) in enumerate(zip(i1, i2)):
+            output1.append(n1)
+            output2.append(n2)
         self.assertEqual(list(range(5)) + list(range(10)), output1)
         self.assertEqual(list(range(5)) + list(range(10)), output2)
 
@@ -1040,7 +1045,8 @@ class TestFunctionalIterDataPipe(TestCase):
         traverse(dp2)  # This should not raise any error either
 
     def test_map_iterdatapipe(self):
-        input_dp = dp.iter.IterableWrapper(range(10))
+        target_length = 10
+        input_dp = dp.iter.IterableWrapper(range(target_length))
 
         def fn(item, dtype=torch.float, *, sum=False):
             data = torch.tensor(item, dtype=dtype)
@@ -1048,21 +1054,21 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Functional Test: apply to each element correctly
         map_dp = input_dp.map(fn)
-        self.assertEqual(len(input_dp), len(map_dp))
-        for x, y in zip(map_dp, input_dp):
+        self.assertEqual(target_length, len(map_dp))
+        for x, y in zip(map_dp, range(target_length)):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
         # Functional Test: works with partial function
         map_dp = input_dp.map(partial(fn, dtype=torch.int, sum=True))
-        for x, y in zip(map_dp, input_dp):
+        for x, y in zip(map_dp, range(target_length)):
             self.assertEqual(x, torch.tensor(y, dtype=torch.int).sum())
 
         # __len__ Test: inherits length from source DataPipe
-        self.assertEqual(len(input_dp), len(map_dp))
+        self.assertEqual(target_length, len(map_dp))
 
-        input_dp_nl = IDP_NoLen(range(10))
+        input_dp_nl = IDP_NoLen(range(target_length))
         map_dp_nl = input_dp_nl.map(lambda x: x)
-        for x, y in zip(map_dp_nl, input_dp_nl):
+        for x, y in zip(map_dp_nl, range(target_length)):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
         # __len__ Test: inherits length from source DataPipe - raises error when invalid
@@ -1214,24 +1220,24 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Functional Test: defaults to the default collate function when a custom one is not specified
         collate_dp = input_dp.collate()
-        for x, y in zip(input_dp, collate_dp):
+        for x, y in zip(arrs, collate_dp):
             self.assertEqual(torch.tensor(x), y)
 
         # Functional Test: custom collate function
         collate_dp = input_dp.collate(collate_fn=_collate_fn)
-        for x, y in zip(input_dp, collate_dp):
+        for x, y in zip(arrs, collate_dp):
             self.assertEqual(torch.tensor(sum(x), dtype=torch.float), y)
 
         # Functional Test: custom, partial collate function
         collate_dp = input_dp.collate(partial(_collate_fn, default_type=torch.int))
-        for x, y in zip(input_dp, collate_dp):
+        for x, y in zip(arrs, collate_dp):
             self.assertEqual(torch.tensor(sum(x), dtype=torch.int), y)
 
         # Reset Test: reset the DataPipe and results are still correct
         n_elements_before_reset = 1
         res_before_reset, res_after_reset = reset_after_n_next_calls(collate_dp, n_elements_before_reset)
         self.assertEqual([torch.tensor(6, dtype=torch.int)], res_before_reset)
-        for x, y in zip(input_dp, res_after_reset):
+        for x, y in zip(arrs, res_after_reset):
             self.assertEqual(torch.tensor(sum(x), dtype=torch.int), y)
 
         # __len__ Test: __len__ is inherited
@@ -1242,7 +1248,7 @@ class TestFunctionalIterDataPipe(TestCase):
         collate_dp_nl = input_dp_nl.collate()
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(collate_dp_nl)
-        for x, y in zip(input_dp_nl, collate_dp_nl):
+        for x, y in zip(arrs, collate_dp_nl):
             self.assertEqual(torch.tensor(x), y)
 
     def test_batch_iterdatapipe(self):
@@ -1292,14 +1298,14 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp = prebatch_dp.batch(3)
         unbatch_dp = input_dp.unbatch()
         self.assertEqual(len(list(unbatch_dp)), target_length)  # __len__ is as expected
-        for i, res in zip(prebatch_dp, unbatch_dp):
+        for i, res in zip(range(target_length), unbatch_dp):
             self.assertEqual(i, res)
 
         # Functional Test: unbatch works for an input with nested levels
         input_dp = dp.iter.IterableWrapper([[0, 1, 2], [3, 4, 5]])
         unbatch_dp = input_dp.unbatch()
         self.assertEqual(len(list(unbatch_dp)), target_length)
-        for i, res in zip(prebatch_dp, unbatch_dp):
+        for i, res in zip(range(target_length), unbatch_dp):
             self.assertEqual(i, res)
 
         input_dp = dp.iter.IterableWrapper([[[0, 1], [2, 3]], [[4, 5], [6, 7]]])
@@ -1308,8 +1314,8 @@ class TestFunctionalIterDataPipe(TestCase):
         unbatch_dp = input_dp.unbatch()
         expected_dp = [[0, 1], [2, 3], [4, 5], [6, 7]]
         self.assertEqual(len(list(unbatch_dp)), 4)
-        for i, res in zip(expected_dp, unbatch_dp):
-            self.assertEqual(i, res)
+        for j, res in zip(expected_dp, unbatch_dp):
+            self.assertEqual(j, res)
 
         # Functional Test: unbatching multiple levels at the same time
         unbatch_dp = input_dp.unbatch(unbatch_level=2)
