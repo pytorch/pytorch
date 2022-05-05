@@ -1428,7 +1428,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     const auto nneg_index = [&index, index_len, &self, size, dim](void) -> Tensor {
       const auto index_contiguous = index.contiguous();
       auto nneg_index = at::empty_like(index_contiguous);
-      // nneg_index = ((index < 0) * index + size) + (index >= 0) * index
+      // nneg_index = (index < 0) * (index + size) + (index >= 0) * index
       auto* ptr_index = index_contiguous.data_ptr<int64_t>();
       auto* ptr_nneg_index = nneg_index.data_ptr<int64_t>();
       at::parallel_for(0, index_len, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
@@ -1629,7 +1629,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     // Converts a 1d sorted idx to a compressed 1d compressed idx,
     // aka crow in the CSR format. Useful to get a count table in
     // a parallelized and no-sync manner.
-    // TODO: this function could be very useful as a separate util.
+    // TODO: this function is equivalent to _convert_indices_from_coo_to_csr.
+    // The mentioned function is not public yet.
     const auto sorted_idx_to_cidx = [](
         const Tensor& idx,
         int64_t len,

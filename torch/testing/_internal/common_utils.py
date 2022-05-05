@@ -2088,7 +2088,7 @@ class TestCase(expecttest.TestCase):
         i = i.to(torch.long)
         if is_uncoalesced:
             i1 = i[:, :(nnz // 2), ...]
-            i2 = i[:, :(nnz // 2 + (0 if nnz % 2 == 0 else 1)), ...]
+            i2 = i[:, :((nnz + 1) // 2), ...]
             i = torch.cat([i1, i2], 1)
         x = torch.sparse_coo_tensor(i, v, torch.Size(size), dtype=dtype, device=device)
 
