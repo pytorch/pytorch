@@ -2194,6 +2194,9 @@ class TestCase(expecttest.TestCase):
         # Hide this function from `pytest`'s traceback
         __tracebackhide__ = True
 
+        # TODO: the Tensor compare uses bunch of operations which is currently not
+        # supported by MPS. We will remove this move to CPU after all the
+        # support is added.
         if isinstance(x, torch.Tensor) and (x.is_mps):
             x = x.to('cpu')
 
