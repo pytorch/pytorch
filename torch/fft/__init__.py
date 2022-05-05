@@ -29,7 +29,7 @@ Note:
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal length along the dimenion of FFT.
+    However it only supports powers of 2 signal length in every transformed dimension.
 
 Args:
     input (Tensor): the input tensor
@@ -73,7 +73,7 @@ Computes the one dimensional inverse discrete Fourier transform of :attr:`input`
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal length along the dimenion of IFFT.
+    However it only supports powers of 2 signal length in every transformed dimension.
 
 Args:
     input (Tensor): the input tensor
@@ -120,7 +120,7 @@ Note:
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of FFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -170,7 +170,7 @@ Equivalent to :func:`~torch.fft.ifftn` but IFFTs only the last two dimensions by
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of IFFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -227,7 +227,7 @@ Note:
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of FFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -276,7 +276,7 @@ Computes the N dimensional inverse discrete Fourier transform of :attr:`input`.
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of IFFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -329,7 +329,7 @@ To compute the full output, use :func:`~torch.fft.fft`
 
 Note:
     Supports torch.half on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal length along the dimension of FFT.
+    However it only supports powers of 2 signal length in every transformed dimension.
 
 Args:
     input (Tensor): the real input tensor
@@ -395,7 +395,7 @@ Note:
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal length along the dimension of IFFT.
+    However it only supports powers of 2 signal length in every transformed dimension.
 
 Args:
     input (Tensor): the input tensor representing a half-Hermitian signal
@@ -456,7 +456,7 @@ dimension.
 
 Note:
     Supports torch.half on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of FFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -532,7 +532,7 @@ Note:
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of IFFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -597,7 +597,7 @@ last dimension.
 
 Note:
     Supports torch.half on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of FFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -672,7 +672,7 @@ Note:
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of IFFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -757,7 +757,7 @@ Note:
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal length along the dimension of FFT.
+    However it only supports powers of 2 signal length in every transformed dimension.
 
 Args:
     input (Tensor): the input tensor representing a half-Hermitian signal
@@ -823,7 +823,7 @@ full output, use :func:`~torch.fft.ifft`.
 
 Note:
     Supports torch.half on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal length along the dimension of IFFT.
+    However it only supports powers of 2 signal length in every transformed dimension.
 
 Args:
     input (Tensor): the real input tensor
@@ -874,7 +874,7 @@ domain. By the Hermitian property, the Fourier transform will be real-valued.
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of FFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -938,7 +938,7 @@ two last dimensions by default.
 
 Note:
     Supports torch.half on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of IFFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -1024,7 +1024,7 @@ Note:
 
 Note:
     Supports torch.half and torch.chalf on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of FFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
@@ -1093,7 +1093,7 @@ full output, use :func:`~torch.fft.ifftn`.
 
 Note:
     Supports torch.half on CUDA with GPU Architecture SM53 or greater.
-    However it only supports powers of 2 signal size along the dimensions of IFFT.
+    However it only supports powers of 2 signal length in every transformed dimensions.
 
 Args:
     input (Tensor): the input tensor
