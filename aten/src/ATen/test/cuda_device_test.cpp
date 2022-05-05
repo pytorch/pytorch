@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADevice.h>
 
 TEST(CudaDeviceTest, getDeviceFromPtr_fails_with_host_memory) {
