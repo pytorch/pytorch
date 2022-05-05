@@ -5,6 +5,7 @@
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <c10/util/Optional.h>
 
 namespace torch {
 namespace lazy {
@@ -44,6 +45,12 @@ BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
   TORCH_CHECK(device.type() == at::kLazy, device);
   int64_t ordinal = device.has_index() ? device.index() : 0;
   return BackendDevice(getBackend()->GetDefaultDeviceType(), ordinal);
+}
+c10::optional<BackendDevice> atenDeviceToBackendDevice(const c10::optional<c10::Device> device) {
+  if (device) {
+    return c10::make_optional(atenDeviceToBackendDevice(*device));
+  }
+  return c10::nullopt;
 }
 
 // TODO(whc) refactor this: we need to support non 1 on 1 mapping for torch/XLA.

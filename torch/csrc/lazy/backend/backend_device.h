@@ -56,6 +56,7 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const BackendDevice& device
 
 // Helpers for converting a c10::Device to BackendDevice and vice versa.
 TORCH_API BackendDevice atenDeviceToBackendDevice(const c10::Device& device);
+TORCH_API c10::optional<BackendDevice> atenDeviceToBackendDevice(const c10::optional<c10::Device> device);
 TORCH_API c10::Device backendDeviceToAtenDevice(const BackendDevice& device);
 
 // Tries to extract the backend device out of the lazy tensor. Returns nullopt if the
