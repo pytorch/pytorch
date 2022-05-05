@@ -38,18 +38,7 @@ def meta_abs(*args, **kwargs):
     else:
         return self.new_empty(self.size())
 
-def meta_stack(*args, **kwargs):
-    tensors, dim = args #fill_defaults(args, 2, [0])
-    # the internal implementation is completely illegible
-    # so I reimplemented this from the docs
-    assert tensors
-    assert all(tensors[0].shape == t.shape for t in tensors[1:])
-    r_shape = list(tensors[0].shape)
-    r_shape.insert(dim, len(tensors))
-    return tensors[0].new_empty(r_shape)
-
 meta_lib.impl(aten.index_select.default, meta_index_select)
 meta_lib.impl(aten.inverse.default, meta_inverse)
 meta_lib.impl(aten.max.default, meta_max)
 meta_lib.impl(aten.abs.default, meta_abs)
-meta_lib.impl(aten.stack.default, meta_stack)
