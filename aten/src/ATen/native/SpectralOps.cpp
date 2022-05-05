@@ -28,7 +28,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     type = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
-  if (device.is_cuda()) {
+  if (device.is_cuda() && !at::detail::getCUDAHooks().hasROCM()) {
     TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
   } else {
     TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
