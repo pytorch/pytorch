@@ -58,9 +58,7 @@ def _list_connected_datapipes(scan_obj, only_datapipe, cache):
             if DILL_AVAILABLE:
                 d.dump(scan_obj)
             else:
-                pass
-    except AttributeError:  # unpickable DataPipesGraph
-        pass  # TODO(VitalyFedyunin): We need to tighten this requirement after migrating from old DataLoader
+                raise
     finally:
         for cls in datapipe_classes:
             cls.set_reduce_ex_hook(None)
