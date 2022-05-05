@@ -34,6 +34,8 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, MetaInitErrorInfo
+
 __all__ = [
     "get_ignored_functions",
     "get_overridable_functions",
@@ -167,7 +169,11 @@ def get_ignored_functions() -> Set[Callable]:
         torch.result_type,
         torch.scalar_tensor,
         torch.sparse_coo_tensor,
+        torch.sparse_compressed_tensor,
         torch.sparse_csr_tensor,
+        torch.sparse_csc_tensor,
+        torch.sparse_bsr_tensor,
+        torch.sparse_bsc_tensor,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -220,6 +226,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.is_deterministic_algorithms_warn_only_enabled,
         torch.set_deterministic_debug_mode,
         torch.get_deterministic_debug_mode,
+        torch.set_float32_matmul_precision,
+        torch.get_float32_matmul_precision,
         torch.unify_type_list,
         torch.is_warn_always_enabled,
         torch.set_warn_always,
@@ -1676,20 +1684,6 @@ def is_tensor_like(inp):
     """
     return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
 
-def _wrap_init(f):
-    undef = object()
-
-    @functools.wraps(f)
-    def wrapped(self, *args, inner=undef, **kwargs):
-        if inner is undef:
-            raise TypeError(
-                "missing inner keyword argument; instead of constructing a TorchModeFunction directly, "
-                "pass the constructor to push_torch_function_mode"
-            )
-        self.inner = inner
-        return f(self, *args, **kwargs)
-    return wrapped
-
 
 def _wrap_torch_function(f):
     @functools.wraps(f)
@@ -1712,6 +1706,11 @@ def _wrap_torch_function(f):
 # more difficult to interact with TorchFunctionModeMeta.
 
 
+class _TorchFunctionMetaInitErrorInfo(MetaInitErrorInfo):
+    def __init__(self):
+        super().__init__(mode_class_name="TorchDispatchMode", mode_name="torch_dispatch")
+
+
 class TorchFunctionModeMeta(type):
     """
     Metaclass for :class:`TorchFunctionMode`; it does two things:
@@ -1729,7 +1728,7 @@ class TorchFunctionModeMeta(type):
     """
     def __new__(metacls, name, bases, dct):
         if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'])
+            dct['__init__'] = _wrap_init(dct['__init__'], _TorchFunctionMetaInitErrorInfo())
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
@@ -1793,6 +1792,18 @@ def _no_torch_function_mode() -> Iterator[None]:
         _set_torch_function_mode(old)
 
 
+class _TorchFunctionModeInfo(_ModeInfo):
+    def __init__(self):
+        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode,
+                         base_mode_class=BaseTorchFunctionMode)
+
+    def get_mode(self):
+        return _get_torch_function_mode()
+
+    def set_mode(self, mode):
+        return _set_torch_function_mode(mode)
+
+
 @contextlib.contextmanager
 def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
     """
@@ -1823,50 +1834,7 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
         ignore_preexisting (bool): if True, ignore any preexisting mode
             and overwrite it with the passed mode.
     """
-    if not (
-        mode is None or
-        isinstance(mode, TorchFunctionMode) or
-        (isinstance(mode, type) and not issubclass(mode, TorchFunctionMode))
-    ):
-        raise TypeError(
-            "expected to get TorchFunctionMode, Tensor-like class or None as argument, got "
-            f"{type(mode)} instead"
-        )
-    old = _get_torch_function_mode()
-    # Short circuit.  It is valid to reset a mode to yourself, we won't error
-    # here
-    if old is mode:
-        yield
-        return
-    if old is not None and not ignore_preexisting and old is not replace:
-        if isinstance(mode, TorchFunctionMode):
-            help_text = (
-                'Use push_torch_function_mode instead.'
-            )
-        else:
-            help_text = (
-                'If you intended to completely override the preexisting mode, '
-                'pass ignore_preexisting=True.  This can result in unexpected '
-                'behavior; please consider rewriting your mode to be a subclass '
-                'of TorchFunctionMode to make it compositional!'
-            )
-        raise ValueError(
-            'Attempted to enable_torch_function_mode, but there is already an '
-            f'active mode {old}.  {help_text}'
-        )
-    # NB: we don't require TorchFunctionMode since this is intended to also
-    # let you directly pass a Tensor subclass type to "mode-ify" it.
-    if not hasattr(mode, '__torch_function__'):
-        raise ValueError(
-            'The argument passed to enable_torch_function_mode must implement '
-            '__torch_function__'
-        )
-    _set_torch_function_mode(mode)
-    try:
-        yield
-    finally:
-        _set_torch_function_mode(old)
-
+    return _enable_mode(mode, _TorchFunctionModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
 
 @contextlib.contextmanager
 def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
@@ -1885,28 +1853,7 @@ def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
             non-inner arguments (e.g.,
             ``push_torch_function_mode(partial(MyMode, arg))``)
     """
-    if isinstance(ctor, TorchFunctionMode):
-        raise ValueError(
-            'Expected a TorchFunctionMode constructor function, but got an '
-            f'instance of TorchFunctionMode {ctor}.  Consider using '
-            'enable_torch_function_mode instead.'
-        )
-    old = _get_torch_function_mode()
-    if old is None:
-        inner = BaseTorchFunctionMode(inner=None)
-    else:
-        inner = old
-    mode = ctor(inner=inner)
-    if not isinstance(mode, TorchFunctionMode):
-        raise ValueError(
-            'The callable passed to push_torch_function_mode must return '
-            'a TorchFunctionMode'
-        )
-    _set_torch_function_mode(mode)
-    try:
-        yield mode
-    finally:
-        _set_torch_function_mode(old)
+    return _push_mode(ctor, _TorchFunctionModeInfo())
 
 class enable_reentrant_dispatch():
     def __enter__(self):
