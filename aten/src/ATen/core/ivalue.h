@@ -365,14 +365,11 @@ public:
       return payload.as_tensor.use_count();
     }
 
-    if (!isIntrusivePtr()) {
+    if (!isIntrusivePtrLegacyBehavior()) {
       return 1;
     }
 
     if (payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()) {
-      if (isStorage() || isGenerator()) {
-        return 1;
-      }
       return 0;
     }
     return c10::raw::intrusive_ptr::use_count(payload.u.as_intrusive_ptr);
@@ -916,10 +913,7 @@ public:
     if (isTensor()) {
       return payload.as_tensor.defined();
     }
-    if (isStorage() || isGenerator()) {
-      return payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton();
-    }
-    return isIntrusivePtr();
+    return isIntrusivePtrLegacyBehavior();
   }
 
   /// @private [doxygen private]
