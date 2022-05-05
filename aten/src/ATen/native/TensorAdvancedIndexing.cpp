@@ -1411,10 +1411,12 @@ static void scatter_reduce_exclude_self_helper(
         init_val = (scalar_t)1;
         break;
       case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
-        init_val = std::numeric_limits<scalar_t>::lowest();
+        init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
+                   : std::numeric_limits<scalar_t>::lowest();
         break;
       case SCATTER_GATHER_OP::REDUCE_MINIMUM:
-        init_val = std::numeric_limits<scalar_t>::max();
+        init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
+                   : std::numeric_limits<scalar_t>::max();
         break;
       case SCATTER_GATHER_OP::REDUCE_MEAN:
         init_val = (scalar_t)0;
