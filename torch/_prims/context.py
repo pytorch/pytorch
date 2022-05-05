@@ -2,19 +2,29 @@ import string
 from typing import Callable, Sequence, Any, Dict
 from itertools import chain
 
+
 import torch
 from torch.fx.graph import Graph, Node
+import torch.overrides
 
 from torch._prims.utils import TensorMeta
 import torch._refs as refs
 
 
+# TODO:  automap torch operations to references
+# (need to throw a good assertion if the mapping doesn't exist)
 _torch_to_reference_map = {
     torch.add: refs.add,
+    # torch.div: refs.div,
+    torch.mul: refs.mul,
+    torch.ge: refs.ge,
+    torch.gt: refs.gt,
+    torch.le: refs.le,
+    torch.lt: refs.lt,
 }
 
 
-class PrimContext(object):
+class PrimContext(torch.overrides.TorchFunctionMode):
     """
     The prototype prim tracing context.
 
@@ -23,12 +33,12 @@ class PrimContext(object):
     import torch._prims.utils as utils
     from torch._prims.context import PrimContext
     from torch._prims.executor import execute
+    from torch.overrides import push_torch_function_mode
 
     a = torch.randn((2, 2))
     b = torch.randn((2, 2))
 
-    ctx = PrimContext()
-    with ctx as tracing_ctx:
+    with push_torch_function_mode(PrimContext):
       meta_a = ctx.placeholder(utils.TensorMeta(a))
       meta_b = ctx.placeholder(utils.TensorMeta(b))
       result = torch.add(meta_a, meta_b)
@@ -56,13 +66,6 @@ class PrimContext(object):
         self._lowercase = tuple(string.ascii_lowercase)
         self._uppercase = tuple(string.ascii_uppercase)
 
-    def __enter__(self):
-        self.old_ctx = TensorMeta.ctx
-        TensorMeta.ctx = self
-
-    def __exit__(self, type, value, traceback):
-        TensorMeta.ctx = self.old_ctx
-
     @staticmethod
     def _create_name(idx, chars):
         name = ""
@@ -83,18 +86,17 @@ class PrimContext(object):
         assert tm.node is not None
         tm.node.users[node] = None
 
-    def placeholder(self, tm: TensorMeta):
-        # TODO: allow other input types
-        assert isinstance(tm, TensorMeta)
-
-        if tm.node is not None:
-            raise ValueError("Attempting to reuse a TensorMeta in a new trace!")
-
+    def placeholder(self, a: Any):
         name = self._tensor_name()
         node = self.graph.placeholder(name)
-        tm.name = name
-        tm.node = node
-        return tm
+
+        if isinstance(a, TensorMeta):
+            if a.node is not None:
+                raise ValueError("Attempting to reuse a TensorMeta in a new trace!")
+            a.tname = name
+            a.node = node
+
+        return a
 
     def output(self, tm: TensorMeta):
         # TODO: allow other output types
@@ -103,12 +105,12 @@ class PrimContext(object):
         node = self.graph.output(tm)
         self._add_user(tm, node)
 
-    def handle_torch_function(
+    def __torch_function__(
         self,
         func: Callable,
         types: Sequence,
-        args: Sequence[Any],
-        kwargs: Dict,
+        args: Sequence[Any] = (),
+        kwargs: Dict = None,
     ):
         """
         Determines which function to call. The order of which
@@ -118,6 +120,9 @@ class PrimContext(object):
         - if func is a torch operation, its corresponding reference
         - func
         """
+
+        if kwargs is None:
+            kwargs = {}
 
         if hasattr(func, "meta"):
             # TODO: add check that all args/kwargs are 'registered' properly
@@ -133,7 +138,7 @@ class PrimContext(object):
             node = self.graph.create_node(
                 "call_function", func, name=output_name, args=args, kwargs=kwargs
             )
-            output.name = output_name
+            output.tname = output_name
             output.node = node
 
             # Marks uses
@@ -147,6 +152,7 @@ class PrimContext(object):
         # Remaps torch operations to their references
         if func in _torch_to_reference_map:
             fn = _torch_to_reference_map[func]
-            return fn(*args, **kwargs)
+            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
+                return fn(*args, **kwargs)  # type: ignore[operator]
 
         return func(*args, **kwargs)
