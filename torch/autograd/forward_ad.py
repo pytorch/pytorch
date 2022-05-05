@@ -4,7 +4,7 @@ from collections import namedtuple
 
 from typing import Any
 
-__all__ = ["enter_dual_level", "exit_dual_level", "make_dual", "unpack_dual", "dual_level"]
+__all__ = ["UnpackedDualTensor", "enter_dual_level", "exit_dual_level", "make_dual", "unpack_dual", "dual_level"]
 
 # Global variable used to make the python API simpler to use
 _current_level = -1
@@ -74,8 +74,12 @@ def make_dual(tensor, tangent, *, level=None):
 
     return torch._VF._make_dual(tensor, tangent, level=level)
 
-UnpackedDualTensor = namedtuple('UnpackedDualTensor', ['primal', 'tangent'])
-
+class UnpackedDualTensor(NamedTuple):
+    r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
+    See :func:`unpack_dual` for more details."""
+    primal: Tensor
+    tangent: Tensor
+    
 def unpack_dual(tensor, *, level=None):
     r"""Unpacks a "dual tensor" to get both its Tensor value and its forward AD gradient.
     The result is a namedtuple ``(primal, tangent)`` where ``primal`` is a view of

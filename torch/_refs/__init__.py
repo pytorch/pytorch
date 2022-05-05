@@ -1,24 +1,64 @@
 import torch
-from torch._C import _add_docstr  # type: ignore[attr-defined]
 
 import torch._prims as prims
 import torch._prims.utils as utils
-from torch._prims import TensorLike as TensorLike
-from torch._prims.utils import DimsType
+from torch._prims.utils import (
+    DimsType,
+    TensorLike,
+    TensorLikeType,
+    DimsSequenceType,
+    TensorSequenceType,
+    Number,
+    NumberType,
+)
+
 
 from functools import reduce
 from enum import Enum
-from numbers import Number, Complex
-from typing import Sequence, Optional, Union, Callable, List
+from typing import Sequence, Optional, Union, Callable, List, Tuple
+import operator
+import warnings
+import math
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
 
-all = [
+__all__ = [
     #
     # Elementwise Unary References
     #
+    "abs",
+    "acos",
+    "acosh",
+    "asin",
+    "atan",
+    # "bessel_i0e",  # special.i0e
+    # "bessel_i1e",  # special.i1e
+    # "cbrt",  # No corresponding torch operation
+    "ceil",
+    "cos",
+    "cosh",
+    "digamma",
+    "erf",
+    "erfinv",
+    "erfc",
+    "exp",
+    "expm1",
     "floor",
+    "isfinite",
+    "isnan",
+    "lgamma",
+    "log",
+    "log1p",
+    "neg",
+    "reciprocal",
+    "round",  # TODO: model kwargs
+    "sign",
+    "sin",
+    "sinh",
+    "sqrt",
+    "square",
+    "tan",
     #
     # Elementwise Binary References
     #
@@ -42,8 +82,8 @@ all = [
     "gt",
     # 'heaviside',
     # 'hypot',
-    # 'igamma',
-    # 'igammac',
+    "igamma",
+    "igammac",
     # 'isclose', # abs, sub, le, add, mul
     # 'lcm',
     # 'ldexp',
@@ -71,15 +111,25 @@ all = [
     #
     # Conditional references
     #
-    "where",
+    "where",  # TODO: add opinfo
     #
     # Data conversion and movement references
     #
-    "copy_to",
+    "copy_to",  # TODO: add opinfo
     #
     # Reduction ops
     #
     "sum",
+    "amax",
+    "amin",
+    #
+    # View & Shape Ops
+    #
+    "cat",
+    "permute",
+    "transpose",
+    "swap_axes",  # alias for transpose
+    "tensor_split",
 ]
 
 Tensor = torch.Tensor
@@ -89,7 +139,9 @@ class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     DEFAULT = (0,)
     INT_TO_FLOAT = (1,)
     ALWAYS_BOOL = (2,)
-    OP_MATH = 3
+    OP_MATH = (3,)
+    COMPLEX_TO_FLOAT = (4,)
+    BOOL_TO_LONG = (5,)
 
 
 class REDUCTION_OUTPUT_TYPE_KIND(Enum):
@@ -103,20 +155,29 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
 _computation_dtype_map = {
     torch.bfloat16: torch.float32,
     torch.float16: torch.float32,
+    torch.complex32: torch.complex64,
 }
 
 
-def _get_computation_dtype(dtype: torch.dtype):
+def _get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
     return _computation_dtype_map.get(dtype, dtype)
 
 
 # TODO: document type promotion kinds
-def _elementwise_dtypes(*_args, type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND):
+def _elementwise_dtypes(
+    *_args, type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND
+) -> Tuple[torch.dtype, torch.dtype]:
     """
     Computes the computation and result dtypes for elementwise type promotion
     on the given arguments and with the given elementwise type promotion kind.
 
-    Elementwise type promotion first decides which of four ordered types to use:
+    Note that not all inputs to an elementwise operation necessarily participate in type promotion.
+    For example, the "alpha" parameter of torch.add does not participate in type promotion,
+    although it is cast to the Python type corresponding to the computation dtype that
+    the type promotion algorithm determines.
+
+    Default elementwise type promotion, which all other type promotion kinds tweak (see below),
+    first decides which of four ordered types to use:
 
     bool -> integer -> floating point -> complex
 
@@ -132,79 +193,179 @@ def _elementwise_dtypes(*_args, type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND)
 
     The result dtype is selected by:
       - if no tensor's dtype has the same corresponding type as the one selected,
-          then the result dtype is the dtype corresponding to the selected type
-      - if no tensor with one or dimensions' dtype has the same corresponding type as the one
-          selected, then the result dtype is the highest dtype among all tensors
+          then the result dtype is the (default) dtype corresponding to the selected type
+          (for example, 1.5 + an integer tensor has a result dtype of the default floating point dtype)
+      - if the result type is complex then the dtype is:
+        -  the default complex dtype if there are no floating point or complex tensors
+        -  if there are floating point or complex tensors with one or more dimensions, then
+            the complex dtype corresponding to the highest corresponding complex dtype among those tensors
+            (for example, double + cfloat -> cdouble)
+        -  if there are only floating point or complex tensors with zero dimensions, then
+            the complex dtype corresponding to the highest corresponding complex dtype among those tensors
       - if the first two cases do not apply, the result dtype is the highest dtype among
-          all tensors with one or more dimensions
+          all tensors with one or more dimensions of the output type, and if there are no such
+          tensors then it's the highest dtype among all tensors with zero dimensions of the output type
+          (for example, long + half -> half, even if the half tensor has zero dimensions)
 
-    The computation dtype is usually the result dtype, except for float16 and bfloat16, where
-    the computation dtype is float32, and complex32, where the computation dtype is complex64.
+    The "corresponding complex dtypes" are:
+      float16    -> complex32
+      bfloat16   -> complex64
+      float32    -> complex64
+      float64    -> complex128
+      complex32  -> complex32
+      complex64  -> complex64
+      complex128 -> complex128
+
+    The DEFAULT type promotion option computes per above, and uses the result dtype as the computation dtype.
+
+    The OP_MATH, INT_TO_FLOAT, COMPLEX_TO_FLOAT and BOOL_TO_LONG type promotion options tweak the above slightly.
+    OP_MATH determines a "computation dtype" from the result dtype, and the mapping is simple:
+
+      float16   -> float32
+      bfloat16  -> float32
+      complex32 -> complex64
+
+    INT_TO_FLOAT, COMPLEX_TO_FLOAT, and BOOL_TO_LONG compute the computation type in the same way, but INT_TO_FLOAT
+    and BOOL_TO_LONG map the result dtype to another dtype first, and COMPLEX_TO_FLOAT maps its result dtype
+    after the compuation dtype is determined, as follows:
+
+      INT_TO_FLOAT  maps all boolean and integer result dtypes to the default floating point dtype
+      COMPLEX_TO_FLOAT  maps complex result dtypes to their corresponding floating point dtype
+      BOOL_TO_LONG maps the boolean result dtype to long
+
+    The "corresponding floating point dtypes" are:
+      complex32  -> float16
+      complex64  -> float32
+      complex128 -> float64
+
+    The ALWAYS_BOOL type promotion option always maps the result dtype to bool.
+
+    Example operators for each type promotion option:
+      DEFAULT          : nextafter
+      OP_MATH          : add
+      INT_TO_FLOAT     : sin
+      COMPLEX_TO_FLOAT : abs
+      BOOL_TO_LONG     : pow
+      ALWAYS_BOOL      : eq
+
     """
 
-    args = tuple(filter(lambda x: x is not None, _args))
+    args = tuple(x for x in _args if x is not None)
 
-    # Type checking
-    for arg in args:
-        assert isinstance(arg, (Number, TensorLike))
+    highest_type: type = bool
+    for x in args:
+        if not isinstance(x, (Number, TensorLike)):
+            msg = (
+                "Unexpected type {0} when computing elementwise type promotion!".format(
+                    str(type(x))
+                )
+            )
+            raise ValueError(msg)
 
-    # Determines datatypes for each category
-    scalar_args = filter(lambda x: isinstance(x, Number), args)
-    scalar_type = reduce(
-        lambda acc, x: utils.get_higher_type(acc, type(x)), scalar_args, bool  # type: ignore[arg-type, return-value]
-    )
-
-    scalar_tensors = filter(lambda t: isinstance(t, TensorLike) and t.ndim == 0, args)
-    scalar_tensor_dtype = reduce(
-        utils.get_higher_dtype, (t.dtype for t in scalar_tensors), torch.bool
-    )
-    scalar_tensor_type = utils.dtype_to_type(scalar_tensor_dtype)
-
-    nonscalar_tensors = filter(
-        lambda t: isinstance(t, TensorLike) and t.ndim != 0, args
-    )
-    nonscalar_tensor_dtype = reduce(
-        utils.get_higher_dtype, (t.dtype for t in nonscalar_tensors), torch.bool
-    )
-    nonscalar_tensor_type = utils.dtype_to_type(nonscalar_tensor_dtype)
-
-    typ = reduce(
-        utils.get_higher_type, (scalar_type, scalar_tensor_type, nonscalar_tensor_type)
-    )
-
-    if nonscalar_tensor_type is typ:
-        dtype = nonscalar_tensor_dtype
-    elif scalar_tensor_type is typ:
-        dtype = scalar_tensor_dtype
-    else:
-        # scalar type kind -> default torch dtype mapping
-        if typ is bool:
-            dtype = torch.bool
-        elif typ is int:
-            dtype = torch.int64
-        elif typ is float:
-            dtype = torch.get_default_dtype()
+        if isinstance(x, Number):
+            highest_type = utils.get_higher_type(highest_type, type(x))
         else:
-            # typ is complex
-            dtype = (
-                torch.complex128
-                if torch.get_default_dtype() is torch.float64
-                else torch.complex64
+            # x is a TensorLike
+            highest_type = utils.get_higher_type(
+                highest_type, utils.dtype_to_type(x.dtype)
             )
 
-    if type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT and (
-        utils.is_boolean_dtype(dtype) or utils.is_integer_dtype(dtype)
-    ):
-        return torch.get_default_dtype(), torch.get_default_dtype()
+    result_dtype = None
 
-    if type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
-        return dtype, torch.bool
+    def _find_highest_dtype_filtered(
+        args, filter, *, float_as_complex=False, all_tensors_equal=False
+    ) -> Optional[torch.dtype]:
+        zero_dim_tensor_dtype = None
+        one_plus_dim_tensor_dtype = None
+        for x in args:
+            if isinstance(x, TensorLike) and filter(x.dtype):
+                _dtype = x.dtype
+                if float_as_complex and utils.is_float_dtype(_dtype):
+                    _dtype = utils.corresponding_complex_dtype(_dtype)
+                if x.ndim == 0 and not all_tensors_equal:
+                    zero_dim_tensor_dtype = utils.get_higher_dtype(
+                        zero_dim_tensor_dtype, _dtype
+                    )
+                else:
+                    # x.ndim > 0 or all_tensors_equal
+                    one_plus_dim_tensor_dtype = utils.get_higher_dtype(
+                        one_plus_dim_tensor_dtype, _dtype
+                    )
 
-    if type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH:
-        return _get_computation_dtype(dtype), dtype
+        # Prefers dtype of tensors with one or more dimensions
+        if one_plus_dim_tensor_dtype is not None:
+            return one_plus_dim_tensor_dtype
 
-    # DEFAULT type promotion
-    return dtype, dtype
+        return zero_dim_tensor_dtype
+
+    if highest_type is float:
+        result_dtype = _find_highest_dtype_filtered(args, utils.is_float_dtype)
+        result_dtype = (
+            torch.get_default_dtype() if result_dtype is None else result_dtype
+        )
+    elif highest_type is complex:
+        # NOTE: complex x float type promotion is incorrectly implemented in PyTorch today
+        # it will treat zero dim and non-zero-dim float and complex tensors equally
+        # unless there's a non-zero-dim complex tensor
+        # the following captures this oddity
+        has_one_plus_dim_complex_tensor = False
+        for x in args:
+            if (
+                isinstance(x, TensorLike)
+                and x.ndim > 0
+                and utils.is_complex_dtype(x.dtype)
+            ):
+                has_one_plus_dim_complex_tensor = True
+                break
+
+        if has_one_plus_dim_complex_tensor:
+            result_dtype = _find_highest_dtype_filtered(
+                args,
+                lambda x: utils.is_float_dtype(x) or utils.is_complex_dtype(x),
+                float_as_complex=True,
+            )
+        else:
+            # no complex tensors of rank 1+
+            # NOTE: bugged case where all tensors are equal
+            result_dtype = _find_highest_dtype_filtered(
+                args,
+                lambda x: utils.is_float_dtype(x) or utils.is_complex_dtype(x),
+                float_as_complex=True,
+                all_tensors_equal=True,
+            )
+
+        if result_dtype is None:
+            result_dtype = utils.corresponding_complex_dtype(torch.get_default_dtype())
+    elif highest_type is int:
+        result_dtype = _find_highest_dtype_filtered(args, utils.is_integer_dtype)
+        result_dtype = torch.long if result_dtype is None else result_dtype
+    else:
+        # highest_type is bool
+        result_dtype = torch.bool
+
+    if type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
+        return result_dtype, result_dtype
+    elif type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH:
+        return _get_computation_dtype(result_dtype), result_dtype
+    elif type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
+        if utils.is_integer_dtype(result_dtype) or utils.is_boolean_dtype(result_dtype):
+            result_dtype = torch.get_default_dtype()
+        return _get_computation_dtype(result_dtype), result_dtype
+    elif type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
+        if utils.is_complex_dtype(result_dtype):
+            # Note: computation still occurs in complex
+            return _get_computation_dtype(result_dtype), utils.corresponding_real_dtype(
+                result_dtype
+            )
+        return _get_computation_dtype(result_dtype), result_dtype
+    elif type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG:
+        if utils.is_boolean_dtype(result_dtype):
+            return torch.long, torch.long
+        return result_dtype, result_dtype
+    elif type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
+        return result_dtype, torch.bool
+    else:
+        raise ValueError("Unknown type promotion kind {0}".format(str(type_promotion)))
 
 
 def _broadcast_shapes(*_shapes):
@@ -272,7 +433,8 @@ def broadcast(*args):
 def _convert_dtype(*args, dtype: torch.dtype):
     def _convert(x):
         if isinstance(x, TensorLike):
-            return prims.convert_element_type(x, dtype)
+            if x.dtype != dtype:
+                return prims.convert_element_type(x, dtype)
         elif isinstance(x, Number):
             typ = utils.dtype_to_type(dtype)
             return typ(x)
@@ -282,8 +444,21 @@ def _convert_dtype(*args, dtype: torch.dtype):
 
 
 # TODO: handle tuples of tensors
-def _maybe_resize_out(out: Tensor, shape):
+def _maybe_resize_out(out: TensorLikeType, shape):
     if out.numel() == 0:
+        return prims.resize(out, shape)
+
+    if out.numel() != reduce(operator.mul, shape, 1):
+        msg = (
+            "An output with one or more elements was resized since it had shape {0} "
+            "which does not match the required output shape {1}. "
+            "This behavior is deprecated, and in a future PyTorch release outputs will not "
+            "be resized unless they have zero elements. "
+            "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0).".format(
+                str(out.shape), str(shape)
+            )
+        )
+        warnings.warn(msg)
         return prims.resize(out, shape)
 
     return out
@@ -294,13 +469,21 @@ def _maybe_resize_out(out: Tensor, shape):
 #
 
 # TODO: add type promotion support
-def _make_elementwise_unary_reference(prim: Callable) -> Callable:
+def _make_elementwise_unary_reference(prim: Callable, *, type_promotion) -> Callable:
     def _ref(a: Tensor, *, out: Optional[Tensor] = None) -> Tensor:
 
         assert isinstance(a, TensorLike)
         assert out is None or isinstance(out, TensorLike)
 
+        computation_dtype, result_dtype = _elementwise_dtypes(
+            a, type_promotion=type_promotion
+        )
+        (a,) = _convert_dtype(a, dtype=computation_dtype)
+
         result = prim(a)
+
+        if type_promotion is not ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
+            (result,) = _convert_dtype(result, dtype=result_dtype)
 
         # TODO: refactor out handling to a generic wrapper
         if out is not None:
@@ -312,13 +495,133 @@ def _make_elementwise_unary_reference(prim: Callable) -> Callable:
     return _ref
 
 
-floor = _make_elementwise_unary_reference(prims.floor)
+abs = _make_elementwise_unary_reference(
+    prims.abs, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+)
+
+acos = _make_elementwise_unary_reference(
+    prims.acos, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+acosh = _make_elementwise_unary_reference(
+    prims.acosh, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+asin = _make_elementwise_unary_reference(
+    prims.asin, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+atan = _make_elementwise_unary_reference(
+    prims.atan, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+ceil = _make_elementwise_unary_reference(
+    prims.ceil, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+cos = _make_elementwise_unary_reference(
+    prims.cos, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+cosh = _make_elementwise_unary_reference(
+    prims.cosh, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+digamma = _make_elementwise_unary_reference(
+    prims.digamma, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+erf = _make_elementwise_unary_reference(
+    prims.erf, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+erfinv = _make_elementwise_unary_reference(
+    prims.erf_inv, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+erfc = _make_elementwise_unary_reference(
+    prims.erfc, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+exp = _make_elementwise_unary_reference(
+    prims.exp, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+expm1 = _make_elementwise_unary_reference(
+    prims.expm1, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+floor = _make_elementwise_unary_reference(
+    prims.floor, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+isfinite = _make_elementwise_unary_reference(
+    prims.is_finite, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+)
 
 
-def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Callable:
+def _isnan(a: Tensor) -> Tensor:
+    return prims.ne(a, a)
+
+
+isnan = _make_elementwise_unary_reference(
+    _isnan, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+)
+
+lgamma = _make_elementwise_unary_reference(
+    prims.lgamma, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+log = _make_elementwise_unary_reference(
+    prims.log, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+log1p = _make_elementwise_unary_reference(
+    prims.log1p, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+neg = _make_elementwise_unary_reference(
+    prims.neg, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+reciprocal = _make_elementwise_unary_reference(
+    prims.reciprocal, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+# TODO: round takes additional kwargs
+round = _make_elementwise_unary_reference(
+    prims.round, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+sign = _make_elementwise_unary_reference(
+    prims.sign, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+sin = _make_elementwise_unary_reference(
+    prims.sin, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+sinh = _make_elementwise_unary_reference(
+    prims.sinh, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+sqrt = _make_elementwise_unary_reference(
+    prims.sqrt, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+square = _make_elementwise_unary_reference(
+    prims.square, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
+)
+
+tan = _make_elementwise_unary_reference(
+    prims.tan, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+
+def _make_elementwise_binary_reference(prim: Callable, *, type_promotion, wrap_scalars=False) -> Callable:
     def _ref(
-        a: Union[Tensor, Number],
-        b: Union[Tensor, Number],
+        a: Union[Tensor, NumberType],
+        b: Union[Tensor, NumberType],
         *,
         out: Optional[Tensor] = None
     ) -> Tensor:
@@ -328,7 +631,10 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Cal
 
         # Special-cases Number x Number case
         if isinstance(a, Number) and isinstance(b, Number):
-            a, b = utils.wrap_scalars(a, b)
+            if wrap_scalars:
+                a, b = utils.wrap_scalars(a, b)
+            else:
+                raise RuntimeError("got two scalar arguments, while expected at least one TensorLike")
 
         # Handles type promotion
         computation_dtype, result_dtype = _elementwise_dtypes(
@@ -356,10 +662,10 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Cal
 # Add is implemented specially because it has an alpha argument and
 #   is decomposed into multiple prims
 def add(
-    a: Union[Tensor, Number],
-    b: Union[Tensor, Number],
+    a: Union[Tensor, NumberType],
+    b: Union[Tensor, NumberType],
     *,
-    alpha: Optional[Number] = None,
+    alpha: Optional[NumberType] = None,
     out: Optional[Tensor] = None
 ):
     """
@@ -442,19 +748,18 @@ eq = _make_elementwise_binary_reference(
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
 def float_power(
-    a: Union[Tensor, Number], b: Union[Tensor, Number], out: Optional[Tensor] = None
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+    out: Optional[TensorLikeType] = None,
 ) -> Tensor:
 
-    assert isinstance(a, (Tensor, Number))
-    assert isinstance(b, (Tensor, Number))
+    assert isinstance(a, (TensorLike, Number))
+    assert isinstance(b, (TensorLike, Number))
     assert out is None or isinstance(out, TensorLike)
-
-    # Special-cases Number x Number case
-    if isinstance(a, Number) and isinstance(b, Number):
-        a, b = utils.wrap_scalars(a, b)
 
     # Handles type promotion
     dtype = utils.get_higher_dtype(a, b)
+    assert dtype is not None
     if utils.is_complex_dtype(dtype):
         dtype = torch.complex128
     else:
@@ -484,9 +789,17 @@ gt = _make_elementwise_binary_reference(
     prims.gt, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
 )
 
+igamma = _make_elementwise_binary_reference(
+    prims.igamma, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+igammac = _make_elementwise_binary_reference(
+    prims.igammac, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
 # TODO: add docstring
 le = _make_elementwise_binary_reference(
-    prims.lt, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.le, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
 )
 
 # TODO: add docstring
@@ -496,17 +809,20 @@ lt = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 maximum = _make_elementwise_binary_reference(
-    prims.max, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.max,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 minimum = _make_elementwise_binary_reference(
-    prims.min, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.min,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 mul = _make_elementwise_binary_reference(
-    prims.mul, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH
+    prims.mul, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    wrap_scalars=True
 )
 
 # TODO: add docstring
@@ -521,7 +837,7 @@ nextafter = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 pow = _make_elementwise_binary_reference(
-    prims.pow, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH
+    prims.pow, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
 )
 
 # TODO: add docstring
@@ -529,10 +845,10 @@ pow = _make_elementwise_binary_reference(
 #   is decomposed into multiple prims.
 # TODO: consider refactoring this with add impl
 def sub(
-    a: Union[Tensor, Number],
-    b: Union[Tensor, Number],
+    a: Union[Tensor, NumberType],
+    b: Union[Tensor, NumberType],
     *,
-    alpha: Optional[Number] = None,
+    alpha: Optional[NumberType] = None,
     out: Optional[Tensor] = None
 ):
     """
@@ -576,7 +892,8 @@ def sub(
 
 # TODO: add docstring
 true_divide = _make_elementwise_binary_reference(
-    prims.div, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.div, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    wrap_scalars=True
 )
 
 #
@@ -658,19 +975,19 @@ def _reduction(
         assert isinstance(out, TensorLike)
         if dtype is not None:
             # TODO - this is true for eager mode currently, but it's wrong behavior for complex norms
-            assert (
-                dtype == out.dtype
-            ), "dtype argument and out dtype must match in reduction"
+            if dtype != out.dtype:
+                raise RuntimeError(
+                    "dtype argument and out dtype must match in reduction"
+                )
     if not accepts_dim_tuple:
         assert dims is None or isinstance(dims, int)
     if isinstance(dims, int):
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = all(a.shape[i] for i in range(a.ndim) if i in dims)  # type: ignore[operator]
-        assert (
-            valid_shape
-        ), "reducing over zero-size dimension for reduction operation without identity"
+        valid_shape = all(a.shape[i] for i in range(a.ndim) if i in dims)
+        if not valid_shape:
+            raise RuntimeError("reducing over zero-size dimension for reduction operation without identity")
     # even though some reductions, like amin or amax, don't strictly require type promotion,
     # all the math ops (including comparisons) are still defined only for a computation type,
     # so promotion will still happen. We are doing it explicitly here
@@ -680,24 +997,27 @@ def _reduction(
     result = prim(a_converted, dims)
 
     if keepdims:
-        output_shape = [a.shape[i] if i in dims else 1 for i in range(a.ndim)]
+        output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
         broadcast_dims = [i for i in range(a.ndim) if i not in dims]
         result = prims.broadcast_in_dim(result, output_shape, broadcast_dims)
     if out is not None:
         if dtype is None:
             if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
-                assert (
-                    out.dtype == a.dtype
-                ), "out dtype and output type of reduction must match"
+                if out.dtype != a.dtype:
+                    raise RuntimeError(
+                        "Expected the dtype for input and out to match"
+                    )
             elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.ALWAYS_BOOL:
-                assert (
-                    out.dtype == torch.bool
-                ), "out dtype and output type of reduction must match"
+                if out.dtype != torch.bool:
+                    raise RuntimeError(
+                        "Expected the dtype for input and out to match"
+                    )
         out = _maybe_resize_out(out, result.shape)
         return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
     if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
-        result = prims.convert_element_type(result, a.dtype)
+        result_dtype = dtype if dtype else a.dtype
+        result = prims.convert_element_type(result, result_dtype)
     return result
 
 
@@ -714,12 +1034,177 @@ def sum(
             dtype = torch.int64
         else:
             dtype = a.dtype
-
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
     return _reduction(
         a,
         prims.sum,
         dims=dim,
         keepdims=keepdim,
         dtype=dtype,
+        out=out,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
     )
+
+def amin(
+    a: Tensor,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    out: Optional[Tensor] = None
+):
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+    return _reduction(
+        a,
+        prims.amin,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=None,
+        out=out,
+        has_identity=False,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    )
+
+def amax(
+    a: Tensor,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    out: Optional[Tensor] = None
+):
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+    return _reduction(
+        a,
+        prims.amax,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=None,
+        out=out,
+        has_identity=False,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    )
+
+
+def cat(
+    tensors: TensorSequenceType, dim: int = 0, out: TensorLikeType = None
+) -> TensorLikeType:
+    if len(tensors) == 0:
+        msg = "cat expects at least one tensor, but received zero!"
+        raise ValueError(msg)
+
+    _dim = utils.canonicalize_dims(tensors[0].ndim, dim)
+    dtype, _ = _elementwise_dtypes(
+        *tensors, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+    _tensors = _convert_dtype(*tensors, dtype=dtype)
+    result = prims.concatenate(_tensors, _dim)
+
+    if out is not None:
+        out = _maybe_resize_out(out, result.shape)
+        return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
+
+    return result
+
+
+def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    _permutation = utils.canonicalize_dims(a.ndim, dims)
+    return prims.transpose(a, _permutation)
+
+
+# Note: does not work with TensorMetas because of data-dependent control-flow
+def tensor_split(
+    a: TensorLikeType,
+    indices_or_sections: Union[Tensor, DimsType],
+    dim: int = 0,
+) -> Tuple[TensorLikeType, ...]:
+    _dim = utils.canonicalize_idx(a.ndim, dim)
+    if a.ndim == 0:
+        msg = "tensor_split: received a rank zero tensor, but expected a tensor of rank one or greater!"
+        raise ValueError(msg)
+
+    # If indices_or_sections is a tensor, it must be a CPU Long tensor
+    if isinstance(indices_or_sections, TensorLike):
+        if indices_or_sections.device != torch.device("cpu"):
+            msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {0}".format(
+                indices_or_sections.device
+            )
+            raise ValueError(msg)
+        if indices_or_sections.dtype != torch.long:
+            msg = "tensor_split: if indices_or_sections is a tensor it must have long dtype, "
+            " but received one with dtype {0}".format(indices_or_sections.dtype)
+            raise ValueError(msg)
+
+    # Case 0 -- indices_or_sections is an integer or a scalar tensor n and a is split along dim into n parts of equal-ish length
+    if isinstance(indices_or_sections, int) or (
+        isinstance(indices_or_sections, TensorLike) and indices_or_sections.ndim == 0
+    ):
+        sections: int = (
+            indices_or_sections  # type: ignore[assignment]
+            if isinstance(indices_or_sections, Number)
+            else indices_or_sections.item()
+        )
+
+        if sections <= 0:
+            msg = "tensor_split: number of sections must be greater than 0, but was {0}".format(
+                sections
+            )
+            raise ValueError(msg)
+
+        splits = []
+        dim_size = a.shape[_dim]
+        min_split_size = math.floor(dim_size / sections)
+        num_splits_one_extra = dim_size % sections
+        start_idx = 0
+        for split_idx in range(sections):
+            split_size = (
+                min_split_size + 1
+                if (split_idx < num_splits_one_extra)
+                else min_split_size
+            )
+            s = prims.slice_in_dim(a, start_idx, start_idx + split_size, axis=_dim)
+            splits.append(s)
+            start_idx = start_idx + split_size
+
+        return tuple(splits)
+    # Case 1 -- indices_or_sections is a sequence of integers or a 1D tensor describing the splits
+    else:
+        indices = indices_or_sections
+        if isinstance(indices_or_sections, TensorLike):
+            if indices_or_sections.ndim != 1:
+                msg = "tensor_split: non-scalar indices_or_sections tensors must have only one dimension, "
+                "but received a tensor with {0} dimensions".format(
+                    indices_or_sections.ndim
+                )
+                raise ValueError(msg)
+
+            indices = indices_or_sections.tolist()
+
+        splits = []
+        start_idx = 0
+        for x in indices:
+            splits.append(prims.slice_in_dim(a, start_idx, x, axis=_dim))
+            start_idx = x
+        splits.append(prims.slice_in_dim(a, start_idx, a.shape[_dim], axis=_dim))
+        return tuple(splits)
+
+
+def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
+    _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
+
+    if a.ndim <= 1:
+        return a
+
+    _permutation = list(range(0, a.ndim))
+    _permutation[_dim0] = _dim1
+    _permutation[_dim1] = _dim0
+    return prims.transpose(a, _permutation)
+
+
+# Aliases for transpose
+swap_axes = transpose

@@ -9,10 +9,14 @@ from typing import Callable, Union, Optional, Iterable, List, Tuple, Dict
 from torch._vmap_internals import vmap, _vmap
 import functools
 
-__all__ = ["gradcheck", "gradgradcheck"]
+# Note: `get_*_jacobian` functions are added here even though we didn't intend to make them public
+# since they have been exposed from before we added `__all__`  and we already maintain BC for them
+# We should eventually deprecate them and remove them from `__all__`
+__all__ = ["gradcheck", "gradgradcheck", "GradcheckError", "get_numerical_jacobian", 
+           "get_analytical_jacobian", "get_numerical_jacobian_wrt_specific_input"]
 
 class GradcheckError(RuntimeError):
-    # Custom error so that user errors are not caught in the gradcheck's try-catch
+    r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`"""
     pass
 
 
