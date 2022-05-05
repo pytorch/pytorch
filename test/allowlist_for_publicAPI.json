@@ -2094,6 +2094,7 @@
     "ldl_factor_ex",
     "ldl_solve",
     "lstsq",
+    "lu",
     "lu_factor",
     "lu_factor_ex",
     "matmul",

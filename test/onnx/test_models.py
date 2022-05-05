@@ -1,46 +1,58 @@
 # Owner(s): ["module: onnx"]
 
+import unittest
+
+from model_defs.dcgan import _netD, _netG, bsz, imgsz, nz, weights_init
+from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
+from model_defs.mnist import MNIST
+from model_defs.op_test import (
+    ConcatNet,
+    DummyNet,
+    FakeQuantNet,
+    PermuteNet,
+    PReluNet,
+)
+from model_defs.squeezenet import SqueezeNet
+from model_defs.srresnet import SRResNet
+from model_defs.super_resolution import SuperResolutionNet
+from test_pytorch_common import (
+    TestCase,
+    run_tests,
+    skipIfNoLapack,
+    skipIfUnsupportedMinOpsetVersion,
+    skipScriptTest,
+)
+from torchvision.models import shufflenet_v2_x1_0
 from torchvision.models.alexnet import alexnet
-from torchvision.models.inception import inception_v3
 from torchvision.models.densenet import densenet121
-from torchvision.models.resnet import resnet50
-from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 from torchvision.models.googlenet import googlenet
+from torchvision.models.inception import inception_v3
 from torchvision.models.mnasnet import mnasnet1_0
 from torchvision.models.mobilenet import mobilenet_v2
-from torchvision.models import shufflenet_v2_x1_0
-from torchvision.models.segmentation import fcn_resnet101, deeplabv3_resnet101
-from torchvision.models.video import r3d_18, mc3_18, r2plus1d_18
+from torchvision.models.resnet import resnet50
+from torchvision.models.segmentation import deeplabv3_resnet101, fcn_resnet101
+from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
+from torchvision.models.video import mc3_18, r2plus1d_18, r3d_18
+from verify import verify
 
-from model_defs.mnist import MNIST
-from model_defs.squeezenet import SqueezeNet
-from model_defs.super_resolution import SuperResolutionNet
-from model_defs.srresnet import SRResNet
-from model_defs.dcgan import _netD, _netG, weights_init, bsz, imgsz, nz
-from model_defs.op_test import DummyNet, ConcatNet, PermuteNet, PReluNet, FakeQuantNet
-from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
-
-from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, skipIfUnsupportedMinOpsetVersion, skipScriptTest
-
+import caffe2.python.onnx.backend as backend
 import torch
 import torch.onnx
 import torch.onnx.utils
+from torch import quantization
 from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
-from torch import quantization
-
-import unittest
-
-import caffe2.python.onnx.backend as backend
-
-from verify import verify
 
 if torch.cuda.is_available():
+
     def toC(x):
         return x.cuda()
+
 else:
+
     def toC(x):
         return x
+
 
 BATCH_SIZE = 2
 
@@ -53,26 +65,28 @@ class TestModels(TestCase):
         with torch.onnx.select_model_mode_for_export(model, None):
             graph = torch.onnx.utils._trace(model, inputs, OperatorExportTypes.ONNX)
             torch._C._jit_pass_lint(graph)
-            verify(model, inputs, backend, rtol=rtol, atol=atol,
-                   opset_version=self.opset_version)
+            verify(
+                model,
+                inputs,
+                backend,
+                rtol=rtol,
+                atol=atol,
+                opset_version=self.opset_version,
+            )
 
     def test_ops(self):
-        x = Variable(
-            torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0)
-        )
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(DummyNet()), toC(x))
 
     def test_prelu(self):
-        x = Variable(
-            torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0)
-        )
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(PReluNet(), x)
 
     @skipScriptTest()
     def test_concat(self):
         input_a = Variable(torch.randn(BATCH_SIZE, 3))
         input_b = Variable(torch.randn(BATCH_SIZE, 3))
-        inputs = ((toC(input_a), toC(input_b)), )
+        inputs = ((toC(input_a), toC(input_b)),)
         self.exportTest(toC(ConcatNet()), inputs)
 
     def test_permute(self):
@@ -92,19 +106,17 @@ class TestModels(TestCase):
     @unittest.skip("This model takes too much memory")
     def test_srresnet(self):
         x = Variable(torch.randn(1, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(SRResNet(rescale_factor=4, n_filters=64, n_blocks=8)), toC(x))
+        self.exportTest(
+            toC(SRResNet(rescale_factor=4, n_filters=64, n_blocks=8)), toC(x)
+        )
 
     @skipIfNoLapack
     def test_super_resolution(self):
-        x = Variable(
-            torch.randn(BATCH_SIZE, 1, 224, 224).fill_(1.0)
-        )
+        x = Variable(torch.randn(BATCH_SIZE, 1, 224, 224).fill_(1.0))
         self.exportTest(toC(SuperResolutionNet(upscale_factor=3)), toC(x), atol=1e-6)
 
     def test_alexnet(self):
-        x = Variable(
-            torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0)
-        )
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(alexnet()), toC(x))
 
     def test_mnist(self):
@@ -190,7 +202,9 @@ class TestModels(TestCase):
 
         # Use per tensor for weight. Per channel support will come with opset 13
         qat_resnet50.qconfig = quantization.QConfig(
-            activation=quantization.default_fake_quant, weight=quantization.default_fake_quant)
+            activation=quantization.default_fake_quant,
+            weight=quantization.default_fake_quant,
+        )
         quantization.prepare_qat(qat_resnet50, inplace=True)
         qat_resnet50.apply(torch.ao.quantization.enable_observer)
         qat_resnet50.apply(torch.ao.quantization.enable_fake_quant)
@@ -211,7 +225,8 @@ class TestModels(TestCase):
 
         qat_resnet50.qconfig = quantization.QConfig(
             activation=quantization.default_fake_quant,
-            weight=quantization.default_per_channel_weight_fake_quant)
+            weight=quantization.default_per_channel_weight_fake_quant,
+        )
         quantization.prepare_qat(qat_resnet50, inplace=True)
         qat_resnet50.apply(torch.ao.quantization.enable_observer)
         qat_resnet50.apply(torch.ao.quantization.enable_fake_quant)
@@ -245,12 +260,22 @@ class TestModels(TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_fcn(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(fcn_resnet101(pretrained=False, pretrained_backbone=False)), toC(x), rtol=1e-3, atol=1e-5)
+        self.exportTest(
+            toC(fcn_resnet101(pretrained=False, pretrained_backbone=False)),
+            toC(x),
+            rtol=1e-3,
+            atol=1e-5,
+        )
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_deeplab(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(deeplabv3_resnet101(pretrained=False, pretrained_backbone=False)), toC(x), rtol=1e-3, atol=1e-5)
+        self.exportTest(
+            toC(deeplabv3_resnet101(pretrained=False, pretrained_backbone=False)),
+            toC(x),
+            rtol=1e-3,
+            atol=1e-5,
+        )
 
     def test_r3d_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
