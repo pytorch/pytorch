@@ -545,6 +545,10 @@ class Tensor(torch._C._TensorBase):
         else:
             return LU, pivots
 
+    def solve(self, other):
+        from ._linalg_utils import solve
+        return solve(self, other)
+
     def resize(self, *sizes):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.resize, (self,), self, *sizes)
