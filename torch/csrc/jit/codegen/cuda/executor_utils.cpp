@@ -935,14 +935,14 @@ NvrtcFunction nvrtcCompile(
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
 
-  const char* disable_fma = getenv("PYTORCH_NVFUSER_DISABLE_FMA");
+  const bool disable_fma = isDisabled(DisableOption::Fma);
 #ifdef __HIP_PLATFORM_HCC__
-  if (disable_fma && atoi(disable_fma)) {
+  if (disable_fma) {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
   }
 #else
-  if (disable_fma && atoi(disable_fma)) {
+  if (disable_fma) {
     args.push_back("--fmad=false");
   } else {
     args.push_back("--fmad=true");

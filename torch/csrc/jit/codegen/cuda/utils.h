@@ -46,18 +46,24 @@ enum class DebugDumpOption {
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
 
+//! Types of features to disable
+//!
+//! These can be set through the `PYTORCH_NVFUSER_DISABLE` environment variable
+//!
+enum class DisableOption {
+  Fallback, //! Disable fallback
+  Fma, //! Disable FMA instructions
+  IndexHoist, //! Disable index hoisting
+  Nvtx, //! Disable NVTX instrumentation
+  PredicateElimination, //! Disable predicate elimination
+  UnrollWithRng //! Disable unrolling for kernels with RNG in them
+};
+
+TORCH_CUDA_CU_API bool isDisabled(DisableOption option);
+
 // Check if fallback path should be used which will dispatch to eagermode if any
 // errors are encountered. Helpful for debugging.
 bool useFallback();
-
-// Returns if unrolling should not be used for kernels with RNG in them.
-bool disableRNGUnrolling();
-
-//! Returns if index hoisting should be disabled
-TORCH_CUDA_CU_API bool disableIndexHoisting();
-
-//! Returns if predicate elimination should be disabled
-TORCH_CUDA_CU_API bool disablePredicateElimination();
 
 //! Ceil integer division
 constexpr int64_t ceilDiv(int64_t a, int64_t b) {

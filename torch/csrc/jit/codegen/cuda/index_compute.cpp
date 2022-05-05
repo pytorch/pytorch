@@ -1071,7 +1071,7 @@ Val* hoistConsumerIndex(
     const std::vector<kir::ForLoop*>& loops,
     Val* index) {
   // If index has no defining expression, there's nothing to hoist
-  if (disableIndexHoisting() || index->definition() == nullptr) {
+  if (isDisabled(DisableOption::IndexHoist) || index->definition() == nullptr) {
     return index;
   }
 
@@ -1136,7 +1136,7 @@ Val* hoistProducerIndex(
     const std::vector<kir::ForLoop*>& loops,
     Val* index) {
   // If index has no defining expression, there's nothing to hoist
-  if (disableIndexHoisting() || index->definition() == nullptr) {
+  if (isDisabled(DisableOption::IndexHoist) || index->definition() == nullptr) {
     return index;
   }
 
@@ -3043,7 +3043,7 @@ std::pair<Val*, Val*> hoistPredicates(
     const std::unordered_map<IterDomain*, Val*>& ref_stop_index_map) {
   const std::pair<Val*, Val*> same_indices{start_index, stop_index};
 
-  if (disableIndexHoisting()) {
+  if (isDisabled(DisableOption::IndexHoist)) {
     return same_indices;
   }
 

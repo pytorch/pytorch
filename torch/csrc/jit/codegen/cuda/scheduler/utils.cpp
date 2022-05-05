@@ -1646,7 +1646,7 @@ size_t expandVectorizationToContigMergedDomains(
     int break_point,
     size_t default_word_size) {
   // Don't vectorize when RNG is used
-  if (fusion->isStochastic() && disableRNGUnrolling()) {
+  if (fusion->isStochastic() && isDisabled(DisableOption::UnrollWithRng)) {
     return default_word_size;
   }
 
