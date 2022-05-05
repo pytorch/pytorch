@@ -343,6 +343,10 @@ def to_real_dtype(dtype: torch.dtype):
     elif dtype == torch.complex128:
         return torch.float64
 
+# TODO: None of these loss castings are quite correct, see
+# https://github.com/pytorch/pytorch/issues/76870. Also, the ATen kernels
+# perform the pointwise portion in opmath, but don't maintain it between the
+# pointwise portion and the reduction
 
 @register_decomposition(aten.l1_loss)
 def l1_loss(
@@ -371,6 +375,7 @@ def l1_loss_backward(
 
 
 @register_decomposition(aten.mse_loss)
+@pw_cast_for_opmath
 def mse_loss(
     self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
 ) -> Tensor:
@@ -1034,14 +1039,14 @@ def logical_not(self: Tensor) -> Tensor:
     return ~self.to(dtype=torch.bool)
 
 
-# Actually, I'm just not sure how to implement this correctly (maybe you need a special case for floating point?)
-# @register_decomposition(aten.xlogy)
-# def xlogy(self: Tensor, other: Tensor) -> Tensor:
-#     return aten.where(aten.isnan(self),
-#                       self,
-#                       aten.where(self == aten.new_zeros(self, ()),
-#                                  aten.new_zeros(self, ()),
-#                                  self * aten.log(other)))
+@register_decomposition(aten.xlogy.Tensor)
+@pw_cast_for_int_to_real
+def xlogy(self: Tensor, other: Tensor) -> Tensor:
+    return aten.where(aten.isnan(self),
+                      self,
+                      aten.where(self == aten.new_zeros(self, ()),
+                                 aten.new_zeros(self, ()),
+                                 self * aten.log(other)))
 
 
 @register_decomposition(aten.var.correction)
@@ -1152,3 +1157,42 @@ def cudnn_batch_norm_backward(
         epsilon,
         [True, True, True],
     )
+
+
+@register_decomposition(aten.rot90.default)
+def rot90(self: Tensor, k: int = 1, dims: List[int] = [0, 1]) -> Tensor:
+    total_dims = self.dim()
+    total_rot_dims = len(dims)
+    assert total_rot_dims == 2, f"expected total rotation dims == 2, but got dims = {total_rot_dims}"
+    assert total_dims >= 2, f"expected total dims >= 2, but got total dims = {total_dims}"
+    assert dims[0] != dims[1] and abs(dims[0] - dims[1]) != total_dims, f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
+    assert dims[0] < total_dims and dims[0] >= -total_dims, f"Rotation dim0 out of range, dim0 = {dims[0]}"
+    assert dims[1] < total_dims and dims[1] >= -total_dims, f"Rotation dim1 out of range, dim1 = {dims[1]}"
+    k = (4 + (k % 4)) % 4
+    if k == 1:
+        return self.flip(dims[1]).transpose(dims[0], dims[1])
+    elif k == 2:
+        return self.flip(dims)
+    elif k == 3:
+        return self.flip(dims[0]).transpose(dims[0], dims[1])
+    else:
+        return self.clone(memory_format=torch.contiguous_format)
+
+
+@register_decomposition(aten.transpose.int)
+def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
+    dim0, dim1 = utils.canonicalize_dims(self.ndim, (dim0, dim1))
+
+    if self.dim() <= 1:
+        return self
+
+    if dim0 == dim1:
+        return self
+    perm = list(range(self.dim()))
+    perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
+    return torch.permute(self, perm)
+
+
+@register_decomposition(aten.t.default)
+def t(self: Tensor) -> Tensor:
+    return self.transpose(0, 0 if self.dim() < 2 else 1)
