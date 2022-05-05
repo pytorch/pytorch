@@ -137,7 +137,7 @@ c10::DeviceType convertDeviceType(const std::string& tpDeviceType) {
     return c10::kCPU;
   } else if (tpDeviceType == tensorpipe::kCudaDeviceType) {
     return c10::kCUDA;
-  } else if (tpDeviceType == "meta") {
+  } else if (tpDeviceType == tensorpipe::kMetaDeviceType) {
     return c10::kMeta;
   } else {
     TORCH_INTERNAL_ASSERT(false, "Unrecognized TensorPipe buffer type.");
