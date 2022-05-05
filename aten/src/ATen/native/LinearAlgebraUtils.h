@@ -41,10 +41,11 @@ static inline std::vector<int64_t> batched_matrix_contiguous_strides(
   // and C-contiguous matrices
   auto strides = c10::contiguous_strides(sizes);
   if (f_contig) {
-    // Swap the strides of the last two dimensions, so that we return
+    // Fix the strides of the last two dimensions, so that we return
     // C-contiguous batches of F-contiguous matrices.
     auto dim = strides.size();
-    std::swap(strides[dim - 1], strides[dim - 2]);
+    strides[dim - 1] = std::max(sizes[dim - 2], static_cast<int64_t>(1));
+    strides[dim - 2] = 1;
   }
   return strides;
 }
