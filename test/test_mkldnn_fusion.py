@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -6,7 +5,7 @@ import unittest
 
 from torch.testing._internal.common_utils import run_tests
 
-from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
+from torch.testing._internal.jit_utils import JitTestCase
 
 from test_tensorexpr import warmup_and_run_forward
 
