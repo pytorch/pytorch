@@ -1994,7 +1994,7 @@ void ONNXShapeTypeInference(
         switch (n->kind()) {
           case ::c10::onnx::Shape:
           case ::c10::onnx::Gather: {
-            inferred_shape_data = onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, inferred_shape_data);
+            onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, inferred_shape_data);
             break;
           }
           default: {
