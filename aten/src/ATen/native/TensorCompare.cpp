@@ -33,6 +33,20 @@ const OptionalScalarRef max) {
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(clamp_max) (
+  const Tensor& self,
+  const Scalar& max
+) {
+  build_borrowing_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(clamp_min) (
+  const Tensor& self,
+  const Scalar& min
+) {
+  build_borrowing_unary_op(maybe_get_output(), self);
+}
+
 TORCH_META_FUNC2(isin, Tensor_Tensor) (
   const Tensor& elements, const Tensor& test_elements, bool /*assume_unique*/, bool /*invert*/
 ) {
@@ -491,28 +505,18 @@ Tensor& clamp_out(const Tensor& self, const c10::optional<Tensor>& min,
   return result;
 }
 
-Tensor clamp(const Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_outf(self, min, max, result);
-}
-
 Tensor clamp(const Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
   Tensor result = at::empty({0}, self.options());
   return at::clamp_outf(self, min, max, result);
-}
-
-Tensor& clamp_(Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
-  return at::clamp_outf(self, min, max, self);
 }
 
 Tensor& clamp_(Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
   return at::clamp_outf(self, min, max, self);
 }
 
-Tensor& clamp_max_out(const Tensor& self, const Scalar& max, Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  clamp_max_scalar_stub(iter.device_type(), iter, max);
-  return result;
+TORCH_IMPL_FUNC(clamp_max_out)
+(const Tensor& self, const Scalar& max, const Tensor& result) {
+  clamp_max_scalar_stub(device_type(), *this, max);
 }
 
 Tensor& clamp_max_out(const Tensor& self, const Tensor& max, Tensor& result) {
@@ -523,28 +527,18 @@ Tensor& clamp_max_out(const Tensor& self, const Tensor& max, Tensor& result) {
   return result;
 }
 
-Tensor clamp_max(const Tensor& self, const Scalar& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_max_outf(self, max, result);
-}
-
 Tensor clamp_max(const Tensor& self, const Tensor& max) {
   Tensor result = at::empty({0}, self.options());
   return at::clamp_max_outf(self, max, result);
-}
-
-Tensor& clamp_max_(Tensor& self, const Scalar& max) {
-  return at::clamp_max_outf(self, max, self);
 }
 
 Tensor& clamp_max_(Tensor& self, const Tensor& max) {
   return at::clamp_max_outf(self, max, self);
 }
 
-Tensor& clamp_min_out(const Tensor& self, const Scalar& min, Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  clamp_min_scalar_stub(iter.device_type(), iter, min);
-  return result;
+TORCH_IMPL_FUNC(clamp_min_out)
+(const Tensor& self, const Scalar& min, const Tensor& result) {
+  clamp_min_scalar_stub(device_type(), *this, min);
 }
 
 Tensor& clamp_min_out(const Tensor& self, const Tensor& min, Tensor& result) {
@@ -555,18 +549,9 @@ Tensor& clamp_min_out(const Tensor& self, const Tensor& min, Tensor& result) {
   return result;
 }
 
-Tensor clamp_min(const Tensor& self, const Scalar& min) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_min_outf(self, min, result);
-}
-
 Tensor clamp_min(const Tensor& self, const Tensor& min) {
   Tensor result = at::empty({0}, self.options());
   return at::clamp_min_outf(self, min, result);
-}
-
-Tensor& clamp_min_(Tensor& self, const Scalar& min) {
-  return at::clamp_min_outf(self, min, self);
 }
 
 Tensor& clamp_min_(Tensor& self, const Tensor& min) {
