@@ -20,7 +20,7 @@ class Library:
 
     Args:
         ns: library name
-        kind: "IMPL" by default
+        kind: "DEF", "IMPL" (default: "IMPL")
         dispatch_key: PyTorch dispatch key (default: "")
     """
     def __init__(self, ns, kind, dispatch_key=""):
