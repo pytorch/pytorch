@@ -16,6 +16,7 @@
 
 #include <nvfuser_resources/PhiloxCudaStateRaw.h>
 #include <nvfuser_resources/array.h>
+#include <nvfuser_resources/array_rocm.h>
 #include <nvfuser_resources/bf16_support.h>
 #include <nvfuser_resources/block_reduction.h>
 #include <nvfuser_resources/block_sync_atomic.h>
@@ -36,6 +37,7 @@
 #include <nvfuser_resources/tuple.h>
 #include <nvfuser_resources/type_traits.h>
 #include <nvfuser_resources/warp.h>
+#include <nvfuser_resources/warp_rocm.h>
 #include <nvfuser_resources/welford.h>
 
 #ifndef USE_ROCM
@@ -78,7 +80,11 @@ std::string kernelPreamble() {
   // Base classes and helpers
   ss << nvfuser_resources::tensor_cu;
   ss << nvfuser_resources::type_traits_cu;
+#ifndef USE_ROCM
   ss << nvfuser_resources::array_cu;
+#else
+  ss << nvfuser_resources::array_rocm_cu;
+#endif
   ss << nvfuser_resources::random_numbers_cu;
   ss << nvfuser_resources::helpers_cu;
   ss << nvfuser_resources::index_utils_cu;
@@ -98,9 +104,13 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::grid_broadcast_cu;
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
+#ifndef USE_ROCM
   ss << nvfuser_resources::warp_cu;
   ss << nvfuser_resources::tensorcore_cu;
   ss << nvfuser_resources::memory_cu;
+#else
+  ss << nvfuser_resources::warp_rocm_cu;
+#endif
   ss << nvfuser_resources::fused_reduction_cu;
   ss << nvfuser_resources::swizzle_cu;
 
