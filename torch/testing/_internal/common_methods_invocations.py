@@ -6413,8 +6413,8 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
     is_linalg_lu_solve = (op_info.name == "linalg.lu_solve")
 
     batches = ((), (0, ), (2, ))
-    ns = (5, 3, 0)
-    nrhs = (0, 1, 6)
+    ns = (3, 1, 0)
+    nrhs = (4, 1, 0)
 
     for n, batch, rhs in product(ns, batches, nrhs):
         A = make_a(*(batch + (n, n)))
@@ -12745,9 +12745,6 @@ op_db: List[OpInfo] = [
            decorators=(
                # FIXME: both derivatives are implemented incorrectly
                # https://github.com/pytorch/pytorch/issues/69322
-               # RuntimeError: cannot reshape tensor of 0 elements into shape [0, 1, -1] because the
-               # unspecified dimension size -1 can be any value and is ambiguous
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -12807,15 +12804,21 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.max_unpool1d',
            aten_name='max_unpool1d',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
-               # Jacobian mismatch
+               # Gradients are tested in `variant_test_name=grad` below.
+               # We skip tests here because there is non-determinism in backward
+               # with gather, when there are writes into the same memory location,
+               # and if there are several indices pointing to the same memory,
+               # gradcheck is oblivious about that and cannot perturb them all at once
+               # (see sample_inputs_max_unpool_grad to find out more).
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
-               # Backward is not reentrant
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
            )),
@@ -12824,6 +12827,7 @@ op_db: List[OpInfo] = [
            aten_name='max_unpool1d',
            supports_autograd=True,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
@@ -12832,22 +12836,30 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.max_unpool2d',
            aten_name='max_unpool2d',
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
+               # Gradients are tested in `variant_test_name=grad` below.
+               # We skip tests here because there is non-determinism in backward
+               # with gather, when there are writes into the same memory location,
+               # and if there are several indices pointing to the same memory,
+               # gradcheck is oblivious about that and cannot perturb them all at once
+               # (see sample_inputs_max_unpool_grad to find out more).
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
-               # Backward is not reentrant
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
-               # Jacobian mismatch
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
            aten_name='max_unpool2d',
+           supports_autograd=True,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            # Vmap is not happy with non-contiguous (channels_last) inputs
            check_batched_grad=False,
            supports_out=False,
@@ -12857,22 +12869,31 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool3d',
            aten_name='max_unpool3d',
+           supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
-           supports_gradgrad=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
            sample_inputs_func=sample_inputs_max_unpool,
            skips=(
-               # Jacobian mismatch
+               # Gradients are tested in `variant_test_name=grad` below.
+               # We skip tests here because there is non-determinism in backward
+               # with gather, when there are writes into the same memory location,
+               # and if there are several indices pointing to the same memory,
+               # gradcheck is oblivious about that and cannot perturb them all at once
+               # (see sample_inputs_max_unpool_grad to find out more).
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
            )),
     OpInfo('nn.functional.max_unpool3d',
            variant_test_name='grad',
            aten_name='max_unpool3d',
+           supports_autograd=True,
            supports_forward_ad=True,
-           supports_gradgrad=False,
+           supports_fwgrad_bwgrad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
