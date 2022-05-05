@@ -1424,11 +1424,18 @@ Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
 
 Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {
   AT_ASSERT(indices.dim() >= dim);
-  auto size = indices.sizes().slice(0, indices.dim() - dim).vec();
-  size.push_back(-1);
-  auto indices_view = indices.view(size);
-  const auto memory_format = indices.suggest_memory_format();
-  return grad.contiguous(memory_format).view(size).gather(-1, indices_view).view(indices.sizes());
+  // handle non-empty inputs
+  if (indices.numel()) {
+    auto size = indices.sizes().slice(0, indices.dim() - dim).vec();
+    size.push_back(-1);
+    auto indices_view = indices.view(size);
+    const auto memory_format = indices.suggest_memory_format();
+    return grad.contiguous(memory_format).view(size).gather(-1, indices_view).view(indices.sizes());
+  }
+  // handle empty inputs
+  else {
+    return at::empty_like(indices, grad.options());
+  }
 }
 
 Tensor glu_double_backward(const Tensor & grad, const Tensor & grad_output, const Tensor & input, int64_t dim) {
