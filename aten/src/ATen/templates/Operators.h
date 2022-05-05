@@ -22,6 +22,7 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/QScheme.h>
+#include <c10/util/OptionalArrayRef.h>
 #include <tuple>
 #include <vector>
 

@@ -31,7 +31,7 @@ class TORCH_API TsNode : public lazy::Node {
 
   hash_t shapeHash() const override;
 
-  const std::string& getPythonStacktrace() const { return python_stacktrace_; }
+  const std::string getPythonStacktrace() const;
 
   // Lower is a backend-specific method since it returns a backend specific
   // type. hence, it is convenient to define it differently per-backend rather
@@ -46,7 +46,6 @@ class TORCH_API TsNode : public lazy::Node {
   // in this case, we will use the dag hash WITHOUT size info if dynamic shape is enabled
   // and use the dag hash WITH size info otherwise.
   hash_t dag_hash_;
-  std::string python_stacktrace_;
 };
 
 // Note: this OpKind is separate from ltc_ops.h since it would be a circular import otherwise, I like leaving TensorList
