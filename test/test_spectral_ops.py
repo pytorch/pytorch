@@ -488,7 +488,8 @@ class TestFFT(TestCase):
         torch.half : tol(1e-2, 1e-2),
         torch.chalf : tol(1e-2, 1e-2),
     })
-    @dtypes(torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
+    @dtypes(torch.half, torch.float, torch.double,
+            torch.complex32, torch.complex64, torch.complex128)
     def test_fftn_round_trip(self, device, dtype):
         skip_helper(device, dtype)
 
@@ -529,8 +530,13 @@ class TestFFT(TestCase):
                 kwargs = {'s': s, 'dim': dim, 'norm': norm}
                 y = backward(forward(x, **kwargs), **kwargs)
                 # For real input, ifftn(fftn(x)) will convert to complex
-                self.assertEqual(x, y, exact_dtype=(
-                    forward != torch.fft.fftn or x.is_complex()))
+                if x.dtype is torch.half and y.dtype is torch.chalf:
+                    # Since type promotion currently doesn't work with complex32
+                    # manually promote `x` to complex32
+                    self.assertEqual(x.to(torch.chalf), y)
+                else:
+                    self.assertEqual(x, y, exact_dtype=(
+                        forward != torch.fft.fftn or x.is_complex()))
 
     @onlyNativeDeviceTypes
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
