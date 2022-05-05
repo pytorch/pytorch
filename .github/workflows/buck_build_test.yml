@@ -66,4 +66,7 @@ jobs:
       - name: Build Buck target
         run: |
           echo -e "" > .buckconfig
+          cd third_party
+          python generate-xnnpack-wrappers.py
+          cd ..
           buck build --config-file oss.buckconfig c10:c10 third_party: --keep-going
