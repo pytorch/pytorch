@@ -967,13 +967,13 @@ Tensor _csr_to_block_csr_cpu(const Tensor& self, IntArrayRef blocksize) {
                   result_values.data_ptr<scalar_t>());
             });
       });
-  return at::native::_sparse_csr_tensor_unsafe(
+  return at::native::_sparse_bsr_tensor_unsafe(
       result_crow_indices,
       result_col_indices,
       result_values,
       self.sizes(),
       result_values.scalar_type(),
-      self.layout(),
+      c10::kSparseBsr,
       result_values.device());
 }
 
@@ -987,7 +987,7 @@ Tensor _csr_to_block_csr(const Tensor& self, IntArrayRef blocksize) {
                                 self_values.cpu(),
                                 self.sizes(),
                                 self_values.scalar_type(),
-                                self.layout(),
+                                c10::kSparseBsr,
                                 self_values.device()),
       blocksize);
   Tensor result_values = cpu_result.values().to(self_values.options());
@@ -999,7 +999,7 @@ Tensor _csr_to_block_csr(const Tensor& self, IntArrayRef blocksize) {
       result_values,
       self.sizes(),
       result_values.scalar_type(),
-      self.layout(),
+      c10::kSparseBsr,
       result_values.device());
 }
 

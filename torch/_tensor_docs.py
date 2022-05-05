@@ -4245,6 +4245,20 @@ Example::
 
 """)
 
+add_docstr_all('to_sparse_bsr',
+               r"""
+to_sparse_bsr(blocksize) -> Tensor
+Convert a tensor to a block based compressed row storage format.
+
+Example::
+
+    >>> dense = torch.randn(5, 5)
+    >>> sparse = dense.to_sparse_csr()
+    >>> sparse._nnz()
+    25
+
+""")
+
 add_docstr_all('to_mkldnn',
                r"""
 to_mkldnn() -> Tensor
