@@ -485,7 +485,6 @@ def _decide_input_format(model, args):
     return args
 
 
-
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -535,6 +534,7 @@ def _get_param_count_list(method_graph, args_params):
 
 def _check_flatten_did_not_remove(original, jit_flattened):
     """torch.jit._flatten removes None. Check if it did so in this case."""
+
     def flatten(x):
         if isinstance(x, (list, tuple)):
             for inner in x:
@@ -546,6 +546,7 @@ def _check_flatten_did_not_remove(original, jit_flattened):
                     yield y
         else:
             yield x
+
     flattened_with_none = list(flatten(original))
     num_none = len(flattened_with_none) - len(jit_flattened)
     assert num_none >= 0
@@ -553,8 +554,8 @@ def _check_flatten_did_not_remove(original, jit_flattened):
         raise ValueError(
             f"args contained {num_none} None's after flattening. "
             "When exporting a ScriptModule or ScriptFunction, no args may "
-            "be None because that breaks type propagation.")
-
+            "be None because that breaks type propagation."
+        )
 
 
 def _create_jit_graph(model, args):
@@ -576,7 +577,8 @@ def _create_jit_graph(model, args):
         param_count_list = _get_param_count_list(method_graph, args_params)
         in_vars, _ = torch.jit._flatten(args_params)
         graph = torch._C._propagate_and_assign_input_shapes(
-            method_graph, tuple(in_vars), param_count_list, False, False)
+            method_graph, tuple(in_vars), param_count_list, False, False
+        )
         return graph, params, torch_out, module
     elif isinstance(model, torch.jit.ScriptFunction):
         params = ()
@@ -584,7 +586,8 @@ def _create_jit_graph(model, args):
         torch._C._jit_pass_onnx_function_substitution(graph)
         param_count_list = _get_param_count_list(graph, args)
         graph = torch._C._propagate_and_assign_input_shapes(
-            graph, flattened_args, param_count_list, False, False)
+            graph, flattened_args, param_count_list, False, False
+        )
         return graph, params, torch_out, None
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
@@ -732,6 +735,7 @@ def _model_to_graph(
         torch.onnx.log("Torch IR graph at exception: ", graph)
         raise
     from torch.onnx.symbolic_helper import _onnx_shape_inference
+
     is_script = isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule))
     if is_script:
         example_outputs = _get_example_outputs(model, args)
