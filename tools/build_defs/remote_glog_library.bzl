@@ -7,6 +7,7 @@ def remote_glog_library(name, srcs, http_archive, exported_preprocessor_flags, *
                 'logging',
     ]
 
+    # from glog bazel build
     sed = " ".join([
         "sed",
         "-e 's/@ac_cv_cxx_using_operator@/1/g'",
@@ -33,7 +34,8 @@ def remote_glog_library(name, srcs, http_archive, exported_preprocessor_flags, *
     new_srcs["config.h"] = ["src/config.h"]
 
     cmd.append("rsync -a $(location :{})/src/glog/log_severity.h $OUT/glog/".format(http_archive))
-    new_srcs["log_severity.h"] = ["glog/log_severity.h"]
+    new_srcs["."] = ["glog"] # a hacky way to get the location of this folder
+    # new_srcs["log_severity.h"] = ["glog/log_severity.h"]
 
     for f in [
                 'vlog_is_on',
@@ -42,14 +44,14 @@ def remote_glog_library(name, srcs, http_archive, exported_preprocessor_flags, *
                 'logging',
             ]:
         cmd.append("{} $(location :{})/src/glog/{}.h.in > $OUT/glog/{}.h".format(sed, http_archive, f, f))
-        new_srcs["{}.h".format(f)] = ["glog/{}.h".format(f)]
-    new_srcs["."] = ["glog"]
+        # new_srcs["{}.h".format(f)] = ["glog/{}.h".format(f)]
 
     temp_name = name + "_temp"
     native.genrule(
         name = temp_name,
         outs = new_srcs,
         cmd = " && ".join(cmd),
+        # reuqired for internal buck but not oss buck
         # default_outs = ["."],
     )
 
