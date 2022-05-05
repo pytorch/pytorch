@@ -1093,8 +1093,7 @@ class TestSparse(TestCase):
         # NOTE: GRAIN_SIZE = 32768
         # case nnz <= size[d]
         tlen = 70000  # > 2 * GRAIN_SIZE
-        # TODO: unblock once CI failure is known
-        # run_test(tlen, tlen)
+        run_test(tlen, tlen)
 
         # case nnz > size[d]
         run_test(tlen, tlen // 2)
