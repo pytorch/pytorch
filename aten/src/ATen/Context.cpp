@@ -6,6 +6,7 @@
 #include <c10/core/CPUAllocator.h>
 
 #include <algorithm>
+#include <cctype>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
