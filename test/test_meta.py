@@ -16,9 +16,12 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 
 import functools
+import re
 from functools import partial
 import unittest
 import warnings
+
+RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
 meta_exclude_set = {
     torch.Tensor.__lshift__,  # MISSING aten::__lshift__.Scalar
