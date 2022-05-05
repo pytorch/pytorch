@@ -12,7 +12,6 @@ import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
 toq = torch.ops.quantized
-from torch.testing._internal.common_utils import skipIfCrossRef
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     skip_if_no_torchvision,
@@ -122,7 +121,6 @@ class QuantizeDBRTestCase(QuantizationTestCase):
             traced_rewritten_out = traced_rewritten(*example_args)
             self.assertTrue(_allclose(traced_rewritten_out, out_q))
 
-@skipIfCrossRef
 @skipIfNoFBGEMM
 class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
     """
@@ -381,7 +379,6 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
             fuse_modules=False)
 
 
-@skipIfCrossRef
 @skipIfNoFBGEMM
 class TestQuantizeDBR(QuantizeDBRTestCase):
     def test_fusion(self):
@@ -1365,7 +1362,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             .check_count("aten::dequantize", 2, exactly=True)\
             .run(mqt.graph)
 
-@skipIfCrossRef
 @skipIfNoFBGEMM
 class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
     """
@@ -1595,7 +1591,6 @@ class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
             do_fx_comparison=False)
 
 
-@skipIfCrossRef
 @skipIfNoFBGEMM
 class TestQuantizeDBRModels(QuantizeDBRTestCase):
     @skip_if_no_torchvision

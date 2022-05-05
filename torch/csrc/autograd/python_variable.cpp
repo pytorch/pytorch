@@ -1,4 +1,5 @@
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/PythonFallbackKernel.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/util/DeadlockDetection.h>
@@ -32,7 +33,6 @@
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/autograd/python_mode.h>
 
 
 #include <ATen/ATen.h>
@@ -1008,14 +1008,14 @@ PyObject *THPVariable_is_mkldnn(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_is_mlc(THPVariable *self, void *unused)
+PyObject *THPVariable_is_mps(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_getter(self, "is_mlc");
+    return handle_torch_function_getter(self, "is_mps");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(self_.is_mlc());
+  return torch::autograd::utils::wrap(self_.is_mps());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1198,7 +1198,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"is_sparse_csr", (getter)THPVariable_is_sparse_csr, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
-  {"is_mlc", (getter)THPVariable_is_mlc, nullptr, nullptr, nullptr},
+  {"is_mps", (getter)THPVariable_is_mps, nullptr, nullptr, nullptr},
   {"is_ort", (getter)THPVariable_is_ort, nullptr, nullptr, nullptr},
   {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
@@ -1738,9 +1738,9 @@ bool isPythonTensor(const Tensor& tensor) {
 }
 
 // NOTE [dispatch_fn's type argument]
-// `type` is nullable and represents the PythonMode going on.
-// Right now we only support a single PythonMode, but in the future we could
-// change this to a stack of PythonModes.
+// `type` is nullable and represents the TorchDispatchMode going on.
+// Right now we only support a single TorchDispatchMode, but in the future we could
+// change this to a stack of TorchDispatchModes.
 //
 // If `type` isn't null, then we consider the type for dispatch by prepending
 // it to the overloaded_args list. `handle_torch_funciton_no_python_arg_parser`
@@ -1898,6 +1898,7 @@ void concrete_dispatch_fn(
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
   pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
 
   // Setup the arguments expected for the detach call
   std::vector<py::handle> overloaded_args;

@@ -8,7 +8,7 @@ import torch.onnx.symbolic_helper as sym_help
 import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType, quantized_args
-from torch.onnx.symbolic_opset9 import expand, unused, mul, op_with_optional_float_cast
+from torch.onnx.symbolic_opset9 import expand, unused, mul, op_with_optional_float_cast, _pad_circular
 from torch.onnx.symbolic_opset9 import linalg_vector_norm as lvn
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
@@ -500,6 +500,20 @@ reflection_pad3d = reflection_pad
 replication_pad1d = replication_pad
 replication_pad2d = replication_pad
 replication_pad3d = replication_pad
+
+
+def pad(g, input, pad, mode, value):
+    mode = sym_help._parse_arg(mode, "s")
+    if mode == "replicate":
+        return replication_pad(g, input, pad)
+    elif mode == "reflect":
+        return reflection_pad(g, input, pad)
+    elif mode == "constant":
+        return constant_pad_nd(g, input, pad, value)
+    elif mode == "circular":
+        return _pad_circular(g, input, pad)
+    else:
+        raise RuntimeError(f"Unrecognized padding mode {mode}")
 
 
 def linalg_det(g, self):

@@ -16,7 +16,6 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     prepare_qat_fx,
 )
-from torch.testing._internal.common_utils import skipIfCrossRef
 from torch.testing._internal.common_quantization import (
     ConvBnModel,
     ConvBnReLUModel,
@@ -956,7 +955,6 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         return results
 
 
-@skipIfCrossRef
 class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
@@ -1610,7 +1608,10 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 self.assertTrue(
                     (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
                     (base_op in MODS_IO_TYPE_FP32_OR_INT8) or
-                    (base_op in METHS_IO_TYPE_FP32_OR_INT8),
+                    (base_op in METHS_IO_TYPE_FP32_OR_INT8) or
+                    # Softmax has a different signature for the quantized
+                    # version, so it does not fit into the cases above.
+                    (base_op is torch.nn.Softmax),
                     f"missing IO type handling for {base_op}")
             elif qhandler_cls == qp.EmbeddingQuantizeHandler:
                 # embedding shadowing is not implemented, for now
@@ -1952,6 +1953,20 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mp = prepare_fx(copy.deepcopy(m), qconfig_dict)
         mq = convert_fx(mp, is_reference=True)
         mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
+
+    def test_mul_add_skips_shadowing(self):
+        class M(nn.Module):
+            def forward(self, x):
+                x = x * x
+                x = torch.mul(x, x)
+                x = x + x
+                x = torch.add(x, x)
+                return x
+
+        m = M().eval()
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 1, 4, 4),),
+            results_len=0)
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
