@@ -8,15 +8,14 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
-                                                  TEST_NUMPY, torch_to_numpy_dtype_dict)
+                                                  TEST_NUMPY, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, dtypesIfCUDA, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, get_all_math_dtypes, integral_types_and, floating_types_and
 )
 
-if TEST_NUMPY:
-    import numpy as np
+import numpy as np
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -831,6 +830,10 @@ class TestTypePromotion(TestCase):
             self.assertEqual(res1, res2)
             self.assertEqual(res1.dtype, res2.dtype)
 
+    # Fails on XLA:
+    # https://github.com/pytorch/pytorch/pull/74234#issuecomment-1117169366
+    # https://github.com/pytorch/xla/issues/3551
+    @onlyNativeDeviceTypes
     def test_addcdiv_promotion(self, device):
         def op1(arg1, arg2, arg3):
             return torch.addcdiv(arg1, arg2, arg3)
@@ -840,6 +843,10 @@ class TestTypePromotion(TestCase):
 
         self._ternary_promotion_common(device, op1, op2)
 
+    # Fails on XLA:
+    # https://github.com/pytorch/pytorch/pull/74234#issuecomment-1117169366
+    # https://github.com/pytorch/xla/issues/3551
+    @onlyNativeDeviceTypes
     def test_addcmul_promotion(self, device):
         def op1(arg1, arg2, arg3):
             return torch.addcmul(arg1, arg2, arg3)
@@ -852,8 +859,8 @@ class TestTypePromotion(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
     @onlyCPU
-    @dtypes(*list(itertools.product(torch_to_numpy_dtype_dict.keys(),
-                                    torch_to_numpy_dtype_dict.keys())))
+    @dtypes(*list(itertools.product(set(numpy_to_torch_dtype_dict.values()),
+                                    set(numpy_to_torch_dtype_dict.values()))))
     def test_numpy_array_binary_ufunc_promotion(self, device, dtypes):
         import operator
         np_type = torch_to_numpy_dtype_dict[dtypes[0]]
