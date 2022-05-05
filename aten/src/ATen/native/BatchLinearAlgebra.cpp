@@ -1470,7 +1470,7 @@ std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
     "torch.solve is deprecated in favor of torch.linalg.solve",
     "and will be removed in a future PyTorch release.\n",
     "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
-    "To get the LU factorization see torch.lu, which can be used with torch.lu_solve or torch.lu_unpack.\n",
+    "To get the LU factorization see torch.linalg.lu_factor, which can be used with torch.lu_solve or torch.lu_unpack.\n",
     "X = torch.solve(B, A).solution\n",
     "should be replaced with\n",
     "X = torch.linalg.solve(A, B)"
@@ -1489,7 +1489,7 @@ std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tenso
     "torch.solve is deprecated in favor of torch.linalg.solve",
     "and will be removed in a future PyTorch release.\n",
     "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
-    "To get the LU factorization see torch.lu, which can be used with torch.lu_solve or torch.lu_unpack.\n",
+    "To get the LU factorization see torch.linalg.lu_factor, which can be used with torch.lu_solve or torch.lu_unpack.\n",
     "X = torch.solve(B, A).solution\n",
     "should be replaced with\n",
     "X = torch.linalg.solve(A, B)"
@@ -2256,6 +2256,17 @@ std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
 
 // TODO Deprecate this function in favour of linalg_lu_factor_ex
 std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool) {
+   TORCH_WARN_ONCE(
+    "torch.lu is deprecated in favor of torch.linalg.lu_factor / torch.linalg.lu_factor_ex and will be ",
+    "removed in a future PyTorch release.\n",
+    "LU, pivots = torch.lu(A, compute_pivots)\n",
+    "should be replaced with\n",
+    "LU, pivots = torch.linalg.lu_factor(A, compute_pivots)\n",
+    "and\n",
+    "LU, pivots, info = torch.lu(A, compute_pivots, get_infos=True)\n",
+    "should be replaced with\n",
+    "LU, pivots, info = torch.linalg.lu_factor_ex(A, compute_pivots)"
+  );
   return at::linalg_lu_factor_ex(self, compute_pivots, false);
 }
 
