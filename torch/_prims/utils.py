@@ -203,10 +203,12 @@ def validate_shape(shape: Sequence):
 def validate_idx(shape: Sequence, idx: int):
     """
     Validates that idx is a valid idx for the given shape.
+    0 and -1 is a valid index for an empty shape
     """
 
     assert isinstance(idx, int)
-    assert idx >= 0 and idx < len(shape)
+    ndim = len(shape) if len(shape) else 1
+    assert idx >= 0 and idx < ndim
 
 
 def validate_exclusive_idx(shape: Sequence, ex_idx: int):
@@ -220,9 +222,10 @@ def validate_exclusive_idx(shape: Sequence, ex_idx: int):
 
 
 def canonicalize_idx(shape: Sequence, idx: int):
-    validate_idx(shape, idx)
+    ndim = len(shape) if len(shape) else 1
     if idx < 0:
-        idx = idx + len(shape)
+        idx = idx + ndim
+    assert idx >= 0 and idx < ndim
     return idx
 
 
