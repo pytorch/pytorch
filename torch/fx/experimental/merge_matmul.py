@@ -9,27 +9,20 @@ import operator
 from typing import Dict, List
 
 
-def split_result_tensors(result: torch.Tensor, inputs: List[torch.Tensor]) -> List[torch.Tensor]:
+def get_first_dim(t: torch.Tensor) -> int:
     """
-    A free function for use in the merge_matmul graph transformation below that
-    splits the output from a merged matmul into the individual results for each
-    input tensor.
+    A free function primarily for use in the merge_matmul graph transformation below
+    that returns the first dimension of a Tensor. This is necessary because torch.Tensor.shape
+    is an attribute (and cannot be the target of a call_function node) and also helps save
+    a getitem op in the graph.
 
     Arguments:
-        result: The merged matmul result tensor.
-        inputs: The list of inputs that were merged into one for the matmul.
+        t: The tensor to get the first dimension of.
 
     Returns:
-        List of matmul results for each input tensor.
+        The first dimension of t.
     """
-    splits = [x.shape[0] for x in inputs]
-
-    # When fx tracer is running, x.shape[0] will be torch.fx.Attribute but we
-    # need an int even when tracing
-    if isinstance(result, torch.fx.Proxy):
-        splits = [0] * len(inputs)
-
-    return torch.split(result, splits)
+    return t.shape[0]
 
 
 def may_depend_on(a: Node, b: Node, search_depth: int = 6):
@@ -147,8 +140,11 @@ def merge_matmul(in_mod: torch.nn.Module):
 
         # Split the result of the merged matmul using the shapes of the LHS operands
         # to ascertain how large each chunk should be.
+        merge_mm_sizes = [
+            gm.graph.call_function(get_first_dim, (l,), {}) for l in lhs
+        ]
         merge_mm_split = gm.graph.call_function(
-            split_result_tensors, (merge_mm, lhs), {}
+            torch.split, (merge_mm, merge_mm_sizes), {}
         )
         merge_mm_res = [
             gm.graph.call_function(operator.getitem, (merge_mm_split, out), {})
