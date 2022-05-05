@@ -2,7 +2,6 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 
 #include <c10/macros/Export.h>
 

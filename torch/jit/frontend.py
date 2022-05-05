@@ -537,8 +537,9 @@ class StmtBuilder(Builder):
             raise UnsupportedNodeError(ctx, stmt, reason='without assigned value')
 
         # Disallow type annotations on instance attributes outside of __init__
-        if type(stmt.target) == ast.Attribute and \
-                stmt.target.value.id == "self" and ctx.funcname != "__init__":  # type: ignore[attr-defined]
+        if type(stmt.target) == ast.Attribute and\
+                stmt.target.value.id == "self" and\
+                ctx.funcname != "__init__":
             start = stmt.col_offset
             end = start + len(f"self.{stmt.target.attr}")
             if hasattr(stmt.annotation, 'id'):

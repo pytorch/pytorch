@@ -1,58 +1,44 @@
 from __future__ import annotations
 
+from numbers import Number
 from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
+from functools import reduce
+import threading
 
 import torch
 from torch.fx import Node
 
-# nvFuser imports are conditional on CUDA being available
-if torch.cuda.is_available():
-    from torch._C._nvfuser import DataType  # type: ignore[import]
-
-    _torch_dtype_to_nvfuser_dtype_map = {
-        torch.cdouble: DataType.ComplexDouble,
-        torch.cfloat: DataType.ComplexFloat,
-        torch.double: DataType.Double,
-        torch.float: DataType.Float,
-        torch.half: DataType.Half,
-        torch.bfloat16: DataType.BFloat16,
-        torch.long: DataType.Int,
-        torch.int: DataType.Int32,
-        torch.bool: DataType.Bool,
-    }
-else:
-    _torch_dtype_to_nvfuser_dtype_map = {}
-
-
-def getnvFuserDtype(dtype: torch.dtype):
-    """
-    Translates from torch.dtype to nvFuser's DataType enum
-    """
-    return _torch_dtype_to_nvfuser_dtype_map[dtype]
-
-
 ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
-DimsSequenceType = Union[List[int], Tuple[int, ...]]
-NumberType = Union[bool, int, float, complex]
-Number = (bool, int, float, complex)
 
 
-class TensorMeta(torch.Tensor):
+class TensorMeta_Meta(type):
+    def __init__(cls, *args, **kwargs):
+
+        _tls = threading.local()
+        cls._tls = _tls
+        cls._tls.ctx = None
+
+    @property
+    def ctx(cls):
+        return cls._tls.ctx
+
+    @ctx.setter
+    def ctx(cls, value):
+        cls._tls.ctx = value
+
+
+class TensorMeta(object, metaclass=TensorMeta_Meta):
     """
-    Model tensor metadata.  Not a stock meta tensor because device is modeled
-    as the original device (not meta device), also we have different behavior
-    for some high level Python bindings
+    Temporary helper class to model tensor metadata.
+
+    Likely to be replaced with an actual meta tensor subclass.
     """
 
-    node: Optional[Node]
-    tname: str
-
-    @staticmethod
-    def __new__(
-        cls,
-        tensorlike: Optional[Union[TensorMeta, NumberType, torch.Tensor]] = None,
+    def __init__(
+        self,
+        tensorlike: Optional[Union[TensorMeta, Number, torch.Tensor]] = None,
         *,
         shape: Optional[ShapeType] = None,
         strides: Optional[StrideType] = None,
@@ -60,22 +46,26 @@ class TensorMeta(torch.Tensor):
         device: Optional[torch.device] = None,
     ):
 
+        self.shape: Tuple[int, ...]
+        self.strides: Tuple[int, ...]
+        self.dtype: torch.dtype
+        self.device: torch.device
+        self.name: str = ""
+        self.node: Optional[Node] = None
+
         if isinstance(tensorlike, Number):
             assert not shape and (shape is None or isinstance(shape, Sequence))
             assert not strides and (strides is None or isinstance(strides, Sequence))
-            inferred_shape: Tuple[int, ...] = ()
-            inferred_strides: Tuple[int, ...] = ()
-            inferred_dtype = type_to_dtype(type(tensorlike))
-            inferred_device = torch.device("cpu")
-            # TODO: This looks wrong, a number that is wrapped into a tensor
-            # needs to behave differently than a scalar tensor for type
-            # promotion purposes
+            self.shape = ()
+            self.strides = ()
+            self.dtype = type_to_dtype(type(tensorlike))
+            self.device = torch.device("cpu")
         elif tensorlike is not None:
             assert isinstance(tensorlike, (TensorMeta, torch.Tensor))
-            inferred_shape = tuple(tensorlike.shape)
-            inferred_strides = tuple(tensorlike.stride())
-            inferred_dtype = tensorlike.dtype
-            inferred_device = tensorlike.device
+            self.shape = tuple(tensorlike.shape)
+            self.strides = tuple(tensorlike.stride())
+            self.dtype = tensorlike.dtype
+            self.device = tensorlike.device
         else:
             # If no tensorlike "example" is given then all metadata
             # must be provided explicitly
@@ -84,24 +74,15 @@ class TensorMeta(torch.Tensor):
             assert dtype is not None
             assert device is not None
 
-        shape = inferred_shape if shape is None else tuple(shape)
-        strides = inferred_strides if strides is None else tuple(strides)
-        dtype = inferred_dtype if dtype is None else dtype
-        device = inferred_device if device is None else device
+        # Sets metadata from kwargs, possibly overriding metadata from
+        # the example tensorlike
+        self.shape = self.shape if shape is None else tuple(shape)
+        self.strides = self.strides if strides is None else tuple(strides)
+        self.dtype = self.dtype if dtype is None else dtype
+        self.device = self.device if device is None else device
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-            cls,
-            shape,
-            strides=strides,
-            storage_offset=0,  # TODO: this is inaccurate
-            dtype=dtype,
-            device=device,
-            requires_grad=False
-        )
-
-        r.tname = ""
-        r.node = None
-        return r
+        # Computes derived properties
+        self.ndim = len(self.shape)
 
     @classmethod
     def __torch_function__(
@@ -114,43 +95,31 @@ class TensorMeta(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
-        if func in {
-            torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.numel,
-            torch.Tensor.stride,
-            torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.device.__get__,  # type: ignore[attr-defined]
-        }:
-            return super().__torch_function__(func, types, args, kwargs)
+        if cls.ctx is not None:
+            return cls.ctx.handle_torch_function(func, types, args, kwargs)
 
         if not hasattr(func, "meta"):
-            raise ValueError(f"Callable {func} has no meta function!")
+            raise ValueError("Callable {0} has no meta function!".format(func.__name__))
 
         return func.meta(*args, **kwargs)  # type: ignore[attr-defined]
 
-    @classmethod
-    def __torch_dispatch__(
-        cls,
-        func,
-        types,
-        args=(),
-        kwargs=None,
-    ):
-        raise RuntimeError("this should be unreachable")
-
     # TODO: fx uses dunder repr to print objects in code
     def __repr__(self):
-        return self.tname
-        # return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.stride()})"
+        return self.name
+        # return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.strides})"
 
-    def __format__(self, format_spec):
-        return self.tname
+    def stride(self):
+        return self.strides
+
+    def numel(self):
+        if len(self.shape) == 0:
+            return 1
+
+        return reduce(lambda x, acc: x * acc, self.shape, 1)
 
 
 TensorLikeType = Union[torch.Tensor, TensorMeta]
 TensorLike = (torch.Tensor, TensorMeta)
-TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 
 
 # TODO: look at using torch.testing.assert_close instead with an option
@@ -208,12 +177,10 @@ def validate_shape(shape: Sequence):
 def validate_idx(shape: Sequence, idx: int):
     """
     Validates that idx is a valid idx for the given shape.
-    0 and -1 is a valid index for an empty shape
     """
 
     assert isinstance(idx, int)
-    ndim = len(shape) if len(shape) else 1
-    assert idx >= 0 and idx < ndim
+    assert idx >= 0 and idx < len(shape)
 
 
 def validate_exclusive_idx(shape: Sequence, ex_idx: int):
@@ -226,51 +193,23 @@ def validate_exclusive_idx(shape: Sequence, ex_idx: int):
     assert ex_idx > 0 and ex_idx <= len(shape)
 
 
-# "Wraps" a dim (up to one time) for the given rank, allowing
-# dims to be specified using negative indices
-def canonicalize_idx(rank: int, idx: int) -> int:
-    # TODO: add a comment for why this is
-    _rank = rank if rank != 0 else 1
-
-    if idx >= 0 and idx < _rank:
-        return idx
-
+def canonicalize_idx(shape: Sequence, idx: int):
+    validate_idx(shape, idx)
     if idx < 0:
-        _idx = idx + _rank
-
-    if _idx < 0 or _idx > _rank:
-        msg = "Received out of bounds index {0} for tensor of rank {1}!".format(
-            idx, rank
-        )
-        raise ValueError(msg)
-
-    return _idx
+        idx = idx + len(shape)
+    return idx
 
 
-# Takes a dimension or sequence of dimensions and "wraps" them,
-# mapping negative offsets to positive ones
-def canonicalize_dims(rank: int, indices: DimsType) -> DimsType:
-    if isinstance(indices, int):
-        return canonicalize_idx(rank, indices)
-
-    return tuple(canonicalize_idx(rank, x) for x in indices)
-
-
-def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
+def validate_permutation(rank: int, perm: Sequence):
     """
     Validates that perm is a permutation of length rank.
     """
 
-    if not isinstance(perm, Sequence):
-        return False
-
-    if not (tuple(sorted(perm)) == tuple(range(0, rank))):
-        return False
-
-    return True
+    assert isinstance(perm, Sequence)
+    assert tuple(sorted(perm)) == tuple(range(0, rank))
 
 
-def is_same_shape(a: Sequence, b: Sequence) -> bool:
+def is_same_shape(a: Sequence, b: Sequence):
     """
     Compares two shapes a and b, returning True if they are the same
     (their ranks and corresponding lengths match) and False otherwise.
@@ -279,13 +218,14 @@ def is_same_shape(a: Sequence, b: Sequence) -> bool:
     return tuple(a) == tuple(b)
 
 
-def check_same_device(*args, allow_cpu_scalar_tensors):
+def check_same_device(*args, allow_scalars):
     """
     Checks that all Tensors in args have the same device.
 
     Raises a RuntimeError when:
       - args contains an object whose type is not Tensor or Number
-      - two Tensor objects in args have different devices, unless one is a CPU scalar tensor and allow_cpu_scalar_tensors is True
+      - args contains an object whose type is Number and allow_scalar is False
+      - two Tensor objects in args have different devices
     """
     # Short-circuits if all (one or fewer) arguments are trivially on the same device
     if len(args) <= 1:
@@ -295,11 +235,10 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
     device = None
     for arg in args:
         if isinstance(arg, Number):
-            continue
+            if not allow_scalars:
+                msg = "Found a scalar when checking for same device but scalars not allowed!"
+                raise RuntimeError(msg)
         elif isinstance(arg, TensorLike):
-            if allow_cpu_scalar_tensors and arg.device.type == "cpu" and arg.ndim == 0:
-                continue
-
             if device is None:
                 device = arg.device
 
@@ -353,7 +292,7 @@ def check_same_shape(*args):
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 _float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-_complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
+_complex_dtypes = (torch.complex64, torch.complex128)
 
 
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
@@ -370,28 +309,6 @@ def is_float_dtype(dtype: torch.dtype) -> bool:
 
 def is_complex_dtype(dtype: torch.dtype) -> bool:
     return dtype in _complex_dtypes
-
-
-_complex_to_real_dtype_map = {
-    torch.complex128: torch.float64,
-    torch.complex64: torch.float32,
-    torch.complex32: torch.float16,
-}
-
-_real_to_complex_dtype_map = {
-    torch.float16: torch.complex32,
-    torch.bfloat16: torch.complex64,
-    torch.float32: torch.complex64,
-    torch.float64: torch.complex128,
-}
-
-
-def corresponding_real_dtype(dtype: torch.dtype) -> torch.dtype:
-    return _complex_to_real_dtype_map[dtype]
-
-
-def corresponding_complex_dtype(dtype: torch.dtype) -> torch.dtype:
-    return _real_to_complex_dtype_map[dtype]
 
 
 def dtype_to_type(dtype: torch.dtype) -> type:
@@ -457,26 +374,22 @@ def get_higher_type(a: type, b: type) -> type:
 #   are not ordered relative to each other, the next
 #   higher datatype
 def get_higher_dtype(
-    a: Optional[Union[torch.dtype, TensorLikeType, NumberType]],
-    b: Optional[Union[torch.dtype, TensorLikeType, NumberType]],
-) -> Optional[torch.dtype]:
+    a: Union[torch.dtype, torch.Tensor, Number],
+    b: Union[torch.dtype, torch.Tensor, Number],
+) -> torch.dtype:
     """
     Computes the "lowest" datatype that is weakly
     "higher" than both a and b.
     """
 
     # Type checking
-    assert a is None or isinstance(a, (torch.dtype, TensorLike, Number))
-    assert b is None or isinstance(b, (torch.dtype, TensorLike, Number))
+    assert isinstance(a, (torch.dtype, torch.Tensor, Number))
+    assert isinstance(b, (torch.dtype, torch.Tensor, Number))
 
-    def _extract_dtype(
-        x: Optional[Union[torch.dtype, TensorLikeType, NumberType]]
-    ) -> Optional[torch.dtype]:
-        if x is None:
-            return None
+    def _extract_dtype(x: Union[torch.dtype, torch.Tensor, Number]) -> torch.dtype:
         if isinstance(x, torch.dtype):
             return x
-        if isinstance(x, TensorLike):
+        if isinstance(x, torch.Tensor):
             return x.dtype
         if isinstance(x, Number):
             return type_to_dtype(type(x))
@@ -488,12 +401,6 @@ def get_higher_dtype(
     if a is b:
         return a
 
-    if a is None:
-        return b
-
-    if b is None:
-        return a
-
     ordered_datatypes = (
         (torch.bool,),
         (torch.uint8, torch.int8),
@@ -503,7 +410,6 @@ def get_higher_dtype(
         (torch.float16, torch.bfloat16),
         (torch.float32,),
         (torch.float64,),
-        (torch.complex32,),
         (torch.complex64,),
         (torch.complex128,),
     )
@@ -606,14 +512,11 @@ def check_same_dtype(*args):
             raise RuntimeError(msg)
 
 
-def wrap_scalar(a: NumberType, *, dtype: torch.dtype = None) -> torch.Tensor:
+def wrap_scalar(a: Number) -> torch.Tensor:
     """
     Wraps a Number into a Tensor of corresponding dtype.
     """
-    if dtype is None:
-        return torch.tensor(a, dtype=type_to_dtype(type(a)))
-
-    return torch.tensor(a, dtype=dtype)
+    return torch.tensor(a, dtype=type_to_dtype(type(a)))
 
 
 def wrap_scalars(*args):
@@ -626,7 +529,7 @@ def wrap_scalars(*args):
             return wrap_scalar(x)
         return x
 
-    return tuple(_maybe_wrap_scalar(x) for x in args)
+    return (_maybe_wrap_scalar(x) for x in args)
 
 
 def wrap_device(d: Union[str, torch.device]) -> torch.device:
@@ -676,6 +579,6 @@ def compute_reduction_output_shape(
 def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...]:
     if dims is None:
         return tuple(range(len(shape)))
-    dims = tuple(canonicalize_idx(len(shape), idx) for idx in dims)
+    dims = tuple(canonicalize_idx(shape, idx) for idx in dims)
     assert len(dims) == len(set(dims)), "duplicate value in dims"
     return dims

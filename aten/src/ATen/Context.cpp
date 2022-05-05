@@ -5,7 +5,6 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
 
-#include <algorithm>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -139,43 +138,11 @@ void Context::setBenchmarkCuDNN(bool b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-  return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
+  return allow_tf32_cublas;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
-  float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
-}
-
-Float32MatmulPrecision Context::float32MatmulPrecision() const {
-  return float32_matmul_precision;
-}
-
-void Context::setFloat32MatmulPrecision(Float32MatmulPrecision p) {
-  float32_matmul_precision = p;
-}
-
-void Context::setFloat32MatmulPrecision(const std::string &s) {
-  auto match = [this](const std::string & s_) {
-    // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
-    if (s_ == "highest") {
-      float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
-      return true;
-    } else if (s_ == "high") {
-      float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
-      return true;
-    } else if (s_ == "medium") {
-      float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
-      return true;
-    }
-    return false;
-  };
-  if (match(s)) { return; }
-  std::string sl;
-  std::transform(s.begin(), s.end(), sl.begin(),
-                 [](unsigned char c) -> unsigned char { return std::tolower(c); });
-  if (match(sl)) { return; }
-  TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
-    "setFloat32MatmulPrecision call has no effect.");
+  allow_tf32_cublas = b;
 }
 
 at::LinalgBackend Context::linalgPreferredBackend() const {

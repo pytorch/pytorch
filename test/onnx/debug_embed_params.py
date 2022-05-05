@@ -1,12 +1,13 @@
 import sys
 
-import onnx
-from test_pytorch_common import flatten
-
-import caffe2.python.onnx.backend as c2
 import torch
 import torch.jit
 from torch.autograd import Variable
+
+import onnx
+import caffe2.python.onnx.backend as c2
+from test_pytorch_common import flatten
+
 
 torch.set_default_tensor_type("torch.FloatTensor")
 try:

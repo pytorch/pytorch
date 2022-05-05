@@ -126,10 +126,7 @@ Tensor batch_offsets_from_efficient_size(const Tensor& ef_sizes) {
   return offsets;
 }
 
-Tensor NestedTensor_to_padded_tensor_cuda(
-    const Tensor& t,
-    double padding,
-    OptionalIntArrayRef output_size) {
+Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
   int64_t t_dim = t.dim();
   if (t_dim >= 2 && t_dim <= 4 &&
       (t.dtype() == at::kFloat || t.dtype() == at::kDouble ||
@@ -138,16 +135,14 @@ Tensor NestedTensor_to_padded_tensor_cuda(
     TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
     const auto& nt_buffer = nt_input->get_buffer();
 
-    if (t_dim == 3 && nt_input->opt_size(2) && (*nt_input->opt_size(2) > 0) &&
-        !(output_size.has_value())) {
+    if (t_dim == 3 && nt_input->opt_size(2) && (*nt_input->opt_size(2) > 0)) {
       Tensor nt_sizes = nt_input->get_nested_size_tensor();
       Tensor sizes_dim1 = at::native::narrow(nt_sizes, 1, 0, 1);
       Tensor sizes_dim2 = at::native::narrow(nt_sizes, 1, 1, 1);
       Tensor result = at::detail::make_tensor<NestedTensorImpl>(
           nt_input->get_buffer(), sizes_dim1 * sizes_dim2[0]);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.dim() == 2);
-      result =
-          NestedTensor_to_padded_tensor_cuda(result, padding, output_size);
+      result = NestedTensor_to_padded_tensor_cuda(result, padding);
       return result.reshape({result.sizes()[0], -1, *nt_input->opt_size(2)});
     }
 
@@ -155,26 +150,10 @@ Tensor NestedTensor_to_padded_tensor_cuda(
     Tensor offsets = batch_offsets_from_efficient_size(nt_sizes);
     auto new_size = NestedTensor_get_max_size(*nt_input);
     new_size.insert(new_size.begin(), nt_sizes.sizes()[0]);
-
-    // Pad output tensor to output_size if provided
-    if (output_size.has_value()) {
-      auto output_size_ = output_size.value();
-      TORCH_CHECK(
-          output_size_.size() == new_size.size(),
-          "Length of output_size does not match NestedTensor dims. Broadcasting is not supported.");
-      for (uint64_t i = 0; i < new_size.size(); i++) {
-        TORCH_CHECK(
-            output_size_[i] >= new_size[i],
-            "Value in output_size is less than NestedTensor padded size. Truncation is not supported.");
-        new_size[i] = output_size_[i];
-      }
-    }
-
     Tensor output = at::empty(IntArrayRef(new_size), nt_buffer.options());
 
     int64_t input_dim = nt_sizes.sizes()[1];
     int64_t batch_size = nt_sizes.sizes()[0];
-    int64_t output_batch_size = new_size[0];
     // TODO: Remove need for cat here
     at::Tensor metadata = at::cat({offsets, nt_sizes.reshape(-1)});
     metadata = metadata.to(at::Device(kCUDA), at::kInt);
@@ -195,12 +174,11 @@ Tensor NestedTensor_to_padded_tensor_cuda(
               nt_sizes.data_ptr<int>(),
               input_dim,
               new_size,
-              batch_size,
-              output_batch_size);
+              batch_size);
         });
     return output;
   }
-  return NestedTensor_to_padded_tensor_generic(t, padding, output_size);
+  return NestedTensor_to_padded_tensor_generic(t, padding);
 }
 } // namespace native
 } // namespace at

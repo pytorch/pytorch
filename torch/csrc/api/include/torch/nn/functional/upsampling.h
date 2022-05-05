@@ -64,7 +64,7 @@ inline std::vector<int64_t> _interp_output_size(
 
   std::vector<int64_t> ret;
   for (const auto i : c10::irange(dim)) {
-    ret.emplace_back(static_cast<int64_t>(floor(static_cast<double>(input.size(i + 2)) * scale_factors[i])));
+    ret.emplace_back(static_cast<int64_t>(floor(input.size(i + 2) * scale_factors[i])));
   }
   return ret;
 }

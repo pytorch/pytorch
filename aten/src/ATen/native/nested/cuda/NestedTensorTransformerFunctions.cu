@@ -241,13 +241,13 @@ __global__ void add_padding_1(
   const int grid_id = blockIdx.y;
   const int tid = threadIdx.x + grid_id * 256;
   const int grainsize = 16 * 256;
+  const int batch_input_offset = offsets[batch_id];
   const int* sizes_i = input_sizes + batch_id * input_dim;
   const int batch_output_offset = batch_id * output_sizes_1;
   for (int ii = 0; ii < (output_sizes_1 / grainsize); ii++) {
     const int i = ii * grainsize + tid;
     const int output_offset = batch_output_offset + i;
-    if (batch_id < batch_size && i < sizes_i[0]) {
-      const int batch_input_offset = offsets[batch_id];
+    if (i < sizes_i[0]) {
       output[output_offset] = input[batch_input_offset + i];
     } else {
       output[output_offset] = padding_value;
@@ -256,8 +256,7 @@ __global__ void add_padding_1(
   const int i = (output_sizes_1 / grainsize) * grainsize + tid;
   if (i < output_sizes_1) {
     const int output_offset = batch_output_offset + i;
-    if (batch_id < batch_size && (i < sizes_i[0])) {
-      const int batch_input_offset = offsets[batch_id];
+    if (i < sizes_i[0]) {
       output[output_offset] = input[batch_input_offset + i];
     } else {
       output[output_offset] = padding_value;
@@ -280,6 +279,7 @@ __global__ void add_padding_2(
   const int grid_id = blockIdx.y;
   const int tid = threadIdx.x + grid_id * 256;
   const int grainsize = 16 * 256;
+  const int offset = offsets[batch_id];
   const int* sizes_i = input_sizes + batch_id * input_dim;
   const int output_offset = batch_id * output_sizes_1 * output_sizes_2;
   const int output_numel = output_sizes_1 * output_sizes_2;
@@ -287,8 +287,7 @@ __global__ void add_padding_2(
     const int i = ii * grainsize + tid;
     const int i0 = i / (output_sizes_2);
     const int i1 = i - i0 * output_sizes_2;
-    if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1]) {
-      const int offset = offsets[batch_id];
+    if (i0 < sizes_i[0] && i1 < sizes_i[1]) {
       const int input_offset = offset + i0 * sizes_i[1] + i1;
       output[output_offset + i] = input[input_offset];
     } else {
@@ -299,8 +298,7 @@ __global__ void add_padding_2(
   if (i < output_numel) {
     const int i0 = i / (output_sizes_2);
     const int i1 = i - i0 * output_sizes_2;
-    if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1]) {
-      const int offset = offsets[batch_id];
+    if (i0 < sizes_i[0] && i1 < sizes_i[1]) {
       const int input_offset = offset + i0 * sizes_i[1] + i1;
       output[output_offset + i] = input[input_offset];
     } else {
@@ -325,6 +323,7 @@ __global__ void add_padding_3(
   const int grid_id = blockIdx.y;
   const int tid = threadIdx.x + grid_id * 256;
   const int grainsize = 16 * 256;
+  const int offset = offsets[batch_id];
   const int* sizes_i = input_sizes + batch_id * input_dim;
   const int output_offset =
       batch_id * output_sizes_1 * output_sizes_2 * output_sizes_3;
@@ -334,8 +333,7 @@ __global__ void add_padding_3(
     const int i0 = i / (output_sizes_2 * output_sizes_3);
     const int i1 = (i % (output_sizes_2 * output_sizes_3)) / output_sizes_3;
     const int i2 = i % output_sizes_3;
-    if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1] && i2 < sizes_i[2]) {
-      const int offset = offsets[batch_id];
+    if (i0 < sizes_i[0] && i1 < sizes_i[1] && i2 < sizes_i[2]) {
       const int input_offset =
           offset + i0 * (sizes_i[1] * sizes_i[2]) + i1 * sizes_i[2] + i2;
       output[output_offset + i] = input[input_offset];
@@ -348,8 +346,7 @@ __global__ void add_padding_3(
     const int i0 = i / (output_sizes_2 * output_sizes_3);
     const int i1 = (i % (output_sizes_2 * output_sizes_3)) / output_sizes_3;
     const int i2 = i % output_sizes_3;
-    if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1] && i2 < sizes_i[2]) {
-      const int offset = offsets[batch_id];
+    if (i0 < sizes_i[0] && i1 < sizes_i[1] && i2 < sizes_i[2]) {
       const int input_offset =
           offset + i0 * (sizes_i[1] * sizes_i[2]) + i1 * sizes_i[2] + i2;
       output[output_offset + i] = input[input_offset];
@@ -368,11 +365,10 @@ void add_padding_kernelLauncher(
     const int* input_sizes,
     int input_dim,
     const std::vector<int64_t>& output_sizes,
-    const int batch_size,
-    const int output_batch_size) {
+    const int batch_size) {
   at::cuda::CUDAStream stream = at::cuda::getDefaultCUDAStream();
   dim3 grid;
-  grid.x = output_batch_size;
+  grid.x = batch_size;
   grid.y = 16;
   if (input_dim == 1) {
     add_padding_1<T><<<grid, 256, 0, stream>>>(
@@ -420,8 +416,7 @@ template void add_padding_kernelLauncher<double>(
     const int* input_sizes,
     int input_dim,
     const std::vector<int64_t>& output_sizes,
-    const int batch_size,
-    const int output_batch_size);
+    const int batch_size);
 
 template void add_padding_kernelLauncher<float>(
     float* input,
@@ -431,8 +426,7 @@ template void add_padding_kernelLauncher<float>(
     const int* input_sizes,
     int input_dim,
     const std::vector<int64_t>& output_sizes,
-    const int batch_size,
-    const int output_batch_size);
+    const int batch_size);
 
 template void add_padding_kernelLauncher<c10::Half>(
     c10::Half* input,
@@ -442,8 +436,7 @@ template void add_padding_kernelLauncher<c10::Half>(
     const int* input_sizes,
     int input_dim,
     const std::vector<int64_t>& output_sizes,
-    const int batch_size,
-    const int output_batch_size);
+    const int batch_size);
 
 } // namespace native
 } // namespace at

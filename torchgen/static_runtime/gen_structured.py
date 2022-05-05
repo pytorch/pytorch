@@ -2,7 +2,6 @@ import torchgen.api.cpp as cpp
 from torchgen.context import native_function_manager
 from torchgen.model import (
     Argument,
-    BackendIndex,
     BaseTy,
     FunctionSchema,
     OptionalType,
@@ -31,46 +30,11 @@ def has_alias(
     return False
 
 
-BLOCKED_OPS = frozenset(
-    (
-        # non cpu ops
-        "sparse_sampled_addmm",
-        "hspmm",
-        # sparse ops
-        "sspaddmm",
-        # deprecated ops
-        "floor_divide",
-        "ger",
-        # buggy ops
-        "conj_physical",  # P495807361
-        "binary_cross_entropy",  # P496394764
-        "arccosh",
-        # uncommon ops
-        "cholesky",
-        "lu_solve",
-        "linalg_cholesky",
-        "linalg_householder_product",
-        "_compute_linear_combination",
-    )
-)
-
-
 def is_supported(g: NativeFunctionsGroup) -> bool:
-    base_op_name = g.out.func.name.name.base
-    if base_op_name in BLOCKED_OPS:
+    if not g.structured:
         return False
     if config.is_hand_written(g):
         return False
-    if not g.structured:
-        # In case of unstructured op, we check if it has out variant implementation.
-        # The out variant implementation satisfies the minimum requirement that it has the output tensor as the last
-        # parameter.
-        if (
-            not hasattr(g, "out")
-            or not str(g.out.func).endswith("Tensor(a!) out) -> Tensor(a!)")
-            or not str(g.out.func.name).endswith(".out")
-        ):
-            return False
     if has_alias(g.out.func.arguments.non_out):
         # This op may create an alias of inputs.
         return False
@@ -116,9 +80,7 @@ def ivalue_type_conversion_method(
     if isinstance(arg_type, BaseType):
         base_ty_object = arg_type.name
     elif isinstance(arg_type, OptionalType):
-        if not isinstance(arg_type.elem, BaseType):
-            # ListType is currently unsupported.
-            return None
+        assert isinstance(arg_type.elem, BaseType)
         base_ty_object = arg_type.elem.name
     else:
         return None
@@ -158,15 +120,9 @@ test_tensor_dim_ops_1_ = frozenset(
         "_convert_indices_from_coo_to_csr",
         "_convert_indices_from_csr_to_coo",
         "nll_loss_backward",
-        "dot",
-        "vdot",
-        "outer",
-        "ger",
     )
 )
-test_tensor_dim_ops_2_ = frozenset(
-    ("addmm", "mm", "nuclear_norm", "diag", "_addmm_activation")
-)
+test_tensor_dim_ops_2_ = frozenset(("addmm", "mm"))
 
 
 def test_tensor_dim(op_name: str) -> int:
@@ -281,79 +237,32 @@ def generate_arg_extraction(g: NativeFunctionsGroup) -> str:
     return ";\n    ".join(arg_populations) + ";"
 
 
-def get_kernel_name(g: NativeFunctionsGroup, backend_index: BackendIndex) -> str:
-    kernel = backend_index.get_kernel(g.functional)
-    if g.structured or kernel is None:
-        return cpp.name(g.functional.func)
-    return kernel.kernel
-
-
-def get_out_kernel_name(g: NativeFunctionsGroup, backend_index: BackendIndex) -> str:
-    kernel = backend_index.get_kernel(g.out)
-    if g.structured or kernel is None:
-        return cpp.name(g.out.func)
-    return kernel.kernel
-
-
-def generate_non_out_variant_call(
-    g: NativeFunctionsGroup, backend_index: BackendIndex
-) -> str:
+def generate_non_out_variant_call(g: NativeFunctionsGroup) -> str:
     schema = g.functional.func
     assert not schema.is_out_fn()
-    kernel_name = get_kernel_name(g, backend_index)
     arg_names = (arg.name for arg in schema.schema_order_arguments())
-    namespace_name = "cpu" if g.structured else "native"
-    return f'at::{namespace_name}::{kernel_name}({",".join(arg_names)})'
+    return f'at::cpu::{cpp.name(schema)}({",".join(arg_names)})'
 
 
-def generate_out_variant_call(
-    g: NativeFunctionsGroup, backend_index: BackendIndex
-) -> str:
+def generate_out_variant_call(g: NativeFunctionsGroup) -> str:
     schema = g.out.func
     assert schema.is_out_fn()
-    arg_names = []
-    kernel_name = get_out_kernel_name(g, backend_index)
-    if g.structured:
-        # structured op starts with the output tensor argument.
-        arg_names = [out_arg.name for out_arg in schema.arguments.out]
-    else:
-        arg_names = []
+    arg_names = [out_arg.name for out_arg in schema.arguments.out]
     for arg in schema.arguments.non_out:
         if isinstance(arg, SelfArgument):
             arg_names.append(arg.argument.name)
         else:
             assert isinstance(arg, Argument)
             arg_names.append(arg.name)
-    if not g.structured:
-        assert len(schema.arguments.out) == 1
-        arg_names.append(schema.arguments.out[0].name)
     cpp_func_name = cpp.name(schema)
     cpp_arg_names = ",".join(arg_names)
-    namespace_name = "cpu" if g.structured else "native"
-    return f"at::{namespace_name}::{kernel_name}({cpp_arg_names})"
-
-
-no_memory_resize_ops = frozenset(
-    (
-        "isin.Scalar_Tensor",
-        "index_add",
-        "dot",
-        "vdot",
-        "nuclear_norm",
-        "histc",
-        "l1_loss",
-        "multi_margin_loss",
-        "multilabel_margin_loss",
-        "nll_loss",
-        "nll_loss2d",
-    )
-)
+    return f"at::cpu::{cpp_func_name}({cpp_arg_names})"
 
 
 def should_check_resize(schema: FunctionSchema) -> bool:
     schema_str = str(schema)
     type_variant_op_name = schema_str[: schema_str.find("(")]
-    return type_variant_op_name not in no_memory_resize_ops
+    return type_variant_op_name not in ("isin.Scalar_Tensor", "index_add")
 
 
 def op_name_from_group(g: NativeFunctionsGroup) -> str:
@@ -361,9 +270,7 @@ def op_name_from_group(g: NativeFunctionsGroup) -> str:
 
 
 class GenOutVariantDispatcher:
-    def __call__(
-        self, groups: Sequence[NativeFunctionsGroup], backend_index: BackendIndex
-    ) -> str:
+    def __call__(self, groups: Sequence[NativeFunctionsGroup]) -> str:
         if not groups:
             return ""
         generated_type_variants = []
@@ -371,7 +278,7 @@ class GenOutVariantDispatcher:
             with native_function_manager(g):
                 assert is_supported(g)
                 assert isinstance(g, NativeFunctionsGroup)
-                generated_type_variant = self.op_generator(g, backend_index)
+                generated_type_variant = self.gen_structured(g)
                 generated_type_variants.append(generated_type_variant)
         op_name = op_name_from_group(groups[0])
         body = "\n".join(generated_type_variants)
@@ -387,15 +294,15 @@ REGISTER_OPERATOR_FUNCTOR(
 """
         return generated
 
-    def op_generator(self, g: NativeFunctionsGroup, backend_index: BackendIndex) -> str:
+    def gen_structured(self, g: NativeFunctionsGroup) -> str:
         functional = g.functional
         schema = str(functional.func)
         op_name = op_name_from_group(g)
         populated_argument = generate_arg_extraction(g)
-        functional_variant_call = generate_non_out_variant_call(g, backend_index)
+        functional_variant_call = generate_non_out_variant_call(g)
         assert len(g.out.func.arguments.out) == 1
         out_variable_name = str(g.out.func.arguments.out[0].name)
-        out_variant_call = generate_out_variant_call(g, backend_index)
+        out_variant_call = generate_out_variant_call(g)
         generated = f"""
       if (n->matches(torch::schema("aten::{schema}"))) {{
         return [](ProcessedNode* p_node) {{
@@ -421,11 +328,11 @@ class GenOutVariantDispatcherTestCase:
             with native_function_manager(g):
                 assert is_supported(g)
                 assert isinstance(g, NativeFunctionsGroup)
-                generated_type_variant = self.test_case_generator(g)
+                generated_type_variant = self.gen_structured_test_case(g)
                 generated_type_variants.append(generated_type_variant)
         return "\n".join(generated_type_variants)
 
-    def test_case_generator(self, g: NativeFunctionsGroup) -> str:
+    def gen_structured_test_case(self, g: NativeFunctionsGroup) -> str:
         functional = g.functional
         schema = str(functional.func)
         assert schema.find("(") > 0

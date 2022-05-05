@@ -33,9 +33,7 @@ _backend_type_doc = """
 BackendType = enum.Enum(value="BackendType", names=dict())  # type: ignore[misc]
 # Unable to assign a function a method (mypy bug #2427)
 BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
-
-if BackendType.__doc__:
-    BackendType.__doc__ = _backend_type_doc
+BackendType.__doc__ = _backend_type_doc
 
 def backend_registered(backend_name):
     """
@@ -82,8 +80,7 @@ def register_backend(
     BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)  # type: ignore[misc]
     # Unable to assign a function a method (mypy bug #2427)
     BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
-    if BackendType.__doc__:
-        BackendType.__doc__ = _backend_type_doc
+    BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
 def construct_rpc_backend_options(

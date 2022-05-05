@@ -18,6 +18,8 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    TYPE_CHECKING,
+    Union,
 )
 
 import torch
@@ -26,6 +28,8 @@ from torch import Tensor
 
 from ._utils import _replace_by_prefix
 
+if TYPE_CHECKING:
+    from collections import OrderedDict  # noqa: F401
 
 ParamOffset = Tuple[int, int]
 SharedParamInfo = Tuple[str, str, nn.Module, str, nn.Module, str]
@@ -34,8 +38,8 @@ FPW_MODULE = "_fpw_module"
 
 
 def _post_state_dict_hook(
-    module: nn.Module, state_dict: Dict[str, Any], prefix: str, *args: Any
-) -> Dict[str, Any]:
+    module: nn.Module, state_dict: "OrderedDict[str, Tensor]", prefix: str, *args: Any
+) -> "OrderedDict[str, Tensor]":
     """
     _post_state_dict_hook() is called after the state_dict() is executed
     and before returning the state_dict to the users.
@@ -48,7 +52,7 @@ def _post_state_dict_hook(
 
 
 def _pre_load_state_dict_hook(
-    state_dict: Dict[str, Any],
+    state_dict: Union[Dict[str, Tensor], "OrderedDict[str, Tensor]"],
     prefix: str,
     *args: Any,
 ) -> None:

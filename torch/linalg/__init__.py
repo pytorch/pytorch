@@ -2222,7 +2222,7 @@ the output has the same batch dimensions.
              As such, different platforms, like SciPy, or inputs on different devices,
              may produce different valid decompositions.
 
-             Gradient computations are only supported if the input matrix is full-rank.
+.. warning:: Gradient computations are only supported if the input matrix is full-rank.
              If this condition is not met, no error will be thrown, but the gradient may not be finite.
              This is because the LU decomposition with pivoting is not differentiable at these points.
 
@@ -2296,93 +2296,6 @@ Returns:
 
 .. _LAPACK's getrf:
     https://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
-""")
-
-lu = _add_docstr(_linalg.linalg_lu, r"""
-lu(A, *, pivot=True, out=None) -> (Tensor, Tensor, Tensor)
-
-Computes the LU decomposition with partial pivoting of a matrix.
-
-Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
-the **LU decomposition with partial pivoting** of a matrix
-:math:`A \in \mathbb{K}^{m \times n}` if `k = min(m,n)`, is defined as
-
-.. math::
-
-    A = PLU\mathrlap{\qquad P \in \mathbb{K}^{m \times m}, L \in \mathbb{K}^{m \times k}, U \in \mathbb{K}^{k \times n}}
-
-where :math:`P` is a `permutation matrix`_, :math:`L` is lower triangular with ones on the diagonal
-and :math:`U` is upper triangular.
-
-If :attr:`pivot`\ `= False` and :attr:`A` is on GPU, then the **LU decomposition without pivoting** is computed
-
-.. math::
-
-    A = LU\mathrlap{\qquad L \in \mathbb{K}^{m \times k}, U \in \mathbb{K}^{k \times n}}
-
-When :attr:`pivot`\ `= False`, the returned matrix :attr:`P` will be empty.
-The LU decomposition without pivoting `may not exist`_ if any of the principal minors of :attr:`A` is singular.
-In this case, the output matrix may contain `inf` or `NaN`.
-
-Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
-the output has the same batch dimensions.
-
-.. seealso::
-
-        :func:`torch.linalg.solve` solves a system of linear equations using the LU decomposition
-        with partial pivoting.
-
-.. warning:: The LU decomposition is almost never unique, as often there are different permutation
-             matrices that can yield different LU decompositions.
-             As such, different platforms, like SciPy, or inputs on different devices,
-             may produce different valid decompositions.
-
-.. warning:: Gradient computations are only supported if the input matrix is full-rank.
-             If this condition is not met, no error will be thrown, but the gradient
-             may not be finite.
-             This is because the LU decomposition with pivoting is not differentiable at these points.
-
-Args:
-    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
-    pivot (bool, optional): Controls whether to compute the LU decomposition with partial pivoting or
-        no pivoting. Default: `True`.
-
-Keyword args:
-    out (tuple, optional): output tuple of three tensors. Ignored if `None`. Default: `None`.
-
-Returns:
-    A named tuple `(P, L, U)`.
-
-Examples::
-
-    >>> A = torch.randn(3, 2)
-    >>> P, L, U = torch.linalg.lu(A)
-    >>> P
-    tensor([[0., 1., 0.],
-            [0., 0., 1.],
-            [1., 0., 0.]])
-    >>> L
-    tensor([[1.0000, 0.0000],
-            [0.5007, 1.0000],
-            [0.0633, 0.9755]])
-    >>> U
-    tensor([[0.3771, 0.0489],
-            [0.0000, 0.9644]])
-    >>> torch.dist(A, P @ L @ U)
-    tensor(5.9605e-08)
-
-    >>> A = torch.randn(2, 5, 7, device="cuda")
-    >>> P, L, U = torch.linalg.lu(A, pivot=False)
-    >>> P
-    tensor([], device='cuda:0')
-    >>> torch.dist(A, L @ U)
-    tensor(1.0376e-06, device='cuda:0')
-
-.. _permutation matrix:
-    https://en.wikipedia.org/wiki/Permutation_matrix
-.. _may not exist:
-    https://en.wikipedia.org/wiki/LU_decomposition#Definitions
 """)
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
@@ -2526,8 +2439,7 @@ the **full QR decomposition** of a matrix
 
     A = QR\mathrlap{\qquad Q \in \mathbb{K}^{m \times m}, R \in \mathbb{K}^{m \times n}}
 
-where :math:`Q` is orthogonal in the real case and unitary in the complex case,
-and :math:`R` is upper triangular with real diagonal (even in the complex case).
+where :math:`Q` is orthogonal in the real case and unitary in the complex case, and :math:`R` is upper triangular.
 
 When `m > n` (tall matrix), as `R` is upper triangular, its last `m - n` rows are zero.
 In this case, we can drop the last `m - n` columns of `Q` to form the
@@ -2547,27 +2459,30 @@ The parameter :attr:`mode` chooses between the full and reduced QR decomposition
 If :attr:`A` has shape `(*, m, n)`, denoting `k = min(m, n)`
 
 - :attr:`mode`\ `= 'reduced'` (default): Returns `(Q, R)` of shapes `(*, m, k)`, `(*, k, n)` respectively.
-  It is always differentiable.
 - :attr:`mode`\ `= 'complete'`: Returns `(Q, R)` of shapes `(*, m, m)`, `(*, m, n)` respectively.
-  It is differentiable for `m <= n`.
 - :attr:`mode`\ `= 'r'`: Computes only the reduced `R`. Returns `(Q, R)` with `Q` empty and `R` of shape `(*, k, n)`.
-  It is never differentiable.
 
 Differences with `numpy.linalg.qr`:
 
 - :attr:`mode`\ `= 'raw'` is not implemented.
 - Unlike `numpy.linalg.qr`, this function always returns a tuple of two tensors.
   When :attr:`mode`\ `= 'r'`, the `Q` tensor is an empty tensor.
+  This behavior may change in a future PyTorch release.
 
-.. warning:: The elements in the diagonal of `R` are not necessarily positive.
-             As such, the returned QR decomposition is only unique up to the sign of the diagonal of `R`.
-             Therefore, different platforms, like NumPy, or inputs on different devices,
-             may produce different valid decompositions.
+.. note:: The elements in the diagonal of `R` are not necessarily positive.
 
-.. warning:: The QR decomposition is only well-defined if the first `k = min(m, n)` columns
+.. note:: :attr:`mode`\ `= 'r'` does not support backpropagation. Use :attr:`mode`\ `= 'reduced'` instead.
+
+.. warning:: The QR decomposition is only unique up to the sign of the diagonal of `R` when the
+             first `k = min(m, n)` columns of :attr:`A` are linearly independent.
+             If this is not the case, different platforms, like NumPy,
+             or inputs on different devices, may produce different valid decompositions.
+
+.. warning:: Gradient computations are only supported if the first `k = min(m, n)` columns
              of every matrix in :attr:`A` are linearly independent.
-             If this condition is not met, no error will be thrown, but the QR produced
-             may be incorrect and its autodiff may fail or produce incorrect results.
+             If this condition is not met, no error will be thrown, but the gradient produced
+             will be incorrect.
+             This is because the QR decomposition is not differentiable at these points.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.

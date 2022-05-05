@@ -3,7 +3,7 @@
 from collections import defaultdict
 from torch import Tensor
 import torch.autograd
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
+from torch.utils._python_dispatch import enable_python_mode
 from torch._decomp import decomposition_table
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
@@ -144,7 +144,6 @@ def _getDefaultRtolAndAtol(dtype0, dtype1):
 
 
 def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
-    assert orig.dtype == decomp.dtype, f"Operation:  {op}"
     if orig.numel() == 0 or decomp.numel() == 0:
         assert orig.numel() == decomp.numel()
         return
@@ -283,9 +282,9 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float16, "nn.functional.batch_norm"),
     ("cuda", torch.bfloat16, "nn.functional.instance_norm"),
     ("cuda", torch.float16, "nn.functional.instance_norm"),
-    # doesn't work
-    ("cuda", torch.bfloat16, "nn.functional.embedding"),
-
+    # complex is not handled
+    (None, torch.complex64, "var"),
+    (None, torch.complex128, "var"),
 }
 
 all_decomposed = set()
@@ -451,7 +450,7 @@ class TestDecomp(TestCase):
                 # explicit clearing is necessary as I will create a fresh mode
                 # for each region
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode):
+                with enable_python_mode(DecompCrossRefMode):
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     check_decomposed(aten_name)
@@ -460,7 +459,7 @@ class TestDecomp(TestCase):
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
                     decomposed.clear()
-                    with enable_torch_dispatch_mode(DecompCrossRefMode):
+                    with enable_python_mode(DecompCrossRefMode):
                         decomp_vjp_fn(cotangents)
                     if not run_all:
                         check_decomposed(op.aten_backward_name)
@@ -469,7 +468,7 @@ class TestDecomp(TestCase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode):
+                with enable_python_mode(DecompCrossRefMode):
                     func(*args, **kwargs)
                 if not run_all:
                     check_decomposed(aten_name)
@@ -478,6 +477,13 @@ class TestDecomp(TestCase):
                 self.skipTest(
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
+
+    def test_torchscriptable(self, device):
+        skip_list = [aten.rsub.Scalar]
+        for op, decomposition in decomposition_table.items():
+            if op in skip_list:
+                continue
+            f = torch.jit.script(decomposition)
 
 
 instantiate_device_type_tests(TestDecomp, globals())

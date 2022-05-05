@@ -13,9 +13,10 @@ import datetime
 import os
 import pathlib
 import re
-import subprocess
 import sys
+import subprocess
 from subprocess import DEVNULL
+
 
 pytorch_dir = pathlib.Path(__file__).parent.parent.parent.resolve()
 onnx_dir = pytorch_dir / "third_party" / "onnx"

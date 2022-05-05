@@ -1,5 +1,4 @@
 import math
-from typing import Any
 
 import torch
 from torch import Tensor
@@ -8,14 +7,6 @@ from .. import functional as F
 from .. import init
 from .module import Module
 from .lazy import LazyModuleMixin
-
-
-__all__ = [
-    'Bilinear',
-    'Identity',
-    'LazyLinear',
-    'Linear',
-]
 
 
 class Identity(Module):
@@ -38,7 +29,7 @@ class Identity(Module):
         torch.Size([128, 20])
 
     """
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args, **kwargs):
         super(Identity, self).__init__()
 
     def forward(self, input: Tensor) -> Tensor:

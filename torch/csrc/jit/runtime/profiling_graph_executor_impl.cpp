@@ -651,7 +651,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
     // value
 #ifndef C10_MOBILE
-    if (torch::jit::fuser::cuda::isEnabled()) {
+    if (RegisterCudaFuseGraph::isRegistered()) {
       torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
     }
 #endif

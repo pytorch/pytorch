@@ -16,8 +16,6 @@ using unary_fn = void(*)(TensorIteratorBase&);
 using unary_fn_with_scalar = void(*)(TensorIteratorBase&, const Scalar& a);
 
 DECLARE_DISPATCH(unary_fn, abs_stub);
-DECLARE_DISPATCH(unary_fn, angle_stub);
-DECLARE_DISPATCH(unary_fn, conj_physical_stub);
 DECLARE_DISPATCH(unary_fn, acos_stub);
 DECLARE_DISPATCH(unary_fn, acosh_stub);
 DECLARE_DISPATCH(unary_fn, angle_stub);

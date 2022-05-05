@@ -191,6 +191,24 @@ static void angle_kernel(TensorIteratorBase& iter) {
   });
 }
 
+static void real_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "real_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return real_impl(a); },
+        [=](Vectorized<scalar_t> a) { return a.real(); });
+  });
+}
+
+static void imag_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "imag_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return imag_impl(a); },
+        [=](Vectorized<scalar_t> a) { return a.imag(); });
+  });
+}
+
 // NB: Ignores the negative bit on tensors
 void conj_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(

@@ -2,7 +2,6 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
