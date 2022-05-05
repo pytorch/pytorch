@@ -1011,8 +1011,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       const kir::TensorIndex* output,
       const Val* input,
       BinaryOpType reduction_op_type) {
-    const auto domain = output->view()->domain();
-
     const auto gen_out = gen(output);
     indent() << gen_out << " = "
              << genBinaryOp(

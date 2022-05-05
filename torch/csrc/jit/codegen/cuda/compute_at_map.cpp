@@ -407,12 +407,44 @@ IterDomain* ComputeAtMap::getConcreteMappedID(
   return cache_it->second;
 }
 
+namespace {
+
+std::string idGraphNodesToString(
+    const ComputeAtMap& ca_map,
+    IdMappingMode mode) {
+  std::stringstream ss;
+  const auto& disjoint_sets = ca_map.getIdSets(mode);
+  for (const auto& s_ptr : disjoint_sets.disjointSets()) {
+    const auto& set = *s_ptr;
+    IterDomain* concrete_id = nullptr;
+    if (!set.empty()) {
+      auto id = set.front();
+      concrete_id = ca_map.getConcreteMappedID(id, mode);
+    }
+    ss << "  {";
+    for (auto entry : set.vector()) {
+      ss << abstractToString(entry);
+      if (entry == concrete_id) {
+        ss << "*";
+      }
+      if (entry != set.back()) {
+        ss << "; ";
+      }
+    }
+    ss << " }\n";
+  }
+  return ss.str();
+}
+
+} // namespace
+
 std::string ComputeAtMap::toString() const {
   std::stringstream ss;
   ss << "Compute at map { \n";
-  ss << "Permissive map:\n" << id_graph_.permissiveNodes().toString() << "\n";
-  ss << "Exact map:\n" << id_graph_.exactNodes().toString() << "\n";
-  ss << "Loop map:\n" << id_graph_.loopNodes().toString() << "\n";
+  ss << "Permissive map:\n"
+     << idGraphNodesToString(*this, IdMappingMode::PERMISSIVE);
+  ss << "Exact map:\n" << idGraphNodesToString(*this, IdMappingMode::EXACT);
+  ss << "Loop map:\n" << idGraphNodesToString(*this, IdMappingMode::LOOP);
   ss << "Consumer maps:\n";
   for (auto entry : id_graph_.consumers()) {
     ss << "  " << entry.first->toString() << " :: " << entry.second.toString()
@@ -452,13 +484,18 @@ std::vector<IterDomain*> ComputeAtMap::getViewRfactorDomainsOfIdGroup(
 
 const std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>& ComputeAtMap::
     disjointSetOf(IterDomain* id, IdMappingMode mode) const {
+  return getIdSets(mode).disjointSetMap().at(id);
+}
+
+const DisjointSets<IterDomain*>& ComputeAtMap::getIdSets(
+    IdMappingMode mode) const {
   switch (mode) {
     case IdMappingMode::PERMISSIVE:
-      return id_graph_.permissiveNodes().disjointSetMap().at(id);
+      return id_graph_.permissiveNodes();
     case IdMappingMode::EXACT:
-      return id_graph_.exactNodes().disjointSetMap().at(id);
+      return id_graph_.exactNodes();
     case IdMappingMode::LOOP:
-      return id_graph_.loopNodes().disjointSetMap().at(id);
+      return id_graph_.loopNodes();
   }
   TORCH_INTERNAL_ASSERT(false, "Error with mapping mode provided.");
 }

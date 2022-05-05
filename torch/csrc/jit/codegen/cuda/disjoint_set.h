@@ -63,6 +63,11 @@ class VectorOfUniqueEntries {
     return vector_;
   }
 
+  // Returns first element in vector
+  T front() const {
+    return vector_.front();
+  }
+
   // Returns last element in vector
   T back() const {
     return vector_.back();

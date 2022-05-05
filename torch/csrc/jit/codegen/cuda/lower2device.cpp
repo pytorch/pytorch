@@ -237,6 +237,11 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // of mappings Permissive, Exact, and Loop, see compute_at_map.h/cpp for more
   // information.
   compute_at_map_ = std::make_unique<ComputeAtMap>(fusion_);
+
+  if (isDebugDumpEnabled(DebugDumpOption::ComputeAtMap)) {
+    std::cout << compute_at_map_->toString() << std::endl;
+  }
+
   compute_at_map_->validateAndPropagatePType();
 
   // Used in parallel dimension map

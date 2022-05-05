@@ -148,6 +148,9 @@ class TORCH_CUDA_CU_API ComputeAtMap {
     return id_graph_;
   }
 
+  //! Get the ID sets for a provided IdMappingMode
+  const DisjointSets<IterDomain*>& getIdSets(IdMappingMode mode) const;
+
  private:
   // Build id_graph_
   void build(Fusion* fusion);

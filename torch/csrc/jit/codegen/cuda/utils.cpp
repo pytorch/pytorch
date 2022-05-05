@@ -19,6 +19,7 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::FusionIr, false},
       {DebugDumpOption::FusionIrMath, false},
       {DebugDumpOption::KernelIr, false},
+      {DebugDumpOption::ComputeAtMap, false},
       {DebugDumpOption::CudaKernel, false},
       {DebugDumpOption::CudaFull, false},
       {DebugDumpOption::CudaToFile, false},
@@ -46,6 +47,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::FusionIrMath] = true;
       } else if (token == "kernel_ir") {
         options_map[DebugDumpOption::KernelIr] = true;
+      } else if (token == "ca_map") {
+        options_map[DebugDumpOption::ComputeAtMap] = true;
       } else if (token == "cuda_kernel") {
         options_map[DebugDumpOption::CudaKernel] = true;
       } else if (token == "cuda_full") {
@@ -82,7 +85,7 @@ auto parseDebugDumpOptions() {
             "Invalid debug dump option: '",
             token,
             "'\nAvailable options:\n",
-            "\tfusion_ir, fusion_ir_math, kernel_ir, cuda_kernel, cuda_full,\n",
+            "\tfusion_ir, fusion_ir_math, kernel_ir, ca_map, cuda_kernel, cuda_full,\n",
             "\tcuda_to_file, launch_param, segmented_fusion, fusion_args,\n",
             "\tkernel_args, dump_eff_bandwidth, draw_segmented_fusion,\n",
             "\tscheduler_params, parallel_dimensions, buffer_reuse_verbose,\n",
