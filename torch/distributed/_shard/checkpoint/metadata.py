@@ -1,5 +1,4 @@
 import io
-import pickle
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Union
 
@@ -53,14 +52,6 @@ STORAGE_TYPES = Union[ShardedTensorStorageMetadata, TensorStorageMetadata, Bytes
 class Metadata:
     # Keys are the same from the `state_dict` used.
     state_dict_metadata: Dict[str, STORAGE_TYPES]
-
-    def __getstate__(self) -> bytes:
-        serialized = pickle.dumps(self.state_dict_metadata)
-        return serialized
-
-    def __setstate__(self, state: bytes) -> None:
-        self.state_dict_metadata = pickle.loads(state)
-
 
 @dataclass
 class BytesWriteRequest:

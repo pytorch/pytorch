@@ -76,7 +76,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
     def test_validate_metadata(self) -> None:
         module = TestModule()
 
-        metadata, _, _, _ = _prepare(module.state_dict())
+        metadata, _, _ = _prepare(module.state_dict())
         self.assertTrue(
             "regular" in metadata.state_dict_metadata,
             f"keys: {metadata.state_dict_metadata.keys()}",
@@ -109,7 +109,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
     def gen_metadata(self) -> Metadata:
         module = TestModule()
         # compute the default saved metadata (must pass include_non_replicated_tensors or we'll get incomplete MD)
-        metadata, _, _, _ = _prepare(module.state_dict())
+        metadata, _, _ = _prepare(module.state_dict())
 
         # _prepare only produc
         metadata = [metadata]
@@ -225,7 +225,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
             'bytes': [1, 2, 3, 4],
         }
 
-        metadata, _, bytes_reqs, tensor_reqs = _prepare(state_dict)
+        metadata, bytes_reqs, tensor_reqs = _prepare(state_dict)
 
         if self.rank == 0:
             self.assertEqual(1, len(bytes_reqs))

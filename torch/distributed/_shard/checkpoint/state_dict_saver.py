@@ -1,5 +1,5 @@
 import io
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -26,7 +26,7 @@ from .storage import StorageWriter
 
 def _prepare(
     state_dict: Dict[str, Any]
-) -> Tuple[Metadata, Dict[str, int], List[BytesWriteRequest], List[TensorWriteRequest]]:
+) -> Tuple[Metadata, List[BytesWriteRequest], List[TensorWriteRequest]]:
     """
     Build the serialization plan for a given state_dict
 
@@ -80,19 +80,7 @@ def _prepare(
                 bytes_write_requests += byte_write_reqs
             metadata.state_dict_metadata[fqn] = bytes_md
 
-    storage_keys: Dict[str, int] = {
-        req.storage_key: req.tensor.nelement() * req.tensor.element_size()
-        for req in tensor_write_requests
-    }
-
-    bytes_io_keys: Dict[str, int] = {
-        req.storage_key: len(req.bytes.getbuffer())
-        for req in bytes_write_requests
-    }
-
-    storage_keys.update(bytes_io_keys)
-
-    return (metadata, storage_keys, bytes_write_requests, tensor_write_requests)
+    return (metadata, bytes_write_requests, tensor_write_requests)
 
 
 def save_state_dict(
@@ -137,7 +125,6 @@ def save_state_dict(
     """
     (
         metadata,
-        storage_keys,
         bytes_write_requests,
         tensor_write_requests,
     ) = _prepare(state_dict)
@@ -150,7 +137,11 @@ def save_state_dict(
     if dist.is_initialized():
         dist.barrier(process_group)
 
-    storage_writer.prepare_storage(storage_keys=storage_keys)
+    combined_writes: List[Union[TensorWriteRequest, BytesWriteRequest]] = []
+    combined_writes.extend(tensor_write_requests)
+    combined_writes.extend(bytes_write_requests)
+
+    storage_writer.prepare_storage(combined_writes)
     bytes_futures = storage_writer.write_bytes(bytes_write_requests)
     tensor_futures = storage_writer.write_tensors(tensor_write_requests)
     torch.futures.wait_all([bytes_futures, tensor_futures])

@@ -1,5 +1,5 @@
 import abc
-from typing import List, Dict
+from typing import List, Union
 
 from torch.futures import Future
 
@@ -17,16 +17,16 @@ class StorageWriter(abc.ABC):
 
     A subclass should expect the following sequence of calls by ``save_state_dict``
 
-    1) (if rank == 0) prepare()
-    2) prepare_storage with a dict of storage_key -> size. This can be used to
-        pre-allocate storage.
+    1) (called once globally) prepare()
+    2) prepare_storage() with the writes that will be used with (3) and (4).
     3) write_bytes
     4) write_tensors.
     5) Wait for (2) and (3) futures. If either fail, abort checkpoint.
-    6) (if rank == 0) write_metadata().
-    7) (if rank == 0) finish().
+    6) (called once globally) write_metadata().
+    7) (called once globally) finish().
 
-    Rank 0 will wait for (3) and (4) before writing metadata.
+    There's a single process that executes methods that are called once globally.
+
     The writes from (3) and (4) are initiated before any waiting is done.
     """
     @abc.abstractmethod
@@ -34,7 +34,9 @@ class StorageWriter(abc.ABC):
         """
         Initialize storage to receive the checkpoint.
 
-        This method will only be called on rank0.
+        This method is called once globally per checkpoint before any other method.
+        This is in contrast to ``prepare_storage`` which is called on each process
+        in parallel.
 
         Returns:
             Future to signal intialization is complete.
@@ -80,7 +82,7 @@ class StorageWriter(abc.ABC):
         """
         Write the global metadata and commit the checkpoint.
 
-        This method is called on rank 0 after all data was writen
+        This method is called once globally after all data was writen
         and is used to commit the checkpoint.
 
         The `metadata` object includes a global view of the checkpoint
@@ -103,28 +105,25 @@ class StorageWriter(abc.ABC):
         """
         Mark the current checkpoint as sucessfully done.
 
-        This method will only be called from rank0.
+        This method is called once globally after metadata is writen.
         """
         pass
 
 
-    def prepare_storage(self, storage_keys: Dict[str, int]) -> None:
+    def prepare_storage(self, storage_writes: List[Union[TensorWriteRequest, BytesWriteRequest]]) -> None:
         """
         Prepare the underlying storage for upcoming writes.
 
         This is an optional override intended for advanced scenarios where
         a storage layer needs wants to do some work ahead of the writing itself.
 
+        This method is called on each process in parallel before any writes are performed.
+
         The default implementation does nothing.
 
-        NB: Size is a lowerbound estimate and doesn't account for any
-        serialization overhead from the storage layer. For example, for a tensor `t`
-        it will be `t.numel() * t.element_size()` but if `torch.save` is used,
-        there will be aditional serialization overhead.
-
         Args:
-            storage_keys (Dict[str, int]): key - handle's name. value - size
-                of the handle.
+            storage_writes (List[Union[TensorWriteRequest, BytesWriteRequest]]): A list of
+            all writes that will be submited.
 
         Returns:
             None
