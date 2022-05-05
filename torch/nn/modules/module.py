@@ -267,6 +267,7 @@ class Module:
         self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
         self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
         self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._load_state_dict_post_hooks: Dict[int, Callable] = OrderedDict()
         self._modules: Dict[str, Optional['Module']] = OrderedDict()
 
     forward: Callable[..., Any] = _forward_unimplemented
@@ -1183,6 +1184,8 @@ class Module:
             self._state_dict_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
             self._load_state_dict_pre_hooks = OrderedDict()
+        if '_load_state_dict_post_hooks' not in self.__dict__:
+            self._load_state_dict_post_hooks = OrderedDict()
         if '_non_persistent_buffers_set' not in self.__dict__:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
@@ -1403,6 +1406,37 @@ class Module:
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 
+    def register_load_state_dict_post_hook(self, hook):
+        r"""Registers a post hook to be run after module's ``load_state_dict``
+        is called.
+
+        It should have the following signature::
+            hook(module, incompatible_keys) -> None
+
+        The ``module`` argument is the current module that this hook is registered
+        on, and the ``incompatible_keys`` argument is a ``NamedTuple`` consisting
+        of attributes ``missing_keys`` and ``unexpected_keys``. ``missing_keys``
+        is a ``list`` of ``str`` containing the missing keys and
+        ``unexpected_keys`` is a ``list`` of ``str`` containing the unexpected keys.
+
+        The given incompatible_keys can be modified inplace if needed.
+
+        Note that the checks performed when calling :func:`load_state_dict` with
+        ``strict=True`` are affected by modifications the hook makes to
+        ``missing_keys`` or ``unexpected_keys``, as expected. Additions to either
+        set of keys will result in an error being thrown when ``strict=True``, and
+        clearning out both missing and unexpected keys will avoid an error.
+
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+        """
+        handle = hooks.RemovableHandle(self._load_state_dict_post_hooks)
+        self._load_state_dict_post_hooks[handle.id] = hook
+        return handle
+
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
@@ -1539,6 +1573,16 @@ class Module:
             for name, child in module._modules.items():
                 if child is not None:
                     load(child, prefix + name + '.')
+
+            # Note that the hook can modify missing_keys and unexpected_keys.
+            incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
+            for hook in module._load_state_dict_post_hooks.values():
+                out = hook(module, incompatible_keys)
+                assert out is None, (
+                    "Hooks registered with ``register_load_state_dict_post_hook`` are not"
+                    "expected to return new values, if incompatible_keys need to be modified,"
+                    "it should be done inplace."
+                )
 
         load(self)
         del load
