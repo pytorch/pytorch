@@ -123,12 +123,12 @@ class no_grad(_DecoratorContextManager):
         >>> z.requires_grad
         False
     """
-    def __init__(self):
+    def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
         self.prev = False
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self.prev = torch.is_grad_enabled()
         torch.set_grad_enabled(False)
 

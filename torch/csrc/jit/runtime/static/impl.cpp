@@ -140,6 +140,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
+  EliminateNoOpSlice(graph);
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
@@ -176,6 +177,7 @@ void OptimizeGraph(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   AddIfThenElseOp(graph);
   UseSplitAndSqueeze(graph);
+  QuantizedLinearReluFusion(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -1845,6 +1847,9 @@ void ProcessedNode::run() {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     guard.needsInputs() ? guard.before(get_op_name(), inputs_ivalue_vec())
                         : guard.before(get_op_name());
+    if (has_out_variant()) {
+      guard._setStaticRuntimeOutVariant();
+    }
 
     fn_->run(this);
   } else {

@@ -787,9 +787,10 @@ class ShardedTensor(object):
         size = self._metadata.size
         if dim is None:
             return size
-        if dim < 0 or dim >= len(size):
+        if dim < -len(size) or dim >= len(size):
             raise ValueError(
-                f"Argument ``dim`` must be within the range of tensor dimensions [0, {len(size)})"
+                "Argument ``dim`` must be within the range of tensor "
+                f"dimensions [-{len(size)}, {len(size)})"
             )
         return size[dim]
 
@@ -806,6 +807,129 @@ class ShardedTensor(object):
         in the order specified by memory format.
         """
         return self._metadata.tensor_properties.memory_format == torch.contiguous_format
+
+    def dim(self) -> int:
+        """
+        Returns a `int` which represents the dimension of the tensor.
+
+        Returns:
+            A `int` represents the dimension of the tensor.
+        """
+        return len(self._metadata.size)
+
+    # TODO: This op needs further definition of what exactly its behavior will be.
+    def contiguous(self) -> ShardedTensor:
+        """
+        Returns a new sharded tensor with the local tensor is made to contiguous.
+        """
+        if self.is_contiguous():
+            return self
+        local_shards = []
+        for shard in self.local_shards():
+            local_shards.append(
+                Shard(shard.tensor.contiguous(), shard.metadata)
+            )
+        return ShardedTensor._init_from_local_shards_and_global_metadata(
+            local_shards,
+            self._metadata,
+            process_group=self._process_group,
+            init_rrefs=self._init_rrefs,
+        )
+
+    def masked_fill(self, mask, value) -> ShardedTensor:
+        """
+        Returns a new sharded tensor with each shard has been filled elements
+        with value where mask is True. The shape of mask must be broadcastable
+        with the shape of the underlying tensor.
+
+        Args:
+            mask (BoolTensor): the boolean mask.
+            value (float): the value to fill in with.
+
+        Returns:
+            A :class:`ShardedTensor` object whose shards have been applied masked_fill.
+        """
+        return handle_torch_function(
+            torch.Tensor.masked_fill, (self, mask, value), self, mask, value
+        )
+
+    def type_as(self, tensor) -> ShardedTensor:
+        """
+        Returns a new sharded tensor with each shard has been
+        cast to the type of the given tensor.
+
+        Args:
+            tensor (Tensor): the tensor which has the desired type.
+
+        Returns:
+            A :class:`ShardedTensor` object whose shards have been applied type_as.
+        """
+        return handle_torch_function(torch.Tensor.type_as, (self, tensor), self, tensor)
+
+    def view(self, *shape) -> ShardedTensor:
+        """
+        Returns a new sharded tensor with the same data as the
+        self tensor but of a different shape for its local tensor.
+
+        For now, we only support to pass through the view op to the local
+        tensor.
+
+        Args:
+            shape (torch.Size or int...) – the desired size.
+
+        Returns:
+            A :class:`ShardedTensor` object whose shards have been applied
+                with view to its local tensor.
+        """
+        return handle_torch_function(torch.Tensor.view, (self, *shape), self, *shape)
+
+    def transpose(self, dim0, dim1) -> ShardedTensor:
+        """
+        Returns a new sharded tensor with the given dimensions transposed.
+        During the transpose, we keep the original shading dim, e.g., if the
+        tensor is sharded by dim 0 and if we call transpose(1, 0). The returned
+        tensor will be sharded by dim 1.
+
+        Args:
+            dim0 (int): the first dimension to be transposed.
+            dim1 (int): the second dimension to be transposed.
+
+        Returns:
+            A :class:`ShardedTensor` object whose dims have been transposed
+                specified in the input.
+        """
+        return handle_torch_function(torch.Tensor.transpose, (self, dim0, dim1), self, dim0, dim1)
+
+    def bmm(self, st2, *, out=None) -> ShardedTensor:
+        """
+        Performs a batch matrix-matrix product of matrices stored in self and st2.
+
+        Warning: For now we only supports the case when both tensors are sharded
+            by dim 0 so that no communication is needed.
+
+        Args:
+            st2 (ShardedTensor) – the second batch of sharded matrices to be multiplied.
+
+        Returns:
+            A :class:`ShardedTensor` object which is the result of the batch multiplication.
+        """
+        return handle_torch_function(torch.Tensor.bmm, (self, st2, out), self, st2, out=out)
+
+    def chunk(self, chunks, dim=0) -> List[ShardedTensor]:
+        """
+        Attempts to split a tensor into the specified number of chunks.
+        Each chunk is a view of the input tensor.
+
+        Warnings: Chunk by the sharding dim is not supported.
+
+        Args:
+            chunks (int) – number of chunks to return
+            dim (int) – dimension along which to split the tensor
+
+        Returns:
+            A List of :class:`ShardedTensor` object chunked on dims.
+        """
+        return handle_torch_function(torch.Tensor.chunk, (self, chunks, dim), self, chunks, dim=dim)
 
     @property
     def shape(self):

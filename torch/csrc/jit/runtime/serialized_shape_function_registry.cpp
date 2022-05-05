@@ -4,7 +4,7 @@
  * This is an auto-generated file. Please do not modify it by hand.
  * To re-generate, please run:
  * cd ~/pytorch && python
- * tools/codegen/shape_functions/gen_jit_shape_functions.py
+ * torchgen/shape_functions/gen_jit_shape_functions.py
  */
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -2332,6 +2332,47 @@ def transpose(self: List[int],
   return expandedSizes
 
 )=====")
++ std::string(R"=====(def argmax(self: List[int],
+    dim: Optional[int]=None,
+    keepdim: bool=False) -> List[int]:
+  if torch.__is__(dim, None):
+    _0 = annotate(List[int], [])
+  else:
+    dim0 = unchecked_cast(int, dim)
+    _1 = torch.len(self)
+    if torch.le(_1, 0):
+      dim_post_expr = 1
+    else:
+      dim_post_expr = _1
+    min = torch.neg(dim_post_expr)
+    max = torch.sub(dim_post_expr, 1)
+    if torch.lt(dim0, min):
+      _2 = True
+    else:
+      _2 = torch.gt(dim0, max)
+    if torch.__not__(_2):
+      pass
+    else:
+      ops.prim.RaiseException("AssertionError: ")
+    if torch.lt(dim0, 0):
+      dim1 = torch.add(dim0, dim_post_expr)
+    else:
+      dim1 = dim0
+    out = annotate(List[int], [])
+    _3 = [9223372036854775807, torch.len(self)]
+    for i in range(ops.prim.min(_3)):
+      self_dim = self[i]
+      if torch.eq(i, dim1):
+        if keepdim:
+          _4 = torch.append(out, 1)
+        else:
+          pass
+      else:
+        _5 = torch.append(out, self_dim)
+    _0 = out
+  return _0
+
+)=====")
 + std::string(R"=====(def broadcast_three(a: List[int],
     b: List[int],
     c: List[int]) -> List[int]:
@@ -2544,6 +2585,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor", "unary"},
     {"aten::dequantize(Tensor self) -> Tensor", "unary"},
     {"quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc", "broadcast"},
+    {"aten::argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor", "argmax"},
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},
