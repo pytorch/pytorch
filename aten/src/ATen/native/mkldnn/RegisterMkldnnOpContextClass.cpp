@@ -10,18 +10,18 @@ namespace at {
 namespace native {
 namespace mkldnn {
 
-using namespace internal::convolution2d;
+using namespace internal::convolution;
 
 TORCH_LIBRARY(mkldnn, m) {
-  m.class_<Conv2dOpContext>(TORCH_SELECTIVE_CLASS("Conv2dOpContext"))
+  m.class_<ConvOpContext>(TORCH_SELECTIVE_CLASS("ConvOpContext"))
       .def_pickle(
-          [](const c10::intrusive_ptr<Conv2dOpContext>& op_context)
-              -> SerializationTypeConv2dPrePack { // __getstate__
+          [](const c10::intrusive_ptr<ConvOpContext>& op_context)
+              -> SerializationTypeConvPrePack { // __getstate__
             return op_context->unpack();
           },
-          [](SerializationTypeConv2dPrePack state)
-              -> c10::intrusive_ptr<Conv2dOpContext> { // __setstate__
-            return createConv2dPrePackOpContext(
+          [](SerializationTypeConvPrePack state)
+              -> c10::intrusive_ptr<ConvOpContext> { // __setstate__
+            return createConvPrePackOpContext(
                 std::move(std::get<0>(state)),
                 std::move(std::get<1>(state)),
                 std::move(std::get<2>(state)),
@@ -38,20 +38,19 @@ TORCH_LIBRARY(mkldnn, m) {
 
 TORCH_LIBRARY(mkldnn_prepacked, m) {
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "mkldnn_prepacked::conv2d_prepack(Tensor W, Tensor? B, int[2] stride, int[2] padding, int[2] dilation, int groups, int[4] input_size, str attr) -> __torch__.torch.classes.mkldnn.Conv2dOpContext"));
+      "mkldnn_prepacked::conv2d_prepack(Tensor W, Tensor? B, int[2] stride, int[2] padding, int[2] dilation, int groups, int[4] input_size, str attr) -> __torch__.torch.classes.mkldnn.ConvOpContext"));
 
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.Conv2dOpContext W_prepack) -> Tensor Y"));
+      "mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.ConvOpContext W_prepack) -> Tensor Y"));
 }
 
 TORCH_LIBRARY_IMPL(mkldnn_prepacked, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn_prepacked::conv2d_prepack"),
-      TORCH_FN(createConv2dPrePackOpContext));
+      TORCH_FN(createConvPrePackOpContext));
 
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn_prepacked::conv2d_run"),
-      TORCH_FN(conv2d_run));
+      TORCH_SELECTIVE_NAME("mkldnn_prepacked::conv2d_run"), TORCH_FN(conv_run));
 }
 
 } // namespace mkldnn

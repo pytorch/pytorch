@@ -11,7 +11,7 @@ namespace at {
 namespace native {
 namespace mkldnn {
 namespace internal {
-namespace convolution2d {
+namespace convolution {
 
 // These constants control the fusion behavior of convolution.
 enum AttrType {
@@ -30,7 +30,7 @@ static AttrType get_attrtype_enum(const c10::string_view attr) {
   }
 }
 
-c10::intrusive_ptr<mkldnn::Conv2dOpContext> createConv2dPrePackOpContext(
+c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
     c10::optional<Tensor> bias,
     std::vector<int64_t> stride,
@@ -40,11 +40,11 @@ c10::intrusive_ptr<mkldnn::Conv2dOpContext> createConv2dPrePackOpContext(
     std::vector<int64_t> input_size,
     c10::string_view attr);
 
-Tensor conv2d_run(
+Tensor conv_run(
     const Tensor& input,
-    const c10::intrusive_ptr<mkldnn::Conv2dOpContext>& op_context);
+    const c10::intrusive_ptr<mkldnn::ConvOpContext>& op_context);
 
-ContextConv2D create(
+ContextConv create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef padding,
@@ -54,9 +54,9 @@ ContextConv2D create(
     const IntArrayRef input_size,
     const ideep::attr_t& attr);
 
-Tensor run(ContextConv2D& context, const Tensor& input);
+Tensor run(ContextConv& context, const Tensor& input);
 
-} // namespace convolution2d
+} // namespace convolution
 } // namespace internal
 } // namespace mkldnn
 } // namespace native

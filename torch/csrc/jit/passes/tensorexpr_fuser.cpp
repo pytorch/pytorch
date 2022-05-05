@@ -90,9 +90,9 @@ static const OperatorSet& supported_non_eltwise_set() {
 static const OperatorSet& supported_mkldnn_fusion_op_set() {
   // clang-format off
   static const OperatorSet supported_mkldnn_fusion_op_set{
-#if AT_MKLDNN_ENABLED()    
-      "mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.Conv2dOpContext W_prepack) -> (Tensor Y)",
-#endif // AT_MKLDNN_ENABLED()      
+#if AT_MKLDNN_ENABLED()
+      "mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.ConvOpContext W_prepack) -> (Tensor Y)",
+#endif // AT_MKLDNN_ENABLED()
   };
   // clang-format on
   return supported_mkldnn_fusion_op_set;

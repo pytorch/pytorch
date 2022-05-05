@@ -11,7 +11,7 @@ namespace at {
 namespace native {
 namespace mkldnn {
 
-struct ContextConv2D final {
+struct ContextConv final {
   ideep::tensor weight_packed_;
   c10::optional<at::Tensor> at_bias_;
   std::array<int64_t, 2> padding_;
@@ -20,9 +20,9 @@ struct ContextConv2D final {
   int64_t groups_;
   ideep::attr_t attr_;
 
-  ContextConv2D() = delete;
+  ContextConv() = delete;
 
-  ContextConv2D(
+  ContextConv(
       ideep::tensor&& weight_packed,
       c10::optional<at::Tensor> at_bias,
       std::array<int64_t, 2> padding,

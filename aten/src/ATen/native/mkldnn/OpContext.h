@@ -10,7 +10,7 @@ namespace at {
 namespace native {
 namespace mkldnn {
 
-using SerializationTypeConv2dPrePack = std::tuple<
+using SerializationTypeConvPrePack = std::tuple<
     Tensor,
     c10::optional<Tensor>,
     std::vector<int64_t>,
@@ -20,7 +20,7 @@ using SerializationTypeConv2dPrePack = std::tuple<
     std::vector<int64_t>,
     c10::string_view>;
 
-class Conv2dOpContext : public torch::jit::CustomClassHolder {
+class ConvOpContext : public torch::jit::CustomClassHolder {
  protected:
   Tensor orig_weight_;
   c10::optional<Tensor> orig_bias_;
@@ -32,7 +32,7 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   c10::string_view attr_;
 
  public:
-  SerializationTypeConv2dPrePack unpack() {
+  SerializationTypeConvPrePack unpack() {
     return std::make_tuple(
         orig_weight_,
         orig_bias_,
@@ -47,12 +47,12 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   virtual Tensor run(const Tensor& input) = 0;
 };
 
-class MkldnnConv2dOpContext final : public Conv2dOpContext {
+class MkldnnConvOpContext final : public ConvOpContext {
  private:
-  ContextConv2D op_context_;
+  ContextConv op_context_;
 
  public:
-  MkldnnConv2dOpContext(
+  MkldnnConvOpContext(
       Tensor&& weight,
       c10::optional<Tensor>&& bias,
       std::vector<int64_t>&& padding,
@@ -60,7 +60,7 @@ class MkldnnConv2dOpContext final : public Conv2dOpContext {
       std::vector<int64_t>&& dilation,
       uint64_t groups,
       std::vector<int64_t>&& input_size,
-      ContextConv2D&& op_context)
+      ContextConv&& op_context)
       : op_context_(std::move(op_context)) {
     orig_weight_ = std::move(weight);
     orig_bias_ = std::move(bias);
@@ -73,7 +73,7 @@ class MkldnnConv2dOpContext final : public Conv2dOpContext {
 
   Tensor run(const Tensor& input) override;
 
-  static c10::intrusive_ptr<Conv2dOpContext> create_context(
+  static c10::intrusive_ptr<ConvOpContext> create_context(
       Tensor&& weight,
       c10::optional<Tensor>&& bias,
       std::vector<int64_t>&& padding,

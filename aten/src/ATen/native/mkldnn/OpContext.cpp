@@ -7,7 +7,7 @@ namespace at {
 namespace native {
 namespace mkldnn {
 
-c10::intrusive_ptr<Conv2dOpContext> MkldnnConv2dOpContext::create_context(
+c10::intrusive_ptr<ConvOpContext> MkldnnConvOpContext::create_context(
     at::Tensor&& weight,
     c10::optional<at::Tensor>&& bias,
     std::vector<int64_t>&& padding,
@@ -16,10 +16,10 @@ c10::intrusive_ptr<Conv2dOpContext> MkldnnConv2dOpContext::create_context(
     int64_t groups,
     std::vector<int64_t>&& input_size,
     const ideep::attr_t& attr) {
-  auto op_context = mkldnn::internal::convolution2d::create(
+  auto op_context = mkldnn::internal::convolution::create(
       weight, bias, padding, stride, dilation, groups, input_size, attr);
 
-  auto conv2d_op_context = c10::make_intrusive<MkldnnConv2dOpContext>(
+  auto conv_op_context = c10::make_intrusive<MkldnnConvOpContext>(
       std::move(weight),
       std::move(bias),
       std::move(padding),
@@ -29,11 +29,11 @@ c10::intrusive_ptr<Conv2dOpContext> MkldnnConv2dOpContext::create_context(
       std::move(input_size),
       std::move(op_context));
 
-  return conv2d_op_context;
+  return conv_op_context;
 }
 
-Tensor MkldnnConv2dOpContext::run(const Tensor& input) {
-  return mkldnn::internal::convolution2d::run(op_context_, input);
+Tensor MkldnnConvOpContext::run(const Tensor& input) {
+  return mkldnn::internal::convolution::run(op_context_, input);
 }
 
 } // namespace mkldnn

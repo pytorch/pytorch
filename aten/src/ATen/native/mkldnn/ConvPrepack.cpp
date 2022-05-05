@@ -14,14 +14,14 @@ namespace at {
 namespace native {
 namespace mkldnn {
 namespace internal {
-namespace convolution2d {
+namespace convolution {
 
 std::map<AttrType, ideep::attr_t> FusionAttrMap{
     {AttrType::None, ideep::attr_t()},
     {AttrType::ReLU, ideep::attr_t::fuse_relu()},
 };
 
-c10::intrusive_ptr<mkldnn::Conv2dOpContext> createConv2dPrePackOpContext(
+c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
     c10::optional<Tensor> bias,
     std::vector<int64_t> stride,
@@ -35,7 +35,7 @@ c10::intrusive_ptr<mkldnn::Conv2dOpContext> createConv2dPrePackOpContext(
   TORCH_CHECK(it != FusionAttrMap.end(), "Fusion behavior undefined.");
   ideep::attr_t op_attr = FusionAttrMap[attr_type];
 
-  return mkldnn::MkldnnConv2dOpContext::create_context(
+  return mkldnn::MkldnnConvOpContext::create_context(
       std::move(weight),
       std::move(bias),
       std::move(padding),
@@ -46,7 +46,7 @@ c10::intrusive_ptr<mkldnn::Conv2dOpContext> createConv2dPrePackOpContext(
       op_attr);
 }
 
-ContextConv2D create(
+ContextConv create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef padding,
@@ -82,7 +82,7 @@ ContextConv2D create(
   packed_weight.init(expected_weight_desc);
   packed_weight.feed_from(w);
 
-  return ContextConv2D{
+  return ContextConv{
       std::move(packed_weight),
       bias.has_value() ? c10::make_optional(*bias) : c10::nullopt,
       {padding_expanded[0], padding_expanded[1]},
@@ -179,7 +179,7 @@ Tensor mkldnn_convolution(
       input.options().device_opt()));
 }
 
-Tensor run(ContextConv2D& context, const Tensor& input) {
+Tensor run(ContextConv& context, const Tensor& input) {
   return mkldnn_convolution(
       input,
       context.weight_packed_,
@@ -191,13 +191,13 @@ Tensor run(ContextConv2D& context, const Tensor& input) {
       context.attr_);
 }
 
-Tensor conv2d_run(
+Tensor conv_run(
     const Tensor& input,
-    const c10::intrusive_ptr<mkldnn::Conv2dOpContext>& op_context) {
+    const c10::intrusive_ptr<mkldnn::ConvOpContext>& op_context) {
   return op_context->run(input);
 }
 
-} // namespace convolution2d
+} // namespace convolution
 } // namespace internal
 } // namespace mkldnn
 } // namespace native
