@@ -74,12 +74,13 @@ def make_dual(tensor, tangent, *, level=None):
 
     return torch._VF._make_dual(tensor, tangent, level=level)
 
-class UnpackedDualTensor(NamedTuple):
+_UnpackedDualTensor = namedtuple('_UnpackedDualTensor', ['primal', 'tangent'])
+
+class UnpackedDualTensor(_UnpackedDualTensor):
     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
     See :func:`unpack_dual` for more details."""
-    primal: Tensor
-    tangent: Tensor
-    
+    pass
+
 def unpack_dual(tensor, *, level=None):
     r"""Unpacks a "dual tensor" to get both its Tensor value and its forward AD gradient.
     The result is a namedtuple ``(primal, tangent)`` where ``primal`` is a view of

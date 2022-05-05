@@ -12,7 +12,7 @@ import functools
 # Note: `get_*_jacobian` functions are added here even though we didn't intend to make them public
 # since they have been exposed from before we added `__all__`  and we already maintain BC for them
 # We should eventually deprecate them and remove them from `__all__`
-__all__ = ["gradcheck", "gradgradcheck", "GradcheckError", "get_numerical_jacobian", 
+__all__ = ["gradcheck", "gradgradcheck", "GradcheckError", "get_numerical_jacobian",
            "get_analytical_jacobian", "get_numerical_jacobian_wrt_specific_input"]
 
 class GradcheckError(RuntimeError):
