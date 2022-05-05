@@ -6170,6 +6170,9 @@ class TestNN(NNTestCase):
         self.assertEqual(state_dict['weight'].data_ptr(), l.weight.data_ptr())
         self.assertEqual(state_dict['bias'].data_ptr(), l.bias.data_ptr())
 
+        # Reference https://github.com/pytorch/pytorch/pull/75507#issuecomment-1110291545
+        self.assertNotWarn(lambda: l.state_dict(destination=dict()), "Should not warn kwarg destination w/o _metadata")
+
     def test_load_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
