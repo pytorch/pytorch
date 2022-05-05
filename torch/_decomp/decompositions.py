@@ -1181,7 +1181,7 @@ def rot90(self: Tensor, k: int = 1, dims: List[int] = [0, 1]) -> Tensor:
 
 @register_decomposition(aten.transpose.int)
 def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
-    dim0, dim1 = utils.canonicalize_dims(self.ndim, (dim0, dim1))
+    dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))
 
     if self.dim() <= 1:
         return self
