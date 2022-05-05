@@ -1165,7 +1165,8 @@ def rot90(self: Tensor, k: int = 1, dims: List[int] = [0, 1]) -> Tensor:  # noqa
     total_rot_dims = len(dims)
     assert total_rot_dims == 2, f"expected total rotation dims == 2, but got dims = {total_rot_dims}"
     assert total_dims >= 2, f"expected total dims >= 2, but got total dims = {total_dims}"
-    assert dims[0] != dims[1] and abs(dims[0] - dims[1]) != total_dims, f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
+    assert dims[0] != dims[1] and abs(dims[0] - dims[1]) != total_dims,\
+           f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
     assert dims[0] < total_dims and dims[0] >= -total_dims, f"Rotation dim0 out of range, dim0 = {dims[0]}"
     assert dims[1] < total_dims and dims[1] >= -total_dims, f"Rotation dim1 out of range, dim1 = {dims[1]}"
     k = k % 4
