@@ -527,11 +527,6 @@ Tensor& clamp_max_out(const Tensor& self, const Tensor& max, Tensor& result) {
   return result;
 }
 
-Tensor clamp_max(const Tensor& self, const Scalar& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_max_outf(self, max, result);
-}
-
 Tensor clamp_max(const Tensor& self, const Tensor& max) {
   Tensor result = at::empty({0}, self.options());
   return at::clamp_max_outf(self, max, result);
@@ -552,11 +547,6 @@ Tensor& clamp_min_out(const Tensor& self, const Tensor& min, Tensor& result) {
   auto iter = TensorIterator::borrowing_binary_op(result, self, min);
   clamp_min_stub(iter.device_type(), iter);
   return result;
-}
-
-Tensor clamp_min(const Tensor& self, const Scalar& min) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_min_outf(self, min, result);
 }
 
 Tensor clamp_min(const Tensor& self, const Tensor& min) {
