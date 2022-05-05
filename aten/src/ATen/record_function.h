@@ -416,6 +416,10 @@ struct TORCH_API RecordFunction {
   // Returns whether this RecordFunction corresponds to an async event orn ot.
   bool isAsync() const;
 
+  // Internal-only, used to denote out variant used for Static Runtime execution
+  void _setStaticRuntimeOutVariant();
+  bool isStaticRuntimeOutVariant() const;
+
   RecordFunctionHandle handle() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called handle() on inactive RecordFunction");
     return state_->handle_;
@@ -499,6 +503,10 @@ struct TORCH_API RecordFunction {
     // This is specifically is useful for mobile runtime, where generated
     // debug handles can be lazily symbolicated using debug information
     int64_t debug_handle_{-1};
+
+    // Whether this RecordFunction is used for an out variant run with
+    // Static Runtime
+    bool is_static_runtime_out_variant_{false};
   };
 
   c10::optional<State> state_;
