@@ -329,27 +329,32 @@ TEST(StaticRuntime, Logit) {
         return (a)
   )JIT";
 
+  // with nnc, strided
+  const auto logit_script_2s = R"JIT(
+    def forward(self, inp: Tensor):
+        a = torch.logit(torch.transpose(inp, 1, 0), 1e-6).clone()
+        return (a)
+  )JIT";
+
   // no nnc
   const auto logit_script_3 = R"JIT(
     def forward(self, inp: Tensor, eps: float):
         a = torch.logit(inp, eps).clone()
         return (a)
   )JIT";
-  auto a = at::ones({2, 3});
+  auto a = at::rand({2, 3});
   double b = 1e-6;
   std::vector<IValue> args_1{a};
   std::vector<IValue> args_2({a, b});
 
-  auto c = at::ones({4, 3, 2});
+  auto c = at::rand({4, 3, 2});
 
-  // logit
-  testStaticRuntime(logit_script_1, args_1);
-  testStaticRuntime(logit_script_2, args_1);
-  testStaticRuntime(logit_script_3, args_2);
-
-  testStaticRuntime(logit_script_1, args_1, {c});
-  testStaticRuntime(logit_script_2, args_1, {c});
-  testStaticRuntime(logit_script_3, args_2, {c, b});
+  for (const auto &src : {logit_script_1, logit_script_2, logit_script_2s}) {
+    testStaticRuntime(src, args_1, {}, /* use_allclose */ true);
+    testStaticRuntime(src, args_1, {c}, /* use_allclose */ true);
+  }
+  testStaticRuntime(logit_script_3, args_2, {}, /* use_allclose */ true);
+  testStaticRuntime(logit_script_3, args_2, {c, b}, /* use_allclose */ true);
 }
 
 TEST(StaticRuntime, EmbeddingBag) {

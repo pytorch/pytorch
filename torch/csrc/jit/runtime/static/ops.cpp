@@ -977,7 +977,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    if (!te || !te->checkInput<float>(in0_t)) {
+    if (!te || in0_t.scalar_type() != at::kFloat || in0_t.layout() != at::kStrided) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_d = p_node->Input(1).toOptional<double>();
       fastResizeToZero(out_t);
@@ -985,6 +985,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       return;
     }
     at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+    auto in_strides = in0_t.strides();
+    for (size_t i = 0; i < in_strides.size(); ++i) {
+      out_t.unsafeGetTensorImpl()->set_stride(i, in_strides[i]);
+    }
     int64_t nn = in0_t.numel();
     float c = clamp_value;
     te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn, &c});
