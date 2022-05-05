@@ -1901,7 +1901,7 @@ REGISTER_OPERATOR_FUNCTOR(
         const auto& in0_t = p_node->Input(0).toTensor();
         const auto in1_s = p_node->Input(1).toScalar();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::native::clamp_min(in0_t, in1_s);
+          p_node->Output(0) = at::cpu::clamp_min(in0_t, in1_s);
           return;
         }
         auto& out_t = p_node->Output(0).toTensor();
