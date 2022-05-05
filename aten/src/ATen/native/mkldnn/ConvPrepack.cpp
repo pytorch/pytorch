@@ -55,12 +55,14 @@ ContextConv create(
     const int64_t groups,
     const IntArrayRef input_size,
     const ideep::attr_t& attr) {
-  const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
-  const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
+  auto k = weight.ndimension();
+  int64_t dim = k - 2;
+  const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
+  const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
   const auto dilation_expanded =
-      expand_param_if_needed(dilation, "dilation", 2);
+      expand_param_if_needed(dilation, "dilation", dim);
   const auto input_size_expanded =
-      expand_param_if_needed(input_size, "input_size", 4);
+      expand_param_if_needed(input_size, "input_size", k);
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   auto w = itensor_view_from_dense(weight);
@@ -85,9 +87,9 @@ ContextConv create(
   return ContextConv{
       std::move(packed_weight),
       bias.has_value() ? c10::make_optional(*bias) : c10::nullopt,
-      {padding_expanded[0], padding_expanded[1]},
-      {stride_expanded[0], stride_expanded[1]},
-      {dilation_expanded[0], dilation_expanded[1]},
+      {padding_expanded.begin(), padding_expanded.end()},
+      {stride_expanded.begin(), stride_expanded.end()},
+      {dilation_expanded.begin(), dilation_expanded.end()},
       groups,
       std::move(attr)};
 }
