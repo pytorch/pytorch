@@ -54,7 +54,7 @@ class Stream:
 class Size(Tuple[_int, ...]):
     # TODO: __reduce__
 
-    @overload
+    @overload  # type: ignore[override]
     def __getitem__(self: Size, key: _int) -> _int: ...
 
     @overload
