@@ -27,9 +27,9 @@ with open(Path(__file__).parent.parent.parent / fn('.'), "r") as f:
     contents = f.read()
 
 yaml = ruamel.yaml.YAML()  # type: ignore[attr-defined]
-yaml.preserve_quotes = True
-yaml.width = 1000
-yaml.boolean_representation = ['False', 'True']
+yaml.preserve_quotes = True  # type: ignore[assignment]
+yaml.width = 1000  # type: ignore[assignment]
+yaml.boolean_representation = ['False', 'True']  # type: ignore[attr-defined]
 r = yaml.load(contents)
 
 # Cuz ruamel's author intentionally didn't include conversion to string
