@@ -25,6 +25,7 @@ enum class C10_API_ENUM ProfilerState {
   NVTX, // only emit NVTX markers
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
+  KINETO_ONDEMAND, // run the profiler in on-demand mode
   NUM_PROFILER_STATES, // must be the last one
 };
 

@@ -85,9 +85,11 @@ includes = [
     "aten/src/ATen/cuda/*",
     "aten/src/ATen/native/cuda/*",
     "aten/src/ATen/native/cudnn/*",
+    "aten/src/ATen/native/quantized/cudnn/*",
     "aten/src/ATen/native/nested/cuda/*",
     "aten/src/ATen/native/sparse/cuda/*",
     "aten/src/ATen/native/quantized/cuda/*",
+    "aten/src/ATen/native/transformers/cuda/*",
     "aten/src/THC/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
@@ -97,11 +99,13 @@ includes = [
     "tools/autograd/templates/python_variable_methods.cpp",
 ]
 
+includes = [os.path.join(proj_dir, include) for include in includes]
+
 for new_dir in args.extra_include_dir:
     abs_new_dir = os.path.join(proj_dir, new_dir)
     if os.path.exists(abs_new_dir):
-        new_dir = os.path.join(new_dir, "**/*")
-        includes.append(new_dir)
+        abs_new_dir = os.path.join(abs_new_dir, "**/*")
+        includes.append(abs_new_dir)
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
@@ -119,6 +123,8 @@ ignores = [
     "torch/lib/tmp_install/*",
     "torch/include/*",
 ]
+
+ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]
 
 # Check if the compiler is hip-clang.
 def is_hip_clang() -> bool:
