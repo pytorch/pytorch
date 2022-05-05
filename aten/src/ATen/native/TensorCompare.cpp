@@ -220,7 +220,7 @@ Tensor isfinite(const Tensor& self) {
 
   // Note: a complex value is finite iff both parts are finite
   if (self.is_complex()) {
-    return at::isfinite(self.abs());
+    return at::isfinite(at::real(self)).__iand__(at::isfinite(at::imag(self)));
   }
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "isfinite", [&]() {
@@ -231,47 +231,6 @@ Tensor isfinite(const Tensor& self) {
 void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
 }
-
-namespace {
-
-// DO NOT USE THIS -- it's just an implementation detail of wrapped_scalar tensor below.
-at::Tensor scalar_to_tensor_default_dtype(
-    const Scalar& s,
-    const Device device = at::kCPU) {
-  if (s.isFloatingPoint()) {
-    return at::scalar_tensor(
-        s, at::device(device).dtype(at::get_default_dtype()));
-  } else if (s.isBoolean()) {
-    return at::scalar_tensor(s, at::device(device).dtype(at::kBool));
-  } else if (s.isComplex()) {
-    return at::scalar_tensor(
-        s, at::device(device).dtype(at::get_default_complex_dtype()));
-  } else {
-    TORCH_INTERNAL_ASSERT(s.isIntegral(false));
-    return at::scalar_tensor(s, at::device(device).dtype(at::kLong));
-  }
-}
-
-// TLDR: Don't call `wrapped_scalar_tensor_default_dtype` -- this function is only necessary to support the partial
-// type-promotion that torch.where supports.  Once torch.where fully supports type promotion, we
-// won't need this function.
-//
-// Longer explanation:
-// `wrapped_scalar_tensor_default_dtype` is a bit of a hack because torch.where doesn't support type promotion, but
-// does support `torch.where(tensor, scalar1, scalar2)` with default scalar types.  The trickiness is we
-// usually convert double scalars to doubles, and `set_wrapped_number` defines type promotion priority
-// as being below tensor types rather than as the default dtype (perhaps we should?).  This wouldn't matter
-// if we just supported type normal type promotion on torch.where, however.
-Tensor wrapped_scalar_tensor_default_dtype(
-    const Scalar& scalar,
-    Device device) {
-  at::Tensor tensor;
-  tensor = scalar_to_tensor_default_dtype(scalar, device);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
-} // anonymous namespace
 
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
@@ -295,7 +254,7 @@ static void isin_sorting(
   // 2. Stable sort all elements, maintaining order indices to reverse the
   //    operation. Stable sort is necessary to keep elements before test
   //    elements within the sorted list.
-  Tensor all_elements = at::_cat({elements_flat, test_elements_flat});
+  Tensor all_elements = at::cat({elements_flat, test_elements_flat});
   Tensor sorted_elements, sorted_order;
   std::tie (sorted_elements, sorted_order) = all_elements.sort(
       /*stable=*/ true, /*dim=*/ 0, /*descending=*/ false);
@@ -324,8 +283,15 @@ static void isin_sorting(
 }
 
 Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
-  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
-
+  Tensor self_, other_;
+  if (self.dtype() != other.dtype()) {
+    auto result_type = at::native::result_type(self, other);
+    self_ = self.to(result_type);
+    other_ = other.to(result_type);
+  } else {
+    self_ = self;
+    other_ = other;
+  }
   if (condition.scalar_type() == ScalarType::Byte) {
   TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
   } else {
@@ -336,31 +302,38 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
     .check_all_same_dtype(false)
     .add_output(out)
     .add_input(cond_bool)
-    .add_input(self)
-    .add_input(other)
+    .add_input(self_)
+    .add_input(other_)
     .build();
   where_kernel(iter.device_type(), iter);
   return out;
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  Tensor ret = at::empty({0}, self.options());
+  auto result_type = at::native::result_type(self, other);
+  Tensor ret = at::empty({0}, self.options().dtype(result_type));
   at::native::where_self_out(condition, self, other, ret);
   return ret;
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
-  return at::where(condition, wrapped_scalar_tensor(self, other.device()), other);
+  auto result_type = at::native::result_type(other, self);
+  auto self_converted = at::scalar_tensor(self, other.options().dtype(result_type));
+  auto other_converted = other.to(result_type);
+  return at::where(condition, self_converted, other_converted);
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
-  return at::where(condition, self, wrapped_scalar_tensor(other, self.device()));
+  auto result_type = at::native::result_type(self, other);
+  auto other_converted = at::scalar_tensor(other, self.options().dtype(result_type));
+  auto self_converted = self.to(result_type);
+  return at::where(condition, self_converted, other_converted);
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
-  const auto device = condition.device();
-  const Tensor& other_t = wrapped_scalar_tensor_default_dtype(other, device);
-  const Tensor& self_t = wrapped_scalar_tensor_default_dtype(self, device);
+  auto result_type = at::native::result_type(self, other);
+  const Tensor& other_t = at::scalar_tensor(other, condition.options().dtype(result_type));
+  const Tensor& self_t = at::scalar_tensor(self, condition.options().dtype(result_type));
   return at::where(condition, self_t, other_t);
 }
 
