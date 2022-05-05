@@ -10,12 +10,10 @@ import torch
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Callable, Dict, Optional, Union
+from typing import Callable, Dict, Optional, Union, Any
 from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
-
-import torch.nn as nn
 
 try:
     from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
