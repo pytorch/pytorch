@@ -2347,6 +2347,7 @@
   "torch.nn.modules.linear": [
     "LazyModuleMixin",
     "Module",
+    "NonDynamicallyQuantizableLinear",
     "Parameter",
     "Tensor",
     "UninitializedParameter"
