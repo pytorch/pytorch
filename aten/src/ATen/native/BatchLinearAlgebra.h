@@ -5,6 +5,10 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TransposeType.h>
 
+// Forward declare TI
+namespace at {
+struct TensorIterator;
+}
 
 namespace at { namespace native {
 
@@ -273,18 +277,17 @@ using lu_factor_fn = void (*)(
     bool /*compute_pivots*/);
 DECLARE_DISPATCH(lu_factor_fn, lu_factor_stub);
 
-using lu_solve_fn = void (*)(
-    const Tensor& /*b*/,
-    const Tensor& /*lu*/,
-    const Tensor& /*pivots*/);
-DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
+using unpack_pivots_fn = void(*)(
+  TensorIterator& iter,
+  const int64_t dim_size);
+DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
 
-using lu_solve_trans_fn = void (*)(
-    const Tensor& /*b*/,
-    const Tensor& /*lu*/,
+using lu_solve_fn = void (*)(
+    const Tensor& /*LU*/,
     const Tensor& /*pivots*/,
+    const Tensor& /*B*/,
     TransposeType /*trans*/);
-DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
+DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
 
 using ldl_factor_fn = void (*)(
     const Tensor& /*LD*/,
