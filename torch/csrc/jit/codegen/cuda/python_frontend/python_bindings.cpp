@@ -224,7 +224,7 @@ void initNvFuserPythonBindings(PyObject* module) {
               if (i == static_cast<int>(contig_info.size() - 1)) {
                 contig_info[i] = (strides[i] == 1);
               } else {
-                contig_info[i] = (strides[i] == strides[i - 1] * sizes[i - 1]);
+                contig_info[i] = (strides[i] == (strides[i - 1] * sizes[i - 1]));
               }
             }
 
