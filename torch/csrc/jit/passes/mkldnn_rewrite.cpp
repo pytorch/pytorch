@@ -13,7 +13,6 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/mkldnn_rewrite.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
@@ -148,19 +147,7 @@ void insertMkldnnPrePackedOps(script::Module& module) {
   }
 }
 
-// Eltwise inplace OP shares the same op_attr
-std::string PrepareAttr(const std::string& op) {
-  auto pos = op.find("_");
-  if (pos != std::string::npos) {
-    return op.substr(0, pos);
-  } else {
-    return op;
-  }
-}
-
 void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
-  SubgraphRewriter rewriter;
-  std::vector<std::string> fusion_operators = {"relu"};
   auto conv_op_rstring = at::jit::CodeTemplate(R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %input_size:int[], %dummy_attr:str):
@@ -181,18 +168,25 @@ void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
         %res = mkldnn_prepacked::conv2d_run(%input, %packed_weight_bias)
         return (%res))");
 
-  for (const auto& op : fusion_operators) {
+  for (auto const& it : mkldnn::fusion_attr_map) {
+    std::string op = it.first;
+    if (op == std::string("none")) {
+      continue;
+    }
+
     at::jit::TemplateEnv env;
     env.s("op", op);
 
     at::jit::TemplateEnv env_fused;
-    env_fused.s("op_attr", PrepareAttr(op));
+    env_fused.s("op_attr", op);
 
+    SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(
         conv_op_rstring.format(env), conv_op_fused_rstring.format(env_fused));
-  }
 
-  rewriter.runOnGraph(graph);
+    auto filters = it.second.filters;
+    rewriter.runOnGraph(graph, filters);
+  }
 }
 
 void PrePackingOpsFolder(Block* b) {

@@ -18,7 +18,7 @@ using SerializationTypeConvPrePack = std::tuple<
     std::vector<int64_t>,
     int64_t,
     std::vector<int64_t>,
-    c10::string_view>;
+    std::string>;
 
 class ConvOpContext : public torch::jit::CustomClassHolder {
  protected:
@@ -29,7 +29,7 @@ class ConvOpContext : public torch::jit::CustomClassHolder {
   std::vector<int64_t> dilation_;
   int64_t groups_;
   std::vector<int64_t> input_size_;
-  c10::string_view attr_;
+  std::string attr_;
 
  public:
   SerializationTypeConvPrePack unpack() {

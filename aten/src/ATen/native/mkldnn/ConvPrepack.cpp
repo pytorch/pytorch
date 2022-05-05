@@ -6,6 +6,7 @@
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <torch/csrc/jit/passes/mkldnn_rewrite.h>
 #include <c10/util/irange.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -16,10 +17,7 @@ namespace mkldnn {
 namespace internal {
 namespace convolution {
 
-std::map<AttrType, ideep::attr_t> FusionAttrMap{
-    {AttrType::None, ideep::attr_t()},
-    {AttrType::ReLU, ideep::attr_t::fuse_relu()},
-};
+using torch::jit::mkldnn::fusion_attr_map;
 
 c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
@@ -29,11 +27,10 @@ c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     std::vector<int64_t> dilation,
     int64_t groups,
     std::vector<int64_t> input_size,
-    c10::string_view attr) {
-  auto attr_type = get_attrtype_enum(attr);
-  auto it = FusionAttrMap.find(attr_type);
-  TORCH_CHECK(it != FusionAttrMap.end(), "Fusion behavior undefined.");
-  ideep::attr_t op_attr = FusionAttrMap[attr_type];
+    std::string attr) {
+  auto it = fusion_attr_map.find(attr);
+  TORCH_CHECK(it != fusion_attr_map.end(), "Fusion behavior undefined.");
+  ideep::attr_t op_attr = it->second.op_attr;
 
   return mkldnn::MkldnnConvOpContext::create_context(
       std::move(weight),

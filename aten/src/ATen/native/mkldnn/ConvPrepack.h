@@ -3,7 +3,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/mkldnn/Common.h>
 #include <ATen/native/mkldnn/OpContext.h>
-#include <c10/util/string_view.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -13,23 +12,6 @@ namespace mkldnn {
 namespace internal {
 namespace convolution {
 
-// These constants control the fusion behavior of convolution.
-enum AttrType {
-  None, // No fusion
-  ReLU, // ReLU fusion
-  END
-};
-
-static AttrType get_attrtype_enum(const c10::string_view attr) {
-  if (attr == "none") {
-    return AttrType::None;
-  } else if (attr == "relu") {
-    return AttrType::ReLU;
-  } else {
-    TORCH_CHECK(false, "unknown attr argument: ", attr);
-  }
-}
-
 c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
     c10::optional<Tensor> bias,
@@ -38,7 +20,7 @@ c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     std::vector<int64_t> dilation,
     int64_t groups,
     std::vector<int64_t> input_size,
-    c10::string_view attr);
+    std::string attr);
 
 Tensor conv_run(
     const Tensor& input,
