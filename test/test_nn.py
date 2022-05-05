@@ -21329,6 +21329,62 @@ class TestStateDictHooks(TestCase):
             m.load_state_dict(state_dict)
             self.assertEqual(2, hook_called)
 
+    def test_load_state_dict_post_hook(self):
+        hook_called = 0
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.foo = torch.nn.Parameter(torch.rand(10))
+
+            def my_post_load_hook(self, module, incompatible_keys):
+                assert module is self
+                nonlocal hook_called
+                incompatible_keys.missing_keys.append("foo")
+                incompatible_keys.unexpected_keys.append("bar")
+                hook_called += 1
+
+        nested = MyModule()
+        wrapped = nn.ModuleList([nested])
+        handle = nested.register_load_state_dict_post_hook(
+            nested.my_post_load_hook,
+        )
+        # Hook must be called even if it is wrapped
+        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
+        self.assertEqual(hook_called, 1)
+        # Ensure that the hook modified missing_keys and unexpected_keys
+        missing = ret.missing_keys
+        unexpected = ret.unexpected_keys
+        self.assertEqual(missing, ["foo"])
+        self.assertEqual(unexpected, ["bar"])
+        # When called with strict=True, the error raised should mention the
+        # missing and unexpected keys the hook added.
+        with self.assertRaisesRegex(RuntimeError, "foo.*\n.*bar"):
+            wrapped.load_state_dict(wrapped.state_dict(), strict=True)
+        self.assertEqual(hook_called, 2)
+        # Removing the hook via handle.remove() should cause it not to
+        # fire anymore.
+        handle.remove()
+        # Hook did not run so it should not have added any keys
+        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
+        self.assertEqual(ret.missing_keys, [])
+        self.assertEqual(ret.unexpected_keys, [])
+        # hook_called should not have been incremented
+        self.assertEqual(hook_called, 2)
+
+        def load_hook_clear_incompatible(module, incompatible_keys):
+            incompatible_keys.missing_keys.clear()
+            incompatible_keys.unexpected_keys.clear()
+
+        nested.register_load_state_dict_post_hook(load_hook_clear_incompatible)
+        state_dict = wrapped.state_dict()
+        state_dict["extra"] = torch.ones(1)
+        # load state_dict with strict=True should not throw.
+        ret = wrapped.load_state_dict(state_dict, strict=True)
+        # explicitly ensure that the post hook clearned out incompatible_keys
+        self.assertEqual([], ret.missing_keys)
+        self.assertEqual([], ret.unexpected_keys)
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)
