@@ -420,6 +420,12 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::create_owned_ref(...) -> ...",
       c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
+      "static_runtime::embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -1151,6 +1157,74 @@ void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
     to_erase.push_back(node);
   }
   for (auto* node : to_erase) {
+    node->destroy();
+  }
+}
+
+C10_UNUSED void RemoveUnnecessaryOutputs(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  RemoveUnnecessaryEmbeddingBagOutputs(graph);
+}
+
+C10_UNUSED void RemoveUnnecessaryEmbeddingBagOutputs(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        return (%y2, %y1, %y0))IR";
+  std::string transformed_pattern = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor = static_runtime::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        return (%y2, %y1, %y0))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, transformed_pattern);
+  fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx)
+        return (%y2, %y1, %y0))IR";
+  std::string transformed_pattern2 = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor = static_runtime::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx)
+        return (%y2, %y1, %y0))IR";
+  fuse.RegisterRewritePattern(pattern2, transformed_pattern2);
+  fuse.runOnGraph(graph);
+}
+
+namespace {
+bool isNoOpSlice(Node* node) {
+  DCHECK(node->kind() == aten::slice);
+  auto step = toIValue(node->input(3));
+  if (!step.has_value() || step->toInt() != 1) {
+    return false;
+  }
+  auto start = toIValue(node->input(1));
+  if (!start.has_value() || (start->isInt() && start->toInt() != 0)) {
+    return false;
+  }
+  auto end = toIValue(node->input(2));
+  // Could also look at list length, but most models that have this pattern are
+  // just doing list[0:], so it's not needed for now.
+  return end.has_value() && end->isNone();
+}
+} // namespace
+
+void EliminateNoOpSlice(std::shared_ptr<Graph>& graph) {
+  DepthFirstGraphNodeIterator it(graph);
+  auto schema = torch::schema(
+      "aten::slice.t(t[] l, int? start=None, int? end=None, int step=1) -> t[]");
+  Node* node = nullptr;
+  std::vector<Node*> to_delete;
+  while ((node = it.next()) != nullptr) {
+    if (!node->matches(schema) || !isNoOpSlice(node)) {
+      continue;
+    }
+
+    node->output()->replaceAllUsesWith(node->input(0));
+    to_delete.push_back(node);
+  }
+  for (auto* node : to_delete) {
     node->destroy();
   }
 }
