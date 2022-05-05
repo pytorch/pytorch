@@ -752,11 +752,13 @@ def find_matching_merge_rule(pr: GitHubPR,
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
                 reject_reason = f"Refusing to merge as mandatory check(s) {','.join(failed_checks)} failed for rule {rule_name}"
+            continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
                 reject_reason = f"Refusing to merge as mandatory check(s) {','.join(pending_checks)}"
                 reject_reason += f" are not yet run for rule {rule_name}"
+            continue
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
