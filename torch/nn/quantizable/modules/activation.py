@@ -1,5 +1,5 @@
 import torch
-import torch.jit
+import torch.jit  # this is needed to avoid a circular import
 from torch import nn
 import torch.nn.functional as nnF
 
@@ -74,6 +74,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         # Functionals
         self.q_scaling_product = torch.nn.quantized.FloatFunctional()
+        # note: importing torch.nn.quantized at top creates a circular import
 
         # Quant/Dequant
         self.quant_attn_output = torch.ao.quantization.QuantStub()
@@ -222,7 +223,7 @@ class MultiheadAttention(nn.MultiheadAttention):
     @classmethod
     def from_observed(cls, other):
         # The whole flow is float -> observed -> quantized
-        # This class does observed -> quantized only
+        # This class does float -> observed only
         # See nn.quantized.MultiheadAttention
         raise NotImplementedError("It looks like you are trying to prepare an "
                                   "MHA module. Please, see "
