@@ -1,3 +1,4 @@
+import torch.distributed._shard.sharded_tensor._ops.chunk
 import torch.distributed._shard.sharded_tensor._ops.elementwise_ops
 import torch.distributed._shard.sharded_tensor._ops.math_ops
 
@@ -9,3 +10,4 @@ from torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.linear impor
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.embedding import sharded_embedding
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.embedding_bag import sharded_embedding_bag
 import torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.math_ops
+import torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.matrix_ops

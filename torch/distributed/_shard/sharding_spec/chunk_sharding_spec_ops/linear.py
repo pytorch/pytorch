@@ -9,7 +9,6 @@ from torch.distributed.nn.functional import (
 )
 from torch.distributed._shard.partial_tensor import _PartialTensor
 from torch.distributed._shard.sharded_tensor import (
-    _PartialTensor,
     ShardedTensor,
 )
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
