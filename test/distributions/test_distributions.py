@@ -2341,6 +2341,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_wishart_log_prob(self):
+        set_rng_seed(0)
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
 

@@ -24,7 +24,9 @@ static PyObject* recursive_to_list(
     PyObject* obj = recursive_to_list(data, sizes, strides, dim + 1, scalarType, elementSize);
     if (!obj) throw python_error();
     PyList_SET_ITEM(list.get(), i, obj);
-    data += strides[dim] * elementSize;
+    auto advance_data_ptr = strides[dim] * elementSize;
+    TORCH_INTERNAL_ASSERT(data || advance_data_ptr == 0);
+    data += advance_data_ptr;
   }
   return list.release();
 }
@@ -36,6 +38,7 @@ PyObject* tensor_to_list(const Tensor& tensor) {
     pybind11::gil_scoped_release no_gil;
     data = data.toBackend(Backend::CPU);
   }
+  TORCH_CHECK(tensor.numel() == 0 || data.data_ptr(), "tolist() shouldn't be called on a tensor with unallocated storage");
   return recursive_to_list(
       (char*)data.data_ptr(), data.sizes(), data.strides(), 0,
       data.scalar_type(), data.dtype().itemsize());

@@ -808,6 +808,7 @@ def preprocessor(
             if (
                 f.startswith("ATen/cuda")
                 or f.startswith("ATen/native/cuda")
+                or f.startswith("ATen/native/nested/cuda")
                 or f.startswith("ATen/native/quantized/cuda")
                 or f.startswith("ATen/native/sparse/cuda")
                 or f.startswith("THC/")

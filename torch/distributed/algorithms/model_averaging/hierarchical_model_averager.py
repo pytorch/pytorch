@@ -1,8 +1,10 @@
 # Copyright 2022 Cruise LLC
+import logging
 import warnings
 from collections import OrderedDict
-import logging
+from typing import Union, Iterable, Dict
 
+import torch
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as utils
@@ -110,8 +112,9 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         overall_group_size = dist.get_world_size(group=self.process_group)
         if list(period_group_size_dict.values())[-1] != overall_group_size:
             raise ValueError(
-                "The last value in arg ``period_process_group_dict`` "
-                "must be equal to the size of arg ``process_group``.")
+                f"The last value in arg ``period_process_group_dict`` {list(period_group_size_dict.values())[-1]} "
+                "must be equal to the size of arg ``process_group`` {overall_group_size}."
+            )
 
         self.period_process_group_dict = OrderedDict()
         logger.info("Model averaging hierarchy:")
@@ -131,27 +134,30 @@ class HierarchicalModelAverager(averagers.ModelAverager):
 
     def _find_process_group(self):
         """
-        Returns a tuple consisting of whether ``step`` can be divided by
-        a period in the keys of ``period_process_group_dict`` and the associated process group if any.
+        Returns a process group as the value of an ``period_process_group_dict`` entry,
+        if ``step`` can be divided by a period in the keys of ``period_process_group_dict``.
         If ``step`` can be divided by multiple periods in the keys of ``period_process_group_dict``,
         then the returned process group is the one corresponding to the largest period,
         since this process group will be used for averaging parameters at this ``step``.
+        Returns ``None`` if not found.
         """
         for period in reversed(self._periods):
             if self.step % period == 0:
-                return (True, self.period_process_group_dict[period])
-        return (False, None)
+                return self.period_process_group_dict[period]
+        return None
 
-    def average_parameters(self, params):
-        r"""
-        Averages parameters if ``step`` is no less than ``warmup_steps``
+    def average_parameters(self, params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]]):
+        """
+        Averages parameters or parameter groups of an optimizer if ``step`` is no less than ``warmup_steps``
         and it can be divided by a period in the keys of ``period_process_group_dict``,
         where ``step`` is increased by 1 at each iteration in the training loop.
         If ``step`` can be divided by multiple periods in the keys of ``period_process_group_dict``,
         only the largest period is used, and the corresponding process group is used for averaging parameters.
+        Args:
+            params: The parameters of a model or parameter groups of an optimizer.
         """
         if self.step >= self.warmup_steps:
-            found, group = self._find_process_group()
-            if found:
-                utils.average_parameters(iter(params), group)
+            group = self._find_process_group()
+            if group is not None:
+                utils.average_parameters_or_parameter_groups(params, group)
         self.step += 1

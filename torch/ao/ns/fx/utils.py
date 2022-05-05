@@ -60,10 +60,15 @@ def get_node_first_input_and_output_type(
         elif node.target in FUNS_IO_TYPE_INT8:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
         elif node.target in FUNS_IO_TYPE_FP32_OR_INT8:
-            return (
-                NodeInputOrOutputType.FP32_OR_INT8,
-                NodeInputOrOutputType.FP32_OR_INT8,
+            first_arg = node.args[0]
+            assert isinstance(first_arg, Node)
+            (
+                _prev_node_input_type,
+                prev_node_output_type,
+            ) = get_node_first_input_and_output_type(
+                first_arg, gm, logger_cls, node_type_to_io_type_map
             )
+            return (prev_node_output_type, prev_node_output_type)
         else:
             return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
@@ -71,7 +76,13 @@ def get_node_first_input_and_output_type(
         assert node.op == "call_module"
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
-        if isinstance(mod, (logger_cls, ObserverBase, FakeQuantizeBase)):  # type: ignore[arg-type]
+        is_known_fp32_or_int8_input_module = any(
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
+        )
+        if (
+            isinstance(mod, (logger_cls, ObserverBase, FakeQuantizeBase))  # type: ignore[arg-type]
+            or is_known_fp32_or_int8_input_module
+        ):
             # A logger or observer's input and output type is the output
             # type of the preceding node.
             first_arg = node.args[0]
@@ -89,18 +100,10 @@ def get_node_first_input_and_output_type(
         is_known_int8_input_module = any(
             isinstance(mod, target_type) for target_type in MODS_IO_TYPE_INT8  # type: ignore[arg-type]
         )
-        is_known_fp32_or_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
-        )
         if is_known_fp32_input_module:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
         elif is_known_int8_input_module:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
-        elif is_known_fp32_or_int8_input_module:
-            return (
-                NodeInputOrOutputType.FP32_OR_INT8,
-                NodeInputOrOutputType.FP32_OR_INT8,
-            )
         else:
             return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
@@ -141,10 +144,15 @@ def get_node_first_input_and_output_type(
             return (prev_node_output_type, NodeInputOrOutputType.FP16)
 
         elif node.target in METHS_IO_TYPE_FP32_OR_INT8:
-            return (
-                NodeInputOrOutputType.FP32_OR_INT8,
-                NodeInputOrOutputType.FP32_OR_INT8,
+            first_arg = node.args[0]
+            assert isinstance(first_arg, Node)
+            (
+                _prev_node_input_type,
+                prev_node_output_type,
+            ) = get_node_first_input_and_output_type(
+                first_arg, gm, logger_cls, node_type_to_io_type_map
             )
+            return (prev_node_output_type, prev_node_output_type)
 
         return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
     else:
@@ -481,3 +489,10 @@ def compute_cosine_similarity(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     x = x.reshape(1, -1)
     y = y.reshape(1, -1)
     return torch.nn.functional.cosine_similarity(x, y)
+
+def op_type_supports_shadowing(node: Node) -> bool:
+    if node.op == 'call_function':
+        if node.target in (torch.add, torch.mul):
+            # shadowing for ops with two inputs is not implemented yet
+            return False
+    return True

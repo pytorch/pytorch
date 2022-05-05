@@ -43,7 +43,7 @@ class TRTTestCase(TestCase):
         super().setUp()
         torch.manual_seed(3)
 
-    def run_test(self, mod, inputs, expected_ops, unexpected_ops, interpreter, rtol, atol):
+    def run_test(self, mod, inputs, expected_ops, unexpected_ops, interpreter, rtol, atol, precision=LowerPrecision.FP32):
         with torch.no_grad():
             cuda_inputs = []
             for i in inputs:
@@ -55,7 +55,7 @@ class TRTTestCase(TestCase):
             if unexpected_ops:
                 self.assert_unexpected_op(mod, unexpected_ops)
 
-            interpreter_result = interpreter.run(lower_precision=LowerPrecision.FP32)
+            interpreter_result = interpreter.run(lower_precision=precision)
             trt_mod = TRTModule(
                 interpreter_result.engine,
                 interpreter_result.input_names,
@@ -68,8 +68,10 @@ class TRTTestCase(TestCase):
             if isinstance(outputs, torch.Tensor):
                 ref_outputs = [ref_outputs]
                 outputs = [outputs]
-
             for out, ref in zip(outputs, ref_outputs):
+                if not isinstance(ref, torch.Tensor):
+                    ref = torch.tensor([ref])
+                ref = ref.cpu()  # to_dtype test has cases with gpu output
                 torch.testing.assert_allclose(out.cpu(), ref, rtol=rtol, atol=atol)
 
     def run_test_custom_compare_results(
@@ -192,8 +194,10 @@ class AccTestCase(TRTTestCase):
         apply_passes=None,
         test_explicit_batch_dim=True,
         test_implicit_batch_dim=True,
+        test_explicit_precision=False,
         rtol=1e-03,
         atol=1e-03,
+        precision=LowerPrecision.FP32,
     ):
         mod.eval()
         mod = acc_tracer.trace(mod, inputs)
@@ -210,7 +214,17 @@ class AccTestCase(TRTTestCase):
             interp = TRTInterpreter(
                 mod, InputTensorSpec.from_tensors(inputs), explicit_batch_dimension=True
             )
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol, precision)
+
+        if test_explicit_precision:
+            interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs), explicit_precision=test_explicit_precision)
             super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)
+
+            interp = TRTInterpreter(
+                mod, InputTensorSpec.from_tensors(inputs), explicit_batch_dimension=True, explicit_precision=test_explicit_precision
+            )
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol, precision)
+
 
     def run_test_with_assert_error(
         self,
