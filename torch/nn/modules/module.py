@@ -39,6 +39,18 @@ def _addindent(s_, numSpaces):
     return s
 
 
+def _wrap_hook(hook, module):
+    weak_module = weakref.ref(module)
+    @functools.wraps(hook)
+    def inner(*args, **kwargs):
+        module = weak_module()
+        if module is None:
+            raise RuntimeError("You are trying to call hook of a dead object!")
+        else:
+            return hook(module, *args, **kwargs)
+    return inner
+
+
 r"""This tracks hooks common to all modules that are executed before/after
 calling forward and backward. This is global state used for debugging/profiling
 purposes"""
@@ -1167,8 +1179,7 @@ class Module:
             grad_fn = var.grad_fn
             if grad_fn is not None:
                 for hook in non_full_backward_hooks:
-                    wrapper = functools.partial(hook, weakref.proxy(self))
-                    functools.update_wrapper(wrapper, hook)
+                    wrapper = _wrap_hook(hook, self)
                     grad_fn.register_hook(wrapper)
                 self._maybe_warn_non_full_backward_hook(input, result, grad_fn)
 
@@ -1403,7 +1414,7 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
         if with_module:
-            hook = functools.partial(hook, weakref.proxy(self))
+            hook = _wrap_hook(hook, self)
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 
