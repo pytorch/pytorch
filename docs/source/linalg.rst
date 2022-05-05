@@ -52,6 +52,7 @@ Solvers
 
     solve
     solve_triangular
+    lu_solve
     lstsq
 
 Inverses
