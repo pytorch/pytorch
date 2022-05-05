@@ -85,6 +85,10 @@ class Runtime final {
   uint32_t init_adapter(const Selector& selector);
 };
 
+// Utility functions that can be used to pre-emptively load the runtime
+int runtime_loader_async();
+int runtime_loader_sync();
+
 // The global runtime is retrieved using this function, where it is declared as
 // a static local variable.
 Runtime* runtime();

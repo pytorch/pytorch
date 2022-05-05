@@ -240,11 +240,11 @@ bool load_vulkan_drivers() {
     return false;
   }
   return true;
-#endif /* USE_VULKAN_VOLK, USE_VULKAN_WRAPPER */
-
+# else
   // If not using Volk or the Vulkan wrapper, assume that the vulkan drivers are
   // linked with pytorch.
   return true;
+#endif /* USE_VULKAN_VOLK, USE_VULKAN_WRAPPER */
 }
 
 std::unique_ptr<Runtime> init_global_vulkan_runtime() {
@@ -287,27 +287,12 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
   return std::unique_ptr<Runtime>(nullptr);
 }
 
-// This is a utility function that can be used to trigger pre-emptive loading
-// of the global vulkan runtime in an asynchronous fashion. This is useful to
-// reduce the latency of the first loading of a vulkan model, as without calling
-// this function the first model load will trigger init_global_vulkan_runtime()
-// which will greatly increase model loading time.
-int async_runtime_loader() {
-  // This is safe since the global vulkan runtime instance is stored as a static
-  // local variable inside runtime(). Local static variable initialization is
-  // thread-safe since C++11.
-  std::thread async_loader(runtime);
-  async_loader.detach();
-
-  return 1;
-}
-
 // On Android, we can trigger the global vulkan runtime to load asynchronously
 // on library load. On other platforms, this has shown to raise some issues,
 // possibly due to implementation details of the Vulkan drivers on those
 // platforms.
 #ifdef __ANDROID__
-static int async_load_trigger = async_runtime_loader();
+static int load_trigger = runtime_loader_async();
 #endif
 
 } // namespace
@@ -390,6 +375,31 @@ uint32_t Runtime::init_adapter(const Selector& selector) {
   adapters_[i].init_device();
 
   return i;
+}
+
+// This is a utility function that can be used to trigger pre-emptive loading
+// of the global vulkan runtime in an asynchronous fashion. This is useful to
+// reduce the latency of the first loading of a vulkan model, as without calling
+// this function the first model load will trigger init_global_vulkan_runtime()
+// which will greatly increase model loading time.
+int runtime_loader_async() {
+  // This is safe since the global vulkan runtime instance is stored as a static
+  // local variable inside runtime(). Local static variable initialization is
+  // thread-safe since C++11.
+  std::thread async_loader(runtime);
+  async_loader.detach();
+
+  return 1;
+}
+
+// Same as above, but runs synchronously
+int runtime_loader_sync() {
+  Runtime* runtime_p = runtime();
+
+  if (runtime_p) {
+    return 1;
+  }
+  return 0;
 }
 
 Runtime* runtime() {
