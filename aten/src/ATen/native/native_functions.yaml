@@ -5241,11 +5241,13 @@
   python_module: sparse
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_out_sparse_csr_cuda
+    SparseCsrCPU: sparse_sampled_addmm_out_sparse_csr_cpu
 
 - func: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   python_module: sparse
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_sparse_csr_cuda
+    SparseCsrCPU: sparse_sampled_addmm_sparse_csr_cpu
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -5423,7 +5425,7 @@
 
 - func: _validate_sparse_coo_tensor_args(Tensor indices, Tensor values, int[] size) -> ()
 
-- func: _validate_sparse_compressed_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, Layout layout) -> ()
+- func: _validate_sparse_compressed_tensor_args(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, Layout layout) -> ()
 - func: _validate_sparse_csr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size) -> ()
 - func: _validate_sparse_csc_tensor_args(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size) -> ()
 - func: _validate_sparse_bsr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size) -> ()

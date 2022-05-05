@@ -1431,7 +1431,6 @@ class TestSparseCSR(TestCase):
             run_test(n, k, upper, unitriangular, transpose, zero)
 
     @skipCUDAIfRocm
-    @onlyCUDA
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
@@ -1477,7 +1476,6 @@ class TestSparseCSR(TestCase):
                     run_test(c, a, b, op_a, op_b)
 
     @skipCUDAIfRocm
-    @onlyCUDA
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
