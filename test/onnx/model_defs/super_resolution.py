@@ -10,7 +10,7 @@ class SuperResolutionNet(nn.Module):
         self.conv1 = nn.Conv2d(1, 64, (5, 5), (1, 1), (2, 2))
         self.conv2 = nn.Conv2d(64, 64, (3, 3), (1, 1), (1, 1))
         self.conv3 = nn.Conv2d(64, 32, (3, 3), (1, 1), (1, 1))
-        self.conv4 = nn.Conv2d(32, upscale_factor ** 2, (3, 3), (1, 1), (1, 1))
+        self.conv4 = nn.Conv2d(32, upscale_factor**2, (3, 3), (1, 1), (1, 1))
         self.pixel_shuffle = nn.PixelShuffle(upscale_factor)
 
         self._initialize_weights()
@@ -23,7 +23,7 @@ class SuperResolutionNet(nn.Module):
         return x
 
     def _initialize_weights(self):
-        init.orthogonal_(self.conv1.weight, init.calculate_gain('relu'))
-        init.orthogonal_(self.conv2.weight, init.calculate_gain('relu'))
-        init.orthogonal_(self.conv3.weight, init.calculate_gain('relu'))
+        init.orthogonal_(self.conv1.weight, init.calculate_gain("relu"))
+        init.orthogonal_(self.conv2.weight, init.calculate_gain("relu"))
+        init.orthogonal_(self.conv3.weight, init.calculate_gain("relu"))
         init.orthogonal_(self.conv4.weight)
