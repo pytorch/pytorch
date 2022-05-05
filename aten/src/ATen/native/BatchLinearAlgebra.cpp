@@ -477,6 +477,69 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   sizes.end()[-1] = k;
   set_output(1, sizes, {}, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
 }
+
+TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_data, bool unpack_pivots) {
+  TORCH_CHECK(LU.dim() >= 2, "torch.lu_unpack: Expected tensor with 2 or more dimensions. Got size: ", LU.sizes(), " instead");
+  if (unpack_pivots) {
+    TORCH_CHECK(pivots.scalar_type() == at::kInt,
+        "torch.lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype.\n"
+        "Note: this function is intended to be used with the output produced by torch.linalg.lu_factor");
+  }
+
+  auto sizes = LU.sizes().vec();
+  const auto m = sizes.cend()[-2];
+  const auto n = sizes.cend()[-1];
+  const auto k = std::min(m, n);
+
+  // P.shape[-2:] == (m, m) (or size zero if pivot == False)
+  sizes.end()[-1] = m;
+  if (unpack_pivots) {
+    set_output(0, sizes, LU.options());
+  } else {
+    set_output(0, {0}, LU.options());
+  }
+
+  if (unpack_data) {
+    // L.shape[-2:] == (m, k)
+    sizes.end()[-1] = k;
+    set_output(1, sizes, LU.options());
+
+    // U.shape[-2:] == (k, n)
+    sizes.end()[-2] = k;
+    sizes.end()[-1] = n;
+    set_output(2, sizes, LU.options());
+  } else {
+    set_output(1, {0}, LU.options());
+    set_output(2, {0}, LU.options());
+  }
+}
+
+TORCH_META_FUNC(linalg_lu)(const Tensor& A, bool pivot) {
+  TORCH_CHECK(A.dim() >= 2, "linalg.lu: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
+
+  auto sizes = A.sizes().vec();
+  const auto m = sizes.cend()[-2];
+  const auto n = sizes.cend()[-1];
+  const auto k = std::min(m, n);
+
+  // P.shape[-2:] == (m, m) (or size zero if pivot == False)
+  sizes.end()[-1] = m;
+  if (pivot) {
+    set_output(0, sizes, A.options());
+  } else {
+    set_output(0, {0}, A.options());
+  }
+
+  // L.shape[-2:] == (m, k)
+  sizes.end()[-1] = k;
+  set_output(1, sizes, A.options());
+
+  // U.shape[-2:] == (k, n)
+  sizes.end()[-2] = k;
+  sizes.end()[-1] = n;
+  set_output(2, sizes, A.options());
+}
+
 } // namespace meta
 
 namespace native {
@@ -2114,6 +2177,105 @@ std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
 // TODO Deprecate this function in favour of linalg_lu_factor_ex
 std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool) {
   return at::linalg_lu_factor_ex(self, compute_pivots, false);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+DEFINE_DISPATCH(unpack_pivots_stub);
+
+TORCH_IMPL_FUNC(linalg_lu_out)(const Tensor& A,
+                               bool pivot,
+                               const Tensor& P,
+                               const Tensor& L,
+                               const Tensor& U) {
+  const auto m = A.sizes().end()[-2];
+  const auto n = A.sizes().end()[-1];
+
+  // A.shape[-2:] == (m, n)
+  // P.shape[-2:] == (m, m)
+  // L.shape[-2:] == (m, k)
+  // U.shape[-2:] == (k, n)
+  // with k = min(m, n)
+
+  // Use L as it has the correct size
+  const bool use_L = m > n;
+  auto pivots = at::empty({0}, A.options().dtype(kInt));
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(use_L ? L : U),
+                              const_cast<Tensor&>(pivots),
+                              const_cast<Tensor&>(info),
+                              A,
+                              pivot,
+                              /*check_errors=*/false);
+  at::lu_unpack_out(const_cast<Tensor&>(P),
+                    const_cast<Tensor&>(L),
+                    const_cast<Tensor&>(U),
+                    use_L ? L : U,
+                    pivots,
+                    /*unpack_lu=*/true,
+                    /*unpack_pivots=*/pivot);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_unpack ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
+                               const Tensor& pivots,
+                               bool unpack_lu,
+                               bool unpack_pivots,
+                               const Tensor& P,
+                               const Tensor& L,
+                               const Tensor& U) {
+  const auto m = LU.sizes().end()[-2];
+  const auto n = LU.sizes().end()[-1];
+
+  // A.shape[-2:] == (m, n)
+  // P.shape[-2:] == (m, m)
+  // L.shape[-2:] == (m, k)
+  // U.shape[-2:] == (k, n)
+  // with k = min(m, n)
+
+  if (unpack_lu) {
+    if (m > n || LU.is_same(L)) {
+      // The order of triu and tril is important as we may have LU.is_same(L)
+      at::triu_out(const_cast<Tensor&>(U), m == n ? LU : LU.narrow(-2, 0, n), 0);
+      at::tril_out(const_cast<Tensor&>(L), LU, -1);
+      L.diagonal(0, -2, -1).fill_(1.);
+    } else {
+      // The order of triu and tril is important as we may have LU.is_same(U)
+      at::tril_out(const_cast<Tensor&>(L), m == n ? LU : LU.narrow(-1, 0, m), -1);
+      L.diagonal(0, -2, -1).fill_(1.);
+      at::triu_out(const_cast<Tensor&>(U), LU, 0);
+    }
+  }
+  if (unpack_pivots) {
+    // lu_factor_ex returns an int32 1-based indexing, which is what we have in `pivots`
+    // We transform that to a proper permutation of the indices {0, ..., m-1}
+    const auto perm_sizes = IntArrayRef(P.sizes().data(), P.dim() - 1);
+
+    // Fill `perm` with the identity permutation (perhaps batched)
+    const auto perm = at::arange(m, pivots.options().memory_format(at::MemoryFormat::Contiguous).dtype(kLong))
+                        .expand(perm_sizes)
+                        .contiguous();
+
+    // Note that perm is of type kLong and pivots is a 1-indexed kInt.
+    // This is taken into account in the unpack_pivots kernel
+    auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
+      .add_output(perm)
+      .add_owned_input(pivots.contiguous())
+      .build();
+
+    if (iter.numel() != 0) {
+      unpack_pivots_stub(pivots.device().type(), iter, std::min(m, n));
+    }
+
+    // Transform the permutation into a permutation matrix
+    P.zero_();
+    P.scatter_(-2, perm.unsqueeze(-2), 1.);
+  }
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

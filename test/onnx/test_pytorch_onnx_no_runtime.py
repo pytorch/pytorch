@@ -4,14 +4,17 @@
 
 import io
 import unittest
+from typing import Optional, Type
 
 import onnx
+
 import torch
-from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 from torch import Tensor
 from torch.onnx import symbolic_helper
-
-from typing import Optional, Type
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class TestOptionalOutput(unittest.TestCase):
@@ -32,7 +35,6 @@ class TestOptionalOutput(unittest.TestCase):
                 y = None
             return y
 
-
     class LoopNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:
             y: Optional[Tensor] = None
@@ -47,11 +49,11 @@ class TestOptionalOutput(unittest.TestCase):
                 y = None
             return y
 
-
     @parametrize(
         "module_class",
         (IfNoneInput, IfNoneOutput, LoopNoneInput, LoopNoneOutput),
-        name_fn=lambda module_class: module_class.__name__)
+        name_fn=lambda module_class: module_class.__name__,
+    )
     @parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
     def test_optional_output(self, module_class: Type[torch.nn.Module], x_size: int):
         # Need scripting to preserve control flow for this test to be meaningful.
@@ -60,14 +62,21 @@ class TestOptionalOutput(unittest.TestCase):
         x = torch.ones(x_size)
         dynamic_axis_name = "condition"
         torch.onnx.export(
-            model, (x,), f, opset_version=15,
+            model,
+            (x,),
+            f,
+            opset_version=15,
             # Ensure condition is not constant
-            dynamic_axes={"x": {0: dynamic_axis_name}}, input_names=["x"])
+            dynamic_axes={"x": {0: dynamic_axis_name}},
+            input_names=["x"],
+        )
         exported = onnx.load_from_string(f.getvalue())
         expected_elem_type = symbolic_helper.scalar_type_to_onnx[
-            symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)].value
+            symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)
+        ].value
         expected_output_type = onnx.helper.make_optional_type_proto(
-            onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,)))
+            onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
+        )
         self.assertEqual(expected_output_type, exported.graph.output[0].type)
         for node in exported.graph.node:
             # Both branches output types should match.
@@ -89,8 +98,13 @@ class TestOptionalOutput(unittest.TestCase):
 
         y = torch.ones((3, 4), dtype=torch.int)
         torch.onnx.export(
-            torch.jit.script(Module()), y, io.BytesIO(), opset_version=15,
-            dynamic_axes={"y": {0: "y0", 1: "y1"}}, input_names=["y"])
+            torch.jit.script(Module()),
+            y,
+            io.BytesIO(),
+            opset_version=15,
+            dynamic_axes={"y": {0: "y0", 1: "y1"}},
+            input_names=["y"],
+        )
 
 
 instantiate_parametrized_tests(TestOptionalOutput)
