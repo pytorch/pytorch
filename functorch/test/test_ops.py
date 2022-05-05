@@ -582,15 +582,6 @@ class TestOperators(TestCase):
         xfail('_masked.prod'),  # calls aten::item
         xfail('block_diag'),
         xfail('eig'),  # calls aten::item
-        xfail('fft.ihfft'),
-        xfail('fft.ihfft'),
-        xfail('fft.ihfft2'),
-        xfail('fft.ihfftn'),
-        xfail('fft.rfft'),
-        xfail('fft.rfft'),
-        xfail('fft.rfft2'),
-        xfail('fft.rfftn'),
-        xfail('index_copy'),
         xfail('linalg.det', ''),  # calls .item()
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.eigh'),  # needs diag_scatter
@@ -897,10 +888,7 @@ class TestOperators(TestCase):
         xfail('nanmean'),
         xfail('fmin'),
         xfail('fmax'),
-        xfail('fft.ihfft'),
-        xfail('fft.rfft'),
         xfail('special.log_ndtr'),
-        xfail('fft.rfftn'),
         xfail('fill_'),
         xfail('index_copy'),
         xfail('index_fill'),
@@ -946,7 +934,6 @@ class TestOperators(TestCase):
         xfail('_masked.prod'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
-        xfail('fft.rfft2'),
         xfail('cross'),
         xfail('linalg.cross'),
         xfail('nn.functional.gaussian_nll_loss'),
