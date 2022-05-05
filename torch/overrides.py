@@ -226,6 +226,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.is_deterministic_algorithms_warn_only_enabled,
         torch.set_deterministic_debug_mode,
         torch.get_deterministic_debug_mode,
+        torch.set_float32_matmul_precision,
+        torch.get_float32_matmul_precision,
         torch.unify_type_list,
         torch.is_warn_always_enabled,
         torch.set_warn_always,
@@ -651,6 +653,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.masked_scatter: lambda input, mask, source: -1,
         torch.masked_select: lambda input, mask, out=None: -1,
         torch.matmul: lambda input, other, out=None: -1,
+        torch.linalg.lu: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor_ex: lambda input, pivot=True, check_errors=False, out=None: -1,
         torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
@@ -1762,6 +1765,8 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
     ``enable_torch_function_mode(self, replace=self.inner)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
+    inner: "TorchFunctionMode"
+
     # Force metaclass to generate constructor at the base of the hierarchy
     def __init__(self):
         pass
