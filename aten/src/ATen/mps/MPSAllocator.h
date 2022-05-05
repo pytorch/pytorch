@@ -4,11 +4,11 @@
 #include <ATen/ATen.h>
 #include <ATen/Utils.h>
 #include <torch/library.h>
+#include <c10/util/flat_hash_map.h>
 
 #include <ATen/mps/MPSDevice.h>
 #include <cstdio>
 #include <mutex>
-#include <unordered_map>
 #include <set>
 #include <utility>
 #include <mach/vm_page_size.h>
@@ -20,8 +20,9 @@
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
 
-// NOTE: this header must not be included directly anywhere, except for MPSAllocator.mm
-// Use "at::mps::GetMPSAllocator()" to acquire a handle to MPS Allocator
+// this implementation is based on CUDACachingAllocator.
+// It utilizes Metal Heaps to improve the performance with buffer allocation.
+
 namespace at {
 namespace mps {
 
@@ -90,10 +91,10 @@ struct HeapBlock
       }
       d.storageMode = is_shared ? MTLStorageModeShared : MTLStorageModePrivate;
       d.cpuCacheMode = MTLCPUCacheModeDefaultCache;
-      // TODO: Add manual fencing
+      // this automatically handles Metal buffer access synchronizations at the
+      // cost of slightly lower performance.
       d.hazardTrackingMode = MTLHazardTrackingModeTracked;
-      d.resourceOptions = getOptions(is_shared) |
-                          (MTLHazardTrackingModeTracked << MTLResourceHazardTrackingModeShift);
+      d.resourceOptions = getOptions(is_shared) | (MTLHazardTrackingModeTracked << MTLResourceHazardTrackingModeShift);
       d.type = MTLHeapTypeAutomatic;
       heap = [device newHeapWithDescriptor: d];
       if (heap) {
@@ -185,7 +186,7 @@ private:
   const id<MTLDevice> m_device;
   std::mutex m_mutex;
   // allocated buffers by device pointer
-  std::unordered_map<void*, BufferBlock*> m_allocated_buffers;
+  ska::flat_hash_map<void*, BufferBlock*> m_allocated_buffers;
   // unallocated cached buffers larger than 1 MB
   BufferPool m_large_pool_shared, m_large_pool_private;
   // unallocated cached buffers 1 MB or smaller
@@ -224,6 +225,7 @@ private:
   // maximum size of device memory available for allocation in current process
   size_t max_available_size() const { return [m_device recommendedMaxWorkingSetSize] - [m_device currentAllocatedSize]; }
 
+  // TODO: make a common function to do size unit conversions in PyTorch.
   static std::string format_size(uint64_t size) {
     std::ostringstream os;
     os.precision(2);

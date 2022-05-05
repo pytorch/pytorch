@@ -11,6 +11,7 @@
 #include <torch/library.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/Optional.h>
+#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -215,6 +216,22 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
   return dst;
 }
 
+at::Tensor _copy_from_and_resize(const at::Tensor& self, const at::Tensor& dst)
+{
+  return mps_copy_(const_cast<Tensor&>(dst), self, false);
+}
+
+at::Tensor _copy_from(const at::Tensor& self, const at::Tensor& dst, bool non_blocking)
+{
+  return mps_copy_(const_cast<Tensor&>(dst), self, non_blocking);
+}
+
 } // namespace mps
+
+TORCH_LIBRARY_IMPL(aten, MPS, m) {
+   m.impl("_copy_from", TORCH_FN(mps::_copy_from));
+   m.impl("_copy_from_and_resize", TORCH_FN(mps::_copy_from_and_resize));
+}
+
 } // namespace native
 } // namespace at

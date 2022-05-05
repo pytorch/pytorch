@@ -1,6 +1,8 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/mps/MPSDevice.h>
+#include <torch/library.h>
+#include <ATen/native/CPUFallback.h>
 
 namespace at {
 namespace mps {
@@ -38,4 +40,13 @@ at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
 }
 
 } // namespace mps
+
+TORCH_LIBRARY_IMPL(_, MPS, m) {
+  static const char *mps_fallback = getenv("PYTORCH_DISABLE_MPS_FALLBACK");
+  if(mps_fallback && std::stoi(mps_fallback) == 1) {
+    return;
+  }
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&native::cpu_fallback>());
+}
+
 } // namespace at

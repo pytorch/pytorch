@@ -251,6 +251,7 @@ bool MPSHeapAllocatorImpl::release_cached_buffers()
 
 } // namespace HeapAllocator
 
+// Use "at::mps::GetMPSAllocator()" to acquire a handle to MPS Allocator
 static HeapAllocator::MPSHeapAllocatorImpl s_allocatorImpl;
 
 // MPS allocator struct to be registered with Pytorch
@@ -283,7 +284,7 @@ public:
   }
 
   DeleterFnPtr raw_deleter() const override { return &Delete; }
-  bool is_shared(void* ptr) { return s_allocatorImpl.isSharedBuffer(ptr); }
+  bool is_shared(void* ptr) const { return s_allocatorImpl.isSharedBuffer(ptr); }
   bool is_shared_storge_supported() const { return m_has_unified_memory; }
 
 private:
