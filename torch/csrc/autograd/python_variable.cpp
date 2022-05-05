@@ -4,7 +4,6 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
-#include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -25,18 +24,19 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 
 #include <ATen/ATen.h>
-#include <pybind11/pybind11.h>
 
 #include <structmember.h>
 #include <cstdint>
@@ -50,6 +50,91 @@
 using namespace at;
 using namespace torch;
 using namespace torch::autograd;
+
+std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(const c10::OperatorHandle& op, const std::vector<c10::IValue>& arguments) {
+  TORCH_CHECK(PyGILState_Check(), "GIL must be held before you call parseIValuesToPyArgsKwargs");
+  const auto& schema = op.schema();
+  py::dict kwargs;
+  // About all the pointers:
+  //
+  // f(int x, int y = 0, *, int z = 0)
+  //                                  ^- arguments.size()
+  //                        ^- kwarg_only_start
+  //          ^- positional_default_start
+  //   ^- 0
+
+  // Find the split point between kwarg-only and regular.  Since most functions
+  // don't have kwarg-only arguments, it is more efficient to scan from the
+  // right (but ideally, this would just be precomputed in FunctionSchema
+  // itself).  (NB: minus one in the loop is because we're testing if the
+  // *next* argument is kwarg-only before we advance the starting index)
+  int64_t kwarg_only_start = arguments.size();
+  for (; kwarg_only_start > 0; kwarg_only_start--) {
+    const auto& arg = schema.arguments()[kwarg_only_start - 1];
+    if (!arg.kwarg_only()) {
+      break;
+    }
+  }
+
+  // Find the first positional argument that isn't defaulted
+  auto is_default = [&](int64_t idx) -> bool {
+    const auto& arg = schema.arguments()[idx];
+    if (!arg.default_value().has_value()) {
+      return false;
+    }
+    const auto& default_ivalue = *arg.default_value();
+    const auto& ivalue = arguments[idx];
+    if (default_ivalue != ivalue) {
+      return false;
+    }
+    return true;
+  };
+
+  int64_t positional_default_start = kwarg_only_start;
+  for (; positional_default_start > 0; positional_default_start--) {
+    if (!is_default(positional_default_start - 1)) {
+      break;
+    }
+  }
+
+  auto args = py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
+
+  // Populate positional arguments
+  for (const auto idx : c10::irange(positional_default_start)) {
+    PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(arguments[idx]).release().ptr());
+  }
+
+  // Populate keyword arguments
+  for (const auto idx : c10::irange(kwarg_only_start, arguments.size())) {
+    // But don't populate default keyword arguments
+    if (is_default(idx)) continue;
+    const auto& arg = schema.arguments()[idx];
+    kwargs[py::cast(arg.name())] = torch::jit::toPyObject(arguments[idx]);
+  }
+  return std::make_pair(std::move(args), std::move(kwargs));
+}
+
+void pushPyOutToStack(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    py::object out,
+    const char* msg) {
+  TORCH_CHECK(PyGILState_Check(), "GIL must be held before you call pushPyOutToStack");
+  auto schema_returns = op.schema().returns();
+  const auto num_returns = schema_returns.size();
+  if (num_returns == 0) {
+    // Check that we got a None return from Python. Anything else is an error.
+    TORCH_CHECK(out.is(py::none()), "Expected ", msg, " for ", op.operator_name(),
+                " to return None but it returned something else instead.");
+  } else if (num_returns == 1) {
+    torch::jit::push(stack, torch::jit::toIValue(out.ptr(), schema_returns[0].type()));
+  } else {
+    auto outs = py::cast<py::sequence>(out);
+    for (const auto idx : c10::irange(outs.size())) {
+      torch::jit::push(stack, torch::jit::toIValue(outs[idx].ptr(), schema_returns[idx].type()));
+    }
+  }
+}
 
 namespace {
 
@@ -130,8 +215,6 @@ PyInterpreterHolder self_interpreter;
 c10::impl::PyInterpreter* getPyInterpreter() {
   return self_interpreter.get();
 }
-
-namespace py = pybind11;
 
 PyObject *THPVariableClass = nullptr;
 
@@ -1751,8 +1834,6 @@ void concrete_dispatch_fn(
     torch::jit::Stack* stack,
     const std::shared_ptr<SafePyObject>& type) {
   const auto& schema = op.schema();
-  const auto num_returns = schema.returns().size();
-
   const auto num_arguments = schema.arguments().size();
   auto arguments = torch::jit::pop(*stack, num_arguments);
 
@@ -1776,9 +1857,6 @@ void concrete_dispatch_fn(
   py::gil_scoped_acquire g;
 
   std::vector<py::handle> overloaded_args;
-  // For now, overloads get coalesced.  Might be easier for users if they get
-  // overload resolution but is more complicated (need to expose separate
-  // functions per overload)
   py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
   py::handle torch_api_function_overload;
   if (overload_name == "") {
@@ -1787,51 +1865,6 @@ void concrete_dispatch_fn(
     torch_api_function_overload = torch_api_function.attr(overload_name.c_str());
   }
   std::string module_name_str = "torch.ops." + ns_str;
-
-  // About all the pointers:
-  //
-  // f(int x, int y = 0, *, int z = 0)
-  //                                  ^- arguments.size()
-  //                        ^- kwarg_only_start
-  //          ^- positional_default_start
-  //   ^- 0
-
-  // Find the split point between kwarg-only and regular.  Since most functions
-  // don't have kwarg-only arguments, it is more efficient to scan from the
-  // right (but ideally, this would just be precomputed in FunctionSchema
-  // itself).  (NB: minus one in the loop is because we're testing if the
-  // *next* argument is kwarg-only before we advance the starting index)
-  int64_t kwarg_only_start = arguments.size();
-  for (; kwarg_only_start > 0; kwarg_only_start--) {
-    const auto& arg = schema.arguments()[kwarg_only_start - 1];
-    if (!arg.kwarg_only()) {
-      break;
-    }
-  }
-
-  // Find the first positional argument that isn't defaulted
-  auto is_default = [&](int64_t idx) -> bool {
-    const auto& arg = schema.arguments()[idx];
-    if (!arg.default_value().has_value()) {
-      return false;
-    }
-    const auto& default_ivalue = *arg.default_value();
-    const auto& ivalue = arguments[idx];
-    if (default_ivalue != ivalue) {
-      return false;
-    }
-    return true;
-  };
-
-  int64_t positional_default_start = kwarg_only_start;
-  for (; positional_default_start > 0; positional_default_start--) {
-    if (!is_default(positional_default_start - 1)) {
-      break;
-    }
-  }
-
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
-  py::dict kwargs;
 
   if (type) {
     append_overloaded_type(&overloaded_args, type->ptr(getPyInterpreter()));
@@ -1859,41 +1892,19 @@ void concrete_dispatch_fn(
     }
   }
 
-  // Populate positional arguments
-  for (const auto idx : c10::irange(positional_default_start)) {
-    PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
-  }
+  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+  auto args = std::move(args_kwargs.first);
+  auto kwargs = std::move(args_kwargs.second);
 
-  // Populate keyword arguments
-  for (const auto idx : c10::irange(kwarg_only_start, arguments.size())) {
-    // But don't populate default keyword arguments
-    if (is_default(idx)) continue;
-    const auto& arg = schema.arguments()[idx];
-    kwargs[py::cast(arg.name())] = torch::jit::toPyObject(std::move(arguments[idx]));
-  }
-
-  auto out = py::reinterpret_steal<py::object>(
-      handle_torch_function_no_python_arg_parser(
-          overloaded_args,
-          args.ptr(),
-          kwargs.ptr(),
-          func_name,
-          torch_api_function_overload.ptr(),
-          module_name_str.c_str(),
-          TorchFunctionName::TorchDispatch));
-
-  if (num_returns == 0) {
-    // Check that we got a None return from Python. Anything else is an error.
-    TORCH_CHECK(out.is(py::none()), "Expected __torch_dispatch__ for ", op.operator_name(),
-                " to return None but it returned something else instead.");
-  } else if (num_returns == 1) {
-    torch::jit::push(stack, torch::jit::toIValue(out.ptr(), op.schema().returns()[0].type()));
-  } else {
-    auto outs = py::cast<py::sequence>(out);
-    for (const auto idx : c10::irange(outs.size())) {
-      torch::jit::push(stack, torch::jit::toIValue(outs[idx].ptr(), op.schema().returns()[idx].type()));
-    }
-  }
+  PyObject* obj = handle_torch_function_no_python_arg_parser(
+                    overloaded_args,
+                    args.ptr(),
+                    kwargs.ptr(),
+                    func_name,
+                    torch_api_function_overload.ptr(),
+                    module_name_str.c_str(),
+                    TorchFunctionName::TorchDispatch);
+  pushPyOutToStack(op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
 }
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
