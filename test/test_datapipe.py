@@ -858,7 +858,7 @@ class TestFunctionalIterDataPipe(TestCase):
             output2.append(n2)
             if i == 4:
                 with warnings.catch_warnings(record=True) as wa:
-                    i1 = iter(dp1)  # Reset both all child DataPipe
+                    _ = iter(dp1)  # Reset both all child DataPipe
                     self.assertEqual(len(wa), 1)
                     self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
                 break
