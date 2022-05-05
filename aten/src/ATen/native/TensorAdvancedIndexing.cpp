@@ -335,6 +335,7 @@ DEFINE_DISPATCH(index_fill_stub);
 DEFINE_DISPATCH(index_copy_stub);
 DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_with_sort_stub);
+DEFINE_DISPATCH(index_select_contig_stub);
 DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
@@ -1068,62 +1069,6 @@ static void check_indexarray_range(
   }
 }
 
-Tensor & index_select_out_cpu_dim1_(
-    Tensor & result_contig, const Tensor & self, const Tensor & index_contig) {
-
-  auto self_contig = self.contiguous();
-  const caffe2::TypeMeta dataType = self_contig.dtype();
-  size_t item_bytesize = dataType.itemsize();
-
-  auto out = static_cast<char*>(result_contig.data_ptr());
-
-  auto src_base = static_cast<const char*>(self_contig.data_ptr());
-
-  auto self_sizes = self_contig.sizes();
-  auto outer_dims_product = c10::size_to_dim_(1, self_sizes);
-  auto block_size = c10::size_from_dim_(2, self_sizes);
-  auto block_bytesize = block_size * item_bytesize;
-
-  auto src_indexing_axis_dim = self_sizes[1];
-  auto src_batch_bytesize = self_sizes[1] * block_bytesize;
-  auto N = index_contig.numel();
-
-  auto gathered_batch_bytesize = N * block_bytesize;
-
-  AT_DISPATCH_INDEX_TYPES(
-    index_contig.scalar_type(), "batch_index_select_compute", [&]() {
-
-      const auto* idxs = index_contig.data_ptr<index_t>();
-      check_indexarray_range<index_t>(idxs, N, src_indexing_axis_dim);
-
-      // Special-case single-float copy for efficiency
-      if (self.scalar_type() == ScalarType::Float && block_size == 1) {
-        for (const auto batch : c10::irange(outer_dims_product)) {
-          const float* src_floats =
-              (const float*)(src_base + batch * src_batch_bytesize);
-          float* dst_floats = (float*)(out + batch * gathered_batch_bytesize);
-
-          for (const auto i : c10::irange(N)) {
-            auto idx = idxs[i];
-            dst_floats[i] = src_floats[idx];
-          }
-        }
-      } else {
-        // outer_dims_product specifies how many times we repeat inner dimensions,
-        // so we just iterate over it to cover all outer dimensions.
-        for (const auto batch : c10::irange(outer_dims_product)) {
-          for (const auto i : c10::irange(N)) {
-            auto idx = idxs[i];
-            auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
-            auto dst = out + batch * gathered_batch_bytesize + i * block_bytesize;
-            memcpy(dst, src, block_bytesize);
-          }
-        }
-      }
-  });
-  return result_contig;
-}
-
 Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & index, Tensor & result) {
   if (self.is_quantized()) {
     TORCH_CHECK(
@@ -1154,9 +1099,11 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
       return result;
     }
 
-    if (dim == 1 && result.is_contiguous()) {
-      // fast pass
-      return index_select_out_cpu_dim1_(result, self, index_contig);
+    const auto st = self.scalar_type();
+    if (result.is_contiguous() && (st == kFloat || st == kDouble || st == kBFloat16)) {
+      auto self_contig = self.contiguous();
+      index_select_contig_stub(kCPU, result, self_contig, dim, index_contig);
+      return result;
     }
 
     auto selfSlice = self.select(dim, 0);

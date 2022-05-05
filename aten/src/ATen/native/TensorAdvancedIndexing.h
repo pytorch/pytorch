@@ -28,6 +28,7 @@ using scatter_scalar_reduce_fn = void(*)(const Tensor& self, const int64_t dim, 
                                          const Scalar& value, const SCATTER_GATHER_OP& reduce);
 using scatter_reduce_two_fn = void(*)(const Tensor& self, const int64_t dim, const Tensor& index,
                                       const Tensor& src, const SCATTER_GATHER_OP& reduce);
+using index_select_fn = void(*)(const Tensor &, const Tensor &, int64_t, const Tensor &);
 
 DECLARE_DISPATCH(index_put_with_sort_fn, index_put_with_sort_stub);
 
@@ -38,6 +39,8 @@ DECLARE_DISPATCH(scatter_add_fn, scatter_add_stub);
 DECLARE_DISPATCH(scatter_reduce_fn, scatter_reduce_stub);
 DECLARE_DISPATCH(scatter_scalar_reduce_fn, scatter_scalar_reduce_stub);
 DECLARE_DISPATCH(scatter_reduce_two_fn, scatter_reduce_two_stub);
+DECLARE_DISPATCH(index_select_fn, index_select_contig_stub);
+
 
 TORCH_API Tensor& index_out(Tensor& result, const Tensor & self, const c10::List<c10::optional<at::Tensor>>& indices);
 

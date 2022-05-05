@@ -3004,6 +3004,26 @@ else:
             out2 = ref_index_select(src, dim, idx)
             self.assertEqual(out, out2)
 
+        def test_index_select_fast_path_cpu(sizes, dim, n, idx_type):
+            src = make_tensor(sizes, dtype=dtype, device=device, noncontiguous=False)
+            num_src_dim = src.size(dim)
+            idx = make_tensor((n,), dtype=idx_type, device=device, low=0, high=num_src_dim, noncontiguous=False)
+            out = torch.index_select(src, dim, idx)
+            out2 = ref_index_select(src, dim, idx)
+            self.assertEqual(out, out2)
+
+        # test fast path on CPU
+        if device == 'cpu' and (dtype == torch.float32 or dtype == torch.bfloat16):
+            for idx_type in (torch.int32, torch.int64):
+                # gather impl
+                test_index_select_fast_path_cpu((2, 20, 1), 1, 20, idx_type)
+                test_index_select_fast_path_cpu((2, 20, 2), 1, 20, idx_type)
+                # dim is the first dimension
+                test_index_select_fast_path_cpu((25, 33), 0, 18, idx_type)
+                test_index_select_fast_path_cpu((3, 25, 7, 19), 0, 3, idx_type)
+                # dim is not the first dimension
+                test_index_select_fast_path_cpu((3, 5, 7), 1, 8, idx_type)
+
         # Create the 4 possible combinations of scalar sizes for index / source
         scalars = ((make_tensor(size_s, dtype=dtype, device=device),
                     torch.zeros(size_i, dtype=torch.int64, device=device))
