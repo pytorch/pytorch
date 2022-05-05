@@ -34,6 +34,7 @@ Decompositions
 
     cholesky
     qr
+    lu
     lu_factor
     eig
     eigvals
@@ -104,3 +105,6 @@ Experimental Functions
     cholesky_ex
     inv_ex
     lu_factor_ex
+    ldl_factor
+    ldl_factor_ex
+    ldl_solve
