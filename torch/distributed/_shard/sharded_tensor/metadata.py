@@ -4,7 +4,6 @@ from typing import List
 
 import torch
 from torch.distributed._shard.metadata import ShardMetadata
-from torch import Tensor
 
 class MEM_FORMAT_ENCODING(Enum):
     TORCH_CONTIGUOUS_FORMAT = 0
