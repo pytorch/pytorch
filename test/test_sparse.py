@@ -3565,6 +3565,7 @@ class TestSparseMaskedReductions(TestCase):
         """
 
         samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
+        op_name = op.name.replace('_masked.', '')
         for sample_input in samples:
             if sample_input.kwargs.get('dim') != 0:
                 continue
@@ -3573,6 +3574,12 @@ class TestSparseMaskedReductions(TestCase):
 
             t = sample_input.input
             mask = sample_input_kwargs.get('mask')
+            if mask is None and op_name in {'prod', 'amax', 'amin'}:
+                # FIXME: for now reductions with non-zero reduction identity and
+                # unspecified mask are not supported for sparse COO
+                # tensors, see torch._masked.prod implementation
+                # for details.
+                continue
             sparse_op_kwargs = dict(sample_input_kwargs)
             actual = op(t.to_sparse(), *sample_input.args, **sample_input_kwargs)
             self.assertEqual(actual.layout, torch.sparse_coo)
