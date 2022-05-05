@@ -1269,7 +1269,7 @@
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
-  structured: true
+  structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: clamp_min_out
