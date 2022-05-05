@@ -4,13 +4,26 @@
 # This file exports ONNX ops for opset 13
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_opset9 import (overload_by_arg_count, _maybe_cast_reduce_op_input,
-                                        nonzero, expand, zeros, ones, size, linear, conv2d,
-                                        relu, unused)
+from torch.onnx.symbolic_helper import _unimplemented, parse_args
+from torch.onnx.symbolic_opset9 import (
+    _maybe_cast_reduce_op_input,
+    conv2d,
+    expand,
+    linear,
+    nonzero,
+    ones,
+    overload_by_arg_count,
+    relu,
+    size,
+    unused,
+    zeros,
+)
 from torch.onnx.symbolic_opset11 import unsqueeze
-from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
-
+from torch.onnx.utils import (
+    _add_block,
+    _add_input_to_block,
+    _add_output_to_block,
+)
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -33,7 +46,9 @@ def log_softmax(g, input, dim, dtype=None):
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = sym_help._get_const(dtype, "i", "dtype")
-        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+        return_op = g.op(
+            "Cast", return_op, to_i=sym_help.scalar_type_to_onnx[parsed_dtype]
+        )
     return return_op
 
 
@@ -54,20 +69,33 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         if _outputs is None:
             return split_out
         # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
-        if sym_help._is_packed_list(split_size_or_sizes) and \
-                len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
-            split_sizes = [sym_help._unsqueeze_helper(g, v, [0]) for v in sym_help._unpack_list(split_size_or_sizes)]
+        if (
+            sym_help._is_packed_list(split_size_or_sizes)
+            and len(sym_help._unpack_list(split_size_or_sizes)) == _outputs
+        ):
+            split_sizes = [
+                sym_help._unsqueeze_helper(g, v, [0])
+                for v in sym_help._unpack_list(split_size_or_sizes)
+            ]
 
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
             res = []
             for i in range(_outputs):
-                end = g.op("Add", start, split_sizes[i])  # split_sizes is a list of same length as _outputs
+                end = g.op(
+                    "Add", start, split_sizes[i]
+                )  # split_sizes is a list of same length as _outputs
                 res.append(g.op("Slice", self, start, end, axis))
                 start = end
             return res
-        return [g.op("SequenceAt", split_out, g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)))
-                for i in range(_outputs)]
+        return [
+            g.op(
+                "SequenceAt",
+                split_out,
+                g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)),
+            )
+            for i in range(_outputs)
+        ]
 
     split_val = split_size_or_sizes.node()["value"]
     if split_val.dim() > 0:
@@ -103,15 +131,21 @@ def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
 @parse_args("v", "i", "i")
 def unbind(g, self, dim=0, _outputs=None):
     if _outputs is None:
-        return g.op("SplitToSequence",
-                    self,
-                    g.op("Constant", value_t=torch.tensor(1, dtype=torch.long)),
-                    axis_i=dim, keepdims_i=0)
+        return g.op(
+            "SplitToSequence",
+            self,
+            g.op("Constant", value_t=torch.tensor(1, dtype=torch.long)),
+            axis_i=dim,
+            keepdims_i=0,
+        )
 
     splits = g.op("Constant", value_t=torch.tensor([1] * _outputs))
     outputs = g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
     outputs = [outputs] if _outputs == 1 else outputs
-    squeezed_outputs = [g.op("Squeeze", out, g.op("Constant", value_t=torch.tensor([dim]))) for out in outputs]
+    squeezed_outputs = [
+        g.op("Squeeze", out, g.op("Constant", value_t=torch.tensor([dim])))
+        for out in outputs
+    ]
     return squeezed_outputs
 
 
@@ -127,17 +161,23 @@ def where(g, condition, self=None, other=None, _outputs=None):
         condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx["Bool"])
     if self is None:
         condition = nonzero(g, condition)
-        return sym_help._unbind_helper(g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs)
+        return sym_help._unbind_helper(
+            g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs
+        )
     return g.op("Where", condition, self, other)
 
+
 @parse_args("v", "v", "v", "i", "i", "i")
-def fake_quantize_per_channel_affine(g, inputs, scale, zero_point, axis, quant_min=-128, quant_max=127):
+def fake_quantize_per_channel_affine(
+    g, inputs, scale, zero_point, axis, quant_min=-128, quant_max=127
+):
     # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
     #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
     if (quant_min, quant_max) not in [(0, 255), (-128, 127), (0, 127)]:
         raise RuntimeError(
             "For (quant_min, quant_max), ONNX allows only (0, 127), (0, 255) and (-128, 127). "
-            "Got ({}, {})".format(quant_min, quant_max))
+            "Got ({}, {})".format(quant_min, quant_max)
+        )
     # ONNX defines zero_point to be int8 or uint8
     if quant_min == 0:
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
@@ -145,17 +185,26 @@ def fake_quantize_per_channel_affine(g, inputs, scale, zero_point, axis, quant_m
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
     quantized = g.op("QuantizeLinear", inputs, scale, zero_point, axis_i=axis)
     if (quant_min, quant_max) == (0, 127):
-        quantized = g.op("Clip", quantized, unused(g), g.op("Constant", value_t=torch.tensor(127, dtype=torch.uint8)))
+        quantized = g.op(
+            "Clip",
+            quantized,
+            unused(g),
+            g.op("Constant", value_t=torch.tensor(127, dtype=torch.uint8)),
+        )
     return g.op("DequantizeLinear", quantized, scale, zero_point, axis_i=axis)
 
+
 @parse_args("v", "v", "v", "i", "i")
-def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128, quant_max=127):
+def fake_quantize_per_tensor_affine(
+    g, inputs, scale, zero_point, quant_min=-128, quant_max=127
+):
     # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
     #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
     if (quant_min, quant_max) not in [(0, 255), (-128, 127), (0, 127)]:
         raise RuntimeError(
             "For (quant_min, quant_max), ONNX allows only (0, 127), (0, 255) and (-128, 127). "
-            "Got ({}, {})".format(quant_min, quant_max))
+            "Got ({}, {})".format(quant_min, quant_max)
+        )
     if quant_min == 0:
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
     else:
@@ -164,8 +213,14 @@ def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128
         scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
     quantized = g.op("QuantizeLinear", inputs, scale, zero_point)
     if (quant_min, quant_max) == (0, 127):
-        quantized = g.op("Clip", quantized, unused(g), g.op("Constant", value_t=torch.tensor(127, dtype=torch.uint8)))
+        quantized = g.op(
+            "Clip",
+            quantized,
+            unused(g),
+            g.op("Constant", value_t=torch.tensor(127, dtype=torch.uint8)),
+        )
     return g.op("DequantizeLinear", quantized, scale, zero_point)
+
 
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
@@ -176,7 +231,9 @@ def _reduce_op_symbolic(onnx_op_name):
         else:
             keepdim = sym_help._get_const(keepdim, "i", "keepdim")
             return g.op(onnx_op_name, self, dim, keepdims_i=keepdim)
+
     return symbolic
+
 
 def _reduce_with_dtype(onnx_op, name):
     symbolic = _reduce_op_symbolic(onnx_op)
@@ -200,18 +257,25 @@ def _reduce_with_dtype(onnx_op, name):
             elif dtype.node().kind() != "prim::Constant":
                 return _unimplemented(name, "dtype")
             return symbolic(g, self, dim, keepdim)
+
         return reduce_nodim, reduce_dim
+
     return reduce
 
+
 sum = _reduce_with_dtype("ReduceSum", "sum")
+
 
 @parse_args("v", "i", "i", "i")
 def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     if _outputs is None:
-        return g.op("SplitToSequence",
-                    self,
-                    g.op("Constant", value_t=torch.tensor(1, dtype=torch.long)),
-                    axis_i=dim, keepdims_i=0)
+        return g.op(
+            "SplitToSequence",
+            self,
+            g.op("Constant", value_t=torch.tensor(1, dtype=torch.long)),
+            axis_i=dim,
+            keepdims_i=0,
+        )
 
     size = sym_help._get_tensor_dim_size(self, dim)
     if size is None:
@@ -228,13 +292,16 @@ def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     splits = g.op("Constant", value_t=torch.tensor(splits, dtype=torch.long))
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
+
 def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     input = self
     final_dim = dim
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
     if sym_help._is_none(dim):
-        input = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1])))
+        input = sym_help._reshape_helper(
+            g, self, g.op("Constant", value_t=torch.tensor([-1]))
+        )
         dim = 0
     else:
         dim = sym_help._maybe_get_scalar(dim)
@@ -243,14 +310,17 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     repeats_sizes = sym_help._get_tensor_sizes(repeats)
     input_sizes = sym_help._get_tensor_sizes(input)
     if repeats_dim is None:
-        raise RuntimeError("Unsupported: ONNX export of repeat_interleave for unknown "
-                           "repeats rank.")
+        raise RuntimeError(
+            "Unsupported: ONNX export of repeat_interleave for unknown " "repeats rank."
+        )
     if repeats_sizes is None:
-        raise RuntimeError("Unsupported: ONNX export of repeat_interleave for unknown "
-                           "repeats size.")
+        raise RuntimeError(
+            "Unsupported: ONNX export of repeat_interleave for unknown " "repeats size."
+        )
     if input_sizes is None:
-        raise RuntimeError("Unsupported: ONNX export of repeat_interleave for unknown "
-                           "input size.")
+        raise RuntimeError(
+            "Unsupported: ONNX export of repeat_interleave for unknown " "input size."
+        )
     # Handle cases where dim is negative
     if dim < 0:
         dim += len(input_sizes)
@@ -260,7 +330,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
         if input_size is None:
             output_sizes[idx], input_sizes[idx] = 0, -1
 
-    cond_dynamic_repeats = (repeats_dim == 1 and repeats_sizes[0] is None)
+    cond_dynamic_repeats = repeats_dim == 1 and repeats_sizes[0] is None
     # If input size is dynamic or repeats vector is dynamic
     if output_sizes[dim] == 0 or cond_dynamic_repeats:
         reps = sym_help._size_helper(g, input, dim)
@@ -275,8 +345,12 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
         # As repeats is dynamic, we use a where node as a substitute for the if statement
         # If repests_dim = 1, expand repeats otherwise use original tensor
         elif cond_dynamic_repeats:
-            repeat_dim = sym_help._size_helper(g, repeats, g.op("Constant", value_t=torch.LongTensor([0])))
-            repeat_cond = g.op("Equal", repeat_dim, g.op("Constant", value_t=torch.LongTensor([1])))
+            repeat_dim = sym_help._size_helper(
+                g, repeats, g.op("Constant", value_t=torch.LongTensor([0]))
+            )
+            repeat_cond = g.op(
+                "Equal", repeat_dim, g.op("Constant", value_t=torch.LongTensor([1]))
+            )
             repeats = where(g, repeat_cond, g.op("Expand", repeats, reps), repeats)
     # There are cases when the repeats are 1-d tensor with multiple repeats, but dim
     # provided along one of the dynamic axes provided. A simple example would be
@@ -287,8 +361,11 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     else:
         return torch.onnx.symbolic_opset9.repeat_interleave(g, self, repeats, final_dim)
 
-    reps_like = g.op("ConstantOfShape", g.op("Shape", repeats),
-                     value_t=torch.tensor([1], dtype=torch.long))
+    reps_like = g.op(
+        "ConstantOfShape",
+        g.op("Shape", repeats),
+        value_t=torch.tensor([1], dtype=torch.long),
+    )
     r_splits = split(g, repeats, reps_like, 0)
     i_splits = split(g, input, reps_like, dim)
 
@@ -323,13 +400,16 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     i_split = loop_block.op("SequenceAt", i_splits, block_input_iter)
 
     i_split = unsqueeze(loop_block, i_split, dim + 1)
-    r_concat = [loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[:dim + 1])),
-                r_split,
-                loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[dim + 1:]))]
+    r_concat = [
+        loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[: dim + 1])),
+        r_split,
+        loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[dim + 1 :])),
+    ]
     r_concat = loop_block.op("Concat", *r_concat, axis_i=0)
     i_split = expand(loop_block, i_split, r_concat, None)
-    i_split = sym_help._reshape_helper(loop_block, i_split,
-                                       g.op("Constant", value_t=torch.LongTensor(output_sizes)))
+    i_split = sym_help._reshape_helper(
+        loop_block, i_split, g.op("Constant", value_t=torch.LongTensor(output_sizes))
+    )
     final_splits = loop_block.op("SequenceInsert", final_splits, i_split)
 
     # Loop outputs
@@ -376,12 +456,18 @@ def diagonal(g, self, offset, dim1, dim2):
     # calculation of selection window
     offset_op = g.op("Constant", value_t=torch.LongTensor([offset]))
     if offset >= 0:
-        diag_size = g.op("Max", g.op("Min", dim1_size, g.op("Sub", dim2_size, offset_op)),
-                         g.op("Constant", value_t=torch.LongTensor([0])))
+        diag_size = g.op(
+            "Max",
+            g.op("Min", dim1_size, g.op("Sub", dim2_size, offset_op)),
+            g.op("Constant", value_t=torch.LongTensor([0])),
+        )
         offset = 0
     else:
-        diag_size = g.op("Max", g.op("Min", g.op("Add", dim1_size, offset_op), dim2_size),
-                         g.op("Constant", value_t=torch.LongTensor([0])))
+        diag_size = g.op(
+            "Max",
+            g.op("Min", g.op("Add", dim1_size, offset_op), dim2_size),
+            g.op("Constant", value_t=torch.LongTensor([0])),
+        )
     diag_size = g.op("Concat", diag_size, axis_i=0)
 
     # Calculate which diagonal values to select
@@ -392,11 +478,21 @@ def diagonal(g, self, offset, dim1, dim2):
     # with all columns that are to be selected
     # So in this example, it is [1, 2]
     select_window_ones_fill = ones(g, diag_size, 4, None, None)
-    select_window = g.op("CumSum", select_window_ones_fill, g.op("Constant", value_t=torch.LongTensor([0])))
-    select_window = g.op("Add", select_window, g.op("Constant", value_t=torch.LongTensor([abs(offset) - 1])))
+    select_window = g.op(
+        "CumSum",
+        select_window_ones_fill,
+        g.op("Constant", value_t=torch.LongTensor([0])),
+    )
+    select_window = g.op(
+        "Add",
+        select_window,
+        g.op("Constant", value_t=torch.LongTensor([abs(offset) - 1])),
+    )
 
-    gather_shape = [size(g, result,
-                         dim=g.op("Constant", value_t=torch.LongTensor([axis]))) for axis in list(range(rank))[:-2]]
+    gather_shape = [
+        size(g, result, dim=g.op("Constant", value_t=torch.LongTensor([axis])))
+        for axis in list(range(rank))[:-2]
+    ]
     gather_shape.append(diag_size)
     gather_shape = g.op("Concat", *gather_shape, axis_i=0)
     gather_indices = zeros(g, gather_shape, 4, None, None)
@@ -411,14 +507,25 @@ def diagonal(g, self, offset, dim1, dim2):
     # are calculating diagonal values. In cases with diagonal overrun, we return a tensor which has
     # the dimension of the row/column where overrun occurred as 0-dim, as we are essentially
     # returning an empty tensor
-    overrun_cond = g.op("Not", g.op("Equal", diag_size, g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))))
+    overrun_cond = g.op(
+        "Not",
+        g.op(
+            "Equal",
+            diag_size,
+            g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64)),
+        ),
+    )
     if_op = g.op("If", overrun_cond)
     if_node = if_op.node()
 
     if_block = _add_block(if_node)
     gather_indices_if_block = if_block.op("Add", gather_indices, select_window)
-    gather_indices_if_block = sym_help._unsqueeze_helper(if_block, gather_indices_if_block, [rank - 1])
-    final_non_overrun_ = if_block.op("GatherND", result, gather_indices_if_block, batch_dims_i=rank - 2)
+    gather_indices_if_block = sym_help._unsqueeze_helper(
+        if_block, gather_indices_if_block, [rank - 1]
+    )
+    final_non_overrun_ = if_block.op(
+        "GatherND", result, gather_indices_if_block, batch_dims_i=rank - 2
+    )
     _add_output_to_block(if_block, final_non_overrun_)
 
     else_block = _add_block(if_node)
@@ -426,17 +533,21 @@ def diagonal(g, self, offset, dim1, dim2):
     _add_output_to_block(else_block, final_overrun_)
     return if_op
 
+
 class Quantized:
     """
     https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
     """
+
     domain = "quantized"
 
     @staticmethod
     def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
         input, input_scale, _, _ = sym_help.dequantize_helper(g, q_input)
         weight, weight_scale, _, axis = sym_help.dequantize_helper(g, q_weight)
-        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale, axis)
+        q_bias = sym_help.requantize_bias_helper(
+            g, bias, input_scale, weight_scale, axis
+        )
         bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
 
         output = linear(g, input, weight, bias)
@@ -444,10 +555,23 @@ class Quantized:
         return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
-    def conv2d(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
+    def conv2d(
+        g,
+        q_input,
+        q_weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        op_scale,
+        op_zero_point,
+    ):
         input, input_scale, _, _ = sym_help.dequantize_helper(g, q_input)
         weight, weight_scale, _, axis = sym_help.dequantize_helper(g, q_weight)
-        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale, axis)
+        q_bias = sym_help.requantize_bias_helper(
+            g, bias, input_scale, weight_scale, axis
+        )
         bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
 
         output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
@@ -455,10 +579,23 @@ class Quantized:
         return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
-    def conv2d_relu(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
+    def conv2d_relu(
+        g,
+        q_input,
+        q_weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        op_scale,
+        op_zero_point,
+    ):
         input, input_scale, _, _ = sym_help.dequantize_helper(g, q_input)
         weight, weight_scale, _, axis = sym_help.dequantize_helper(g, q_weight)
-        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale, axis)
+        q_bias = sym_help.requantize_bias_helper(
+            g, bias, input_scale, weight_scale, axis
+        )
         bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
 
         output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)

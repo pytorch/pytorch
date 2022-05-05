@@ -3,7 +3,9 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/trie.h>
 #include <vector>
 
 // This file is part of the backend interface. So, ops shouldn't be added or removed without due process
@@ -12,10 +14,33 @@
 namespace torch {
 namespace lazy {
 
+template <typename T, typename... Args>
+NodePtr ReuseNode(OpKind op, Args&&... args) {
+  if (FLAGS_torch_lazy_reuse_ir) {
+    return LookupNodeFromTrieCache<T>(op, std::forward<Args>(args)...);
+  }
+  return nullptr;
+}
+
 // TODO(alanwaketan): Support r-value reference argument type.
 template <typename T, typename... Args>
 NodePtr MakeNode(Args&&... args) {
-  return std::make_shared<T>(std::forward<Args>(args)...);
+  NodePtr node = std::make_shared<T>(std::forward<Args>(args)...);
+  if (FLAGS_torch_lazy_reuse_ir) {
+      // If ir caching is enabled, we need to record all new nodes
+    TrieCache::Get()->Insert(node);
+  }
+  return node;
+}
+
+// op is passed in for a more efficient node casting, see the implementation of NodeCast
+template <typename T, typename... Args>
+NodePtr ReuseOrMakeNode(OpKind op, Args&&... args) {
+  NodePtr node = ReuseNode<T>(op, std::forward<Args>(args)...);
+  if (!node) {
+    node = MakeNode<T>(std::forward<Args>(args)...);
+  }
+  return node;
 }
 
 struct IrBuilder {
