@@ -66,6 +66,8 @@ class IRParser {
       int end,
       const std::function<void()>& callback);
 
+  void bypassTypeAnnotationList();
+
   Value* findValueInVMap(const std::string& name);
 
   torch::jit::Lexer L;
@@ -74,6 +76,7 @@ class IRParser {
   SchemaTypeParser type_parser;
   bool parse_tensor_constants_;
   std::vector<Node*> deferred_tensor_value_initializations_;
+  std::vector<Node*> deferred_empty_container_initializations_;
 };
 
 struct ParsedLiteral {
@@ -226,10 +229,39 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       r.k = AttributeKind::t;
       return r;
     }
+    case '{': {
+      L.next();
+      if (L.cur().kind == '-') {
+        L.next();
+      }
+      auto text = L.expect(TK_NUMBER);
+      if (!parse_tensor_constants_) {
+        throw ErrorReport(token.range)
+            << "Single-element tensor constant encoutered but "
+            << "`parse_tensor_constants` is set to false " << token.text();
+      }
+      L.expect('}');
+      deferred_tensor_value_initializations_.push_back(n);
+      r.k = AttributeKind::t;
+      return r;
+    }
     default:
       throw ErrorReport(token.range)
           << "Could not parse literal" << token.text();
   }
+}
+
+void IRParser::bypassTypeAnnotationList() {
+  int depth = 0;
+  while (!(L.cur().kind == ']' && depth == 1)) {
+    if (L.cur().kind == '[') {
+      depth++;
+    } else if (L.cur().kind == ']') {
+      depth--;
+    }
+    L.next();
+  }
+  L.next();
 }
 
 /** \brief Parse attribute and add it to the node N.
@@ -306,6 +338,29 @@ void IRParser::parseAttr(Node* n) {
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
     }
+  } else if (L.cur().text() == "annotate") {
+    L.next();
+    L.expect('(');
+    auto type = L.cur().text();
+    if (type != "List" && type != "Dict") {
+      throw ErrorReport(L.cur().range)
+          << "Unexpected annotation (only List and Dict can be parsed)";
+    }
+    L.next();
+    // use the profiling annotation instead of the `annotate()` type.
+    // so, we throw away the annotation value
+    // Note: we could also use script_type_parser
+    bypassTypeAnnotationList();
+    L.expect(',');
+    // expect an empty definition
+    if (type == "Dict") {
+      L.expect('{');
+      L.expect('}');
+    } else if (type == "List") {
+      L.expect('[');
+      L.expect(']');
+    }
+    L.expect(')');
   } else {
     // scalar
     ParsedLiteral r = parseScalarLiteral(n);
@@ -544,6 +599,18 @@ void IRParser::parse() {
     auto options = at::TensorOptions(*device).dtype(*dtype);
     auto t = n->t_(attr::value, at::empty_strided(*sizes, *strides, options));
     (void)t;
+  }
+
+  for (Node* n : deferred_empty_container_initializations_) {
+    auto type = n->output()->type();
+    IValue val;
+    if (type->kind() == TypeKind::ListType) {
+      val = c10::impl::GenericList(type->containedType(0));
+    } else if (type->kind() == TypeKind::DictType) {
+      val = c10::impl::GenericDict(
+          type->containedType(0), type->containedType(1));
+    }
+    n->ival_(attr::value, val);
   }
 }
 
