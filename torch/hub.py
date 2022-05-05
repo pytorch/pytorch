@@ -666,7 +666,7 @@ def load_state_dict_from_url(
     progress: bool = True,
     check_hash: bool = False,
     file_name: Optional[str] = None
-) -> nn.Module:
+) -> Dict[str, Any]:
     r"""Loads the Torch serialized object at the given URL.
 
     If downloaded file is a zip file, it will be automatically
