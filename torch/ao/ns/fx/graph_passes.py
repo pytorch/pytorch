@@ -360,6 +360,53 @@ def _copy_node_from_a_to_c(
         raise AssertionError(
             f"handling of node {node_a.format_node()} with op {node_a.op} is not implemented")
 
+def _can_insert_copy_of_subgraph_a(
+    subgraph_a: NSSubgraph,
+    gm_a: GraphModule,
+    num_non_param_args_node_a: int,
+) -> bool:
+    """
+    This function returns `False` if the input subgraph cannot be copied by
+    `_insert_copy_of_subgraph_a_after_input_node_c`. This usually means
+    that there is a corner case logic for which copy is not yet implemented.
+    """
+    # populate the list of nodes we need to check
+    nodes = []
+    cur_node = subgraph_a.end_node
+    while cur_node != subgraph_a.start_node:
+        nodes.append(cur_node)
+        cur_node = cur_node.args[0]  # type: ignore[assignment]
+    nodes.append(cur_node)
+    nodes.reverse()
+
+    def _can_insert(node_a_arg, gm_a):
+        if isinstance(node_a_arg, Node):
+            arg_a = return_first_non_observer_node(node_a_arg, gm_a)
+            if arg_a.op == 'call_method':
+                return arg_a.target in ('dequantize', 'to')
+            elif arg_a.op == 'get_attr':
+                return True
+            else:
+                return False
+        elif isinstance(node_a_arg, (list, tuple)):
+            for el in node_a_arg:
+                if not isinstance(el, Node):
+                    return False
+        return True
+
+    # For each node, check if we handle the copy behavior. This follows the
+    # logic in `_insert_copy_of_subgraph_a_after_input_node_c`.
+    for node_a_arg in nodes[0].args[num_non_param_args_node_a:]:
+        if not _can_insert(node_a_arg, gm_a):
+            return False
+
+    for node in nodes[1:]:
+        for node_a_arg in node.args[1:]:
+            if not _can_insert(node_a_arg, gm_a):
+                return False
+
+    return True
+
 def _insert_copy_of_subgraph_a_after_input_node_c(
     input_node_c: Union[Node, List[Node]],
     input_node_c_2: Optional[Union[Node, List[Node]]],
@@ -602,6 +649,26 @@ def create_a_shadows_b(
                 subgraph_a, ref_name, ref_node_type_a, ref_node_type_b = \
                     end_node_b_to_matched_subgraph_a_and_name[node_b]
 
+            if len(node_b.args) == 0:
+                print(
+                    f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
+                    f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
+                    ', kwargs-only node not handled yet')
+                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                continue
+
+            all_op_types_support_shadowing = (
+                op_type_supports_shadowing(subgraph_a.start_node) and
+                op_type_supports_shadowing(node_b)
+            )
+            if not all_op_types_support_shadowing:
+                print(
+                    f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
+                    f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
+                    ', unsupported')
+                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                continue
+
             # For both start_node and end_node verify that we know how to do
             # the dtype cast. If we do not, skip.
             node_input_type_a, node_output_type_a = \
@@ -626,18 +693,6 @@ def create_a_shadows_b(
                 env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
                 continue
 
-            all_op_types_support_shadowing = (
-                op_type_supports_shadowing(subgraph_a.start_node) and
-                op_type_supports_shadowing(node_b)
-            )
-            if not all_op_types_support_shadowing:
-                print(
-                    f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
-                    f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
-                    ', unsupported')
-                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
-                continue
-
             # If we are shadowing from fp32 to int8, we need to insert
             # quantize_per_tensor call with qparams from the previous node.
             # Only do this if we are able to infer these qparams from the graph.
@@ -654,6 +709,16 @@ def create_a_shadows_b(
                         ', unknown input qparams')
                     env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
                     continue
+
+            num_non_param_args_node_a = \
+                get_number_of_non_param_args(subgraph_a.start_node, gm_a)
+            if not _can_insert_copy_of_subgraph_a(subgraph_a, gm_a, num_non_param_args_node_a):
+                print(
+                    f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
+                    f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
+                    ', unhandled logic in subgraph copy')
+                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                continue
 
             fqn_base_a = _maybe_get_fqn(subgraph_a.base_op_node, gm_a)
             fqn_base_b = _maybe_get_fqn(subgraph_b.base_op_node, gm_b)
