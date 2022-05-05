@@ -1211,6 +1211,7 @@
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  structured_delegate: clamp_max.out
   dispatch:
     CompositeExplicitAutograd: clamp_max
 
@@ -1222,6 +1223,7 @@
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  structured_delegate: clamp_max.out
   dispatch:
     CompositeExplicitAutograd: clamp_max_
 
@@ -1232,6 +1234,8 @@
 
 - func: clamp_max.out(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: clamp_max_out
 
@@ -1242,6 +1246,7 @@
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  structured_delegate: clamp_min.out
   dispatch:
     CompositeExplicitAutograd: clamp_min
 
@@ -1253,6 +1258,7 @@
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  structured_delegate: clamp_min.out
   dispatch:
     CompositeExplicitAutograd: clamp_min_
 
@@ -1263,6 +1269,8 @@
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: clamp_min_out
 
@@ -7324,13 +7332,9 @@
   variants: function
 
 - func: lu_solve.out(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: lu_solve_out
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
-  dispatch:
-    CPU, CUDA: lu_solve
 
 # lu_unpack
 - func: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
@@ -11009,6 +11013,19 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_lu_out
+
+# linalg.lu_solve
+- func: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
+  python_module: linalg
+  structured_delegate: linalg_lu_solve.out
+  variants: function
+
+- func: linalg_lu_solve.out(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: linalg_lu_solve_out
 
 # linalg.det
 - func: linalg_det(Tensor self) -> Tensor
