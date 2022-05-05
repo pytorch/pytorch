@@ -831,7 +831,7 @@ class Generator(object):
 
 
 # Defined in torch/csrc/utils/python_dispatch.cpp
-def _dispatch_library(kind: str, name: str, dispatch: str, file: str, linenum: Any) -> Any: ...
+def _dispatch_library(kind: str, name: str, dispatch: str, file: str = "", linenum: Any = 0) -> Any: ...
 
 # Defined in torch/csrc/utils/init.cpp
 class BenchmarkConfig(object):
