@@ -1278,7 +1278,7 @@
 - name: remainder.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad
   other: -grad * self.div(other, /*rounding_mode=*/"floor")
-  result: self_t - (other_t * self_p).div(other_p, /*rounding_mode=*/"floor")
+  result: self_t - other_t * self_p.div(other_p, /*rounding_mode=*/"floor")
 
 - name: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   self: renorm_backward(grad, self, p, dim, maxnorm)
