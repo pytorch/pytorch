@@ -53,7 +53,7 @@ namespace executor_utils {
 std::string kernelPreamble() {
   std::stringstream ss;
 
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   ss << nvfuser_resources::fp16_support_cu;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   ss << nvfuser_resources::bf16_support_cu;
@@ -936,7 +936,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
         at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
   });
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
   std::vector<const char*> args = {"--std=c++14"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
@@ -1142,7 +1142,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
 
   // TODO: We do go through different code path, should investigate whether this
   // has an impact on generated binary.
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   const char* prefix_env = getenv("PYTORCH_NVFUSER_CUBIN");
   if (prefix_env) {
     FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadCUBIN");

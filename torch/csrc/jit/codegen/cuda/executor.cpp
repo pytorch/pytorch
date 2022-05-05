@@ -94,7 +94,7 @@ __host__ __device__ float __int_as_float(int a)
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
   std::string code = "";
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
 #if ROCM_VERSION < 40200
   code += std::string("#include <hip/hip_runtime.h>\n") +
       std::string("#include <hip/hip_bf16.h>\n") +
@@ -860,7 +860,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
 
     if (kernel()->summary().has_cooperative_grid_reduction) {
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
       int num_blocks_per_SM = -1;
       at::globalContext().getNVRTC().hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
           &num_blocks_per_SM,
@@ -1057,7 +1057,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
           kernel_arguments.getBuffer(),
           nullptr));
     } else {
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
       FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchCooperativeKernel");
       AT_CUDA_DRIVER_CHECK(
           at::globalContext().getNVRTC().cuLaunchCooperativeKernel(
