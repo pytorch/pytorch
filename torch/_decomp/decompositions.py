@@ -1160,7 +1160,7 @@ def cudnn_batch_norm_backward(
 
 
 @register_decomposition(aten.rot90.default)
-def rot90(self: Tensor, k: int = 1, dims: List[int] = [0, 1]) -> Tensor:
+def rot90(self: Tensor, k: int = 1, dims: List[int] = [0, 1]) -> Tensor:  # noqa: B006
     total_dims = self.dim()
     total_rot_dims = len(dims)
     assert total_rot_dims == 2, f"expected total rotation dims == 2, but got dims = {total_rot_dims}"
@@ -1168,7 +1168,7 @@ def rot90(self: Tensor, k: int = 1, dims: List[int] = [0, 1]) -> Tensor:
     assert dims[0] != dims[1] and abs(dims[0] - dims[1]) != total_dims, f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
     assert dims[0] < total_dims and dims[0] >= -total_dims, f"Rotation dim0 out of range, dim0 = {dims[0]}"
     assert dims[1] < total_dims and dims[1] >= -total_dims, f"Rotation dim1 out of range, dim1 = {dims[1]}"
-    k = (4 + (k % 4)) % 4
+    k = k % 4
     if k == 1:
         return self.flip(dims[1]).transpose(dims[0], dims[1])
     elif k == 2:
@@ -1181,7 +1181,7 @@ def rot90(self: Tensor, k: int = 1, dims: List[int] = [0, 1]) -> Tensor:
 
 @register_decomposition(aten.transpose.int)
 def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
-    dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))
+    dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
 
     if self.dim() <= 1:
         return self
@@ -1198,16 +1198,15 @@ def t(self: Tensor) -> Tensor:
     return self.transpose(0, 0 if self.dim() < 2 else 1)
 
 
-def check_stack_inputs(tensors: List[Tensor], dim: int):
+def check_stack_inputs(tensors: List[Tensor]):
     entry_shape = tensors[0].shape
     for i in range(1, len(tensors)):
-        assert tensors[i].shape == entry_shape, f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0 and {tensors[i].sizes()} at entry {i}"
+        assert tensors[i].shape == entry_shape, (f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
+                                                 f"and {tensors[i].shape} at entry {i}")
 
 
 def get_stack_inputs(tensors: List[Tensor], dim: int):
-    entry_shape = tensors[0].shape
-    for i in range(1, len(tensors)):
-        assert tensors[i].shape == entry_shape, f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0 and {tensors[i].sizes()} at entry {i}"
+    check_stack_inputs(tensors)
     return [t.unsqueeze(dim) for t in tensors]
 
 
@@ -1216,7 +1215,7 @@ def stack(tensors: List[Tensor], dim: int = 0) -> Tensor:
     assert len(tensors) > 0, "stack expects a non-empty TensorList"
     wrapped_dim = utils.canonicalize_dim(tensors[0].dim() + 1, dim)
     if wrapped_dim < tensors[0].dim() and not tensors[0].is_sparse:
-        check_stack_inputs(tensors, wrapped_dim)
+        check_stack_inputs(tensors)
         result_sizes = list(tensors[0].shape)
         result_sizes.insert(wrapped_dim, len(tensors))
         out = torch.cat(tensors, wrapped_dim)
