@@ -21,8 +21,8 @@ def _list_connected_datapipes(scan_obj, only_datapipe, cache):
     f = io.BytesIO()
     p = pickle.Pickler(f)  # Not going to work for lambdas, but dill infinite loops on typing and can't be used as is
     if DILL_AVAILABLE:
-        from dill import Pickler
-        d = Pickler(f)
+        from dill import Pickler as dill_Pickler
+        d = dill_Pickler(f)
     else:
         d = None
 
@@ -66,6 +66,9 @@ def _list_connected_datapipes(scan_obj, only_datapipe, cache):
             cls.set_reduce_ex_hook(None)
             if only_datapipe:
                 cls.set_getstate_hook(None)
+        if DILL_AVAILABLE:
+            from dill import extend as dill_extend
+            dill_extend(False)  # Undo change to dispatch table
     return captured_connections
 
 
