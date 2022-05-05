@@ -66,7 +66,6 @@ class TestSegmentReductions(TestCase):
             unsafe=unsafe,
             initial=initial_value,
         )
-        # print(reduction, "\n", expected_result, "\n", actual_result)
         self.assertEqual(
             expected_result, actual_result, rtol=1e-02, atol=1e-05, equal_nan=True
         )
