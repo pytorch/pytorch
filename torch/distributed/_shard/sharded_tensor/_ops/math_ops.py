@@ -165,7 +165,7 @@ def sharded_bmm(args, kwargs, pg):
     Handles ``__torch_function__`` dispatch for the sharded_bmm op.
 
     Warning: For now we only supports the case when both tensors are sharded
-             by dim 0 so that no local communication.
+             by dim 0 so that no communication is needed.
 
     Args: same as ``torch.bmm``.
 

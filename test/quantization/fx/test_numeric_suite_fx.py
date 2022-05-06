@@ -1172,33 +1172,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             results_len=0)
 
     @skipIfNoFBGEMM
-    def test_add_shadow_loggers_multiple_dtype_casts(self):
-        """
-        Verifies that for nodes where the first input arg is a list,
-        such as `cat`, we insert an individual dtype cast for each
-        arg of the list.
-        """
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                x = torch.cat([x, x, x], dim=0)
-                return x
-
-        m = M().eval()
-        expected_occurrence = {
-            # 3 dequantize function calls from the 3 dtype casts for [x, x, x]
-            ns.call_module(torch.nn.Identity): 3,
-            # 1 dequantize method call for module output
-            ns.call_method("dequantize"): 1,
-        }
-        self._test_match_shadow_activations(
-            m, (torch.randn(4, 4),),
-            prepared_expected_node_occurrence=expected_occurrence,
-            results_len=1, compare_fp32_vs_fp32_prepared=False)
-
-    @skipIfNoFBGEMM
     def test_shadow_activations_fqn(self):
         m = nn.Sequential(
             nn.Sequential(nn.Conv2d(1, 1, 1)),
@@ -1237,7 +1210,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         m = M().eval()
         self._test_match_shadow_activations(
             m, (torch.randn(1, 1, 4, 4),),
-            results_len=2,
+            results_len=1,
             should_log_inputs=True)
 
     @skipIfNoFBGEMM
@@ -1954,13 +1927,44 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mq = convert_fx(mp, is_reference=True)
         mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
 
-    def test_mul_add_skips_shadowing(self):
+    def test_mul_add_cat_stack_skips_shadowing(self):
         class M(nn.Module):
             def forward(self, x):
                 x = x * x
                 x = torch.mul(x, x)
                 x = x + x
                 x = torch.add(x, x)
+                x = torch.cat([x])
+                x = torch.stack([x])
+                return x
+
+        m = M().eval()
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 1, 4, 4),),
+            results_len=0)
+
+    def test_op_with_only_kwargs_skips_shadowing(self):
+        class M(nn.Module):
+            def forward(self, x):
+                x = torch.cat(tensors=[x])
+                x = torch.stack(tensors=[x])
+                return x
+
+        m = M().eval()
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 1, 4, 4),),
+            results_len=0)
+
+    def test_unsupported_op_copy_skips_shadowing(self):
+        """
+        Copying a `call_function` node is not implemented, test that this
+        does not crash shadowing but instead skips the node.
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                # the second argument leads to attempting to copy a
+                # call_function node
+                x = F.layer_norm(x, x.shape[1:])
                 return x
 
         m = M().eval()
@@ -2101,7 +2105,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             x = torch.randn(2, 4)
             self._test_match_shadow_activations(
                 sparse_nn, (idx, offsets, x),
-                results_len=4,
+                results_len=3,
                 should_log_inputs=should_log_inputs)
 
     @skip_if_no_torchvision
