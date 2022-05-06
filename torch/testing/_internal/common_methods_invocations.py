@@ -6381,7 +6381,7 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
     make_arg = partial(make_fn, dtype=dtype, device=device, requires_grad=requires_grad)
 
     def out_fn(output):
-        if op_info.name in ("linalg.lu"):
+        if op_info.name == "linalg.lu":
             return output[1], output[2]
         else:
             return output
@@ -6397,35 +6397,42 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
         yield SampleInput(A, kwargs={"pivot": pivot}, output_process_fn_grad=out_fn)
 
 def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+    """ Samples the inputs for both linalg.lu_solve and lu_solve """
     make_fn = make_fullrank_matrices_with_distinct_singular_values
     make_a = partial(make_fn, dtype=dtype, device=device)
     make_b = partial(make_tensor, dtype=dtype, device=device)
 
+    def clone(X, requires_grad):
+        Y = X.clone()
+        Y.requires_grad_(requires_grad)
+        return Y
+
+    is_linalg_lu_solve = (op_info.name == "linalg.lu_solve")
+
     batches = ((), (0, ), (2, ))
-    ns = (5, 3, 0)
-    nrhs = (0, 1, 6)
+    ns = (3, 1, 0)
+    nrhs = (4, 1, 0)
 
     for n, batch, rhs in product(ns, batches, nrhs):
-        shape_a = batch + (n, n)
-        a = make_a(*shape_a)
-        lu, pivs = a.lu()
-        lu = lu.contiguous()
+        A = make_a(*(batch + (n, n)))
+        LU, pivots = torch.linalg.lu_factor(A)
 
-        shape_b = batch + (n, rhs)
-        b = make_b(shape_b)
+        B = make_b(batch + (n, rhs))
 
         grads = (False,) if not requires_grad else (True, False)
         # we try all possible combinations of requires_grad for each input
-        for lu_grad, b_grad in product(grads, grads):
+        for LU_grad, B_grad in product(grads, grads):
             # when requires_grad == True, at least one input has to have requires_grad enabled
-            if requires_grad and not lu_grad and not b_grad:
+            if requires_grad and not LU_grad and not B_grad:
                 continue
 
-            lu_ = lu.clone()
-            lu_.requires_grad_(lu_grad)
-            b_ = b.clone()
-            b_.requires_grad_(b_grad)
-            yield SampleInput(b_, args=(lu_, pivs))
+            if is_linalg_lu_solve:
+                for adjoint, left in product((True, False), repeat=2):
+                    yield SampleInput(clone(LU, LU_grad),
+                                      args=(pivots, clone(B if left else B.mT, B_grad)),
+                                      kwargs=dict(adjoint=adjoint, left=left))
+            else:
+                yield SampleInput(clone(B, B_grad), args=(clone(LU, LU_grad), pivots))
 
 def sample_inputs_lu_unpack(op_info, device, dtype, requires_grad=False, **kwargs):
     def out_fn(output):
@@ -7587,18 +7594,40 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
     )
 
     reduce = op_info.variant_test_name
-    sample_inputs = []
     for args, include_self in product(test_cases, [True, False]):
         inp_shape, dim, index, src_shape = args
-        sample_inputs.append(
-            SampleInput(
-                _tensor(inp_shape),
-                args=(dim, index, _tensor(src_shape), reduce),
-                kwargs={'include_self': include_self}
-            )
-        )
+        yield SampleInput(_tensor(inp_shape),
+                          args=(dim, index, _tensor(src_shape), reduce),
+                          kwargs={'include_self': include_self})
 
-    return sample_inputs
+
+    # Sample inputs to test edge cases for backward
+    # Check that gradients are propagated correctly for prod when zeros in self/src are reduced
+    if requires_grad and reduce == 'prod':
+        # This sample tests gradients for the following cases
+        # (a) 1 zero reduced (from src (self[0, 1], self[1, 1]), from self (self[0, 0], self[2, 0]))
+        # (b) 2 zeros reduced (1 from src and 1 from self (self[1, 0])
+        # (c) no zeros reduced (self([2, 1]))
+        # (d) 2 zeros reduced (both from src) is tested in test/test_autograd.py
+        #     test_scatter_reduce_prod_gradgrad_error as this case is not supported for gradgrad
+        input = torch.tensor([[0, 13], [0, 17], [0, 19]], dtype=dtype, device=device, requires_grad=requires_grad)
+        src = torch.tensor([[0, 1, 2, 3], [0, 4, 0, 1], [2, 3, 5, 6]], dtype=dtype, device=device, requires_grad=requires_grad)
+        idx = torch.tensor([[1, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1]], dtype=torch.long, device=device)
+
+        yield SampleInput(input,
+                          args=(1, idx, src, reduce),
+                          kwargs={'include_self': True})
+
+
+    # Check that gradients are evenly distributed for amax/amin
+    if requires_grad and (reduce in ['amax', 'amin']):
+        input = _tensor((M, S))
+        src = input.clone().detach_().requires_grad_(requires_grad)
+        idx = torch.arange(S).expand((M, S)).to(dtype=torch.long, device=device)
+
+        yield SampleInput(_tensor((M, S)),
+                          args=(1, idx, src, reduce),
+                          kwargs={'include_self': True})
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     samples = (SampleInput(make_tensor((S, S, S), dtype=dtype, device=device,
@@ -11513,17 +11542,27 @@ op_db: List[OpInfo] = [
     OpInfo('lu_solve',
            op=torch.lu_solve,
            dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_lu_solve,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
-               DecorateInfo(unittest.skip("Tests different backward implementations"),
+               DecorateInfo(unittest.skip("Tests different backward paths"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
-           ),
+           decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver]),
+    OpInfo('linalg.lu_solve',
+           op=torch.linalg.lu_solve,
+           aten_name='linalg_lu_solve',
+           dtypes=floating_and_complex_types(),
+           supports_forward_ad=True,
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_lu_solve,
+           skips=(
+               DecorateInfo(unittest.skip("Tests different backward paths"),
+                            "TestCommon", "test_floating_inputs_are_differentiable"),),
+           decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver]),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
@@ -17521,6 +17560,8 @@ op_db: List[OpInfo] = [
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        # FIXME: vmap segfaults in _remove_batch_dim after node logic was added to scatter_reduce_backward(prod)
+        check_batched_grad=False,
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
     OpInfo(
