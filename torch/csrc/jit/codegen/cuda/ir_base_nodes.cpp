@@ -88,11 +88,7 @@ Val::Val(IrBuilderPasskey passkey, ValType _vtype, DataType _dtype)
 //  this constructor now leaving them to be resolved by later stages
 //
 Val::Val(const Val* src, IrCloner* ir_cloner)
-    : Statement(src, ir_cloner),
-      vtype_(src->vtype_),
-      dtype_(src->dtype_),
-      is_fusion_input_(src->is_fusion_input_),
-      is_fusion_output_(src->is_fusion_output_) {}
+    : Statement(src, ir_cloner), vtype_(src->vtype_), dtype_(src->dtype_) {}
 
 const std::vector<Expr*>& Val::uses() const {
   if (vtype_ == ValType::TensorView) {
