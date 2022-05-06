@@ -439,7 +439,8 @@ TEST(StaticRuntime, LongModel) {
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
-  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+  EXPECT_TRUE(
+      torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 }
 
 TEST(StaticRuntime, TrivialModel) {
@@ -457,7 +458,8 @@ TEST(StaticRuntime, TrivialModel) {
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
-  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+  EXPECT_TRUE(
+      torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 }
 
 TEST(StaticRuntime, DeepWide) {
@@ -482,7 +484,8 @@ TEST(StaticRuntime, DeepWide) {
       ASSERT_TRUE(outputs.size() > 0);
       at::Tensor output_2 = outputs[0].toTensor();
       smod.runtime().check_for_memory_leak();
-      EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+      EXPECT_TRUE(
+          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
     }
   }
 }
@@ -509,7 +512,8 @@ TEST(StaticRuntime, KWargsAPI_1) {
         smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
-        EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+        EXPECT_TRUE(
+            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -553,7 +557,8 @@ TEST(StaticRuntime, KWargsAPI_2) {
         smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
-        EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+        EXPECT_TRUE(
+            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -630,7 +635,8 @@ TEST(StaticRuntime, CleanUpMemory) {
             ASSERT_TRUE(outputs.size() > 0);
             auto output_2 = outputs[0].toTensor();
             runtime.check_for_memory_leak();
-            EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+            EXPECT_TRUE(torch::allclose(
+                output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
             if (manage_output_tensors) {
               runtime.deallocateOutputTensors();
               runtime.checkOutputTensorMemoryLeaks();
@@ -875,7 +881,8 @@ TEST(StaticRuntime, FusionPass) {
       }
       EXPECT_TRUE(hit);
       auto output_2 = getTensor(module.forward(inputs));
-      EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+      EXPECT_TRUE(
+          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
     }
   }
 }
