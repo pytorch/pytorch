@@ -9,6 +9,7 @@ from typing import (
     Dict,
     Iterator,
     List,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -361,12 +362,12 @@ class _RemoteModule(nn.Module):
     def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
         _raise_not_supported(self.register_forward_hook.__name__)
 
-    def state_dict(self, destination=None, prefix="", keep_vars=False):
+    def state_dict(self, *args, **kwargs):
         _raise_not_supported(self.state_dict.__name__)
 
     def load_state_dict(
         self,
-        state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
+        state_dict: Mapping[str, Any],
         strict: bool = True,
     ):
         _raise_not_supported(self.load_state_dict.__name__)

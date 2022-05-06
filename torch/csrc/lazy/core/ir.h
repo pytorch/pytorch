@@ -11,7 +11,6 @@
 #include <utility>
 #include <vector>
 
-#include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/core/hash.h>
@@ -174,12 +173,6 @@ protected:
 inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
   stream << node.ToString();
   return stream;
-}
-
-// TODO(alanwaketan): Support r-value reference argument type.
-template <typename T, typename... Args>
-NodePtr MakeNode(Args&&... args) {
-  return std::make_shared<T>(std::forward<Args>(args)...);
 }
 
 template <typename T>
