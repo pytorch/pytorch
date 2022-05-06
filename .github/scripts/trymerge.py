@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
@@ -352,6 +353,7 @@ def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--on-green", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
@@ -652,7 +654,8 @@ class GitHubPR:
 
         repo.push(self.default_branch(), dry_run)
 
-
+class MandatoryChecksMissingError(Exception):
+    pass
 @dataclass
 class MergeRule:
     name: str
@@ -696,7 +699,8 @@ def find_matching_merge_rule(pr: GitHubPR,
     #  Used to determine best rejection reason
     # Score 0 to 10K - how many files rule matched
     # Score 10K - matched all files, but no overlapping approvers
-    # Score 20K - matched all files and approvers, but lacks mandatory checks
+    # Score 20K - matched all files and approvers, but mandatory checks are pending
+    # Score 30k - Matched all files and approvers, but mandatory checks failed
     reject_reason_score = 0
     for rule in rules:
         rule_name = rule.name
@@ -735,22 +739,31 @@ def find_matching_merge_rule(pr: GitHubPR,
                                  f"{','.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
             continue
         if rule.mandatory_checks_name is not None:
-            pass_checks = True
+            pending_checks = []
+            failed_checks = []
             checks = pr.get_checkrun_conclusions()
             # HACK: We don't want to skip CLA check, even when forced
             for checkname in filter(lambda x: force is False or "CLA Check" in x, rule.mandatory_checks_name):
-                if checkname not in checks or checks[checkname] != "SUCCESS":
-                    if reject_reason_score < 20000:
-                        reject_reason_score = 20000
-                        reject_reason = f"Refusing to merge as mandatory check {checkname} "
-                        reject_reason += "has not been run" if checkname not in checks or checks[checkname] is None else "failed"
-                        reject_reason += f" for rule {rule_name}"
-                    pass_checks = False
-            if not pass_checks:
-                continue
+                if checkname not in checks or checks[checkname] is None:
+                    pending_checks.append(checkname)
+                elif checks[checkname] != 'SUCCESS':
+                    failed_checks.append(checkname)
+        if len(failed_checks) > 0:
+            if reject_reason_score < 30000:
+                reject_reason_score = 30000
+                reject_reason = f"Refusing to merge as mandatory check(s) {','.join(failed_checks)} failed for rule {rule_name}"
+            continue
+        elif len(pending_checks) > 0:
+            if reject_reason_score < 20000:
+                reject_reason_score = 20000
+                reject_reason = f"Refusing to merge as mandatory check(s) {','.join(pending_checks)}"
+                reject_reason += f" are not yet run for rule {rule_name}"
+            continue
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
+    if reject_reason_score == 20000:
+        raise MandatoryChecksMissingError(reject_reason)
     raise RuntimeError(reject_reason)
 
 
@@ -798,6 +811,32 @@ def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
 
+def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
+    repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+    org, project = repo.gh_owner_and_name()
+    start_time = time.time()
+    last_exception = ''
+    while True:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+
+        if(elapsed_time > 355 * 60):
+            msg = 'Merged timed out after 6 hours. Please contact the pytorch_dev_infra team.'
+            msg += f'The last exception was: {last_exception}'
+            gh_post_comment(org, project, pr_num, msg, dry_run=dry_run)
+            gh_add_labels(org, project, pr_num, ["land-failed"])
+            raise RuntimeError(msg)
+
+        pr = GitHubPR(org, project, pr_num)
+        try:
+            pr.merge_into(repo, dry_run=dry_run)
+        except MandatoryChecksMissingError as ex:
+            last_exception = str(ex)
+            print(f'Merged failed due to: {ex}. Retrying in 60 seconds.')
+            time.sleep(60)
+        else:
+            return
+
 def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
@@ -823,9 +862,7 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    try:
-        pr.merge_into(repo, dry_run=args.dry_run, force=args.force)
-    except Exception as e:
+    def handle_exception(e: Exception) -> None:
         msg = f"Merge failed due to {e}"
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
@@ -833,6 +870,17 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
+
+    if args.on_green:
+        try:
+            merge_on_green(args.pr_num, repo, args.dry_run,)
+        except Exception as e:
+            handle_exception(e)
+    else:
+        try:
+            pr.merge_into(repo, dry_run=args.dry_run, force=args.force)
+        except Exception as e:
+            handle_exception(e)
 
 
 if __name__ == "__main__":
