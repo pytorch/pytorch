@@ -225,7 +225,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                 contig_info[i] = (strides[i] == 1);
               } else {
                 contig_info[i] =
-                    (strides[i] == (strides[i - 1] * sizes[i - 1]));
+                    (strides[i] == (strides[i + 1] * sizes[i + 1]));
               }
             }
 
