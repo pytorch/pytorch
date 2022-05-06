@@ -45,7 +45,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         } else if (THPUtils_checkDouble(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackDouble(obj.ptr()));
         } else {
-          throw py::cast_error(c10::str("Unable to cast ", py::str(obj), " to Tensor"));
+          throw py::cast_error(
+              c10::str("Unable to cast ", py::str(obj), " to Tensor"));
         }
         at::Tensor tensor = at::scalar_to_tensor(scalar);
         tensor.unsafeGetTensorImpl()->set_wrapped_number(true);

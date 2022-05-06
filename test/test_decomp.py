@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 
+import itertools
 import functools
 from functools import partial
 import unittest
@@ -317,6 +318,27 @@ atexit.register(dump_ops)
 """
 
 
+def any_unsupported(args, kwargs):
+    def test_unsupported(t):
+        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
+            # These are all things that we haven't coded decompositions
+            # to handle correctly.  Maybe they should.
+            return any([
+                t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
+                t.is_nested, torch._is_functional_tensor(t), t.is_neg(), t.is_conj(),
+            ])
+        elif torch.overrides.is_tensor_like(t):
+            # Decompositions will generally change the behavior of Tensor-like
+            # subclasses, so bypass tests in this case too
+            return True
+        else:
+            return False
+
+    flat_args, _ = tree_flatten(args)
+    flat_kwargs, _ = tree_flatten(kwargs)
+    return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
+
+
 class TestDecomp(TestCase):
     longMessage = True
 
@@ -376,7 +398,7 @@ class TestDecomp(TestCase):
                 # (TODO: remove detach from the decomp table?)
                 if func not in decomposition_table or func in [
                     torch.ops.aten.detach.default
-                ]:
+                ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
 
                 decomposed.add(func)
