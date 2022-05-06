@@ -2912,6 +2912,7 @@ class IrParser {
       REGISTER_PARSE_RULE(
           flatten_op,
           {
+            auto self_value = node->inputs()[0];
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
