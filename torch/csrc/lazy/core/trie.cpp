@@ -43,7 +43,7 @@ void TrieCache::SetCurrent(std::deque<std::shared_ptr<TrieNode>>::iterator iter)
   current_ = (*iter).get();
   // Insert this node to the front of its parent's successor list
   if (iter != successors.begin()) {
-    successors.push_front(std::move(*iter));
+    successors.push_front(*iter);
     successors.erase(iter);
   }
 }
