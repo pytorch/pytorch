@@ -418,7 +418,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
 
     # add the new connections from backend_config_dict
     for item1, item2 in new_connections:
-        # print(item1, item2)
         for set_of_related_ops in sets_of_related_ops:
             if item1 in set_of_related_ops or item2 in set_of_related_ops:
                 set_of_related_ops.add(item1)
