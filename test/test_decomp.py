@@ -283,9 +283,9 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float16, "nn.functional.batch_norm"),
     ("cuda", torch.bfloat16, "nn.functional.instance_norm"),
     ("cuda", torch.float16, "nn.functional.instance_norm"),
-    # complex is not handled
-    (None, torch.complex64, "var"),
-    (None, torch.complex128, "var"),
+    # doesn't work
+    ("cuda", torch.bfloat16, "nn.functional.embedding"),
+
 }
 
 all_decomposed = set()
@@ -478,13 +478,6 @@ class TestDecomp(TestCase):
                 self.skipTest(
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
-
-    def test_torchscriptable(self, device):
-        skip_list = [aten.rsub.Scalar]
-        for op, decomposition in decomposition_table.items():
-            if op in skip_list:
-                continue
-            f = torch.jit.script(decomposition)
 
 
 instantiate_device_type_tests(TestDecomp, globals())

@@ -1,7 +1,7 @@
-#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
+#include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/SharedReduceOps.h>
@@ -100,56 +100,42 @@ static void _launch_kernel(int total_n_elems, func_t f) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-void _unpack_pivots_internal_kernel(
-  TensorIterator& iter,
-  int64_t dim_size
-) {
+void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size) {
   if (iter.numel() == 0) {
     return;
   }
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      _unpack_pivots_internal_kernel(sub_iter, dim_size);
+      unpack_pivots_cuda_kernel(sub_iter, dim_size);
     }
     return;
   }
 
-  auto offset_calculator = make_offset_calculator<2>(iter);
+  const auto offset_calculator = make_offset_calculator<2>(iter);
 
-  char* unpacked_pivots_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
-  const char* const __restrict__ pivots_ptr = reinterpret_cast<const char*>(iter.data_ptr(1));
+  const auto perm_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  const auto pivots_ptr = reinterpret_cast<const char*>(iter.data_ptr(1));
 
-  auto loop = [=]C10_DEVICE(int i) {
-    auto offsets = offset_calculator.get(i);
+  auto loop = [=]C10_DEVICE(const int idx) {
+    const auto offsets = offset_calculator.get(idx);
 
-    auto* unpacked_pivots_data = reinterpret_cast<int32_t*>(
-      unpacked_pivots_ptr + offsets[0]);
-    const auto* const __restrict__ pivots_data = reinterpret_cast<const int32_t*>(
-      pivots_ptr + offsets[1]);
+    int64_t* const __restrict__ perm_data = reinterpret_cast<int64_t*>(perm_ptr + offsets[0]);
+    const int32_t* const __restrict__ pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr + offsets[1]);
 
     // QUESTION: can we mix 64bit offsets with 32bit Iterator indexing?
     for (int64_t i = 0; i < dim_size; ++i) {
       thrust::swap(
-        unpacked_pivots_data[i],
-        unpacked_pivots_data[pivots_data[i]]
+        perm_data[i],
+        perm_data[pivots_data[i] - 1]
       );
     }
   };
 
   _launch_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
 }
-
-void unpack_pivots_cuda_kernel(
-  TensorIterator& iter,
-  int64_t dim_size
-) {
-  _unpack_pivots_internal_kernel(iter, dim_size);
-}
-
 } // anonymous namespace
 
-REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
 REGISTER_DISPATCH(unpack_pivots_stub, &unpack_pivots_cuda_kernel);
-
+REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
 }}
