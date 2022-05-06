@@ -10415,7 +10415,7 @@ dedent """
         self.assertTrue(n.type() == torch._C.TensorType.getInferred())
 
         with self.assertRaisesRegex(RuntimeError, "Inferred \'x\' to be of type \'Tensor"):
-            fn(1)
+            fn("1")
 
     def test_script_define_order(self):
         class M(torch.jit.ScriptModule):
@@ -15919,7 +15919,7 @@ dedent """
 
         with self.assertRaisesRegex(RuntimeError, (r"Expected a value of type \'Tensor \(inferred\)\'"
                                                    r"[\S\s]*Inferred \'a\' to be of type \'Tensor\'")):
-            foo(1)
+            foo("1")
 
     def test_type_comments_in_body(self):
         @torch.jit.script
