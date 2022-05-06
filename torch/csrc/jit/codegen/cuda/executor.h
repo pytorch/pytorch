@@ -108,6 +108,32 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     return measure_kernel_time_ ? kernel_time_ms_ : 0;
   }
 
+  //! Returns the number of bytes processed last kernel execution
+  int64_t bytesProcessed() const {
+    return bytes_processed_;
+  }
+
+  //! Returns the launch parameters from the last kernel execution
+  LaunchParams lastLaunchParams() const {
+    return launch_params_;
+  }
+
+  //! Returns the string of the compiled kernel
+  std::string kernelString() const {
+    return kernel_code_;
+  }
+
+  //! Returns the latest compile log
+  std::string compilerLog() const {
+    return last_compiler_log_;
+  }
+
+  std::string kernelName() const {
+    std::stringstream ss;
+    ss << "kernel" << fusion_id_;
+    return ss.str();
+  }
+
   //! Internal tests only. Compiles CUDA code with NVRTC directly from
   //! string. This util provides a path to test runtime code, i.e. the resource
   //! strings.
@@ -132,12 +158,6 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     std::vector<at::Tensor> buffers;
     std::vector<bool> zero_init;
   };
-
-  std::string kernelName() const {
-    std::stringstream ss;
-    ss << "kernel" << fusion_id_;
-    return ss.str();
-  }
 
   static std::string kernelNamespace() {
     return "CudaCodeGen";
@@ -220,19 +240,6 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // launch kernels without re-inference parameters.
   std::unordered_map<size_t, ExecutorEntry> executor_entry_lookup_;
 
-  // Profiling support: knob to control wheter we actually execute the
-  // kernel on the GPU or not
-  bool execute_kernel_ = true;
-
-  // Profiling support: knob to enable measuring kernel execution time
-  bool measure_kernel_time_ = false;
-
-  // The last kernel execution time, if measure_kernel_time_ is true
-  float kernel_time_ms_ = 0;
-
-  // Profiling support: knob to disable caching of launch params
-  bool disable_parameter_cache_ = false;
-
   // Compile time information caching. This is used for shape inference
   //  support. The cache stores graph information that are available
   //  without shape information so that each shape inference call will
@@ -242,6 +249,32 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // Cached expr eval
   std::unique_ptr<KernelPrecomputedIntegers> evaluator_precomputed_integers_ =
       nullptr;
+
+  // Profiling support: knob to control wheter we actually execute the
+  // kernel on the GPU or not
+  bool execute_kernel_ = true;
+
+  // Profiling support: knob to enable measuring kernel execution time
+  bool measure_kernel_time_ = false;
+
+  // Profiling support: the last kernel execution time, if measure_kernel_time_
+  // is true
+  float kernel_time_ms_ = 0;
+
+  // Profiling support: the last kernel Bytes processed
+  int64_t bytes_processed_ = 0;
+
+  // Profiling support: the last launch param used
+  LaunchParams launch_params_;
+
+  // Profiling support: knob to disable caching of launch params
+  bool disable_parameter_cache_ = false;
+
+  // Profiling support: kept copy of the cuda kernel
+  std::string kernel_code_;
+
+  // Profiling support: nvrtc log for debugging
+  std::string last_compiler_log_;
 };
 
 } // namespace cuda

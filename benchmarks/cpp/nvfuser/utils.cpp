@@ -157,12 +157,16 @@ void runBenchmarkIterations(
     auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
     auto executor_instance = compile_log.fusion_executor;
 
-    if (compile_log.reduction_params.has_value() &&
-        compile_log.launch_constraints.has_value()) {
+    if (compile_log.reduction_params.has_value()) {
       auto rparams = toString(compile_log.reduction_params.value());
-      auto lparams = toString(compile_log.launch_constraints.value());
+      auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
       benchmark_state.SetLabel(rparams + lparams);
+    } else if (compile_log.pointwise_params.has_value()){
+      auto pparams = toString(compile_log.pointwise_params.value());
+      auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
+      benchmark_state.SetLabel(pparams + lparams);
     }
+
     executor_instance->setMeasureKernelTimeFlag(true);
 
     // Sync everything up before we start

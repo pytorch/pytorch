@@ -41,7 +41,9 @@ enum class DebugDumpOption {
   BufferReuseInfo, //!< Dump the analysis details of local/shared buffer re-use
   SchedulerDebug, //! Dump scheduler heuristic parameters
   ParallelDimensions, //!< Dump known parallel dimensions
-  Halo //! Halo information of tensors
+  Halo, //! Halo information of tensors
+  PerfDebugVerbose //! When running kernels, print verbose information
+                   //! associated with what's running
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);

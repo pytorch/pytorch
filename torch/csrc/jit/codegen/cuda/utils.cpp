@@ -34,7 +34,8 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::BufferReuseInfo, false},
       {DebugDumpOption::SchedulerDebug, false},
       {DebugDumpOption::ParallelDimensions, false},
-      {DebugDumpOption::Halo, false}};
+      {DebugDumpOption::Halo, false},
+      {DebugDumpOption::PerfDebugVerbose, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -79,6 +80,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::ParallelDimensions] = true;
       } else if (token == "halo") {
         options_map[DebugDumpOption::Halo] = true;
+      } else if (token == "perf_debug_verbose") {
+        options_map[DebugDumpOption::PerfDebugVerbose] = true;
       } else {
         TORCH_CHECK(
             false,
@@ -89,7 +92,7 @@ auto parseDebugDumpOptions() {
             "\tcuda_to_file, launch_param, segmented_fusion, fusion_args,\n",
             "\tkernel_args, dump_eff_bandwidth, draw_segmented_fusion,\n",
             "\tscheduler_params, parallel_dimensions, buffer_reuse_verbose,\n",
-            "\tptxas_verbose, halo, segmenter_logging\n");
+            "\tptxas_verbose, halo, segmenter_logging, perf_debug_verbose\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)

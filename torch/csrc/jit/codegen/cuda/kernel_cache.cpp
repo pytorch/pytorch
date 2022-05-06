@@ -383,7 +383,6 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
 
   if (profiling_) {
     most_recent_executor_log_.fusion_executor = &executors_[group_id];
-    most_recent_executor_log_.launch_constraints = launch_params;
     if (scheduler_entry->hasReductionParam()) {
       most_recent_executor_log_.reduction_params =
           scheduler_entry->reductionParams();
@@ -393,7 +392,49 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     }
   }
 
-  return executors_[group_id].runFusion(inputs, launch_params, input_id);
+  auto& executor = executors_[group_id];
+  if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
+    executor.setMeasureKernelTimeFlag(true);
+  }
+
+  auto outputs = executor.runFusion(inputs, launch_params, input_id);
+
+  // Print relevant information all at once for easy debuging of perf
+  if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
+    std::cout << "\nRun kernel:\n";
+    if (sg) {
+      segmented_fusion_->makeFusion(sg)->printMath();
+    } else {
+      single_kernel_fusion_->printMath();
+    }
+    std::cout << "With inputs:\n";
+    for (auto inp : inputs) {
+      if (inp.isTensor()) {
+        auto inp_tensor = inp.toTensor();
+        std::cout << "  " << inp_tensor.dtype() << "  " << inp_tensor.sizes()
+                  << "  " << inp_tensor.strides() << "\n";
+      } else {
+        std::cout << "  " << inp << "\n";
+      }
+    }
+    std::cout << "Compiler log: " << executor.compilerLog() << "\n";
+    if (scheduler_entry->hasReductionParam()) {
+      std::cout << scheduler_entry->reductionParams().toString() << "\n";
+    } else {
+      std::cout << scheduler_entry->pointwiseParams().toString() << "\n";
+    }
+    std::cout << "With arguments: " << executor.lastLaunchParams().toString();
+    std::cout << executor.kernelName() << " " << executor.bytesProcessed()
+              << " bytes/ " << std::setprecision(3) << executor.kernelTimeMs()
+              << " ms "
+              << ((double)executor.bytesProcessed() /
+                  ((double)executor.kernelTimeMs() / 1000)) /
+            (double)1.0e9
+              << " GB/s" << std::endl;
+    executor.setMeasureKernelTimeFlag(false);
+  }
+
+  return outputs;
 }
 
 void FusionKernelRuntime::prepareRuntimeOrder() {
@@ -456,7 +497,9 @@ void FusionKernelRuntime::prepareRuntimeOrder() {
 std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
     const at::ArrayRef<IValue>& inputs,
     size_t input_id) {
-  if (is_segmented_) {
+  if (!is_segmented_) {
+    return runKernelWithInput(inputs, input_id);
+  } else {
     FUSER_PERF_SCOPE("FusionKernelRuntime::runMultiKernelWithInput");
 
     TORCH_INTERNAL_ASSERT(
@@ -489,6 +532,10 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
       }
     }
 
+    if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
+      std::cout << "=================RUNNING FUSION SEGMENTS================="
+                << std::endl;
+    }
     for (auto group_to_run : runtime_workspace_.group_run_order) {
       // Prepare input vector
       for (auto input : group_to_run->inputs()) {
@@ -512,6 +559,10 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
       runtime_workspace_.group_runtime_outputs.clear();
     }
 
+    if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
+      std::cout << "=============FINISHED RUNNING FUSION SEGMENTS============"
+                << std::endl;
+    }
     // Produce final global output
     std::vector<IValue> fusion_outputs;
     for (auto output : segmented_fusion_->outputs()) {
@@ -566,8 +617,6 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
 
     runtime_workspace_.tensor_map.clear();
     return fusion_output_tensors;
-  } else {
-    return runKernelWithInput(inputs, input_id);
   }
 }
 
