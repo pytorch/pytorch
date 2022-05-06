@@ -1123,7 +1123,7 @@ def tensor_split(
     indices_or_sections: Union[Tensor, DimsType],
     dim: int = 0,
 ) -> Tuple[TensorLikeType, ...]:
-    _dim = utils.canonicalize_idx(a.ndim, dim)
+    _dim = utils.canonicalize_dim(a.ndim, dim)
     if a.ndim == 0:
         msg = "tensor_split: received a rank zero tensor, but expected a tensor of rank one or greater!"
         raise ValueError(msg)
