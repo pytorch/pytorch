@@ -9,6 +9,8 @@
 
 #include <torch/csrc/THP.h>
 
+#include <c10/util/StringUtil.h>
+
 PyObject *THPException_FatalError, *THPException_LinAlgError;
 
 #define ASSERT_TRUE(cond) if (!(cond)) return false
@@ -43,19 +45,10 @@ could not be completed because the input matrix is singular.", PyExc_RuntimeErro
 
 namespace torch {
 
-void replaceAll(std::string & str,
-    const std::string & old_str,
-    const std::string & new_str) {
-  std::string::size_type pos = 0u;
-  while ((pos = str.find(old_str, pos)) != std::string::npos) {
-    str.replace(pos, old_str.length(), new_str);
-  }
-}
-
 std::string processErrorMsg(std::string str) {
 
   // Translate Aten types to their respective pytorch ones
-  std::vector<std::pair<std::string, std::string>> changes {
+  constexpr std::array<std::pair<c10::string_view, c10::string_view>, 64> changes {{
     {"Variable[SparseCUDAByteType]", "torch.cuda.sparse.ByteTensor"},
     {"Variable[SparseCUDACharType]", "torch.cuda.sparse.CharTensor"},
     {"Variable[SparseCUDADoubleType]", "torch.cuda.sparse.DoubleTensor"},
@@ -120,10 +113,14 @@ std::string processErrorMsg(std::string str) {
     {"CPULongType", "torch.LongTensor"},
     {"CPUShortType", "torch.ShortTensor"},
     {"CPUHalfType", "torch.HalfTensor"},
-  };
+  }};
 
+  // Avoid doing any work if no types need translated
+  if (str.find("Type") == str.npos) {
+    return str;
+  }
   for (const auto & it : changes) {
-    replaceAll(str, it.first, it.second);
+    c10::ReplaceAll(str, it.first, it.second);
   }
 
   return str;
