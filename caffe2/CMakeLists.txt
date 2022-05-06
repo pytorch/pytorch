@@ -352,6 +352,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
     if(BUILD_LAZY_TS_BACKEND)
       list(APPEND GENERATED_CXX_TORCH
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterAutogradLazy.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterLazy.cpp"
@@ -432,6 +433,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
