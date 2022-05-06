@@ -27,7 +27,6 @@ def define_targets(rules):
         srcs = [
             ":DispatchKeyNativeFunctions.cpp",
             ":DispatchKeyNativeFunctions.h",
-            ":LazyIr.cpp",
             ":LazyIr.h",
             ":RegisterDispatchKey.cpp",
             ":native_functions.yaml",

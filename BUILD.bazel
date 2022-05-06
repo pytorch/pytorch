@@ -1915,6 +1915,7 @@ test_suite(
     for path in [
         "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
         "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
+        "aten/src/ATen/templates/LazyIr.cpp",
         "aten/src/ATen/templates/LazyIr.h",
         "aten/src/ATen/templates/RegisterDispatchKey.cpp",
         "aten/src/ATen/native/native_functions.yaml",
