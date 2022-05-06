@@ -131,6 +131,10 @@ class FakeQuantize(FakeQuantizeBase):
             assert quant_max <= torch.iinfo(dtype).max, 'quant_max out of bound'
             observer_kwargs.update({"quant_min": quant_min, "quant_max": quant_max})
         self.activation_post_process = observer(**observer_kwargs)
+        # TODO: keeping self.quant_min/max for BC; remove after a couple releases
+        # Users should use self.activation_post_process.quant_min
+        self.quant_min = self.activation_post_process.quant_min
+        self.quant_max = self.activation_post_process.quant_max
         if _is_float_qparams(self.activation_post_process.qscheme):
             zero_point_dtype = torch.float
         else:
