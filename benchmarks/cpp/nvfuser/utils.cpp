@@ -1,4 +1,4 @@
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 
@@ -145,7 +145,11 @@ void runBenchmarkIterations(
     std::vector<c10::IValue>& aten_inputs) {
   fusion_executor_cache->runFusionWithInputs(aten_inputs);
   bool segmented =
-      fusion_executor_cache->getMostRecentKernelRuntime()->isSegmented();
+      fusion_executor_cache->getMostRecentKernelRuntime()->isSegmented() &&
+      fusion_executor_cache->getMostRecentKernelRuntime()
+              ->fusionSegments()
+              ->groups()
+              .size() > 1;
 
   if (!segmented) {
     fusion_executor_cache->profile(true);

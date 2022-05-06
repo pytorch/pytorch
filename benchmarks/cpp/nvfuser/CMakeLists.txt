@@ -20,6 +20,7 @@ if(USE_CUDA)
     softmax_backward.cpp
     scale_bias_relu.cpp
     transpose.cpp
+    timm.cpp
     utils.cpp
     main.cpp)
 
