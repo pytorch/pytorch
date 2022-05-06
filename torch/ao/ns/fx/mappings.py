@@ -191,13 +191,11 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.Embedding,
             nnq.Embedding,
-            nnqat.Embedding,
         ]),
         # EmbeddingBag
         set([
             nn.EmbeddingBag,
             nnq.EmbeddingBag,
-            nnqat.EmbeddingBag,
         ]),
         # GroupNorm
         set([
