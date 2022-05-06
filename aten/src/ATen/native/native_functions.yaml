@@ -10973,6 +10973,8 @@
   python_module: linalg
   variants: function
   structured_delegate: linalg_cross.out
+  dispatch:
+    ZeroTensor: linalg_cross_zerotensor
 
 - func: linalg_cross.out(Tensor self, Tensor other, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
