@@ -20,6 +20,7 @@ chown jenkins:jenkins /usr/local
 
 # Allow sudo
 # TODO: Maybe we shouldn't
+
 echo 'jenkins ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/jenkins
 
 # Test that sudo works
