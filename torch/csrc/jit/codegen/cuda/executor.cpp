@@ -538,10 +538,6 @@ LaunchParams FusionExecutor::computeLaunchParams(
       true,
       reduction_broadcast_workspace);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const uint64_t static_smem_size =
-      computeSharedMemory(expr_eval, kernel_summary.static_smem_allocations);
-
   // Check that requested smem size can be dynamically allocated.
   //  This check is only done once a kernel has been compiled, since
   //  maybe_available_dynamic_smem_ needs to be evaluated on
