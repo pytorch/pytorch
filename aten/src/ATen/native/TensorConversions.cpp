@@ -51,6 +51,54 @@ Tensor _to_copy(
   // memory_format is handled separately due to MemoryFormat::Preserve logic
   options = self.options().merge_in(options).memory_format(c10::nullopt);
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
+  // TODO: Use the dispatcher for this.
+  // Currently there are unenumerated extensibility issues preventing this.
+  if (self.is_sparse_csr()) {
+    TORCH_CHECK(
+        memory_format == MemoryFormat::Preserve,
+        "sparse_csr only supports memory format Preserve, but got ",
+        memory_format,
+        " instead.");
+
+    auto new_values = at::native::to(
+        self.values(),
+        dtype,
+        c10::kStrided, // values are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    auto new_crow_indices = at::native::to(
+        self.crow_indices(),
+        self.crow_indices().scalar_type(), // indices are integral
+        c10::kStrided, // indices are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    auto new_col_indices = at::native::to(
+        self.col_indices(),
+        self.col_indices().scalar_type(), // indices are integral
+        c10::kStrided, // indices are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    return at::native::_sparse_csr_tensor_unsafe(
+        new_crow_indices,
+        new_col_indices,
+        new_values,
+        self.sizes(),
+        new_values.scalar_type(),
+        self.layout(),
+        new_values.device());
+  }
 
   bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
                   (options.layout() == c10::kStrided));
