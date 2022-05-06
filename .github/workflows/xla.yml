@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - clee2000/test
+      - clee2000
   workflow_dispatch:
 
 concurrency:
