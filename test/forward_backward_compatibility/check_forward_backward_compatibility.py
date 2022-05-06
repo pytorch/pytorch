@@ -81,7 +81,13 @@ ALLOW_LIST = [
     ("aten::linalg_svdvals_out", datetime.date(2022, 3, 31)),
     ("aten::linalg_svd", datetime.date(2022, 3, 31)),
     ("aten::linalg_svd_out", datetime.date(2022, 3, 31)),
+    ("aten::linalg_qr_out", datetime.date(2022, 5, 31)),
+    ("aten::linalg_qr", datetime.date(2022, 5, 31)),
     ("aten::_max_pool1d_cpu_forward", datetime.date(2022, 2, 8)),
+    ("aten::max_unpool2d_backward", datetime.date(2022, 5, 15)),
+    ("aten::max_unpool2d_backward.grad_input", datetime.date(2022, 5, 15)),
+    ("aten::max_unpool3d_backward", datetime.date(2022, 5, 15)),
+    ("aten::max_unpool3d_backward.grad_input", datetime.date(2022, 5, 15)),
     ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_bias", datetime.date(9999, 1, 1)),
@@ -122,6 +128,7 @@ ALLOW_LIST = [
     ("aten::nansum", datetime.date(2022, 5, 15)),
     ("aten::zero", datetime.date(2022, 5, 15)),
     ("aten::_validate_sparse_compressed_tensor_args", datetime.date(2022, 5, 15)),
+    ("quantized::layer_norm", datetime.date(2022, 6, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [

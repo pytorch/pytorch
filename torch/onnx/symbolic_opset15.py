@@ -27,8 +27,8 @@
 
 import torch
 from torch._C import OptionalType
-from torch.onnx.symbolic_opset9 import eq, wrap_logical_op_with_negation
 from torch.onnx.symbolic_helper import _is_none
+from torch.onnx.symbolic_opset9 import eq, wrap_logical_op_with_negation
 
 
 def __is_(g, self, other):
