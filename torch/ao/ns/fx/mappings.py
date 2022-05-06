@@ -159,7 +159,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # GroupNorm
         set([
             nn.GroupNorm,
-            nnq.GroupNorm,
         ]),
         # Hardswish
         set([
@@ -612,7 +611,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.ConvTranspose1d,
         nnq.ConvTranspose2d,
         nnq.ELU,
-        nnq.GroupNorm,
         nnq.InstanceNorm1d,
         nnq.InstanceNorm2d,
         nnq.InstanceNorm3d,

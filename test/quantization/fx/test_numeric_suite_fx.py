@@ -573,6 +573,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 # the ConvTranspose3d swap is not implemented in FX Graph
                 # mode quantization yet
                 nn.ConvTranspose3d,
+                # the GroupNorm swap is not implemented in FX Graph
+                # mode quantization yet
+                nn.GroupNorm,
             )
             if fp32_type in types_to_skip:
                 continue
@@ -1490,6 +1493,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 # the ConvTranspose3d swap is not implemented in FX Graph
                 # mode quantization yet
                 nn.ConvTranspose3d,
+                # the GroupNorm swap is not implemented in FX Graph
+                # mode quantization yet
+                nn.GroupNorm,
             )
             if fp32_type in types_to_skip:
                 continue
