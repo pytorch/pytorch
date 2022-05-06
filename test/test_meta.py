@@ -654,6 +654,18 @@ meta_exclude_set = {
     torch._validate_sparse_csr_tensor_args,
 }
 
+# This is a __torch_function__ mode that, when enabled, interposes every
+# Torch API call and runs the operator as normal, and then reruns it
+# with meta inputs, and then checks that everything about the output agrees.
+# Most of the logic deals with faithfully replicating the original tensor
+# as a meta tensor, which is nontrivial because there are a lot of subsystems
+# that may potentially be exercised.
+#
+# That being said, this class is a little overkill for what it is doing in
+# this test file (since I could have just inlined __torch_function__ on the
+# OpInfo call, and OpInfos generally have very regular inputs), but it will be
+# useful for more comprehensive testing e.g., as seen in
+# https://github.com/pytorch/pytorch/pull/75994
 class MetaCrossRefMode(torch.overrides.TorchFunctionMode):
     def __init__(self, test_case):
         self.test_case = test_case
@@ -685,9 +697,7 @@ class MetaCrossRefMode(torch.overrides.TorchFunctionMode):
                     r = torch.empty(
                         (0,), dtype=t.dtype, device='meta'
                     )
-                    torch._C._set_storage_via_tensor(
-                        r, s, t.storage_offset(), t.size(), t.stride()
-                    )
+                    r.set_(s, t.storage_offset(), t.size(), t.stride())
                     r.requires_grad = t.requires_grad
                     if not is_leaf and t.requires_grad:
                         with torch.enable_grad():
@@ -696,9 +706,7 @@ class MetaCrossRefMode(torch.overrides.TorchFunctionMode):
                     base = torch.empty(
                         (0,), dtype=t.dtype, device='meta'
                     )
-                    torch._C._set_storage_via_tensor(
-                        base, s, 0, s.size(), (1,)
-                    )
+                    base.set_(s, 0, s.size(), (1,))
                     base.requires_grad = t.requires_grad
                     with torch.enable_grad():
                         if t._is_view() and not safe_is_leaf(t._base):
@@ -731,7 +739,9 @@ class MetaCrossRefMode(torch.overrides.TorchFunctionMode):
                     return t
                 elif any([
                     t.device.type in ("lazy", "meta"), t.is_complex(),
-                    torch._C._is_batched(t),
+                    # We need a way to test if a tensor is batched but there
+                    # is no official APi to do it
+                    # torch._C._is_batched(t),
                 ]):
                     # TODO: this stuff should support storage
                     # (well, maybe not batched)
@@ -830,6 +840,9 @@ class TestMeta(TestCase):
     @suppress_warnings
     @ops(op_db)
     def test_meta(self, device, dtype, op):
+        # run the OpInfo sample inputs, cross-referencing them with the
+        # meta implementation and check the results are the same.  All
+        # the heavy lifting happens in MetaCrossRefMode
         func = op.get_op()
         if func in meta_exclude_set:
             self.skipTest('meta known not to be implemented')
