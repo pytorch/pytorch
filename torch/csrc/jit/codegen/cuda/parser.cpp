@@ -3195,11 +3195,13 @@ void profileReductionSize(ProfilingRecord* pr, Node* node, size_t offset) {
       pn->is_(reductionSizeAttr, size_vec);
     } else {
       auto profiled_ints = pn->is(reductionSizeAttr);
-      TORCH_INTERNAL_ASSERT(
-          profiled_ints.size() == size_vec.size() &&
-              std::equal(
-                  profiled_ints.begin(), profiled_ints.end(), size_vec.begin()),
-          "profiling ivalue doesn't support merge");
+      if (profiled_ints.size() != size_vec.size() ||
+          !std::equal(
+              profiled_ints.begin(), profiled_ints.end(), size_vec.begin())) {
+        TORCH_WARN(
+            __FUNCTION__,
+            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+      }
     }
     push(stack, value);
   };
@@ -3225,13 +3227,13 @@ void profileViewSize(ProfilingRecord* pr, Node* node, size_t offset) {
     } else {
       auto profiled_ints = pn->is(viewSizeAttr);
       auto input_ints = value.toIntList();
-      TORCH_INTERNAL_ASSERT(
-          profiled_ints.size() == input_ints.size() &&
-              std::equal(
-                  profiled_ints.begin(),
-                  profiled_ints.end(),
-                  input_ints.begin()),
-          "profiling ivalue doesn't support merge");
+      if (profiled_ints.size() != input_ints.size() ||
+          !std::equal(
+              profiled_ints.begin(), profiled_ints.end(), input_ints.begin())) {
+        TORCH_WARN(
+            __FUNCTION__,
+            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+      }
     }
     push(stack, value);
   };
@@ -3258,13 +3260,13 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
     } else {
       auto profiled_ints = pn->is(intListAttr);
       auto input_ints = value.toIntList();
-      TORCH_INTERNAL_ASSERT(
-          profiled_ints.size() == input_ints.size() &&
-              std::equal(
-                  profiled_ints.begin(),
-                  profiled_ints.end(),
-                  input_ints.begin()),
-          "profiling ivalue doesn't support merge");
+      if (profiled_ints.size() != input_ints.size() ||
+          !std::equal(
+              profiled_ints.begin(), profiled_ints.end(), input_ints.begin())) {
+        TORCH_WARN(
+            __FUNCTION__,
+            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+      }
     }
     push(stack, value);
   };
@@ -3291,8 +3293,11 @@ void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
     } else {
       const auto& profiled_str = pn->s(strAttr);
       const auto& input_str = value.toStringRef();
-      TORCH_INTERNAL_ASSERT(
-          input_str == profiled_str, "profiling ivalue doesn't support merge");
+      if (input_str != profiled_str) {
+        TORCH_WARN(
+            __FUNCTION__,
+            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+      }
     }
     push(stack, value);
   };
@@ -3319,9 +3324,11 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
     } else {
       auto profiled_bool = pn->i(boolAttr);
       auto input_bool = value.toBool();
-      TORCH_INTERNAL_ASSERT(
-          input_bool == profiled_bool,
-          "profiling ivalue doesn't support merge");
+      if (input_bool != profiled_bool) {
+        TORCH_WARN(
+            __FUNCTION__,
+            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+      }
     }
     push(stack, value);
   };
@@ -3348,8 +3355,11 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
     } else {
       auto profiled_int = pn->i(intAttr);
       auto input_int = value.toInt();
-      TORCH_INTERNAL_ASSERT(
-          input_int == profiled_int, "profiling ivalue doesn't support merge");
+      if (input_int != profiled_int) {
+        TORCH_WARN(
+            __FUNCTION__,
+            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+      }
     }
     push(stack, value);
   };
@@ -3374,8 +3384,11 @@ void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
       pn->ival_(ivalAttr, value);
     } else {
       auto profiled_ival = pn->ival(ivalAttr);
-      TORCH_INTERNAL_ASSERT(
-          value == profiled_ival, "profiling ivalue doesn't support merge");
+      if (value != profiled_ival) {
+        TORCH_WARN(
+            __FUNCTION__,
+            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+      }
     }
     push(stack, value);
   };
@@ -3404,13 +3417,13 @@ void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
     } else {
       auto profiled_ints = pn->is(boolListAttr);
       auto input_bools = value.toBoolList();
-      TORCH_INTERNAL_ASSERT(
-          profiled_ints.size() == input_bools.size() &&
-              std::equal(
-                  input_bools.begin(),
-                  input_bools.end(),
-                  profiled_ints.begin()),
-          "profiling ivalue doesn't support merge");
+      if (profiled_ints.size() != input_bools.size() ||
+          !std::equal(
+              input_bools.begin(), input_bools.end(), profiled_ints.begin())) {
+        TORCH_WARN(
+            __FUNCTION__,
+            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+      }
     }
     push(stack, value);
   };
