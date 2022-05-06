@@ -642,7 +642,7 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             # Adding the url here makes it clickable within the Github UI
             approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
-            msg = self.get_title() + "\n\n" + self.get_body()
+            msg = self.get_title() + f" (#{self.pr_num})\n\n" + self.get_body()
             msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
             msg += f"Approved by: {approved_by_urls}\n"
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
