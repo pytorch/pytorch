@@ -55,6 +55,9 @@ inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, int64_t batch
 #define VMAP_SUPPORT2(op, overload, batch_rule) \
   m.impl(#op "." #overload, op ## _ ## overload ## _generated_plumbing<decltype(&batch_rule), &batch_rule>);
 
+#define OP_DECOMPOSE(op)  m.impl(#op, static_cast<decltype(&ATEN_FN(op))>(native::op));
+#define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
+
 // DO NOT USE ME DIRECTLY! Use BASIC_UNARY_BATCH_RULE to save yourself some pain
 template <typename A, A a, typename C>
 struct BasicUnaryBatchRuleHelper;

@@ -147,6 +147,11 @@ def ref_vjp(f, *primals):
     return result, wrapped
 
 
+def simulate_jvp(f, primals, tangents):
+    primals_out, tangents_out = torch.autograd.functional.jvp(f, primals, tangents)
+    return primals_out, tangents_out
+
+
 def ref_jvp(f, primals, tangents):
     with fwAD.dual_level():
         duals = tuple(fwAD.make_dual(p, t) for p, t in zip(primals, tangents))
@@ -395,7 +400,12 @@ class TestOperators(TestCase):
     ))
     def test_jvp(self, device, dtype, op):
         # TODO: when we change supports_autograd to supports_backward_ad, also change in this file
-        if not op.supports_forward_ad:
+        VJP_DECOMP = {
+            'nn.functional.logsigmoid',
+        }
+        if op.name in VJP_DECOMP:
+            ref_jvp = simulate_jvp
+        elif not op.supports_forward_ad:
             self.skipTest("Skipped! Forward AD not supported.")
             return
 
