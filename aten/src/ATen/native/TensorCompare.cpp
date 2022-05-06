@@ -40,11 +40,26 @@ TORCH_META_FUNC(clamp_max) (
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC2(clamp_max, Tensor) (
+  const Tensor& self,
+  const Tensor& max
+) {
+  build_borrowing_binary_op(maybe_get_output(), self, max);
+}
+
+
 TORCH_META_FUNC(clamp_min) (
   const Tensor& self,
   const Scalar& min
 ) {
   build_borrowing_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC2(clamp_min, Tensor) (
+  const Tensor& self,
+  const Tensor& min
+) {
+  build_borrowing_binary_op(maybe_get_output(), self, min);
 }
 
 TORCH_META_FUNC2(isin, Tensor_Tensor) (
@@ -519,21 +534,9 @@ TORCH_IMPL_FUNC(clamp_max_out)
   clamp_max_scalar_stub(device_type(), *this, max);
 }
 
-Tensor& clamp_max_out(const Tensor& self, const Tensor& max, Tensor& result) {
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "torch.clamp only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::borrowing_binary_op(result, self, max);
-  clamp_max_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor clamp_max(const Tensor& self, const Tensor& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_max_outf(self, max, result);
-}
-
-Tensor& clamp_max_(Tensor& self, const Tensor& max) {
-  return at::clamp_max_outf(self, max, self);
+TORCH_IMPL_FUNC(clamp_max_Tensor_out)
+(const Tensor& self, const Tensor& max, const Tensor& result) {
+  clamp_max_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(clamp_min_out)
@@ -541,21 +544,9 @@ TORCH_IMPL_FUNC(clamp_min_out)
   clamp_min_scalar_stub(device_type(), *this, min);
 }
 
-Tensor& clamp_min_out(const Tensor& self, const Tensor& min, Tensor& result) {
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "torch.clamp only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::borrowing_binary_op(result, self, min);
-  clamp_min_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor clamp_min(const Tensor& self, const Tensor& min) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_min_outf(self, min, result);
-}
-
-Tensor& clamp_min_(Tensor& self, const Tensor& min) {
-  return at::clamp_min_outf(self, min, self);
+TORCH_IMPL_FUNC(clamp_min_Tensor_out)
+(const Tensor& self, const Tensor& min, const Tensor& result) {
+  clamp_min_stub(device_type(), *this);
 }
 
 // Implements the "clip" alias for clamp

@@ -359,7 +359,7 @@ static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min
   });
 }
 
-static void clamp_max_kernel_impl(TensorIterator& iter) {
+static void clamp_max_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_max_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t max) -> scalar_t {
@@ -385,7 +385,7 @@ static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) 
   });
 }
 
-static void clamp_min_kernel_impl(TensorIterator& iter) {
+static void clamp_min_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_cpu", [&]() {
     cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t min) -> scalar_t {
