@@ -41,7 +41,8 @@ class NVFuserEnabler {
 #ifdef USE_ROCM
     return false;
 #else
-    return at::globalContext().hasCUDA() && NVFuserPassManager::isRegistered();
+    return at::globalContext().hasCUDA() &&
+        NVFuserPassManager::isRegistered() && getExecutorMode();
 #endif
   }
 
