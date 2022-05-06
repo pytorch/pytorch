@@ -342,7 +342,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_reference_consistency(self, device, dtype, op):
-        for sample in op.reference_inputs(device, dtype, requires_grad=False):
+        for sample in op.torch_opinfo.reference_inputs(device, dtype, requires_grad=False):
             actual = op(sample.input, *sample.args, **sample.kwargs)
             expected = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
@@ -357,7 +357,7 @@ class TestCommon(TestCase):
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    @ops([op for op in ops_and_refs if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
         for ei in error_inputs:

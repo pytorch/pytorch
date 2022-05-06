@@ -22,12 +22,12 @@ def split_result_tensors(result: torch.Tensor, inputs: List[torch.Tensor]) -> Li
     Returns:
         List of matmul results for each input tensor.
     """
-    splits = [x.shape[0] for x in inputs]
-
     # When fx tracer is running, x.shape[0] will be torch.fx.Attribute but we
     # need an int even when tracing
     if isinstance(result, torch.fx.Proxy):
         splits = [0] * len(inputs)
+    else:
+        splits = [x.shape[0] for x in inputs]
 
     return torch.split(result, splits)
 
