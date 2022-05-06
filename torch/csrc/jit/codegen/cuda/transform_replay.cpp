@@ -718,17 +718,38 @@ bool TransformPropagator::replayPasC(
   }
 
   auto pairwiseMap = PairwiseRootDomainMap(producer_tv, consumer_tv);
-  auto producerAsC = TransformReplay::replayPasC(
+  auto replayed_producer = TransformReplay::replayPasC(
       producer_tv, consumer_tv, consumer_pos_it->second, pairwiseMap);
 
+  auto producer_root = producer_tv->getMaybeRFactorDomain();
+  auto replayed_domain = replayed_producer.first->domain();
+
+  // Find the number of root IDs involved in the transformation
+  auto dep_vals = DependencyCheck::getAllValsBetween(
+      {producer_root.begin(), producer_root.end()},
+      {replayed_domain.begin(),
+       replayed_domain.begin() + replayed_producer.second});
+
+  std::unordered_set<Val*> dep_vals_set{dep_vals.begin(), dep_vals.end()};
+
+  auto n_transformed_root_dims = std::count_if(
+      producer_root.begin(),
+      producer_root.end(),
+      [&dep_vals_set](IterDomain* root_id) {
+        return dep_vals_set.find(root_id) != dep_vals_set.end();
+      });
+
   if (replayed_pos.find(producer_tv) != replayed_pos.end()) {
-    if (producerAsC.second <= replayed_pos.at(producer_tv)) {
+    if (n_transformed_root_dims < n_replayed_root_dims.at(producer_tv) ||
+        (n_transformed_root_dims == n_replayed_root_dims.at(producer_tv) &&
+         replayed_producer.second <= replayed_pos.at(producer_tv))) {
       return false; // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     }
   }
 
-  producer_tv->setDomain(producerAsC.first);
-  replayed_pos[producer_tv] = producerAsC.second;
+  producer_tv->setDomain(replayed_producer.first);
+  replayed_pos[producer_tv] = replayed_producer.second;
+  n_replayed_root_dims[producer_tv] = n_transformed_root_dims;
 
   return true;
 }
@@ -746,17 +767,38 @@ bool TransformPropagator::replayCasP(
   }
 
   auto pairwiseMap = PairwiseRootDomainMap(producer_tv, consumer_tv);
-  auto consumerAsP = TransformReplay::replayCasP(
+  auto replayed_consumer = TransformReplay::replayCasP(
       consumer_tv, producer_tv, producer_pos_it->second, pairwiseMap);
 
+  auto consumer_root = consumer_tv->getRootDomain();
+  auto replayed_domain = replayed_consumer.first->domain();
+
+  // Find the number of root IDs involved in the transformation
+  auto dep_vals = DependencyCheck::getAllValsBetween(
+      {consumer_root.begin(), consumer_root.end()},
+      {replayed_domain.begin(),
+       replayed_domain.begin() + replayed_consumer.second});
+
+  std::unordered_set<Val*> dep_vals_set{dep_vals.begin(), dep_vals.end()};
+
+  auto n_transformed_root_dims = std::count_if(
+      consumer_root.begin(),
+      consumer_root.end(),
+      [&dep_vals_set](IterDomain* root_id) {
+        return dep_vals_set.find(root_id) != dep_vals_set.end();
+      });
+
   if (replayed_pos.find(consumer_tv) != replayed_pos.end()) {
-    if (consumerAsP.second <= replayed_pos.at(consumer_tv)) {
+    if (n_transformed_root_dims < n_replayed_root_dims.at(consumer_tv) ||
+        (n_transformed_root_dims == n_replayed_root_dims.at(consumer_tv) &&
+         replayed_consumer.second <= replayed_pos.at(consumer_tv))) {
       return false; // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     }
   }
 
-  consumer_tv->setDomain(consumerAsP.first);
-  replayed_pos[consumer_tv] = consumerAsP.second;
+  consumer_tv->setDomain(replayed_consumer.first);
+  replayed_pos[consumer_tv] = replayed_consumer.second;
+  n_replayed_root_dims[consumer_tv] = n_transformed_root_dims;
 
   return true;
 }
