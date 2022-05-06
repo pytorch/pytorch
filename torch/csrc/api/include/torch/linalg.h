@@ -501,6 +501,48 @@ inline std::tuple<Tensor&, Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& i
   return detail::qr_out(Q, R, input, mode);
 }
 
+/// Computes the LDL decomposition
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.ldl_factor_ex
+inline std::tuple<Tensor, Tensor, Tensor> ldl_factor_ex(
+    const Tensor& input,
+    bool hermitian,
+    bool check_errors) {
+  return torch::linalg_ldl_factor_ex(input, hermitian, check_errors);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> ldl_factor_ex_out(
+    Tensor& LD,
+    Tensor& pivots,
+    Tensor& info,
+    const Tensor& input,
+    bool hermitian,
+    bool check_errors) {
+  return torch::linalg_ldl_factor_ex_out(
+      LD, pivots, info, input, hermitian, check_errors);
+}
+
+/// Solve a system of linear equations using the LDL decomposition
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.ldl_solve
+inline Tensor ldl_solve(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool hermitian) {
+  return torch::linalg_ldl_solve(LD, pivots, B, hermitian);
+}
+
+inline Tensor& ldl_solve_out(
+    Tensor& result,
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool hermitian) {
+  return torch::linalg_ldl_solve_out(
+      result, LD, pivots, B, hermitian);
+}
+
 /// Computes a tensor `x` such that `matmul(input, x) = other`.
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve

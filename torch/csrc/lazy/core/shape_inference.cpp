@@ -591,6 +591,10 @@ std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef
   return {Shape(self.scalar_type(), target_size)};
 }
 
+std::vector<Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t dim, int64_t start, c10::SymInt length) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 // Restore unused-parameters warnings
 #pragma GCC diagnostic pop
 
