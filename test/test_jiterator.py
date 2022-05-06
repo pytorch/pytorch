@@ -7,7 +7,8 @@ from itertools import product
 from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, TEST_CUDA
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_device_type import (
-    skipCUDAIfRocm, instantiate_device_type_tests, dtypes, toleranceOverride, tol)
+    skipCUDAIfRocm, skipCUDAIf, instantiate_device_type_tests, dtypes, toleranceOverride, tol)
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
@@ -23,12 +24,32 @@ def ref_fn(x, y, alpha=1, beta=1):
 class TestPythonJiterator(TestCase):
     @skipCUDAIfRocm
     @parametrize("shape_strides", [
-        # (([3, 3], [3, 1]), ([3, 3], [3, 1])),  # contiguous
+        (([3, 3], [3, 1]), ([3, 3], [3, 1])),  # contiguous
+    ])
+    @dtypes(*product(all_types_and_complex_and(torch.half, torch.bfloat16),
+                     all_types_and_complex_and(torch.half, torch.bfloat16)))
+    def test_all_dtype_contiguous(self, device, dtypes, shape_strides):
+        a_buffer = torch.rand(9, device=device).mul(10).type(dtypes[0])
+        b_buffer = torch.rand(9, device=device).mul(10).type(dtypes[1])
+
+        a = a_buffer.as_strided(*shape_strides[0])
+        b = b_buffer.as_strided(*shape_strides[1])
+
+        expected = ref_fn(a, b)
+        result = jitted_fn(a, b)
+
+        self.assertEqual(expected, result)
+
+    @skipCUDAIfRocm
+    # See https://github.com/pytorch/pytorch/pull/76394#issuecomment-1118018287 for details
+    @skipCUDAIf(_get_torch_cuda_version() < (11, 6), "On cuda 11.3, nvrtcCompileProgram is taking too long to "
+                "compile jiterator generated kernels for non-contiguous input that requires dynamic-casting.")
+    @parametrize("shape_strides", [
         (([3, 3], [1, 3]), ([3, 1], [1, 3])),  # non-contiguous
     ])
     @dtypes(*product(all_types_and_complex_and(torch.half, torch.bfloat16),
                      all_types_and_complex_and(torch.half, torch.bfloat16)))
-    def test_all_dtype_and_layout(self, device, dtypes, shape_strides):
+    def test_all_dtype_noncontiguous(self, device, dtypes, shape_strides):
         a_buffer = torch.rand(9, device=device).mul(10).type(dtypes[0])
         b_buffer = torch.rand(9, device=device).mul(10).type(dtypes[1])
 

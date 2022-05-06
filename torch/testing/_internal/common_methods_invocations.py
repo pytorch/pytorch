@@ -16340,9 +16340,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # Jiterator ops doesn't have composite rule
+            # Jiterator ops doesn't suport CompositeCompliantTensor
+            # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
-
             # Skip reference_numerics tests for bool type, as the defined function doesn't work for bool
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                          dtypes=[torch.bool]),
@@ -16371,7 +16371,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # Jiterator ops doesn't have composite rule
+            # Jiterator ops doesn't suport CompositeCompliantTensor
+            # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_binary is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -16393,7 +16394,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # Jiterator ops doesn't have composite rule
+            # Jiterator ops doesn't suport CompositeCompliantTensor
+            # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
