@@ -140,7 +140,7 @@ def default_partition(
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
     forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
-    forward_node_names = set([node.name for node in forward_only_graph.nodes if node.op != 'output'])
+    forward_node_names = {node.name for node in forward_only_graph.nodes if node.op != 'output'}
     saved_values = []
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
@@ -148,7 +148,7 @@ def default_partition(
         # Since we can't save tuple of tensor values, we need to flatten out what we're saving
         if 'tensor_meta' not in node.meta and node.op == 'call_function':
             users = node.users
-            assert all([user.target == operator.getitem for user in users])
+            assert all(user.target == operator.getitem for user in users)
             for user in users:
                 saved_values.append(user)
         else:
@@ -197,7 +197,7 @@ def _count_ops(graph):
     for node in graph.nodes:
         if node.op == 'call_function':
             cnt[node.target.__name__] += 1
-    print(sorted(list(cnt.items()), key=lambda x: x[1], reverse=True))
+    print(sorted(cnt.items(), key=lambda x: x[1], reverse=True))
 
 
 def min_cut_rematerialization_partition(
@@ -244,10 +244,10 @@ def min_cut_rematerialization_partition(
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
         fwd_outputs, _ = _extract_fwd_bwd_outputs(joint_module)
         forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
-        required_fw_nodes = set([name_to_node[node.name] for node in forward_only_graph.nodes
-                                 if node.op != 'output'])
-        unclaimed_nodes = set([node for node in joint_module.graph.nodes
-                               if node not in required_fw_nodes and node not in required_bw_nodes])
+        required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
+                             if node.op != 'output'}
+        unclaimed_nodes = {node for node in joint_module.graph.nodes
+                           if node not in required_fw_nodes and node not in required_bw_nodes}
         return required_fw_nodes, required_bw_nodes, unclaimed_nodes
 
     required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
@@ -307,7 +307,7 @@ def min_cut_rematerialization_partition(
             # If the output of the reduction is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
             if node.target in reduction_ops:
-                input_tensors_size = sum([_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, fx.Node)])
+                input_tensors_size = sum(_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, fx.Node))
                 output_size = _size_of(node.meta['tensor_meta'])
                 return (output_size * 4 < input_tensors_size)
             return False
@@ -319,7 +319,7 @@ def min_cut_rematerialization_partition(
         if node.op == 'placeholder':
             return True
 
-        return not all([is_fusible(node, user) for user in node.users])
+        return not all(is_fusible(node, user) for user in node.users)
 
     def get_node_weight(node):
         mem_sz = _size_of(node.meta['tensor_meta'])

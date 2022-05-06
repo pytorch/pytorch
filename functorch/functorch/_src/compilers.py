@@ -77,11 +77,11 @@ def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
 
 def tensorexpr_compile(fx_module: fx.GraphModule, flat_args) -> Callable:
     """Compiles the given fx_module using TensorExpr Kernel"""
-    inp_devices = set([i.device for i in flat_args if isinstance(i, torch.Tensor)])
+    inp_devices = {i.device for i in flat_args if isinstance(i, torch.Tensor)}
     assert len(inp_devices) == 1
     inp_device = list(inp_devices)[0]
-    inputs = list()
-    output_refs = list()
+    inputs = []
+    output_refs = []
     for node in fx_module.graph.nodes:
         if node.op == "placeholder":
             inputs.append(node)
@@ -256,30 +256,28 @@ def nnc_jit(f, static_argnums=None):
 
 
 aten = torch.ops.aten
-default_decompositions = set(
-    [
-        aten.detach,
-        aten.gelu_backward,
-        aten.leaky_relu_backward,
-        aten.sigmoid_backward,
-        aten.threshold_backward,
-        aten.hardtanh_backward,
-        aten.hardsigmoid_backward,
-        aten.hardswish_backward,
-        aten.tanh_backward,
-        aten.silu_backward,
-        aten.elu_backward,
-        aten.cudnn_batch_norm,
-        aten.cudnn_batch_norm_backward,
-        aten.masked_fill.Scalar,
-        aten.masked_fill.Tensor,
-        aten.elu,
-        aten.leaky_relu,
-        aten.hardtanh,
-        aten.hardswish,
-        aten.hardsigmoid,
-    ]
-)
+default_decompositions = {
+    aten.detach,
+    aten.gelu_backward,
+    aten.leaky_relu_backward,
+    aten.sigmoid_backward,
+    aten.threshold_backward,
+    aten.hardtanh_backward,
+    aten.hardsigmoid_backward,
+    aten.hardswish_backward,
+    aten.tanh_backward,
+    aten.silu_backward,
+    aten.elu_backward,
+    aten.cudnn_batch_norm,
+    aten.cudnn_batch_norm_backward,
+    aten.masked_fill.Scalar,
+    aten.masked_fill.Tensor,
+    aten.elu,
+    aten.leaky_relu,
+    aten.hardtanh,
+    aten.hardswish,
+    aten.hardsigmoid,
+}
 default_decompositions = get_decompositions(default_decompositions)
 
 
