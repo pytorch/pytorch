@@ -13,6 +13,7 @@ list(APPEND NVFUSER_RUNTIME_FILES
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default_rocm.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fused_reduction.cu

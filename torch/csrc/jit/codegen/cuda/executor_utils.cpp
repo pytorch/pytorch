@@ -21,6 +21,7 @@
 #include <nvfuser_resources/block_reduction.h>
 #include <nvfuser_resources/block_sync_atomic.h>
 #include <nvfuser_resources/block_sync_default.h>
+#include <nvfuser_resources/block_sync_default_rocm.h>
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
 #include <nvfuser_resources/fused_reduction.h>
@@ -94,7 +95,11 @@ std::string kernelPreamble() {
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     ss << nvfuser_resources::block_sync_atomic_cu;
   } else {
+#ifndef USE_ROCM
     ss << nvfuser_resources::block_sync_default_cu;
+#else
+    ss << nvfuser_resources::block_sync_default_rocm_cu;
+#endif
   }
   ss << nvfuser_resources::grid_sync_cu;
 

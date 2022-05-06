@@ -5,7 +5,7 @@ __forceinline__ __device__ void init() {}
 
 // Thread-block synchronization
 __forceinline__ __device__ void sync() {
-  __barrier_sync(0);
+  __syncthreads();
 }
 
 } // namespace block_sync
