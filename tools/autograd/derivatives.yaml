@@ -630,6 +630,15 @@
 - name: _fused_moving_avg_obs_fq_helper(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor output, Tensor mask)
   self: fake_quantize_per_tensor_affine_cachemask_backward(grad, mask)
 
+- name: fill.Scalar(Tensor self, Scalar value) -> Tensor
+  self: zeros_like(grad)
+  result: at::fill(self_t, 0)
+
+- name: fill.Tensor(Tensor self, Tensor value) -> Tensor
+  self: zeros_like(grad)
+  value: grad.sum()
+  result: at::fill(self_t, value_t)
+
 - name: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   self: zeros_like(grad)
   result: self_t.fill_(0)
@@ -759,8 +768,12 @@
   index: non_differentiable
   result: at::index_add(self_t, dim, index, maybe_multiply(source_t, alpha))
 
+- name: _index_reduce(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor
+  self, source: _index_reduce_backward(grad, self, dim, index, source, reduce, include_self, result)
+  index: non_differentiable
+
 - name: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
-  self: grad.clone().index_fill_(dim, index, 0)
+  self: grad.index_fill(dim, index, 0)
   # The case source.dim() == 0 is necessary to support scalar tensors of the form
   # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
   # This is because source is not broadcastable to index, as source.dim() < index.dim()
@@ -1486,10 +1499,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim)
   result: auto_linear
 
-- name: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes()).to(self.scalar_type()) * self.isnan().logical_not()
-
-- name: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: nansum(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
@@ -2316,6 +2326,11 @@
   grad_output: replication_pad3d(grad, padding)
   self: zeros_like(self)
   result: replication_pad3d_backward(grad_output_t, self_p, padding)
+
+- name: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  self: maybe_multiply(grad, beta.conj())
+  mat1: maybe_multiply(grad.sparse_mask(self).mm(mat2.mH()), alpha.conj())
+  mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, beta)
