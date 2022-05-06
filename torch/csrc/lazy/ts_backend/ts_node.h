@@ -64,6 +64,8 @@ const OpKind tensor_list_opkind = OpKind::Get("lazy_tensors::tensor_list");
 // TODO(whc) once Shape() API is moved to Node base, also make it virtual, and then implement it as NotImplemented for
 // TensorList, also fixing the assertion that would fail.
 struct TORCH_API TensorList : public TsNode {
+  static const OpKind class_op_kind;
+
   TensorList() = delete;
   TensorList(OpList values);
 

@@ -371,7 +371,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
 
     with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
         output = function(*args)
-        if torch.cuda._initialized and not had_cuda_in_fwd:
+        if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
             # Cuda was not initialized before running the forward, so we didn't
             # stash the CUDA state.
             raise RuntimeError(
