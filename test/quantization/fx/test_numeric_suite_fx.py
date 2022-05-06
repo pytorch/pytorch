@@ -570,6 +570,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 torch.ao.quantization.QuantStub,
                 torch.ao.quantization.DeQuantStub,
                 nnq.FloatFunctional,
+                # the ConvTranspose3d swap is not implemented in FX Graph
+                # mode quantization yet
+                nn.ConvTranspose3d,
             )
             if fp32_type in types_to_skip:
                 continue
@@ -1484,6 +1487,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 # makes sense
                 nn.Embedding,
                 nn.EmbeddingBag,
+                # the ConvTranspose3d swap is not implemented in FX Graph
+                # mode quantization yet
+                nn.ConvTranspose3d,
             )
             if fp32_type in types_to_skip:
                 continue

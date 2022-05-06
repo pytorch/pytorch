@@ -28,15 +28,12 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # conv modules
         set([
             nn.Conv1d,
-            nnqd.Conv1d,
         ]),
         set([
             nn.Conv2d,
-            nnqd.Conv2d,
         ]),
         set([
             nn.Conv3d,
-            nnqd.Conv3d,
         ]),
         # conv functionals
         set([
@@ -142,19 +139,12 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # ConvTranspose
         set([
             nn.ConvTranspose1d,
-            nnqd.ConvTranspose1d,
         ]),
         set([
             nn.ConvTranspose2d,
-            nnqd.ConvTranspose2d,
         ]),
         set([
             nn.ConvTranspose3d,
-            nnqd.ConvTranspose3d,
-        ]),
-        set([
-            nn.ConvTranspose3d,
-            nnq.ConvTranspose3d,
         ]),
         # ELU
         set([
@@ -552,9 +542,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.Conv1d,
         nn.Conv2d,
         nn.Conv3d,
-        nnqd.Conv1d,
-        nnqd.Conv2d,
-        nnqd.Conv3d,
         nnqat.Conv1d,
         nnqat.Conv2d,
         nnqat.Conv3d,
@@ -570,9 +557,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.ConvTranspose1d,
         nn.ConvTranspose2d,
         nn.ConvTranspose3d,
-        nnqd.ConvTranspose1d,
-        nnqd.ConvTranspose2d,
-        nnqd.ConvTranspose3d,
         nn.ELU,
         nn.GroupNorm,
         nn.InstanceNorm1d,
@@ -619,7 +603,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Dropout,
         nnq.ConvTranspose1d,
         nnq.ConvTranspose2d,
-        nnq.ConvTranspose3d,
         nnq.ELU,
         nnq.GroupNorm,
         nnq.InstanceNorm1d,
