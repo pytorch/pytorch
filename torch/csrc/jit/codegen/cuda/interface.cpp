@@ -91,6 +91,7 @@ class NVFuserEnabler {
       return *getCachedFuserEnabledEnvVar();
     }
     // 3. default value
+    // TODO guard in #ifdef FBCODE_CAFFE2
     return nvfuserCanBeEnabled();
   }
 
