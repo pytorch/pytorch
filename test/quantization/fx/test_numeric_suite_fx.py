@@ -71,8 +71,8 @@ from torch.ao.ns._numeric_suite_fx import (
     extract_shadow_logger_info,
     extend_logger_results_with_comparison,
 )
-from torch.ao.quantization.fx.backend_config import get_native_backend_config_dict
-from torch.ao.quantization.fx.backend_config.utils import get_pattern_to_quantize_handlers
+from torch.ao.quantization.backend_config import get_native_backend_config_dict
+from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 
 
 # Note: these models are not for use outside of this file. While it's good
@@ -477,7 +477,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @skipIfNoFBGEMM
-    @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, need dtype inference support")
     def test_nodes_with_equal_types_get_matched(self):
         class M(nn.Module):
             def __init__(self):
@@ -524,13 +523,12 @@ class TestFXGraphMatcher(QuantizationTestCase):
             conv_name_0:
                 ((nn.Conv2d, torch.ao.quantization.MinMaxObserver), (nn.Conv2d, nn.Conv2d)),
             mul_name_0: ((torch.mul, torch.ao.quantization.MinMaxObserver), (toq.mul, toq.mul)),
-            relu_name_0: ((F.relu, torch.ao.quantization.MinMaxObserver), (F.relu, F.relu)),
+            relu_name_0: ((F.relu, torch.ao.quantization.FixedQParamsObserver), (F.relu, F.relu)),
             sigmoid_name_0:
-                ((torch.sigmoid, torch.sigmoid), (torch.sigmoid, torch.sigmoid)),
+                ((torch.sigmoid, torch.ao.quantization.FixedQParamsObserver), (torch.sigmoid, torch.sigmoid)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
-    @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, need dtype inference support")
     def test_methods(self):
         """
         Verify that graph matching works on methods
@@ -551,7 +549,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             base_name_to_sets_of_related_ops, torch.sigmoid) + '_0'
         expected_types = {
             sigmoid_name_0:
-                (('sigmoid', 'sigmoid'), ('sigmoid', 'sigmoid')),
+                (('sigmoid', torch.ao.quantization.FixedQParamsObserver), ('sigmoid', torch.ao.quantization.FixedQParamsObserver)),
         }
         self.assert_types_for_matched_subgraph_pairs(
             results, expected_types, m1p, m2p)
@@ -1131,8 +1129,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             prepare_fn=prepare_fn, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
-    @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, enable after"
-                   "dtype inference is supported")
     def test_add_shadow_loggers_mod_ptq(self):
         self._test_add_shadow_loggers_mod_impl(prepare_fn=prepare_fx)
 
@@ -1158,8 +1154,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self._test_add_shadow_loggers_fun_impl(prepare_fn=prepare_qat_fx)
 
     @skipIfNoFBGEMM
-    @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, enable after"
-                   "dtype inference is supported")
     def test_add_shadow_loggers_meth_ptq(self):
         """
         Verify that add_loggers works on methods
@@ -1172,7 +1166,10 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         m = M().eval()
         res = self._test_match_shadow_activations(
             m, (torch.randn(4, 4),),
-            results_len=1)
+            # For now, sigmoid is not supported for shadowing because the dtype
+            # inference for it is not implemented yet. So, this is just testing
+            # that shadowing models with method calls does not crash.
+            results_len=0)
 
     @skipIfNoFBGEMM
     def test_add_shadow_loggers_multiple_dtype_casts(self):
@@ -1326,7 +1323,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
 
     @skipIfNoFBGEMM
-    @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")
     def test_op_with_either_fp32_or_int8_input(self):
         """
         Verify that shadowing works with ops which accept either fp32 or
@@ -1345,7 +1341,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         m = M()
         res = self._test_match_shadow_activations(
             m, (torch.randn(4, 4),),
-            results_len=2)
+            # Note: shadowing relu by itself is currently not supported,
+            # this test is just testing that it does not crash
+            results_len=0)
 
     def _test_int8_shadows_int8_impl(self, m):
         """
@@ -1610,7 +1608,10 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 self.assertTrue(
                     (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
                     (base_op in MODS_IO_TYPE_FP32_OR_INT8) or
-                    (base_op in METHS_IO_TYPE_FP32_OR_INT8),
+                    (base_op in METHS_IO_TYPE_FP32_OR_INT8) or
+                    # Softmax has a different signature for the quantized
+                    # version, so it does not fit into the cases above.
+                    (base_op is torch.nn.Softmax),
                     f"missing IO type handling for {base_op}")
             elif qhandler_cls == qp.EmbeddingQuantizeHandler:
                 # embedding shadowing is not implemented, for now
@@ -1732,8 +1733,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @skipIfNoFBGEMM
-    @unittest.skip("Broken by https://github.com/pytorch/pytorch/pull/62608, enable after"
-                   "dtype inference is supported")
     def test_layer_names(self):
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
@@ -1865,7 +1864,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mp_shadows_mq(torch.randn(1, 1, 1, 1))
         act_compare_dict = extract_shadow_logger_info(
             mp_shadows_mq, OutputLogger, 'fp32')
-        self.assertTrue(len(act_compare_dict) == 4)
+        self.assertTrue(len(act_compare_dict) == 3)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @skipIfNoFBGEMM
@@ -2093,7 +2092,6 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
-    @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")
     def test_resnet18(self):
         import torchvision
         m = torchvision.models.quantization.resnet18(pretrained=False, quantize=False).eval()
@@ -2105,7 +2103,6 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
-    @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")
     def test_mobilenet_v2(self):
         import torchvision
         m = torchvision.models.quantization.mobilenet_v2(pretrained=False, quantize=False).eval()

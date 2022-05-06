@@ -20,6 +20,14 @@ on:
         type: string
         description: Docker image to run in.
 
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
+        required: true
+        description: access key id for test stats upload
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY:
+        required: true
+        description: secret acess key for test stats upload
+
 env:
   IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
   IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
@@ -29,7 +37,7 @@ jobs:
   test:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    timeout-minutes: 270
+    timeout-minutes: 300
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
@@ -74,7 +82,7 @@ jobs:
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
-        timeout-minutes: 240
+        timeout-minutes: 270
         run: |
           set -x
 
@@ -155,12 +163,16 @@ jobs:
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
           GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         shell: bash
         run: |

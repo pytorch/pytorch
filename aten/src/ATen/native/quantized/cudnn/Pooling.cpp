@@ -97,7 +97,7 @@ Tensor quantized_max_pool2d_cudnn(
 
   auto input = qx;
   if (ndim == 4) {
-    input = qx.contiguous(MemoryFormat::ChannelsLast);
+    input = qx.to(MemoryFormat::ChannelsLast);
   } else { // 3D
     std::vector<int64_t> new_sizes{1, qx.size(0), qx.size(1), qx.size(2)};
     input = qx.view(new_sizes);

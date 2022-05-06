@@ -333,11 +333,11 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  if (owns_pyobj_) {
+  if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
     pyobj_interpreter_.load(std::memory_order_acquire)
-        ->decref(pyobj_, /*is_tensor*/ true);
+        ->decref(_unchecked_untagged_pyobj(), /*is_tensor*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
     // to the PyObject (if there are references to the PyObject,
@@ -531,8 +531,12 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python)
-                            .remove(DispatchKey::PythonTLSSnapshot);
+  // Copying tensor metadata doesn't change the PyObject (maybe
+  // it should), which means that we have to preserve whatever the
+  // original Python keyset was (as it's associated with the PyObject
+  // being a tensor subclass or not)
+  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
+      (dest_impl->key_set_ & c10::python_ks);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =

@@ -6679,9 +6679,10 @@ class TestAutogradForwardMode(TestCase):
                 if func.overloadpacket == torch.ops.aten.alias:
                     counter[0] += 1
 
-                    # Make sure autograd is not disabled here
-                    foo = torch.rand(1, requires_grad=True)
-                    self.assertIsNotNone(foo.exp().grad_fn)
+                    # Make sure we can re-enable autograd here
+                    with torch.overrides.enable_reentrant_dispatch():
+                        foo = torch.rand(1, requires_grad=True)
+                        self.assertIsNotNone(foo.exp().grad_fn)
 
                 with no_dispatch():
                     return func(*args, **kwargs)
@@ -7824,6 +7825,16 @@ class TestAutogradDeviceType(TestCase):
         def do_test():
             out_c.copy_(inp_r)
             out_c.sum().backward()
+            self.assertEqual(inp_r.grad, torch.ones_like(inp_r))
+
+        self.assertNotWarn(do_test)
+
+    def test_to_r_to_c(self, device):
+        def do_test():
+            inp_r = torch.randn(3, 2, dtype=torch.double, device=device,
+                                requires_grad=True)
+            out = inp_r.to(torch.complex128)
+            out.sum().backward()
             self.assertEqual(inp_r.grad, torch.ones_like(inp_r))
 
         self.assertNotWarn(do_test)
