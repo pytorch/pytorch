@@ -7,6 +7,8 @@ namespace lazy {
 
 class TORCH_API Diagonal : public TsNode {
  public:
+  static const OpKind class_op_kind;
+
   Diagonal(const Value& input, int64_t offset, int64_t dim1, int64_t dim2);
 
   std::string ToString() const override;
