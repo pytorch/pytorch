@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_list.h>
 
+#include <ATen/ScalarOps.h>
+
 #include <c10/util/irange.h>
 
 namespace torch {
