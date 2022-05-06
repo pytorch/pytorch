@@ -95,6 +95,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
     datapipe: IterDataPipe[T_co]
     buffer_size: int
     _shuffle_enabled: bool
+    buffer: List[T_co]
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
@@ -109,6 +110,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         else:
             self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
+        self.buffer: List[T_co] = []
         self._enabled = True
 
     @staticmethod
@@ -123,24 +125,49 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         return self
 
     def __iter__(self) -> Iterator[T_co]:
+        self.reset()
         if not self._enabled:
             for x in self.datapipe:
                 yield x
         else:
-            buffer: List[T_co] = []
             for x in self.datapipe:
-                if len(buffer) == self.buffer_size:
-                    yield ShufflerIterDataPipe.buffer_replace(buffer, x)
+                if len(self.buffer) == self.buffer_size:
+                    yield ShufflerIterDataPipe.buffer_replace(self.buffer, x)
                 else:
-                    buffer.append(x)
-            random.shuffle(buffer)
-            while buffer:
-                yield buffer.pop()
+                    self.buffer.append(x)
+            random.shuffle(self.buffer)
+            while self.buffer:
+                yield self.buffer.pop()
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+
+    def reset(self) -> None:
+        self.buffer = []
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+        state = (
+            self.datapipe,
+            self.buffer_size,
+            self._enabled
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.datapipe,
+            self.buffer_size,
+            self._enabled
+        ) = state
+        self.reset()
+
+    def __del__(self):
+        if hasattr(self, "buffer"):
+            self.buffer.clear()
 
     def save_snapshot(self):
         # TODO: Need to save the buffer
