@@ -12,16 +12,51 @@ namespace torch {
 namespace pytree {
 
 namespace {
+
+struct PyAux {
+  py::object custom_type_context;
+};
+using PyTreeSpec = TreeSpec<PyAux>;
+
 class PyTypeRegistry {
  public:
   struct PyTypeReg {
-    Kind kind;
     explicit PyTypeReg(Kind k) : kind(k) {}
+
+    Kind kind;
+
+    // for custom types
+    py::object type;
+    // function type: object -> (children, spec_data)
+    py::function flatten;
+    // function type: (children, spec_data) -> object
+    py::function unflatten;
   };
-  static const PyTypeReg* get(py::handle pytype) {
+
+  static const PyTypeReg* get_by_str(const std::string pytype) {
     auto* registry = instance();
-    auto it = registry->regs_.find(py::cast<py::object>(pytype));
+    auto it = registry->regs_.find(pytype);
     return it == registry->regs_.end() ? nullptr : it->second.get();
+  }
+
+  static const PyTypeReg* get_by_type(py::handle pytype) {
+    return get_by_str(py::str(pytype));
+  }
+
+  static void register_custom_type(
+      py::object type,
+      py::function flatten,
+      py::function unflatten) {
+    auto* registry = instance();
+    auto reg = std::make_unique<PyTypeReg>(Kind::Custom);
+    reg->type = type;
+    reg->flatten = std::move(flatten);
+    reg->unflatten = std::move(unflatten);
+    std::string pytype_str = py::str(type);
+    auto it = registry->regs_.emplace(pytype_str, std::move(reg));
+    if (!it.second) {
+      assert(false);
+    }
   }
 
  private:
@@ -29,74 +64,46 @@ class PyTypeRegistry {
     static auto* registry_instance = []() -> PyTypeRegistry* {
       auto* registry = new PyTypeRegistry;
 
-      auto add_pytype_reg = [&](PyTypeObject* pytype_obj, Kind kind) {
-        py::object pytype = py::reinterpret_borrow<py::object>(
-            reinterpret_cast<PyObject*>(pytype_obj));
+      auto add_pytype_reg = [&](const std::string& pytype, Kind kind) {
         registry->regs_.emplace(pytype, std::make_unique<PyTypeReg>(kind));
       };
 
-      add_pytype_reg(&PyTuple_Type, Kind::Tuple);
-      add_pytype_reg(&PyList_Type, Kind::List);
-      add_pytype_reg(&PyDict_Type, Kind::Dict);
+      add_pytype_reg("<class 'tuple'>", Kind::Tuple);
+      add_pytype_reg("<class 'list'>", Kind::List);
+      add_pytype_reg("<class 'dict'>", Kind::Dict);
 
       return registry;
     }();
 
     return registry_instance;
   }
-
-  struct PyTypeHash {
-    using is_transparent = void;
-    size_t operator()(const py::object& t) const {
-      return PyObject_Hash(t.ptr());
-    }
-  };
-
-  struct PyTypeEq {
-    using is_transparent = void;
-    bool operator()(const py::object& a, const py::object& b) const {
-      return a.ptr() == b.ptr();
-    }
-  };
-
-  std::unordered_map<
-      py::object,
-      std::unique_ptr<PyTypeReg>,
-      PyTypeHash,
-      PyTypeEq>
-      regs_;
+  std::unordered_map<std::string, std::unique_ptr<PyTypeReg>> regs_;
 };
 
 class PyTree {
-  TreeSpec spec_;
-
-  static Kind get_kind(const py::handle& x) {
-    const auto* reg = PyTypeRegistry::get(x.get_type());
-    if (reg) {
-      return reg->kind;
-    }
-    if (py::isinstance<py::tuple>(x) && py::hasattr(x, "_fields")) {
-      return Kind::NamedTuple;
-    }
-    return Kind::Leaf;
-  }
-
-  static bool is_leaf(const py::handle& x) {
-    return get_kind(x) == Kind::Leaf;
-  }
+  PyTreeSpec spec_;
 
   static void flatten_internal(
       py::handle x,
       std::vector<py::object>& leaves,
-      TreeSpec& s) {
-    const auto kind = get_kind(x);
+      PyTreeSpec& s) {
+    const auto* reg = PyTypeRegistry::get_by_type(x.get_type());
+    const auto kind = [&reg, &x]() {
+      if (reg) {
+        return reg->kind;
+      }
+      if (py::isinstance<py::tuple>(x) && py::hasattr(x, "_fields")) {
+        return Kind::NamedTuple;
+      }
+      return Kind::Leaf;
+    }();
     switch (kind) {
       case Kind::List: {
         const size_t n = PyList_GET_SIZE(x.ptr());
-        s = TreeSpec(Kind::List, n);
+        s = PyTreeSpec(Kind::List, n);
         size_t leaves_num = 0;
         for (size_t i = 0; i < n; ++i) {
-          TreeSpec& child = s.handle->items[i];
+          PyTreeSpec& child = s.handle->items[i];
           flatten_internal(PyList_GET_ITEM(x.ptr(), i), leaves, child);
           leaves_num += child.leaves_num();
         }
@@ -105,10 +112,10 @@ class PyTree {
       }
       case Kind::Tuple: {
         const size_t n = PyTuple_GET_SIZE(x.ptr());
-        s = TreeSpec(Kind::Tuple, n);
+        s = PyTreeSpec(Kind::Tuple, n);
         size_t leaves_num = 0;
         for (size_t i = 0; i < n; ++i) {
-          TreeSpec& child = s.handle->items[i];
+          PyTreeSpec& child = s.handle->items[i];
           flatten_internal(PyTuple_GET_ITEM(x.ptr(), i), leaves, child);
           leaves_num += child.leaves_num();
         }
@@ -118,11 +125,11 @@ class PyTree {
       case Kind::NamedTuple: {
         py::tuple tuple = py::reinterpret_borrow<py::tuple>(x);
         const size_t n = tuple.size();
-        s = TreeSpec(Kind::NamedTuple, n);
+        s = PyTreeSpec(Kind::NamedTuple, n);
         size_t i = 0;
         size_t leaves_num = 0;
         for (py::handle entry : tuple) {
-          TreeSpec& child = s.handle->items[i++];
+          PyTreeSpec& child = s.handle->items[i++];
           flatten_internal(entry, leaves, child);
           leaves_num += child.leaves_num();
         }
@@ -134,7 +141,7 @@ class PyTree {
         py::list keys =
             py::reinterpret_steal<py::list>(PyDict_Keys(dict.ptr()));
         const auto n = PyList_GET_SIZE(keys.ptr());
-        s = TreeSpec(Kind::Dict, n);
+        s = PyTreeSpec(Kind::Dict, n);
         size_t leaves_num = 0;
         size_t i = 0;
         for (py::handle key : keys) {
@@ -146,7 +153,7 @@ class PyTree {
             TORCH_INTERNAL_ASSERT(false);
           }
 
-          TreeSpec& child = s.handle->items[i];
+          PyTreeSpec& child = s.handle->items[i];
           flatten_internal(dict[key], leaves, child);
           leaves_num += child.leaves_num();
           i++;
@@ -154,8 +161,29 @@ class PyTree {
         s.set_leaves_num(leaves_num);
         break;
       }
+      case Kind::Custom: {
+        py::tuple out = py::cast<py::tuple>(reg->flatten(x));
+        if (out.size() != 2) {
+          assert(false);
+        }
+        py::list children = py::cast<py::list>(out[0]);
+        const size_t n = children.size();
+        s = PyTreeSpec(Kind::Custom, n);
+        s.handle->custom_type = py::str(x.get_type());
+        s.handle->custom_type_context = out[1];
+        size_t leaves_num = 0;
+        size_t i = 0;
+        for (py::handle pychild : children) {
+          PyTreeSpec& spec_child = s.handle->items[i];
+          flatten_internal(pychild, leaves, spec_child);
+          leaves_num += spec_child.leaves_num();
+          i++;
+        }
+        s.set_leaves_num(leaves_num);
+        break;
+      }
       case Kind::Leaf: {
-        s = TreeSpec(Kind::Leaf);
+        s = PyTreeSpec(Kind::Leaf);
         leaves.push_back(py::reinterpret_borrow<py::object>(x));
         s.set_leaves_num(1u);
         break;
@@ -166,7 +194,7 @@ class PyTree {
   }
 
   template <typename T>
-  py::object unflatten_internal(const TreeSpec& spec, T&& leaves_it) const {
+  py::object unflatten_internal(const PyTreeSpec& spec, T&& leaves_it) const {
     switch (spec.kind()) {
       case Kind::NamedTuple:
       case Kind::Tuple: {
@@ -184,6 +212,17 @@ class PyTree {
           list[i] = unflatten_internal(spec[i], leaves_it);
         }
         return std::move(list);
+      }
+      case Kind::Custom: {
+        const auto& pytype_str = spec.handle->custom_type;
+        const auto* reg = PyTypeRegistry::get_by_str(pytype_str);
+        const size_t size = spec.size();
+        py::list list(size);
+        for (size_t i = 0; i < size; ++i) {
+          list[i] = unflatten_internal(spec[i], leaves_it);
+        }
+        py::object o = reg->unflatten(list, spec.handle->custom_type_context);
+        return o;
       }
       case Kind::Dict: {
         const size_t size = spec.size();
@@ -220,25 +259,24 @@ class PyTree {
   }
 
  public:
-  explicit PyTree(TreeSpec spec) : spec_(std::move(spec)) {}
+  explicit PyTree(PyTreeSpec spec) : spec_(std::move(spec)) {}
 
-  const TreeSpec& spec() const {
+  const PyTreeSpec& spec() const {
     return spec_;
   }
 
   static PyTree py_from_str(std::string spec) {
-    return PyTree(from_str(spec));
+    return PyTree(from_str<PyAux>(spec));
   }
 
   StrTreeSpec py_to_str() const {
     return to_str(spec_);
   }
 
-  // TODO: should it be py::object x argument?
   static std::pair<std::vector<py::object>, std::unique_ptr<PyTree>>
   tree_flatten(py::handle x) {
     std::vector<py::object> leaves{};
-    TreeSpec spec{};
+    PyTreeSpec spec{};
     flatten_internal(x, leaves, spec);
     return {std::move(leaves), std::make_unique<PyTree>(std::move(spec))};
   }
@@ -278,7 +316,7 @@ static py::object tree_map(py::function& fn, py::handle x) {
 }
 
 static std::unique_ptr<PyTree> py_from_str(std::string spec) {
-  return std::make_unique<PyTree>(from_str(spec));
+  return std::make_unique<PyTree>(from_str<PyAux>(spec));
 }
 
 static py::object broadcast_to_and_flatten(
@@ -292,8 +330,8 @@ static py::object broadcast_to_and_flatten(
 
   py::list ret;
   struct StackItem {
-    const TreeSpec* tree_spec_node;
-    const TreeSpec* x_spec_node;
+    const PyTreeSpec* tree_spec_node;
+    const PyTreeSpec* x_spec_node;
     const size_t x_leaves_offset;
   };
   std::stack<StackItem> stack;
@@ -356,6 +394,7 @@ void init_bindings(PyObject* module) {
   pytree.def("tree_map", &tree_map);
   pytree.def("from_str", &py_from_str);
   pytree.def("broadcast_to_and_flatten", &broadcast_to_and_flatten);
+  pytree.def("register_custom", &PyTypeRegistry::register_custom_type);
 
   py::class_<PyTree>(pytree, "TreeSpec")
       .def("from_str", &PyTree::py_from_str)

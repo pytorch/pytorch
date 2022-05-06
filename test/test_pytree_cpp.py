@@ -2,7 +2,7 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch._C._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, broadcast_to_and_flatten
+from torch._C._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, broadcast_to_and_flatten, register_custom
 from collections import namedtuple
 
 def _spec(o):
@@ -88,9 +88,6 @@ class TestPytree(TestCase):
 
             expected_spec = TreeSpec.from_str(spec)
             values, treespec = tree_flatten(tup)
-            print("XXX 91: treespec:", treespec)
-            print("XXX 91: spec_str:", spec)
-            print("XXX 91: expected_spec:", expected_spec)
             self.assertTrue(isinstance(values, list))
             self.assertEqual(values, list(tup))
             self.assertEqual(treespec, expected_spec)
@@ -199,6 +196,34 @@ class TestPytree(TestCase):
         _, spec = tree_flatten(pytree)
         self.assertEqual(
             repr(spec), 'T2#1#3($,L3#1#1#1($,$,$))')
+
+    def test_custom_tree_node(self):
+        class Point(object):
+            def __init__(self, x, y, name):
+                self.x = x
+                self.y = y
+                self.name = name
+
+            def __repr__(self):
+                return "Point(x:{}, y:{}, name: {})".format(self.x, self.y, self.name)
+
+        def custom_flatten(p):
+            children = [p.x, p.y]
+            extra_data = p.name
+            return (children, extra_data)
+
+        def custom_unflatten(children, extra_data):
+            return Point(*children, extra_data)
+
+        register_custom(Point,
+            custom_flatten,
+            custom_unflatten)
+
+        point = Point((1.0,1.0,1), 2.0, "point_name")
+        children, spec = tree_flatten(point)
+        point2 = tree_unflatten(children, spec)
+        self.assertEqual(str(point), str(point2))
+
 
     def test_broadcast_to_and_flatten(self):
         cases = [
