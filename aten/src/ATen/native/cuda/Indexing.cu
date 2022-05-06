@@ -146,15 +146,6 @@ public:
 };
 static ReduceAdd reduce_add;
 
-class ReduceMean {
-public:
-  template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicAddNoReturn(self_data, *src_data);
-  }
-};
-static ReduceMean reduce_mean;
-
 class ReduceMinimum {
 public:
   template <typename scalar_t>
@@ -421,7 +412,7 @@ static ptrdiff_t getSliceSize(const Tensor & dst,
 // indexFuncLargeIndex kernel is a better choice to increase
 // parallelism.
 template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
-          typename func_t, bool use_alpha = false>
+          typename func_t>
 __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     cuda::detail::TensorInfo<T, IndexType> src,
                                     cuda::detail::TensorInfo<IndicesType, IndexType> indices,
@@ -455,7 +446,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
           cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
       srcOffset += srcIndex * src.strides[srcAddDim];
 
-      T val = use_alpha ? src.data[srcOffset] * alpha : src.data[srcOffset];
+      T val = src.data[srcOffset] * alpha;
       op(&dst.data[dstOffset], &val);
     }
 
@@ -469,7 +460,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 // indexFuncSmallIndex kernel is a better choice to reduce memory
 // accesses.
 template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
-          bool IndexIsMajor, typename func_t, bool use_alpha = false>
+          bool IndexIsMajor, typename func_t>
 __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     cuda::detail::TensorInfo<T, IndexType> src,
                                     cuda::detail::TensorInfo<IndicesType, IndexType> indices,
@@ -508,7 +499,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcAddDim];
 
-    T val = use_alpha ? src.data[srcOffset] * alpha : src.data[srcOffset];
+    T val = src.data[srcOffset] * alpha;
     op(&dst.data[dstOffset], &val);
   }
 }
@@ -589,8 +580,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
-  indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM,   \
-                      /*func_t=*/ReduceAdd, /*use_alpha=*/true>                         \
+  indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
       selfInfo, sourceInfo, indexInfo,                                                  \
       selfAddDim, sourceAddDim, sliceSize, selfAddDimSize, reduce_add, alpha_value);    \
@@ -599,8 +589,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)            \
   indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                      \
-                      SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR,          \
-                      /*func_t=*/ReduceAdd, /*use_alpha=*/true>             \
+                      SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>          \
     <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
       selfInfo, sourceInfo, indexInfo,                                      \
       selfAddDim, sourceAddDim, sourceTotalSize,                            \
@@ -702,7 +691,7 @@ void index_reduce_func_cuda_impl(
   const Tensor& index,
   const Tensor& source,
   bool include_self,
-  const INDEX_OP& reduce,
+  const SCATTER_GATHER_OP& reduce,
   const func_t& reduce_func,
   const Tensor& result) {
   if (!result.is_same(self)) result.copy_(self);
@@ -715,10 +704,9 @@ void index_reduce_func_cuda_impl(
   TORCH_CHECK(source.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims" );
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
 
-  if (globalContext().deterministicAlgorithms()){
-    TORCH_CHECK(
-      false, "index_reduce() does not have a deterministic path. Please file a feature request if you need this.");
-  }
+  TORCH_CHECK(
+    !globalContext().deterministicAlgorithms(),
+    "index_reduce() does not have a deterministic path. Please file a feature request if you need this.");
 
   if (!include_self) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -726,14 +714,14 @@ void index_reduce_func_cuda_impl(
       self.scalar_type(), "index_reduce_func_cuda_exclude_input_init", [&] {
       scalar_t init_val;
       switch (reduce) {
-        case INDEX_OP::PROD:
+        case SCATTER_GATHER_OP::REDUCE_MULTIPLY:
           init_val = (scalar_t)1;
           break;
-        case INDEX_OP::MAXIMUM:
+        case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::lowest();
           break;
-        case INDEX_OP::MINIMUM:
+        case SCATTER_GATHER_OP::REDUCE_MINIMUM:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::max();
           break;
@@ -765,21 +753,21 @@ void index_reduce_func_cuda_impl(
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)                  \
-  indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM, func_t>        \
+  indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>                \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
       selfInfo, sourceInfo, indexInfo,                                                               \
-      selfReduceDim, sourceReduceDim, sliceSize, selfReduceDimSize, reduce_func, alpha_value);      \
+      selfReduceDim, sourceReduceDim, sliceSize, selfReduceDimSize, reduce_func, alpha_value);       \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                                     \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)                         \
   indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                   \
-                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR, func_t>                \
+                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>                        \
     <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                    \
       selfInfo, sourceInfo, indexInfo,                                                   \
       selfReduceDim, sourceReduceDim, sourceTotalSize,                                   \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                             \
-      selfReduceDimSize, reduce_func, alpha_value);                                     \
+      selfReduceDimSize, reduce_func, alpha_value);                                      \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
@@ -885,17 +873,17 @@ TORCH_IMPL_FUNC(_index_reduce_cuda_out)
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
 
   if (reduce == "prod") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::PROD, reduce_multiply, result);
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, SCATTER_GATHER_OP::REDUCE_MULTIPLY, reduce_multiply, result);
   } else if (reduce == "mean") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MEAN, reduce_add, result);
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, SCATTER_GATHER_OP::REDUCE_MEAN, reduce_add, result);
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
     counts.index_add_(dim, index, at::ones_like(source));
     counts.masked_fill_(counts == 0, 1);
     result.div_(counts);
   } else if (reduce == "amax") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MAXIMUM, reduce_maximum, result);
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, SCATTER_GATHER_OP::REDUCE_MAXIMUM, reduce_maximum, result);
   } else if (reduce == "amin") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MINIMUM, reduce_minimum, result);
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, SCATTER_GATHER_OP::REDUCE_MINIMUM, reduce_minimum, result);
   } else {
     TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
   }
