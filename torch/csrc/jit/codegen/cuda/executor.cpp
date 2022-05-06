@@ -12,12 +12,12 @@
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/hip/HIPContext.h>
-#include <ATen/hip/llvm_jit_strings.h>
-#include <ATen/hip/nvrtc_stub/ATenNVRTC.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/llvm_jit_strings.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/core/DeviceGuard.h>
-#include <c10/hip/HIPFunctions.h>
-#include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
+#include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAStream.h>
 #include <c10/util/irange.h>
 
 #include <fstream>
@@ -767,7 +767,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   }
 
   c10::DeviceGuard dg(options_.device);
-  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
+  auto stream = at::cuda::getCurrentCUDAStream();
   executor_utils::initializeCudaContext();
   TORCH_INTERNAL_ASSERT(lowered_);
   launch_params_ = LaunchParams();
@@ -866,7 +866,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     if (kernel()->summary().has_cooperative_grid_reduction) {
 #ifndef USE_ROCM
       int num_blocks_per_SM = -1;
-      at::globalContext().getNVRTC().hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
+      at::globalContext().getNVRTC().cuOccupancyMaxActiveBlocksPerMultiprocessor(
           &num_blocks_per_SM,
           compiled_kernel_.function,
           (int)(launch_params_.bdimx() * launch_params_.bdimy() * launch_params_.bdimz()),
@@ -1021,15 +1021,15 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
   }
 
-  hipEvent_t start_event = {};
-  hipEvent_t finish_event = {};
+  cudaEvent_t start_event = {};
+  cudaEvent_t finish_event = {};
 
   if (measure_kernel_time_ ||
       isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth) ||
       isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
-    hipEventCreate(&start_event);
-    hipEventCreate(&finish_event);
-    hipEventRecord(start_event);
+    cudaEventCreate(&start_event);
+    cudaEventCreate(&finish_event);
+    cudaEventRecord(start_event);
   }
 
   if (execute_kernel_) {
@@ -1047,8 +1047,8 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 #endif
     }
     if (!kernel()->summary().has_cooperative_grid_reduction) {
-      FUSER_PERF_SCOPE("ExecutorRunFusion::hipModuleLaunchKernel");
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().hipModuleLaunchKernel(
+      FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchKernel");
+      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
           compiled_kernel_.function,
           launch_params_.gdimx(),
           launch_params_.gdimy(),
@@ -1085,12 +1085,12 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (measure_kernel_time_ ||
       isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth) ||
       isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
-    hipEventRecord(finish_event);
-    hipEventSynchronize(start_event);
-    hipEventSynchronize(finish_event);
-    hipEventElapsedTime(&kernel_time_ms_, start_event, finish_event);
-    hipEventDestroy(start_event);
-    hipEventDestroy(finish_event);
+    cudaEventRecord(finish_event);
+    cudaEventSynchronize(start_event);
+    cudaEventSynchronize(finish_event);
+    cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event);
+    cudaEventDestroy(start_event);
+    cudaEventDestroy(finish_event);
 
     bytes_processed_ = 0;
     // Figure how many bytes are inputs, outputs, and temporary buffers
@@ -1145,11 +1145,11 @@ void FusionExecutor::runRtc(
   FUSER_PERF_SCOPE("runFusion");
 
   c10::DeviceGuard dg(options_.device);
-  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
+  auto stream = at::cuda::getCurrentCUDAStream();
 
   KernelArgumentHolder kernel_arguments(options_.index_mode);
   kernel_arguments.push(args);
-  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().hipModuleLaunchKernel(
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
       compiled_kernel_.function,
       launch_params.gdimx(),
       launch_params.gdimy(),
