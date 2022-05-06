@@ -433,6 +433,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
