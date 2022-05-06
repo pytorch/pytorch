@@ -437,20 +437,6 @@ binary_windows_params: &binary_windows_params
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     JOB_EXECUTOR: <<parameters.executor>>
-
-promote_common: &promote_common
-  docker:
-    - image: pytorch/release
-  parameters:
-    package_name:
-      description: "package name to promote"
-      type: string
-      default: ""
-  environment:
-    PACKAGE_NAME: << parameters.package_name >>
-    ANACONDA_API_TOKEN: ${CONDA_PYTORCHBOT_TOKEN}
-    AWS_ACCESS_KEY_ID: ${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}
-    AWS_SECRET_ACCESS_KEY: ${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}
 ##############################################################################
 # Job specs
 ##############################################################################
@@ -1532,24 +1518,6 @@ jobs:
           export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && . ./.jenkins/pytorch/docs-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
-  promote_s3:
-    <<: *promote_common
-    steps:
-      - checkout
-      - run:
-          name: Running promote script
-          command: |
-            scripts/release/promote/wheel_to_s3.sh
-
-  promote_conda:
-    <<: *promote_common
-    steps:
-      - checkout
-      - run:
-          name: Running promote script
-          command: |
-            scripts/release/promote/conda_to_conda.sh
-
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -1762,49 +1730,3 @@ workflows:
               only:
                 - postnightly
     when: << pipeline.parameters.run_build >>
-  # Promotion workflow
-  promote:
-    jobs:
-      # Requires manual approval by someone in org-member
-      # CircleCI security context
-      - promote_approval:
-          context: org-member
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*/
-          type: approval
-      - promote_s3:
-          context: org-member
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*/
-          name: promote_s3_libtorch
-          package_name: libtorch
-          requires:
-            - promote_approval
-      - promote_s3:
-          context: org-member
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*/
-          name: promote_s3_torch
-          package_name: torch
-          requires:
-            - promote_approval
-      - promote_conda:
-          context: org-member
-          filters:
-            branches:
-              ignore: /.*/
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*/
-          name: promote_conda_pytorch
-          package_name: pytorch
-          requires:
-            - promote_approval
