@@ -3230,18 +3230,24 @@ void profileViewSize(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isIntList(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(viewSizeAttr)) {
-      pn->is_(viewSizeAttr, value.toIntVector());
-    } else {
-      auto profiled_ints = pn->is(viewSizeAttr);
-      auto input_ints = value.toIntList();
-      if (profiled_ints.size() != input_ints.size() ||
-          !std::equal(
-              profiled_ints.begin(), profiled_ints.end(), input_ints.begin())) {
-        TORCH_WARN(
-            __FUNCTION__,
-            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(viewSizeAttr)) {
+        pn->is_(viewSizeAttr, value.toIntVector());
+      } else {
+        auto profiled_ints = pn->is(viewSizeAttr);
+        auto input_ints = value.toIntList();
+        if (profiled_ints.size() != input_ints.size() ||
+            !std::equal(
+                profiled_ints.begin(), profiled_ints.end(), input_ints.begin())) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+	  pn->removeAttribute(viewSizeAttr);
+        }
       }
+    } else {
+      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(viewSizeAttr), "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3263,18 +3269,24 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isIntList(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(intListAttr)) {
-      pn->is_(intListAttr, value.toIntVector());
-    } else {
-      auto profiled_ints = pn->is(intListAttr);
-      auto input_ints = value.toIntList();
-      if (profiled_ints.size() != input_ints.size() ||
-          !std::equal(
-              profiled_ints.begin(), profiled_ints.end(), input_ints.begin())) {
-        TORCH_WARN(
-            __FUNCTION__,
-            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(intListAttr)) {
+        pn->is_(intListAttr, value.toIntVector());
+      } else {
+        auto profiled_ints = pn->is(intListAttr);
+        auto input_ints = value.toIntList();
+        if (profiled_ints.size() != input_ints.size() ||
+            !std::equal(
+                profiled_ints.begin(), profiled_ints.end(), input_ints.begin())) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+	  pn->removeAttribute(intListAttr);
+        }
       }
+    } else {
+      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(intListAttr), "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3296,16 +3308,22 @@ void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isString(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(strAttr)) {
-      pn->s_(strAttr, value.toStringRef());
-    } else {
-      const auto& profiled_str = pn->s(strAttr);
-      const auto& input_str = value.toStringRef();
-      if (input_str != profiled_str) {
-        TORCH_WARN(
-            __FUNCTION__,
-            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(strAttr)) {
+        pn->s_(strAttr, value.toStringRef());
+      } else {
+        const auto& profiled_str = pn->s(strAttr);
+        const auto& input_str = value.toStringRef();
+        if (input_str != profiled_str) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+	  pn->removeAttribute(strAttr);
+        }
       }
+    } else {
+      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(strAttr), "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3327,16 +3345,22 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isBool(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(boolAttr)) {
-      pn->i_(boolAttr, value.toBool());
-    } else {
-      auto profiled_bool = pn->i(boolAttr);
-      auto input_bool = value.toBool();
-      if (input_bool != profiled_bool) {
-        TORCH_WARN(
-            __FUNCTION__,
-            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(boolAttr)) {
+        pn->i_(boolAttr, value.toBool());
+      } else {
+        auto profiled_bool = pn->i(boolAttr);
+        auto input_bool = value.toBool();
+        if (input_bool != profiled_bool) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+	  pn->removeAttribute(boolAttr);
+        }
       }
+    } else {
+      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(boolAttr), "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3358,16 +3382,22 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isInt(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(intAttr)) {
-      pn->i_(intAttr, value.toInt());
-    } else {
-      auto profiled_int = pn->i(intAttr);
-      auto input_int = value.toInt();
-      if (input_int != profiled_int) {
-        TORCH_WARN(
-            __FUNCTION__,
-            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(intAttr)) {
+        pn->i_(intAttr, value.toInt());
+      } else {
+        auto profiled_int = pn->i(intAttr);
+        auto input_int = value.toInt();
+        if (input_int != profiled_int) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+	  pn->removeAttribute(intAttr);
+        }
       }
+    } else {
+      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(intAttr), "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3388,15 +3418,21 @@ void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, frame_id);
     IValue value;
     pop(stack, value);
-    if (!pn->hasAttribute(ivalAttr)) {
-      pn->ival_(ivalAttr, value);
-    } else {
-      auto profiled_ival = pn->ival(ivalAttr);
-      if (value != profiled_ival) {
-        TORCH_WARN(
-            __FUNCTION__,
-            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(ivalAttr)) {
+        pn->ival_(ivalAttr, value);
+      } else {
+        auto profiled_ival = pn->ival(ivalAttr);
+        if (value != profiled_ival) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+	  pn->removeAttribute(ivalAttr);
+        }
       }
+    } else {
+      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(ivalAttr), "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3418,20 +3454,26 @@ void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isBoolList(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(boolListAttr)) {
-      auto list = value.toBoolList();
-      std::vector<int64_t> val(list.begin(), list.end());
-      pn->is_(boolListAttr, val);
-    } else {
-      auto profiled_ints = pn->is(boolListAttr);
-      auto input_bools = value.toBoolList();
-      if (profiled_ints.size() != input_bools.size() ||
-          !std::equal(
-              input_bools.begin(), input_bools.end(), profiled_ints.begin())) {
-        TORCH_WARN(
-            __FUNCTION__,
-            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(boolListAttr)) {
+        auto list = value.toBoolList();
+        std::vector<int64_t> val(list.begin(), list.end());
+        pn->is_(boolListAttr, val);
+      } else {
+        auto profiled_ints = pn->is(boolListAttr);
+        auto input_bools = value.toBoolList();
+        if (profiled_ints.size() != input_bools.size() ||
+            !std::equal(
+                input_bools.begin(), input_bools.end(), profiled_ints.begin())) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+	  pn->removeAttribute(boolListAttr);
+        }
       }
+    } else {
+      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(boolListAttr), "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
