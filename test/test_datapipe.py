@@ -2165,6 +2165,11 @@ class TestSharding(TestCase):
 
 class TestIterDataPipeSingletonConstraint(TestCase):
 
+    r"""
+    Each `IterDataPipe` can only have one active iterator. Whenever a new iterator is created, older
+    iterators are invalidated. These tests aim to ensure `IterDataPipe` follows this behavior.
+    """
+
     def test_iterdatapipe_singleton_constraint(self):
         r"""
         Testing for the case where IterDataPipe's `__iter__` is a generator function.
@@ -2249,7 +2254,7 @@ class TestIterDataPipeSingletonConstraint(TestCase):
             next(it2)
         self.assertEqual(0, next(it3))
         # The next line should not invalidate anything, as there was no new iterator created
-        # for `cdp2` yet, after `it2` was invalidated
+        # for `cdp2` after `it2` was invalidated
         it4 = iter(cdp2)
         self.assertEqual(1, next(it3))  # An error shouldn't be raised here
         self.assertEqual(list(range(10)), list(it4))
