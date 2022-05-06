@@ -59,20 +59,18 @@ run_tests() {
         fi
     done
 
+    "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
     if [[ ( -z "${JOB_BASE_NAME}" || "${JOB_BASE_NAME}" == *-test ) && $NUM_TEST_SHARDS -eq 1 ]]; then
-        "$SCRIPT_HELPERS_DIR"/test_python.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
         "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
         if [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-            "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat
             "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
             if [[ "${USE_CUDA}" == "1" ]]; then
               "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
             fi
         elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
-            "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat
             "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
             "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         fi
