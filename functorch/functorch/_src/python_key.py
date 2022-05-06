@@ -110,9 +110,9 @@ class PythonTensor(torch.Tensor):
             else:
                 return e
         if isinstance(real_out, tuple):
-            return tuple([wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out)])
+            return tuple(wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out))
         elif isinstance(real_out, list):
-            return list([wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out)])
+            return [wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out)]
         elif isinstance(real_out, torch.Tensor):
             return wrap_with_proxy(real_out, proxy_out)
         else:
@@ -195,7 +195,10 @@ def wrap_key(f, inps):
     return wrapped
 
 
-def make_fx(f, decomposition_table={}):
+def make_fx(f, decomposition_table=None):
+    if decomposition_table is None:
+        decomposition_table = {}
+
     @functools.wraps(f)
     def wrapped(*args):
         phs = pytree.tree_map(lambda x: fx.PH, args)
