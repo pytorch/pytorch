@@ -44,7 +44,8 @@ size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
   const c10::string_view input(s);
   std::string buffer;
 
-  while ((cur_pos = s.find(from.data(), last_pos, from.size())) != std::string::npos) {
+  while ((cur_pos = s.find(from.data(), last_pos, from.size())) !=
+         std::string::npos) {
     ++numReplaced;
     // Append input between replaced sub-strings
     buffer.append(input.begin() + last_pos, input.begin() + cur_pos);
