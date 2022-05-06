@@ -280,7 +280,7 @@ namespace std {
 #define C10_MPARK_BUILTIN_UNREACHABLE
 #endif
 
-#if __has_builtin(__type_pack_element)
+#if __has_builtin(__type_pack_element) && !defined(__CUDACC__)
 #define C10_MPARK_TYPE_PACK_ELEMENT
 #endif
 
