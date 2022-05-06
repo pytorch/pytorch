@@ -1609,7 +1609,7 @@ class TestTensorExprFuser(BaseTestClass):
             a = torch.rand(2, 3, 4, 5, dtype=torch.float32)
             b = torch.rand(2, 3, 4, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
             c = torch.rand(2, 3, 4, 5, dtype=torch.float32)
-            # The memory layouts of the imperative mode outputs are
+            # The memory layout of the imperative mode output is
             #     (contiguous)
             # propagation memory layout is contiguous
             run_foo_case(foo, a, b, c)
@@ -1623,7 +1623,7 @@ class TestTensorExprFuser(BaseTestClass):
             a = torch.rand(2, 3, 4, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
             b = torch.rand(2, 3, 4, 5, dtype=torch.float32)
             c = torch.rand(2, 3, 4, 5, dtype=torch.float32)
-            # The memory layouts of the imperative mode outputs are
+            # The memory layout of the imperative mode output is
             #     (channels-last)
             # propagation memory layout is contiguous
             run_foo_case(foo, a, b, c)
@@ -1637,7 +1637,7 @@ class TestTensorExprFuser(BaseTestClass):
             a = torch.rand(2, 3, 4, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
             b = torch.rand(2, 3, 4, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
             c = torch.rand(2, 3, 4, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
-            # The memory layouts of the imperative mode outputs are
+            # The memory layout of the imperative mode output is
             #     (channels-last)
             # propagation memory layout is channels-last
             run_foo_case(foo, a, b, c)

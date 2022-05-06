@@ -1515,6 +1515,9 @@ BlockPtr TensorExprKernel::bindAllInputs() {
 }
 
 void TensorExprKernel::deduceMemoryLayoutPolicy() {
+  // If the tensor is channels-last contiguous, the preferred memory layout
+  // propagation policy is to use channes-last. Otherwise, the preferred policy
+  // is to use contiguous.
   auto _get_preferred_mem_policy =
       [](const torch::jit::Value* val,
          const std::vector<torch::jit::StrideInput>& stride_desc_vec) {
@@ -1540,36 +1543,57 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
             : MemoryLayoutPolicy::kContiguous;
       };
 
+  // Check whether the Value is TensorType
+  auto _is_tensor = [](const jit::Value* el) {
+    if (el->type()->kind() == TypeKind::TensorType) {
+      return true;
+    } else {
+      return false;
+    }
+  };
+
   std::vector<torch::jit::StrideInput> empty_strides = {};
-  auto inputs_all_channels_last = std::all_of(
-      graph_->inputs().begin(),
-      graph_->inputs().end(),
-      [&](const jit::Value* el) {
-        if (el->type()->kind() != TypeKind::TensorType) {
-          return true;
-        }
-        return MemoryLayoutPolicy::kChannelsLastNdContiguous ==
-            _get_preferred_mem_policy(
-                   el,
-                   el->isCompleteTensor() ? empty_strides
-                                          : getSymbolicInputStrideDesc(el));
-      });
 
-  auto outputs_all_channels_last = std::all_of(
-      graph_->outputs().begin(),
-      graph_->outputs().end(),
-      [&](const jit::Value* el) {
-        if (el->type()->kind() != TypeKind::TensorType) {
-          return true;
-        }
+  // The graph inputs contain Tensor. Othewise, do nothing.
+  auto inputs_contain_tensor =
+      std::any_of(graph_->inputs().begin(), graph_->inputs().end(), _is_tensor);
+  auto inputs_all_channels_last = inputs_contain_tensor &&
+      std::all_of(graph_->inputs().begin(),
+                  graph_->inputs().end(),
+                  [&](const jit::Value* el) {
+                    if (el->type()->kind() != TypeKind::TensorType) {
+                      return true;
+                    }
 
-        std::vector<torch::jit::StrideInput> output_strides = {};
-        if (has_symbolic_shapes_)
-          output_strides.push_back(getSymbolicOutputStrideDesc(el));
-        return MemoryLayoutPolicy::kChannelsLastNdContiguous ==
-            _get_preferred_mem_policy(
-                   el, has_symbolic_shapes_ ? output_strides : empty_strides);
-      });
+                    return MemoryLayoutPolicy::kChannelsLastNdContiguous ==
+                        _get_preferred_mem_policy(
+                               el,
+                               el->isCompleteTensor()
+                                   ? empty_strides
+                                   : getSymbolicInputStrideDesc(el));
+                  });
+
+  // The graph outputs contain Tensor. Othewise, do nothing.
+  auto outputs_contain_tensor = std::any_of(
+      graph_->outputs().begin(), graph_->outputs().end(), _is_tensor);
+  auto outputs_all_channels_last = outputs_contain_tensor &&
+      std::all_of(graph_->outputs().begin(),
+                  graph_->outputs().end(),
+                  [&](const jit::Value* el) {
+                    if (el->type()->kind() != TypeKind::TensorType) {
+                      return true;
+                    }
+
+                    auto has_symbolic_strides = sym_stride_outputs_.size() > 0;
+                    std::vector<torch::jit::StrideInput> output_strides = {};
+                    if (has_symbolic_strides)
+                      output_strides.push_back(getSymbolicOutputStrideDesc(el));
+                    return MemoryLayoutPolicy::kChannelsLastNdContiguous ==
+                        _get_preferred_mem_policy(
+                               el,
+                               has_symbolic_strides ? output_strides
+                                                    : empty_strides);
+                  });
 
   // If the memory layout of all the input and outputs is channels-last
   // contiguous, the propagated memory layout should be channels-last.
