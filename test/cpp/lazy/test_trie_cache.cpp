@@ -44,9 +44,9 @@ TEST(TrieCacheTest, TestSinglePath) {
   FLAGS_torch_lazy_reuse_ir = true;
   TrieCache::Get()->Clear();
 
-  NodePtr a = MakeNode<TrieCacheNode>(0);
-  NodePtr b = MakeNode<TrieCacheNode>(1);
-  NodePtr c = MakeNode<TrieCacheNode>(2);
+  NodePtr a = ReuseOrMakeNode<TrieCacheNode>(0);
+  NodePtr b = ReuseOrMakeNode<TrieCacheNode>(1);
+  NodePtr c = ReuseOrMakeNode<TrieCacheNode>(2);
   TrieCache::Get()->ResetCurrent(); // MarkStep
 
   EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(0).get(), a.get());
@@ -66,9 +66,9 @@ TEST(TrieCacheTest, TestTwoPaths) {
   FLAGS_torch_lazy_reuse_ir = true;
   TrieCache::Get()->Clear();
 
-  NodePtr a = MakeNode<TrieCacheNode>(0);
-  NodePtr b = MakeNode<TrieCacheNode>(1);
-  NodePtr c = MakeNode<TrieCacheNode>(2);
+  NodePtr a = ReuseOrMakeNode<TrieCacheNode>(0);
+  NodePtr b = ReuseOrMakeNode<TrieCacheNode>(1);
+  NodePtr c = ReuseOrMakeNode<TrieCacheNode>(2);
   TrieCache::Get()->ResetCurrent(); // MarkStep
 
   EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(0).get(), a.get());
