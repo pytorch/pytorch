@@ -375,7 +375,7 @@ class TransformerEncoderLayer(Module):
             ((src_mask is None and src_key_padding_mask is None)
              if src.is_nested
              else (src_mask is None or src_key_padding_mask is None)) and
-            not torch.is_autocast_enabled()):
+                not torch.is_autocast_enabled()):
             tensor_args = (
                 src,
                 self.self_attn.in_proj_weight,
