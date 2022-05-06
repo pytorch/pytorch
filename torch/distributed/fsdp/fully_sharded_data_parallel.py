@@ -550,12 +550,12 @@ class FullyShardedDataParallel(nn.Module):
         # buffers
         ignored_modules = self._get_ignored_modules(module, ignored_modules)
         ignored_params = self._get_ignored_parameters(ignored_modules)
-        ignored_buffers = self._get_ignored_buffers(ignored_modules)
         # Compute the names to ignore for full state dict cloning (i.e. those
-        # of the ignored modules' parameters and buffers)
-        self._ignored_tensor_names = self._get_ignored_tensor_names(
-            module, ignored_params, ignored_buffers,
+        # of the ignored modules' parameters and all modules' buffers)
+        self._ignored_param_names = self._get_ignored_param_names(
+            module, ignored_params,
         )
+        self._buffer_names = self._get_buffer_names(module)
         # NOTE: Since the names are computed at construction time, if the user
         # changes them later, then FSDP will not properly ignore them. However,
         # the `FlatParameter` implementation already relies on this assumption.
@@ -801,21 +801,14 @@ class FullyShardedDataParallel(nn.Module):
             if not isinstance(p, FlatParameter)
         )
 
-    def _get_ignored_buffers(
-        self,
-        ignored_modules: Set[torch.nn.Module],
-    ) -> Set[torch.Tensor]:
-        """Returns the buffers of the modules in ``ignored_modules`` as a
-        :class:`set`."""
-        return set(b for m in ignored_modules for b in m.buffers())
-
-    def _get_ignored_tensor_names(
+    def _get_ignored_param_names(
         self,
         module: torch.nn.Module,
         ignored_params: Set[torch.nn.Parameter],
-        ignored_buffers: Set[torch.Tensor],
     ) -> Set[str]:
-        """Returns a :class:`set` of ignored parameter and buffer names."""
+        """Returns a :class:`set` of tensor names to be ignored when cloning in
+        the full post state dict hook. This includes ignored parameters' and
+        all buffers' names."""
         param_to_unflat_param_names = _get_param_to_unflat_param_names(module)
         ignored_param_names = set()
         for param in ignored_params:
@@ -825,14 +818,13 @@ class FullyShardedDataParallel(nn.Module):
                 "name, and `_get_ignored_parameters()` should have excluded " \
                 "them; check `_get_param_to_unflat_param_names()`"
             ignored_param_names.add(unflat_param_names[0])
-        buffer_to_buffer_name = _get_buffer_to_buffer_name(module)
-        ignored_buffer_names = set(
-            buffer_to_buffer_name[b] for b in ignored_buffers
-        )
-        assert ignored_param_names.isdisjoint(ignored_buffer_names), \
-            "Expects parameter and buffer names to be disjoint but got " \
-            f"parameters {ignored_param_names} and buffers {ignored_buffer_names}"
-        return ignored_param_names.union(ignored_buffer_names)
+        return ignored_param_names
+
+    def _get_buffer_names(self, module: torch.nn.Module) -> Set[str]:
+        """Returns a :class:`set` of buffer names to be ignored when cloning in
+        the full post state dict hook. Buffers do not need to be cloned since
+        they are not sharded."""
+        return _get_buffer_to_buffer_name(module).values()
 
     @classmethod
     def _check_wrapped(cls, begin_module, check_fn, err_fn):
@@ -1409,10 +1401,11 @@ class FullyShardedDataParallel(nn.Module):
                 m._fsdp_graph_order = self._fsdp_graph_order
                 # Give each non-root FSDP module an alias to the root's
                 # execution order data structure and ignored parameter and
-                # buffer names since only the root's names are fully prefixed
-                # like the state dict keys
+                # all buffer names since only the root's names are fully
+                # prefixed like the state dict keys
                 m._exec_order_data = self._exec_order_data
-                m._ignored_tensor_names = self._ignored_tensor_names
+                m._ignored_param_names = self._ignored_param_names
+                m._buffer_names = self._buffer_names
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -1544,10 +1537,20 @@ class FullyShardedDataParallel(nn.Module):
         if not state_dict:
             return state_dict
 
+        offload_to_cpu = self._state_dict_config.offload_to_cpu
+        cpu_device = torch.device("cpu")
         for key in state_dict:
+            clean_key = clean_tensor_name(key)
+            # Do not need to clone buffers
+            if clean_key in self._buffer_names:
+                # Offload the buffer to CPU if needed since it is not done in
+                # `_summon_full_params()`
+                if offload_to_cpu and state_dict[key].device != cpu_device:
+                    state_dict[key] = state_dict[key].to(cpu_device)
+                continue
             # Clone non-ignored parameters before exiting the
             # `_summon_full_params()` context
-            if clean_tensor_name(key) not in self._ignored_tensor_names:
+            if clean_key not in self._ignored_param_names:
                 if not getattr(state_dict[key], "_has_been_cloned", False):
                     try:
                         state_dict[key] = state_dict[key].clone().detach()
