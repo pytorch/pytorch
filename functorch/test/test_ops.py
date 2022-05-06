@@ -404,8 +404,11 @@ class TestOperators(TestCase):
             'nn.functional.logsigmoid',
         }
         if op.name in VJP_DECOMP:
-            ref_jvp = simulate_jvp
-        elif not op.supports_forward_ad:
+            ref_jvp_local = simulate_jvp
+        else:
+            ref_jvp_local = ref_jvp
+
+        if not op.supports_forward_ad:
             self.skipTest("Skipped! Forward AD not supported.")
             return
 
@@ -422,7 +425,7 @@ class TestOperators(TestCase):
             primals = tree_map(lambda x: x.detach(), primals)
             tangents = tree_map(lambda x: torch.randn_like(x), primals)
             primal_outs, tangent_outs = jvp(fn, primals, tangents)
-            expected_primal_outs, expected_tangent_outs = ref_jvp(fn, primals, tangents)
+            expected_primal_outs, expected_tangent_outs = ref_jvp_local(fn, primals, tangents)
             self.assertEqual(primal_outs, expected_primal_outs)
             self.assertEqual(tangent_outs, expected_tangent_outs)
 
