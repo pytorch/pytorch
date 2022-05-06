@@ -34,15 +34,21 @@ from torchgen.api.types import (
 
 _valueT = None
 
+
 def getValueT():
     global _valueT
     if not _valueT:
-        raise NotImplementedError("The value type needs to be set with setValueT() in run_gen_lazy_tensor()")
+        raise NotImplementedError(
+            "The value type needs to be set with setValueT() in run_gen_lazy_tensor()"
+        )
 
     return _valueT
+
+
 def setValueT(val):
     global _valueT
     _valueT = val
+
 
 # this is a bad hack. I need to refactor the data model to represent each arg in the schema as an object,
 # making it easier to represent special properties of an arg.
