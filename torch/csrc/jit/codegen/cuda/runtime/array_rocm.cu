@@ -113,7 +113,7 @@ __device__ void loadLocalToGlobal(
     case 8: {
       if (is_volatile) {
         uint2 const& _from = *reinterpret_cast<uint2*>(from);
-        volatile uint2 & _to = *reinterpret_cast<volatile uint2*>(to);
+        uint2 & _to = *reinterpret_cast<uint2*>(to);
         _to = _from;
       } else {
         uint2 const& _from = *reinterpret_cast<uint2*>(from);
@@ -125,7 +125,7 @@ __device__ void loadLocalToGlobal(
     case 12: {
       if (is_volatile) {
         uint3 const& _from = *reinterpret_cast<uint3*>(from);
-        volatile uint3 & _to = *reinterpret_cast<volatile uint3*>(to);
+        uint3 & _to = *reinterpret_cast<uint3*>(to);
         _to = _from;
       } else {
         uint3 const& _from = *reinterpret_cast<uint3*>(from);
@@ -137,7 +137,7 @@ __device__ void loadLocalToGlobal(
     case 16: {
       if (is_volatile) {
         uint4 const& _from = *reinterpret_cast<uint4*>(from);
-        volatile uint4 & _to = *reinterpret_cast<volatile uint4*>(to);
+        uint4 & _to = *reinterpret_cast<uint4*>(to);
         _to = _from;
       } else {
         uint4 const& _from = *reinterpret_cast<uint4*>(from);
@@ -162,7 +162,7 @@ __device__ void loadGlobalToLocal(
     case 8: {
       if (is_volatile) {
         uint2& _to = *reinterpret_cast<uint2*>(to);
-        volatile uint2& _from = *reinterpret_cast<volatile uint2*>(from);
+        uint2& _from = *reinterpret_cast<uint2*>(from);
         _to = _from;
       } else {
         uint2& _to = *reinterpret_cast<uint2*>(to);
@@ -174,7 +174,7 @@ __device__ void loadGlobalToLocal(
     case 12: {
       if (is_volatile) {
         uint3& _to = *reinterpret_cast<uint3*>(to);
-        volatile uint3& _from = *reinterpret_cast<volatile uint3*>(from);
+        uint3& _from = *reinterpret_cast<uint3*>(from);
       } else {
         uint3& _to = *reinterpret_cast<uint3*>(to);
         uint3& _from = *reinterpret_cast<uint3*>(from);
@@ -184,7 +184,7 @@ __device__ void loadGlobalToLocal(
     case 16: {
       if (is_volatile) {
         uint4& _to = *reinterpret_cast<uint4*>(to);
-        volatile uint4& _from = *reinterpret_cast<volatile uint4*>(from);
+        uint4& _from = *reinterpret_cast<uint4*>(from);
       } else {
         uint4& _to = *reinterpret_cast<uint4*>(to);
         uint4& _from = *reinterpret_cast<uint4*>(from);
