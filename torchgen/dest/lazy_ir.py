@@ -137,14 +137,15 @@ class GenLazyIR(ABC):
         )
 
         value_comparsion = []
-        for arg in schema.positional_args:
-            if arg.is_lazy_value:
-                if isinstance(arg.lazy_type, OptionalCType):
-                    value_comparsion.append(
-                        f"operand(i++) == {arg.name}.value_or(kNullValue)"
-                    )
-                else:
-                    value_comparsion.append(f"operand(i++) == {arg.name}")
+        for arg in schema.positional_values:
+            if isinstance(arg.lazy_type, OptionalCType):
+                value_comparsion.append(
+                    f"operand(i++) == {arg.name}.value_or(kNullValue)"
+                )
+            else:
+                value_comparsion.append(f"operand(i++) == {arg.name}")
+        for arg in schema.positional_scalars:
+            value_comparsion.append(f"this->{arg.name} == {arg.name}")
         for arg in schema.keyword_values:
             value_comparsion.append(f"operand(i++) == {arg.name}")
         for arg in schema.keyword_scalars:

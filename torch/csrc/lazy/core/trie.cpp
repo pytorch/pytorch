@@ -64,6 +64,7 @@ void TrieCache::Insert(NodePtr ir_node) {
 }
 
 void TrieCache::Clear() {
+  ResetCurrent();
   // Clear at the root level should be sufficient because all the nodes
   // are created as shared_ptr.
   root_->successors.clear();

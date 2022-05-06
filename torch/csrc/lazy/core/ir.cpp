@@ -26,7 +26,9 @@ std::string Output::ToString() const {
 }
 
 bool Output::operator==(const Value& rhs) const {
-  return node->hash() == rhs.node->hash() && index == rhs.index;
+  // Either side could be kNullValue which has node as nullptr
+  return (!node == !rhs.node) && (!node ||
+      (node->hash() == rhs.node->hash() && index == rhs.index));
 }
 
 hash_t Value::hash() const {

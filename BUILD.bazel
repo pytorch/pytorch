@@ -123,6 +123,7 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
         "torch/csrc/lazy/generated/LazyIr.h",
+        "torch/csrc/lazy/generated/LazyIr.cpp",
         "torch/csrc/lazy/generated/LazyNativeFunctions.h",
         "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
         "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",

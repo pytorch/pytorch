@@ -194,11 +194,10 @@ const T* NodeCast(const Node* node) {
   if (T::class_op_kind != node->op()) {
     return nullptr;
   }
-#ifdef NDEBUG
-  return static_cast<const T*>(node);
-#else
-  return &dynamic_cast<const T&>(*node);
-#endif
+  // TODO: Some IR classes share the same opkind, such as Mean and MeanDim, so
+  // static_cast is not safe here. Unless we have opkind unique for each class,
+  // we have to use dynamic_cast here.
+  return dynamic_cast<const T*>(node);
 }
 
 
