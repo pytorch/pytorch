@@ -816,42 +816,46 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
     org, project = repo.gh_owner_and_name()
     start_time = time.time()
     last_exception = ''
-    while True:
+    elapsed_time = 0.0
+    while elapsed_time < 400 * 60:
         current_time = time.time()
         elapsed_time = current_time - start_time
 
-        if(elapsed_time > 355 * 60):
-            msg = 'Merged timed out after 6 hours. Please contact the pytorch_dev_infra team.'
-            msg += f'The last exception was: {last_exception}'
-            gh_post_comment(org, project, pr_num, msg, dry_run=dry_run)
-            gh_add_labels(org, project, pr_num, ["land-failed"])
-            raise RuntimeError(msg)
 
         pr = GitHubPR(org, project, pr_num)
         try:
-            pr.merge_into(repo, dry_run=dry_run)
+            return pr.merge_into(repo, dry_run=dry_run)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
-            print(f'Merged failed due to: {ex}. Retrying in 60 seconds.')
+            print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
             time.sleep(60)
-        else:
-            return
+    # Finally report timeout back
+    msg = "Merged timed out after 6 hours. Please contact the pytorch_dev_infra team."
+    msg += f"The last exception was: {last_exception}"
+    if not dry_run:
+        gh_add_labels(org, project, pr_num, ["land-failed"])
+    raise RuntimeError(msg)
 
 def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
-
     pr = GitHubPR(org, project, args.pr_num)
+
+    def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
+        msg += f" due to {e}"
+        run_url = os.getenv("GH_RUN_URL")
+        if run_url is not None:
+            msg += f"\nRaised by {run_url}"
+        gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+        import traceback
+        traceback.print_exc()
+
     if args.revert:
         try:
             try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id)
         except Exception as e:
-            msg = f"Reverting PR {args.pr_num} failed due to {e}"
-            run_url = os.getenv("GH_RUN_URL")
-            if run_url is not None:
-                msg += f"\nRaised by {run_url}"
-            gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+            handle_exception(e, f"Reverting PR {args.pr_num} failed")
         return
 
     if pr.is_closed():
@@ -862,18 +866,9 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    def handle_exception(e: Exception) -> None:
-        msg = f"Merge failed due to {e}"
-        run_url = os.getenv("GH_RUN_URL")
-        if run_url is not None:
-            msg += f"\nRaised by {run_url}"
-        gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
-        import traceback
-        traceback.print_exc()
-
     if args.on_green:
         try:
-            merge_on_green(args.pr_num, repo, args.dry_run,)
+            merge_on_green(args.pr_num, repo, dry_run=args.dry_run)
         except Exception as e:
             handle_exception(e)
     else:
