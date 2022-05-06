@@ -1,0 +1,17 @@
+name: mirror
+
+on:
+  pull_request:
+
+jobs:
+  mirror:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
+      - name: Push
+        run: git push origin master:clee2000/test
