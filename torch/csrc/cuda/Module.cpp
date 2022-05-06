@@ -6,6 +6,7 @@
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/cuda/jiterator.h>
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
@@ -214,6 +215,71 @@ PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
   return PyLong_FromVoidPtr(mem);
+  END_HANDLE_TH_ERRORS
+}
+
+// Unpack a PyObject to at::Scalar, throw an exception if it fails
+at::Scalar as_scalar(PyObject* arg) {
+  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
+  // handle most NumPy scalar types except np.float64.
+  if (THPVariable_Check(arg)) {
+    return THPVariable_Unpack(arg).item();
+  }
+
+  if (THPUtils_checkLong(arg)) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
+  }
+
+  if (PyBool_Check(arg)) {
+    return at::Scalar(THPUtils_unpackBool(arg));
+  }
+
+  if (PyComplex_Check(arg)) {
+    return at::Scalar(THPUtils_unpackComplexDouble(arg));
+  }
+  return at::Scalar(THPUtils_unpackDouble(arg));
+}
+
+// Entrypoint for the callable created by torch.cuda.jiterator
+// See jiterator.py for more details
+PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyObject *args){
+  HANDLE_TH_ERRORS
+
+  PyObject* code_string_o = nullptr;
+  PyObject* kernel_name_o = nullptr;
+  PyObject* tensors_o = nullptr;
+  PyObject* kwargs_o = nullptr;
+  if(!PyArg_ParseTuple(args, "OOO|O", &code_string_o, &kernel_name_o, &tensors_o, &kwargs_o)) {
+    return nullptr;
+  }
+
+  std::string code_string = THPUtils_unpackString(code_string_o);
+  std::string kernel_name = THPUtils_unpackString(kernel_name_o);
+
+  THPUtils_assert(PyTuple_Check(tensors_o), "tensors argument is expected to "
+      "be a tuple, but got %s", THPUtils_typename(tensors_o));
+  Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors_o);
+
+  std::vector<at::Tensor> tensors;
+  for(const auto i : c10::irange(num_tensors)) {
+    PyObject *_tensor = PyTuple_GET_ITEM(tensors_o, i);
+    THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
+        "tuple is not a Tensor", i);
+
+    tensors.emplace_back(THPVariable_Unpack(_tensor));
+  }
+
+  std::vector<at::Scalar> extra_args;
+  PyObject *key = nullptr;
+  PyObject *value  = nullptr;
+  Py_ssize_t pos = 0;
+  while (PyDict_Next(kwargs_o, &pos, &key, &value)) {
+    extra_args.emplace_back(as_scalar(value));
+  }
+
+  at::Tensor output = at::cuda::CompileAndLaunchKernel(code_string, kernel_name, tensors, extra_args);
+
+  return THPVariable_Wrap(output);
   END_HANDLE_TH_ERRORS
 }
 
@@ -597,6 +663,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
   {"_cuda_set_sync_debug_mode", THCPModule_cudaSetSyncDebugMode, METH_O, nullptr},
   {"_cuda_get_sync_debug_mode", THCPModule_cudaGetSyncDebugMode, METH_NOARGS, nullptr},
+  {"_cuda_jiterator_compile_and_launch_kernel", THCPModule_cudaJiteratorCompileAndLaunchKernel, METH_VARARGS, nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},

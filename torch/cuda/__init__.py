@@ -767,3 +767,4 @@ from . import sparse
 from . import profiler
 from . import nvtx
 from . import amp
+from . import jiterator

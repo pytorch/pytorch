@@ -123,3 +123,11 @@ NVIDIA Tools Extension (NVTX)
     nvtx.mark
     nvtx.range_push
     nvtx.range_pop
+
+Jiterator (beta)
+-----------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    jiterator._create_jit_fn
