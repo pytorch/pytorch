@@ -253,15 +253,16 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
 
 void IRParser::bypassTypeAnnotationList() {
   int depth = 0;
-  while (!(L.cur().kind == ']' && depth == 1)) {
+  bool bypassed_list = false;
+  while (depth != 0 || !bypassed_list) {
     if (L.cur().kind == '[') {
+      bypassed_list = true;
       depth++;
     } else if (L.cur().kind == ']') {
       depth--;
     }
     L.next();
   }
-  L.next();
 }
 
 /** \brief Parse attribute and add it to the node N.
@@ -347,12 +348,12 @@ void IRParser::parseAttr(Node* n) {
           << "Unexpected annotation (only List and Dict can be parsed)";
     }
     L.next();
-    // use the profiling annotation instead of the `annotate()` type.
-    // so, we throw away the annotation value
+    // ignore the annotations on the IValue constants, and instead recover
+    // type from the Node output
     // Note: we could also use script_type_parser
     bypassTypeAnnotationList();
     L.expect(',');
-    // expect an empty definition
+    // expect an empty definition (note - this isn't always true)
     if (type == "Dict") {
       L.expect('{');
       L.expect('}');
@@ -361,6 +362,7 @@ void IRParser::parseAttr(Node* n) {
       L.expect(']');
     }
     L.expect(')');
+    deferred_empty_container_initializations_.push_back(n);
   } else {
     // scalar
     ParsedLiteral r = parseScalarLiteral(n);

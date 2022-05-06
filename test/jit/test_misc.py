@@ -353,8 +353,11 @@ class TestMisc(JitTestCase):
           return (%3)
         """
         graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret == [])
 
-    def test_parse_ir_single_element_tensor(self):
+    def test_parse_ir_single_element_tensor_positive(self):
         ir = """
         graph():
           %7 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={0}]()
@@ -364,3 +367,16 @@ class TestMisc(JitTestCase):
         func = torch._C._create_function_from_graph("forward", graph)
         ret = func()
         self.assertTrue(ret.numel() == 1)
+        self.assertTrue(len(ret.size()) == 1)
+
+    def test_parse_ir_single_element_tensor_negative(self):
+        ir = """
+        graph():
+          %7 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={-17}]()
+          return (%7)
+        """
+        graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret.numel() == 1)
+        self.assertTrue(len(ret.size()) == 1)
