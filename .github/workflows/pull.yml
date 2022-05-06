@@ -263,26 +263,15 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "windows.4xlarge" },
         ]}
 
+  # please ensure that this and its corresponding job in trunk.yml are in sync
   win-vs2019-cuda11_3-py3-build:
+    # don't run build twice on master
+    if: github.event_name == 'pull_request'
     name: win-vs2019-cuda11.3-py3
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.3-py3
       cuda-version: "11.3"
-
-  win-vs2019-cuda11_3-py3-test:
-    name: win-vs2019-cuda11.3-py3
-    uses: ./.github/workflows/_win-test.yml
-    needs: win-vs2019-cuda11_3-py3-build
-    with:
-      build-environment: win-vs2019-cuda11.3-py3
-      cuda-version: "11.3"
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
-        ]}
 
   linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
