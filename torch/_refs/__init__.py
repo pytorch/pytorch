@@ -671,7 +671,7 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion, wrap_s
         a, b = _convert_dtype(a, b, dtype=computation_dtype)
 
         # Special case CPU scalar tensors to be eligible for device transfer
-        if unwrap_cpu_scalars:
+        if wrap_scalars:
             a, b = _unwrap_cpu_scalars(a, b)
 
         # Broadcasting

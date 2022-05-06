@@ -618,11 +618,6 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
 
 
-@register_decomposition(aten.reciprocal)
-def reciprocal(self: Tensor) -> Tensor:
-    return 1 / self
-
-
 @register_decomposition(aten.logit)
 @pw_cast_for_int_to_real
 def logit(self: Tensor, eps: Optional[float] = None) -> Tensor:
