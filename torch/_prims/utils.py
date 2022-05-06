@@ -580,18 +580,20 @@ def check_same_dtype(*args):
 
     for arg in args:
         if isinstance(arg, Number):
-            if scalar_type is None:
-                scalar_type = type(arg)
+            # Scalar type checking is disabled (and may be removed in the future)
+            continue
+            # if scalar_type is None:
+            #     scalar_type = type(arg)
 
-            if scalar_type is not type(arg):
-                msg = (
-                    "Scalar of type "
-                    + str(type(arg))
-                    + " is not the expected type of "
-                    + str(scalar_type)
-                    + "!"
-                )
-                raise RuntimeError(msg)
+            # if scalar_type is not type(arg):
+            #     msg = (
+            #         "Scalar of type "
+            #         + str(type(arg))
+            #         + " is not the expected type of "
+            #         + str(scalar_type)
+            #         + "!"
+            #     )
+            #     raise RuntimeError(msg)
         elif isinstance(arg, TensorLike):
             if full_dtype is None:
                 full_dtype = arg.dtype

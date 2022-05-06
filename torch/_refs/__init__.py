@@ -222,7 +222,9 @@ def _make_elementwise_unary_reference(
     prim: Callable, *, type_promotion_kind
 ) -> Callable:
     @out_wrapper
-    @elementwise_type_promotion_wrapper(type_promotion_kind=type_promotion_kind)
+    @elementwise_type_promotion_wrapper(
+        type_promoting_args=("a",), type_promotion_kind=type_promotion_kind
+    )
     def _ref(a: Tensor) -> Tensor:
         return prim(a)
 
@@ -356,7 +358,9 @@ def _make_elementwise_binary_reference(
     prim: Callable, *, type_promotion_kind
 ) -> Callable:
     @out_wrapper
-    @elementwise_type_promotion_wrapper(type_promotion_kind=type_promotion_kind)
+    @elementwise_type_promotion_wrapper(
+        type_promoting_args=("a", "b"), type_promotion_kind=type_promotion_kind
+    )
     def _ref(
         a: Union[Tensor, NumberType],
         b: Union[Tensor, NumberType],
@@ -370,7 +374,8 @@ def _make_elementwise_binary_reference(
 # Add has its own implementation because it has an alpha argument
 @out_wrapper
 @elementwise_type_promotion_wrapper(
-    scalar_args=("alpha",), type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH
+    type_promoting_args=("a", "b"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
 )
 def add(
     a: Union[TensorLikeType, NumberType],
@@ -384,7 +389,17 @@ def add(
     a, b = _maybe_broadcast(a, b)
 
     if alpha is not None:
+        dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
+        python_type = utils.dtype_to_type(dtype)
+        if not utils.is_weakly_lesser_type(type(alpha), python_type):
+            msg = (
+                "alpha argument of type {0} cannot be safely cast to type {1}!".format(
+                    type(alpha), python_type
+                )
+            )
+            raise ValueError(msg)
         b = prims.mul(b, alpha)
+
     return prims.add(a, b)
 
 
@@ -515,7 +530,8 @@ pow = _make_elementwise_binary_reference(
 # sub has its own implementation because it has an alpha argument
 @out_wrapper
 @elementwise_type_promotion_wrapper(
-    scalar_args=("alpha",), type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH
+    type_promoting_args=("a", "b"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
 )
 def sub(
     a: Union[TensorLikeType, NumberType],
@@ -529,7 +545,17 @@ def sub(
     a, b = _maybe_broadcast(a, b)
 
     if alpha is not None:
+        dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
+        python_type = utils.dtype_to_type(dtype)
+        if not utils.is_weakly_lesser_type(type(alpha), python_type):
+            msg = (
+                "alpha argument of type {0} cannot be safely cast to type {1}!".format(
+                    type(alpha), python_type
+                )
+            )
+            raise ValueError(msg)
         b = prims.mul(b, alpha)
+
     return prims.sub(a, b)
 
 
@@ -719,7 +745,8 @@ def amax(
 
 @out_wrapper
 @elementwise_type_promotion_wrapper(
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    type_promoting_args=("tensors",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     _dim = utils.canonicalize_dims(tensors[0].ndim, dim)

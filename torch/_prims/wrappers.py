@@ -62,15 +62,18 @@ class elementwise_type_promotion_wrapper(object):
     """
     Adds elementwise type promotion to a Python reference implementation.
 
-    type_promoting_args can optionally specify the names of arguments that should participate
-    in type promotion. If unspecified it defaults to all possible Tensor arguments except out.
+    Takes two kwargs, type_promoting_args and type_promotion_kind.
 
-    scalar_args can optionally specify the names of Number-only arguments that should not participate in
-    type promotion but validate that they can be safely cast to the computation dtype's corresponding
-    Python type.
+    type_promoting_args must be a string Sequence specifiying the argument names of all
+    arguments that participate in type promotion (and should be type promoted). If the
+    arg specifies a Sequence-type then every element of the Sequence will participate in
+    type promotion.
 
-    Finally, safe_cast_to can optionally specify the names of arguments that should not participate
-    in type promotion but validate that they can be safely to from the result dtype.
+    type_promotion_kind must be one of the kinds specified by ELEMENTWISE_TYPE_PROMOTION_KIND.
+    See its documentation for details.
+
+    Other type promotion behavior, like validating the Python type of scalar arguments, must
+    be handled separately.
     """
 
     def __init__(
@@ -78,28 +81,12 @@ class elementwise_type_promotion_wrapper(object):
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
         type_promoting_args: Sequence[str] = None,
-        scalar_args: Sequence[str] = None,
-        safe_cast_to: Sequence[str] = None
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
-        self.scalar_args = scalar_args
-        self.safe_cast_to = safe_cast_to
 
     def __call__(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
-
-        # if no type promoting args are specified then all args that can
-        # possibly be tensors are considered, except out
-        if self.type_promoting_arg_names is None:
-            self.type_promoting_arg_names = []
-            for k, v in fn.__annotations__.items():
-                if k == "out":
-                    msg = "Found out argument when applying type promotion decorator! Apply the out wrapper after this!"
-                    raise ValueError(msg)
-
-                if _annotation_has_type(typ=torch.Tensor, annotation=v):
-                    self.type_promoting_arg_names.append(k)
 
         @wraps(fn)
         def _fn(*args, **kwargs):
@@ -114,7 +101,7 @@ class elementwise_type_promotion_wrapper(object):
 
             compute_dtype, result_dtype = utils.elementwise_dtypes(
                 *flattened_type_promoting_args,
-                type_promotion_kind=self.type_promotion_kind
+                type_promotion_kind=self.type_promotion_kind,
             )
 
             promoted_args = {
@@ -123,33 +110,6 @@ class elementwise_type_promotion_wrapper(object):
                 if x in bound.arguments.keys()
             }
             bound.arguments.update(promoted_args)
-
-            if self.scalar_args is not None:
-                scalar_promotion_type = utils.dtype_to_type(compute_dtype)
-                promoted_scalars = {
-                    x: _maybe_convert_to_type(
-                        bound.arguments[x], typ=scalar_promotion_type
-                    )
-                    for x in self.scalar_args
-                    if x in bound.arguments.keys()
-                }
-                bound.arguments.update(promoted_scalars)
-
-            if self.safe_cast_to is not None:
-                to_validate = (
-                    bound.arguments[x]
-                    for x in self.safe_cast_to
-                    if x in bound.arguments.keys()
-                )
-                for x in to_validate:
-                    if not utils.can_safe_cast_to(
-                        cast_to=x.dtype, cast_from=result_dtype
-                    ):
-                        raise ValueError(
-                            "Can't safely cast to {0} from {1}!".format(
-                                x.dtype, result_dtype
-                            )
-                        )
 
             result = fn(**bound.arguments)
 
