@@ -249,6 +249,8 @@ class _DataPipeMeta(GenericMeta):
     r"""
     Metaclass for `DataPipe`. Add `type` attribute and `__init_subclass__` based
     on the type, and validate the return hint of `__iter__`.
+
+    Note that there is subclass `_IterDataPipeMeta` specifically for `IterDataPipe`.
     """
     type: _DataPipeType
 
@@ -336,6 +338,9 @@ class _DataPipeMeta(GenericMeta):
 
 
 class _IterDataPipeMeta(_DataPipeMeta):
+    r"""
+    Metaclass for `IterDataPipe` and inherits from `_DataPipeMeta`. Aad a hook function to `__iter__`.
+    """
 
     def __new__(cls, name, bases, namespace, **kwargs):
         if '__iter__' in namespace:
@@ -374,7 +379,7 @@ def _generate_iterdatapipe_msg(datapipe):
 
 def _check_iterator_valid(datapipe, iterator_id) -> None:
     r"""
-    Given an instance of a DataPipe and an iterator ID, check if they match, and if not, raises an exception.
+    Given an instance of a DataPipe and an iterator ID, check if the IDs match, and if not, raises an exception.
     """
     if hasattr(datapipe, "_is_child_datapipe") and datapipe._is_child_datapipe is True:
         pass  # TODO: Add logic for multiple ChildDataPipe
@@ -392,7 +397,7 @@ def _check_iterator_valid(datapipe, iterator_id) -> None:
 
 def _set_datapipe_valid_iterator_id(datapipe):
     r"""
-    Given a DataPipe, set or update its valid iterator ID.
+    Given a DataPipe, updates its valid iterator ID.
     """
     if datapipe._valid_iterator_id is None:
         datapipe._valid_iterator_id = 0
@@ -410,7 +415,7 @@ def hook_iterator(namespace, profile_name):
         return torch.autograd.profiler.record_function(profile_name)
 
     class IteratorDecorator:
-        """Wrap the iterator return result by adding __next__"""
+        """Wrap the iterator and modifying its `__next__` method"""
         def __init__(self, iterator, source_dp, iterator_id):
             self.iterator = iterator
             self.source_dp = source_dp
@@ -430,7 +435,7 @@ def hook_iterator(namespace, profile_name):
             return getattr(self.iterator, name)
 
     func = namespace['__iter__']
-    iterator_id: Optional[int] = None
+    iterator_id: Optional[int] = None  # This ID is tied to each created iterator
 
     # ``__iter__`` of IterDataPipe is a generator function
     if inspect.isgeneratorfunction(func):
@@ -460,16 +465,10 @@ def hook_iterator(namespace, profile_name):
                 raise
 
         namespace['__iter__'] = wrap_generator
-    else:  # ``__iter__`` of IterDataPipe is not a generator function
+    else:  # ``__iter__`` of IterDataPipe is NOT a generator function
         # IterDataPipe is an iterator with both ``__iter__`` and ``__next__``
         # And ``__iter__`` may or may not return `self`
-
-        # TODO: The two todos below are probably not needed
-        # TODO: We need to check if they return `self` or not, not `__next__`
-        # TODO: Wrap it around and return a wrapper object with an ID and a pointer to the original one
-        #       This will allow invalidation
-        #       Very similar to the third case below (need to return a wrapper around it)
-        if '__next__' in namespace:
+        if '__next__' in namespace:  # If `__next__` exists, put a wrapper around it
             next_func = namespace['__next__']
 
             @functools.wraps(next_func)
@@ -490,8 +489,8 @@ def hook_iterator(namespace, profile_name):
 
             namespace['__next__'] = wrap_next
 
-            # TODO: What if the __next__ and __iter__ do something completely unrelated? That may be an issue
-            #       but the user is probably violating the iterator protocol
+            # Note that if the `__next__` and `__iter__` do something completely unrelated? It may cause issue but
+            # the user will be violating the iterator protocol
 
         # Regardless if `__next__` exists or not, `__iter__` needs a wrapper to track the number of valid iterators
         @functools.wraps(func)
@@ -503,17 +502,6 @@ def hook_iterator(namespace, profile_name):
             return IteratorDecorator(iter_ret, datapipe, iterator_id)
 
         namespace['__iter__'] = wrap_iter
-
-        # else:  # Object has ``__iter__`` but it doesn't have ``__next__``
-        #     @functools.wraps(func)
-        #     def wrap_iter(*args, **kwargs):
-        #         iter_ret = func(*args, **kwargs)
-        #         datapipe = args[0]
-        #         nonlocal iterator_id
-        #         iterator_id = _set_datapipe_valid_iterator_id(datapipe)
-        #         return IteratorDecorator(iter_ret, datapipe, iterator_id)
-        #
-        #     namespace['__iter__'] = wrap_iter
 
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
