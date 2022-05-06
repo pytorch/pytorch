@@ -1282,10 +1282,6 @@ void sampled_addmm_out_sparse_csr(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(B.layout() == Layout::Strided);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C.is_sparse_csr());
 
-  auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(A);
-  auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(B);
-  auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C);
-
   cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
   cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
@@ -1293,6 +1289,9 @@ void sampled_addmm_out_sparse_csr(
       C.scalar_type(),
       "sampled_addmm_out_sparse_csr",
       [&] {
+        auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(A);
+        auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(B);
+        auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C);
         auto beta_ = beta.to<scalar_t>();
         auto alpha_ = alpha.to<scalar_t>();
         auto compute_type = at::cuda::getCudaDataType<scalar_t>();
