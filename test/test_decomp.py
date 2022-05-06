@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     ops,
     instantiate_device_type_tests,
+    skipCUDAVersionIn,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 
@@ -331,6 +332,7 @@ class TestDecomp(TestCase):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipCUDAVersionIn([(11, 6)])  # Tracked in https://github.com/pytorch/pytorch/issues/76961
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
