@@ -22,7 +22,7 @@ NodePtr ReuseNode(Args&&... args) {
   return nullptr;
 }
 
-// Caching an IR node into the TrieCache
+// Caching an IR node into TrieCache
 static inline void CacheNode(NodePtr node) {
   if (FLAGS_torch_lazy_reuse_ir) {
     TrieCache::Get()->Insert(std::move(node));

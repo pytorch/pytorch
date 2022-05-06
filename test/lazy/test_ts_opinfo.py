@@ -184,10 +184,8 @@ class TestLazyOpInfo(TestCase):
             r_actual = op(*args, **kwargs)
 
             torch._lazy.mark_step()
-            torch._lazy.ir_cache.dump("trie.dot")
             assert_allclose_rec((r_actual, r_exp))
 
-        torch._lazy.ir_cache.dump("trie.dot")
         torch._lazy.ir_cache.reset()
         torch._lazy.config.set_reuse_ir(False)
 

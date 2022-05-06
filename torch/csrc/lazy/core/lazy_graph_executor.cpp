@@ -473,7 +473,7 @@ void LazyGraphExecutor::MarkStep(const BackendDevice& device) {
   DeviceContextArena::Get()->MarkStep(device);
   ScopePusher::ResetScopes();
   g_tls_data.Reset();
-  // Move the current pointer of TrieCache back to its root
+  // Move TrieCache's current pointer back to its root
   TrieCache::Get()->ResetCurrent();
 }
 
