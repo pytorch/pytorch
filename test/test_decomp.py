@@ -325,7 +325,7 @@ def any_unsupported(args, kwargs):
             # to handle correctly.  Maybe they should.
             return any([
                 t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
-                t.is_nested, torch._is_functional_tensor(t), t.is_neg(), t.is_conj(),
+                t.is_nested, torch._is_functional_tensor(t),
             ])
         elif torch.overrides.is_tensor_like(t):
             # Decompositions will generally change the behavior of Tensor-like
