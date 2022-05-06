@@ -187,13 +187,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.ReLU6,
             F.relu6,
         ]),
-        # BNReLU2d
-        set([
-            nni.BNReLU2d,
-        ]),
-        set([
-            nni.BNReLU3d,
-        ]),
         # F.elu
         set([
             F.elu,
