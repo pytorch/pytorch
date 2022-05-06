@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <c10/util/irange.h>
 #include <ATen/FuncTorchTLS.h>
+#include <iostream>
 
 namespace at {
 namespace functorch {
@@ -441,7 +442,7 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   return dynamicLayerFrontFallbackOperator(op, stack, false);
 }
 
-void dynamicLayerFrontFallbackWithOpId(
+void dynamicLayerFrontFallBackWithDecomp(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
   return dynamicLayerFrontFallbackOperator(op, stack, true);
@@ -464,10 +465,10 @@ TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_BACK_MODE_KEY, m) {
 }
 
 #define JVP_DECOMP(op) \
-  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallbackWithOpId>());
+  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallBackWithDecomp>());
 
 #define JVP_DECOMP2(op, overload) \
-  m.impl(#op "." #overload, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallbackWithOpId>());
+  m.impl(#op "." #overload, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallBackWithDecomp>());
 
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   JVP_DECOMP(nll_loss_backward);
@@ -476,6 +477,8 @@ TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   JVP_DECOMP(l1_loss_backward);
   JVP_DECOMP(_log_softmax_backward_data);
   JVP_DECOMP(_softmax_backward_data);
+  OP_DECOMPOSE(log_sigmoid);
+  JVP_DECOMP(log_sigmoid_forward);
 }
 
 
