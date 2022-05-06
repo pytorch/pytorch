@@ -832,7 +832,6 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
     # Finally report timeout back
     msg = "Merged timed out after 6 hours. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
-    gh_post_comment(org, project, pr_num, msg, dry_run=dry_run)
     if not dry_run:
         gh_add_labels(org, project, pr_num, ["land-failed"])
     raise RuntimeError(msg)
