@@ -386,30 +386,24 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     new_connections = []
     for config in backend_config_dict['configs']:
 
-        if 'pattern' in config and 'fused_module' in config:
+        if 'pattern' not in config:
+            continue
+
+        # format: (c, (b, a))
+        pattern = config['pattern']
+        first_element = pattern
+        # look from the end, because pattern is in reverse order
+        while isinstance(first_element, (list, tuple)):
+            first_element = first_element[-1]
+
+        if 'fused_module' in config:
             # case 1: pattern fuses a pattern of ops into an op
             # example: nn.Conv1d, nn.ReLU fused into nni.ConvReLU1d
-
-            assert 'qat_module' not in config
-            # format: (c, (b, a))
-            pattern = config['pattern']
-            first_element = pattern
-            # look from the end, because pattern is in reverse order
-            while isinstance(first_element, (list, tuple)):
-                first_element = first_element[-1]
             new_connections.append((first_element, config['fused_module']))
 
-        elif 'pattern' in config and 'qat_module' in config:
+        if 'qat_module' in config:
             # case 2: pattern swaps a module into a QAT module
             # example: nni.ConvReLU1d swapped into nniqat.ConvReLU1d
-
-            assert 'fused_module' not in config
-            # format: (c, (b, a))
-            pattern = config['pattern']
-            first_element = pattern
-            # look from the end, because pattern is in reverse order
-            while isinstance(first_element, (list, tuple)):
-                first_element = first_element[-1]
             new_connections.append((first_element, config['qat_module']))
 
         # TODO(future PR): add more cases here
