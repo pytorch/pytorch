@@ -231,7 +231,7 @@ static bool isContiguous(
     return false;
   }
 
-  return *strides == TensorType::contiguousStridesOf(*sizes);
+  return *strides == TensorType::contiguousStridesOf(*sizes, memory_format);
 }
 
 // The fuser only supports conv2d with very specific properties:
@@ -509,8 +509,8 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
   auto outputType = findDtypeForValue(v);
   std::vector<ExprHandle> outputShape = sizesForValue(v);
-  std::vector<ExprHandle> outputStrides;
-  if (is_channels_last_contiguous && (!is_contiguous)) {
+  std::vector<ExprHandle> outputStrides = {};
+  if (memory_layout_policy_ == MemoryLayoutPolicy::kChannelsLastNdContiguous) {
     outputStrides =
         c10::fmap<ExprHandle>(make_channels_last_strides(outputShape));
   } else {
@@ -963,6 +963,17 @@ std::vector<torch::jit::StrideInput>& TensorExprKernel::
   TORCH_INTERNAL_ASSERT(false);
 }
 
+torch::jit::StrideInput& TensorExprKernel::getSymbolicOutputStrideDesc(
+    const torch::jit::Value* value) {
+  for (size_t i : c10::irange(graph_->outputs().size())) {
+    if (value == graph_->outputs().at(i)) {
+      TORCH_INTERNAL_ASSERT(sym_stride_outputs_.count(i));
+      return sym_stride_outputs_[i];
+    }
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 std::vector<ExprHandle> TensorExprKernel::getInputStrides(
     const torch::jit::Value* input,
     const std::vector<ExprHandle>& inputTensorDims) {
@@ -1037,17 +1048,25 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& outputs = input->owningGraph()->outputs();
   std::unordered_set<const Value*> outputs_set(outputs.begin(), outputs.end());
 
-  auto is_concrete_cont = [](const torch::jit::Value* input) {
+  auto is_concrete_cont = [](const torch::jit::Value* input,
+                             const MemoryLayoutPolicy& mem_layout_policy) {
     if (input->isCompleteTensor()) {
-      return isContiguous(input);
+      auto mem_layout = (mem_layout_policy == MemoryLayoutPolicy::kContiguous)
+          ? at::MemoryFormat::Contiguous
+          : at::MemoryFormat::ChannelsLast;
+      return isContiguous(input, mem_layout);
     } else {
       return false;
     }
   };
 
-  auto is_symbolic_cont = [](std::vector<torch::jit::StrideInput> desc) {
+  auto is_symbolic_cont = [](std::vector<torch::jit::StrideInput> desc,
+                             const MemoryLayoutPolicy& mem_layout_policy) {
     if (desc.size() == 1) {
-      return desc[0] == torch::jit::StrideInput::TENSOR_CONT;
+      auto mem_layout = (mem_layout_policy == MemoryLayoutPolicy::kContiguous)
+          ? torch::jit::StrideInput::TENSOR_CONT
+          : torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST;
+      return desc[0] == mem_layout;
     } else {
       return false;
     }
@@ -1057,11 +1076,13 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
-      bool contiguous_concrete_tensor = is_concrete_cont(input);
+      bool contiguous_concrete_tensor =
+          is_concrete_cont(input, memory_layout_policy_);
       bool contiguous_symbolic_tensor = false;
       if (has_symbolic_shapes_) {
         auto desc = getSymbolicInputStrideDesc(input);
-        contiguous_symbolic_tensor = is_symbolic_cont(desc);
+        contiguous_symbolic_tensor =
+            is_symbolic_cont(desc, memory_layout_policy_);
       }
 
       // Get input size and strides
@@ -1232,15 +1253,21 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
       buildErrorMessage(
           "Ouput tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
-  // output is contiguous, no work to do
-  auto stride_desc = tensorOutputStrideDesc_[v->offset()];
-  if (stride_desc == torch::jit::StrideInput::TENSOR_CONT) {
+  TORCH_INTERNAL_ASSERT(buf != nullptr);
+  TORCH_INTERNAL_ASSERT(tt != nullptr);
+  TORCH_INTERNAL_ASSERT(tt->symbolic_sizes().rank() != c10::nullopt);
+
+  auto stride_desc = getSymbolicOutputStrideDesc(v);
+  auto memory_format = (stride_desc == torch::jit::StrideInput::TENSOR_CONT)
+      ? at::MemoryFormat::Contiguous
+      : at::MemoryFormat::ChannelsLast;
+  // output is contiguous with specified memory format, no work to do
+  if (buf->is_contiguous(memory_format)) {
     return Tensor(buf, nullptr);
   }
 
   TORCH_INTERNAL_ASSERT(
-      tensorOutputStrideDesc_[v->offset()] ==
-      torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST);
+      stride_desc == torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST);
   auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
   auto strides = make_channels_last_strides(sizes);
   // For a tensor with dimensions N C H W, channels last
@@ -1274,7 +1301,12 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
       tt->sizes().concrete_sizes(),
       buildErrorMessage("Output shapes are unknown."));
   auto sizes = *tt->sizes().concrete_sizes();
-  std::vector<int64_t> default_strides = TensorType::contiguousStridesOf(sizes);
+  at::MemoryFormat memory_format =
+      (memory_layout_policy_ == MemoryLayoutPolicy::kContiguous)
+      ? c10::MemoryFormat::Contiguous
+      : c10::MemoryFormat::ChannelsLast;
+  std::vector<int64_t> default_strides =
+      TensorType::contiguousStridesOf(sizes, memory_format);
   if (!tt->strides().concrete_sizes()) {
     return Tensor(buf, nullptr);
   }
@@ -1482,6 +1514,69 @@ BlockPtr TensorExprKernel::bindAllInputs() {
   return block;
 }
 
+void TensorExprKernel::deduceMemoryLayoutPolicy() {
+  auto _get_preferred_mem_policy =
+      [](const torch::jit::Value* val,
+         const std::vector<torch::jit::StrideInput>& stride_desc_vec) {
+        if (stride_desc_vec.size() > 0) {
+          // Has symbolic stride information
+          auto cur_stride_desc = stride_desc_vec[0];
+          return (cur_stride_desc ==
+                  torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST)
+              ? MemoryLayoutPolicy::kChannelsLastNdContiguous
+              : MemoryLayoutPolicy::kContiguous;
+        }
+
+        const auto& tt = val->type()->expect<TensorType>();
+        // No shape info is present in the graph
+        TORCH_INTERNAL_ASSERT(
+            tt->sizes().concrete_sizes(),
+            buildErrorMessage(
+                "Shapes for " + val->debugName() + " are unknown."));
+        auto sizes = *tt->sizes().concrete_sizes();
+        const std::vector<int64_t> strides = *tt->strides().concrete_sizes();
+        return (c10::is_channels_last_strides_2d(sizes, strides))
+            ? MemoryLayoutPolicy::kChannelsLastNdContiguous
+            : MemoryLayoutPolicy::kContiguous;
+      };
+
+  std::vector<torch::jit::StrideInput> empty_strides = {};
+  auto inputs_all_channels_last = std::all_of(
+      graph_->inputs().begin(), graph_->inputs().end(), [&](const auto& el) {
+        if (el->type()->kind() != TypeKind::TensorType) {
+          return true;
+        }
+        return MemoryLayoutPolicy::kChannelsLastNdContiguous ==
+            _get_preferred_mem_policy(
+                   el,
+                   el->isCompleteTensor() ? empty_strides
+                                          : getSymbolicInputStrideDesc(el));
+      });
+
+  auto outputs_all_channels_last = std::all_of(
+      graph_->outputs().begin(), graph_->outputs().end(), [&](const auto& el) {
+        if (el->type()->kind() != TypeKind::TensorType) {
+          return true;
+        }
+
+        std::vector<torch::jit::StrideInput> output_strides = {};
+        if (has_symbolic_shapes_)
+          output_strides.push_back(getSymbolicOutputStrideDesc(el));
+        return MemoryLayoutPolicy::kChannelsLastNdContiguous ==
+            _get_preferred_mem_policy(
+                   el, has_symbolic_shapes_ ? output_strides : empty_strides);
+      });
+
+  // If the memory layout of all the input and outputs is channels-last
+  // contiguous, the propagated memory layout should be channels-last.
+  // Otherwise, the propagated memory layout is contiguous which is as
+  // same as current situation.
+  memory_layout_policy_ =
+      (inputs_all_channels_last && outputs_all_channels_last)
+      ? MemoryLayoutPolicy::kChannelsLastNdContiguous
+      : MemoryLayoutPolicy::kContiguous;
+}
+
 void TensorExprKernel::compile() {
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
@@ -1492,6 +1587,9 @@ void TensorExprKernel::compile() {
   nInputs_ = graph_->inputs().size();
   nOutputs_ = graph_->outputs().size();
   genInputDebugNames();
+
+  // Determine the propagated memory layout
+  deduceMemoryLayoutPolicy();
 
   // Bind inputs to buffers.
   auto block = bindAllInputs();
