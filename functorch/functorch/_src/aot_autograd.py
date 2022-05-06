@@ -37,7 +37,7 @@ Context = Any
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
-    keys = list(sorted(d.keys()))
+    keys = sorted(d.keys())
     values = [d[key] for key in keys]
     return values, keys
 
@@ -132,6 +132,8 @@ def create_aot_autograd_function(
     The resulting compiled forward and backward graphs are then wrapped up in a
     ``torch.autograd.Function`` object.
     """
+    if decompositions is None:
+        decompositions = {}
     joint_forward_backward = create_joint_forward_backward(flat_fn)
 
     compiled_fw = None
@@ -212,7 +214,7 @@ class PytreeThunk:
         assert self.spec is None or self.spec == spec
         self.spec = spec
         if type(self.spec) in [tuple, list] and all(
-            [isinstance(i, pytree.LeafSpec) for i in spec.children_specs]
+            isinstance(i, pytree.LeafSpec) for i in spec.children_specs
         ):
             self.is_simple = True
         if isinstance(self.spec, pytree.LeafSpec):
@@ -279,7 +281,7 @@ def aot_function(
     fw_compiler: Callable,
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
-    decompositions: Dict = {},
+    decompositions: Optional[Dict] = None,
     hasher_type: str = "StaticShapeHasher",
     static_argnums: Optional[Tuple[int]] = None,
 ) -> Callable:
@@ -579,7 +581,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         fw_compiler: Callable,
         bw_compiler: Optional[Callable] = None,
         partition_fn: Callable = default_partition,
-        decompositions: Dict = {},
+        decompositions: Optional[Dict] = None,
         hasher_type: str = "StaticShapeHasher",
         static_argnums: Optional[Tuple[int]] = None,
     ) -> Callable:
