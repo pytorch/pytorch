@@ -52,6 +52,7 @@ Solvers
 
     solve
     solve_triangular
+    lu_solve
     lstsq
 
 Inverses
@@ -95,6 +96,15 @@ Tensor Operations
 
     tensorinv
     tensorsolve
+
+Misc
+----
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    vander
 
 Experimental Functions
 ----------------------
