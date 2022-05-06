@@ -278,7 +278,7 @@ void multiReductionInliner(
     std::vector<TensorView*> compute_from;
 
     // Grab all tensor views that should be vectorized
-    auto vecotrizable_inputs_outputs =
+    auto vectorizable_inputs_outputs =
         scheduler_utils::getInputsOutputsWithInnerDim(reference_tv, true);
 
     // Inputs to cache
@@ -308,9 +308,9 @@ void multiReductionInliner(
           auto producer_tvs = ir_utils::producerTvsOf(cached_input);
           if (producer_tvs.size() == 1 &&
               std::find(
-                  vecotrizable_inputs_outputs.begin(),
-                  vecotrizable_inputs_outputs.end(),
-                  producer_tvs[0]) != vecotrizable_inputs_outputs.end()) {
+                  vectorizable_inputs_outputs.begin(),
+                  vectorizable_inputs_outputs.end(),
+                  producer_tvs[0]) != vectorizable_inputs_outputs.end()) {
             keep_unrolled.emplace(cached_input);
           }
         } else {
@@ -325,8 +325,19 @@ void multiReductionInliner(
       auto cached_output = cached_output_pair.first;
       auto output = cached_output_pair.second;
 
-      // If an output has multiple consumers don't process here, we want only
-      // terminating outputs
+      if (vectorize) {
+        if (std::find(
+                vectorizable_inputs_outputs.begin(),
+                vectorizable_inputs_outputs.end(),
+                output) != vectorizable_inputs_outputs.end()) {
+          keep_unrolled.emplace(output);
+        }
+      } else {
+        keep_unrolled.emplace(output);
+      }
+
+      // If an output has multiple consumers don't process compute at structure
+      // here, we want only terminating outputs
       if (cached_output->uses().size() > 1) {
         continue;
       }
@@ -348,15 +359,27 @@ void multiReductionInliner(
       cached_output->computeAt(output, pos, ComputeAtMode::BestEffort);
 
       compute_to.push_back(cached_output);
-      if (vectorize) {
-        if (std::find(
-                vecotrizable_inputs_outputs.begin(),
-                vecotrizable_inputs_outputs.end(),
-                output) != vecotrizable_inputs_outputs.end()) {
-          keep_unrolled.emplace(output);
+    }
+
+    {
+      // Add inputs to compute_at that weren't unrolled
+      auto processed_inputs = ir_utils::inputTvsOf(compute_from);
+      std::unordered_set<TensorView*> processed_inputs_set{
+          processed_inputs.begin(), processed_inputs.end()};
+      for (auto inp_tv : ir_utils::filterByType<TensorView>(fusion->inputs())) {
+        if (!processed_inputs_set.count(inp_tv)) {
+          compute_from.push_back(inp_tv);
         }
-      } else {
-        keep_unrolled.emplace(output);
+      }
+
+      auto processed_outputs = ir_utils::inputTvsOf(compute_to);
+      std::unordered_set<TensorView*> processed_outputs_set{
+          processed_outputs.begin(), processed_outputs.end()};
+      for (auto out_tv :
+           ir_utils::filterByType<TensorView>(fusion->outputs())) {
+        if (!processed_outputs_set.count(out_tv) && out_tv->uses().empty()) {
+          compute_to.push_back(out_tv);
+        }
       }
     }
 
@@ -481,19 +504,15 @@ void multiReductionInliner(
     }
     // For topologies where there may not be paths to all inputs/outputs from
     // the reductions, we need to take a similar approach to the unrolled
-    // version and setup of compute at from inputs->outputs that are not
-    // inputs/outputs of the reductions.
+    // version and setup of compute at from inputs->outputs avoiding going
+    // through the reduction expressions. This can be done by grabbing inputs
+    // not on path to a reduction, and computeAt-ing with all outputs. This
+    // doesn't guarantee we don't go through a reduction, but with best effort
+    // it should minimize damage if it does.
     std::vector<TensorView*> compute_to;
-    std::unordered_set<TensorView*> outs_of_reds;
-    {
-      auto outs_of_red_vec = ir_utils::outputTvsOf(ref_tvs);
-      outs_of_reds = std::unordered_set<TensorView*>(
-          outs_of_red_vec.begin(), outs_of_red_vec.end());
-    }
     for (auto out : ir_utils::filterByType<TensorView>(fusion->outputs())) {
       // only terminating outputs
-      if (out->uses().size() || outs_of_reds.find(out) != outs_of_reds.end() ||
-          out->isFusionInput()) {
+      if (out->uses().size() || out->isFusionInput()) {
         continue;
       }
       compute_to.push_back(out);
@@ -517,7 +536,7 @@ void multiReductionInliner(
         compute_from,
         compute_to,
         -1,
-        ComputeAtMode::MostInlined,
+        ComputeAtMode::BestEffort,
         mapped_to_trivial_reduction);
   }
 }

@@ -1030,15 +1030,20 @@ std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
     bool unroll) {
   std::vector<std::pair<TensorView*, TensorView*>> cached_outputs;
   // For intermediate outputs, apply cacheFork
-  for (const auto output :
-       ir_utils::filterByType<TensorView>(fusion->outputs())) {
+  for (auto output : ir_utils::filterByType<TensorView>(fusion->outputs())) {
     if (output->definition() == nullptr) {
       continue;
     }
     if (!output->uses().empty()) {
-      auto cached_output = output->cacheFork();
-      cached_outputs.emplace_back(std::make_pair(output, cached_output));
-    } else if (unroll) {
+      output = output->cacheFork();
+    }
+    // We shouldn't necessarily need to fork and cache for unrolling, but
+    // compute at best effort replay doesn't look at multiple outputs to limit
+    // itself by, so to make sure vectorization is done correctly we fork and
+    // cache. This is partially a compute at issue, but even with that fixed,
+    // we'd likely want to cache a forked output to make sure our inlining
+    // strategy is optimal.
+    if (unroll) {
       auto cached_output = output->cacheBefore();
       cached_outputs.emplace_back(std::make_pair(cached_output, output));
     }
