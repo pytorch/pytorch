@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/FbgemmUtils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>

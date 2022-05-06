@@ -2,7 +2,7 @@
 
 #include <torch/custom_class.h>
 
-#include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/ao_sparse/quantized/cpu/FbgemmUtils.h>
 #include <ATen/native/ao_sparse/quantized/cpu/PackedParams.h>
 #include <ATen/native/ao_sparse/quantized/cpu/QnnpackUtils.h>
 

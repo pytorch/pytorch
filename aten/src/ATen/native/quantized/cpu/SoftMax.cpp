@@ -1,3 +1,8 @@
+// TODO: should this be combined with Activation.cpp since it's an activation file?
+// The fp version of this file is not in Activation.cpp but in its own file: SoftMax.cpp
+// We'll adopt the same convention for now
+
+
 #include <ATen/ATen.h>
 #include <torch/library.h>
 

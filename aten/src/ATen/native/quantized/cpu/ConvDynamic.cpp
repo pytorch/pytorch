@@ -6,7 +6,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/SmallVector.h>
 #include <ATen/native/quantized/PackedParams.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/FbgemmUtils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>

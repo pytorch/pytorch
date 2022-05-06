@@ -316,7 +316,7 @@ _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
 
-  return _EmbeddingBag.cuda(
+  return _embedding_bag_cuda(
       weight,
       indices,
       offsets,
@@ -331,7 +331,7 @@ _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
 // Assumes all input tensors are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 std::tuple<Tensor, Tensor, Tensor, Tensor>
-_EmbeddingBag.cuda(const Tensor &weight, const Tensor &indices_,
+_embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
                    const Tensor &offsets_, const bool scale_grad_by_freq,
                    const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset, int64_t padding_idx) {
@@ -342,13 +342,13 @@ _EmbeddingBag.cuda(const Tensor &weight, const Tensor &indices_,
   Tensor indices, offsets;
   std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
   auto indices_arg = TensorArg(indices, "indices", 1);
-  checkScalarTypes("EmbeddingBag.cuda", indices_arg, {kLong, kInt});
+  checkScalarTypes("embedding_bag_cuda", indices_arg, {kLong, kInt});
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
-  checkScalarTypes("EmbeddingBag.cuda", offsets_arg, {kLong, kInt});
-  checkSameType("EmbeddingBag.cuda", indices_arg, offsets_arg);
+  checkScalarTypes("embedding_bag_cuda", offsets_arg, {kLong, kInt});
+  checkSameType("embedding_bag_cuda", indices_arg, offsets_arg);
   auto weight_arg = TensorArg(weight, "weight", 1);
-  checkSameGPU("EmbeddingBag.cuda", weight_arg, indices_arg);
-  checkSameGPU("EmbeddingBag.cuda", weight_arg, offsets_arg);
+  checkSameGPU("embedding_bag_cuda", weight_arg, indices_arg);
+  checkSameGPU("embedding_bag_cuda", weight_arg, offsets_arg);
 
   int64_t numIndices = indices.size(0);
   int64_t numBags = offsets.size(0);
@@ -386,8 +386,8 @@ _EmbeddingBag.cuda(const Tensor &weight, const Tensor &indices_,
   dim3 block = dim3(32, 8);
 #endif
   int grid = 1024;
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "EmbeddingBag.cuda", [&] {
-    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "EmbeddingBag.cuda", [&] () {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_cuda", [&] {
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cuda", [&] () {
       if (mode == MODE_MAX) {
         EmbeddingBag_updateOutputKernel_max<scalar_t, index_t><<<grid, block, 0, stream>>>(
             indices.data_ptr<index_t>(), offsets.data_ptr<index_t>(),
@@ -434,7 +434,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
   Tensor grad = grad_.contiguous();
   auto indices_arg = TensorArg(indices, "indices", 1);
   auto grad_arg = TensorArg(grad, "grad", 1);
-  checkSameGPU("EmbeddingBag.cuda", grad_arg, indices_arg);
+  checkSameGPU("embedding_bag_cuda", grad_arg, indices_arg);
 
 
   switch (mode) {
