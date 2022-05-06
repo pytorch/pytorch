@@ -82,6 +82,10 @@ def set_printoptions(
 
 
 class _Formatter(object):
+    def tensor_totype(t):
+        dtype = torch.float if t.is_mps() else torch.double
+        return t.to(dtype=dtype)
+
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
         self.int_mode = True
@@ -104,9 +108,9 @@ class _Formatter(object):
                 return
 
             # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
-            nonzero_finite_abs = nonzero_finite_vals.abs()
-            nonzero_finite_min = nonzero_finite_abs.min()
-            nonzero_finite_max = nonzero_finite_abs.max()
+            nonzero_finite_abs = tensor_totype(nonzero_finite_vals.abs())
+            nonzero_finite_min = tensor_totype(nonzero_finite_abs.min())
+            nonzero_finite_max = tensor_totype(nonzero_finite_abs.max())
 
             for value in nonzero_finite_vals:
                 if value != torch.ceil(value):
