@@ -452,6 +452,7 @@
     SparseCsrCPU, SparseCsrCUDA: add_sparse_csr
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_add_Tensor
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -461,6 +462,7 @@
     SparseCPU, SparseCUDA: add_sparse_
     SparseCsrCPU, SparseCsrCUDA: add_sparse_csr_
     MkldnnCPU: mkldnn_add_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_add__Tensor
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1373,6 +1375,9 @@
 
 - func: conv_transpose3d.input(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
 
+- func: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
+  variants: function
+
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
   device_check: NoCheck
@@ -2113,6 +2118,16 @@
 - func: unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
   variants: method
 
+- func: fill.Scalar(Tensor self, Scalar value) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: fill
+
+- func: fill.Tensor(Tensor self, Tensor value) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: fill
+
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -2120,6 +2135,7 @@
     CPU, CUDA: fill_
     QuantizedCPU, QuantizedCUDA: fill_quantized_
     Meta: fill_meta_
+    SparseCsrCPU, SparseCsrCUDA: fill_sparse_csr_
 
 - func: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3009,6 +3025,7 @@
 - func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
     QuantizedCPU: quantized_max_pool2d
+    QuantizedCUDA: quantized_max_pool2d_cudnn
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
@@ -3204,6 +3221,7 @@
     SparseCsrCPU, SparseCsrCUDA: mul_sparse_csr
     MkldnnCPU: mkldnn_mul
     ZeroTensor: mul_zerotensor
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Tensor
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3213,6 +3231,7 @@
     SparseCPU, SparseCUDA: mul_sparse_
     SparseCsrCPU, SparseCsrCUDA: mul_sparse_csr_
     MkldnnCPU: mkldnn_mul_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul__Tensor
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3231,6 +3250,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: mul
+    SparseCsrCPU, SparseCsrCUDA: mul_scalar_sparse_csr
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -4298,12 +4318,7 @@
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
-# Overload without center & pad mode, needed for forward-compatibility
-- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
-  variants: function, method
-  cpp_no_default_args: ['hop_length', 'win_length', 'window', 'normalized']
-
-- func: stft.center(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   variants: function, method
 
 - func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
@@ -4345,17 +4360,12 @@
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
-- func: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
+- func: nansum(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   dispatch:
     CPU, CUDA: nansum
 
-- func: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  variants: function, method
-  dispatch:
-    CPU, CUDA: nansum
-
-- func: nansum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: nansum.out(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: nansum_out
 
@@ -4662,6 +4672,12 @@
 - func: trapz.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
 
 - func: trapz.dx(Tensor y, *, float dx=1, int dim=-1) -> Tensor
+
+# Fused implementation detail for transformers. Adds in-projection bias to QKV and divides Q by sqrt(D/num_heads).
+- func: _transform_bias_rescale_qkv(Tensor qkv, Tensor qkv_bias, int num_heads) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU, NestedTensorCPU: transform_bias_rescale_qkv_cpu
+    CUDA, NestedTensorCUDA: transform_bias_rescale_qkv_cuda
 
 - func: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   device_check: NoCheck # cpu_nested_shape_example will always be on CPU
@@ -5225,11 +5241,13 @@
   python_module: sparse
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_out_sparse_csr_cuda
+    SparseCsrCPU: sparse_sampled_addmm_out_sparse_csr_cpu
 
 - func: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   python_module: sparse
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_sparse_csr_cuda
+    SparseCsrCPU: sparse_sampled_addmm_sparse_csr_cpu
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -5379,11 +5397,23 @@
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
 
+- func: sparse_compressed_tensor.comp_plain_value_size(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 - func: sparse_csr_tensor.crow_col_value_size(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- func: sparse_csc_tensor.ccol_row_value_size(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- func: sparse_bsr_tensor.crow_col_value_size(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- func: sparse_bsc_tensor.ccol_row_value_size(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 
+- func: sparse_compressed_tensor.comp_plain_value(Tensor compressed_indices, Tensor plain_indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 - func: sparse_csr_tensor.crow_col_value(Tensor crow_indices, Tensor col_indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- func: sparse_csc_tensor.ccol_row_value(Tensor ccol_indices, Tensor row_indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- func: sparse_bsr_tensor.crow_col_value(Tensor crow_indices, Tensor col_indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- func: sparse_bsc_tensor.ccol_row_value(Tensor ccol_indices, Tensor row_indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 
+- func: _sparse_compressed_tensor_unsafe(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 - func: _sparse_csr_tensor_unsafe(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _sparse_csc_tensor_unsafe(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _sparse_bsr_tensor_unsafe(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _sparse_bsc_tensor_unsafe(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 
@@ -5395,9 +5425,11 @@
 
 - func: _validate_sparse_coo_tensor_args(Tensor indices, Tensor values, int[] size) -> ()
 
+- func: _validate_sparse_compressed_tensor_args(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, Layout layout) -> ()
 - func: _validate_sparse_csr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size) -> ()
-
-- func: _validate_sparse_compressed_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, Layout layout) -> ()
+- func: _validate_sparse_csc_tensor_args(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size) -> ()
+- func: _validate_sparse_bsr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size) -> ()
+- func: _validate_sparse_bsc_tensor_args(Tensor ccol_indices, Tensor row_indices, Tensor values, int[] size) -> ()
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
@@ -5424,6 +5456,7 @@
   dispatch:
     SparseCPU: sparse_mask_cpu
     SparseCUDA: sparse_mask_cuda
+    SparseCsrCPU, SparseCsrCUDA: sparse_mask_sparse_csr
 
 - func: _to_cpu(Tensor[] tensors) -> Tensor[]
   variants: function
@@ -5847,9 +5880,14 @@
   dispatch:
     CUDA: _thnn_fused_lstm_cell_cuda
 
-- func: _thnn_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+# NB: The composite version of this function below is a simple wrapper that duplicates some of the outputs
+#     It is necessary to avoid triggering TensorImpl use count checks in debug mode
+# NB: this is function is NOT differentiable
+- func: _thnn_fused_lstm_cell_backward_impl(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CUDA: _thnn_fused_lstm_cell_backward_cuda
+    CUDA: _thnn_fused_lstm_cell_backward_impl_cuda
+
+- func: _thnn_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
 
 - func: _thnn_differentiable_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor input_gates, Tensor hidden_gates, Tensor? input_bias, Tensor? hidden_bias, Tensor cx, Tensor cy) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
 
@@ -6056,6 +6094,22 @@
   variants: function, method
 
 - func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
+  variants: function, method
+
+- func: _index_reduce.out(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  precomputed:
+  - dim -> int dim
+  dispatch:
+    CPU: _index_reduce_cpu_out
+
+- func: _index_reduce_(Tensor(a!) self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor(a!)
+  structured_delegate: _index_reduce.out
+  variants: method
+
+- func: _index_reduce(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor
+  structured_delegate: _index_reduce.out
   variants: function, method
 
 - func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
@@ -9235,6 +9289,7 @@
     CPU: adaptive_avg_pool2d_cpu
     CUDA: adaptive_avg_pool2d_cuda
     QuantizedCPU: adaptive_avg_pool2d_quantized_cpu
+    QuantizedCUDA: adaptive_avg_pool2d_quantized_cuda
 
 - func: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
@@ -10986,6 +11041,38 @@
   dispatch:
     CPU, CUDA: _det_lu_based_helper_backward_helper
 
+- func: linalg_ldl_factor_ex(Tensor self, *, bool hermitian=False, bool check_errors=False) -> (Tensor LD, Tensor pivots, Tensor info)
+  structured_delegate: linalg_ldl_factor_ex.out
+  python_module: linalg
+  variants: function
+
+- func: linalg_ldl_factor_ex.out(Tensor self, *, bool hermitian=False, bool check_errors=False, Tensor(a!) LD, Tensor(b!) pivots, Tensor(c!) info) -> (Tensor(a!) LD, Tensor(b!) pivots, Tensor(c!) info)
+  structured: True
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_ldl_factor_ex_out
+
+- func: linalg_ldl_factor(Tensor self, *, bool hermitian=False) -> (Tensor LD, Tensor pivots)
+  python_module: linalg
+  variants: function
+
+- func: linalg_ldl_factor.out(Tensor self, *, bool hermitian=False, Tensor(a!) LD, Tensor(b!) pivots) -> (Tensor(a!) LD, Tensor(b!) pivots)
+  python_module: linalg
+  variants: function
+
+- func: linalg_ldl_solve(Tensor LD, Tensor pivots, Tensor B, *, bool hermitian=False) -> Tensor
+  structured_delegate: linalg_ldl_solve.out
+  python_module: linalg
+  variants: function
+
+- func: linalg_ldl_solve.out(Tensor LD, Tensor pivots, Tensor B, *, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_ldl_solve_out
+
 - func: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   python_module: linalg
   variants: function
@@ -11594,12 +11681,24 @@
     CompositeExplicitAutograd: alias_copy
   tags: view_copy
 
-- func: to_padded_tensor(Tensor self, float padding) -> Tensor
+- func: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
   variants: method
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_to_padded_tensor
+    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
+    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
 
 - func: _nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
   variants: method
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_layer_norm
+
+# Apparently, putting "forward" in the name will cause Python bindings to be skipped, so "fwd" it is.
+- func: _transformer_encoder_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: transformer_encoder_layer_forward
+
+- func: _native_multi_head_attention(Tensor query, Tensor key, Tensor value, int embed_dim, int num_head, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None, bool need_weights=True, bool average_attn_weights=True) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: native_multi_head_attention

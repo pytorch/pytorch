@@ -34,7 +34,7 @@ struct VecReduceAllSIMD {
   }
 };
 
-#if defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER)
+#if defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
 #if defined(CPU_CAPABILITY_AVX2)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
@@ -76,7 +76,7 @@ struct VecReduceAllSIMD<float, Op> {
   }
 };
 #endif // defined(CPU_CAPABILITY_AVX512)
-#endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER)
+#endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
 
 template <typename scalar_t, typename Op>
 inline scalar_t vec_reduce_all(const Op& vec_fun, Vectorized<scalar_t> acc_vec) {
