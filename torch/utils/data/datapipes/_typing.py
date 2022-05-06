@@ -249,6 +249,8 @@ class _DataPipeMeta(GenericMeta):
     r"""
     Metaclass for `DataPipe`. Add `type` attribute and `__init_subclass__` based
     on the type, and validate the return hint of `__iter__`.
+
+    Note that there is subclass `_IterDataPipeMeta` specifically for `IterDataPipe`.
     """
     type: _DataPipeType
 
@@ -336,6 +338,9 @@ class _DataPipeMeta(GenericMeta):
 
 
 class _IterDataPipeMeta(_DataPipeMeta):
+    r"""
+    Metaclass for `IterDataPipe` and inherits from `_DataPipeMeta`. Aad a hook function to `__iter__`.
+    """
 
     def __new__(cls, name, bases, namespace, **kwargs):
         if '__iter__' in namespace:
