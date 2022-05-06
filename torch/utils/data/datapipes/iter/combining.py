@@ -193,6 +193,22 @@ class _ChildDataPipe(IterDataPipe):
     Iterable Datapipe that is a child of a main DataPipe. The instance of this class
     will pass its instance_id to get the next value from its main DataPipe.
 
+    Note:
+        ChildDataPipe, like all other IterDataPipe, follows the singler iterator per IterDataPipe constraint.
+        Since ChildDataPipes share a common buffer, when an iterator is created for one of the ChildDataPipes,
+        the previous iterators  for all ChildDataPipes must be invalidated, with the exception when a ChildDataPipe
+        hasn't had an iterator created from it since the last invalidation. See the example below.
+
+    Singler Iterator per IteraDataPipe Invalidation Example:
+        >>> source_dp = IterableWrapper(range(10))
+        >>> cdp1, cdp2 = source_dp.fork(num_instances=2)
+        >>> it1, it2 = iter(cdp1), iter(cdp2)
+        >>> it3 = iter(cdp1)
+        The line above invalidates `it1` and `it2`, and resets `ForkerIterDataPipe`.
+        >>> it4 = iter(cdp2)
+        The line above doesn't invalidate `it3`, because an iterator for `cdp2` hasn't been created since
+        the last invalidation.
+
     Args:
         main_datapipe: Main DataPipe with a method 'get_next_element_by_instance(instance_id)'
         instance_id: integer identifier of this instance
@@ -221,7 +237,7 @@ class _ChildDataPipe(IterDataPipe):
     def get_generator_by_instance(self, instance_id: int):
         yield from self.main_datapipe.get_next_element_by_instance(self.instance_id)
 
-    # This method is called by `hook_iterator`
+    # This method is called by `hook_iterator` in `_typing.py`.
     def _set_main_datapipe_valid_iterator_id(self) -> int:
         r"""
         Update the valid iterator ID for both this DataPipe object and `main_datapipe`.
@@ -241,7 +257,7 @@ class _ChildDataPipe(IterDataPipe):
         self._valid_iterator_id = self.main_datapipe._valid_iterator_id
         return self._valid_iterator_id
 
-    # This method is called by `hook_iterator`
+    # This method is called by `hook_iterator` in `_typing.py`.
     def _check_valid_iterator_id(self, iterator_id) -> bool:
         r"""
         Check the valid iterator ID against that of DataPipe object and that of `main_datapipe`.

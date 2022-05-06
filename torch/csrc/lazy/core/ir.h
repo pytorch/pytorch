@@ -175,9 +175,23 @@ inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
   return stream;
 }
 
+// Note: Keep this version of NodeCast for smooth PyTorch/XLA migration, and
+// clean up once the migration is done.
 template <typename T>
 const T* NodeCast(const Node* node, OpKind op) {
   if (op != node->op()) {
+    return nullptr;
+  }
+#ifdef NDEBUG
+  return static_cast<const T*>(node);
+#else
+  return &dynamic_cast<const T&>(*node);
+#endif
+}
+
+template <typename T>
+const T* NodeCast(const Node* node) {
+  if (T::class_op_kind != node->op()) {
     return nullptr;
   }
 #ifdef NDEBUG
