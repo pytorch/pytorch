@@ -29,9 +29,12 @@ jobs:
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FORCE: ${{ github.event.client_payload.force}}
+          ON_GREEN: ${{ github.event.client_payload.on_green}}
         run: |
           if [ -n "${FORCE}" ]; then
             python3 .github/scripts/trymerge.py --force "${PR_NUM}"
+          elif [ -n "${ON_GREEN}" ]; then
+            python3 .github/scripts/trymerge.py --on-green "${PR_NUM}"
           else
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi
