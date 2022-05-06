@@ -228,7 +228,7 @@ def validate_exclusive_idx(shape: Sequence, ex_idx: int):
 
 # "Wraps" a dim (up to one time) for the given rank, allowing
 # dims to be specified using negative indices
-def canonicalize_idx(rank: int, idx: int) -> int:
+def canonicalize_dim(rank: int, idx: int) -> int:
     # TODO: add a comment for why this is
     _rank = rank if rank != 0 else 1
 
@@ -237,6 +237,8 @@ def canonicalize_idx(rank: int, idx: int) -> int:
 
     if idx < 0:
         _idx = idx + _rank
+    else:
+        _idx = idx
 
     if _idx < 0 or _idx > _rank:
         msg = "Received out of bounds index {0} for tensor of rank {1}!".format(
@@ -251,9 +253,9 @@ def canonicalize_idx(rank: int, idx: int) -> int:
 # mapping negative offsets to positive ones
 def canonicalize_dims(rank: int, indices: DimsType) -> DimsType:
     if isinstance(indices, int):
-        return canonicalize_idx(rank, indices)
+        return canonicalize_dim(rank, indices)
 
-    return tuple(canonicalize_idx(rank, x) for x in indices)
+    return tuple(canonicalize_dim(rank, x) for x in indices)
 
 
 def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
@@ -676,6 +678,7 @@ def compute_reduction_output_shape(
 def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...]:
     if dims is None:
         return tuple(range(len(shape)))
-    dims = tuple(canonicalize_idx(len(shape), idx) for idx in dims)
-    assert len(dims) == len(set(dims)), "duplicate value in dims"
+    dims = tuple(canonicalize_dim(len(shape), idx) for idx in dims)
+    if len(dims) != len(set(dims)):
+        raise RuntimeError("duplicate value in the list of dims")
     return dims
