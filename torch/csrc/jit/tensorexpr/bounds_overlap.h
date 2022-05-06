@@ -63,11 +63,18 @@ enum OverlapKind { ContainedOrEqual, Contains, PartialOverlap, NoOverlap };
 // dimension.
 OverlapKind TORCH_API boundOverlap(Bound A, Bound B);
 
-// Return true if the logic as follows is always satisfied:
-//    (a < b) / (a <= b) / (a > b) / (a >= b) / (a == b) / (a != b)
-// Otherwise, it returns false.
-bool TORCH_API
-compareBound(const Bound& a, const Bound& b, BoundCompareResult& cmp_result);
+// The comparison is conservative and the compare result is deterministic.
+// It means that every element of the bounds to be compared need to satisfiy
+// the given comparison operator. The comparison operator could be <, <=, >,
+// >=, ==, !=.
+//
+// Take a < b as an example.
+//     true: Each element of a is less than each element of b
+//     false: Some elements of a are greater than or equal to some elements of b
+bool TORCH_API compareBound(
+    const Bound& a,
+    const Bound& b,
+    BoundCompareResult* cmp_result_ptr);
 
 // A multi dimensional bound representing the bound of a set of indices.
 using IndexBounds = std::vector<Bound>;
