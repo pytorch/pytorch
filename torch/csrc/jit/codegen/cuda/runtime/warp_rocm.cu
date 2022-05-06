@@ -28,7 +28,7 @@ __device__ void warpReduceTIDX(
   // Reduce within each warp
   for (int i = 16; i >= 1; i /= 2) {
     reduction_op(
-        reduce_val, __shfl_xor_sync(0xffffffff, reduce_val, i, WARP_SIZE));
+        reduce_val, __shfl_xor(reduce_val, i, WARP_SIZE));
   }
 
   // Reduce across warp if needed
@@ -61,7 +61,7 @@ __device__ void warpReduceTIDX(
       // Reduce within warp 0
       for (int i = 16; i >= 1; i /= 2) {
         reduction_op(
-            reduce_val, __shfl_xor_sync(0xffffffff, reduce_val, i, 32));
+            reduce_val, __shfl_xor(reduce_val, i, WARP_SIZE));
       }
     }
 
