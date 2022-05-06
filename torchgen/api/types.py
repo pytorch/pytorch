@@ -29,6 +29,7 @@ ArgName = Union[str, SpecialArgName]
 class BaseCppType:
     ns: Optional[str]
     name: str
+    is_value: bool = True  # Only applies for scalar types
 
     def __str__(self) -> str:
         if self.ns is None or self.ns == "":
@@ -70,6 +71,8 @@ dimnameListT = BaseCppType("at", "DimnameList")
 layoutT = BaseCppType("at", "Layout")
 deviceT = BaseCppType("at", "Device")
 scalarT = BaseCppType("at", "Scalar")
+scalarValT = BaseCppType("at", "Scalar", False)
+backendDataPtrT = BaseCppType("", "std::shared_ptr<BackendData>")
 optionalScalarRefT = BaseCppType("at", "OptionalScalarRef")
 memoryFormatT = BaseCppType("at", "MemoryFormat")
 qschemeT = BaseCppType("at", "QScheme")

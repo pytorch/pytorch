@@ -2,7 +2,12 @@ from abc import ABC
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 from torchgen.context import method_with_native_function
-from torchgen.model import BackendIndex, NativeFunction, NativeFunctionsGroup
+from torchgen.model import (
+    BackendIndex,
+    NativeFunction,
+    NativeFunctionsGroup,
+    FunctionSchema,
+)
 from torchgen.api.types import (
     BaseCType,
     OptionalCType,
@@ -149,14 +154,11 @@ class GenLazyIR(ABC):
     }}"""
 
     def node_base_ctor_call(self, schema: LazyIrSchema) -> str:
-        opkind = getattr(schema, "ltc_name", None)
-        if not opkind:
-            opkind = f"torch::lazy::OpKind({aten_symbol(schema)})"
-
+        value_args = schema.filtered_args(values=True, scalars=False)
         # backends can customize the way the node base class constructor is called,
         # as long as all of its arguments can be generated from information available from the schema
         base_ctor_value_args_list = []
-        for arg in schema.filtered_args(values=True, scalars=False):
+        for arg in value_args:
             if isinstance(arg.lazy_type, BaseCType) or isinstance(
                 arg.lazy_type, VectorCType
             ):
@@ -178,29 +180,29 @@ class GenLazyIR(ABC):
         if not getattr(schema, "has_shape", True):
             shape_ctor_arg = ""
         elif getattr(schema, "is_non_native", False):
-            inputs = getattr(schema, "inputs", [])
             if getattr(schema, "cache_shape", True):
-                shape_args = [f"operand({i})" for i in range(len(inputs))]
+                shape_args = [f"operand({i})" for i in range(len(value_args))]
                 shape_ctor_arg = (
                     f"[&](){{{{ return compute_shape_{schema.name}({{}})[0]; }}}},"
                 )
             else:
-                shape_args = [i.name for i in inputs]
+                shape_args = [a.name for a in value_args]
                 shape_ctor_arg = f"compute_shape_{schema.name}({{}}),"
             shape_args.extend(a.name for a in scalar_args)
             shape_ctor_arg = shape_ctor_arg.format(", ".join(shape_args))
 
-        scalar_hashes = ", ".join(
-            f"{a.name}" for a in scalar_args if getattr(a, "is_hashable", True)
-        )
+        scalar_hashes = ", ".join(f"{a.name}" for a in scalar_args)
 
-        return f"""{self.node_base}({opkind},
-              {{{base_ctor_value_args}}},
+        return f"""{self.node_base}(
+              {schema.node_name}::class_op_kind,
+              OpList{{{base_ctor_value_args}}},
               {shape_ctor_arg}
               /* num_outputs */ {len(schema.returns)},
               torch::lazy::MHash({scalar_hashes}))"""
 
     def gen(self, schema: LazyIrSchema) -> List[str]:
+        opkind = getattr(schema, "opkind", aten_symbol(schema))
+
         # for now, we just want one IR class decl and soon after also the method defs
         # and we use the functional version not out/inplace.
         all_args = schema.filtered_args()
@@ -262,7 +264,7 @@ class GenLazyIR(ABC):
 class {schema.node_name} : public {self.node_base} {{
  public:
   static torch::lazy::OpKind ClassOpKind() {{
-    return torch::lazy::OpKind({aten_symbol(schema)});
+    return torch::lazy::OpKind({opkind});
   }}
 
   {schema.node_name}({node_ctor_args})
@@ -585,6 +587,20 @@ def generate_non_native_lazy_ir_nodes(
     non_native: List[Dict[str, Any]], gen_lazy_ir: GenLazyIR
 ) -> List[str]:
     """Generate the non-native lazy IR node classes"""
-    schemas = [NonNativeLazyIrSchema(op) for op in non_native]
-    nodes = [gen_lazy_ir.gen(schema)[0] for schema in schemas]
+    nodes = []
+    for op in non_native:
+        schema = LazyIrSchema(FunctionSchema.parse(op["func"]))
+        schema.is_non_native = True
+        opkind = op.get("opkind", None)
+        if opkind:
+            schema._aten_name = opkind
+            if not opkind.startswith("at::"):
+                schema.ltc_name = opkind
+        schema.has_shape = op.get("has_shape", True)
+        schema.cache_shape = op.get("cache_shape", True)
+        schema.is_lowerable = op.get("is_lowerable", False)
+        schema.lower_declaration_only = op.get("lower_declaration_only", True)
+
+        nodes.append(gen_lazy_ir.gen(schema)[0])
+
     return nodes

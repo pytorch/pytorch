@@ -116,7 +116,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     if (node->op() == *torch::lazy::ltc_device_data) {
       const torch::lazy::DeviceData* device_data_node =
           torch::lazy::NodeCast<torch::lazy::DeviceData>(node);
-      auto infoptr = device_data_node->data()->info();
+      auto infoptr = device_data_node->data->info();
       auto deviceDataInfoPtr = (torch::lazy::LazyGraphExecutor::DeviceDataInfo*) infoptr;
       if (GRAPH_DUMP_ENABLED) {
         LOG(ERROR) << "Lowering device data node, tensor id " << deviceDataInfoPtr->tensor_id << std::endl;

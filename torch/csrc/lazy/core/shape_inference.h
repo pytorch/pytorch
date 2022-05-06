@@ -78,18 +78,18 @@ TORCH_API std::vector<Shape> compute_shape_view(const Output& input0, const std:
 TORCH_API std::vector<Shape> compute_shape_cast(const Output& input0, const at::ScalarType& dtype, const c10::optional<at::ScalarType>& stype);
 
 // View Ops
-TORCH_API std::vector<Shape> compute_shape_as_strided_view_update(const Output& input0, const Output& input1, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset);
-TORCH_API std::vector<Shape> compute_shape_as_strided(const Output& input0, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset);
-TORCH_API std::vector<Shape> compute_shape_diagonal_view_update(const Output& input0, const Output& input1, const int64_t& offset, const int64_t& dim1, const int64_t& dim2);
-TORCH_API std::vector<Shape> compute_shape_diagonal(const Output& input0, const int64_t& offset, const int64_t& dim1, const int64_t& dim2);
-TORCH_API std::vector<Shape> compute_shape_narrow_view_update(const Output& input0, const Output& input1, const std::vector<int64_t>& base_indices);
-TORCH_API std::vector<Shape> compute_shape_narrow(const Output& input0, const std::vector<int64_t>& base_indices, const std::vector<int64_t>& sizes);
-TORCH_API std::vector<Shape> compute_shape_permute(const Output& input0, const std::vector<int64_t>& dims);
-TORCH_API std::vector<Shape> compute_shape_resize(const Output& input0, const std::vector<int64_t>& size);
-TORCH_API std::vector<Shape> compute_shape_select_view_update(const Output& input0, const Output& input1, const int64_t& dim, const int64_t& start, const int64_t& end, const int64_t& stride);
-TORCH_API std::vector<Shape> compute_shape_select(const Output& input0, const int64_t& dim, const int64_t& start, const int64_t& end, const int64_t& stride);
-TORCH_API std::vector<Shape> compute_shape_squeeze(const Output& input0, const int& dim);
-TORCH_API std::vector<Shape> compute_shape_unsqueeze(const Output& input0, const int& dim);
+TORCH_API std::vector<Shape> compute_shape_as_strided_view_update(const Output& target, const Output& input, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset);
+TORCH_API std::vector<Shape> compute_shape_as_strided(const Output& input, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset);
+TORCH_API std::vector<Shape> compute_shape_diagonal_view_update(const Output& target, const Output& input, const int64_t& offset, const int64_t& dim1, const int64_t& dim2);
+TORCH_API std::vector<Shape> compute_shape_diagonal(const Output& input, const int64_t& offset, const int64_t& dim1, const int64_t& dim2);
+TORCH_API std::vector<Shape> compute_shape_narrow_view_update(const Output& input, const Output& source, const std::vector<int64_t>& base_indices);
+TORCH_API std::vector<Shape> compute_shape_narrow(const Output& input, const std::vector<int64_t>& base_indices, const std::vector<int64_t>& sizes);
+TORCH_API std::vector<Shape> compute_shape_permute(const Output& input, const std::vector<int64_t>& dims);
+TORCH_API std::vector<Shape> compute_shape_resize(const Output& input, const std::vector<int64_t>& size);
+TORCH_API std::vector<Shape> compute_shape_select_view_update(const Output& target, const Output& source, const int64_t& dim, const int64_t& start, const int64_t& end, const int64_t& stride);
+TORCH_API std::vector<Shape> compute_shape_select(const Output& input, const int64_t& dim, const int64_t& start, const int64_t& end, const int64_t& stride);
+TORCH_API std::vector<Shape> compute_shape_squeeze(const Output& input, const int& dim);
+TORCH_API std::vector<Shape> compute_shape_unsqueeze(const Output& input, const int& dim);
 
 } // namespace lazy
 } // namespace torch

@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <ostream>
+#include <torch/csrc/lazy/core/hash.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 
@@ -60,6 +61,10 @@ using BackendDataPtr = std::shared_ptr<BackendData>;
 
 static inline std::ostream& operator<<(std::ostream& out, BackendDataPtr data) {
     return out << "{device=" << data->device() << "}";
+}
+
+static inline hash_t Hash(const std::shared_ptr<BackendData> data) {
+  return static_cast<uint32_t>(101);  // Hash seed for backend data
 }
 
 } // namespace lazy
