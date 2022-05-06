@@ -2966,10 +2966,10 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
       "(SimplifierUnderContext) after simplify: ",
       std::to_string(simplified_cmp_select_expr));
 
-  BoundInfo lhs_bound;
-  BoundInfo rhs_bound;
-  auto lhs_has_bound = getBoundInfo(simplified_lhs, lhs_bound);
-  auto rhs_has_bound = getBoundInfo(simplified_rhs, rhs_bound);
+  LoopBoundInfo lhs_bound;
+  LoopBoundInfo rhs_bound;
+  auto lhs_has_bound = getLoopBoundInfo(simplified_lhs, &lhs_bound);
+  auto rhs_has_bound = getLoopBoundInfo(simplified_rhs, &rhs_bound);
   if (!lhs_has_bound || !rhs_has_bound) {
     GRAPH_DEBUG(
         "(SimplifierUnderContext) Final: ",
@@ -2981,7 +2981,7 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
   auto bound_solved = analysis::compareBound(
       {lhs_bound.first, lhs_bound.second},
       {rhs_bound.first, rhs_bound.second},
-      cmp_res);
+      &cmp_res);
   if (!bound_solved) {
     GRAPH_DEBUG(
         "(SimplifierUnderContext) Final: ",
@@ -2989,6 +2989,9 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     return simplified_cmp_select_expr;
   }
 
+  // Get the oppositive comparison operation
+  //    not(gt) = le, not(le) = gt, not(lt) = ge, not(ge) = lt
+  //    not(eq) = ne, not(ne) = eq
   auto _not = [](const CompareSelectOperation& cmp_op) {
     switch (cmp_op) {
       case CompareSelectOperation::kGT:
@@ -3007,6 +3010,7 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     }
   };
 
+  // Check whether the compare result satisfies the given comparison operation.
   auto _imply = [](const analysis::BoundCompareResult& cmp_res,
                    const CompareSelectOperation& cmp_op) {
     // a > b
@@ -3028,7 +3032,8 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     // a != b
     auto ne_true =
         (cmp_res == analysis::BoundCompareResult::kLT ||
-         cmp_res == analysis::BoundCompareResult::kGT);
+         cmp_res == analysis::BoundCompareResult::kGT ||
+         cmp_res == analysis::BoundCompareResult::kNE);
 
     switch (cmp_op) {
       case CompareSelectOperation::kGT:
@@ -3047,8 +3052,19 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     }
   };
 
+  // Get the comparison operation
   auto cmp_op = v->compare_select_op();
+  // Get the oppositive comparison operation
   auto not_cmp_op = _not(cmp_op);
+  // Return the simplified ret1/ret2 if the compare result is deterministic.
+  // Otherwise, return the simplified CompareSelect directly.
+  //     1) _imply(cmp_res, cmp_op): Check whether the cmp_res always
+  //        satisfies the cmp_op. If yes, return the simplified ret1.
+  //     2) _imply(cmp_res, not_cmp_op): Check whether the cmp_res
+  //        always fails to satisfy the cmp_op. If yes, return the simplified
+  //        ret2.
+  //     3) Return the simplified CompareSelect if the compare result is
+  //        non-deterministic.
   auto ret_expr = _imply(cmp_res, cmp_op)
       ? simplified_ret1
       : (_imply(cmp_res, not_cmp_op) ? simplified_ret2
@@ -3097,15 +3113,15 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
   return alloc<Mod>(lhs_new, rhs_new);
 }
 
-bool SimplifierUnderContext::getBoundInfo(
+bool SimplifierUnderContext::getLoopBoundInfo(
     const ExprPtr& expr,
-    BoundInfo& bound_info) {
+    LoopBoundInfo* loop_bound_info) {
   if (expr == nullptr)
     return false;
 
   if (expr->isConstant()) {
-    bound_info.first = expr;
-    bound_info.second = expr;
+    loop_bound_info->first = expr;
+    loop_bound_info->second = expr;
     return true;
   }
 
@@ -3119,14 +3135,14 @@ bool SimplifierUnderContext::getBoundInfo(
     return false;
   }
 
-  bound_info.first = got->second.first;
+  loop_bound_info->first = got->second.first;
   // TODO: Need to add the boundary information(close/open) of a range to
   // Bound. Currently, the VarBoundInfo comes from for-loop statement while
   // the end of the boundary is open. But we assume the start and end of a
   // range are always close. Hence, we explicitly convert the open boundary to
   // close.
   //   [for-start, for-stop) => [for-start, for-stop -1]
-  bound_info.second = IRSimplifier::simplify(
+  loop_bound_info->second = IRSimplifier::simplify(
       alloc<Sub>(got->second.second, immLike(got->second.second, 1)));
   return true;
 }

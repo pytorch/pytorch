@@ -372,8 +372,8 @@ class MinTerm : public ExprNode<MinTerm> {
 };
 
 // Context-sensitive IR simplification
-using BoundInfo = std::pair<ExprPtr, ExprPtr>;
-using VarBoundInfo = std::unordered_map<VarPtr, BoundInfo>;
+using LoopBoundInfo = std::pair<ExprPtr, ExprPtr>;
+using VarBoundInfo = std::unordered_map<VarPtr, LoopBoundInfo>;
 
 class TORCH_API SimplifierUnderContext : public IRMutator {
  public:
@@ -387,7 +387,7 @@ class TORCH_API SimplifierUnderContext : public IRMutator {
   ExprPtr mutate(IfThenElsePtr v) override;
 
  protected:
-  bool getBoundInfo(const ExprPtr& expr, BoundInfo& bound_info);
+  bool getLoopBoundInfo(const ExprPtr& expr, LoopBoundInfo* loop_bound_info);
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

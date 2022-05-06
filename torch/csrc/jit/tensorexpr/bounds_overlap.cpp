@@ -74,14 +74,18 @@ OverlapKind boundOverlap(Bound a, Bound b) {
 bool compareBound(
     const Bound& a,
     const Bound& b,
-    BoundCompareResult& cmp_result) {
+    BoundCompareResult* cmp_result_ptr) {
+  TORCH_INTERNAL_ASSERT(cmp_result_ptr != nullptr);
+
   if (a == b) {
-    cmp_result = BoundCompareResult::kEQ;
+    *cmp_result_ptr = BoundCompareResult::kEQ;
     return true;
   }
 
   auto overlap_kind = boundOverlap(a, b);
   if (overlap_kind == OverlapKind::PartialOverlap) {
+    // The element of a and b could not always satisfy the comparison
+    //    a = [2, 10], b = [5, 15]
     return false;
   }
 
@@ -96,31 +100,50 @@ bool compareBound(
     int diff = immediateAs<int>(ret);
     TORCH_INTERNAL_ASSERT(diff != 0);
     // CompareResult::kGT:
-    //   lhs = [5, 10] and rhs = [0, 4]
+    //   a = [5, 10] and b = [0, 4]
     // CompareResult::kLT:
-    //   lhs = [5, 10] and rhs = [11, 15]
-    cmp_result = diff > 0 ? BoundCompareResult::kGT : BoundCompareResult::kLT;
+    //   a = [5, 10] and b = [11, 15]
+    *cmp_result_ptr =
+        diff > 0 ? BoundCompareResult::kGT : BoundCompareResult::kLT;
     return true;
   }
 
+  // The overlap kind is Contains or ContainedOrEqual. It means that
+  // one Bound is a subset of the other Bound.
   TORCH_INTERNAL_ASSERT(
       (overlap_kind == analysis::OverlapKind::Contains) ||
       (overlap_kind == analysis::OverlapKind::ContainedOrEqual));
+
   if (exprEquals(a.end, b.start)) {
-    // lhs = [5, 5] and rhs = [5, 10]
-    // lhs = [5, 10] and rhs = [10, 10]
-    cmp_result = BoundCompareResult::kLE;
+    // One of the two Bounds only has a single element and the element is the
+    // boundary of the other one.
+    //     a = [5, 5] and b = [5, 10]
+    //     a = [5, 10] and b = [10, 10]
+    *cmp_result_ptr = BoundCompareResult::kLE;
     return true;
   } else if (exprEquals(a.start, b.end)) {
-    // lhs = [10, 10] and rhs = [5, 10]
-    // lhs = [5, 10] and rhs = [5, 5]
-    cmp_result = BoundCompareResult::kGE;
+    // One of the two Bounds only has a single element and the element is the
+    // boundary of the other one.
+    //     a = [10, 10] and b = [5, 10]
+    //     a = [5, 10] and b = [5, 5]
+    *cmp_result_ptr = BoundCompareResult::kGE;
     return true;
   } else {
-    // lhs = [8, 8] and rhs = [5, 10]
-    // lhs = [5, 10] and rhs = [8, 8]
-    // lhs = [5, 10] and rhs = [6, 7]
-    // lhs = [6, 7] and rhs = [5, 10]
+    // The examples as follows demostrate the element of a and b does not always
+    // satisfy the given comparison operation. The compare result is not
+    // deterministic.
+    //     a = [8, 8] and b = [5, 10]
+    //         Compare result(gt, eq, lt):
+    //             8(a) > 5(b), 8(a) == 8(b), 8(a) < 9(b)
+    //     a = [5, 10] and b = [8, 8]
+    //         Compare result(gt, eq, lt):
+    //             9(a) > 8(b), 8(a) == 8(b), 6(a) < 8(b)
+    //     a = [5, 10] and b = [6, 7]
+    //         Compare result(gt, eq, lt):
+    //             10(a) > 6(b), 6(a) == 6(b), 5(a) < 6(b)
+    //     a = [6, 7] and b = [5, 10]
+    //         Compare result(gt, eq, lt):
+    //             6(a) > 5(b), 7(a) == 7(b), 7(a) < 8(b)
     return false;
   }
 }

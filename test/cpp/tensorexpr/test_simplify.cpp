@@ -4887,7 +4887,7 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //   for (const auto n : c10::irange(1, N)) {
   //     b[n] = 1.f;
   //   }
-  test_case_fn(n, b, 1, N, 1, kLT, "b[n] = 1.f;");
+  test_case_fn(n, b, 1, N, 0, kLT, "b[n] = 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(1, N)) {
