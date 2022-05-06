@@ -466,8 +466,6 @@ size_t SchedulerRuntimeInfo::getAlignmentSize(TensorView* tv) {
     return alignment_entry->second;
   }
 
-  const size_t address = ptrOf(tv);
-
   auto alignment_size = SchedulerRuntimeInfo::computeAlignmentSize(ptrOf(tv));
   alignment_map_[tv] = alignment_size;
   return alignment_size;

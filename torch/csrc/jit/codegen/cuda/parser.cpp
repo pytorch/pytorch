@@ -2916,8 +2916,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
-                value_map[node->inputs()[0]->unique()]);
+                MemoryFormat::Contiguous(), value_map[self_value->unique()]);
             auto self = list_val.front()->as<TensorView>();
             list_val.pop_front();
 

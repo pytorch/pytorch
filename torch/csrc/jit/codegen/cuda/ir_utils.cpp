@@ -577,7 +577,6 @@ std::vector<Expr*> getReductionOps(Fusion* fusion, bool ignore_trivial) {
   };
 
   for (auto expr : fusion->exprs()) {
-    const Val* out_val = nullptr;
     bool is_reduction = false;
     if (expr->isA<ReductionOp>()) {
       is_reduction = isReduction(expr->as<ReductionOp>()->out());

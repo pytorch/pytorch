@@ -583,7 +583,6 @@ void fillVectorizedContigRootDomains(
     const ContigIDs& contig_finder,
     IterDomain* vectorized_root_id,
     VectorizedSetInfo& info) {
-  const auto& leaf_dom = tv->domain()->domain();
   const auto& root_dom = tv->getMaybeRFactorDomain();
 
   // Find the root domains that are dependency of the merged contig

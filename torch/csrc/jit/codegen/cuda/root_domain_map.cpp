@@ -1158,8 +1158,6 @@ std::unordered_map<IterDomain*, IterDomain*> ExactRootDomainMap::map(
   const auto& producer_root =
       TensorDomain::noReductions(producer->getMaybeRFactorDomain());
   const auto& consumer_root = consumer->getRootDomain();
-  const TensorDomain* from_td = producer_to_consumer ? producer : consumer;
-  const TensorDomain* to_td = producer_to_consumer ? consumer : producer;
   const auto& from_ids = producer_to_consumer ? producer_root : consumer_root;
   const auto& to_ids = producer_to_consumer ? consumer_root : producer_root;
 
