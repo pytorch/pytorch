@@ -1250,7 +1250,8 @@ class IrParser {
             auto& beta = value_map[node->inputs()[1]->unique()];
             auto& threshold = value_map[node->inputs()[2]->unique()];
             auto out = softplus(operand, beta, threshold);
-            value_map.emplace(node->output()->unique(), ValueHolder(out, format));
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
           },
           isInputNonSizeZeroTensor,
           nullptr);
@@ -1273,7 +1274,8 @@ class IrParser {
             auto& value = value_map[node->inputs()[2]->unique()];
 
             auto out = threshold(operand, th, value);
-            value_map.emplace(node->output()->unique(), ValueHolder(out, format));
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
           },
           isInputNonSizeZeroTensor,
           nullptr);
@@ -1331,7 +1333,8 @@ class IrParser {
                 : nullptr;
 
             Val* out = clamp(operand, min, max);
-            value_map.emplace(node->output()->unique(), ValueHolder(out, format));
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
           },
           isInputNonSizeZeroTensor,
           nullptr);
@@ -3205,11 +3208,13 @@ void profileReductionSize(ProfilingRecord* pr, Node* node, size_t offset) {
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
-	  pn->removeAttribute(reductionSizeAttr);
+          pn->removeAttribute(reductionSizeAttr);
         }
       }
     } else {
-      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(reductionSizeAttr), "profiled attribute should have been removed when profiling is marked as failed");
+      TORCH_INTERNAL_ASSERT(
+          !pn->hasAttribute(reductionSizeAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3238,16 +3243,20 @@ void profileViewSize(ProfilingRecord* pr, Node* node, size_t offset) {
         auto input_ints = value.toIntList();
         if (profiled_ints.size() != input_ints.size() ||
             !std::equal(
-                profiled_ints.begin(), profiled_ints.end(), input_ints.begin())) {
+                profiled_ints.begin(),
+                profiled_ints.end(),
+                input_ints.begin())) {
           TORCH_WARN(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
-	  pn->removeAttribute(viewSizeAttr);
+          pn->removeAttribute(viewSizeAttr);
         }
       }
     } else {
-      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(viewSizeAttr), "profiled attribute should have been removed when profiling is marked as failed");
+      TORCH_INTERNAL_ASSERT(
+          !pn->hasAttribute(viewSizeAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3277,16 +3286,20 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
         auto input_ints = value.toIntList();
         if (profiled_ints.size() != input_ints.size() ||
             !std::equal(
-                profiled_ints.begin(), profiled_ints.end(), input_ints.begin())) {
+                profiled_ints.begin(),
+                profiled_ints.end(),
+                input_ints.begin())) {
           TORCH_WARN(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
-	  pn->removeAttribute(intListAttr);
+          pn->removeAttribute(intListAttr);
         }
       }
     } else {
-      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(intListAttr), "profiled attribute should have been removed when profiling is marked as failed");
+      TORCH_INTERNAL_ASSERT(
+          !pn->hasAttribute(intListAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3319,11 +3332,13 @@ void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
-	  pn->removeAttribute(strAttr);
+          pn->removeAttribute(strAttr);
         }
       }
     } else {
-      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(strAttr), "profiled attribute should have been removed when profiling is marked as failed");
+      TORCH_INTERNAL_ASSERT(
+          !pn->hasAttribute(strAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3356,11 +3371,13 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
-	  pn->removeAttribute(boolAttr);
+          pn->removeAttribute(boolAttr);
         }
       }
     } else {
-      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(boolAttr), "profiled attribute should have been removed when profiling is marked as failed");
+      TORCH_INTERNAL_ASSERT(
+          !pn->hasAttribute(boolAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3393,11 +3410,13 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
-	  pn->removeAttribute(intAttr);
+          pn->removeAttribute(intAttr);
         }
       }
     } else {
-      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(intAttr), "profiled attribute should have been removed when profiling is marked as failed");
+      TORCH_INTERNAL_ASSERT(
+          !pn->hasAttribute(intAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3428,11 +3447,13 @@ void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
-	  pn->removeAttribute(ivalAttr);
+          pn->removeAttribute(ivalAttr);
         }
       }
     } else {
-      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(ivalAttr), "profiled attribute should have been removed when profiling is marked as failed");
+      TORCH_INTERNAL_ASSERT(
+          !pn->hasAttribute(ivalAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3464,16 +3485,20 @@ void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
         auto input_bools = value.toBoolList();
         if (profiled_ints.size() != input_bools.size() ||
             !std::equal(
-                input_bools.begin(), input_bools.end(), profiled_ints.begin())) {
+                input_bools.begin(),
+                input_bools.end(),
+                profiled_ints.begin())) {
           TORCH_WARN(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
-	  pn->removeAttribute(boolListAttr);
+          pn->removeAttribute(boolListAttr);
         }
       }
     } else {
-      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(boolListAttr), "profiled attribute should have been removed when profiling is marked as failed");
+      TORCH_INTERNAL_ASSERT(
+          !pn->hasAttribute(boolListAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
