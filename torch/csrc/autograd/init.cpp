@@ -303,7 +303,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         for (const auto& arg : args) {
             iv_inputs.push_back(torch::jit::toTypeInferredIValue(arg));
         }
-        rec->before(name, iv_inputs);
+        rec->before(name, c10::ArrayRef<const c10::IValue>(iv_inputs.data(), iv_inputs.size()));
       } else {
         rec->before(name);
       }
