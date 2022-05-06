@@ -31,7 +31,7 @@ def register_math_op(op):
             _chunk_sharding_spec_check(lhs_spec, op)
             _chunk_sharding_spec_check(rhs_spec, op)
 
-            if lhs.size() == rhs.size() and lhs_spec.dim == rhs_spec.dim:
+            if lhs.size() == rhs.size() and lhs_spec.dim == rhs_spec.dim:  # type: ignore[attr-defined]
                 # perform local element-wise math op
                 res = op(lhs.local_tensor(), rhs.local_tensor())
                 return ShardedTensor._init_from_local_tensor(
