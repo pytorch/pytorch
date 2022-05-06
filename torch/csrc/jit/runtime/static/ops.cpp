@@ -92,11 +92,11 @@ void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
 at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
-    at::IntArrayRef proposed_shape,
+    const at::DimVector& proposed_shape,
     bool infer_size) {
-  auto shape = infer_size
-      ? at::infer_size(proposed_shape, self.numel())
-      : std::vector<int64_t>(proposed_shape.begin(), proposed_shape.end());
+  const auto& shape = infer_size
+      ? at::infer_size_dv(proposed_shape, self.numel())
+      : proposed_shape;
   at::native::resize_(out, shape, c10::nullopt);
 
   auto self_contig = self.expect_contiguous();
@@ -126,11 +126,11 @@ at::Tensor& flatten_copy_out(
       "flatten() has invalid args: start_dim cannot come after end_dim");
 
   if (self.dim() == 0) {
-    return reshape_copy_out(out, self, {1}, false);
+    return reshape_copy_out(out, self, at::DimVector{1}, false);
   }
 
   if (start_dim == end_dim) {
-    auto shape = self.sizes().vec();
+    auto shape = at::DimVector{self.sizes()};
     return reshape_copy_out(out, self, shape, false);
   }
 
@@ -147,7 +147,7 @@ at::Tensor& flatten_copy_out(
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int64_t>());
 
-  std::vector<int64_t> shape;
+  at::DimVector shape;
   shape.reserve(self.dim() - end_dim + start_dim);
   for (const auto i : c10::irange(start_dim)) {
     shape.push_back(self.sizes()[i]);
@@ -607,7 +607,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
 REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
+    return [te = createClamp()](ProcessedNode* p_node) {
       const auto& in0_t = p_node->Input(0).toTensor();
       if (p_node->Output(0).isNone()) {
         p_node->Output(0) = create_empty_from(in0_t);
@@ -616,7 +616,17 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
       auto in2_s = p_node->Input(2).toOptional<at::Scalar>();
-      at::cpu::clamp_out(out_t, in0_t, in1_s, in2_s);
+      if (!te->checkInput<float>(in0_t)) {
+        at::cpu::clamp_out(out_t, in0_t, in1_s, in2_s);
+        return;
+      }
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+      auto output_size = in0_t.numel();
+      auto min = in1_s.has_value() ? in1_s->toFloat()
+                                   : std::numeric_limits<float>::lowest();
+      auto max = in2_s.has_value() ? in2_s->toFloat()
+                                   : std::numeric_limits<float>::max();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &min, &max, &output_size});
     };
   }
   if (n->matches(
@@ -1901,12 +1911,12 @@ REGISTER_OPERATOR_FUNCTOR(
         const auto& in0_t = p_node->Input(0).toTensor();
         const auto in1_s = p_node->Input(1).toScalar();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::native::clamp_min(in0_t, in1_s);
+          p_node->Output(0) = at::cpu::clamp_min(in0_t, in1_s);
           return;
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        at::native::clamp_min_out(in0_t, in1_s, out_t);
+        at::cpu::clamp_min_out(out_t, in0_t, in1_s);
       };
     });
 
