@@ -2,10 +2,10 @@
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 
-#include <ATen/native/quantized/cpu/init_qnnpack.h>
+#include <ATen/native/quantized/cpu/InitQnnpack.h>
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
-#include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/ao_sparse/quantized/cpu/PackedParams.h>
+#include <ATen/native/ao_sparse/quantized/cpu/QnnpackUtils.h>
 
 #include <algorithm>
 

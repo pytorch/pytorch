@@ -1,7 +1,7 @@
 #include <torch/library.h>
 
 #include <torch/custom_class.h>
-#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
+#include <ATen/native/ao_sparse/quantized/cpu/PackedParams.h>
 
 namespace ao {
 namespace sparse {

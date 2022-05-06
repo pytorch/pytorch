@@ -2664,7 +2664,7 @@ def hardswish(g, self):
     return g.op("Mul", self, hs)
 
 
-# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qhardsigmoid.cpp
+# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/Activation.cpp
 @quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @parse_args("v")
 def hardsigmoid(g, self):

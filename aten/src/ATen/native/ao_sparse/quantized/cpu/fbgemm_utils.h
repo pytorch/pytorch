@@ -6,7 +6,7 @@
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmSparse.h>
-#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
+#include <ATen/native/ao_sparse/quantized/cpu/PackedParams.h>
 
 namespace ao {
 namespace sparse {

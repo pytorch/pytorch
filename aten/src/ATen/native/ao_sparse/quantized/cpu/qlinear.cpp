@@ -4,7 +4,7 @@
 #include <torch/library.h>
 
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
+#include <ATen/native/ao_sparse/quantized/cpu/PackedParams.h>
 #include <c10/util/irange.h>
 
 namespace ao {
