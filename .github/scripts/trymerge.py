@@ -653,6 +653,8 @@ class GitHubPR:
             self.merge_ghstack_into(repo, force)
 
         repo.push(self.default_branch(), dry_run)
+        if not dry_run:
+            gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
 
 class MandatoryChecksMissingError(Exception):
     pass
