@@ -825,7 +825,6 @@ class FullyShardedDataParallel(nn.Module):
                 "name, and `_get_ignored_parameters()` should have excluded " \
                 "them; check `_get_param_to_unflat_param_names()`"
             ignored_param_names.add(unflat_param_names[0])
-        ignored_buffer_names = set()
         buffer_to_buffer_name = _get_buffer_to_buffer_name(module)
         ignored_buffer_names = set(
             buffer_to_buffer_name[b] for b in ignored_buffers
