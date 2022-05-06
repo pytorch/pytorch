@@ -8,20 +8,15 @@
 #if HAS_CUDNN_V8()
 
 #include <ATen/ATen.h>
-#include <ATen/native/quantized/cudnn/utils.h>
+#include <ATen/native/quantized/cudnn/Utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <torch/library.h>
 
 #include <tuple>
 
-template <int kSpatialDim>
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightCudnn<
-    kSpatialDim>::unpack() {
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>{maybe_padded_weight_, bias_};
+std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightCudnn::unpack() {
+  return std::tuple<at::Tensor, c10::optional<at::Tensor>>{orig_weight, bias_};
 }
-
-template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightCudnn<
-    2>::unpack();
 
 #endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED

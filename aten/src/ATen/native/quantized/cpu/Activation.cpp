@@ -3,13 +3,14 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/quantized/Quantizer.h>
+#include <ATen/native/Activation.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/InitQnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/quantized/Quantizer.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
@@ -19,6 +20,9 @@
 namespace at {
 namespace native {
 
+DEFINE_DISPATCH(qgelu_stub);
+DEFINE_DISPATCH(qelu_stub);
+DEFINE_DISPATCH(qthreshold_stub);
 DEFINE_DISPATCH(qsigmoid_stub);
 DEFINE_DISPATCH(qhardsigmoid_stub);
 DEFINE_DISPATCH(qhardswish_stub);
@@ -26,6 +30,17 @@ DEFINE_DISPATCH(qrelu_stub);
 DEFINE_DISPATCH(qrelu_leaky_stub);
 
 namespace {
+
+// the underlying implementation for quantized threshold kernel
+Tensor quantized_threshold_impl(
+    const Tensor& qx,
+    const Scalar& threshold,
+    const Scalar& value) {
+  Tensor qy = at::_empty_affine_quantized(
+    qx.sizes(), qx.options(), qx.q_scale(), qx.q_zero_point());
+  qthreshold_stub(qx.device().type(), qx, threshold, value, qy);
+  return qy;
+}
 
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_sigmoid(
@@ -464,5 +479,43 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::sigmoid"), TORCH_FN(QSigmoid::run));
 }
 } // anonyous namespace
+
+Tensor gelu_quantized_cpu(const Tensor& qx, c10::string_view approximate) {
+  Tensor qy;
+  qgelu_stub(qx.device().type(), qx, qy, get_gelutype_enum(approximate));
+  return qy;
+}
+
+// at::native functions for the native_functions.yaml
+Tensor threshold_quantized_cpu(
+    const Tensor& qx,
+    const Scalar& threshold,
+    const Scalar& value) {
+  Tensor qy;
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "threshold", [&]() {
+    qy = quantized_threshold_impl(qx, threshold, value);
+  });
+  return qy;
+}
+
+Tensor quantized_elu(
+    const Tensor& qx, double output_scale, int64_t output_zero_point, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
+  Tensor qy = at::_empty_affine_quantized(qx.sizes(), qx.options(), output_scale, output_zero_point);
+  qelu_stub(qx.device().type(), qx, alpha, scale, input_scale, qy);
+  return qy;
+}
+
+Tensor quantized_celu(const Tensor& qx, double output_scale, int64_t output_zero_point, const Scalar& alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0,
+      "ZeroDivisionError: alpha cannot be 0 for CELU");
+  double inv_alpha = 1. / alpha.to<double>();
+  return quantized_elu(qx, output_scale, output_zero_point, alpha, Scalar(1.0), Scalar(inv_alpha));
+}
+
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("quantized::threshold"), TORCH_FN(threshold_quantized_cpu));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::elu"), quantized_elu);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::celu"), quantized_celu);
+}
 
 }}  // namespace at::native

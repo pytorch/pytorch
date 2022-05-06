@@ -9,7 +9,7 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
-#include <ATen/native/quantized/cudnn/utils.h>
+#include <ATen/native/quantized/cudnn/Utils.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
 #include <c10/core/MemoryFormat.h>
