@@ -44,3 +44,22 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+
+Elliptic Functions
+^^^^^^^^^^^^^^^^^^
+
+Jacobi Elliptic Functions
+"""""""""""""""""""""""""
+
+.. autofunction:: jacobi_elliptic_k_sn
+.. autofunction:: jacobi_elliptic_k_cn
+.. autofunction:: jacobi_elliptic_k_dn
+.. autofunction:: jacobi_elliptic_k_cd
+.. autofunction:: jacobi_elliptic_k_cs
+.. autofunction:: jacobi_elliptic_k_dc
+.. autofunction:: jacobi_elliptic_k_ds
+.. autofunction:: jacobi_elliptic_k_nc
+.. autofunction:: jacobi_elliptic_k_nd
+.. autofunction:: jacobi_elliptic_k_ns
+.. autofunction:: jacobi_elliptic_k_sc
+.. autofunction:: jacobi_elliptic_k_sd

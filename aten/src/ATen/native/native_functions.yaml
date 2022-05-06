@@ -10753,6 +10753,546 @@
   python_module: special
   variants: function
 
+- func: special_jacobi_elliptic_k_cd(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cd
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_cd.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_cd.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cd
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cd.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cd
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cd.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_cd_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_cd.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cd_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cd.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cd_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cn(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cn
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_cn.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_cn.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cn
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cn.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cn
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cn.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_cn_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_cn.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cn_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cn.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cn_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cs(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cs
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_cs.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_cs.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cs
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cs.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cs
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cs.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_cs_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_cs.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cs_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_cs.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_cs_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_dc(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_dc
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_dc.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_dc.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_dc
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_dc.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_dc
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_dc.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_dc_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_dc.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_dc_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_dc.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_dc_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_dn(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_dn
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_dn.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_dn.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_dn
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_dn.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_dn
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_dn.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_dn_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_dn.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_dn_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_dn.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_dn_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_ds(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_ds
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_ds.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_ds.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_ds
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_ds.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_ds
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_ds.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_ds_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_ds.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_ds_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_ds.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_ds_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_nc(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_nc
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_nc.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_nc.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_nc
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_nc.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_nc
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_nc.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_nc_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_nc.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_nc_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_nc.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_nc_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_nd(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_nd
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_nd.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_nd.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_nd
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_nd.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_nd
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_nd.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_nd_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_nd.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_nd_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_nd.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_nd_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_ns(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_ns
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_ns.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_ns.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_ns
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_ns.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_ns
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_ns.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_ns_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_ns.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_ns_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_ns.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_ns_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sc(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sc
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_sc.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_sc.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sc
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sc.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sc
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sc.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_sc_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_sc.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sc_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sc.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sc_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sd(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sd
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_sd.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_sd.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sd
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sd.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sd
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sd.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_sd_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_sd.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sd_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sd.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sd_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sn(Tensor self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sn
+  python_module: special
+  structured_delegate: special_jacobi_elliptic_k_sn.out
+  variants: function
+
+- func: special_jacobi_elliptic_k_sn.self_scalar(Scalar self, Tensor k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sn
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sn.k_scalar(Tensor self, Scalar k) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sn
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sn.out(Tensor self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_jacobi_elliptic_k_sn_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_jacobi_elliptic_k_sn.self_scalar_out(Scalar self, Tensor k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sn_out
+  python_module: special
+  variants: function
+
+- func: special_jacobi_elliptic_k_sn.k_scalar_out(Tensor self, Scalar k, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: special_jacobi_elliptic_k_sn_out
+  python_module: special
+  variants: function
+
 ## Functions related to the fast Fourier transform and the torch.fft namespace
 # Note [FFT namespace binding]
 # Functions in the fft python module should have their names start with

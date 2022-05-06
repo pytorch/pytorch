@@ -101,5 +101,17 @@ DECLARE_DISPATCH(structured_binary_fn, copysign_stub);
 DECLARE_DISPATCH(structured_binary_fn, xlogy_stub);
 DECLARE_DISPATCH(structured_binary_fn, xlog1py_stub);
 DECLARE_DISPATCH(structured_binary_fn, zeta_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_cd_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_cn_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_cs_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_dc_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_dn_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_ds_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_nc_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_nd_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_ns_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_sc_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_sd_stub);
+DECLARE_DISPATCH(structured_binary_fn, jacobi_elliptic_k_sn_stub);
 
 }} // namespace at::native

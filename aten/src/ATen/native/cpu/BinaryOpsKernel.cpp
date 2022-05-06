@@ -43,7 +43,7 @@ void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Sc
 }
 
 void atan2_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atan2_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "atan2_cpu", [&]() {
     cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
     return std::atan2(a, b);
   },
@@ -312,26 +312,12 @@ void bitwise_xor_kernel(TensorIteratorBase& iter) {
 }
 
 void lshift_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "lshift_cpu", [&]() {
-      auto base_vec = Vectorized<scalar_t>((scalar_t)(2));
-      cpu_kernel_vec(
-        iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t {
-          return a * std::pow((scalar_t)(2), b);
-        },
-        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-          return a * base_vec.pow(b);
-      });
+  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lshift_cpu", [&]() {
+    cpu_kernel(iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return static_cast<std::make_unsigned_t<scalar_t>>(a) << b;
     });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lshift_cpu", [&]() {
-      cpu_kernel(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return static_cast<std::make_unsigned_t<scalar_t>>(a) << b;
-      });
-    });
-  }
+  });
 }
 
 void logical_and_kernel(TensorIterator& iter) {
@@ -392,26 +378,12 @@ void logical_xor_kernel(TensorIterator& iter) {
 }
 
 void rshift_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rshift_cpu", [&]() {
-      auto base_vec = Vectorized<scalar_t>((scalar_t)(2));
-      cpu_kernel_vec(
-        iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t {
-          return a / std::pow((scalar_t)(2), b);
-        },
-        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-          return a / base_vec.pow(b);
+  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cpu", [&]() {
+    cpu_kernel(iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return a >> b;
       });
-    });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cpu", [&]() {
-      cpu_kernel(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return a >> b;
-        });
-    });
-  }
+  });
 }
 
 void lt_kernel(TensorIteratorBase& iter) {
@@ -871,7 +843,7 @@ void fmod_kernel(TensorIteratorBase& iter) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(), "fmod_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t x, scalar_t d) -> scalar_t {
@@ -1138,6 +1110,102 @@ void zeta_kernel(TensorIteratorBase& iter) {
   });
 }
 
+void jacobi_elliptic_k_cd_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_cd_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_cd(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_cn_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_cn_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_cn(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_cs_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_cs_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_cs(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_dc_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_dc_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return zeta(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_dn_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_dn_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_dn(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_ds_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_ds_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_ds(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_nc_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_nc_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_nc(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_nd_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_nd_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_nd(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_ns_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_ns_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_ns(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_sc_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_sc_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_sc(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_sd_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_sd_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_sd(u, k);
+   });
+ });
+}
+
+void jacobi_elliptic_k_sn_kernel(TensorIteratorBase& iterator) {
+ AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "jacobi_elliptic_k_sn_cpu", [&]() {
+   cpu_kernel(iterator, [](scalar_t u, scalar_t k) -> scalar_t {
+     return jacobi_elliptic_k_sn(u, k);
+   });
+ });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
@@ -1185,6 +1253,18 @@ REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
 REGISTER_DISPATCH(zeta_stub, &zeta_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_cd_stub, &jacobi_elliptic_k_cd_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_cn_stub, &jacobi_elliptic_k_cn_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_cs_stub, &jacobi_elliptic_k_cs_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_dc_stub, &jacobi_elliptic_k_dc_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_dn_stub, &jacobi_elliptic_k_dn_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_ds_stub, &jacobi_elliptic_k_ds_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_nc_stub, &jacobi_elliptic_k_nc_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_nd_stub, &jacobi_elliptic_k_nd_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_ns_stub, &jacobi_elliptic_k_ns_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_sc_stub, &jacobi_elliptic_k_sc_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_sd_stub, &jacobi_elliptic_k_sd_kernel);
+REGISTER_DISPATCH(jacobi_elliptic_k_sn_stub, &jacobi_elliptic_k_sn_kernel);
 
 } // namespace native
 } // namespace at

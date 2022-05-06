@@ -1265,6 +1265,1386 @@ const auto erfcx_string = jiterator_stringify(
   }
 ); // erfcx_string
 
+const auto jacobi_elliptic_k_cd_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_cd(T u, T k) {
+        T cn;
+        T dn;
+
+        jacobi_elliptic(u, k, &cn, &dn);
+
+        return cn / dn;
+    } // jacobi_elliptic_k_cd
+); // jacobi_elliptic_k_cd_string
+
+const auto jacobi_elliptic_k_cn_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_cn(T u, T k) {
+        T cn;
+
+        jacobi_elliptic(u, k, &cn, static_cast<T *>(0));
+
+        return cn;
+    } // jacobi_elliptic_k_cn
+); // jacobi_elliptic_k_cn_string
+
+const auto jacobi_elliptic_k_cs_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_cs(T u, T k) {
+        T cn;
+
+        T sn = jacobi_elliptic(u, k, &cn, static_cast<T *>(0));
+
+        return cn / sn;
+    } // jacobi_elliptic_k_cs
+); // jacobi_elliptic_k_cs_string
+
+const auto jacobi_elliptic_k_dc_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_dc(T u, T k) {
+        T cn;
+        T dn;
+
+        jacobi_elliptic(u, k, &cn, &dn);
+
+        return dn / cn;
+    } // jacobi_elliptic_k_dc
+); // jacobi_elliptic_k_dc_string
+
+const auto jacobi_elliptic_k_dn_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_dn(T u, T k) {
+        T dn;
+
+        jacobi_elliptic(u, k, static_cast<T *>(0), &dn);
+
+        return dn;
+    } // jacobi_elliptic_k_dn
+); // jacobi_elliptic_k_dn_string
+
+const auto jacobi_elliptic_k_ds_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_ds(T u, T k) {
+        T dn;
+
+        T sn = jacobi_elliptic(u, k, static_cast<T *>(0), &dn);
+
+        return dn / sn;
+    } // jacobi_elliptic_k_ds
+); // jacobi_elliptic_k_ds_string
+
+const auto jacobi_elliptic_k_nc_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_nc(T u, T k) {
+        return 1 / jacobi_elliptic_k_cn(u, k);
+    } // jacobi_elliptic_k_nc
+); // jacobi_elliptic_k_nc_string
+
+const auto jacobi_elliptic_k_nd_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_nd(T u, T k) {
+        return 1 / jacobi_elliptic_k_dn(u, k);
+    } // jacobi_elliptic_k_nd
+); // jacobi_elliptic_k_nd_string
+
+const auto jacobi_elliptic_k_ns_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_ns(T u, T k) {
+        T sn = jacobi_elliptic(u, k, static_cast<T *>(0), static_cast<T *>(0));
+
+        return 1 / sn;
+    } // jacobi_elliptic_k_ns
+); // jacobi_elliptic_k_ns_string
+
+const auto jacobi_elliptic_k_sc_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_sc(T u, T k) {
+        T cn;
+
+        T sn = jacobi_elliptic(u, k, &cn, static_cast<T *>(0));
+
+        return sn / cn;
+    } // jacobi_elliptic_k_sc
+); // jacobi_elliptic_k_sc_string
+
+const auto jacobi_elliptic_k_sd_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_sd(T u, T k) {
+        T dn;
+
+        T sn = jacobi_elliptic(u, k, static_cast<T *>(0), &dn);
+
+        return sn / dn;
+    } // jacobi_elliptic_k_sd
+); // jacobi_elliptic_k_sd_string
+
+const auto jacobi_elliptic_k_sn_string = jiterator_stringify(
+    template<typename T>
+    T jacobi_elliptic_recurrence(const T &x, const T &k, T a, T b, unsigned n, T *p) {
+        n++;
+
+        T m;
+
+        T c_n = (a - b) / 2;
+        T a_n = (a + b) / 2;
+
+        if (c_n < T(2.22045e-16)) {
+            m = std::ldexp(T(1), (int) n) * x * a_n;
+        } else {
+            m = jacobi_elliptic_recurrence<T>(x, k, a_n, std::sqrt(a * b), n, 0);
+        }
+
+        if (p) *p = m;
+
+        return (m + std::asin((c_n / a_n) * std::sin(m))) / 2;
+    } // jacobi_elliptic_recurrence
+
+    template<typename T>
+    T jacobi_elliptic_implementation(const T &u, const T &k, T *cn, T *dn) {
+        if (k > 1) {
+            T x_p = u * k;
+            T k_p = 1 / k;
+
+            T sn_p;
+            T cn_p;
+            T dn_p;
+
+            sn_p = jacobi_elliptic_implementation(x_p, k_p, &cn_p, &dn_p);
+
+            *cn = dn_p;
+            *dn = cn_p;
+
+            return sn_p * k_p;
+        }
+
+        if (u == 0) {
+            *cn = 1;
+            *dn = 1;
+
+            return 0;
+        }
+
+        if (k == 0) {
+            *cn = std::cos(u);
+            *dn = 1;
+
+            return std::sin(u);
+        }
+
+        if (k == 1) {
+            *cn = 1 / std::cosh(u);
+            *dn = 1 / std::cosh(u);
+
+            return std::tanh(u);
+        }
+
+        if (k < std::sqrt(std::sqrt(T(2.22045e-16)))) {
+            T su = std::sin(u);
+            T cu = std::cos(u);
+
+            T m = k * k;
+
+            *dn = 1 - m * su * su / 2;
+            *cn = cu + m * (u - su * cu) * su / 4;
+
+            return su - m * (u - su * cu) * cu / 4;
+        }
+
+        T t_1;
+
+        T k_c = 1 - k;
+
+        T k_prime;
+
+        if (k < 0.5) {
+            k_prime = T(std::sqrt(1 - k * k));
+        } else {
+            k_prime = T(std::sqrt(2 * k_c - k_c * k_c));
+        }
+
+        T t_0 = jacobi_elliptic_recurrence(u, k, T(1), k_prime, 0, &t_1);
+
+        *cn = std::cos(t_0);
+        *dn = std::cos(t_0) / std::cos(t_1 - t_0);
+
+        return std::sin(t_0);
+    } // jacobi_elliptic_implementation
+
+    template<typename T>
+    T jacobi_elliptic(T u, T k, T *pcn, T *pdn) {
+        T sn;
+        T cn;
+        T dn;
+
+        sn = jacobi_elliptic_implementation<T>(u, k, &cn, &dn);
+
+        if (pcn) *pcn = cn;
+        if (pdn) *pdn = dn;
+
+        return sn;
+    } // jacobi_elliptic
+
+    template<typename T>
+    T jacobi_elliptic_k_sn(T u, T k) {
+        return jacobi_elliptic(u, k, static_cast<T *>(0), static_cast<T *>(0));
+    } // jacobi_elliptic_k_sn
+); // jacobi_elliptic_k_sn_string
+
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
 template <typename scalar_t>

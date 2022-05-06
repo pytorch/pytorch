@@ -2692,3 +2692,123 @@
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
+
+- name: special_jacobi_elliptic_k_cd(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_cd.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_cd.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_cn(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_cn.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_cn.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_cs(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_cs.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_cs.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_dc(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_dc.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_dc.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_dn(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_dn.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_dn.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_ds(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_ds.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_ds.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_nc(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_nc.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_nc.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_nd(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_nd.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_nd.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_ns(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_ns.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_ns.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_sc(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_sc.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_sc.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_sd(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_sd.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_sd.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable
+
+- name: special_jacobi_elliptic_k_sn(Tensor self, Tensor k) -> Tensor
+  self: non_differentiable
+  k: non_differentiable
+
+- name: special_jacobi_elliptic_k_sn.self_scalar(Scalar self, Tensor k) -> Tensor
+  k:  non_differentiable
+
+- name: special_jacobi_elliptic_k_sn.k_scalar(Tensor self, Scalar k) -> Tensor
+  self: non_differentiable

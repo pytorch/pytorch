@@ -2,10 +2,52 @@ import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
-__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
-           'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
-           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log_ndtr', 'log1p', 'sinc', 'round', 'log_softmax',
-           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
+__all__ = [
+    'digamma',
+    'entr',
+    'erf',
+    'erfc',
+    'erfcx',
+    'erfinv',
+    'exp2',
+    'expit',
+    'expm1',
+    'gammainc',
+    'gammaincc',
+    'gammaln',
+    'i0',
+    'i0e',
+    'i1',
+    'i1e',
+    'jacobi_elliptic_k_cd',
+    'jacobi_elliptic_k_cn',
+    'jacobi_elliptic_k_cs',
+    'jacobi_elliptic_k_dc',
+    'jacobi_elliptic_k_dn',
+    'jacobi_elliptic_k_ds',
+    'jacobi_elliptic_k_nc',
+    'jacobi_elliptic_k_nd',
+    'jacobi_elliptic_k_ns',
+    'jacobi_elliptic_k_sc',
+    'jacobi_elliptic_k_sd',
+    'jacobi_elliptic_k_sn',
+    'log1p',
+    'log_ndtr',
+    'log_softmax',
+    'logit',
+    'logsumexp',
+    'multigammaln',
+    'ndtr',
+    'ndtri',
+    'polygamma',
+    'psi',
+    'round',
+    'sinc',
+    'softmax',
+    'xlog1py',
+    'xlogy',
+    'zeta',
+]
 
 Tensor = torch.Tensor
 
@@ -819,4 +861,172 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
+""".format(**common_args))
+
+jacobi_elliptic_k_cd = _add_docstr(_special.special_jacobi_elliptic_k_cd,
+                                   r"""
+jacobi_elliptic_k_cd(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{cd}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_cn = _add_docstr(_special.special_jacobi_elliptic_k_cn,
+                                   r"""
+jacobi_elliptic_k_cn(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{cn}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_cs = _add_docstr(_special.special_jacobi_elliptic_k_cs,
+                                   r"""
+jacobi_elliptic_k_cs(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{cs}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_dc = _add_docstr(_special.special_jacobi_elliptic_k_dc,
+                                   r"""
+jacobi_elliptic_k_dc(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{dc}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_dn = _add_docstr(_special.special_jacobi_elliptic_k_dn,
+                                   r"""
+jacobi_elliptic_k_dn(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{dn}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_ds = _add_docstr(_special.special_jacobi_elliptic_k_ds,
+                                   r"""
+jacobi_elliptic_k_ds(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{ds}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_nc = _add_docstr(_special.special_jacobi_elliptic_k_nc,
+                                   r"""
+jacobi_elliptic_k_nc(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{nc}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_nd = _add_docstr(_special.special_jacobi_elliptic_k_nd,
+                                   r"""
+jacobi_elliptic_k_nd(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{nd}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_ns = _add_docstr(_special.special_jacobi_elliptic_k_ns,
+                                   r"""
+jacobi_elliptic_k_ns(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{ns}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_sc = _add_docstr(_special.special_jacobi_elliptic_k_sc,
+                                   r"""
+jacobi_elliptic_k_sc(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{sc}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_sd = _add_docstr(_special.special_jacobi_elliptic_k_sd,
+                                   r"""
+jacobi_elliptic_k_sd(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{sd}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+jacobi_elliptic_k_sn = _add_docstr(_special.special_jacobi_elliptic_k_sn,
+                                   r"""
+jacobi_elliptic_k_sn(input, k, *, out=None) -> Tensor
+
+Jacobi elliptic function :math:`\text{sn}`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
 """.format(**common_args))

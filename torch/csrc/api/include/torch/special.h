@@ -565,4 +565,328 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Jacobi elliptic function :math:`cd`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_cd.
+inline Tensor jacobi_elliptic_k_cd(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cd(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_cd(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cd(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_cd(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_cd(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_cd_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cd_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_cd_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cd_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_cd_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_cd_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`cn`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_cn.
+inline Tensor jacobi_elliptic_k_cn(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cn(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_cn(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cn(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_cn(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_cn(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_cn_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cn_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_cn_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cn_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_cn_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_cn_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`cs`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_cs.
+inline Tensor jacobi_elliptic_k_cs(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cs(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_cs(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cs(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_cs(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_cs(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_cs_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cs_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_cs_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_cs_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_cs_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_cs_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`dc`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_dc.
+inline Tensor jacobi_elliptic_k_dc(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_dc(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_dc(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_dc(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_dc(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_dc(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_dc_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_dc_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_dc_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_dc_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_dc_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_dc_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`dn`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_dn.
+inline Tensor jacobi_elliptic_k_dn(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_dn(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_dn(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_dn(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_dn(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_dn(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_dn_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_dn_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_dn_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_dn_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_dn_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_dn_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`ds`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_ds.
+inline Tensor jacobi_elliptic_k_ds(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_ds(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_ds(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_ds(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_ds(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_ds(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_ds_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_ds_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_ds_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_ds_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_ds_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_ds_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`nc`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_nc.
+inline Tensor jacobi_elliptic_k_nc(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_nc(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_nc(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_nc(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_nc(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_nc(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_nc_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_nc_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_nc_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_nc_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_nc_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_nc_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`nd`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_nd.
+inline Tensor jacobi_elliptic_k_nd(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_nd(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_nd(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_nd(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_nd(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_nd(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_nd_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_nd_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_nd_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_nd_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_nd_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_nd_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`ns`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_ns.
+inline Tensor jacobi_elliptic_k_ns(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_ns(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_ns(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_ns(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_ns(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_ns(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_ns_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_ns_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_ns_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_ns_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_ns_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_ns_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`sc`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_sc.
+inline Tensor jacobi_elliptic_k_sc(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sc(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_sc(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sc(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_sc(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_sc(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_sc_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sc_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_sc_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sc_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_sc_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_sc_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`sd`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_sd.
+inline Tensor jacobi_elliptic_k_sd(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sd(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_sd(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sd(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_sd(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_sd(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_sd_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sd_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_sd_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sd_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_sd_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_sd_out(result, self, k);
+}
+
+/// Jacobi elliptic function :math:`sn`.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.jacobi_elliptic_k_sn.
+inline Tensor jacobi_elliptic_k_sn(const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sn(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_sn(const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sn(self, k);
+}
+
+inline Tensor jacobi_elliptic_k_sn(const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_sn(self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_sn_out(Tensor& result, const Tensor& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sn_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_sn_out(Tensor& result, const Scalar& self, const Tensor& k) {
+  return torch::special_jacobi_elliptic_k_sn_out(result, self, k);
+}
+
+inline Tensor& jacobi_elliptic_k_sn_out(Tensor& result, const Tensor& self, const Scalar& k) {
+  return torch::special_jacobi_elliptic_k_sn_out(result, self, k);
+}
+
 }} // torch::special

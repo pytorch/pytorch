@@ -195,6 +195,54 @@ TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
     build_binary_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC(special_jacobi_elliptic_k_cd) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_cn) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_cs) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_dc) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_dn) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_ds) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_nc) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_nd) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_ns) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_sc) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_sd) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
+TORCH_META_FUNC(special_jacobi_elliptic_k_sn) (const Tensor& self, const Tensor& k) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, k);
+}
+
 void comparison_op_check(const Tensor& self, const Tensor& other, const Tensor& result) {
   // Validate that is possible to convert zero-dim tensor's dtype to other dtype
   // without overflow
@@ -275,6 +323,18 @@ DEFINE_DISPATCH(copysign_stub);
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_cd_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_cn_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_cs_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_dc_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_dn_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_ds_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_nc_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_nd_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_ns_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_sc_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_sd_stub);
+DEFINE_DISPATCH(jacobi_elliptic_k_sn_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -323,6 +383,54 @@ TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, cons
 
 TORCH_IMPL_FUNC(tanh_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
   tanh_backward_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_cd_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_sn_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_cn_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_cn_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_cs_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_dn_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_dc_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_cd_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_dn_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_cs_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_ds_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_dc_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_nc_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_ds_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_nd_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_nc_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_ns_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_nd_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_sc_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_ns_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_sd_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_sc_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_jacobi_elliptic_k_sn_out) (const Tensor& self, const Tensor& k, const Tensor& result) {
+  jacobi_elliptic_k_sd_stub(device_type(), *this);
 }
 
 #define CREATE_BINARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
@@ -640,8 +748,6 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
 }
 
 Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
-  TORCH_INTERNAL_ASSERT(self._is_zerotensor() || other._is_zerotensor());
-
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
@@ -697,6 +803,26 @@ Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alp
 
 Tensor sub_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return maybe_add_maybe_sub(self, other, -alpha);
+}
+
+Tensor linalg_cross_zerotensor(
+  const Tensor& input,
+  const Tensor& other,
+  const int64_t dim)
+{
+  auto out_device = correct_out_device(input, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type
+  // promotion logic (see add_zerotensor)
+  auto device = Device(DeviceType::Meta);
+  auto meta_out = at::redispatch::linalg_cross(
+    c10::DispatchKeySet(at::DispatchKey::Meta),
+    input.to(device),
+    other.to(device),
+    dim);
+
+  return at::_efficientzerotensor(
+    meta_out.sizes(),
+    meta_out.options().device(out_device));
 }
 
 // multiply, alias for mul
@@ -1205,6 +1331,198 @@ Tensor special_xlogy(const Scalar& x, const Tensor& y) {
 
 Tensor special_xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, y);
+}
+
+Tensor special_jacobi_elliptic_k_cd(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_cd(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_cd(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_cd(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_cd_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_cd_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_cd_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_cd_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_cn(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_cn(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_cn(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_cn(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_cn_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_cn_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_cn_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_cn_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_cs(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_cs(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_cs(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_cs(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_cs_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_cs_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_cs_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_cs_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_dc(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_dc(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_dc(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_dc(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_dc_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_dc_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_dc_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_dc_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_dn(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_dn(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_dn(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_dn(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_dn_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_dn_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_dn_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_dn_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_ds(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_ds(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_ds(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_ds(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_ds_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_ds_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_ds_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_ds_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_nc(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_nc(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_nc(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_nc(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_nc_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_nc_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_nc_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_nc_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_nd(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_nd(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_nd(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_nd(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_nd_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_nd_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_nd_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_nd_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_ns(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_ns(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_ns(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_ns(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_ns_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_ns_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_ns_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_ns_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_sc(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_sc(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_sc(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_sc(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_sc_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_sc_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_sc_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_sc_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_sd(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_sd(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_sd(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_sd(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_sd_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_sd_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_sd_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_sd_out(result, self, wrapped_scalar_tensor(k));
+}
+
+Tensor special_jacobi_elliptic_k_sn(const Scalar& self, const Tensor& k) {
+  return at::special_jacobi_elliptic_k_sn(wrapped_scalar_tensor(self), k);
+}
+
+Tensor special_jacobi_elliptic_k_sn(const Tensor& self, const Scalar& k) {
+  return at::special_jacobi_elliptic_k_sn(self, wrapped_scalar_tensor(k));
+}
+
+Tensor& special_jacobi_elliptic_k_sn_out(const Scalar& self, const Tensor& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_sn_out(result, wrapped_scalar_tensor(self), k);
+}
+
+Tensor& special_jacobi_elliptic_k_sn_out(const Tensor& self, const Scalar& k, Tensor& result) {
+  return at::special_jacobi_elliptic_k_sn_out(result, self, wrapped_scalar_tensor(k));
 }
 
 } // namespace native
