@@ -1,11 +1,12 @@
 # Owner(s): ["module: onnx"]
 
+import contextlib
 import io
+import itertools
 import os
 import sys
 import unittest
-from contextlib import ExitStack
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Iterable, Optional, Tuple, Union
 
 import onnx
 from test_pytorch_common import TestCase
@@ -23,12 +24,16 @@ sys.path.append(pytorch_test_dir)
 def export_to_onnx(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction],
     input: Tuple[torch.Tensor],
-    custom_ops: Optional[List[Tuple[str, Callable, int]]] = None,
-    mocks: Optional[List[unittest.mock.patch]] = None,
+    custom_ops: Optional[
+        Iterable[
+            Union[contextlib.AbstractContextManager, contextlib.ContextDecorator],
+        ]
+    ] = None,
+    mocks: Optional[Iterable[unittest.mock.patch]] = None,
     operator_export_type: OperatorExportTypes = OperatorExportTypes.ONNX,
-    opset_version=torch.onnx.symbolic_helper._export_onnx_opset_version,
-):
-    """Exports `model(input)` to ONNX and return it.
+    opset_version: int = torch.onnx.symbolic_helper._export_onnx_opset_version,
+) -> onnx.ModelProto:
+    """Exports `model(input)` to ONNX and returns it.
 
     Custom operators and/or unittest patches can be used help reproducing specific behaviors.
 
@@ -36,18 +41,17 @@ def export_to_onnx(
         model: model to export
         input: model input with same format as `torch.onnx.export(..,args,...)`
         custom_ops: list of custom operators to use during export
-        mocks: list of unittests mocks to use during export
+        mocks: list of mocks to use during export
         operator_export_type: export type as described by `torch.onnx.export(...operator_export_type,...)`
         opset_version: ONNX opset version as described by `torch.onnx.export(...opset_version,...)`
     Returns:
         A valid ONNX model (`onnx.ModelProto`)
     """
-
     custom_ops = custom_ops or []
     mocks = mocks or []
-    with ExitStack() as stack:
-        for mgr in [*custom_ops, *mocks]:
-            stack.enter_context(mgr)
+    with contextlib.ExitStack() as stack:
+        for ctx in itertools.chain(custom_ops, mocks):
+            stack.enter_context(ctx)
 
         f = io.BytesIO()
         torch.onnx.export(
