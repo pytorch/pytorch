@@ -1218,3 +1218,60 @@ def stack(tensors: List[Tensor], dim: int = 0) -> Tensor:
         return out.view(result_sizes)
     else:
         return torch.cat(get_stack_inputs(tensors, wrapped_dim), dim)
+
+
+@register_decomposition(aten.frac)
+def frac(input: Tensor) -> Tensor:
+    return input - torch.trunc(input)
+
+
+@register_decomposition(aten.celu)
+def celu(input: Tensor, alpha: float = 1.0) -> Tensor:
+    inv_alpha = 1.0 / alpha
+    # TODO: Should I use F.elu here?
+    return aten.elu(input, alpha, 1.0, inv_alpha)
+
+
+@register_decomposition(aten.mish)
+@pw_cast_for_opmath
+def mish(x: Tensor) -> Tensor:
+    # TODO: copied from cuda impl, note this is different from doc's 'x * x.softplus().tanh()
+    return x * x.exp().log1p().tanh()
+
+
+@register_decomposition(aten.softplus)
+def softplus(a: Tensor, beta: float = 1.0, threshold: float = 20.0) -> Tensor:
+    return torch.where((a * beta) > threshold, a, (a * beta).exp().log1p() / beta)
+
+
+@register_decomposition(aten.softshrink)
+def softshrink(a: Tensor, lambd: float = 0.5) -> Tensor:
+    # TODO: can these two where be commbined?
+    return torch.where(a > lambd, a - lambd, torch.where(a < -lambd, a + lambd, 0))
+
+
+# TODO: why AOTAutograd tracing caught this? at::deg2rad has native impl
+@register_decomposition(aten.deg2rad)
+def deg2rad(a: Tensor) -> Tensor:
+    M_PI_180 = 0.017453292519943295769236907684886127134428718885417
+    return a * M_PI_180
+
+
+# TODO: why AOTAutograd tracing caught this? at::deg2rad has native impl
+@register_decomposition(aten.rad2deg)
+def rad2deg(a: Tensor) -> Tensor:
+    M_180_PI = 57.295779513082320876798154814105170332405472466564
+    return a * M_180_PI
+
+
+# TODO: same here, at::relu has native impl
+@register_decomposition(aten.relu)
+def relu(a: Tensor) -> Tensor:
+    return torch.clamp(a, min=0)
+
+
+@register_decomposition(aten.sinc)
+def sinc(a: Tensor) -> Tensor:
+    PI = 3.14159265358979323846
+    product = PI * a
+    return torch.where(a == 0.0, 1.0, torch.sin(product) / product)
