@@ -503,7 +503,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::get_device(Tensor self) -> int"),
         [](Stack& stack) {
-          RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
+          RECORD_FUNCTION("get_device", c10::ArrayRef<const c10::IValue>{});
           auto result =
               at::get_device((std::move(peek(stack, 0, 1))).toTensor());
           drop(stack, 1);
@@ -513,7 +513,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::storage_offset(Tensor self) -> int"),
         [](Stack& stack) {
-          RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
+          RECORD_FUNCTION("storage_offset", c10::ArrayRef<const c10::IValue>{});
           auto result =
               ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
           drop(stack, 1);
@@ -523,7 +523,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::is_contiguous(Tensor self) -> bool"),
         [](Stack& stack) {
-          RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
+          RECORD_FUNCTION("is_contiguous", c10::ArrayRef<const c10::IValue>{});
           auto result =
               ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
           drop(stack, 1);
