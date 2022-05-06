@@ -427,7 +427,6 @@ ReductionParams innerPersistentHeuristic(
 
   // For persistent schedules always have to mark the reduction unrolled
   // otherwise rfactor can fail
-  rparams.unroll_inner_reduction = true;
   rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
   rparams.vectorize_inner_reduction = vectorize;
 
@@ -446,7 +445,6 @@ ReductionParams innerPersistentHeuristic(
   }
 
   if (iter_unroll_factor > 1) {
-    rparams.unroll_iter_dom = true;
     rparams.unroll_factor_iter_dom = iter_unroll_factor;
   }
 
@@ -457,7 +455,6 @@ ReductionParams innerPersistentHeuristic(
         batches_per_block_outer_reduction;
     rparams.block_dim_outer_reduction = ParallelType::TIDz;
     rparams.cross_block_outer_reduction = true;
-    rparams.unroll_outer_reduction = outer_reduction_unroll_factor > 1;
     rparams.unroll_factor_outer_reduction = outer_reduction_unroll_factor;
   }
 
@@ -727,12 +724,11 @@ ReductionParams OuterPersistentHeuristic(
 
   // Always need to mark inner reduction unroll for rfactor in outer persitent
   // kernels
-  rparams.unroll_inner_reduction = true;
   rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
 
+  rparams.unroll_factor_iter_dom = iter_unroll_factor;
+
   if (iter_unroll_factor > 1) {
-    rparams.unroll_iter_dom = true;
-    rparams.unroll_factor_iter_dom = iter_unroll_factor;
     rparams.vectorize_iter_dom = vectorize;
   }
 
@@ -982,7 +978,7 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
   // can invalidate the references since when applied to a reduction tensor view
   // the new tensor view contains the reduction and original doesn't.
 
-  bool unroll = rparams.unroll_inner_reduction || rparams.unroll_iter_dom;
+  bool unroll = rparams.isUnrolled();
 
   // Cache inputs if unrolled
   auto cached_inputs = scheduler_utils::cacheInputs(fusion, unroll);

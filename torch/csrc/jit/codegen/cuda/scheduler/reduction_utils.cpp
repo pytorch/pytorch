@@ -48,11 +48,12 @@ TensorView* scheduleReductionTV(
       "Multiple reductions requires an iter domain, but one wasn't found.");
 
   TORCH_INTERNAL_ASSERT(
-      !(rparams.cross_grid_inner_reduction && rparams.unroll_iter_dom),
+      !(rparams.cross_grid_inner_reduction &&
+        rparams.unroll_factor_iter_dom > 1),
       "Unrolling on iter domain not supported with cross grid reductions.");
 
   TORCH_INTERNAL_ASSERT(
-      !(rparams.unroll_iter_dom && !has_iter_axis),
+      !(rparams.unroll_factor_iter_dom > 1 && !has_iter_axis),
       "Unrolling on iter domain requires an iter domain.");
 
   auto vectorize = [&reduction_tv](int axis, int factor) {
@@ -106,7 +107,8 @@ TensorView* scheduleReductionTV(
 
     outer_unswitch(outer_i++);
 
-    if (!rparams.vectorize_inner_reduction && rparams.unroll_inner_reduction) {
+    if (!rparams.vectorize_inner_reduction &&
+        rparams.unroll_factor_inner_reduction > 1) {
       outer_unroll(outer_i++, rparams.unroll_factor_inner_reduction);
     }
 
@@ -130,7 +132,8 @@ TensorView* scheduleReductionTV(
       }
     }
 
-    if (!rparams.vectorize_inner_reduction && rparams.unroll_inner_reduction) {
+    if (!rparams.vectorize_inner_reduction &&
+        rparams.unroll_factor_inner_reduction > 1) {
       inner_unroll(inner_reduce_axis, rparams.unroll_factor_inner_reduction);
     }
 
@@ -158,7 +161,7 @@ TensorView* scheduleReductionTV(
       reduction_tv->split(
           outer_i++, rparams.batches_per_block_outer_reduction, false);
 
-      if (rparams.unroll_outer_reduction) {
+      if (rparams.unroll_factor_outer_reduction > 1) {
         outer_unroll(outer_i++, rparams.unroll_factor_outer_reduction);
       }
 
@@ -171,7 +174,7 @@ TensorView* scheduleReductionTV(
         inner_parallel(outer_reduce_axis, rparams.block_dim_outer_reduction);
       }
 
-      if (rparams.unroll_outer_reduction) {
+      if (rparams.unroll_factor_outer_reduction > 1) {
         inner_unroll(outer_reduce_axis, rparams.unroll_factor_outer_reduction);
       }
 
@@ -193,11 +196,11 @@ TensorView* scheduleReductionTV(
       inner_parallel(iter_axis, rparams.block_dim_iter_dom);
     }
 
-    if (!rparams.vectorize_iter_dom && rparams.unroll_iter_dom) {
+    if (!rparams.vectorize_iter_dom && rparams.unroll_factor_iter_dom > 1) {
       inner_unroll(iter_axis, rparams.unroll_factor_iter_dom);
     }
 
-    if (rparams.unroll_iter_dom) {
+    if (rparams.unroll_factor_iter_dom > 1) {
       inner_unswitch(iter_axis);
     }
 
@@ -259,7 +262,7 @@ void multiReductionInliner(
   std::unordered_set<IterDomain*> mapped_to_trivial_reduction =
       scheduler_utils::getTrivialReductionMap(fusion);
 
-  bool unroll = rparams.unroll_inner_reduction || rparams.unroll_iter_dom;
+  bool unroll = rparams.isUnrolled();
 
   bool vectorize =
       rparams.vectorize_inner_reduction || rparams.vectorize_iter_dom;
@@ -396,7 +399,7 @@ void multiReductionInliner(
       // Compute at rfactor into following reduction, keep outside first
       // reduction iter domain in the rfactor tensor view
       for (const auto i : c10::irange(rfactor_tvs.size())) {
-        if (rparams.unroll_iter_dom) {
+        if (rparams.unroll_factor_iter_dom > 1) {
           auto rfactor_tv = rfactor_tvs[i];
           auto rfactor_tv_dom = rfactor_tv->domain()->domain();
           auto reduction_it = std::find_if(

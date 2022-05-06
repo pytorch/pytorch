@@ -354,19 +354,14 @@ ReductionParams innerReductionHeuristic(
         bdimx % warp_size == 0 ? bdimx : bdimx + warp_size - bdimx % warp_size;
   }
 
-  if (inner_reduction_unroll_factor || iter_unroll_factor == 1) {
-    rparams.unroll_inner_reduction = true;
-    rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
-    rparams.vectorize_inner_reduction = vectorize;
-  }
+  rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
+  rparams.vectorize_inner_reduction = vectorize;
 
   if (rparams.multiple_reds_per_blk) {
     rparams.block_dim_iter_dom = ParallelType::TIDy;
   }
-  if (iter_unroll_factor > 1) {
-    rparams.unroll_iter_dom = true;
-    rparams.unroll_factor_iter_dom = iter_unroll_factor;
-  }
+
+  rparams.unroll_factor_iter_dom = iter_unroll_factor;
 
   rparams.schedule_3D = total_reduction_numel != inner_most_dimension_numel;
   // Outer reduction domain
@@ -376,7 +371,6 @@ ReductionParams innerReductionHeuristic(
       rparams.block_dim_outer_reduction = ParallelType::TIDz;
       rparams.cross_block_outer_reduction = true;
     }
-    rparams.unroll_outer_reduction = outer_reduction_unroll_factor > 1;
     rparams.unroll_factor_outer_reduction = outer_reduction_unroll_factor;
   }
 
@@ -450,7 +444,7 @@ ReductionParams innerReductionHeuristic(
       if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
         std::cerr << "\n===== UNSUPPORTED REDUCTION HEURISTIC ========\n";
         std::cerr << rparams.multiple_reds_per_blk << ", "
-                  << rparams.unroll_inner_reduction << ", "
+                  << (rparams.unroll_factor_inner_reduction > 1) << ", "
                   << rparams.cross_grid_inner_reduction << std::endl;
       }
       return innerReductionHeuristic(
@@ -701,13 +695,10 @@ ReductionParams OuterReductionHeuristic(
     }
   }
 
-  if (inner_reduction_unroll_factor > 1) {
-    rparams.unroll_inner_reduction = true;
-    rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
-  }
+  rparams.unroll_factor_inner_reduction = inner_reduction_unroll_factor;
+
+  rparams.unroll_factor_iter_dom = iter_unroll_factor;
   if (iter_unroll_factor > 1) {
-    rparams.unroll_iter_dom = true;
-    rparams.unroll_factor_iter_dom = iter_unroll_factor;
     rparams.vectorize_iter_dom = vectorize;
   }
 
@@ -888,7 +879,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
   FUSER_PERF_SCOPE("scheduleReduction");
   FusionGuard fg(fusion);
 
-  bool unroll = rparams.unroll_inner_reduction || rparams.unroll_iter_dom;
+  bool unroll = rparams.isUnrolled();
 
   // Cache inputs if unrolled
   auto cached_inputs = scheduler_utils::cacheInputs(fusion, unroll);

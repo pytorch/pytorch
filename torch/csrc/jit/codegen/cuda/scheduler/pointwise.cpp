@@ -444,9 +444,9 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   // Vectorizing innermost domains
 
   // Don't try to vectorize if it's not recommended
-  params.inner_factor = 1;
+  params.unroll_factor = 1;
 
-  // Vectorize as much as we can
+  // Compute maximum vectorize factor that can be used
   size_t vectorize_factor = max_unroll_factor;
 
   auto vectorizable_inputs_outputs_entry =
@@ -484,10 +484,10 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
 
   if (vectorize_factor == 1) {
     params.vectorize = false;
-    params.inner_factor = max_unroll_factor;
+    params.unroll_factor = max_unroll_factor;
   } else {
     params.vectorize = true;
-    params.inner_factor = vectorize_factor;
+    params.unroll_factor = vectorize_factor;
   }
 
   TORCH_INTERNAL_ASSERT(right_elem_count > 0 || params.break_point == 0);
@@ -701,7 +701,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     reference_tv->reorder({{lhs_i, 0}, {-1, 1}});
 
     if (params.vectorize) {
-      reference_tv->split(1, params.inner_factor);
+      reference_tv->split(1, params.unroll_factor);
       reference_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
       reference_tv->split(0, 1);
       // [outer, Unswitch | i-remainder, TIDx, Vectorization]
@@ -718,7 +718,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       //[outer | i-remainder, Unswitch, Vectorization, TIDx]
     } else {
       reference_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
-      reference_tv->split(1, params.inner_factor);
+      reference_tv->split(1, params.unroll_factor);
 
       reference_tv->split(0, 1);
       // [outer, unswitch | i-remainder, unroll, TIDx ]
@@ -760,7 +760,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
 
     if (params.vectorize) {
       // Vectorize
-      reference_tv->split(0, params.inner_factor);
+      reference_tv->split(0, params.unroll_factor);
       // Unswitch
       reference_tv->split(0, 1);
       // Threads
@@ -769,8 +769,8 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       reference_tv->axis(0)->parallelize(ParallelType::BIDx);
       reference_tv->axis(1)->parallelize(ParallelType::TIDx);
       reference_tv->axis(2)->parallelize(ParallelType::Unswitch);
-      // Aggressively mark with vectorized and cleanup later. That way we don't
-      // have to manually specify parallelization outside the reference.
+      // Aggressively mark with vectorized and cleanup later. That way we
+      // don't have to manually specify parallelization outside the reference.
       reference_tv->axis(3)->parallelize(ParallelType::Vectorize);
 
       //[BIDx, TIDx, Unswitch, Vectorization]
@@ -781,7 +781,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       // Threads
       reference_tv->split(0, kThreadX);
       // Unroll
-      reference_tv->split(0, params.inner_factor);
+      reference_tv->split(0, params.unroll_factor);
       // Unswitch
       reference_tv->split(0, 1);
 
