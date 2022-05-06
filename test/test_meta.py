@@ -450,6 +450,8 @@ meta_exclude_set = {
     torch.var_mean,  # MISSING aten::var_mean.correction
     torch.vdot,  # MISSING aten::vdot
     torch.where,  # MISSING aten::where.self
+    torch.quantile,  # MISSING aten::isnan
+    torch.nanquantile,  # MISSING aten::isnan
 }
 
 # Only some overloads/configurations are covered with meta tensors,
@@ -459,8 +461,15 @@ overload_exclude_set = {
     torch.max,  # MISSING aten::max
     torch.min,  # MISSING aten::min
     torch.nn.functional.interpolate,  # MISSING aten::upsample_nearest3d.vec
+    torch.nn.functional.upsample_nearest,  # MISSING aten::upsample_nearest3d.vec
     torch.nn.functional.pad,  # MISSING aten::reflection_pad2d
     torch.remainder,  # MISSING aten::remainder.Scalar_Tensor
+    torch.linalg.matrix_rank,  # MISSING aten::linalg_eigh
+    torch.Tensor.isinf,  # MISSING aten::abs.out
+    torch.isinf,  # MISSING aten::abs.out
+    torch.Tensor.isfinite,  # MISSING aten::abs.out
+    torch.isfinite,  # MISSING aten::abs.out
+    torch.diff,  # MISSING aten::logical_xor.out
 }
 
 # These are fine in OpInfo tests, but triggered errors in full test suite
@@ -468,20 +477,14 @@ overload_exclude_set = {
 # OpInfo.  Patch in https://github.com/pytorch/pytorch/pull/75994 and find
 # out where these fails come from.
 suspicious_exclude_set = {
-    torch.Tensor.isfinite,  # MISSING aten::abs.out
-    torch.Tensor.isinf,  # MISSING aten::abs.out
     torch.add,  # MISSING aten::_local_scalar_dense
     torch.cat,  # MISSING aten::_local_scalar_dense
     torch.cumprod,  # MISSING aten::logical_and.out
     torch.cumsum,  # MISSING aten::_local_scalar_dense
-    torch.diff,  # MISSING aten::logical_xor.out
     torch.functional.lu,  # MISSING aten::lu_unpack
     torch.functional.norm,  # MISSING aten::isnan
-    torch.isfinite,  # MISSING aten::abs.out
-    torch.isinf,  # MISSING aten::abs.out
     torch.linalg.cond,  # MISSING aten::abs.out
     torch.linalg.lu_factor_ex,  # MISSING aten::lu_unpack
-    torch.linalg.matrix_rank,  # MISSING aten::linalg_eigh
     torch.nn.functional.triplet_margin_with_distance_loss,  # MISSING aten::clamp_min.out
     torch.sgn,  # MISSING aten::abs.out
 
