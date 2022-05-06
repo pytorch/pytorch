@@ -362,9 +362,9 @@ struct WarningMeta {
       verbatim_{_verbatim} { }
 
 
-  const c10::SourceLocation source_location_;
-  const std::string msg_;
-  const bool verbatim_;
+  c10::SourceLocation source_location_;
+  std::string msg_;
+  bool verbatim_;
 };
 
 // ATen warning handler for Python
