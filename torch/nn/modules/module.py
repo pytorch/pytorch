@@ -41,6 +41,7 @@ def _addindent(s_, numSpaces):
 
 def _wrap_hook(hook, module):
     weak_module = weakref.ref(module)
+
     @functools.wraps(hook)
     def inner(*args, **kwargs):
         module = weak_module()
@@ -48,6 +49,7 @@ def _wrap_hook(hook, module):
             raise RuntimeError("You are trying to call hook of a dead object!")
         else:
             return hook(module, *args, **kwargs)
+
     return inner
 
 
