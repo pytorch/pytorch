@@ -816,7 +816,7 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
     org, project = repo.gh_owner_and_name()
     start_time = time.time()
     last_exception = ''
-    elapsed_time = 0
+    elapsed_time = 0.0
     while elapsed_time < 400 * 60:
         current_time = time.time()
         elapsed_time = current_time - start_time
@@ -841,9 +841,9 @@ def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
-
     pr = GitHubPR(org, project, args.pr_num)
-    def handle_exception(e: Exception, msg:str = "Merge failed") -> None:
+
+    def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
         msg += f" due to {e}"
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
@@ -856,7 +856,7 @@ def main() -> None:
         try:
             try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id)
         except Exception as e:
-            handle_exception(f"Reverting PR {args.pr_num} failed")
+            handle_exception(e, f"Reverting PR {args.pr_num} failed")
         return
 
     if pr.is_closed():
