@@ -5,6 +5,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind DiagonalViewUpdate::class_op_kind(ltc_diagonal_view_update);
+
 DiagonalViewUpdate::DiagonalViewUpdate(
     const Value& target,
     const Value& input,

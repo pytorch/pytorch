@@ -524,6 +524,29 @@ def run_gen_lazy_tensor(
             "namespace_epilogue": ns_helper.epilogue,
         },
     )
+    # Generate OpKind definitions for IR node classes
+    fm.write_with_template(
+        "LazyIr.cpp",
+        "LazyIr.cpp",
+        lambda: {
+            "includes": [
+                f"#include <{path}>"
+                for path in [
+                    f"{output_dir}/LazyIr.h",
+                ]
+            ],
+            "opkind_definitions": list(
+                concat_map_codegen(
+                    lazy_ir_generator(
+                        backend_indices[backend_key], node_base
+                    ).gen_opkind_definition,
+                    grouped_native_functions,
+                )
+            ),
+            "namespace_prologue": ns_helper.prologue,
+            "namespace_epilogue": ns_helper.epilogue,
+        },
+    )
 
 
 if __name__ == "__main__":

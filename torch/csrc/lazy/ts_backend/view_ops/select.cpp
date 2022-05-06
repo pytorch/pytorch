@@ -6,6 +6,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind Select::class_op_kind(at::aten::select);
+
 Select::Select(
     const Value& input,
     int64_t dim,

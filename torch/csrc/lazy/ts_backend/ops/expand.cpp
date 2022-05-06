@@ -3,6 +3,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind Expand::class_op_kind(at::aten::expand);
+
 Expand::Expand(
     const Value& input,
     std::vector<int64_t> size,

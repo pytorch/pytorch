@@ -7,6 +7,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind SelectViewUpdate::class_op_kind(ltc_select_view_update);
+
 SelectViewUpdate::SelectViewUpdate(
     const Value& target,
     const Value& source,
