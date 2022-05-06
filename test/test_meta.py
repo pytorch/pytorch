@@ -25,6 +25,10 @@ import warnings
 
 RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
+# These just need an implementation of meta tensors, once you
+# implement them remove from this set.  When doing comprehensive
+# testing, we will verify that these raise errors when meta is run under
+# OpInfo
 meta_exclude_set = {
     torch.Tensor.__lshift__,  # MISSING aten::__lshift__.Scalar
     torch.Tensor.__lshift__,  # MISSING aten::__lshift__.Tensor
@@ -77,8 +81,6 @@ meta_exclude_set = {
     torch.Tensor.inverse,  # MISSING aten::_local_scalar_dense
     torch.Tensor.is_set_to,  # MISSING aten::is_set_to
     torch.Tensor.isclose,  # MISSING aten::abs.out
-    torch.Tensor.isfinite,  # MISSING aten::abs.out
-    torch.Tensor.isinf,  # MISSING aten::abs.out
     torch.Tensor.isnan,  # MISSING aten::isnan
     torch.Tensor.istft,  # MISSING aten::view_as_complex
     torch.Tensor.kthvalue,  # MISSING aten::kthvalue.values
@@ -235,7 +237,6 @@ meta_exclude_set = {
     torch._unique2,  # MISSING aten::_unique2
     torch.abs,  # MISSING aten::abs.out
     torch.absolute,  # MISSING aten::abs.out
-    torch.add,  # MISSING aten::_local_scalar_dense
     torch.addbmm,  # MISSING aten::addbmm
     torch.angle,  # MISSING aten::angle
     torch.batch_norm,  # MISSING aten::native_batch_norm
@@ -243,11 +244,9 @@ meta_exclude_set = {
     torch.bincount,  # MISSING aten::bincount
     torch.binomial,  # MISSING aten::binomial
     torch.bucketize,  # MISSING aten::bucketize.Tensor
-    torch.cat,  # MISSING aten::_local_scalar_dense
     torch.cholesky,  # MISSING aten::cholesky
     torch.cholesky_inverse,  # MISSING aten::cholesky_inverse
     torch.cholesky_solve,  # MISSING aten::_cholesky_solve_helper
-    torch.clamp,  # MISSING aten::clamp.Tensor
     torch.clip,  # MISSING aten::clamp.Tensor
     torch.combinations,  # MISSING aten::masked_select
     torch.complex,  # MISSING aten::complex.out
@@ -257,12 +256,9 @@ meta_exclude_set = {
     torch.cov,  # MISSING aten::_local_scalar_dense
     torch.cummax,  # MISSING aten::_cummax_helper
     torch.cummin,  # MISSING aten::_cummin_helper
-    torch.cumprod,  # MISSING aten::logical_and.out
-    torch.cumsum,  # MISSING aten::_local_scalar_dense
     torch.det,  # MISSING aten::_det_lu_based_helper
     torch.diag,  # MISSING aten::diag.out
     torch.diagflat,  # MISSING aten::diag.out
-    torch.diff,  # MISSING aten::logical_xor.out
     torch.dot,  # MISSING aten::dot
     torch.eig,  # MISSING aten::abs.out
     torch.embedding,  # MISSING aten::index_select
@@ -297,8 +293,6 @@ meta_exclude_set = {
     torch.functional.cdist,  # MISSING aten::_cdist_forward
     torch.functional.einsum,  # MISSING aten::dot
     torch.functional.istft,  # MISSING aten::view_as_complex
-    torch.functional.lu,  # MISSING aten::lu_unpack
-    torch.functional.norm,  # MISSING aten::isnan
     torch.functional.pca_lowrank,  # MISSING aten::_linalg_qr_helper
     torch.functional.stft,  # MISSING aten::_fft_r2c
     torch.functional.svd_lowrank,  # MISSING aten::_linalg_qr_helper
@@ -314,14 +308,11 @@ meta_exclude_set = {
     torch.index_select,  # MISSING aten::index_select
     torch.inner,  # MISSING aten::tensordot.out
     torch.inverse,  # MISSING aten::_local_scalar_dense
-    torch.isfinite,  # MISSING aten::abs.out
-    torch.isinf,  # MISSING aten::abs.out
     torch.isnan,  # MISSING aten::isnan
     torch.kthvalue,  # MISSING aten::kthvalue.values
     torch.layer_norm,  # MISSING aten::native_batch_norm
     torch.linalg.cholesky,  # MISSING aten::linalg_cholesky_ex
     torch.linalg.cholesky_ex,  # MISSING aten::linalg_cholesky_ex
-    torch.linalg.cond,  # MISSING aten::abs.out
     torch.linalg.det,  # MISSING aten::_det_lu_based_helper
     torch.linalg.eig,  # MISSING aten::linalg_eig
     torch.linalg.eig,  # MISSING aten::linalg_eig.out
@@ -333,15 +324,11 @@ meta_exclude_set = {
     torch.linalg.inv,  # MISSING aten::_local_scalar_dense
     torch.linalg.lstsq,  # MISSING aten::linalg_lstsq.out
     torch.linalg.lu_factor,  # MISSING aten::_local_scalar_dense
-    torch.linalg.lu_factor_ex,  # MISSING aten::lu_unpack
     torch.linalg.matmul,  # MISSING aten::dot
     torch.linalg.matrix_exp,  # MISSING aten::linalg_matrix_exp
     torch.linalg.matrix_norm,  # MISSING aten::abs.out
     torch.linalg.matrix_power,  # MISSING aten::_local_scalar_dense
     torch.linalg.matrix_power,  # MISSING aten::eye.m_out
-    torch.linalg.matrix_rank,  # MISSING aten::linalg_eigh
-    torch.linalg.matrix_rank,  # MISSING aten::linalg_eigvalsh.out
-    torch.linalg.matrix_rank,  # MISSING aten::where.self
     torch.linalg.norm,  # MISSING aten::linalg_vector_norm
     torch.linalg.pinv,  # MISSING aten::where.self
     torch.linalg.qr,  # MISSING aten::_linalg_qr_helper
@@ -367,10 +354,8 @@ meta_exclude_set = {
     torch.matrix_exp,  # MISSING aten::linalg_matrix_exp
     torch.matrix_power,  # MISSING aten::eye.m_out
     torch.matrix_rank,  # MISSING aten::linalg_eigvalsh.out
-    torch.max,  # MISSING aten::max
     torch.median,  # MISSING aten::median
     torch.median,  # MISSING aten::median.dim_values
-    torch.min,  # MISSING aten::min
     torch.mode,  # MISSING aten::mode
     torch.multinomial,  # MISSING aten::multinomial
     torch.mvlgamma,  # MISSING aten::_local_scalar_dense
@@ -402,8 +387,6 @@ meta_exclude_set = {
     torch.nn.functional.hinge_embedding_loss,  # MISSING aten::clamp_min.out
     torch.nn.functional.huber_loss,  # MISSING aten::huber_loss
     torch.nn.functional.instance_norm,  # MISSING aten::native_batch_norm
-    torch.nn.functional.interpolate,  # MISSING aten::_adaptive_avg_pool2d
-    torch.nn.functional.interpolate,  # MISSING aten::upsample_nearest3d.vec
     torch.nn.functional.kl_div,  # MISSING aten::where.self
     torch.nn.functional.l1_loss,  # MISSING aten::abs.out
     torch.nn.functional.layer_norm,  # MISSING aten::native_batch_norm
@@ -423,7 +406,6 @@ meta_exclude_set = {
     torch.nn.functional.nll_loss,  # MISSING aten::nll_loss2d_forward
     torch.nn.functional.normalize,  # MISSING aten::clamp_min.out
     torch.nn.functional.one_hot,  # MISSING aten::min
-    torch.nn.functional.pad,  # MISSING aten::reflection_pad2d
     torch.nn.functional.pdist,  # MISSING aten::_pdist_forward
     torch.nn.functional.prelu,  # MISSING aten::prelu
     torch.nn.functional.relu,  # MISSING aten::relu
@@ -431,7 +413,6 @@ meta_exclude_set = {
     torch.nn.functional.rrelu,  # MISSING aten::rrelu_with_noise
     torch.nn.functional.softsign,  # MISSING aten::abs.out
     torch.nn.functional.triplet_margin_loss,  # MISSING aten::clamp_min.out
-    torch.nn.functional.triplet_margin_with_distance_loss,  # MISSING aten::clamp_min.out
     torch.nn.functional.unfold,  # MISSING aten::im2col
     torch.nonzero,  # MISSING aten::nonzero
     torch.normal,  # MISSING aten::min
@@ -446,7 +427,6 @@ meta_exclude_set = {
     torch.quantize_per_tensor,  # MISSING aten::quantize_per_tensor
     torch.quantize_per_tensor_dynamic,  # MISSING aten::quantize_per_tensor_dynamic
     torch.relu,  # MISSING aten::relu
-    torch.remainder,  # MISSING aten::remainder.Scalar_Tensor
     torch.repeat_interleave,  # MISSING aten::repeat_interleave.Tensor
     torch.rnn_relu,  # MISSING aten::relu
     torch.rnn_relu_cell,  # MISSING aten::relu
@@ -454,7 +434,6 @@ meta_exclude_set = {
     torch.rot90,  # MISSING aten::flip
     torch.rsub,  # MISSING aten::rsub.Tensor
     torch.searchsorted,  # MISSING aten::searchsorted.Tensor
-    torch.sgn,  # MISSING aten::abs.out
     torch.slogdet,  # MISSING aten::linalg_slogdet
     torch.solve,  # MISSING aten::_solve_helper
     torch.special.logit,  # MISSING aten::logit
@@ -473,7 +452,51 @@ meta_exclude_set = {
     torch.where,  # MISSING aten::where.self
 }
 
-meta_perma_exclude_set = {
+# Only some overloads/configurations are covered with meta tensors,
+# so we can't use these to toggle expected failure.  Try to prioritize these
+overload_exclude_set = {
+    torch.clamp,  # MISSING aten::clamp.Tensor
+    torch.max,  # MISSING aten::max
+    torch.min,  # MISSING aten::min
+    torch.nn.functional.interpolate,  # MISSING aten::upsample_nearest3d.vec
+    torch.nn.functional.pad,  # MISSING aten::reflection_pad2d
+    torch.remainder,  # MISSING aten::remainder.Scalar_Tensor
+}
+
+# These are fine in OpInfo tests, but triggered errors in full test suite
+# crossref testing, which means there is probably not enough coverage from
+# OpInfo.  Patch in https://github.com/pytorch/pytorch/pull/75994 and find
+# out where these fails come from.
+suspicious_exclude_set = {
+    torch.Tensor.isfinite,  # MISSING aten::abs.out
+    torch.Tensor.isinf,  # MISSING aten::abs.out
+    torch.add,  # MISSING aten::_local_scalar_dense
+    torch.cat,  # MISSING aten::_local_scalar_dense
+    torch.cumprod,  # MISSING aten::logical_and.out
+    torch.cumsum,  # MISSING aten::_local_scalar_dense
+    torch.diff,  # MISSING aten::logical_xor.out
+    torch.functional.lu,  # MISSING aten::lu_unpack
+    torch.functional.norm,  # MISSING aten::isnan
+    torch.isfinite,  # MISSING aten::abs.out
+    torch.isinf,  # MISSING aten::abs.out
+    torch.linalg.cond,  # MISSING aten::abs.out
+    torch.linalg.lu_factor_ex,  # MISSING aten::lu_unpack
+    torch.linalg.matrix_rank,  # MISSING aten::linalg_eigh
+    torch.nn.functional.triplet_margin_with_distance_loss,  # MISSING aten::clamp_min.out
+    torch.sgn,  # MISSING aten::abs.out
+
+    # RuntimeError: Expected 3D or 4D (batch mode) tensor with optional 0 dim
+    # batch size for input, but got:[1, 1, 0]
+    # in test_nn.py TestNNDeviceTypeCPU.test_max_pool1d_corner_cases_cpu_float64
+    torch.nn.functional.max_pool1d,
+
+    # Factory functions need tricky kwarg handling
+    torch.zeros_like,
+}
+
+# These also are known to not work, but they fail in a more special way
+# than the regular "Meta not implemented for aten op" way
+meta_exclude_set |= {
     # Convolutions have a special error message
     torch.nn.functional.conv1d,
     torch.nn.functional.conv2d,
@@ -610,10 +633,6 @@ meta_perma_exclude_set = {
     torch.sparse_coo_tensor,
     torch.linalg.ldl_factor,
     torch._index_reduce,
-    # RuntimeError: Expected 3D or 4D (batch mode) tensor with optional 0 dim
-    # batch size for input, but got:[1, 1, 0]
-    # in test_nn.py TestNNDeviceTypeCPU.test_max_pool1d_corner_cases_cpu_float64
-    torch.nn.functional.max_pool1d,
     # IndexError: select() cannot be applied to a 0-dim tensor.
     # e.g. test_fn_fwgrad_bwgrad_index_add_cpu_complex128 (__main__.TestGradientsCPU)
     torch.index_add,
@@ -643,7 +662,6 @@ meta_perma_exclude_set = {
     torch.vander,
     torch.as_tensor,
     torch.tensor,
-    torch.zeros_like,
     torch.randn_like,
     torch.sparse_csr_tensor,
     torch._sparse_coo_tensor_unsafe,
@@ -665,11 +683,11 @@ meta_perma_exclude_set = {
 # https://github.com/pytorch/pytorch/pull/75994
 class MetaCrossRefMode(torch.overrides.TorchFunctionMode):
     test_case: TestCase
-    ignore_exclude_set: bool
+    run_excludes_anyway: bool
 
-    def __init__(self, test_case, *, ignore_exclude_set):
+    def __init__(self, test_case, *, run_excludes_anyway):
         self.test_case = test_case
-        self.ignore_exclude_set = ignore_exclude_set
+        self.run_excludes_anyway = run_excludes_anyway
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
@@ -767,8 +785,8 @@ class MetaCrossRefMode(torch.overrides.TorchFunctionMode):
                 return t
 
         do_meta = (
-            (self.ignore_exclude_set or func not in meta_exclude_set) and
-            func not in meta_perma_exclude_set and not torch.jit.is_tracing() and
+            (self.run_excludes_anyway or func not in meta_exclude_set) and
+            not torch.jit.is_tracing() and
             not isinstance(func, torch.ScriptMethod)
         )
 
@@ -796,10 +814,14 @@ class MetaCrossRefMode(torch.overrides.TorchFunctionMode):
                     meta_rs = func(*meta_args, **meta_kwargs)
             except Exception as e:
                 suppress = False
-                if isinstance(e, NotImplementedError) and not self.ignore_exclude_set:
+                """
+                # This code can be helpful for full crossref test to filter
+                # out "pedestrian" omissions
+                if isinstance(e, NotImplementedError):
                     m = RE_NOT_IMPLEMENTED_MSG.search(e.args[0])
                     if m and m.group(1) not in ("aten::_efficientzerotensor", "aten::view_as_real"):
                         suppress = True
+                """
                 if not suppress:
                     raise RuntimeError(f"""\
 failed to run: {func}(
@@ -847,28 +869,25 @@ class TestMeta(TestCase):
         # the heavy lifting happens in MetaCrossRefMode
         func = op.get_op()
 
-        def do_test(ignore_exclude_set=False):
+        def do_test(run_excludes_anyway=False):
             samples = op.sample_inputs(device, dtype, requires_grad=False)
             for sample_input in samples:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
-                with push_torch_function_mode(partial(MetaCrossRefMode, self, ignore_exclude_set=ignore_exclude_set)):
+                with push_torch_function_mode(partial(MetaCrossRefMode, self, run_excludes_anyway=run_excludes_anyway)):
                     expected = func(*args, **kwargs)
                     if isinstance(expected, torch.Tensor) and op.supports_out:
                         func(*args, **kwargs, out=expected)
 
-        if func in meta_perma_exclude_set:
+        if func in overload_exclude_set:
             self.skipTest('permanently excluded')
-        elif func in meta_exclude_set:
-            self.skipTest('excluded because we think it is broken')
-            """
+        elif func in meta_exclude_set and dtype not in (torch.complex128, torch.complex64):
             try:
-                do_test(ignore_exclude_set=True)
+                do_test(run_excludes_anyway=True)
             except Exception:
                 pass
             else:
                 self.fail('expected failure, but succeeded')
-            """
         else:
             do_test()
 
