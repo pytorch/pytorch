@@ -12,9 +12,6 @@ from torch._prims.utils import (
     NumberType,
 )
 
-
-from torch._decomp import register_decomposition
-
 from functools import reduce
 from enum import Enum
 from typing import Sequence, Optional, Union, Callable, List, Tuple
@@ -472,6 +469,10 @@ def _maybe_resize_out(out: TensorLikeType, shape):
         return prims.resize(out, shape)
 
     return out
+
+
+# Utilities should come BEFORE this import
+from torch._decomp import register_decomposition
 
 
 #
@@ -1176,7 +1177,7 @@ def tensor_split(
     indices_or_sections: Union[Tensor, DimsType],
     dim: int = 0,
 ) -> Tuple[TensorLikeType, ...]:
-    _dim = utils.canonicalize_idx(a.ndim, dim)
+    _dim = utils.canonicalize_dim(a.ndim, dim)
     if a.ndim == 0:
         msg = "tensor_split: received a rank zero tensor, but expected a tensor of rank one or greater!"
         raise ValueError(msg)
