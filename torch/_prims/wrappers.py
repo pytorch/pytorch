@@ -106,7 +106,7 @@ class elementwise_type_promotion_wrapper(object):
             bound = sig.bind(*args, **kwargs)
             type_promoting_args = tuple(
                 bound.arguments[x]
-                for x in self.type_promoting_arg_names
+                for x in self.type_promoting_arg_names  # type: ignore[union-attr]
                 if x in bound.arguments.keys()
             )
 
@@ -119,7 +119,7 @@ class elementwise_type_promotion_wrapper(object):
 
             promoted_args = {
                 x: _maybe_convert_to_dtype(bound.arguments[x], dtype=compute_dtype)
-                for x in self.type_promoting_arg_names
+                for x in self.type_promoting_arg_names  # type: ignore[union-attr]
                 if x in bound.arguments.keys()
             }
             bound.arguments.update(promoted_args)
@@ -157,7 +157,7 @@ class elementwise_type_promotion_wrapper(object):
             assert isinstance(result, TensorLike)
             return _maybe_convert_to_dtype(result, result_dtype)
 
-        _fn.__signature__ = sig
+        _fn.__signature__ = sig  # type: ignore[attr-defined]
         return _fn
 
 
@@ -226,8 +226,8 @@ def out_wrapper(fn: Callable) -> Callable:
         annotation=TensorLikeType,
     )
     params = chain(sig.parameters.values(), (out_param,))
-    _fn.__signature__ = inspect.Signature(
-        parameters=params, return_annotation=sig.return_annotation
+    _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+        parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
     )
     _fn.__annotations__ = fn.__annotations__
     _fn.__annotations__["out"] = TensorLikeType
