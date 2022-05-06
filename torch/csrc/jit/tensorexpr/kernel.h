@@ -294,7 +294,7 @@ class TORCH_API TensorExprKernel {
       const std::vector<ExprHandle>& inputTensorDims);
   std::vector<torch::jit::StrideInput>& getSymbolicInputStrideDesc(
       const torch::jit::Value* value);
-  torch::jit::StrideInput& getSymbolicOutputStrideDesc(
+  torch::jit::StrideInput getSymbolicOutputStrideDesc(
       const torch::jit::Value* value);
 
   int64_t nInputs_ = 0;

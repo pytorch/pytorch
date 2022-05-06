@@ -963,7 +963,7 @@ std::vector<torch::jit::StrideInput>& TensorExprKernel::
   TORCH_INTERNAL_ASSERT(false);
 }
 
-torch::jit::StrideInput& TensorExprKernel::getSymbolicOutputStrideDesc(
+torch::jit::StrideInput TensorExprKernel::getSymbolicOutputStrideDesc(
     const torch::jit::Value* value) {
   for (size_t i : c10::irange(graph_->outputs().size())) {
     if (value == graph_->outputs().at(i)) {
@@ -1542,7 +1542,9 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
 
   std::vector<torch::jit::StrideInput> empty_strides = {};
   auto inputs_all_channels_last = std::all_of(
-      graph_->inputs().begin(), graph_->inputs().end(), [&](const auto& el) {
+      graph_->inputs().begin(),
+      graph_->inputs().end(),
+      [&](const jit::Value* el) {
         if (el->type()->kind() != TypeKind::TensorType) {
           return true;
         }
@@ -1554,7 +1556,9 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
       });
 
   auto outputs_all_channels_last = std::all_of(
-      graph_->outputs().begin(), graph_->outputs().end(), [&](const auto& el) {
+      graph_->outputs().begin(),
+      graph_->outputs().end(),
+      [&](const jit::Value* el) {
         if (el->type()->kind() != TypeKind::TensorType) {
           return true;
         }
