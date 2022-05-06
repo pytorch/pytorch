@@ -53,6 +53,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
+      DESIRED_DEVTOOLSET: 9
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -2135,6 +2136,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
+      DESIRED_DEVTOOLSET: 9
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -4217,6 +4219,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
+      DESIRED_DEVTOOLSET: 9
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
