@@ -1,5 +1,4 @@
 import io
-import traceback
 from typing import Any, Dict, List, Tuple, Optional, Union
 
 
@@ -22,12 +21,16 @@ from .resharding import (
     _prepare_bytes_write
 )
 
-from .storage import StorageWriter
+from .storage import (
+    CheckpointException,
+    StorageWriter,
+)
 
 # -------------- private functions --------------
 
 def _prepare(
-    state_dict: Dict[str, Any]
+    state_dict: Dict[str, Any],
+    process_group: Optional[dist.ProcessGroup] = None
 ) -> Tuple[Metadata, List[BytesWriteRequest], List[TensorWriteRequest]]:
     """
     Build the serialization plan for a given state_dict
@@ -59,7 +62,7 @@ def _prepare(
     storage_key_to_fqn: Dict[str, str] = dict()
     # The assumption is that all non ShardedTensor items are replicated
     #   and we can save them from rank 0.
-    write_replicated_data = not (dist.is_initialized() and dist.get_rank() != 0)
+    write_replicated_data = not (dist.is_initialized() and dist.get_rank(process_group) != 0)
 
     for fqn, obj in state_dict.items():
         if isinstance(obj, ShardedTensor):
@@ -83,15 +86,6 @@ def _prepare(
             metadata.state_dict_metadata[fqn] = bytes_md
 
     return (metadata, bytes_write_requests, tensor_write_requests)
-
-class CheckpointException(BaseException):
-    def __init__(self, msg, failures):
-        super().__init__(msg, failures)
-        self._failures = failures
-
-    @property
-    def failures(self):
-        return self._failures
 
 def save_state_dict(
     state_dict: Dict[str, Any],
@@ -156,7 +150,7 @@ def save_state_dict(
             metadata,
             bytes_write_requests,
             tensor_write_requests,
-        ) = _prepare(state_dict)
+        ) = _prepare(state_dict, process_group)
 
         combined_writes: List[Union[TensorWriteRequest, BytesWriteRequest]] = []
         combined_writes.extend(tensor_write_requests)

@@ -1,8 +1,9 @@
-
+import traceback
 import io
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional, cast
 
 import torch
+import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
     ShardedTensorMetadata
@@ -24,7 +25,10 @@ from .resharding import (
     _prepare_sharded_tensor_read,
     _shards_get_overlap_region_wrt_saved_tensor
 )
-from .storage import StorageReader
+from .storage import (
+    StorageReader,
+    CheckpointException,
+)
 
 
 def _reshard_and_prepare_read_request(
@@ -89,6 +93,7 @@ def _reshard_and_prepare_read_request(
 def load_state_dict(
     state_dict: Dict[str, Any],
     storage_reader: StorageReader,
+    process_group: Optional[dist.ProcessGroup] = None
 ) -> None:
     """
     Load a distributed state_dict in SPMD style.
@@ -112,6 +117,7 @@ def load_state_dict(
         state_dict (Dict[str, Any]) : The state_dict to load. Note that this
             state dict will updated in places.
         storage_reader (StorageReader): StorageReader used to load data from.
+        process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
 
     Returns:
         None.
@@ -132,25 +138,52 @@ def load_state_dict(
         >>> # ensure correct behavior.
         >>> my_model.load_state_dict(model_state_dict)
     """
+    try:
+        metadata = storage_reader.read_metadata()
+        bytes_read_requests, tensor_read_requests = _reshard_and_prepare_read_request(
+            state_dict=state_dict, metadata_from_storage=metadata
+        )
+        bytes_futures = storage_reader.read_bytes(bytes_read_requests)
+        tensor_futures = storage_reader.read_tensors(tensor_read_requests)
 
-    metadata = storage_reader.read_metadata()
-    bytes_read_requests, tensor_read_requests = _reshard_and_prepare_read_request(
-        state_dict=state_dict, metadata_from_storage=metadata
-    )
-    bytes_futures = storage_reader.read_bytes(bytes_read_requests)
-    tensor_futures = storage_reader.read_tensors(tensor_read_requests)
+        bytes_futures.wait()
 
-    bytes_futures.wait()
+        # Addtional steps are required to convert the bytes to its original type
+        # Note that this is NOT inplace,
+        # it creating a new object and replace what's in the state dict
+        for req in bytes_read_requests:
+            # Ensure the BytesIO is rewound
+            req.bytes.seek(0)
+            state_dict[req.fqn] = torch.load(req.bytes)
 
-    # Addtional steps are required to convert the bytes to its original type
-    # Note that this is NOT inplace,
-    # it creating a new object and replace what's in the state dict
-    for req in bytes_read_requests:
-        # Ensure the BytesIO is rewound
-        req.bytes.seek(0)
-        state_dict[req.fqn] = torch.load(req.bytes)
+        tensor_futures.wait()
+        result = None
+    except BaseException as e:
+        traceback.print_exc()
+        result = e
 
-    tensor_futures.wait()
+    global_result: List[Optional[CheckpointException]] = [None]
+    if dist.is_initialized():
+        # FIXME we could do an all_to_all_object if once existed
+        all_errors = [None] * dist.get_world_size(process_group)
+        is_rank0 = dist.get_rank(process_group) == 0
+        dist.gather_object(
+            obj=result,
+            object_gather_list=all_errors if is_rank0 else None,
+        )
+
+        if is_rank0:
+            node_failures = cast(Dict[int, BaseException], {i: err for i, err in enumerate(all_errors) if err is not None})
+            if len(node_failures) > 0:
+                global_result[0] = CheckpointException("failed to read checkpoint", node_failures)
+        dist.broadcast_object_list(
+            object_list=global_result,
+            group=process_group)
+    elif result is not None:
+        global_result = [CheckpointException("failed to read storage", {0 : result})]
+
+    if global_result[0] is not None:
+        raise global_result[0]
 
 
 def _validate_sharded_tensor(
