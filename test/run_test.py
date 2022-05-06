@@ -215,6 +215,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
+    "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "distributed/_shard/test_partial_tensor",
@@ -240,6 +241,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
+    "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "distributed/_shard/test_partial_tensor",
@@ -538,6 +540,7 @@ def test_distributed(test_module, test_directory, options):
                         backend, with_init
                     )
                 )
+            old_environ = dict(os.environ)
             os.environ["TEMP_DIR"] = tmp_dir
             os.environ["BACKEND"] = backend
             os.environ["INIT_METHOD"] = "env://"
@@ -588,6 +591,8 @@ def test_distributed(test_module, test_directory, options):
                     return return_code
             finally:
                 shutil.rmtree(tmp_dir)
+                os.environ.clear()
+                os.environ.update(old_environ)
     return 0
 
 
