@@ -58,8 +58,9 @@ typedef unsigned long long int uint64_t;
 }
 
 static const std::string& defineComplexTypes() {
+  static std::string result = std::string() +
 #ifdef USE_ROCM
-  static std::string result = std::string(R"ESCAPE(
+  std::string(R"ESCAPE(
 __host__ __device__ float __int_as_float(int a)
 {
   union {int a; float b;} u;
@@ -68,24 +69,16 @@ __host__ __device__ float __int_as_float(int a)
 
   return u.b;
 }
-
-#define POS_INFINITY __int_as_float(0x7f800000)
-#define INFINITY POS_INFINITY
-#define NEG_INFINITY __int_as_float(0xff800000)
-#define NAN __int_as_float(0x7fffffff)
-)ESCAPE");
-#else
-  static std::string result = std::string(R"ESCAPE(
-#define POS_INFINITY __int_as_float(0x7f800000)
-#define INFINITY POS_INFINITY
-#define NEG_INFINITY __int_as_float(0xff800000)
-#define NAN __int_as_float(0x7fffffff)
-)ESCAPE");
+)ESCAPE") +
 #endif
-  result += at::cuda::get_traits_string();
-  result += at::cuda::get_complex_body_string();
-  result += at::cuda::get_cmath_string();
-  result += at::cuda::get_complex_math_string();
+std::string(R"ESCAPE(
+#define POS_INFINITY __int_as_float(0x7f800000)
+#define INFINITY POS_INFINITY
+#define NEG_INFINITY __int_as_float(0xff800000)
+#define NAN __int_as_float(0x7fffffff)
+)ESCAPE") +
+      at::cuda::get_traits_string() + at::cuda::get_complex_body_string() +
+      at::cuda::get_cmath_string() + at::cuda::get_complex_math_string();
   return result;
 }
 
