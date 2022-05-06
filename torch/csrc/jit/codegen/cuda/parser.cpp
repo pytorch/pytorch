@@ -66,6 +66,7 @@ const auto& boolListAttr = Symbol::attr("profiled_bool_list");
 const auto& boolAttr = Symbol::attr("profiled_bool");
 const auto& strAttr = Symbol::attr("profiled_str");
 const auto& ivalAttr = Symbol::attr("profiled_ival");
+const auto& profileFailedAttr = Symbol::attr("profile_failed");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
@@ -3191,17 +3192,24 @@ void profileReductionSize(ProfilingRecord* pr, Node* node, size_t offset) {
           "profileReductionSize does not support data type: ",
           value.tagKind());
     }
-    if (!pn->hasAttribute(reductionSizeAttr)) {
-      pn->is_(reductionSizeAttr, size_vec);
-    } else {
-      auto profiled_ints = pn->is(reductionSizeAttr);
-      if (profiled_ints.size() != size_vec.size() ||
-          !std::equal(
-              profiled_ints.begin(), profiled_ints.end(), size_vec.begin())) {
-        TORCH_WARN(
-            __FUNCTION__,
-            " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+    // We stop profiling when it has failed
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(reductionSizeAttr)) {
+        pn->is_(reductionSizeAttr, size_vec);
+      } else {
+        auto profiled_ints = pn->is(reductionSizeAttr);
+        if (profiled_ints.size() != size_vec.size() ||
+            !std::equal(
+                profiled_ints.begin(), profiled_ints.end(), size_vec.begin())) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+	  pn->removeAttribute(reductionSizeAttr);
+        }
       }
+    } else {
+      TORCH_INTERNAL_ASSERT(!pn->hasAttribute(reductionSizeAttr), "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
