@@ -1250,7 +1250,7 @@ class IrParser {
             auto& beta = value_map[node->inputs()[1]->unique()];
             auto& threshold = value_map[node->inputs()[2]->unique()];
             auto out = softplus(operand, beta, threshold);
-            value_map.emplace(node->output()->unique(), out);
+            value_map.emplace(node->output()->unique(), ValueHolder(out, format));
           },
           isInputNonSizeZeroTensor,
           nullptr);
@@ -1273,7 +1273,7 @@ class IrParser {
             auto& value = value_map[node->inputs()[2]->unique()];
 
             auto out = threshold(operand, th, value);
-            value_map.emplace(node->output()->unique(), out);
+            value_map.emplace(node->output()->unique(), ValueHolder(out, format));
           },
           isInputNonSizeZeroTensor,
           nullptr);
@@ -1331,7 +1331,7 @@ class IrParser {
                 : nullptr;
 
             Val* out = clamp(operand, min, max);
-            value_map.emplace(node->output()->unique(), out);
+            value_map.emplace(node->output()->unique(), ValueHolder(out, format));
           },
           isInputNonSizeZeroTensor,
           nullptr);
