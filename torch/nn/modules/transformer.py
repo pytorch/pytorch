@@ -305,6 +305,7 @@ class TransformerEncoderLayer(Module):
           nor ``src_key_padding_mask`` is passed
         - the two ``LayerNorm`` instances have a consistent ``eps`` value (this will naturally be the case
           unless the caller has manually modified one without modifying the other)
+        - ``torch.autocast`` is not enabled
 
         If the optimized implementation is in use, a
         `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be
@@ -373,7 +374,8 @@ class TransformerEncoderLayer(Module):
             self.activation_relu_or_gelu and self.norm1.eps == self.norm2.eps and
             ((src_mask is None and src_key_padding_mask is None)
              if src.is_nested
-             else (src_mask is None or src_key_padding_mask is None))):
+             else (src_mask is None or src_key_padding_mask is None)) and
+            not torch.is_autocast_enabled()):
             tensor_args = (
                 src,
                 self.self_attn.in_proj_weight,

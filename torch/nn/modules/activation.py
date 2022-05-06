@@ -908,6 +908,7 @@ class MultiheadAttention(Module):
     - at most one of ``key_padding_mask`` or ``attn_mask`` is passed
     - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither ``key_padding_mask``
       nor ``attn_mask`` is passed
+    - ``torch.autocast`` is not enabled
 
     If the optimized implementation is in use, a
     `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
@@ -1081,6 +1082,8 @@ class MultiheadAttention(Module):
             why_not_fast_path = "key_padding_mask and attn_mask are not supported with NestedTensor input"
         elif not query.is_nested and key_padding_mask is not None and attn_mask is not None:
             why_not_fast_path = "key_padding_mask and attn_mask were both supplied"
+        elif torch.is_autocast_enabled():
+            why_not_fast_path = "autocast is not supported"
 
         if not why_not_fast_path:
             tensor_args = (
