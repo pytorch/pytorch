@@ -9,14 +9,16 @@
 #include <stdexcept>
 #include <string>
 
-
 #if __cpp_lib_string_view
 #include <string_view>
 #define C10_HAS_STD_STRING_VIEW() 1
 #define C10_HAS_STD_EXPERIMENTAL_STRING_VIEW() 0
 #elif defined(__has_include)
 #if __has_include(<experimental/string_view>)
+// libc++ 7.0 has experimental/string_view but it's just a #error
+#if !defined(_LIBCPP_VERSION) || (_LIBCPP_VERSION < 7000)
 #include <experimental/string_view>
+#endif
 #if __cpp_lib_experimental_string_view
 #define C10_HAS_STD_STRING_VIEW() 0
 #define C10_HAS_STD_EXPERIMENTAL_STRING_VIEW() 1
@@ -719,8 +721,7 @@ struct hash<::c10::basic_string_view<CharT>> {
 #else
     using std_string_type = ::std::basic_string<CharT>;
 #endif
-    return ::std::hash<std_string_type>{}(
-        std_string_type(x.data(), x.size()));
+    return ::std::hash<std_string_type>{}(std_string_type(x.data(), x.size()));
   }
 };
 } // namespace std
