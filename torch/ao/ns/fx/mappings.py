@@ -186,7 +186,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.ReLU6,
             F.relu6,
-            nnq.ReLU6,
         ]),
         # BNReLU2d
         set([
@@ -617,7 +616,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.LayerNorm,
         nnq.Hardswish,
         nnq.LeakyReLU,
-        nnq.ReLU6,
         nnq.Embedding,
         nnq.EmbeddingBag,
         nnq.Dropout,
