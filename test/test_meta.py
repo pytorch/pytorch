@@ -238,7 +238,6 @@ meta_exclude_set = {
     torch.add,  # MISSING aten::_local_scalar_dense
     torch.addbmm,  # MISSING aten::addbmm
     torch.angle,  # MISSING aten::angle
-    torch.argsort,  # MISSING aten::sort
     torch.batch_norm,  # MISSING aten::native_batch_norm
     torch.bernoulli,  # MISSING aten::bernoulli.out
     torch.bincount,  # MISSING aten::bincount
@@ -373,14 +372,12 @@ meta_exclude_set = {
     torch.median,  # MISSING aten::median.dim_values
     torch.min,  # MISSING aten::min
     torch.mode,  # MISSING aten::mode
-    torch.msort,  # MISSING aten::sort
     torch.multinomial,  # MISSING aten::multinomial
     torch.mvlgamma,  # MISSING aten::_local_scalar_dense
     torch.nan_to_num,  # MISSING aten::nan_to_num.out
     torch.nanmean,  # MISSING aten::logical_not.out
     torch.nanmedian,  # MISSING aten::nanmedian
     torch.nanmedian,  # MISSING aten::nanmedian.dim_values
-    torch.nanquantile,  # MISSING aten::sort
     torch.nansum,  # MISSING aten::nansum
     torch.nn.functional.adaptive_avg_pool1d,  # MISSING aten::_adaptive_avg_pool2d
     torch.nn.functional.adaptive_avg_pool2d,  # MISSING aten::_adaptive_avg_pool2d
@@ -445,7 +442,6 @@ meta_exclude_set = {
     torch.polar,  # MISSING aten::polar.out
     torch.prod,  # MISSING aten::prod
     torch.qr,  # MISSING aten::_linalg_qr_helper
-    torch.quantile,  # MISSING aten::sort
     torch.quantize_per_channel,  # MISSING aten::quantize_per_channel
     torch.quantize_per_tensor,  # MISSING aten::quantize_per_tensor
     torch.quantize_per_tensor_dynamic,  # MISSING aten::quantize_per_tensor_dynamic
@@ -461,7 +457,6 @@ meta_exclude_set = {
     torch.sgn,  # MISSING aten::abs.out
     torch.slogdet,  # MISSING aten::linalg_slogdet
     torch.solve,  # MISSING aten::_solve_helper
-    torch.sort,  # MISSING aten::sort
     torch.special.logit,  # MISSING aten::logit
     torch.special.logsumexp,  # MISSING aten::abs.out
     torch.special.multigammaln,  # MISSING aten::_local_scalar_dense
@@ -476,7 +471,9 @@ meta_exclude_set = {
     torch.var_mean,  # MISSING aten::var_mean.correction
     torch.vdot,  # MISSING aten::vdot
     torch.where,  # MISSING aten::where.self
-    # END BLACKLIST
+}
+
+meta_perma_exclude_set = {
     # Convolutions have a special error message
     torch.nn.functional.conv1d,
     torch.nn.functional.conv2d,
@@ -667,8 +664,12 @@ meta_exclude_set = {
 # useful for more comprehensive testing e.g., as seen in
 # https://github.com/pytorch/pytorch/pull/75994
 class MetaCrossRefMode(torch.overrides.TorchFunctionMode):
-    def __init__(self, test_case):
+    test_case: TestCase
+    ignore_exclude_set: bool
+
+    def __init__(self, test_case, *, ignore_exclude_set):
         self.test_case = test_case
+        self.ignore_exclude_set = ignore_exclude_set
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
@@ -766,7 +767,8 @@ class MetaCrossRefMode(torch.overrides.TorchFunctionMode):
                 return t
 
         do_meta = (
-            func not in meta_exclude_set and not torch.jit.is_tracing() and
+            (self.ignore_exclude_set or func not in meta_exclude_set) and
+            func not in meta_perma_exclude_set and not torch.jit.is_tracing() and
             not isinstance(func, torch.ScriptMethod)
         )
 
@@ -794,7 +796,7 @@ class MetaCrossRefMode(torch.overrides.TorchFunctionMode):
                     meta_rs = func(*meta_args, **meta_kwargs)
             except Exception as e:
                 suppress = False
-                if isinstance(e, NotImplementedError):
+                if isinstance(e, NotImplementedError) and not self.ignore_exclude_set:
                     m = RE_NOT_IMPLEMENTED_MSG.search(e.args[0])
                     if m and m.group(1) not in ("aten::_efficientzerotensor", "aten::view_as_real"):
                         suppress = True
@@ -844,14 +846,31 @@ class TestMeta(TestCase):
         # meta implementation and check the results are the same.  All
         # the heavy lifting happens in MetaCrossRefMode
         func = op.get_op()
-        if func in meta_exclude_set:
-            self.skipTest('meta known not to be implemented')
-        samples = op.sample_inputs(device, dtype, requires_grad=False)
-        for sample_input in samples:
-            args = [sample_input.input] + list(sample_input.args)
-            kwargs = sample_input.kwargs
-            with push_torch_function_mode(partial(MetaCrossRefMode, self)):
-                func(*args, **kwargs)
+
+        def do_test(ignore_exclude_set=False):
+            samples = op.sample_inputs(device, dtype, requires_grad=False)
+            for sample_input in samples:
+                args = [sample_input.input] + list(sample_input.args)
+                kwargs = sample_input.kwargs
+                with push_torch_function_mode(partial(MetaCrossRefMode, self, ignore_exclude_set=ignore_exclude_set)):
+                    expected = func(*args, **kwargs)
+                    if isinstance(expected, torch.Tensor) and op.supports_out:
+                        func(*args, **kwargs, out=expected)
+
+        if func in meta_perma_exclude_set:
+            self.skipTest('permanently excluded')
+        elif func in meta_exclude_set:
+            self.skipTest('excluded because we think it is broken')
+            """
+            try:
+                do_test(ignore_exclude_set=True)
+            except Exception:
+                pass
+            else:
+                self.fail('expected failure, but succeeded')
+            """
+        else:
+            do_test()
 
 instantiate_device_type_tests(TestMeta, globals())
 
