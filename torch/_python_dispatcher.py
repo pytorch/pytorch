@@ -66,7 +66,7 @@ class PythonDispatcher:
 
     def __init__(self):
         C._dispatch_check_invariants(self.name)  # type: ignore[attr-defined]
-        self.ref = C._dispatch_library("FRAGMENT", self.namespace, "")  # type: ignore[attr-defined]
+        self.ref = C._dispatch_library("FRAGMENT", self.namespace, "")
         self.ref.def_("foo(Tensor x) -> Tensor")
 
     """
