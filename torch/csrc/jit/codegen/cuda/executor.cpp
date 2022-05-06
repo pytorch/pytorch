@@ -100,10 +100,14 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
       std::string("#include <hip/hip_bf16.h>\n") +
       std::string("#include <hip/hip_fp16.h>\n");
 #endif
+  code += std::string("#pragma clang force_cuda_host_device begin\n");
 #endif
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + defineIntegerTypes() + defineIndexMode(options_.index_mode) +
       defineComplexTypes() + executor_utils::kernelPreamble() + kernel + "}\n";
+#ifdef USE_ROCM
+  code += std::string("#pragma clang force_cuda_host_device end\n");
+#endif
 
   if (isDebugDumpEnabled(DebugDumpOption::CudaKernel)) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()
