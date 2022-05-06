@@ -9,10 +9,10 @@ from torch.distributed.nn.functional import (
 )
 from torch.distributed._shard.partial_tensor import _PartialTensor
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
     ShardedTensor,
 )
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
+from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
 from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
@@ -24,8 +24,8 @@ from ._common import (
 )
 
 
-@sharded_op_impl(torch.nn.functional.linear)
-def sharded_linear(types, args, kwargs, pg):
+@custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.linear)
+def sharded_linear(types, args, kwargs):
     """
     Handles ``__torch_function__`` dispatch for ``torch.nn.functional.linear``.
     This method computes a sharded linear and has the following limitations:
@@ -99,6 +99,7 @@ def sharded_linear(types, args, kwargs, pg):
     weight = args[1]
     bias = args[2]
 
+    pg = weight._process_group
     local_shard = weight.local_tensor()
     local_shard_t = local_shard.t().contiguous()
     sharding_dim = weight._sharding_spec.dim
