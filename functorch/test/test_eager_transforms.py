@@ -2858,6 +2858,20 @@ class TestFunctionalize(TestCase):
             return y
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
 
+    # See https://github.com/pytorch/functorch/issues/780
+    def test_linear(self, device):
+
+        def f(x, y, z) -> torch.Tensor:
+            return torch._C._nn.linear(x, y, z)
+
+        x = torch.randn(14, 1, 384, device=device)
+        y = torch.randn(96, 384, device=device)
+        z = torch.randn(96, device=device)
+
+        out_expected = f(x, y, z)
+        out_actual = functionalize(f)(x, y, z)
+        self.assertEqual(out_expected, out_actual)
+
     def test_multioutput_inplace_slice_view(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
