@@ -14,4 +14,4 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.MERGEBOT_TOKEN }}
       - name: Push
-        run: git push origin refs/heads/clee2000/test
+        run: git push origin origin/master:refs/heads/clee2000/test
