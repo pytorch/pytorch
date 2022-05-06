@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <torch/library.h>
+#include <ATen/native/layer_norm.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
