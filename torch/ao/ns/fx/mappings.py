@@ -93,7 +93,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # cat
         set([
             torch.cat,
-            toq.cat,
         ]),
         # mul
         set([
