@@ -91,30 +91,6 @@ _register_sharded_op_on_local_tensor(
 )
 
 
-def sharded_softmax_check(*args, **kwargs):
-    """
-    Perform extra checks for ``torch.Tensor.softmax`` op for now we don't support
-    doing softmax on the sharding dim.
-
-    Args: same as ``torch.Tensor.softmax``.
-
-    Return: None
-    """
-    st = args[0]
-    dim = kwargs.get("dim")
-    dim = dim if dim is not None else 1  # If no dim specified, softmax use 1 as dim.
-    if dim == st.sharding_spec().dim:
-        raise NotImplementedError(
-            "Only support performing softmax on non-sharding dim now."
-        )
-
-
-_register_sharded_op_on_local_tensor(
-    torch.nn.functional.softmax,
-    extra_check=sharded_softmax_check,
-)
-
-
 def sharded_masked_fill_check(*args, **kwargs):
     """
     Perform extra checks for the ``torch.Tensor.masked_fill`` op.

@@ -5,6 +5,14 @@ from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed import distributed_c10d
 from torch.overrides import get_default_nowrap_functions
 
+_REPLICATED_WITH_NON_TENSOR_ALLOWLIST = [
+    # List of ops where if parameters are a combination of ReplicatedTensors
+    # and non-tensors, we can still return a ReplicatedTensor as the result.
+    torch.unsqueeze,
+    torch.Tensor.unsqueeze,
+    torch.Tensor.__getitem__,
+]
+
 class ReplicatedTensor(torch.Tensor):
     """
     ReplicatedTensor represents a tensor which is replicated across the `world_size` and
@@ -60,12 +68,13 @@ class ReplicatedTensor(torch.Tensor):
         # are all replicated tensor operands, we have to do this to ensure we do not
         # converting results back to ReplicatedTensor if not all operands are replicated.
         all_replicated = True
+        replicated_with_non_tensor = True
         replicated_pg = None
 
         def dispatch_arg(arg):
             # This function returns a tuple, first element represents whether the op been
             # executed, the second element represents the result of the execution
-            nonlocal replicated_pg, all_replicated
+            nonlocal replicated_pg, all_replicated, replicated_with_non_tensor
             if isinstance(arg, ShardedTensor):
                 # redispatch to ShardedTensor
                 # TODO: handle ShardedTensor/PartialTensor inter-op with ReplicatedTensor
@@ -78,6 +87,9 @@ class ReplicatedTensor(torch.Tensor):
                         f"ReplicatedTensor operands must be in the same process group "
                         f"in torch function '{func.__name__}', but found at least two "
                         f"ReplicatedTensor operands in different process groups! ")
+            elif isinstance(arg, torch.Tensor):
+                replicated_with_non_tensor = False
+                all_replicated = False
             else:
                 all_replicated = False
 
@@ -101,7 +113,12 @@ class ReplicatedTensor(torch.Tensor):
             rs = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return rs
-            if all_replicated and isinstance(rs, torch.Tensor) and not isinstance(rs, cls):
+
+            result_not_replicated = isinstance(rs, torch.Tensor) and not isinstance(rs, ReplicatedTensor)
+            should_convert_to_replicated = all_replicated or (
+                replicated_with_non_tensor and func in _REPLICATED_WITH_NON_TENSOR_ALLOWLIST
+            )
+            if result_not_replicated and should_convert_to_replicated:
                 # if all operands are ReplicatedTensors and does not get dispatched to ShardedTensor
                 # __torch_function__, result is a torch.Tensor, then we convert and return a
                 # ReplicatedTensor according to our inter-op rule
