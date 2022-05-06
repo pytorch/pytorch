@@ -570,6 +570,16 @@ class TestCudaFuser(JitTestCase):
             self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
         o = t(x, y)
         self.assertEqual(o.dtype, jit_o.dtype)
+
+        if dtype == torch.bfloat16:
+            # compare with the actual ground truth for
+            #  bfloat16 kernels instead of eager mode
+            #  implementation, since mismatch in cast
+            #  adds excessive noise.
+            o = t(x.to(torch.float64), y.to(torch.float64)).to(torch.bfloat16)
+        else:
+            o = t(x, y)
+
         self.assertTrue(self._compare("failing case {}\n{}\n{}\n{}".format(dtype, operation, x, y), o, jit_o, 1e-2))
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
