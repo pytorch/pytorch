@@ -285,7 +285,8 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float16, "nn.functional.instance_norm"),
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
-
+    # frac's decomp uses trunc, which is not implemented for 'Half' in "_vml_cpu"
+    ("cpu", torch.float16, "frac"),
 }
 
 all_decomposed = set()
