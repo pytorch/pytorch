@@ -825,7 +825,18 @@ class IrParser {
   }
 
   static void initRegistry() {
-    std::call_once(once_flag_, []() { registerJitOperator(); });
+    std::call_once(once_flag_, []() {
+      registerJitOperator();
+      parser_skip_set_.insert(
+          c10::Symbol::fromQualString("aten::_batch_norm_impl_index"));
+      parser_skip_set_.insert(
+          c10::Symbol::fromQualString("aten::native_batch_norm"));
+      parser_skip_set_.insert(c10::Symbol::fromQualString("aten::batch_norm"));
+      parser_skip_set_.insert(
+          c10::Symbol::fromQualString("aten::_batch_norm_impl_index_backward"));
+      parser_skip_set_.insert(
+          c10::Symbol::fromQualString("aten::native_batch_norm_backward"));
+    });
   }
 
   static bool canParseNode(const Node* node) {
