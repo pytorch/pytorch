@@ -1660,63 +1660,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *
    * This op is auto-asynchronous if the underlying device (CUDA) supports it.
    */
-  void Extend(int64_t num, float growthPct) {
-    TORCH_CHECK(sizes_and_strides_.size() >= 1u);
-    TORCH_CHECK(num >= 0, "`num` must be non-negative for Extend");
-    TORCH_CHECK(
-        is_contiguous_,
-        "Right now Extend is only supported for contiguous Tensor.");
-    using SizesVector = SmallVector<int64_t, 5>;
-    SizesVector newDims(
-        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
-    newDims[0] += num;
-    if (!storage_.data()) {
-      Resize(newDims);
-      return;
-    }
-    const auto newNumel =
-        c10::multiply_integers(newDims.begin(), newDims.end());
-    if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
-      sizes_and_strides_.set_sizes(newDims);
-      numel_ = newNumel;
-      return;
-    }
-    SizesVector newCapacity(
-        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
-    newCapacity[0] = std::max(
-        newDims[0],
-        static_cast<int64_t>(std::ceil(
-            sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
-    auto oldData = std::move(storage_.data_ptr());
-    auto oldSize = numel_;
-    Resize(newCapacity);
-    auto* newData = raw_mutable_data(data_type_);
-    if (data_type_.copy()) {
-      TORCH_CHECK(
-          device_type() == DeviceType::CPU, "non-POD types work only on CPU");
-      data_type_.copy()(oldData.get(), newData, oldSize);
-    } else {
-      // The following copy uses the current (thread local) stream for copying
-      // and also takes the GPU id from the device() field passed in.
-      //
-      // TODO: Potentially more enforcements are necessary to avoid accidental
-      // switch to sync copy if the currently set device is wrong.
-      //
-      // Specifically, we might need to switch to a different context device
-      // here explicitly to avoid relying on user synchronizing things
-      // properly.
-      CopyBytes(
-          oldSize * itemsize(),
-          oldData.get(),
-          device(),
-          newData,
-          device(),
-          true); // non-blocking
-    }
-    reserved_ = true;
-    sizes_and_strides_.set_sizes(newDims);
-    numel_ = newNumel;
-  }
+  void Extend(int64_t num, float growthPct);
 
   /**
    * @brief Reserve space for the underlying tensor.
@@ -1724,33 +1668,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * This must be called after Resize(), since we only specify the first
    * dimension This does not copy over the old data to the newly allocated space
    */
-  template <class T>
-  void ReserveSpace(const T& outer_dim) {
-    TORCH_CHECK(
-        is_contiguous_,
-        "Right now ReserveSpace is only supported for contiguous Tensor.");
-    TORCH_CHECK(
-        storage_.unique(), "Can't call ReserveSpace on shared storage.");
-    // TODO: eliminate newCapacity.
-    SmallVector<int64_t, 5> newCapacity(
-        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
-    newCapacity[0] = outer_dim;
-    auto newNumel = c10::multiply_integers(newCapacity);
-    if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
-      return;
-    }
-    // Old data is discarded
-    storage_.data_ptr().clear();
-    auto oldSize = numel_;
-    SmallVector<int64_t, 5> oldDims(
-        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
-    Resize(newCapacity);
-    // Allocate new memory but don't copy over the data
-    raw_mutable_data(data_type_);
-    sizes_and_strides_.set_sizes(oldDims);
-    numel_ = oldSize;
-    reserved_ = true;
-  }
+  void ReserveSpace(int64_t outer_dim);
 
   /**
    * @brief Resizes a tensor.
@@ -1785,38 +1703,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Resizes the tensor without touching underlying storage.
    * This requires the total size of the tensor to remains constant.
    */
-  inline void Reshape(const std::vector<int64_t>& dims) {
-    TORCH_CHECK(
-        is_contiguous_,
-        "Right now Reshape is only supported for contiguous Tensor.");
-    int64_t new_size = 1;
-    for (auto d : dims) {
-      TORCH_CHECK(d >= 0);
-      new_size *= d;
-    }
-    TORCH_CHECK(
-        new_size == numel_,
-        "New size and old size are not equal. You cannot use Reshape, "
-        "but should use Resize."
-        // TODO(jiayq): remove the following warning after pending diffs
-        // stabilize.
-        " The old caffe2 mixes Reshape and Resize but this behavior has "
-        "been changed. If you find this error, most likely you will need "
-        "to change corresponding code from Reshape to Resize.");
-    sizes_and_strides_.set_sizes(dims);
-    empty_tensor_restride(MemoryFormat::Contiguous);
-  }
+  void Reshape(const std::vector<int64_t>& dims);
 
   /**
    * Release whatever memory the tensor was holding but keep size and type
    * information. Subsequent call to mutable_data will trigger new memory
    * allocation.
    */
-  inline void FreeMemory() {
-    // We'll detach from the old Storage and create a new one
-    storage_ = Storage::create_legacy(storage_.device());
-    storage_offset_ = 0;
-  }
+  void FreeMemory();
 
   /**
    * @brief Shares the data with another tensor.
@@ -1831,67 +1725,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * The source tensor should already have its data allocated.
    */
   // To be deprecated
-  void ShareData(const TensorImpl& src) {
-    // Right now, we are assuming the device_type are the same, since it is
-    // inherently the same in the non-templatized code. We should probably add
-    // an assert here which might affect perf a little bit.
-    TORCH_CHECK(
-        src.numel_ == numel_,
-        "Size mismatch - did you call reshape before sharing the data?");
-    // It is possible that the source tensor hasn't called mutable_data() yet,
-    // in which case ShareData() doesn't make much sense since we don't really
-    // know what to share yet.
-    // TODO: Add the assert after all uninitialized states are eliminated
-    // TORCH_CHECK(src.dtype_initialized(),
-    //            "Source tensor don't have a data type (did you call
-    //            mutable_data<T> on the tensor?)");
-    if (!src.dtype_initialized()) {
-      C10_LOG_EVERY_MS(WARNING, 1000)
-          << "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)";
-    }
-    TORCH_CHECK(
-        src.storage_initialized(),
-        "Source tensor has no content and has size > 0");
-    // Finally, do sharing.
-    /* Since we create new Storage whenever we need to change data_type/nbytes
-     * this still keeps the original semantics
-     */
-    storage_ = src.storage();
-    data_type_ = src.dtype();
-    device_opt_ = src.device_opt();
-    storage_offset_ = src.storage_offset();
-  }
+  void ShareData(const TensorImpl& src);
 
   void ShareExternalPointer(
       DataPtr&& data_ptr,
       const caffe2::TypeMeta data_type,
-      size_t size_bytes) {
-    TORCH_CHECK(
-        data_type != ScalarType::Undefined,
-        "To share with a raw external pointer you need to pass in an "
-        "initialized data_type(TypeMeta).");
-    if (!size_bytes) {
-      size_bytes = numel_ * data_type.itemsize();
-    }
-    if (storage_.unique()) {
-      storage_.UniqueStorageShareExternalPointer(
-          std::move(data_ptr), size_bytes);
-      data_type_ = data_type;
-      device_opt_ = storage_.device();
-      storage_offset_ = 0;
-    } else {
-      // Create a new Storage
-      storage_ = Storage(
-          Storage::use_byte_size_t(),
-          size_bytes,
-          std::move(data_ptr),
-          /*allocator=*/nullptr,
-          /*resizable=*/false);
-      data_type_ = data_type;
-      device_opt_ = storage_.device();
-      storage_offset_ = 0;
-    }
-  }
+      size_t size_bytes);
 
   /**
    * Returns a mutable raw pointer of the underlying storage. Since we will need
