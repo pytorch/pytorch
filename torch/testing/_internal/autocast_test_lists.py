@@ -326,6 +326,12 @@ class AutocastCPUTestLists(object):
         ]
         self.nn_fp32 = [
             ("avg_pool3d", dummy_bf16[3], {"kernel_size": (3, 3, 3), "stride": (1, 1, 1)}),
+            ("upsample_nearest1d", dummy_bf16[2], {"output_size": (n)}),
+            ("upsample_nearest2d", dummy_bf16[3], {"output_size": (n, n)}),
+            ("upsample_nearest3d", dummy_bf16[4], {"output_size": (n, n, n)}),
+            ("upsample_linear1d", dummy_bf16[2], {"output_size": (n), "align_corners": False}),
+            ("upsample_bilinear2d", dummy_bf16[3], {"output_size": (n, n), "align_corners": False}),
+            ("upsample_trilinear3d", dummy_bf16[4], {"output_size": (n, n, n), "align_corners": False}),
             ("binary_cross_entropy", (torch.rand((n, n), device=dev, dtype=torch.bfloat16),) +
                                      (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
             ("reflection_pad1d", dummy_bf16[2], {"padding": (3, 3)}),
