@@ -91,54 +91,11 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
 
 C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CPU, TensorpipeCpuConverter);
 
-struct MetaBuffer {
-  void* ptr{nullptr};
-
-  tensorpipe::Device getDevice() const {
-    return tensorpipe::Device{tensorpipe::kMetaDeviceType, 0};
-  }
-};
-
-class TensorpipeMetaConverter : public TensorpipeDeviceTypeConverter {
- public:
-  c10::optional<std::vector<char>> prepareTensorForSending(
-      const c10::Storage& storage,
-      const std::vector<c10::Stream>& /* streams */,
-      tensorpipe::Message& message) const override {
-    MetaBuffer buffer;
-    tensorpipe::Message::Tensor tensor;
-    tensor.buffer = buffer;
-    tensor.length = 0;
-
-    message.tensors.push_back(std::move(tensor));
-
-    return c10::nullopt;
-  }
-
-  at::DataPtr allocateTensorForReceiving(
-      int /* deviceIndex */,
-      size_t length,
-      const std::vector<c10::Stream>& /* streams */,
-      tensorpipe::Allocation& allocation) const override {
-    MetaBuffer buffer;
-    tensorpipe::Allocation::Tensor tensor;
-    tensor.buffer = buffer;
-
-    allocation.tensors.push_back(std::move(tensor));
-
-    return DataPtr(nullptr, c10::kMeta);
-  }
-};
-
-C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(Meta, TensorpipeMetaConverter);
-
 c10::DeviceType convertDeviceType(const std::string& tpDeviceType) {
   if (tpDeviceType == tensorpipe::kCpuDeviceType) {
     return c10::kCPU;
   } else if (tpDeviceType == tensorpipe::kCudaDeviceType) {
     return c10::kCUDA;
-  } else if (tpDeviceType == tensorpipe::kMetaDeviceType) {
-    return c10::kMeta;
   } else {
     TORCH_INTERNAL_ASSERT(false, "Unrecognized TensorPipe buffer type.");
   }
@@ -224,6 +181,10 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   for (const auto i : c10::irange(tensorDataVec.size())) {
     const torch::Tensor& tensor = tensorDataVec[i];
 
+    if (tensor.is_meta()) {
+      continue;
+    }
+
     const TensorpipeDeviceTypeConverter* converter =
         getDeviceTypeConverter(tensor.device().type());
     TORCH_CHECK(
@@ -237,10 +198,9 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
             tensor.storage(), streams, tpMessage);
     TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i + 1);
 
-    TORCH_INTERNAL_ASSERT(!devices.empty());
-    tensorpipe::Device targetDevice = devices[i].is_meta() ? tensorpipe::Device{tensorpipe::kMetaDeviceType, 0} :
-                                      devices[i].is_cpu() ? tensorpipe::Device{tensorpipe::kCpuDeviceType, 0} :
-                                      tensorpipe::Device{tensorpipe::kCudaDeviceType, devices[i].index()};
+    tensorpipe::Device targetDevice = devices.empty() || devices[i].is_cpu()
+        ? tensorpipe::Device{tensorpipe::kCpuDeviceType, 0}
+        : tensorpipe::Device{tensorpipe::kCudaDeviceType, devices[i].index()};
     tpMessage.tensors.back().targetDevice = std::move(targetDevice);
 
     if (maybeCopiedTensor.has_value()) {
@@ -300,6 +260,10 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
     c10::DeviceType targetDeviceType =
         convertDeviceType(tensor.targetDevice->type);
 
+    if (targetDeviceType == DeviceType::Meta) {
+      continue;
+    }
+
     const TensorpipeDeviceTypeConverter* converter =
         getDeviceTypeConverter(targetDeviceType);
     TORCH_INTERNAL_ASSERT(
@@ -348,7 +312,7 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
       nullptr,
       tensorReadFunc,
       {},
-      /* use_storage_device*/ true);
+      /* use_storage_device*/ false);
 
   auto ival = unpickler.parse_ivalue();
   for (auto&& t : ival.toTensorList()) {

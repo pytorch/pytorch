@@ -1203,8 +1203,10 @@ c10::IValue BlockRunner::run_impl_record_functions(
   if (!step_callbacks.empty()) {
     at::RecordFunction guard(std::move(step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
-    guard.needsInputs() ? guard.before("forward", &args)
-                        : guard.before("forward");
+    guard.needsInputs()
+        ? guard.before(
+              "forward", c10::ArrayRef<const IValue>(args.data(), args.size()))
+        : guard.before("forward");
 
     return run_impl(std::forward<IValueList>(args), kwargs);
   }
@@ -1845,8 +1847,14 @@ void ProcessedNode::run() {
   if (!step_callbacks.empty()) {
     at::RecordFunction guard(std::move(step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
-    guard.needsInputs() ? guard.before(get_op_name(), inputs_ivalue_vec())
-                        : guard.before(get_op_name());
+    if (guard.needsInputs()) {
+      const auto inputs = inputs_ivalue_vec();
+      guard.before(
+          get_op_name(),
+          c10::ArrayRef<const IValue>(inputs.data(), inputs.size()));
+    } else {
+      guard.before(get_op_name());
+    }
     if (has_out_variant()) {
       guard._setStaticRuntimeOutVariant();
     }

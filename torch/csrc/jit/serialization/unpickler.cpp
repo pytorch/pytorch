@@ -471,7 +471,7 @@ PickleOpCode Unpickler::readInstruction() {
         caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
 
         at::DataPtr storage_ptr;
-        if (numel > 0) {
+        if (numel > 0 && !device.is_meta()) {
           // If there are no elements in the tensor, there's no point in
           // reading a zero (0) byte file from the input stream and paying
           // that cost.
