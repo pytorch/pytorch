@@ -180,11 +180,6 @@ TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
-TORCH_META_FUNC(minimum) (const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
-  build_borrowing_binary_op(maybe_get_output(), self, other);
-}
-
 TORCH_META_FUNC(fmax) (const Tensor& self, const Tensor& other) {
     TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
@@ -258,7 +253,6 @@ DEFINE_DISPATCH(sigmoid_backward_stub);
 DEFINE_DISPATCH(logit_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(maximum_stub);
-DEFINE_DISPATCH(minimum_stub);
 DEFINE_DISPATCH(fmax_stub);
 DEFINE_DISPATCH(fmin_stub);
 DEFINE_DISPATCH(fmod_stub);
@@ -334,7 +328,6 @@ CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_and_out, bitwise_and_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_or_out, bitwise_or_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_xor_out, bitwise_xor_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(minimum_out, minimum_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(fmax_out, fmax_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(fmin_out, fmin_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(fmod_out, fmod_stub);
@@ -1107,13 +1100,21 @@ Tensor max(const Tensor& self, const Tensor& other) {
   return at::maximum(self, other);
 }
 
+Tensor& minimum_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::clamp_max_out(result, self, other);
+}
+
+Tensor minimum(const Tensor& self, const Tensor& other) {
+  return at::clamp_max(self, other);
+}
+
 // binary min, alias for minimum
 Tensor& min_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  return at::minimum_out(result, self, other);
+  return at::clamp_max_out(result, self, other);
 }
 
 Tensor min(const Tensor& self, const Tensor& other) {
-  return at::minimum(self, other);
+  return at::clamp_max(self, other);
 }
 
 Tensor floor_divide(const Tensor& self, const Scalar& other) {

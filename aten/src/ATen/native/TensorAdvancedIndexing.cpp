@@ -58,6 +58,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/TensorCompare.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ScatterGatherChecks.h>
@@ -953,10 +954,10 @@ void index_reduce_func_impl(
             mul_stub(iter.device_type(), iter);
             break;
           case INDEX_OP::MINIMUM :
-            minimum_stub(iter.device_type(), iter);
+            clamp_max_stub(iter.device_type(), iter);
             break;
           case INDEX_OP::MAXIMUM :
-            maximum_stub(iter.device_type(), iter);
+            clamp_min_stub(iter.device_type(), iter);
             break;
           default :
             add_stub(iter.device_type(), iter, 1);

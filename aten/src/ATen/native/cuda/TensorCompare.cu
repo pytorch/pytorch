@@ -5,6 +5,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/core/Scalar.h>
+#include <ATen/native/BinaryOps.h>
 
 
 namespace at { namespace native {
@@ -89,10 +90,12 @@ void clamp_min_kernel_impl(TensorIteratorBase& iter) {
       iter.remove_operand(2);
       clamp_min_scalar_kernel_impl(iter, min);
     } else {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower) -> scalar_t {
+      gpu_kernel(iter,  []GPU_LAMBDA(scalar_t v, scalar_t lower) -> scalar_t {
         // Propagate nan, which doesn't propagate automatically for ROCm
         if (_isnan(v)) {
           return v;
+        } else if (_isnan(lower)) {
+          return lower;
         } else {
           return ::max(v, lower);
         }
@@ -117,6 +120,8 @@ void clamp_max_kernel_impl(TensorIteratorBase& iter) {
         // Propagate nan, which doesn't propagate automatically for ROCm
         if (_isnan(v)) {
           return v;
+        } else if (_isnan(upper){
+          return upper;
         } else {
           return ::min(v, upper);
         }
@@ -124,6 +129,32 @@ void clamp_max_kernel_impl(TensorIteratorBase& iter) {
     }
   });
 }
+
+void fmin_kernel_cuda(TensorIteratorBase& iter) {
+  if (isFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmin_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return ::fmin(a, b);
+      });
+    });
+  } else {
+    clamp_max_kernel_impl(iter);
+  }
+}
+
+void fmax_kernel_cuda(TensorIteratorBase& iter) {
+  if (isFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmax_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return ::fmax(a, b);
+      });
+    });
+  } else {
+    clamp_min_kernel_impl(iter);
+  }
+}
+
+
 
 
 } // anonymous namespace
@@ -138,6 +169,9 @@ REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_impl);
 REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
+REGISTER_DISPATCH(fmin_stub, &fmin_kernel_cuda);
+REGISTER_DISPATCH(fmax_stub, &fmax_kernel_cuda);
+
 
 template <typename scalar_t>
 __global__ void _assert_async_cuda_kernel(scalar_t* input) {

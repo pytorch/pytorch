@@ -78,7 +78,6 @@ DECLARE_DISPATCH(structured_binary_fn, ne_stub);
 DECLARE_DISPATCH(binary_fn, max_elementwise_stub);
 DECLARE_DISPATCH(binary_fn, min_elementwise_stub);
 DECLARE_DISPATCH(structured_binary_fn, maximum_stub);
-DECLARE_DISPATCH(structured_binary_fn, minimum_stub);
 DECLARE_DISPATCH(structured_binary_fn, fmax_stub);
 DECLARE_DISPATCH(structured_binary_fn, fmin_stub);
 DECLARE_DISPATCH(structured_binary_fn_double, smooth_l1_stub);
