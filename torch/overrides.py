@@ -653,8 +653,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.masked_scatter: lambda input, mask, source: -1,
         torch.masked_select: lambda input, mask, out=None: -1,
         torch.matmul: lambda input, other, out=None: -1,
+        torch.linalg.lu: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor_ex: lambda input, pivot=True, check_errors=False, out=None: -1,
+        torch.linalg.lu_solve: lambda LU, pivots, B, left=True, adjoint=False, out=None: -1,
         torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
@@ -1044,6 +1046,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.unsafe_split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsafe_split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsqueeze: lambda input, dim, out=None: -1,
+        torch.linalg.vander: lambda x, N=None: -1,
         torch.var: lambda input, dim=None: -1,
         torch.var_mean: lambda input, dim=None: -1,
         torch.vsplit: lambda input, indices_or_sections: -1,
