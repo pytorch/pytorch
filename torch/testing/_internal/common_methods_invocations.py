@@ -6101,6 +6101,7 @@ def sample_inputs_linalg_ldl_factor(op_info, device, dtype, requires_grad=False,
 
     # Hermitian inputs
     # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
+    torch.backends.cuda.preferred_linalg_library(backend="default")
     magma_254_available = device.type == 'cuda' and _get_magma_version() >= (2, 5, 4)
     if dtype.is_complex and (device.type == 'cpu' or magma_254_available):
         yield SampleInput(
