@@ -40,10 +40,11 @@ static inline std::vector<int64_t> batched_matrix_contiguous_strides(
   // f_contig chooses between the strides of a batch of Fortran (F-contiguous)
   // and C-contiguous matrices
   auto strides = c10::contiguous_strides(sizes);
-  if (f_contig) {
+  auto dim = strides.size();
+
+  if (f_contig && dim >= 2) {
     // Fix the strides of the last two dimensions, so that we return
     // C-contiguous batches of F-contiguous matrices.
-    auto dim = strides.size();
     strides[dim - 1] = std::max(sizes[dim - 2], static_cast<int64_t>(1));
     strides[dim - 2] = 1;
   }
