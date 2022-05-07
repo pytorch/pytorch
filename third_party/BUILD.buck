@@ -1,6 +1,5 @@
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:remote_glog_library.bzl", "remote_glog_library")
-
 load("//third_party:XNNPACK.BUCK.bzl", "define_xnnpack_targets")
 load(
     "//third_party:buck_defs.bzl",
@@ -23,7 +22,6 @@ cxx_library(
     preferred_linkage = "static",
     exported_preprocessor_flags = ['-DFMT_EXCEPTIONS=0'],
     header_namespace = "third_party/fmt",
-    reexport_all_header_dependencies = True,
     public_system_include_directories = ['fmt/include'],
     raw_headers = glob(["fmt/include/fmt/*.h"]),
     soname = "libthird-party_fmt_fmt.$(ext)",
@@ -58,7 +56,6 @@ cxx_library(
     platform_linker_flags = [],
     platform_preprocessor_flags = [['windows', ['-D_WINDOWS', '-D_WIN32', '-DWIN32', '-DNOMINMAX', '-D_CRT_SECURE_NO_WARNINGS', '-D_USE_MATH_DEFINES']], ['windows.*64$', ['-D_WIN64']]],
     preprocessor_flags = ['-DPTHREADPOOL_USE_FUTEX=0', '-DPTHREADPOOL_USE_GCD=0'],
-    reexport_all_header_dependencies = True,
     visibility = ['PUBLIC'],
 )
 
@@ -67,10 +64,10 @@ cxx_library(
     header_namespace = "",
     preferred_linkage = "static",
     link_whole = False,
-    reexport_all_header_dependencies = True,
     exported_headers = {
         "pthreadpool.h": "pthreadpool/include/pthreadpool.h",
     },
+    visibility = ["PUBLIC"],
 )
 
 cxx_library(
@@ -80,7 +77,6 @@ cxx_library(
         "fxdiv.h": "FXdiv/include/fxdiv.h",
     },
     preferred_linkage = "static",
-    reexport_all_header_dependencies = True,
     visibility = ["PUBLIC"],
 )
 
@@ -91,7 +87,6 @@ cxx_library(
         "psimd.h": "psimd/include/psimd.h",
     },
     preferred_linkage = "static",
-    reexport_all_header_dependencies = True,
     visibility = ["PUBLIC"],
 )
 

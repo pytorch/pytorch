@@ -72,4 +72,4 @@ jobs:
       - name: Build Buck target
         run: |
           echo -e "" > .buckconfig
-          buck build --config-file oss.buckconfig c10:c10 third_party: --keep-going
+          buck build --config-file oss.buckconfig c10:c10 third_party: aten/src/ATen/native/quantized/cpu/qnnpack: --keep-going
