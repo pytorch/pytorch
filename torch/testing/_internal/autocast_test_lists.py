@@ -299,9 +299,6 @@ class AutocastCPUTestLists(object):
             ("conv1d", conv_args_fp32[0]),
             ("conv2d", conv_args_fp32[1]),
             ("conv3d", conv_args_fp32[2]),
-            ("conv_transpose1d", conv_args_fp32[0]),
-            ("conv_transpose2d", conv_args_fp32[1]),
-            ("conv_transpose3d", conv_args_fp32[2]),
             ("bmm", (torch.randn((n, n, n), device=dev, dtype=torch.float32),
                      torch.randn((n, n, n), device=dev, dtype=torch.float32))),
             ("mm", mat0_fp32 + mat1_fp32),
@@ -314,6 +311,9 @@ class AutocastCPUTestLists(object):
                                     torch.randn((n, n, n), device=dev, dtype=torch.float32))),
         ]
         self.torch_fp32 = [
+            ("conv_transpose1d", conv_args_bf16[0]),
+            ("conv_transpose2d", conv_args_bf16[1]),
+            ("conv_transpose3d", conv_args_bf16[2]),
             ("batch_norm", dummy_bf16[2], {"weight": None, "bias": None, "running_mean": torch.rand((n), dtype=torch.float32),
                                            "running_var": torch.rand((n), dtype=torch.float32), "training": False,
                                            "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),

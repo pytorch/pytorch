@@ -258,9 +258,6 @@ CPU Ops that can autocast to ``bfloat16``
 ``conv1d``,
 ``conv2d``,
 ``conv3d``,
-``conv_transpose1d``,
-``conv_transpose2d``,
-``conv_transpose3d``,
 ``bmm``,
 ``mm``,
 ``baddbmm``,
@@ -273,6 +270,9 @@ CPU Ops that can autocast to ``bfloat16``
 CPU Ops that can autocast to ``float32``
 """"""""""""""""""""""""""""""""""""""""
 
+``conv_transpose1d``,
+``conv_transpose2d``,
+``conv_transpose3d``,
 ``batch_norm``,
 ``avg_pool3d``,
 ``upsample_nearest1d``,
