@@ -731,6 +731,64 @@
   other: grad * other / result
   result: self_t * self_p / result + other_t * other_p / result
 
+# BESSEL FUNCTIONS
+
+- name: special_bessel_j0(Tensor self) -> Tensor
+  self: not_implemented("bessel_j0")
+
+- name: special_bessel_j1(Tensor self) -> Tensor
+  self: not_implemented("bessel_j1")
+
+- name: special_bessel_y0(Tensor self) -> Tensor
+  self: not_implemented("bessel_y0")
+
+- name: special_bessel_y1(Tensor self) -> Tensor
+  self: not_implemented("bessel_y1")
+
+# MODIFIED BESSEL FUNCTIONS
+
+- name: special_modified_bessel_i0(Tensor self) -> Tensor
+  self: not_implemented("modified_bessel_i0")
+
+- name: special_modified_bessel_i1(Tensor self) -> Tensor
+  self: not_implemented("modified_bessel_i1")
+
+- name: special_modified_bessel_k0(Tensor self) -> Tensor
+  self: not_implemented("modified_bessel_k0")
+
+- name: special_modified_bessel_k1(Tensor self) -> Tensor
+  self: not_implemented("modified_bessel_k1")
+
+# SCALED MODIFIED BESSEL FUNCTIONS
+
+- name: special_scaled_modified_bessel_i0(Tensor self) -> Tensor
+  self: not_implemented("scaled_modified_bessel_i0")
+
+- name: special_scaled_modified_bessel_i1(Tensor self) -> Tensor
+  self: not_implemented("scaled_modified_bessel_i1")
+
+- name: special_scaled_modified_bessel_k0(Tensor self) -> Tensor
+  self: not_implemented("scaled_modified_bessel_k0")
+
+- name: special_scaled_modified_bessel_k1(Tensor self) -> Tensor
+  self: not_implemented("scaled_modified_bessel_k1")
+
+# AIRY FUNCTIONS
+
+- name: special_airy_ai(Tensor self) -> Tensor
+  self: not_implemented("airy_ai")
+
+- name: special_airy_bi(Tensor self) -> Tensor
+  self: not_implemented("airy_bi")
+
+# AIRY DERIVATIVES
+
+- name: special_airy_derivative_ai(Tensor self) -> Tensor
+  self: not_implemented("airy_derivative_ai")
+
+- name: special_airy_derivative_bi(Tensor self) -> Tensor
+  self: not_implemented("airy_derivative_bi")
+
 - name: i0(Tensor self) -> Tensor
   self: grad * at::special_i1(self)
   result: auto_element_wise

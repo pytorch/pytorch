@@ -2,10 +2,56 @@ import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
-__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
-           'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
-           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log_ndtr', 'log1p', 'sinc', 'round', 'log_softmax',
-           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
+__all__ = [
+    'airy_ai',
+    'airy_bi',
+    'airy_derivative_ai',
+    'airy_derivative_bi',
+    'bessel_j0',
+    'bessel_j1',
+    'bessel_y0',
+    'bessel_y1',
+    'digamma',
+    'entr',
+    'erf',
+    'erfc',
+    'erfcx',
+    'erfinv',
+    'exp2',
+    'expit',
+    'expm1',
+    'gammainc',
+    'gammaincc',
+    'gammaln',
+    'i0',
+    'i0e',
+    'i1',
+    'i1e',
+    'log1p',
+    'log_ndtr',
+    'log_softmax',
+    'logit',
+    'logsumexp',
+    'modified_bessel_i0',
+    'modified_bessel_i1',
+    'modified_bessel_k0',
+    'modified_bessel_k1',
+    'multigammaln',
+    'ndtr',
+    'ndtri',
+    'polygamma',
+    'psi',
+    'round',
+    'scaled_modified_bessel_i0',
+    'scaled_modified_bessel_i1',
+    'scaled_modified_bessel_k0',
+    'scaled_modified_bessel_k1',
+    'sinc',
+    'softmax',
+    'xlog1py',
+    'xlogy',
+    'zeta',
+]
 
 Tensor = torch.Tensor
 
@@ -819,4 +865,190 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
+""".format(**common_args))
+
+# BESSEL FUNCTIONS
+
+bessel_j0 = _add_docstr(_special.special_bessel_j0,
+                        r"""
+bessel_j0(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+bessel_j1 = _add_docstr(_special.special_bessel_j1,
+                        r"""
+bessel_j1(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+bessel_y0 = _add_docstr(_special.special_bessel_y0,
+                        r"""
+bessel_y0(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+bessel_y1 = _add_docstr(_special.special_bessel_y1,
+                        r"""
+bessel_y1(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+# MODIFIED BESSEL FUNCTIONS
+
+modified_bessel_i0 = _add_docstr(_special.special_modified_bessel_i0,
+                                 r"""
+modified_bessel_i0(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+modified_bessel_i1 = _add_docstr(_special.special_modified_bessel_i1,
+                                 r"""
+modified_bessel_i1(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+modified_bessel_k0 = _add_docstr(_special.special_modified_bessel_k0,
+                                 r"""
+modified_bessel_k0(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+modified_bessel_k1 = _add_docstr(_special.special_modified_bessel_k1,
+                                 r"""
+modified_bessel_k1(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+# SCALED MODIFIED BESSEL FUNCTIONS
+
+scaled_modified_bessel_i0 = _add_docstr(_special.special_scaled_modified_bessel_i0,
+                                        r"""
+scaled_modified_bessel_i0(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+scaled_modified_bessel_i1 = _add_docstr(_special.special_scaled_modified_bessel_i1,
+                                        r"""
+scaled_modified_bessel_i1(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+scaled_modified_bessel_k0 = _add_docstr(_special.special_scaled_modified_bessel_k0,
+                                        r"""
+scaled_modified_bessel_k0(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+scaled_modified_bessel_k1 = _add_docstr(_special.special_scaled_modified_bessel_k1,
+                                        r"""
+scaled_modified_bessel_k1(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+# AIRY FUNCTIONS
+
+airy_ai = _add_docstr(_special.special_airy_ai,
+                      r"""
+airy_ai(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+airy_bi = _add_docstr(_special.special_airy_bi,
+                      r"""
+airy_bi(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+# AIRY DERIVATIVES
+
+airy_derivative_ai = _add_docstr(_special.special_airy_derivative_ai,
+                                 r"""
+airy_derivative_ai(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+airy_derivative_bi = _add_docstr(_special.special_airy_derivative_bi,
+                                 r"""
+airy_derivative_bi(input, *, out=None) -> Tensor
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
 """.format(**common_args))

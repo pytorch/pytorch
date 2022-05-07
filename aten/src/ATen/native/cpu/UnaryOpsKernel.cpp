@@ -543,6 +543,144 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
       });
 }
 
+// BESSEL FUNCTIONS
+
+static void bessel_j0_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return bessel_j0(a);
+        });
+    });
+} // bessel_j0_kernel
+
+static void bessel_j1_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return bessel_j1(a);
+        });
+    });
+} // bessel_j1_kernel
+
+static void bessel_y0_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return bessel_y0(a);
+        });
+    });
+} // bessel_y0_kernel
+
+static void bessel_y1_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return bessel_y1(a);
+        });
+    });
+} // bessel_y1_kernel
+
+// MODIFIED BESSEL FUNCTIONS
+
+static void modified_bessel_i0_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return modified_bessel_i0(a);
+        });
+    });
+} // modified_bessel_i0_kernel
+
+static void modified_bessel_i1_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return modified_bessel_i1(a);
+        });
+    });
+} // modified_bessel_i1_kernel
+
+static void modified_bessel_k0_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return modified_bessel_k0(a);
+        });
+    });
+} // modified_bessel_k0_kernel
+
+static void modified_bessel_k1_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return modified_bessel_k1(a);
+        });
+    });
+} // modified_bessel_k1_kernel
+
+// SCALED MODIFIED BESSEL FUNCTIONS
+
+static void scaled_modified_bessel_i0_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "scaled_modified_bessel_i0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return scaled_modified_bessel_i0(a);
+        });
+    });
+} // scaled_modified_bessel_i0_kernel
+
+static void scaled_modified_bessel_i1_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "scaled_modified_bessel_i1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return scaled_modified_bessel_i1(a);
+        });
+    });
+} // scaled_modified_bessel_i1_kernel
+
+static void scaled_modified_bessel_k0_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "scaled_modified_bessel_k0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return scaled_modified_bessel_k0(a);
+        });
+    });
+} // scaled_modified_bessel_k0_kernel
+
+static void scaled_modified_bessel_k1_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "scaled_modified_bessel_k1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return scaled_modified_bessel_k1(a);
+        });
+    });
+} // scaled_modified_bessel_k1_kernel
+
+// AIRY FUNCTIONS
+
+static void airy_ai_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return airy_ai(a);
+        });
+    });
+} // airy_ai_kernel
+
+static void airy_bi_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_bi_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return airy_bi(a);
+        });
+    });
+} // airy_bi_kernel
+
+// AIRY DERIVATIVES
+
+static void airy_derivative_ai_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_derivative_ai_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return airy_derivative_ai(a);
+        });
+    });
+} // airy_derivative_ai_kernel
+
+static void airy_derivative_bi_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_derivative_bi_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return airy_derivative_bi(a);
+        });
+    });
+} // airy_derivative_bi_kernel
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -598,42 +736,57 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
 
 } // CPU_CAPABILITY namespace
 
-REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel);
-REGISTER_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
-REGISTER_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
 REGISTER_DISPATCH(abs_stub, &CPU_CAPABILITY::abs_kernel);
-REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
-REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
-REGISTER_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
-REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
-REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel);
-REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel);
-REGISTER_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kernel);
-REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel);
-REGISTER_DISPATCH(neg_stub, &CPU_CAPABILITY::neg_kernel);
-REGISTER_DISPATCH(sign_stub, &CPU_CAPABILITY::sign_kernel);
-REGISTER_DISPATCH(signbit_stub, &CPU_CAPABILITY::signbit_kernel);
-REGISTER_DISPATCH(sgn_stub, &CPU_CAPABILITY::sgn_kernel);
-REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel);
-REGISTER_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
-REGISTER_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
 REGISTER_DISPATCH(acosh_stub, &CPU_CAPABILITY::acosh_kernel);
+REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
 REGISTER_DISPATCH(asinh_stub, &CPU_CAPABILITY::asinh_kernel);
 REGISTER_DISPATCH(atanh_stub, &CPU_CAPABILITY::atanh_kernel);
+REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
+REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
+REGISTER_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
 REGISTER_DISPATCH(digamma_stub, &CPU_CAPABILITY::digamma_kernel);
-REGISTER_DISPATCH(trigamma_stub, &CPU_CAPABILITY::trigamma_kernel);
-REGISTER_DISPATCH(polygamma_stub, &CPU_CAPABILITY::polygamma_kernel);
-REGISTER_DISPATCH(kaiser_window_stub, &CPU_CAPABILITY::kaiser_window_kernel);
-REGISTER_DISPATCH(special_entr_stub, &CPU_CAPABILITY::entr_kernel);
+REGISTER_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
+REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel);
 REGISTER_DISPATCH(frexp_stub, &CPU_CAPABILITY::frexp_kernel);
+REGISTER_DISPATCH(kaiser_window_stub, &CPU_CAPABILITY::kaiser_window_kernel);
+REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel);
+REGISTER_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
+REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel);
+REGISTER_DISPATCH(neg_stub, &CPU_CAPABILITY::neg_kernel);
+REGISTER_DISPATCH(polygamma_stub, &CPU_CAPABILITY::polygamma_kernel);
+REGISTER_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kernel);
+REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
+REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel);
+REGISTER_DISPATCH(sgn_stub, &CPU_CAPABILITY::sgn_kernel);
+REGISTER_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
+REGISTER_DISPATCH(sign_stub, &CPU_CAPABILITY::sign_kernel);
+REGISTER_DISPATCH(signbit_stub, &CPU_CAPABILITY::signbit_kernel);
+REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel);
+REGISTER_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
+REGISTER_DISPATCH(special_airy_ai_stub, &CPU_CAPABILITY::airy_ai_kernel);
+REGISTER_DISPATCH(special_airy_bi_stub, &CPU_CAPABILITY::airy_bi_kernel);
+REGISTER_DISPATCH(special_airy_derivative_ai_stub, &CPU_CAPABILITY::airy_derivative_ai_kernel);
+REGISTER_DISPATCH(special_airy_derivative_bi_stub, &CPU_CAPABILITY::airy_derivative_bi_kernel);
+REGISTER_DISPATCH(special_bessel_j0_stub, &CPU_CAPABILITY::bessel_j0_kernel);
+REGISTER_DISPATCH(special_bessel_j1_stub, &CPU_CAPABILITY::bessel_j1_kernel);
+REGISTER_DISPATCH(special_bessel_y0_stub, &CPU_CAPABILITY::bessel_y0_kernel);
+REGISTER_DISPATCH(special_bessel_y1_stub, &CPU_CAPABILITY::bessel_y1_kernel);
+REGISTER_DISPATCH(special_entr_stub, &CPU_CAPABILITY::entr_kernel);
+REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
 REGISTER_DISPATCH(special_i0e_stub, &CPU_CAPABILITY::i0e_kernel);
-REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
-REGISTER_DISPATCH(special_log_ndtr_stub, &CPU_CAPABILITY::log_ndtr_kernel);
 REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
-REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
-REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
-
+REGISTER_DISPATCH(special_log_ndtr_stub, &CPU_CAPABILITY::log_ndtr_kernel);
+REGISTER_DISPATCH(special_modified_bessel_i0_stub, &CPU_CAPABILITY::modified_bessel_i0_kernel);
+REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bessel_i1_kernel);
+REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
+REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
+REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
+REGISTER_DISPATCH(special_scaled_modified_bessel_i0_stub, &CPU_CAPABILITY::modified_bessel_i0_kernel);
+REGISTER_DISPATCH(special_scaled_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bessel_i1_kernel);
+REGISTER_DISPATCH(special_scaled_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
+REGISTER_DISPATCH(special_scaled_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
+REGISTER_DISPATCH(trigamma_stub, &CPU_CAPABILITY::trigamma_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(acos)
