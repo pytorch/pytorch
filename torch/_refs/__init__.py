@@ -12,7 +12,6 @@ from torch._prims.utils import (
     NumberType,
 )
 
-
 from functools import reduce
 from enum import Enum
 from typing import Sequence, Optional, Union, Callable, List, Tuple
@@ -23,7 +22,7 @@ import math
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
 
-all = [
+__all__ = [
     #
     # Elementwise Unary References
     #
@@ -119,7 +118,9 @@ all = [
     #
     # Reduction ops
     #
-    "sum",  # TODO: add opinfo
+    "sum",
+    "amax",
+    "amin",
     #
     # View & Shape Ops
     #
@@ -441,6 +442,14 @@ def _convert_dtype(*args, dtype: torch.dtype):
     return tuple(map(lambda x: _convert(x), args))
 
 
+def _unwrap_cpu_scalars(a, b):
+    if type(a) is torch.Tensor and a.device.type == "cpu" and len(a.shape) == 0:
+        a = a.item()
+    elif type(b) is torch.Tensor and b.device.type == "cpu" and len(b.shape) == 0:
+        b = b.item()
+    return a, b
+
+
 # TODO: handle tuples of tensors
 def _maybe_resize_out(out: TensorLikeType, shape):
     if out.numel() == 0:
@@ -462,12 +471,19 @@ def _maybe_resize_out(out: TensorLikeType, shape):
     return out
 
 
+# Utilities should come BEFORE this import
+from torch._decomp import register_decomposition
+
+
 #
 # Elementwise unary references
 #
 
-# TODO: add type promotion support
-def _make_elementwise_unary_reference(prim: Callable, *, type_promotion) -> Callable:
+infer_aten_op = object()
+
+def _make_elementwise_unary_reference(
+    prim: Callable, *, type_promotion, aten_op=infer_aten_op
+) -> Callable:
     def _ref(a: Tensor, *, out: Optional[Tensor] = None) -> Tensor:
 
         assert isinstance(a, TensorLike)
@@ -489,6 +505,11 @@ def _make_elementwise_unary_reference(prim: Callable, *, type_promotion) -> Call
             return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
         return result
+
+    if aten_op is infer_aten_op:
+        aten_op = getattr(torch.ops.aten, prim.__name__)
+    if aten_op is not None:
+        register_decomposition(aten_op)(_ref)
 
     return _ref
 
@@ -534,7 +555,9 @@ erf = _make_elementwise_unary_reference(
 )
 
 erfinv = _make_elementwise_unary_reference(
-    prims.erf_inv, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.erf_inv,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.erfinv,  # prim/aten name mismatch
 )
 
 erfc = _make_elementwise_unary_reference(
@@ -554,7 +577,9 @@ floor = _make_elementwise_unary_reference(
 )
 
 isfinite = _make_elementwise_unary_reference(
-    prims.is_finite, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.is_finite,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=None,  # CompositeImplicitAutograd
 )
 
 
@@ -563,7 +588,9 @@ def _isnan(a: Tensor) -> Tensor:
 
 
 isnan = _make_elementwise_unary_reference(
-    _isnan, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    _isnan,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
 )
 
 lgamma = _make_elementwise_unary_reference(
@@ -588,7 +615,9 @@ reciprocal = _make_elementwise_unary_reference(
 
 # TODO: round takes additional kwargs
 round = _make_elementwise_unary_reference(
-    prims.round, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.round,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
 
 sign = _make_elementwise_unary_reference(
@@ -608,7 +637,9 @@ sqrt = _make_elementwise_unary_reference(
 )
 
 square = _make_elementwise_unary_reference(
-    prims.square, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
+    prims.square,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    aten_op=None,  # CompositeImplicitAutograd
 )
 
 tan = _make_elementwise_unary_reference(
@@ -616,7 +647,7 @@ tan = _make_elementwise_unary_reference(
 )
 
 
-def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Callable:
+def _make_elementwise_binary_reference(prim: Callable, *, type_promotion, wrap_scalars=False, aten_op=infer_aten_op) -> Callable:
     def _ref(
         a: Union[Tensor, NumberType],
         b: Union[Tensor, NumberType],
@@ -629,13 +660,20 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Cal
 
         # Special-cases Number x Number case
         if isinstance(a, Number) and isinstance(b, Number):
-            a, b = utils.wrap_scalars(a, b)
+            if wrap_scalars:
+                a, b = utils.wrap_scalars(a, b)
+            else:
+                raise RuntimeError("got two scalar arguments, while expected at least one TensorLike")
 
         # Handles type promotion
         computation_dtype, result_dtype = _elementwise_dtypes(
             a, b, type_promotion=type_promotion
         )
         a, b = _convert_dtype(a, b, dtype=computation_dtype)
+
+        # Special case CPU scalar tensors to be eligible for device transfer
+        if wrap_scalars:
+            a, b = _unwrap_cpu_scalars(a, b)
 
         # Broadcasting
         a, b = broadcast(a, b)
@@ -650,6 +688,11 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Cal
             return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
         return result
+
+    if aten_op is infer_aten_op:
+        aten_op = getattr(torch.ops.aten, prim.__name__)
+    if aten_op is not None:
+        register_decomposition(aten_op)(_ref)
 
     return _ref
 
@@ -682,6 +725,8 @@ def add(
     )
     a, b = _convert_dtype(a, b, dtype=computation_dtype)
 
+    a, b = _unwrap_cpu_scalars(a, b)
+
     a, b = broadcast(a, b)
 
     if alpha is not None:
@@ -709,12 +754,15 @@ atan2 = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 bitwise_and = _make_elementwise_binary_reference(
-    prims.bitwise_and, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.bitwise_and,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_left_shift = _make_elementwise_binary_reference(
-    prims.shift_left, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.shift_left,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.bitwise_left_shift,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
@@ -724,7 +772,9 @@ bitwise_or = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 bitwise_right_shift = _make_elementwise_binary_reference(
-    prims.shift_right_arithmetic, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.shift_right_arithmetic,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.bitwise_right_shift,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
@@ -742,6 +792,7 @@ eq = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
+# NB: aten_op not registered because CompositeExplicitAutograd
 def float_power(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
@@ -751,10 +802,6 @@ def float_power(
     assert isinstance(a, (TensorLike, Number))
     assert isinstance(b, (TensorLike, Number))
     assert out is None or isinstance(out, TensorLike)
-
-    # Special-cases Number x Number case
-    if isinstance(a, Number) and isinstance(b, Number):
-        a, b = utils.wrap_scalars(a, b)
 
     # Handles type promotion
     dtype = utils.get_higher_dtype(a, b)
@@ -810,17 +857,20 @@ lt = _make_elementwise_binary_reference(
 maximum = _make_elementwise_binary_reference(
     prims.max,
     type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.maximum,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 minimum = _make_elementwise_binary_reference(
     prims.min,
     type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.minimum,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 mul = _make_elementwise_binary_reference(
-    prims.mul, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH
+    prims.mul, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    wrap_scalars=True
 )
 
 # TODO: add docstring
@@ -842,6 +892,7 @@ pow = _make_elementwise_binary_reference(
 # Sub is implemented specially because it has an alpha argument and
 #   is decomposed into multiple prims.
 # TODO: consider refactoring this with add impl
+@register_decomposition(torch.ops.aten.sub)
 def sub(
     a: Union[Tensor, NumberType],
     b: Union[Tensor, NumberType],
@@ -868,6 +919,8 @@ def sub(
     )
     a, b = _convert_dtype(a, b, dtype=computation_dtype)
 
+    a, b = _unwrap_cpu_scalars(a, b)
+
     a, b = broadcast(a, b)
 
     if alpha is not None:
@@ -890,7 +943,9 @@ def sub(
 
 # TODO: add docstring
 true_divide = _make_elementwise_binary_reference(
-    prims.div, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.div, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    wrap_scalars=True,
+    aten_op=None,  # CompositeImplicitAutograd
 )
 
 #
@@ -899,6 +954,7 @@ true_divide = _make_elementwise_binary_reference(
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
+@register_decomposition(torch.ops.aten.where)
 def where(
     pred: Tensor,
     a: Optional[Tensor] = None,
@@ -982,10 +1038,9 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = all(a.shape[i] for i in range(a.ndim) if i in dims)  # type: ignore[operator]
-        assert (
-            valid_shape
-        ), "reducing over zero-size dimension for reduction operation without identity"
+        valid_shape = all(a.shape[i] for i in range(a.ndim) if i in dims)
+        if not valid_shape:
+            raise RuntimeError("reducing over zero-size dimension for reduction operation without identity")
     # even though some reductions, like amin or amax, don't strictly require type promotion,
     # all the math ops (including comparisons) are still defined only for a computation type,
     # so promotion will still happen. We are doing it explicitly here
@@ -1003,12 +1058,12 @@ def _reduction(
             if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
                 if out.dtype != a.dtype:
                     raise RuntimeError(
-                        "out dtype and output type of reduction must match"
+                        "Expected the dtype for input and out to match"
                     )
             elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.ALWAYS_BOOL:
                 if out.dtype != torch.bool:
                     raise RuntimeError(
-                        "out dtype and output type of reduction must match"
+                        "Expected the dtype for input and out to match"
                     )
         out = _maybe_resize_out(out, result.shape)
         return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
@@ -1019,6 +1074,7 @@ def _reduction(
     return result
 
 
+# TODO: register decomp after stride logic is fixed
 def sum(
     a: Tensor,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1032,7 +1088,7 @@ def sum(
             dtype = torch.int64
         else:
             dtype = a.dtype
-    # sum reduces over all dimensions if dim=() is passed
+    # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
     return _reduction(
@@ -1042,6 +1098,48 @@ def sum(
         keepdims=keepdim,
         dtype=dtype,
         out=out,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    )
+
+def amin(
+    a: Tensor,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    out: Optional[Tensor] = None
+):
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+    return _reduction(
+        a,
+        prims.amin,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=None,
+        out=out,
+        has_identity=False,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    )
+
+def amax(
+    a: Tensor,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    out: Optional[Tensor] = None
+):
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+    return _reduction(
+        a,
+        prims.amax,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=None,
+        out=out,
+        has_identity=False,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
     )
 
@@ -1079,7 +1177,7 @@ def tensor_split(
     indices_or_sections: Union[Tensor, DimsType],
     dim: int = 0,
 ) -> Tuple[TensorLikeType, ...]:
-    _dim = utils.canonicalize_idx(a.ndim, dim)
+    _dim = utils.canonicalize_dim(a.ndim, dim)
     if a.ndim == 0:
         msg = "tensor_split: received a rank zero tensor, but expected a tensor of rank one or greater!"
         raise ValueError(msg)

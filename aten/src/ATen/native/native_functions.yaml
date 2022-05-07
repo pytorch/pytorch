@@ -1211,64 +1211,66 @@
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: clamp_max
+  structured_delegate: clamp_max.out
 
 - func: clamp_max.Tensor(Tensor self, Tensor max) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: clamp_max
+  structured_delegate: clamp_max.Tensor_out
 
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: clamp_max_
+  structured_delegate: clamp_max.out
 
 - func: clamp_max_.Tensor(Tensor(a!) self, Tensor max) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: clamp_max_
+  structured_delegate: clamp_max.Tensor_out
 
 - func: clamp_max.out(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: clamp_max_out
 
 - func: clamp_max.Tensor_out(Tensor self, Tensor max, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_max_out
+    CPU, CUDA: clamp_max_Tensor_out
 
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: clamp_min
+  structured_delegate: clamp_min.out
 
 - func: clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: clamp_min
+  structured_delegate: clamp_min.Tensor_out
 
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: clamp_min_
+  structured_delegate: clamp_min.out
 
 - func: clamp_min_.Tensor(Tensor(a!) self, Tensor min) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: clamp_min_
+  structured_delegate: clamp_min.Tensor_out
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: clamp_min_out
 
 - func: clamp_min.Tensor_out(Tensor self, Tensor min, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_min_out
+    CPU, CUDA: clamp_min_Tensor_out
 
 # clip is an alias for clamp
 - func: clip(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
@@ -7190,6 +7192,9 @@
   dispatch:
     CPU, CUDA: linalg_solve_triangular
 
+- func: linalg_vander(Tensor x, *, int? N=None) -> Tensor
+  python_module: linalg
+
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
     CompositeExplicitAutograd: symeig_out
@@ -7324,21 +7329,18 @@
   variants: function
 
 - func: lu_solve.out(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: lu_solve_out
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
-  dispatch:
-    CPU, CUDA: lu_solve
 
+# lu_unpack
 - func: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
+  structured_delegate: lu_unpack.out
   variants: function
-  dispatch:
-    CPU, CUDA: lu_unpack
 
 - func: lu_unpack.out(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True, *, Tensor(a!) P, Tensor(b!) L, Tensor(c!) U) -> (Tensor(a!) P, Tensor(b!) L, Tensor(c!) U)
   variants: function
+  structured: True
   dispatch:
     CPU, CUDA: lu_unpack_out
 
@@ -9550,18 +9552,6 @@
     CPU: max_unpooling2d_forward_cpu
     CUDA: max_unpooling2d_forward_cuda
 
-- func: max_unpool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) grad_input) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: max_unpooling2d_backward_out_cpu
-    CUDA: max_unpooling2d_backward_out_cuda
-
-- func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  python_module: nn
-  dispatch:
-    CPU: max_unpooling2d_backward_cpu
-    CUDA: max_unpooling2d_backward_cuda
-
 - func: max_unpool3d.out(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
@@ -9573,18 +9563,6 @@
   dispatch:
     CPU: max_unpooling3d_forward_cpu
     CUDA: max_unpooling3d_forward_cuda
-
-- func: max_unpool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: max_unpooling3d_backward_out_cpu
-    CUDA: max_unpooling3d_backward_out_cuda
-
-- func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
-  python_module: nn
-  dispatch:
-    CPU: max_unpooling3d_backward_cpu
-    CUDA: max_unpooling3d_backward_cuda
 
 - func: reflection_pad1d.out(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -11020,6 +10998,33 @@
   dispatch:
     CPU, CUDA: linalg_lu_factor_ex_out
 
+# linalg.lu
+- func: linalg_lu(Tensor A, *, bool pivot=True) -> (Tensor P, Tensor L, Tensor U)
+  python_module: linalg
+  structured_delegate: linalg_lu.out
+  variants: function
+
+- func: linalg_lu.out(Tensor A, *, bool pivot=True, Tensor(a!) P, Tensor(b!) L, Tensor(c!) U) -> (Tensor(a!) P, Tensor(b!) L, Tensor(c!) U)
+  python_module: linalg
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: linalg_lu_out
+
+# linalg.lu_solve
+- func: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
+  python_module: linalg
+  structured_delegate: linalg_lu_solve.out
+  variants: function
+
+- func: linalg_lu_solve.out(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: linalg_lu_solve_out
+
+# linalg.det
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
   variants: function
@@ -11347,13 +11352,13 @@
   python_module: linalg
   variants: function
 
-- func: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
+- func: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
   python_module: linalg
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg_qr
 
-- func: linalg_qr.out(Tensor self, str mode='reduced', *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
+- func: linalg_qr.out(Tensor A, str mode='reduced', *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
   python_module: linalg
   variants: function
   dispatch:
