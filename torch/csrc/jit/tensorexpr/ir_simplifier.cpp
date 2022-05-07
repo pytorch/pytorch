@@ -2981,13 +2981,6 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
 
   // Return the simplified ret1/ret2 if the compare result is deterministic.
   // Otherwise, return the simplified CompareSelect directly.
-  //     1) _imply(cmp_res, cmp_op): Check whether the cmp_res always
-  //        satisfies the cmp_op. If yes, return the simplified ret1.
-  //     2) _imply(cmp_res, not_cmp_op): Check whether the cmp_res
-  //        always fails to satisfy the cmp_op. If yes, return the simplified
-  //        ret2.
-  //     3) Return the simplified CompareSelect if the compare result is
-  //        non-deterministic.
   auto ret_expr = (cmp_res == analysis::CmpEvalResult::TRUE)
       ? simplified_ret1
       : ((cmp_res == analysis::CmpEvalResult::FALSE)

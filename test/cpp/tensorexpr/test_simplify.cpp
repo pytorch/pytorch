@@ -4828,6 +4828,7 @@ TEST(Simplify, CompareSelectLoopBounds) {
   constexpr int N = 8;
   BufHandle b("b", {N}, kFloat);
   VarHandle n("n", kInt);
+  VarHandle m("m", kInt);
 
   auto test_case_fn = [](const VarHandle& n,
                          const BufHandle& b,
@@ -4844,6 +4845,29 @@ TEST(Simplify, CompareSelectLoopBounds) {
     s = IRSimplifier::simplify(s);
     std::ostringstream oss;
     oss << *s;
+    std::string target_string = "# CHECK: ";
+    target_string += check_string;
+    torch::jit::testing::FileCheck().run(target_string, oss.str());
+  };
+
+  auto test_case_nest_loops_fn = [](const VarHandle& n,
+                                    const VarHandle& m,
+                                    const BufHandle& b,
+                                    const int& n_start,
+                                    const int& n_stop,
+                                    const int& m_start,
+                                    const int& m_stop,
+                                    const CompareSelectOperation& cmp_op,
+                                    const std::string& check_string) {
+    StmtPtr s = For::make(
+        m,
+        m_start,
+        m_stop,
+        b.store({n, m}, CompareSelect::make(n, m, 0.f, 1.0f, cmp_op)));
+    StmtPtr root_s = For::make(n, n_start, n_stop, s);
+    root_s = IRSimplifier::simplify(root_s);
+    std::ostringstream oss;
+    oss << *root_s;
     std::string target_string = "# CHECK: ";
     target_string += check_string;
     torch::jit::testing::FileCheck().run(target_string, oss.str());
@@ -5118,6 +5142,176 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     b[n] = 0.f;
   //   }
   test_case_fn(n, b, 1, N, N, kNE, "b[n] = 0.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(10, 20)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = (n != m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(10, 20)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = 0.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(n, m, b, 10, 20, 30, 40, kNE, "b[n, m] = 0.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 20)) {
+  //       b[n, m] = (n != m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 20)) {
+  //       b[n, m] = 0.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(n, m, b, 30, 40, 10, 20, kNE, "b[n, m] = 0.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 31)) {
+  //       b[n, m] = (n != m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 31)) {
+  //       b[n, m] = (n != m) ? 0.f : 1.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(
+      n, m, b, 30, 40, 10, 31, kNE, "b[n, m] = n!=m ? 0.f : 1.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(10, 31)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = (n != m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(10, 31)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = (n != m) ? 0.f : 1.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(
+      n, m, b, 10, 31, 30, 40, kNE, "b[n, m] = n!=m ? 0.f : 1.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(10, 20)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = (n < m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(10, 20)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = 0.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(n, m, b, 10, 20, 30, 40, kLT, "b[n, m] = 0.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 31)) {
+  //       b[n, m] = (n < m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 31)) {
+  //       b[n, m] = 1.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(n, m, b, 30, 40, 10, 31, kLT, "b[n, m] = 1.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 20)) {
+  //       b[n, m] = (n > m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 20)) {
+  //       b[n, m] = 0.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(n, m, b, 30, 40, 10, 20, kGT, "b[n, m] = 0.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(10, 31)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = (n > m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(10, 31)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = 1.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(n, m, b, 10, 31, 30, 40, kGT, "b[n, m] = 1.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 31)) {
+  //       b[n, m] = (n >= m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 31)) {
+  //       b[n, m] = 0.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(n, m, b, 30, 40, 10, 31, kGE, "b[n, m] = 0.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(10, 20)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = (n >= m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(10, 20)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = 1.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(n, m, b, 10, 20, 30, 40, kGE, "b[n, m] = 1.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(10, 31)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = (n <= m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(10, 31)) {
+  //     for(const auto m : c10::irange(30, 40)) {
+  //       b[n, m] = 0.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(n, m, b, 10, 31, 30, 40, kLE, "b[n, m] = 0.f;");
+
+  // Before:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 20)) {
+  //       b[n, m] = (n <= m) ? 0.f : 1.f;
+  //     }
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(30, 40)) {
+  //     for(const auto m : c10::irange(10, 20)) {
+  //       b[n, m] = 0.f;
+  //     }
+  //   }
+  test_case_nest_loops_fn(n, m, b, 30, 40, 10, 20, kLE, "b[n, m] = 1.f;");
 }
 
 TEST(Simplify, CompareSelectCondAlwaysInLoopBounds) {

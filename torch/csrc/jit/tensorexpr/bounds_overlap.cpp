@@ -44,7 +44,12 @@ bool Bound::equals(const Bound& other) const {
 }
 
 bool Bound::operator==(const Bound& other) const {
-  return equals(other);
+  if (equals(other)) {
+    auto ret_expr = IRSimplifier::simplify(alloc<Sub>(start, end));
+    return mustBeZero(ret_expr);
+  }
+
+  return false;
 }
 
 bool Bound::operator!=(const Bound& other) const {
