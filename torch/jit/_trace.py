@@ -16,7 +16,7 @@ import functools
 import warnings
 import inspect
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
@@ -938,18 +938,24 @@ def trace_module(
     try:
         trace_module_map: Dict[Any, Any] = {}
 
-        def register_submods(mod, prefix):
-            for name, child in mod.named_children():
-                submod_qualname = prefix + "." + name
-                trace_module_map[child] = submod_qualname
-                register_submods(child, submod_qualname)
+        prefix = "__module"
+        trace_module_map[prefix] = mod
+        
+        name_child_tuple_list = list(mod.named_children())
+        name_child_prefix_tuple_list = [tuple(list(tup)+[prefix]) for tup in name_child_tuple_list]
 
-        trace_module_map["__module"] = mod
+        while len(name_child_prefix_tuple_list) != 0:
+            name, child, prefix = name_child_prefix_tuple_list.pop()
+            submod_qualname = prefix + "." + name
+            trace_module_map[child] = submod_qualname
+            nctl = list(child.named_children())
+            ncptl = [tuple(list(tup)+[submod_qualname]) for tup in nctl]
+            name_child_prefix_tuple_list.extend(ncptl)
+
         torch.jit._trace._trace_module_map = trace_module_map
-        register_submods(mod, "__module")
 
         module = make_module(mod, _module_class, _compilation_unit)
-
+    
         for method_name, example_inputs in inputs.items():
             if method_name == "forward":
                 # "forward" is a special case because we need to trace
@@ -1001,7 +1007,7 @@ def trace_module(
                     )
     finally:
         torch.jit._trace._trace_module_map = old_module_map
-
+    
     return module
 
 
