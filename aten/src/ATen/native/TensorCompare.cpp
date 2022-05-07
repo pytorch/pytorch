@@ -44,15 +44,35 @@ const OptionalScalarRef max) {
       state = at::native::update_result_type_state(max.get(), state);
     }
     result_type = at::native::result_type(state);
+    //disallow type promoting inplace op
+    TORCH_CHECK((result_type == self.scalar_type()) ||
+       (!(maybe_get_output().defined()) || !(maybe_get_output().is_same(self))),
+       "result type ", result_type, " can't be cast to the desired output type ",
+       self.dtype());
   }
-  build_borrowing_unary_op(maybe_get_output(), self.to(result_type));
+  build_unary_op(maybe_get_output(), self.to(result_type));
 }
 
 TORCH_META_FUNC(clamp_max) (
   const Tensor& self,
   const Scalar& max
 ) {
-  build_borrowing_unary_op(maybe_get_output(), self);
+  //we could wrap max into tensor and send to tensor overload,
+  //but relu is implemented via clamp_min, so for perf an uniformity reasons
+  //do a faster but correct thing
+  ScalarType result_type = self.scalar_type();
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  //Floating is the highest supported
+  if (!isFloatingType(result_type)) {
+    auto result_type = at::native::result_type(self, max);
+    TORCH_CHECK((result_type == self.scalar_type()) ||
+       (!(maybe_get_output().defined()) || !(maybe_get_output().is_same(self))),
+       "result type ", result_type, " can't be cast to the desired output type ",
+       self.dtype());
+    build_unary_op(maybe_get_output(), self.to(result_type));
+  } else {
+    build_borrowing_unary_op(maybe_get_output(), self);
+  }
 }
 
 TORCH_META_FUNC2(clamp_max, Tensor) (
@@ -67,7 +87,19 @@ TORCH_META_FUNC(clamp_min) (
   const Tensor& self,
   const Scalar& min
 ) {
-  build_borrowing_unary_op(maybe_get_output(), self);
+  ScalarType result_type = self.scalar_type();
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  //Floating is the highest supported
+  if (!isFloatingType(result_type)) {
+    auto result_type = at::native::result_type(self, min);
+    TORCH_CHECK((result_type == self.scalar_type() ||
+       !(maybe_get_output().defined()) || !(maybe_get_output().is_same(self))),
+       "result type ", result_type, " can't be cast to the desired output type ",
+       self.dtype());
+    build_unary_op(maybe_get_output(), self.to(result_type));
+  } else {
+    build_borrowing_unary_op(maybe_get_output(), self);
+  }
 }
 
 TORCH_META_FUNC2(clamp_min, Tensor) (
