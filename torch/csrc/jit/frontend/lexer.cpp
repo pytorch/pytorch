@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/frontend/lexer.h>
 
-#include <c10/util/call_once.h>
 #include <c10/util/Exception.h>
+#include <c10/util/call_once.h>
 
 #include <mutex>
 #include <string>

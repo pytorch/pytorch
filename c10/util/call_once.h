@@ -10,9 +10,9 @@ struct once_flag {
 };
 
 // std::call_once has a bug in exception handling
-template<class Callable, class... Args>
+template <class Callable, class... Args>
 void call_once(once_flag& flag, Callable&& f, Args&&... args) {
-  std::lock_guard<flag.mutex_> lock;
+  std::lock_guard<std::mutex> lock(flag.mutex_);
   if (flag.has_run_) {
     return;
   }
