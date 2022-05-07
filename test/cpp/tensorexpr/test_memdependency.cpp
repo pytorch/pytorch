@@ -84,7 +84,7 @@ TEST(MemDependency, BoundComparison) {
   };
 
   ASSERT_EQ(
-      CmpEvalResult::TRUE,
+      CmpEvalResult::NOT_DETERMINED,
       compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kEQ));
   ASSERT_EQ(
       CmpEvalResult::TRUE,
@@ -106,7 +106,7 @@ TEST(MemDependency, BoundComparison) {
       compareBound(CB(30, 45), CB(40, 50), CompareSelectOperation::kEQ));
 
   ASSERT_EQ(
-      CmpEvalResult::FALSE,
+      CmpEvalResult::NOT_DETERMINED,
       compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kNE));
   ASSERT_EQ(
       CmpEvalResult::FALSE,
@@ -137,7 +137,7 @@ TEST(MemDependency, BoundComparison) {
       CmpEvalResult::FALSE,
       compareBound(CB(30, 40), CB(10, 30), CompareSelectOperation::kLT));
   ASSERT_EQ(
-      CmpEvalResult::FALSE,
+      CmpEvalResult::NOT_DETERMINED,
       compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kLT));
   ASSERT_EQ(
       CmpEvalResult::NOT_DETERMINED,
@@ -156,7 +156,7 @@ TEST(MemDependency, BoundComparison) {
       CmpEvalResult::TRUE,
       compareBound(CB(30, 40), CB(10, 30), CompareSelectOperation::kGE));
   ASSERT_EQ(
-      CmpEvalResult::TRUE,
+      CmpEvalResult::NOT_DETERMINED,
       compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kGE));
   ASSERT_EQ(
       CmpEvalResult::NOT_DETERMINED,
@@ -172,7 +172,7 @@ TEST(MemDependency, BoundComparison) {
       CmpEvalResult::FALSE,
       compareBound(CB(30, 40), CB(40, 50), CompareSelectOperation::kGT));
   ASSERT_EQ(
-      CmpEvalResult::FALSE,
+      CmpEvalResult::NOT_DETERMINED,
       compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kGT));
   ASSERT_EQ(
       CmpEvalResult::TRUE,
@@ -191,7 +191,7 @@ TEST(MemDependency, BoundComparison) {
       CmpEvalResult::TRUE,
       compareBound(CB(30, 40), CB(40, 50), CompareSelectOperation::kLE));
   ASSERT_EQ(
-      CmpEvalResult::TRUE,
+      CmpEvalResult::NOT_DETERMINED,
       compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kLE));
   ASSERT_EQ(
       CmpEvalResult::FALSE,
