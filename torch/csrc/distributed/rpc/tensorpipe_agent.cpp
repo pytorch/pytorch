@@ -113,7 +113,7 @@ std::vector<c10::Device> getDevicesOfTensors(
   size_t deviceCount = 0;
   std::vector<bool> indexBitset;
   for (const torch::Tensor& tensor : tensors) {
-    if (!tensor.is_cpu() and !tensor.is_meta()) {
+    if (!tensor.is_cpu() && !tensor.is_meta()) {
       c10::Device device = tensor.device();
       if (!impl.has_value()) {
         impl.emplace(device.type());
