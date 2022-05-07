@@ -3420,7 +3420,8 @@ class TestCudaFuser(JitTestCase):
         self.assertGraphContains(graph, 'aten::relu', True)
 
         def t_bias(x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor):
-            return torch.nn.functional.conv2d(x, w, bias)
+            o = torch.nn.functional.conv2d(x, w, bias)
+            return o.relu()
 
         jitted_bias = torch.jit.script(t_bias)
 
