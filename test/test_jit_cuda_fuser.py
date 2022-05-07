@@ -169,7 +169,7 @@ class TestCudaFuser(JitTestCase):
             self.cuda_fuser_options.restore()
         super(TestCudaFuser, self).tearDown()
 
-    def _run_helper(self, jit_op, op, *args):
+    def _run_helper(self, jit_op, op, *args, check_stride=False, num_fusion=1):
         torch.cuda.manual_seed_all(123)
         jit_o = jit_op(*args)
         torch.cuda.manual_seed_all(123)
@@ -178,7 +178,9 @@ class TestCudaFuser(JitTestCase):
         o = op(*args)
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertEqual(o, jit_o)
-        self.assertGraphContainsExactly(jit_op.graph_for(*args), FUSION_GUARD, 1, consider_subgraphs=True)
+        if check_stride:
+            self.assertEqual(o.stride(), jit_o.stride())
+        self.assertGraphContainsExactly(jit_op.graph_for(*args), FUSION_GUARD, num_fusion, consider_subgraphs=True)
 
     def _run_training_helper(self, jit_op, op, grads, *args):
         torch.cuda.manual_seed_all(123)
@@ -2105,35 +2107,23 @@ class TestCudaFuser(JitTestCase):
         sizes = [2, 3, 4, 5]
         dtype = torch.float
         device = "cuda"
-        x = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=torch.channels_last)
 
-        def t(x: torch.Tensor):
-            o = torch.relu(x)
-            o = torch.sum(o, dim=[0])
-            return o
-        t_jit = torch.jit.script(t)
-        jit_o = t_jit(x)
-        jit_o = t_jit(x)
-        o = t(x)
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertEqual(o, jit_o)
-        self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
-        # TODO: we could preserve permutation to inputs
-        self.assertEqual(o.stride(), jit_o.stride())
+        with nvfuser_singleton_fusion(True):
 
-        def t(x: torch.Tensor):
-            o = torch.relu(x)
-            o = torch.add(o, 1.0)
-            return o
+            def t(x: torch.Tensor):
+                return torch.relu(x)
 
-        t_jit = torch.jit.script(t)
-        jit_o = t_jit(x)
-        jit_o = t_jit(x)
-        o = t(x)
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertEqual(o, jit_o)
-        self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
-        self.assertTrue(jit_o.is_contiguous(memory_format=torch.channels_last))
+            t_jit = torch.jit.script(t)
+            x = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=torch.channels_last)
+            self._run_helper(t_jit, t, x, check_stride=True)
+
+            def t(x: torch.Tensor, y: torch.Tensor):
+                return torch.add(x, y)
+
+            t_jit = torch.jit.script(t)
+            x = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=torch.channels_last)
+            y = torch.randn(sizes[1:], dtype=dtype, device=device)
+            self._run_helper(t_jit, t, x, y, check_stride=True)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -2151,14 +2141,7 @@ class TestCudaFuser(JitTestCase):
 
         t_jit = torch.jit.script(t)
         with nvfuser_singleton_fusion(True):
-            for _ in range(5):
-                jit_o = t_jit(x, bias)
-
-        o = t(x, bias)
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertEqual(o, jit_o)
-        self.assertEqual(o.stride(), jit_o.stride())
-        self.assertGraphContains(t_jit.graph_for(x, bias), FUSION_GUARD)
+            self._run_helper(t_jit, t, x, bias, check_stride=True)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -2190,6 +2173,25 @@ class TestCudaFuser(JitTestCase):
                 "permutation propagatoin is broken, proper support should come after nvfuser permutation scheduler update")
         self.assertGraphContains(t_jit.graph_for(x, bias), FUSION_GUARD)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_permutation_preservation_edge_case_2(self):
+        sizes = [2, 3, 4, 5]
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=torch.channels_last)
+        y = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=torch.channels_last)
+        z = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=torch.channels_last)
+
+        def t(x, y, w):
+            tmp = torch.lerp(x, y, w)
+            tmp = torch.clamp(tmp, -1.0, 0.5)
+            tmp = torch.nn.functional.softplus(tmp)
+            return torch.threshold(tmp, -2.0, 0.5)
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x, y, z, check_stride=True)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
