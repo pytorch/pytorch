@@ -20,21 +20,11 @@ Functions
 .. autofunction:: expit
 .. autofunction:: expm1
 .. autofunction:: exp2
-.. autofunction:: gammaln
-.. autofunction:: gammainc
-.. autofunction:: gammaincc
-.. autofunction:: polygamma
-.. autofunction:: digamma
 .. autofunction:: psi
-.. autofunction:: i0
-.. autofunction:: i0e
-.. autofunction:: i1
-.. autofunction:: i1e
 .. autofunction:: logit
 .. autofunction:: logsumexp
 .. autofunction:: log1p
 .. autofunction:: log_softmax
-.. autofunction:: multigammaln
 .. autofunction:: ndtr
 .. autofunction:: ndtri
 .. autofunction:: log_ndtr
@@ -44,3 +34,55 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+
+Gamma and Related Functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Gamma Functions
+"""""""""""""""
+
+.. autofunction:: digamma
+.. autofunction:: gammainc
+.. autofunction:: gammaincc
+.. autofunction:: gammaln
+.. autofunction:: multigammaln
+.. autofunction:: polygamma
+
+Bessel and Related Functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Bessel Functions
+""""""""""""""""
+
+.. autofunction:: bessel_j0
+.. autofunction:: bessel_j1
+.. autofunction:: bessel_y0
+.. autofunction:: bessel_y1
+
+Modified Bessel Functions
+"""""""""""""""""""""""""
+
+.. autofunction:: modified_bessel_i0
+.. autofunction:: modified_bessel_i1
+.. autofunction:: modified_bessel_k0
+.. autofunction:: modified_bessel_k1
+
+Scaled Modified Bessel Functions
+""""""""""""""""""""""""""""""""
+
+.. autofunction:: scaled_modified_bessel_i0
+.. autofunction:: scaled_modified_bessel_i1
+.. autofunction:: scaled_modified_bessel_k0
+.. autofunction:: scaled_modified_bessel_k1
+
+Airy Functions
+""""""""""""""
+
+.. autofunction:: airy_ai
+.. autofunction:: airy_bi
+
+Airy Derivatives
+""""""""""""""""
+
+.. autofunction:: airy_derivative_ai
+.. autofunction:: airy_derivative_bi

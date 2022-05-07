@@ -565,4 +565,94 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+// BESSEL FUNCTIONS
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_j0.
+inline Tensor bessel_j0(const Tensor& self) {
+  return torch::special_bessel_j0(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_j1.
+inline Tensor bessel_j1(const Tensor& self) {
+  return torch::special_bessel_j1(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_y0.
+inline Tensor bessel_y0(const Tensor& self) {
+  return torch::special_bessel_y0(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.bessel_y1.
+inline Tensor bessel_y1(const Tensor& self) {
+  return torch::special_bessel_y1(self);
+}
+
+// MODIFIED BESSEL FUNCTIONS
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i0.
+inline Tensor modified_bessel_i0(const Tensor& self) {
+  return torch::special_modified_bessel_i0(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i1.
+inline Tensor modified_bessel_i1(const Tensor& self) {
+  return torch::special_modified_bessel_i1(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k0.
+inline Tensor modified_bessel_k0(const Tensor& self) {
+  return torch::special_modified_bessel_k0(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k1.
+inline Tensor modified_bessel_k1(const Tensor& self) {
+  return torch::special_modified_bessel_k1(self);
+}
+
+// SCALED MODIFIED BESSEL FUNCTIONS
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_i0.
+inline Tensor scaled_modified_bessel_i0(const Tensor& self) {
+  return torch::special_scaled_modified_bessel_i0(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_i1.
+inline Tensor scaled_modified_bessel_i1(const Tensor& self) {
+  return torch::special_scaled_modified_bessel_i1(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k0.
+inline Tensor scaled_modified_bessel_k0(const Tensor& self) {
+  return torch::special_scaled_modified_bessel_k0(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k1.
+inline Tensor scaled_modified_bessel_k1(const Tensor& self) {
+  return torch::special_scaled_modified_bessel_k1(self);
+}
+
+// AIRY FUNCTIONS
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_ai.
+inline Tensor airy_ai(const Tensor& self) {
+  return torch::special_airy_ai(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_bi.
+inline Tensor airy_bi(const Tensor& self) {
+  return torch::special_airy_bi(self);
+}
+
+// AIRY DERIVATIVES
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_derivative_ai.
+inline Tensor airy_derivative_ai(const Tensor& self) {
+  return torch::special_airy_derivative_ai(self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_derivative_bi.
+inline Tensor airy_derivative_bi(const Tensor& self) {
+  return torch::special_airy_derivative_bi(self);
+}
+
 }} // torch::special

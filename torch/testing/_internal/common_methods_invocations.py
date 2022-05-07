@@ -17797,6 +17797,142 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
+    UnaryUfuncInfo(
+        'special.bessel_j0',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-6, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.j0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_j1',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-6, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.j1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_y0',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-6, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.y0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_y1',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-6, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.y1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_i0',
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.i0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_i1',
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.i1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_k0',
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.modified_bessel_k1',
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.scaled_modified_bessel_i0',
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.i0e if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.scaled_modified_bessel_i1',
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.i1e if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.scaled_modified_bessel_k0',
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k0e if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.scaled_modified_bessel_k1',
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k1e if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.airy_ai',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.airy_bi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.airy(x)[2] if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.airy_derivative_ai',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.airy(x)[1] if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.airy_derivative_bi',
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.airy(x)[3] if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
 ]
 
 # NOTE [Python References]
