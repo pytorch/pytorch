@@ -602,8 +602,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
     Resize(newDims);
     return;
   }
-  const auto newNumel =
-      c10::multiply_integers(newDims.begin(), newDims.end());
+  const auto newNumel = c10::multiply_integers(newDims.begin(), newDims.end());
   if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
     sizes_and_strides_.set_sizes(newDims);
     numel_ = newNumel;
@@ -650,8 +649,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
   TORCH_CHECK(
       is_contiguous_,
       "Right now ReserveSpace is only supported for contiguous Tensor.");
-  TORCH_CHECK(
-      storage_.unique(), "Can't call ReserveSpace on shared storage.");
+  TORCH_CHECK(storage_.unique(), "Can't call ReserveSpace on shared storage.");
   // TODO: eliminate newCapacity.
   SmallVector<int64_t, 5> newCapacity(
       sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
@@ -744,8 +742,7 @@ void TensorImpl::ShareExternalPointer(
     size_bytes = numel_ * data_type.itemsize();
   }
   if (storage_.unique()) {
-    storage_.UniqueStorageShareExternalPointer(
-        std::move(data_ptr), size_bytes);
+    storage_.UniqueStorageShareExternalPointer(std::move(data_ptr), size_bytes);
     data_type_ = data_type;
     device_opt_ = storage_.device();
     storage_offset_ = 0;
