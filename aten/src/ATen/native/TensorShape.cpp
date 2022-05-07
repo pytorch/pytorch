@@ -1698,11 +1698,13 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const auto n_threads = std::max<int64_t>(
             1, std::min<int64_t>((idx_len + grain_size - 1) / grain_size, at::get_num_threads())
         );
+        const auto chunk_size = (idx_len + n_threads - 1) / n_threads;
         const auto run_in_parallel = (n_threads == 1);
 
         auto counts_per_thread = at::zeros({n_threads, size}, idx.options());
-        at::parallel_for(0, idx_len, grain_size, [&](int64_t start, int64_t end) {
-          const auto tid = at::get_thread_num();
+        at::parallel_for(0, n_threads, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
+          const auto start = tid * chunk_size;
+          const auto end = std::min(start + chunk_size, idx_len);
           const auto tid_idx = idx.slice(0, start, end);
           auto tid_counts = counts_per_thread.select(0, tid);
           get_counts(tid_counts, tid_idx, /*bins=*/size,
@@ -1793,8 +1795,14 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const auto* ptr_src_intersection_offsets = src_intersection_offsets.data_ptr<int64_t>();
         auto* ptr_src_idx = src_idx.data_ptr<int64_t>();
 
-        at::parallel_for(0, src.numel(), grain_size, [&](int64_t start, int64_t end) {
-            const auto tid = at::get_thread_num();
+        const auto src_len = src.numel();
+        const auto n_threads_src = std::max<int64_t>(
+            1, std::min<int64_t>((src_len + grain_size - 1) / grain_size, at::get_num_threads())
+        );
+        const auto chunk_size = (src_len + n_threads_src - 1) / n_threads_src;
+        at::parallel_for(0, n_threads_src, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
+            const auto start = tid * chunk_size;
+            const auto end = std::min(start + chunk_size, src_len);
             auto* ptr_src_tid = ptr_src + start;
             const auto* ptr_src_counts_per_thread
               = src_counts_per_thread.select(0, tid).data_ptr<int64_t>();
@@ -1847,8 +1855,14 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         auto* ptr_idx_selected = idx_selected.data_ptr<int64_t>();
         auto* ptr_src_selected = src_selected.data_ptr<int64_t>();
 
-        at::parallel_for(0, idx.numel(), grain_size, [&](int64_t start, int64_t end) {
-            const auto tid = at::get_thread_num();
+        const auto idx_len = idx.numel();
+        const auto n_threads_idx = std::max<int64_t>(
+            1, std::min<int64_t>((idx_len + grain_size - 1) / grain_size, at::get_num_threads())
+        );
+        const auto chunk_size = (idx_len + n_threads_idx - 1) / n_threads_idx;
+        at::parallel_for(0, n_threads_idx, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
+            const auto start = tid * chunk_size;
+            const auto end = std::min(start + chunk_size, idx_len);
             const auto tid_offset = ptr_thread_offset[tid];
             const auto* ptr_idx_tid = ptr_idx + start;
             auto* ptr_idx_selected_tid = ptr_idx_selected + tid_offset;
