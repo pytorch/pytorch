@@ -95,6 +95,7 @@ __all__ = [
     #
     "broadcast_in_dim",
     "collapse_view",
+    "reshape_view",
     "slice",
     "slice_in_dim",  # implemented using slice -- make this a ref?
     "split_dim",
@@ -847,8 +848,7 @@ broadcast_in_dim = _make_prim(
     doc=_broadcast_in_dim_doc,
 )
 
-
-def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
+def _collapse_view_helper(a: TensorLikeType, start: int, end: int) -> Tuple[ShapeType, StrideType]:
     assert isinstance(a, TensorLike)
 
     shape = a.shape
@@ -859,18 +859,31 @@ def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeTy
 
     # Verifies end is strictly greater than start
     # (Collapse requires a non-empty interval)
-    assert end > start
+    if end > start:
+        msg = "Attempting to collapse but end, {0}, is less than or equal to start, {1}!".format(end, start)
+        raise ValueError(msg)
 
     length = 1
     stride = 1
     for idx in range(start, end):
         if idx != (end - 1):
-            assert strides[idx] == strides[idx + 1] * shape[idx + 1]
+            if not (strides[idx] == strides[idx + 1] * shape[idx + 1]):
+                return None, None
         length = length * shape[idx]
         stride = stride * strides[idx]
 
     new_shape = shape[:start] + (length,) + shape[end:]
     new_strides = strides[:start] + (stride,) + shape[end:]
+
+    return new_shape, new_strides
+
+
+def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
+    new_shape, new_strides = _collapse_view_helper(a, start, end)
+
+    if new_shape is None:
+        msg = "Attempting to view a collapsed tensor, but no such view exists!"
+        raise ValueError(msg)
 
     return TensorMeta(a, shape=new_shape, strides=new_strides)
 
@@ -914,9 +927,29 @@ collapse_view = _make_prim(
     doc=_collapse_view_doc,
 )
 
+def _reshape_view_meta():
+    pass
+
+def _reshape_view_aten(a: Tensor, shape: ShapeType):
+    result = a.reshape(shape)
+
+    assert result._is_view()
+    return result
+
+
+_reshape_view_doc = """
+"""
+
+reshape_view = _make_prim(
+    name="reshape_view",
+    meta=_reshape_view_meta,
+    impl_aten=_reshape_view_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_reshape_view_doc,
+)
+
 # Note: saves the Python slice object because we're about to clobber its name with the slice prim
 pyslice = slice
-
 
 def _slice_meta(
     a: TensorLikeType,
@@ -1129,7 +1162,10 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
     # Verifies the dim can be split with the specified lhs_length
     _inner_length = a.shape[dim] / outer_length
     inner_length: int = int(_inner_length)
-    assert inner_length == _inner_length
+
+    if inner_length != _inner_length:
+        msg = "Attempting to split dimension of length {0}, but outer length of {1} divides it with a remainder!".format(a.shape[dim], outer_length)
+        raise ValueError(msg)
 
     new_shape: List[int] = []
     new_strides: List[int] = []
@@ -1256,7 +1292,7 @@ def collapse(a: Tensor, start: int, end: int) -> Tensor:
     """
     Wrapper around reshape that collapses a span of dimensions.
 
-    See merge_dims for the corresponding view operation.
+    See collapse_view for the corresponding view operation.
     """
 
     dim_length = 1
@@ -1320,20 +1356,23 @@ concatenate = _make_prim(
     doc=_concatenate_doc,
 )
 
-
-# TODO: needs to return the proper meta tensor
-def _reshape_meta(a: TensorLikeType, shape: Sequence):
+def _reshape_meta(a: TensorLikeType, shape: ShapeType):
     assert isinstance(a, TensorLike)
     utils.validate_shape(shape)
 
     # Validates the tensor and the requested shape have the
     # same number of elements
-    numel = reduce(lambda acc, x: acc * x, shape)
-    assert a.numel() == numel
+    numel = reduce(operator.mul, shape)
+    if numel != a.numel():
+        msg = "Attempting to reshape a tensor with {0} elements to a shape with {1} elements!".format(a.numel(), numel)
+        raise ValueError(msg)
+
+
+    return TensorMeta(a, shape=shape)
 
 
 def _reshape_aten(
-    a: Tensor, shape: Union[torch.Size, List[int], Tuple[int, ...]]
+    a: Tensor, shape: ShapeType
 ) -> Tensor:
     return a.clone().reshape(shape).contiguous()
 
