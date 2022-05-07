@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/frontend/lexer.h>
 
+#include <c10/util/call_once.h>
 #include <c10/util/Exception.h>
 
 #include <mutex>
@@ -65,9 +66,9 @@ bool SharedParserData::isBinary(int kind, int* prec) {
 }
 
 C10_EXPORT int stringToKind(const std::string& str) {
-  static std::once_flag init_flag;
+  static c10::once_flag init_flag;
   static std::unordered_map<std::string, int> str_to_kind;
-  std::call_once(init_flag, []() {
+  c10::call_once(init_flag, []() {
     for (char tok : std::string(valid_single_char_tokens))
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       str_to_kind[std::string(1, tok)] = tok;

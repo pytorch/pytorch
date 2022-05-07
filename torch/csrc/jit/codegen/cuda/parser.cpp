@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
+#include <c10/util/call_once.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -825,7 +826,7 @@ class IrParser {
   }
 
   static void initRegistry() {
-    std::call_once(once_flag_, []() { registerJitOperator(); });
+    c10::call_once(once_flag_, []() { registerJitOperator(); });
   }
 
   static bool canParseNode(const Node* node) {
@@ -3144,7 +3145,7 @@ class IrParser {
       cached_registry_lookup_; // NOLINT
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-  static std::once_flag once_flag_;
+  static c10::once_flag once_flag_;
 };
 std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
 std::unordered_set<Symbol> IrParser::parser_skip_set_; // NOLINT
