@@ -7,6 +7,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind AsStridedViewUpdate::class_op_kind(ltc_as_strided_view_update);
+
 AsStridedViewUpdate::AsStridedViewUpdate(
     const Value& target,
     const Value& input,

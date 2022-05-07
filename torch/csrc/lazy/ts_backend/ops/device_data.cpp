@@ -7,6 +7,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind DeviceData::class_op_kind(ltc_device_data);
+
 DeviceData::DeviceData(std::shared_ptr<BackendData> data)
     : TsNode(
           ltc_device_data,
@@ -22,7 +24,7 @@ std::string DeviceData::ToString() const {
 }
 
 const DeviceData* DeviceData::Cast(const Node* node) {
-  return NodeCast<DeviceData>(node, ltc_device_data);
+  return NodeCast<DeviceData>(node);
 }
 
 } // namespace lazy
