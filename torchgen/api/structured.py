@@ -26,6 +26,7 @@ from torchgen.api.types import (
     optionalScalarRefT,
     optionalIntArrayRefT,
     iTensorListRefT,
+    iOptTensorListRefT,
 )
 
 from torchgen.api import cpp
@@ -65,6 +66,8 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     elif isinstance(t, ListType):
         if t.elem == BaseType(BaseTy.Tensor):
             return NamedCType(binds, BaseCType(iTensorListRefT))
+        elif t.elem == OptionalType(BaseType(BaseTy.Tensor)):
+            return NamedCType(binds, BaseCType(iOptTensorListRefT))
         # TODO: delete these special cases; see torchgen.api.cpp--these
         # must be changed in tandem, but there are problems; see
         # https://github.com/pytorch/pytorch/pull/51485
