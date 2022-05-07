@@ -119,6 +119,16 @@ class GenLazyIR(ABC):
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
         return self.gen(f)
 
+    @method_with_native_function
+    def gen_opkind_definition(
+        self, f: Union[NativeFunctionsGroup, NativeFunction]
+    ) -> List[str]:
+        func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
+        schema = LazyIrSchema(func)
+        return [
+            f"const OpKind {schema.node_name}::class_op_kind{{{aten_symbol(schema)}}};"
+        ]
+
     # there is no lowering functionality generated unless this IR base class is subclassed and
     # implemented as a backend-specific node
     def lowering_function(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
@@ -202,6 +212,8 @@ class GenLazyIR(ABC):
             f"""\
 class {schema.node_name} : public {self.node_base} {{
  public:
+  static const OpKind class_op_kind;
+
   {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
       : {self.node_base_ctor_call(schema)}{comma_if_scalar_initializers}
         {scalar_initializers}
@@ -221,7 +233,6 @@ class {schema.node_name} : public {self.node_base} {{
 
   {scalar_decls}
   {has_optional_decls}
-
 }};
 
 """,
@@ -394,6 +405,7 @@ class GenLazyNativeFuncDefinition:
         schema = LazyIrSchema(func.func)
         return [
             f"""\
+
     {sig.decl(name=f"{self.class_method_name}::{metadata.kernel}")} {{
         {self.force_eager_fallback(func, schema)}
         {self.metrics(func, schema)}
