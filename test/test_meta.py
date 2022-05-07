@@ -301,7 +301,6 @@ meta_exclude_set = {
     torch.histc,  # MISSING aten::histc.out
     torch.histogram,  # MISSING aten::histogram.bin_ct
     torch.histogramdd,  # MISSING aten::_histogramdd_bin_edges
-    torch.imag,  # MISSING aten::view_as_real
     torch.index_select,  # MISSING aten::index_select
     torch.inner,  # MISSING aten::tensordot.out
     torch.inverse,  # MISSING aten::_local_scalar_dense
@@ -386,7 +385,6 @@ meta_exclude_set = {
     torch.nn.functional.logsigmoid,  # MISSING aten::log_sigmoid_forward
     torch.nn.functional.lp_pool1d,  # MISSING aten::abs.out
     torch.nn.functional.lp_pool2d,  # MISSING aten::abs.out
-    torch.nn.functional.margin_ranking_loss,  # MISSING aten::clamp_min.out
     torch.nn.functional.max_pool3d,  # MISSING aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices,  # MISSING aten::max_pool3d_with_indices
     torch.nn.functional.max_unpool1d,  # MISSING aten::max_unpool2d
@@ -417,7 +415,6 @@ meta_exclude_set = {
     torch.quantize_per_channel,  # MISSING aten::quantize_per_channel
     torch.quantize_per_tensor,  # MISSING aten::quantize_per_tensor
     torch.quantize_per_tensor_dynamic,  # MISSING aten::quantize_per_tensor_dynamic
-    torch.real,  # MISSING aten::view_as_real
     torch.relu,  # MISSING aten::relu
     torch.repeat_interleave,  # MISSING aten::repeat_interleave.Tensor
     torch.rnn_relu,  # MISSING aten::relu
