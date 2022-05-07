@@ -4740,6 +4740,24 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         self.assertEqual(meta_tensor_from_rref.device.type, 'meta')
         self.assertEqual(meta_tensor.device.type, 'meta')
 
+    @staticmethod
+    def meta_tensor_method2(tensors, devices):
+        for tensor, device in zip(tensors, devices):
+            assert tensor.device.type == device
+        return tensors
+
+    @dist_init
+    def test_2_meta_tensor(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        for tensors, devices in [([torch.ones(n, device='meta'), torch.ones(n, device='cpu')], ['meta', 'cpu']),
+                                 ([torch.ones(n, device='cpu'), torch.ones(n, device='meta')], ['cpu', 'meta'])]:
+            returned_tensors = rpc.remote(
+                worker_name(dst_rank), RpcTest.meta_tensor_method2, args=(tensors, devices)
+            ).to_here()
+            for tensor, device in zip(returned_tensors, devices):
+                self.assertEqual(tensor.device.type, device)
+
 
 class CudaRpcTest(RpcAgentTestFixture):
 
