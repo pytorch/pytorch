@@ -259,6 +259,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.new_ones,
         Tensor.new_full,
         Tensor._make_subclass,
+        Tensor.solve,
         Tensor.stride,
         Tensor.unflatten,
         Tensor.to_sparse_coo,
