@@ -9536,6 +9536,11 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_two_python_scalars=True,
                     skips=(
+                        # boolean alpha not handled properly
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestCudaFuserOpInfo',
+                                     'test_nvfuser_correctness',
+                                     dtypes=(torch.bool,)),
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestCommon',
                                      'test_reference_testing',
