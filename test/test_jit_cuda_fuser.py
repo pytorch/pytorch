@@ -565,7 +565,9 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y)
         jit_o = t_jit(x, y)
         if gradient_check:
-            gradcheck(t_jit, [x, y], nondet_tol=1e-5)
+            if jit_o.dtype != torch.bool:
+                # bool dtype has no `-`
+                gradcheck(t_jit, [x, y], nondet_tol=1e-5)
         elif dtype in self.support_tensor_dtypes:
             self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
         o = t(x, y)
@@ -611,6 +613,12 @@ class TestCudaFuser(JitTestCase):
                       torch.trunc,
                       torch.frac,
                       torch.reciprocal,
+                      torch.isfinite,
+                      torch.isinf,
+                      torch.isnan,
+                      torch.isneginf,
+                      torch.isposinf,
+                      torch.isreal,
                       torch.nn.functional.softplus,
                       torch.nn.functional.gelu,
                       torch.relu,
