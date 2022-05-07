@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/hash_provider.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -372,8 +373,7 @@ class MinTerm : public ExprNode<MinTerm> {
 };
 
 // Context-sensitive IR simplification
-using LoopBoundInfo = std::pair<ExprPtr, ExprPtr>;
-using VarBoundInfo = std::unordered_map<VarPtr, LoopBoundInfo>;
+using VarBoundInfo = std::unordered_map<VarPtr, analysis::Bound>;
 
 class TORCH_API SimplifierUnderContext : public IRMutator {
  public:
@@ -387,7 +387,7 @@ class TORCH_API SimplifierUnderContext : public IRMutator {
   ExprPtr mutate(IfThenElsePtr v) override;
 
  protected:
-  bool getLoopBoundInfo(const ExprPtr& expr, LoopBoundInfo* loop_bound_info);
+  bool getLoopBoundInfo(const ExprPtr& expr, analysis::Bound* loop_bound_info);
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
