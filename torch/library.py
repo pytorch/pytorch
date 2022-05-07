@@ -13,17 +13,19 @@ _impls: Set[str] = set()
 
 class Library:
     """
-    Class to create linraries that can be used to register new operators or
+    A class to create libraries that can be used to register new operators or
     override operators in existing libraries from Python.
-    A user can pass in a dispatch keyname if they only want the library to override kernels corresponding
-    to only one specific dispatch key.
+    A user can optionally pass in a dispatch keyname if they only want to register
+    kernels corresponding to only one specific dispatch key.
 
     Args:
         ns: library name
-        kind: "IMPL" by default
+        kind: "DEF", "IMPL" (default: "IMPL")
         dispatch_key: PyTorch dispatch key (default: "")
     """
     def __init__(self, ns, kind, dispatch_key=""):
+        if kind != "IMPL" and kind != "DEF":
+            raise ValueError("Unsupported kind: ", kind)
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
@@ -31,8 +33,6 @@ class Library:
         self._op_impls = set()
         self.kind = kind
         self.dispatch_key = dispatch_key
-        if kind != "IMPL" and kind != "DEF":
-            raise ValueError("Unsupported kind: ", kind)
 
     def __repr__(self):
         return "Library(kind={}, ns={}, dispatch_key={})>".format(self.kind, self.ns, self.dispatch_key)
