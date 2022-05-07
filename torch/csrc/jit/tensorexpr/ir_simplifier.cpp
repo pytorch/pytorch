@@ -2556,7 +2556,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
   // bound info after the for stmt, we can use it to simplify the assignment
   // stmt x = (i+20)/5 to x = 4.
   bool has_bounds = false;
-  std::pair<ExprPtr, ExprPtr> bound_old;
+  analysis::Bound bound_old;
   VarPtr var_key = to<Var>(var);
   auto got = var_bound_info_.find(var_key);
   if (got != var_bound_info_.end()) {
@@ -2564,8 +2564,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
     bound_old = got->second;
   }
   // set bounds info for index var
-  const std::pair<ExprPtr, ExprPtr> bound_new =
-      std::make_pair(start_new, stop_new);
+  const analysis::Bound bound_new(start_new, stop_new);
   var_bound_info_[var_key] = bound_new;
 
   ExprPtr iters = alloc<Sub>(stop_new, start_new);
@@ -2704,10 +2703,10 @@ ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
   }
 
   // check the bounds of 'i'
-  auto start = got->second.first;
+  auto start = got->second.start;
   // open upper bound, i.e.,  end is one more than the maximum value in the
   // range
-  auto end = got->second.second;
+  auto end = got->second.end;
   ExprPtr check_start = IRSimplifier::simplify(
       alloc<CompareSelect>(start, immLike(start, 0), kGE));
   ExprPtr check_end =
@@ -2742,7 +2741,7 @@ ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
 
     // check if j is not negative
     sign_check = IRSimplifier::simplify(alloc<CompareSelect>(
-        got->second.first, immLike(got->second.first, 0), kGE));
+        got->second.start, immLike(got->second.start, 0), kGE));
     if (sign_check->isConstant() && immediateEquals(sign_check, 1)) {
       return ret_var;
     }
@@ -2824,10 +2823,10 @@ ExprPtr distributeMod(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
   }
 
   // check the bounds of 'i'
-  auto start = got->second.first;
+  auto start = got->second.start;
   // open upper bound, i.e.,  end is one more than the maximum value in the
   // range
-  auto end = got->second.second;
+  auto end = got->second.end;
   ExprPtr check_start = IRSimplifier::simplify(
       alloc<CompareSelect>(start, immLike(start, 0), kGE));
   ExprPtr check_end =
@@ -2861,7 +2860,7 @@ ExprPtr distributeMod(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
 
     // check if j is not negative
     sign_check = IRSimplifier::simplify(alloc<CompareSelect>(
-        got->second.first, immLike(got->second.first, 0), kGE));
+        got->second.start, immLike(got->second.start, 0), kGE));
     if (sign_check->isConstant() && immediateEquals(sign_check, 1)) {
       return var_key;
     }
@@ -2888,8 +2887,8 @@ ExprPtr SimplifierUnderContext::mutate(DivPtr v) {
   if (lhsVar && rhsScalar && !rhsScalar->dtype().is_floating_point()) {
     auto got = var_bound_info_.find(lhsVar);
     if (got != var_bound_info_.end()) {
-      auto start = got->second.first;
-      auto end = got->second.second;
+      auto start = got->second.start;
+      auto end = got->second.end;
       ExprPtr check_start = IRSimplifier::simplify(
           alloc<CompareSelect>(start, immLike(start, 0), kGE));
       ExprPtr check_end =
@@ -2966,8 +2965,8 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
       "(SimplifierUnderContext) after simplify: ",
       std::to_string(simplified_cmp_select_expr));
 
-  LoopBoundInfo lhs_bound;
-  LoopBoundInfo rhs_bound;
+  analysis::Bound lhs_bound;
+  analysis::Bound rhs_bound;
   auto lhs_has_bound = getLoopBoundInfo(simplified_lhs, &lhs_bound);
   auto rhs_has_bound = getLoopBoundInfo(simplified_rhs, &rhs_bound);
   if (!lhs_has_bound || !rhs_has_bound) {
@@ -2977,85 +2976,9 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     return simplified_cmp_select_expr;
   }
 
-  analysis::BoundCompareResult cmp_res = analysis::BoundCompareResult::kEQ;
-  auto bound_solved = analysis::compareBound(
-      {lhs_bound.first, lhs_bound.second},
-      {rhs_bound.first, rhs_bound.second},
-      &cmp_res);
-  if (!bound_solved) {
-    GRAPH_DEBUG(
-        "(SimplifierUnderContext) Final: ",
-        std::to_string(simplified_cmp_select_expr));
-    return simplified_cmp_select_expr;
-  }
+  analysis::CmpEvalResult cmp_res =
+      analysis::compareBound(lhs_bound, rhs_bound, v->compare_select_op());
 
-  // Get the oppositive comparison operation
-  //    not(gt) = le, not(le) = gt, not(lt) = ge, not(ge) = lt
-  //    not(eq) = ne, not(ne) = eq
-  auto _not = [](const CompareSelectOperation& cmp_op) {
-    switch (cmp_op) {
-      case CompareSelectOperation::kGT:
-        return CompareSelectOperation::kLE;
-      case CompareSelectOperation::kGE:
-        return CompareSelectOperation::kLT;
-      case CompareSelectOperation::kLT:
-        return CompareSelectOperation::kGE;
-      case CompareSelectOperation::kLE:
-        return CompareSelectOperation::kGT;
-      case CompareSelectOperation::kNE:
-        return CompareSelectOperation::kEQ;
-      default:
-        TORCH_INTERNAL_ASSERT(cmp_op == CompareSelectOperation::kEQ)
-        return CompareSelectOperation::kNE;
-    }
-  };
-
-  // Check whether the compare result satisfies the given comparison operation.
-  auto _imply = [](const analysis::BoundCompareResult& cmp_res,
-                   const CompareSelectOperation& cmp_op) {
-    // a > b
-    auto gt_true = (cmp_res == analysis::BoundCompareResult::kGT);
-    // a >= b
-    auto ge_true =
-        (cmp_res == analysis::BoundCompareResult::kGE ||
-         cmp_res == analysis::BoundCompareResult::kGT ||
-         cmp_res == analysis::BoundCompareResult::kEQ);
-    // a < b
-    auto lt_true = (cmp_res == analysis::BoundCompareResult::kLT);
-    // a <= b
-    auto le_true =
-        (cmp_res == analysis::BoundCompareResult::kLE ||
-         cmp_res == analysis::BoundCompareResult::kLT ||
-         cmp_res == analysis::BoundCompareResult::kEQ);
-    // a == b
-    auto eq_true = (cmp_res == analysis::BoundCompareResult::kEQ);
-    // a != b
-    auto ne_true =
-        (cmp_res == analysis::BoundCompareResult::kLT ||
-         cmp_res == analysis::BoundCompareResult::kGT ||
-         cmp_res == analysis::BoundCompareResult::kNE);
-
-    switch (cmp_op) {
-      case CompareSelectOperation::kGT:
-        return gt_true;
-      case CompareSelectOperation::kGE:
-        return ge_true;
-      case CompareSelectOperation::kLT:
-        return lt_true;
-      case CompareSelectOperation::kLE:
-        return le_true;
-      case CompareSelectOperation::kNE:
-        return ne_true;
-      default:
-        TORCH_INTERNAL_ASSERT(cmp_op == CompareSelectOperation::kEQ)
-        return eq_true;
-    }
-  };
-
-  // Get the comparison operation
-  auto cmp_op = v->compare_select_op();
-  // Get the oppositive comparison operation
-  auto not_cmp_op = _not(cmp_op);
   // Return the simplified ret1/ret2 if the compare result is deterministic.
   // Otherwise, return the simplified CompareSelect directly.
   //     1) _imply(cmp_res, cmp_op): Check whether the cmp_res always
@@ -3065,10 +2988,11 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
   //        ret2.
   //     3) Return the simplified CompareSelect if the compare result is
   //        non-deterministic.
-  auto ret_expr = _imply(cmp_res, cmp_op)
+  auto ret_expr = (cmp_res == analysis::CmpEvalResult::TRUE)
       ? simplified_ret1
-      : (_imply(cmp_res, not_cmp_op) ? simplified_ret2
-                                     : simplified_cmp_select_expr);
+      : ((cmp_res == analysis::CmpEvalResult::FALSE)
+             ? simplified_ret2
+             : simplified_cmp_select_expr);
   GRAPH_DEBUG("(SimplifierUnderContext) Final: ", std::to_string(ret_expr));
   return ret_expr;
 }
@@ -3091,8 +3015,8 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
   if (lhsVar && rhsScalar && !rhsScalar->dtype().is_floating_point()) {
     auto got = var_bound_info_.find(lhsVar);
     if (got != var_bound_info_.end()) {
-      auto start = got->second.first;
-      auto end = got->second.second;
+      auto start = got->second.start;
+      auto end = got->second.end;
       ExprPtr check_start = IRSimplifier::simplify(
           alloc<CompareSelect>(start, immLike(start, 0), kGE));
       ExprPtr check_end =
@@ -3115,13 +3039,13 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
 
 bool SimplifierUnderContext::getLoopBoundInfo(
     const ExprPtr& expr,
-    LoopBoundInfo* loop_bound_info) {
+    analysis::Bound* loop_bound_info) {
   if (expr == nullptr)
     return false;
 
   if (expr->isConstant()) {
-    loop_bound_info->first = expr;
-    loop_bound_info->second = expr;
+    loop_bound_info->start = expr;
+    loop_bound_info->end = expr;
     return true;
   }
 
@@ -3135,15 +3059,15 @@ bool SimplifierUnderContext::getLoopBoundInfo(
     return false;
   }
 
-  loop_bound_info->first = got->second.first;
+  loop_bound_info->start = got->second.start;
   // TODO: Need to add the boundary information(close/open) of a range to
   // Bound. Currently, the VarBoundInfo comes from for-loop statement while
   // the end of the boundary is open. But we assume the start and end of a
   // range are always close. Hence, we explicitly convert the open boundary to
   // close.
   //   [for-start, for-stop) => [for-start, for-stop -1]
-  loop_bound_info->second = IRSimplifier::simplify(
-      alloc<Sub>(got->second.second, immLike(got->second.second, 1)));
+  loop_bound_info->end = IRSimplifier::simplify(
+      alloc<Sub>(got->second.end, immLike(got->second.end, 1)));
   return true;
 }
 
