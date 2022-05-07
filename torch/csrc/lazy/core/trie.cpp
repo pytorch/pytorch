@@ -37,13 +37,14 @@ TrieNode* TrieCache::Current() const {
   return current_;
 }
 
-void TrieCache::SetCurrent(std::deque<std::shared_ptr<TrieNode>>::iterator iter) {
+void TrieCache::SetCurrent(std::list<std::shared_ptr<TrieNode>>::iterator& iter) {
   auto& successors = current_->successors;
   // Update current_ before iter gets destroyed
   current_ = (*iter).get();
+
   // Insert this node to the front of its parent's successor list
   if (iter != successors.begin()) {
-    successors.push_front(*iter);
+    successors.push_front(std::move(*iter));
     successors.erase(iter);
   }
 }

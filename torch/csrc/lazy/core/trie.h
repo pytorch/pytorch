@@ -1,7 +1,7 @@
 #pragma once
 
 #include <atomic>
-#include <deque>
+#include <list>
 
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/lazy/core/ir.h>
@@ -19,7 +19,7 @@ struct TORCH_API TrieNode {
   size_t unique_id;
   size_t hit_counter;
   NodePtr ir_node;
-  std::deque<std::shared_ptr<TrieNode>> successors;
+  std::list<std::shared_ptr<TrieNode>> successors;
 
   TrieNode() : unique_id(GetNextUniqueId()), hit_counter(0), ir_node(nullptr) {}
   explicit TrieNode(NodePtr node)
@@ -33,7 +33,7 @@ class TORCH_API TrieCache {
   TrieNode* Current() const;
   // Take an iterator as the input because we want to move the corresponding
   // node in the successor list to achieve a LRU caching effect
-  void SetCurrent(std::deque<std::shared_ptr<TrieNode>>::iterator iter);
+  void SetCurrent(std::list<std::shared_ptr<TrieNode>>::iterator& iter);
   // Used in MarkStep to indicate the end of one tracing
   void ResetCurrent();
 
