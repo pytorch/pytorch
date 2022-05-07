@@ -582,7 +582,7 @@ class _BaseDataLoaderIter(object):
         # Probably the best way to do this is by moving the sample pushing
         # to a separate thread and then just sharing the data queue
         # but signalling the end is tricky without a non-blocking API
-        raise NotImplementedError("{} cannot be pickled", self.__class__.__name__)
+        raise NotImplementedError(f"{self.__class__.__name__} cannot be pickled")
 
 
 class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
