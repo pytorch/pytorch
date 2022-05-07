@@ -940,22 +940,22 @@ def trace_module(
 
         prefix = "__module"
         trace_module_map[prefix] = mod
-        
-        name_child_tuple_list = list(mod.named_children())
-        name_child_prefix_tuple_list = [tuple(list(tup)+[prefix]) for tup in name_child_tuple_list]
+
+        name_child_tuple_list : List[Tuple[str, 'Module']] = list(mod.named_children())
+        name_child_prefix_tuple_list : List[Tuple[str, 'Module', str]] = [tuple(list(tup) + [prefix]) for tup in name_child_tuple_list]
 
         while len(name_child_prefix_tuple_list) != 0:
             name, child, prefix = name_child_prefix_tuple_list.pop()
             submod_qualname = prefix + "." + name
             trace_module_map[child] = submod_qualname
             nctl = list(child.named_children())
-            ncptl = [tuple(list(tup)+[submod_qualname]) for tup in nctl]
+            ncptl = [tuple(list(tup) + [submod_qualname]) for tup in nctl]
             name_child_prefix_tuple_list.extend(ncptl)
 
         torch.jit._trace._trace_module_map = trace_module_map
 
         module = make_module(mod, _module_class, _compilation_unit)
-    
+
         for method_name, example_inputs in inputs.items():
             if method_name == "forward":
                 # "forward" is a special case because we need to trace
@@ -1007,7 +1007,7 @@ def trace_module(
                     )
     finally:
         torch.jit._trace._trace_module_map = old_module_map
-    
+
     return module
 
 
