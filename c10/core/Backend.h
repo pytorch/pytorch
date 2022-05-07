@@ -53,8 +53,7 @@ enum class Backend {
   MPS,
   HPU,
   Lazy,
-  NumOptions,
-  Meta
+  NumOptions
 };
 
 static inline Backend dispatchKeyToBackend(DispatchKey t) {
@@ -108,8 +107,6 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedXPU;
   } else if (t == DispatchKey::HPU || t == DispatchKey::AutogradHPU) {
     return Backend::HPU;
-  } else if (t == DispatchKey::Meta) {
-    return Backend::Meta;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {

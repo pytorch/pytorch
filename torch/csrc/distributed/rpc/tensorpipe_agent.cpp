@@ -1428,11 +1428,9 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
           ", but found tensor on device: ",
           t.device());
     }
-    return getDevicesForTensors(message.tensors(), {{c10::kCPU, c10::kCPU}, {c10::kMeta, c10::kMeta}}, errStr);
+    return {};
   } else {
-    DeviceMap mergedMap = iter->second;
-    mergedMap.insert({{c10::kCPU, c10::kCPU}, {c10::kMeta, c10::kMeta}});
-    return getDevicesForTensors(message.tensors(), mergedMap, errStr);
+    return getDevicesForTensors(message.tensors(), iter->second, errStr);
   }
 }
 
