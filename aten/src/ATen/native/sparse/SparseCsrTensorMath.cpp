@@ -52,6 +52,7 @@
 #include <ATen/ops/erfinv_native.h>
 #include <ATen/ops/expm1.h>
 #include <ATen/ops/expm1_native.h>
+#include <ATen/ops/fill_native.h>
 #include <ATen/ops/floor.h>
 #include <ATen/ops/floor_native.h>
 #include <ATen/ops/isinf.h>
@@ -65,9 +66,11 @@
 #include <ATen/ops/log1p.h>
 #include <ATen/ops/log1p_native.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul_native.h>
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/normal_native.h>
+#include <ATen/ops/ones_like.h>
 #include <ATen/ops/rad2deg.h>
 #include <ATen/ops/rad2deg_native.h>
 #include <ATen/ops/resize_as_sparse_native.h>
@@ -87,6 +90,8 @@
 #include <ATen/ops/sinh_native.h>
 #include <ATen/ops/sqrt.h>
 #include <ATen/ops/sqrt_native.h>
+#include <ATen/ops/sparse_mask.h>
+#include <ATen/ops/sparse_mask_native.h>
 #include <ATen/ops/tan.h>
 #include <ATen/ops/tan_native.h>
 #include <ATen/ops/tanh.h>
@@ -278,6 +283,39 @@ Tensor& normal_sparse_csr_(
     double std,
     c10::optional<Generator> gen) {
   return unary_op_inplace(self, &Tensor::normal_, mean, std, gen);
+}
+
+Tensor& fill_sparse_csr_(Tensor& self, const Scalar& value) {
+  return unary_op_inplace(self, &TensorBase::fill_, value);
+}
+
+Tensor sparse_mask_sparse_csr(
+    const Tensor& self,
+    const Tensor& sparse_mask) {
+  TORCH_CHECK(sparse_mask.is_sparse_csr(), "sparse_mask_sparse_csr expects mask to be sparse csr");
+  TORCH_CHECK(self.dim() == 2, "sparse_mask_sparse_csr expects self to be 2D");
+  TORCH_CHECK(sparse_mask.dim() == 2, "sparse_mask_sparse_csr expects mask to be 2D");
+
+  // We are computing self.mul(at::ones_like(sparse_mask))
+  // But mul(dense, sparse_csr) is not implemented yet
+  if (self.layout() == sparse_mask.layout()) {
+    // Both inputs are CSR
+    return self.mul(at::ones_like(sparse_mask));
+  } else {
+    return self.sparse_mask(sparse_mask.to_sparse()).to_sparse_csr();
+  }
+}
+
+Tensor mul_scalar_sparse_csr(const Tensor& self, const Scalar& other) {
+  auto result_values = self.values().mul(other);
+  return at::native::_sparse_csr_tensor_unsafe(
+      self.crow_indices().clone(),
+      self.col_indices().clone(),
+      result_values,
+      self.sizes(),
+      result_values.scalar_type(),
+      self.layout(),
+      result_values.device());
 }
 
 /* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout
