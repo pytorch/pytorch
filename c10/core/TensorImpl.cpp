@@ -352,20 +352,20 @@ void TensorImpl::throw_storage_access_error() const {
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   TORCH_CHECK(
       false,
-      "tensors of type ", tensorimpl_type_name(), " do not have is_contiguous");
+      "Tensors of type ", tensorimpl_type_name(), " do not have is_contiguous");
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
-  TORCH_CHECK(false, "tensors of type ", tensorimpl_type_name(), " do not have sizes");
+  TORCH_CHECK(false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
 }
 IntArrayRef TensorImpl::strides_custom() const {
-  TORCH_CHECK(false, "tensors of type ", tensorimpl_type_name(), " do not have strides");
+  TORCH_CHECK(false, "Tensors of type ", tensorimpl_type_name(), " do not have strides");
 }
 int64_t TensorImpl::dim_custom() const {
-  TORCH_CHECK(false, "tensors of type ", tensorimpl_type_name(), " do not have dim");
+  TORCH_CHECK(false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
 }
 int64_t TensorImpl::numel_custom() const {
-  TORCH_CHECK(false, "tensors of type ", tensorimpl_type_name(), " do not have numel");
+  TORCH_CHECK(false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
 }
 
 
