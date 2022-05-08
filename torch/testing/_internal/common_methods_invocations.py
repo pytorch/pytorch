@@ -18318,6 +18318,10 @@ python_ref_db = [
         torch_opinfo_name="flatten",
     ),
     PythonRefInfo(
+        "_refs.flip",
+        torch_opinfo_name="flip",
+    ),
+    PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
     ),

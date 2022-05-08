@@ -135,6 +135,7 @@ __all__ = [
     #
     "cat",
     "flatten",
+    "flip",
     "permute",
     "swap_axes",  # alias for transpose
     "squeeze",
@@ -894,6 +895,11 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
     # Makes a copy if it can't make a view
     result = prims.collapse(a, start_dim, end_dim)
     return result
+
+
+def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
+    return prims.rev(a, dims)
 
 
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:

@@ -109,6 +109,7 @@ __all__ = [
     "collapse",
     "concatenate",
     "reshape",
+    "rev",
     #
     # Conditional prims
     #
@@ -1427,6 +1428,23 @@ reshape = _make_prim(
     impl_aten=_reshape_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_reshape_doc,
+)
+
+
+def _rev_meta(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    return TensorMeta(a)
+
+
+_rev_doc = """
+    Reverses the order of elements along the given dimensions.
+    """
+
+rev = _make_prim(
+    name="rev",
+    meta=_rev_meta,
+    impl_aten=torch.flip,
+    return_type=RETURN_TYPE.NEW,
+    doc=_rev_doc,
 )
 
 #
