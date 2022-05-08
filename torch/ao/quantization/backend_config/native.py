@@ -10,8 +10,8 @@ import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
 from ..observer import (
-    default_affine_fixed_qparams_observer,
-    default_symmetric_fixed_qparams_observer,
+    default_fixed_qparams_range_0to1_observer,
+    default_fixed_qparams_range_neg1to1_observer,
 )
 from ..fake_quantize import FixedQParamsFakeQuantize
 from ..fuser_method_mappings import (
@@ -484,19 +484,19 @@ def _get_binary_op_configs(dtype_configs):
 def _get_fixed_qparams_op_configs():
     fixed_qparams_op_configs = []
     for fixed_qparam_op, output_observer in [
-            (torch.nn.Hardsigmoid, default_affine_fixed_qparams_observer),
-            (torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer),
-            ("hardsigmoid", default_affine_fixed_qparams_observer),
-            ("hardsigmoid_", default_affine_fixed_qparams_observer),
-            (torch.nn.Sigmoid, default_affine_fixed_qparams_observer),
-            (torch.sigmoid, default_affine_fixed_qparams_observer),
-            ("sigmoid", default_affine_fixed_qparams_observer),
-            ("sigmoid_", default_affine_fixed_qparams_observer),
-            (torch.nn.Tanh, default_symmetric_fixed_qparams_observer),
-            (torch.tanh, default_symmetric_fixed_qparams_observer),
-            ("tanh", default_symmetric_fixed_qparams_observer),
-            ("tanh_", default_symmetric_fixed_qparams_observer),
-            (torch.nn.Softmax, default_affine_fixed_qparams_observer),
+            (torch.nn.Hardsigmoid, default_fixed_qparams_range_0to1_observer),
+            (torch.nn.functional.hardsigmoid, default_fixed_qparams_range_0to1_observer),
+            ("hardsigmoid", default_fixed_qparams_range_0to1_observer),
+            ("hardsigmoid_", default_fixed_qparams_range_0to1_observer),
+            (torch.nn.Sigmoid, default_fixed_qparams_range_0to1_observer),
+            (torch.sigmoid, default_fixed_qparams_range_0to1_observer),
+            ("sigmoid", default_fixed_qparams_range_0to1_observer),
+            ("sigmoid_", default_fixed_qparams_range_0to1_observer),
+            (torch.nn.Tanh, default_fixed_qparams_range_neg1to1_observer),
+            (torch.tanh, default_fixed_qparams_range_neg1to1_observer),
+            ("tanh", default_fixed_qparams_range_neg1to1_observer),
+            ("tanh_", default_fixed_qparams_range_neg1to1_observer),
+            (torch.nn.Softmax, default_fixed_qparams_range_0to1_observer),
     ]:
         fixed_qparams_op_configs.append({
             "pattern": fixed_qparam_op,
