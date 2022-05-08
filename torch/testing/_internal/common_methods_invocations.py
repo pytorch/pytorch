@@ -18203,6 +18203,14 @@ python_ref_db = [
         torch_opinfo_name="le",
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.logical_and",
+        torch_opinfo_name="logical_and",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.logical_or",
+        torch_opinfo_name="logical_or",
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.lt",
         torch_opinfo_name="lt",
     ),

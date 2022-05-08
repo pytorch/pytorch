@@ -92,12 +92,12 @@ __all__ = [
     # 'hypot',
     "igamma",
     "igammac",
-    # 'isclose', # abs, sub, le, add, mul
+    # 'isclose',
     # 'lcm',
     # 'ldexp',
     "le",
-    # 'logical_and',
-    # 'logical_or',
+    "logical_and",
+    "logical_or",
     # 'logical_xor',
     "lt",
     # 'max', # implement with reductions
@@ -378,9 +378,12 @@ tan = _make_elementwise_unary_reference(
 
 
 def _make_elementwise_binary_reference(
-    prim: Callable, *, type_promotion_kind, aten_op=infer_aten_op
+    prim: Callable,
+    *,
+    type_promotion_kind,
+    aten_op=infer_aten_op,
+    has_out=True,
 ) -> Callable:
-    @out_wrapper
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"), type_promotion_kind=type_promotion_kind
     )
@@ -390,6 +393,9 @@ def _make_elementwise_binary_reference(
     ) -> Tensor:
         a, b = _maybe_broadcast(a, b)
         return prim(a, b)
+
+    if has_out:
+        _ref = out_wrapper(_ref)
 
     if aten_op is infer_aten_op:
         aten_op = getattr(torch.ops.aten, prim.__name__)
@@ -518,6 +524,36 @@ igammac = _make_elementwise_binary_reference(
 # TODO: add docstring
 le = _make_elementwise_binary_reference(
     prims.le, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+)
+
+
+def _logical_and(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b):
+        b = ne(b, 0)
+    return bitwise_and(a, b)
+
+
+logical_and = _make_elementwise_binary_reference(
+    _logical_and,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_and,
+)
+
+
+def _logical_or(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b):
+        b = ne(b, 0)
+    return bitwise_or(a, b)
+
+
+logical_or = _make_elementwise_binary_reference(
+    _logical_or,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_or,
 )
 
 # TODO: add docstring
