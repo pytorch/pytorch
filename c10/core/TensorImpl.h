@@ -7,6 +7,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/SizesAndStrides.h>
@@ -536,51 +537,154 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
-   *
-   * NOTE: sizes() is only `TENSORIMPL_MAYBE_VIRTUAL` for backward
-   * compatibility. See `set_sizes_customization_policy` for the
-   * encouraged customization point.
-   *
-   * NOTE: Currently, CustomizableMethodPolicy::CustomBehavior is not
-   * supported due to a lack of use case, but it can easily be added.
    */
-  TENSORIMPL_MAYBE_VIRTUAL IntArrayRef sizes() const
-#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  {
+  IntArrayRef sizes() const {
     if (C10_UNLIKELY(
-            sizes_customization_policy_ !=
-            static_cast<uint8_t>(CustomizableMethodPolicy::Default))) {
-      return sizes_nondefault_policy_impl();
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return sizes_custom();
     }
-    return sizes_and_strides_.sizes_arrayref();
+    return sizes_default();
   }
-#else
-      ;
-#endif
 
- private:
-  IntArrayRef sizes_nondefault_policy_impl() const;
-
- public:
   /**
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
    */
-  virtual IntArrayRef strides() const;
+  IntArrayRef strides() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+      return strides_custom();
+    }
+    return strides_default();
+  }
+
+  /**
+   * Return the size of a tensor at some dimension, wrapping the dimension if
+   * necessary.
+   *
+   * NOTE: if you know wrapping is unnecessary, do sizes()[d] instead; it will
+   * be faster
+   */
+  int64_t size(int64_t d) const {
+    d = maybe_wrap_dim(d, dim(), false);
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
+    }
+    return sizes_and_strides_.size_at_unchecked(d);
+  }
+
+  /**
+   * Return the stride of a tensor at some dimension, wrapping the dimension
+   * if necessary.
+   *
+   * NOTE: if you know wrapping is unnecessary, do sizes()[d] instead; it will
+   * be faster
+   */
+  int64_t stride(int64_t d) const {
+    d = maybe_wrap_dim(d, dim(), false);
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+      return strides_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
+    }
+    return sizes_and_strides_.stride_at_unchecked(d);
+  }
 
   /**
    * Return the number of dimensions of this tensor.  Note that 0-dimension
    * represents a Tensor that is a Scalar, e.g., one that has a single element.
    */
-  TENSORIMPL_MAYBE_VIRTUAL int64_t dim() const
-#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  {
+  int64_t dim() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return dim_custom();
+    }
+    return dim_default();
+  }
+
+  /**
+   * The number of elements in a tensor.
+   *
+   * WARNING: Previously, if you were using the Caffe2 API, you could
+   * test numel() == -1 to see if a tensor was uninitialized.  This
+   * is no longer true; numel always accurately reports the product
+   * of sizes of a tensor.
+   */
+  int64_t numel() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return numel_custom();
+    }
+    return numel_default();
+  }
+
+  /**
+   * Whether or not a tensor is laid out in contiguous memory.
+   *
+   * Tensors with non-trivial strides are not contiguous.  See
+   * compute_contiguous() for the exact definition of whether or not
+   * a tensor is contiguous or not.
+   */
+  bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+      return is_contiguous_custom(memory_format);
+    }
+    return is_contiguous_default(memory_format);
+  }
+
+ protected:
+  /**
+   * Customization points for the functions above.  sizes_strides_policy_
+   * must be set to enable these.
+   *
+   * NB: dim is overrideable separately from sizes because it is possible
+   * for a tensor to have rank, but not well defined sizes.
+   */
+  // sizes_strides_policy_ >= CustomStrides
+  virtual IntArrayRef strides_custom() const;
+  virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
+  // sizes_strides_policy_ >= CustomSizes
+  virtual IntArrayRef sizes_custom() const;
+  virtual int64_t dim_custom() const;
+  virtual int64_t numel_custom() const;
+
+  // These are factored into separate functions in case subclasses
+  // want to use them
+  inline IntArrayRef strides_default() const {
+    return sizes_and_strides_.strides_arrayref();
+  }
+  inline bool is_contiguous_default(at::MemoryFormat memory_format) const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
+    if (memory_format == at::MemoryFormat::ChannelsLast) {
+      return is_channels_last_contiguous_;
+    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+      return is_channels_last_3d_contiguous_;
+    }
+    return is_contiguous_;
+  }
+  inline IntArrayRef sizes_default() const {
+    return sizes_and_strides_.sizes_arrayref();
+  }
+  inline int64_t dim_default() const {
     return sizes_and_strides_.size();
   }
-#else
-      ;
+  inline int64_t numel_default() const {
+#ifdef DEBUG
+    TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
 #endif
+    return numel_;
+  }
 
+ public:
   /**
    * True if this tensor has storage. See storage() for details.
    */
@@ -630,63 +734,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_;
   }
 
-  /**
-   * The number of elements in a tensor.
-   *
-   * WARNING: Previously, if you were using the Caffe2 API, you could
-   * test numel() == -1 to see if a tensor was uninitialized.  This
-   * is no longer true; numel always accurately reports the product
-   * of sizes of a tensor.
-   */
-  TENSORIMPL_MAYBE_VIRTUAL int64_t numel() const {
-#ifdef DEBUG
-    TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
-#endif
-    return numel_;
-  }
-
   bool unique_version() const {
     return version_counter_.unique();
   }
 
-  /**
-   * Whether or not a tensor is laid out in contiguous memory.
-   *
-   * Tensors with non-trivial strides are not contiguous.  See
-   * compute_contiguous() for the exact definition of whether or not
-   * a tensor is contiguous or not.
-   *
-   * NOTE: is_contiguous is only `TENSORIMPL_MAYBE_VIRTUAL` for
-   * backward compatibility. See `set_has_contiguity_policy` and
-   * `is_contiguous_custom` for the encouraged customization point.
-   */
-  TENSORIMPL_MAYBE_VIRTUAL bool is_contiguous(
-      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
-    if (C10_UNLIKELY(
-            has_contiguity_ !=
-            static_cast<uint8_t>(HasContiguityPolicy::Default))) {
-      return is_contiguous_nondefault_policy_impl(memory_format);
-    }
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
-    if (memory_format == at::MemoryFormat::ChannelsLast) {
-      return is_channels_last_contiguous_;
-    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-      return is_channels_last_3d_contiguous_;
-    }
-    return is_contiguous_;
-  }
-
- private:
-  bool is_contiguous_nondefault_policy_impl(at::MemoryFormat) const;
-
  protected:
-  /**
-   * Customization point for is_contiguous; must also
-   * set_has_contiguity_policy(HasContiguityPolicy::Custom) for this
-   * to be called.
-   */
-  virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
-
   virtual Layout layout_impl() const {
     TORCH_CHECK(
         false, "layout_impl is only implemented for TensorImpl subclasses.");
@@ -1298,16 +1350,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_numel();
     refresh_contiguous();
   }
-
-  /**
-   * Return the size of a tensor at some dimension.
-   */
-  virtual int64_t size(int64_t d) const;
-
-  /**
-   * Return the stride of a tensor at some dimension.
-   */
-  virtual int64_t stride(int64_t d) const;
 
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides /
@@ -2150,31 +2192,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
  protected:
-  // Policy for adjusting the behavior of customizable methods like
-  // is_contiguous() and sizes(). Allows subclass customization while
-  // still being able to inline the methods in the common case.
-  enum class CustomizableMethodPolicy : uint8_t {
-    // Default behavior.
-    Default,
-    // Throw a generic error message that this tensor type does not
-    // support the method in question.
-    NotSupported,
-    // For backward compatibility.
-    ContiguityNotSupported = NotSupported,
-    // Call virtual foo_custom method to implement custom foo
-    // behavior.
-    CustomBehavior,
+  enum class SizesStridesPolicy : uint8_t {
+    // Default behavior, e.g., dense tensor.
+    //
+    // Can override: nothing
+    Default = 0,
+    // Customizable strides behavior, e.g., sparse tensor,
+    // mkldnn tensor.
+    //
+    // Can override: strides(), is_contiguous()
+    CustomStrides = 1,
+    // Customizable sizes behavior, e.g., nested tensor
+    //
+    // Can override: strides(), is_contiguous(), sizes(), dim(), numel()
+    CustomSizes = 2,
   };
 
-  // For backward compatibility.
-  using HasContiguityPolicy = CustomizableMethodPolicy;
-
-  void set_has_contiguity_policy(CustomizableMethodPolicy p) {
-    has_contiguity_ = static_cast<uint8_t>(p);
-  }
-
-  void set_sizes_customization_policy(CustomizableMethodPolicy p) {
-    sizes_customization_policy_ = static_cast<uint8_t>(p);
+  void set_sizes_strides_policy(SizesStridesPolicy policy) {
+    sizes_strides_policy_ = static_cast<uint8_t>(policy);
   }
 
   Storage storage_;
@@ -2283,9 +2318,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Tensor is contiguous
   bool is_contiguous_ : 1;
-  // gcc doesn't like enum class bitfields; see
-  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61414
-  /* HasContiguityPolicy */ uint8_t has_contiguity_ : 2;
 
   // Tensor is a subclass that does not permit storage access.
   bool storage_access_should_throw_ : 1;
@@ -2294,7 +2326,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // or -std=gnu++2a
   inline void init_bitfields() {
     is_contiguous_ = true;
-    has_contiguity_ = static_cast<uint8_t>(CustomizableMethodPolicy::Default);
 
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;
@@ -2304,8 +2335,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_wrapped_number_ = false;
     allow_tensor_metadata_change_ = true;
     reserved_ = false;
-    sizes_customization_policy_ =
-        static_cast<uint8_t>(CustomizableMethodPolicy::Default);
+    sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::Default);
     storage_access_should_throw_ = false;
   }
 
@@ -2359,8 +2389,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ : 1;
 
-  // Customization policy for the sizes() virtual method.
-  /* CustomizableMethodPolicy */ uint8_t sizes_customization_policy_ : 2;
+  // Call _custom() virtual methods for
+  // strides()/is_contiguous()/sizes()/dim()/numel()
+  uint8_t sizes_strides_policy_ : 2;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
