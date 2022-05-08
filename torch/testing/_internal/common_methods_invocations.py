@@ -18199,6 +18199,10 @@ python_ref_db = [
         torch_opinfo_name="igammac",
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.isclose",
+        torch_opinfo_name="isclose",
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.le",
         torch_opinfo_name="le",
     ),
