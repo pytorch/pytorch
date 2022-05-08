@@ -4,22 +4,38 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/type_factory.h>
+#include <c10/util/flat_hash_map.h>
 
 #include <atomic>
 #include <unordered_map>
 
 namespace c10 {
 
-ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
+static ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
   static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;
   return tmap;
 }
 
-std::unordered_map<std::string, std::function<PyObject*(void*)>>&
-getClassConverter() {
-  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
-      classConverter;
-  return classConverter;
+c10::ClassTypePtr getCustomClassTypeImpl(const std::type_index &tindex) {
+  auto& tmap = c10::getCustomClassTypeMap();
+  auto res = tmap.find(tindex);
+  if (C10_UNLIKELY(res == tmap.end())) {
+    // type_index is not guaranteed to be unique across shared libraries on some platforms
+    // For example see https://github.com/llvm-mirror/libcxx/blob/78d6a7767ed57b50122a161b91f59f19c9bd0d19/include/typeinfo#L133
+    // Also, this is not the case if RTLD_LOCAL option is used, see
+    // https://github.com/pybind/pybind11/blob/f791dc8648e1f6ec33f402d679b6b116a76d4e1b/include/pybind11/detail/internals.h#L101-L106
+    // Take a slow path of iterating over all registered types and compare their names
+    auto class_name = std::string(tindex.name());
+    for(const auto &it: tmap) {
+      if (class_name == it.first.name()) {
+          // Do not modify existing type map here as this template is supposed to be called only once per type
+          // from getCustomClassTypeImpl()
+          return it.second;
+      }
+    }
+    TORCH_CHECK(false, "Can't find class id in custom class type map for ", tindex.name());
+  }
+  return res->second;
 }
 
 } // namespace c10
@@ -29,7 +45,7 @@ namespace torch {
 namespace detail {
 
 void record_custom_class(std::string name) {
-  RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::CUSTOM_CLASS, name, {});
+  RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::CUSTOM_CLASS, name, c10::ArrayRef<const c10::IValue>{});
 }
 
 } // namespace detail
