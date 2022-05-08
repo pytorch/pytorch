@@ -181,16 +181,6 @@ TensorImpl::TensorImpl(
   // Caffe2 operators create Storages with default devices.
 }
 
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-IntArrayRef TensorImpl::sizes() const {
-  return sizes_and_strides_.sizes_arrayref();
-}
-#endif
-
-IntArrayRef TensorImpl::strides() const {
-  return sizes_and_strides_.strides_arrayref();
-}
-
 void TensorImpl::HandleResize() {
   // If needed, we will free the data. the next mutable_data() call
   // will create the data storage.
@@ -349,22 +339,6 @@ void TensorImpl::release_resources() {
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-int64_t TensorImpl::dim() const {
-  return sizes_and_strides_.size();
-}
-#endif
-
-int64_t TensorImpl::size(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return sizes_and_strides_.size_at_unchecked(d);
-}
-
-int64_t TensorImpl::stride(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return sizes_and_strides_.stride_at_unchecked(d);
-}
-
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 bool TensorImpl::has_storage() const {
   return storage_;
 }
@@ -375,44 +349,32 @@ void TensorImpl::throw_storage_access_error() const {
       false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
-bool TensorImpl::is_contiguous_nondefault_policy_impl(
-    at::MemoryFormat memory_format) const {
-  if (has_contiguity_ ==
-      static_cast<uint8_t>(CustomizableMethodPolicy::ContiguityNotSupported)) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "Tensors of type ",
-        tensorimpl_type_name(),
-        " do not have is_contiguous");
-  } else {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        has_contiguity_ ==
-        static_cast<uint8_t>(CustomizableMethodPolicy::CustomBehavior));
-    return is_contiguous_custom(memory_format);
-  }
-}
-
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       false,
-      "TensorImpl::is_contiguous_custom should never be called; did you "
-      "set_has_contiguity_policy and forget to override is_contiguous_custom?");
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have is_contiguous");
 }
 
-IntArrayRef TensorImpl::sizes_nondefault_policy_impl() const {
-  if (sizes_customization_policy_ ==
-      static_cast<uint8_t>(CustomizableMethodPolicy::NotSupported)) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "Tensors of type ",
-        tensorimpl_type_name(),
-        " do not have sizes");
-  } else {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "custom behavior for sizes() is not supported; please add it or file "
-        "an issue.")
-  }
+IntArrayRef TensorImpl::sizes_custom() const {
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
+}
+IntArrayRef TensorImpl::strides_custom() const {
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have strides");
+}
+int64_t TensorImpl::dim_custom() const {
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
+}
+int64_t TensorImpl::numel_custom() const {
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -538,7 +500,6 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
       (dest_impl->key_set_ & c10::python_ks);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
-  dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =
       src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_3d_contiguous_ =
@@ -550,8 +511,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-  dest_impl->sizes_customization_policy_ =
-      src_impl->sizes_customization_policy_;
+  dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
   if (src_impl->named_tensor_meta_ != nullptr) {
