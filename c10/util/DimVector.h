@@ -1,9 +1,9 @@
 #pragma once
 
 #include <c10/util/SmallVector.h>
-#include <stdint.h>
+#include <cstdint>
 
-namespace at {
+namespace c10 {
 
 constexpr size_t kDimVectorStaticSize = 5;
 
