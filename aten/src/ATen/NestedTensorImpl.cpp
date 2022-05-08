@@ -58,7 +58,7 @@ NestedTensorImpl::NestedTensorImpl(
   key_set_ =
       key_set_ - c10::DispatchKeySet({c10::DispatchKey::ADInplaceOrView});
   refresh_dim();
-  set_sizes_customization_policy(CustomizableMethodPolicy::NotSupported);
+  set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
 }
 
 void NestedTensorImpl::refresh_dim() {

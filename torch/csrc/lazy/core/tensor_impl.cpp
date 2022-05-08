@@ -82,6 +82,7 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   // This is a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.
   is_non_overlapping_and_dense_ = false;
+  set_sizes_strides_policy(SizesStridesPolicy::CustomSizes);
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
@@ -126,18 +127,6 @@ void LTCTensorImpl::shallow_copy_from(
   generation_ = 0;
 }
 
-int64_t LTCTensorImpl::size(int64_t d) const {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return c10::TensorImpl::size(d);
-}
-
-int64_t LTCTensorImpl::stride(int64_t d) const {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return c10::TensorImpl::stride(d);
-}
-
 void LTCTensorImpl::setup_size_properties() {
   size_t generation = tensor_->generation();
   if (generation != generation_) {
@@ -159,31 +148,31 @@ void LTCTensorImpl::setup_size_properties() {
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 
-at::IntArrayRef LTCTensorImpl::sizes() const {
+at::IntArrayRef LTCTensorImpl::sizes_custom() const {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return c10::TensorImpl::sizes();
+  return sizes_default();
 }
 
-at::IntArrayRef LTCTensorImpl::strides() const {
+at::IntArrayRef LTCTensorImpl::strides_custom() const {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return c10::TensorImpl::strides();
+  return strides_default();
 }
 
-int64_t LTCTensorImpl::dim() const {
+int64_t LTCTensorImpl::dim_custom() const {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return c10::TensorImpl::dim();
+  return dim_default();
 }
 
-int64_t LTCTensorImpl::numel() const {
+int64_t LTCTensorImpl::numel_custom() const {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return c10::TensorImpl::numel();
+  return numel_default();
 }
 
-bool LTCTensorImpl::is_contiguous(c10::MemoryFormat _unused) const {
+bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
   if (tensor_->CurrentTensorData()) {
     return tensor_->CurrentTensorData()->is_contiguous();
   }

@@ -13,19 +13,6 @@ namespace native {
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
 
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  int64_t numel() const override {
-    TORCH_CHECK(
-        false, "numel is disabled. These methods are not virtual in fbcode.");
-  }
-#endif
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  bool is_contiguous(at::MemoryFormat memory_format) const override {
-    TORCH_CHECK(
-        false,
-        "is_contiguous is disabled. These methods are not virtual in fbcode.");
-  }
-#endif
   // TODO: don't expose private implementation details like this; in
   // particular, resizing this tensor will mess up our dim() and
   // callers cannot fix it.
@@ -42,22 +29,6 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
     }
     return opt_sizes_[d];
   }
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  IntArrayRef sizes() const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
-    return IntArrayRef();
-  }
-#endif
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  IntArrayRef strides() const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
-    return IntArrayRef();
-  }
-#endif
 
   const at::Tensor& get_buffer() const {
     return buffer_;
@@ -65,6 +36,8 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
 
  protected:
   const char* tensorimpl_type_name() const override;
+
+  // TODO: numel_custom and is_contiguous_custom can be profitably overridden
 
  private:
   // Must be called after any changes to our dim() to sync the state
