@@ -538,9 +538,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
    */
-  IntArrayRef sizes() const
-  {
-    if (C10_UNLIKELY(sizes_strides_policy_ >= static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+  IntArrayRef sizes() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
       return sizes_custom();
     }
     return sizes_default();
@@ -550,9 +551,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
    */
-  IntArrayRef strides() const
-  {
-    if (C10_UNLIKELY(sizes_strides_policy_ >= static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+  IntArrayRef strides() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
       return strides_custom();
     }
     return strides_default();
@@ -567,7 +569,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   int64_t size(int64_t d) const {
     d = maybe_wrap_dim(d, dim(), false);
-    if (C10_UNLIKELY(sizes_strides_policy_ >= static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
       return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
     }
     return sizes_and_strides_.size_at_unchecked(d);
@@ -582,7 +586,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   int64_t stride(int64_t d) const {
     d = maybe_wrap_dim(d, dim(), false);
-    if (C10_UNLIKELY(sizes_strides_policy_ >= static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
       return strides_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
     }
     return sizes_and_strides_.stride_at_unchecked(d);
@@ -592,9 +598,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return the number of dimensions of this tensor.  Note that 0-dimension
    * represents a Tensor that is a Scalar, e.g., one that has a single element.
    */
-  int64_t dim() const
-  {
-    if (C10_UNLIKELY(sizes_strides_policy_ >= static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+  int64_t dim() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
       return dim_custom();
     }
     return dim_default();
@@ -609,7 +616,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * of sizes of a tensor.
    */
   int64_t numel() const {
-    if (C10_UNLIKELY(sizes_strides_policy_ >= static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
       return numel_custom();
     }
     return numel_default();
@@ -624,7 +633,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   bool is_contiguous(
       at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
-    if (C10_UNLIKELY(sizes_strides_policy_ >= static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
       return is_contiguous_custom(memory_format);
     }
     return is_contiguous_default(memory_format);
@@ -674,7 +685,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
  public:
-
   /**
    * True if this tensor has storage. See storage() for details.
    */
@@ -2379,7 +2389,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ : 1;
 
-  // Call _custom() virtual methods for strides()/is_contiguous()/sizes()/dim()/numel()
+  // Call _custom() virtual methods for
+  // strides()/is_contiguous()/sizes()/dim()/numel()
   bool sizes_strides_policy_ : 2;
 
   // The set of DispatchKeys which describe this tensor.  NB: this

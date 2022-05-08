@@ -352,22 +352,30 @@ void TensorImpl::throw_storage_access_error() const {
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   TORCH_CHECK(
       false,
-      "Tensors of type ", tensorimpl_type_name(), " do not have is_contiguous");
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have is_contiguous");
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
-  TORCH_CHECK(false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
 }
 IntArrayRef TensorImpl::strides_custom() const {
-  TORCH_CHECK(false, "Tensors of type ", tensorimpl_type_name(), " do not have strides");
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have strides");
 }
 int64_t TensorImpl::dim_custom() const {
-  TORCH_CHECK(false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
 }
 int64_t TensorImpl::numel_custom() const {
-  TORCH_CHECK(false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
 }
-
 
 static void deletePlacementDeleteContext(void* ptr) {
   delete static_cast<PlacementDeleteContext*>(ptr);
@@ -503,8 +511,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-  dest_impl->sizes_strides_policy_ =
-      src_impl->sizes_strides_policy_;
+  dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
   if (src_impl->named_tensor_meta_ != nullptr) {
