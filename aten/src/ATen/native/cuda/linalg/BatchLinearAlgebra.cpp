@@ -58,11 +58,11 @@ struct MagmaInitializer {
 } initializer;
 }  // namespace (anonymous)
 
-#define AT_MAGMA_VERSION MAGMA_VERSION_MAJOR*100 + MAGMA_VERSION_MINOR*10 + MAGMA_VERSION_PATCH
+#define AT_MAGMA_VERSION MAGMA_VERSION_MAJOR*100 + MAGMA_VERSION_MINOR*10 + MAGMA_VERSION_MICRO
 
-// Check that MAGMA never releases MAGMA_VERSION_MINOR >= 10 or MAGMA_VERSION_PATCH >= 10
-#if MAGMA_VERSION_MINOR >= 10 || MAGMA_VERSION_PATCH >= 10
-#error "MAGMA release minor or patch version >= 10, please correct AT_MAGMA_VERSION"
+// Check that MAGMA never releases MAGMA_VERSION_MINOR >= 10 or MAGMA_VERSION_MICRO >= 10
+#if MAGMA_VERSION_MINOR >= 10 || MAGMA_VERSION_MICRO >= 10
+#error "MAGMA release minor or micro version >= 10, please correct AT_MAGMA_VERSION"
 #endif
 
 #else
