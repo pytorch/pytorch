@@ -2391,7 +2391,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Call _custom() virtual methods for
   // strides()/is_contiguous()/sizes()/dim()/numel()
-  bool sizes_strides_policy_ : 2;
+  uint8_t sizes_strides_policy_ : 2;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
