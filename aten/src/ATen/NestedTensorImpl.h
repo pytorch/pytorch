@@ -44,6 +44,9 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   IntArrayRef sizes_custom() const override;
   IntArrayRef strides_custom() const override;
 
+  // this one is real
+  int64_t dim_custom() const override;
+
  private:
   // Must be called after any changes to our dim() to sync the state
   // to TensorImpl.

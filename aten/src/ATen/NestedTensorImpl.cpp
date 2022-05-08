@@ -67,6 +67,9 @@ void NestedTensorImpl::refresh_dim() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dim() == my_dim);
 }
 
+int64_t NestedTensorImpl::dim_custom() const {
+  return dim_default();
+}
 int64_t NestedTensorImpl::numel_custom() const {
   TORCH_CHECK(false, "numel is disabled.");
 }
