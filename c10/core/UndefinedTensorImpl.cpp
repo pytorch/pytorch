@@ -7,6 +7,7 @@ namespace c10 {
 UndefinedTensorImpl::UndefinedTensorImpl()
     : TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), c10::nullopt) {
   set_storage_access_should_throw();
+  set_sizes_strides_policy(SizesStridesPolicy::CustomSizes);
 }
 
 #ifdef DEBUG
