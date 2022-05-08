@@ -18223,6 +18223,10 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.isclose",
         torch_opinfo_name="isclose",
+        skips=(
+            # Intentional xfail -- isclose does not type promote
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.le",
