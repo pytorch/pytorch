@@ -7,13 +7,13 @@
 
     { include: ["<ATen/core/Dict_inl.h>", private, "<ATen/core/Dict.h>", public] },
     { include: ["<ATen/core/ivalue_inl.h>", private, "<ATen/core/ivalue.h>", public] },
-    { include: ["<ATen/core/DimVector.h>", public, "<ATen/DimVector.h>", public] },
+    { include: ["<c10/util/DimVector.h>", public, "<ATen/DimVector.h>", public] },
     { include: ["<ATen/core/Dimname.h>", public, "<ATen/Dimname.h>", public] },
     { include: ["<ATen/core/symbol.h>", public, "<ATen/core/Dimname.h>", public] },
     { include: ["<ATen/TensorIterator.h>", public, "<ATen/core/TensorIterator.h>", public] },
 
     { include: ["<c10/core/WrapDimMinimal.h>", public, "<ATen/WrapDimUtils.h>", public] },
-    { include: ["<c10/util/SmallVector.h>", public, "<ATen/core/DimVector.h>", public] },
+    { include: ["<c10/util/SmallVector.h>", public, "<c10/util/DimVector.h>", public] },
 
     { include: ["<c10/util/MaybeOwned.h>", public, "<ATen/core/TensorBase.h>", public] },
     { include: ["<c10/core/TensorImpl.h>", public, "<ATen/core/TensorBase.h>", public] },
