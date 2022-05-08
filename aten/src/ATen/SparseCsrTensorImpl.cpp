@@ -149,7 +149,7 @@ void SparseCsrTensorImpl::set_member_tensors(
 }
 
 IntArrayRef SparseCsrTensorImpl::strides_custom() const {
-  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have stride");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have strides");
 }
 void SparseCsrTensorImpl::set_size(int64_t dim, int64_t new_size) {
   TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_size.");
