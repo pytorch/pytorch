@@ -491,7 +491,7 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       auto options = at::CPU(type).options();
-      if (use_storage_device_) {
+      if (use_storage_device_ && !device.is_meta()) {
         options = options.device(storage.device());
         device = storage.device();
       }
