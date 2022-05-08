@@ -160,7 +160,7 @@ TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
     """
     Checks that two tensor likes have the same shape,
-    dtype, and device.
+    dtype, and device, and that both are views or not.
 
     In the future this will validate additional metadata, like
     strides.
@@ -180,6 +180,16 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
     if a.device != b.device:
         msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
         raise AssertionError(msg)
+
+
+def compare_significant_strides(a: TensorLikeType, b: TensorLikeType):
+    assert a.ndim == b.ndim
+
+    for idx in range(a.ndim):
+        assert a.shape[idx] == b.shape[idx]
+        if a.shape[idx] == 0 or a.shape[idx] == 1:
+            continue
+        assert a.stride()[idx] == b.stride()[idx]
 
 
 #
@@ -207,25 +217,27 @@ def validate_shape(shape: Sequence):
         validate_dim_length(l)
 
 
-def validate_idx(shape: Sequence, idx: int):
+def validate_idx(rank: int, idx: int):
     """
-    Validates that idx is a valid idx for the given shape.
-    0 and -1 is a valid index for an empty shape
+    Validates that idx is a valid index for the given shape.
+    Assumes the index is already canonicalized.
     """
 
     assert isinstance(idx, int)
-    ndim = len(shape) if len(shape) else 1
-    assert idx >= 0 and idx < ndim
+    assert isinstance(rank, int)
+
+    assert idx >= 0 and idx < rank or idx == 0
 
 
-def validate_exclusive_idx(shape: Sequence, ex_idx: int):
+def validate_exclusive_idx(rank: int, ex_idx: int):
     """
     Validates that ex_idx is a valid exclusive index
     for the given shape.
     """
 
     assert isinstance(ex_idx, int)
-    assert ex_idx > 0 and ex_idx <= len(shape)
+    assert isinstance(rank, int)
+    assert ex_idx > 0 and ex_idx <= rank
 
 
 # "Wraps" a dim (up to one time) for the given rank, allowing
@@ -883,7 +895,7 @@ def compute_reduction_output_shape(
     shape: ShapeType, dimensions: Sequence
 ) -> Tuple[int, ...]:
     for idx in dimensions:
-        validate_idx(shape, idx)
+        validate_idx(len(shape), idx)
 
     new_shape = []
     for idx in range(len(shape)):

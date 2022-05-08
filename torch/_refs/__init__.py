@@ -4,6 +4,7 @@ import torch._prims as prims
 import torch._prims.utils as utils
 from torch._prims.utils import (
     DimsType,
+    ShapeType,
     TensorLike,
     TensorLikeType,
     DimsSequenceType,
@@ -133,10 +134,14 @@ __all__ = [
     # View & Shape Ops
     #
     "cat",
+    "flatten",
     "permute",
-    "transpose",
+    "reshape",
     "swap_axes",  # alias for transpose
+    "squeeze",
     "tensor_split",
+    "transpose",
+    "unsqueeze",
 ]
 
 Tensor = torch.Tensor
@@ -281,7 +286,8 @@ erf = _make_elementwise_unary_reference(
 )
 
 erfinv = _make_elementwise_unary_reference(
-    prims.erf_inv, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    prims.erf_inv,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.erfinv,  # prim/aten name mismatch
 )
 
@@ -302,7 +308,8 @@ floor = _make_elementwise_unary_reference(
 )
 
 isfinite = _make_elementwise_unary_reference(
-    prims.is_finite, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    prims.is_finite,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
 )
 
@@ -312,7 +319,8 @@ def _isnan(a: Tensor) -> Tensor:
 
 
 isnan = _make_elementwise_unary_reference(
-    _isnan, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    _isnan,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
 )
 
@@ -338,7 +346,8 @@ reciprocal = _make_elementwise_unary_reference(
 
 # TODO: round takes additional kwargs
 round = _make_elementwise_unary_reference(
-    prims.round, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    prims.round,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
 
@@ -359,7 +368,8 @@ sqrt = _make_elementwise_unary_reference(
 )
 
 square = _make_elementwise_unary_reference(
-    prims.square, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    prims.square,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
     aten_op=None,  # CompositeImplicitAutograd
 )
 
@@ -429,12 +439,14 @@ atan2 = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 bitwise_and = _make_elementwise_binary_reference(
-    prims.bitwise_and, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    prims.bitwise_and,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_left_shift = _make_elementwise_binary_reference(
-    prims.shift_left, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    prims.shift_left,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_left_shift,  # prim/aten name mismatch
 )
 
@@ -781,9 +793,43 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return prims.concatenate(tensors, _dim)
 
 
+# Note: flatten, unlike prim.collapse and prim.collapse_view has an inclusive end_dim
+def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorLikeType:
+    start_dim = utils.canonicalize_dim(a.ndim, start_dim)
+    end_dim = utils.canonicalize_dim(a.ndim, end_dim) + 1
+
+    # Tries to take a view
+    # TODO: we could look at directing collapse_view to skip its meta function here
+    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    if new_shape is not None:
+        return prims.collapse_view(a, start_dim, end_dim)
+
+    # Makes a copy if it can't make a view
+    result = prims.collapse(a, start_dim, end_dim)
+    return result
+
+
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
+
+
+# Note: although squeeze is documented as having the out= kwarg it doesn't
+def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
+    if dim is not None:
+        dim = utils.canonicalize_dim(a.ndim, dim)
+        # Short-circuits if the tensor has no dimensions
+        if len(a.shape) == 0:
+            assert dim == 0
+            return prims.view_of(a)
+
+        # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
+        if a.shape[dim] != 1:
+            return prims.view_of(a)
+        return prims.squeeze(a, (dim,))
+
+    dims = tuple(idx for idx in range(len(a.shape)) if a.shape[idx] == 1)
+    return prims.squeeze(a, dims)
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
@@ -873,6 +919,13 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _permutation[_dim0] = _dim1
     _permutation[_dim1] = _dim0
     return prims.transpose(a, _permutation)
+
+
+def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
+    # Note that unsqueeze canonicalizes with rank + 1 because it allows
+    # a new innermost dimension to be specified
+    dim = utils.canonicalize_dim(a.ndim + 1, dim)
+    return prims.expand_dims(a, (dim,))
 
 
 # Aliases for transpose
