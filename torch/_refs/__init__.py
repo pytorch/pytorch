@@ -525,8 +525,8 @@ igammac = _make_elementwise_binary_reference(
 def isclose(
     a: TensorLikeType,
     b: TensorLikeType,
-    rtol: NumberType = 1e-05,
-    atol: NumberType = 1e-08,
+    rtol: float = 1e-05,
+    atol: float = 1e-08,
     equal_nan: bool = False,
 ) -> TensorLikeType:
     if a.dtype != b.dtype:
@@ -537,7 +537,7 @@ def isclose(
     if rtol < 0:
         msg = "rtol must be greater than or equal to zero, but got {0}!".format(rtol)
     if atol < 0:
-        msg = "atol must be greater than or equal to zero, but got {1}!".format(atol)
+        msg = "atol must be greater than or equal to zero, but got {0}!".format(atol)
 
     close = eq(a, b)
     if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):
