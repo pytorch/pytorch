@@ -14605,6 +14605,13 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
+                   # TODO: add `torch.chalf` dtype support for angle.
+                   # Currently, we will get:
+                   # The supported dtypes for angle on device type cuda are incorrect!
+                   # The following dtypes did not work in backward but
+                   # are listed by the OpInfo: {torch.complex32}.
+                   backward_dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                   backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse_csr=True,
