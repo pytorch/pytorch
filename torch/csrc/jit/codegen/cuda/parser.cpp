@@ -1257,7 +1257,8 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+                MemoryFormat::Contiguous(),
+                value_map[node->inputs()[0]->unique()]);
             auto operand = list_val.front();
             list_val.pop_front();
 
@@ -1299,8 +1300,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
-                value_map[node->inputs()[0]->unique()]);
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
             auto operand = list_val.front();
             list_val.pop_front();
             auto& th = value_map[node->inputs()[1]->unique()];

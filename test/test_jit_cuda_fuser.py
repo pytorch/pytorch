@@ -2201,7 +2201,7 @@ class TestCudaFuser(JitTestCase):
 
         def t(x, y, w):
             tmp = torch.lerp(x, y, w)
-            tmp = torch.clamp(x, -1.0, 0.5)
+            tmp = torch.clamp(tmp, -1.0, 0.5)
             tmp = torch.nn.functional.softplus(tmp)
             return torch.threshold(tmp, -2.0, 0.5)
 
