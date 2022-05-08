@@ -3,6 +3,7 @@
 import tempfile
 import torch
 from copy import deepcopy
+from torch.library import Library
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, no_dispatch
@@ -11,6 +12,117 @@ from torch.utils._python_dispatch import enable_torch_dispatch_mode, push_torch_
 
 import logging
 from functools import partial
+
+class TestPythonRegistration(TestCase):
+    def test_override_aten_ops_with_multiple_libraries(self) -> None:
+        x = torch.tensor([1, 2])
+        my_lib1 = Library("aten", "IMPL")
+        my_lib2 = Library("aten", "IMPL")
+
+        # Example 1
+        def my_neg(*args, **kwargs):
+            return args[0]._neg_view()
+
+        # Now we are secretly making the operator a view op so autograd needs to know how
+        # to handle it
+        my_lib1.impl('neg', my_neg, "AutogradCPU")
+
+        self.assertTrue(torch.neg(x).is_neg())
+
+        # RuntimeError: impl("aten::neg", ...):
+        # Explicitly provided namespace (aten) in operator name does not match ...
+        with self.assertRaisesRegex(RuntimeError, "operator name does not match namespace"):
+            my_lib3 = Library("foo", "IMPL")
+            my_lib3.impl(torch.ops.aten.neg.default, my_neg, "AutogradCPU")
+            del my_lib3
+
+        # Example 2
+        def my_mul(*args, **kwargs):
+            return torch.zeros_like(args[0])
+
+        # torch.ops.aten.mul.Tensor
+        my_lib2.impl("aten::mul.Tensor", my_mul, "ZeroTensor")
+
+        y = torch._efficientzerotensor(2)
+        self.assertFalse(torch.mul(x, y)._is_zerotensor())
+
+        # Assert that a user can't override the behavior of a (ns, op, dispatch_key)
+        # combination if someone overrided the behavior for the same before them
+        with self.assertRaisesRegex(RuntimeError, 'already a kernel registered from python'):
+            my_lib2.impl(torch.ops.aten.mul.Tensor, my_mul, "ZeroTensor")
+
+        del my_lib1
+
+        # Validate that lib2 is not affected by removing lib1
+        self.assertFalse(torch.mul(x, y)._is_zerotensor())
+
+        del my_lib2
+
+        # Validate that the old behavior is restored for neg and mul
+        self.assertFalse(torch.neg(x).is_neg())
+        self.assertTrue(torch.mul(x, y)._is_zerotensor())
+
+    def test_override_cpu_sum(self) -> None:
+        # Example 1
+        run = [False]
+
+        def my_sum(*args, **kwargs):
+            run[0] = True
+            return args[0]
+
+        my_lib1 = Library("aten", "IMPL")
+        my_lib1.impl('aten::sum', my_sum, "CPU")
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.sum(x), x)
+        self.assertTrue(run[0])
+        del my_lib1
+        # Validate that the old behavior is restored for sum
+        self.assertEqual(torch.sum(x), torch.tensor(3))
+
+    def test_extend_library_with_dispatch_key_arg(self):
+        def my_sum(*args, **kwargs):
+            return args[0]
+        my_lib1 = Library("aten", "IMPL", dispatch_key="CPU")
+
+        # RuntimeError: Explicitly provided dispatch key (Conjugate) is
+        # inconsistent with the dispatch key of the enclosing TORCH_LIBRARY_IMPL block
+        with self.assertRaisesRegex(RuntimeError, "inconsistent with the dispatch key"):
+            my_lib1.impl('sum', my_sum, "Conjugate")
+        my_lib1.impl('aten::sum', my_sum)
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.sum(x), x)
+        del my_lib1
+
+    def test_create_new_library(self) -> None:
+        my_lib1 = Library("foo", "DEF")
+
+        # Example 1
+        def my_sum(*args, **kwargs):
+            return args[0]
+
+        my_lib1.define("sum(Tensor self) -> Tensor")
+        my_lib1.impl("sum", my_sum, "CPU")
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.ops.foo.sum(x), x)
+
+        my_lib2 = Library("foo", "IMPL")
+
+        # Example 2
+        def my_sum_zt(*args, **kwargs):
+            if args[0]._is_zerotensor():
+                return torch._efficientzerotensor(args[0].shape)
+            else:
+                return args[0]
+
+        my_lib2.impl(torch.ops.foo.sum.default, my_sum_zt, "ZeroTensor")
+
+        y = torch._efficientzerotensor(3)
+        self.assertTrue(torch.ops.foo.sum(y)._is_zerotensor())
+        self.assertEqual(torch.ops.foo.sum(x), x)
+
+        del my_lib2
+        del my_lib1
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -268,7 +380,7 @@ $0 = input('x')
 $1 = input('x.grad')
 $2 = torch._ops.aten.pow.Tensor_Scalar($0, 2)
 $3 = input('grad_output')
-$4 = torch._ops.aten.mul.Tensor($3, tensor(2))
+$4 = torch._ops.aten.mul.Tensor($3, 2)
 $5 = torch._ops.aten.mul.Tensor($4, $0)
 $6 = torch._ops.aten.add_.Tensor($1, $5)''')
 

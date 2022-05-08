@@ -11,6 +11,7 @@
 
 # This is duplicated in caffe2/CMakeLists.txt for now and not yet used in buck
 GENERATED_LAZY_TS_CPP = [
+    "lazy/generated/LazyIr.cpp",
     "lazy/generated/LazyNativeFunctions.cpp",
     "lazy/generated/RegisterAutogradLazy.cpp",
     "lazy/generated/RegisterLazy.cpp",
@@ -410,6 +411,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
     "torch/csrc/lazy/core/thread_pool.cpp",
+    "torch/csrc/lazy/core/trie.cpp",
 ]
 
 # We can't build all of the ts backend under certain build configurations, e.g. mobile,
@@ -424,6 +426,7 @@ lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/ops/expand.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
+    "torch/csrc/lazy/ts_backend/ops/to_copy.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/as_strided.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/as_strided_view_update.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/diagonal.cpp",
@@ -1061,7 +1064,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/detail/ORTHooksInterface.cpp",
     "aten/src/ATen/metal/Context.cpp",
     "aten/src/ATen/native/AutogradComposite.cpp",
-    "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
     "aten/src/ATen/native/DispatchStub.cpp",
     "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
@@ -1234,6 +1236,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/AveragePool2d.cpp",
     "aten/src/ATen/native/AveragePool3d.cpp",
     "aten/src/ATen/native/BatchLinearAlgebra.cpp",
+    "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
     "aten/src/ATen/native/Batching.cpp",
     "aten/src/ATen/native/BinaryOps.cpp",
     "aten/src/ATen/native/Blas.cpp",

@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 
+import itertools
 import functools
 from functools import partial
 import unittest
@@ -166,7 +167,8 @@ def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
 
 
 def op_assert_equal(test_case, op, orig, decomp, args, kwargs):
-    assert orig.dtype == decomp.dtype, f"Operation:  {op}"
+    test_case.assertEqual(
+        orig.dtype, decomp.dtype, f"Operation: {op}, orig.dtype: {orig.dtype}, decomp.dtype: {decomp.dtype}, {args}, {kwargs}")
     # Before adding an entry to this table, make sure your decomposition is right :)
     tol_table = {
         # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
@@ -283,9 +285,9 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float16, "nn.functional.batch_norm"),
     ("cuda", torch.bfloat16, "nn.functional.instance_norm"),
     ("cuda", torch.float16, "nn.functional.instance_norm"),
-    # complex is not handled
-    (None, torch.complex64, "var"),
-    (None, torch.complex128, "var"),
+    # doesn't work
+    ("cuda", torch.bfloat16, "nn.functional.embedding"),
+
 }
 
 all_decomposed = set()
@@ -314,6 +316,27 @@ def dump_ops():
 
 atexit.register(dump_ops)
 """
+
+
+def any_unsupported(args, kwargs):
+    def test_unsupported(t):
+        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
+            # These are all things that we haven't coded decompositions
+            # to handle correctly.  Maybe they should.
+            return any([
+                t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
+                t.is_nested, torch._is_functional_tensor(t),
+            ])
+        elif torch.overrides.is_tensor_like(t):
+            # Decompositions will generally change the behavior of Tensor-like
+            # subclasses, so bypass tests in this case too
+            return True
+        else:
+            return False
+
+    flat_args, _ = tree_flatten(args)
+    flat_kwargs, _ = tree_flatten(kwargs)
+    return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
 class TestDecomp(TestCase):
@@ -375,7 +398,7 @@ class TestDecomp(TestCase):
                 # (TODO: remove detach from the decomp table?)
                 if func not in decomposition_table or func in [
                     torch.ops.aten.detach.default
-                ]:
+                ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
 
                 decomposed.add(func)
@@ -478,13 +501,6 @@ class TestDecomp(TestCase):
                 self.skipTest(
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
-
-    def test_torchscriptable(self, device):
-        skip_list = [aten.rsub.Scalar]
-        for op, decomposition in decomposition_table.items():
-            if op in skip_list:
-                continue
-            f = torch.jit.script(decomposition)
 
 
 instantiate_device_type_tests(TestDecomp, globals())
