@@ -2,7 +2,6 @@ ATEN_CORE_HEADER_FILES = [
     # "aten/src/" prefix is added later
     "ATen/core/ATenGeneral.h",
     "ATen/core/blob.h",
-    "ATen/core/DimVector.h",
     "ATen/core/grad_mode.h",
     "ATen/core/UndefinedTensorImpl.h",
 ]

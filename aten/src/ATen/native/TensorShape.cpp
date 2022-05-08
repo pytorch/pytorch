@@ -4,7 +4,7 @@
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/DimVector.h>
+#include <ATen/DimVector.h>
 #include <ATen/core/ITensorListRef.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>

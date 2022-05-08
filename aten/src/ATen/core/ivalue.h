@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/DimVector.h>
+#include <ATen/DimVector.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
 #include <ATen/core/custom_class.h>
