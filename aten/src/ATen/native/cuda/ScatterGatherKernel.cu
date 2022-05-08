@@ -513,6 +513,7 @@ void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Ten
 
 void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                     const Tensor& src, const SCATTER_GATHER_OP& reduce) {
+  globalContext().alertNotDeterministic("scatter_reduce_cuda");
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
