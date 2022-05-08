@@ -363,14 +363,17 @@ auto approximate_type = get_gelutype_enum(approximate);
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
+  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for hardtanh");
   return at::clamp(self, min, max);
 }
 
 Tensor& hardtanh_out(const Tensor& self, const Scalar& min, const Scalar& max, Tensor& result) {
+  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for hardtanh");
   return at::clamp_out(result, self, min, max);
 }
 
 Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
+  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for hardtanh");
   return at::clamp_(self, min, max);
 }
 
@@ -425,10 +428,12 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
+  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min(self, 0);
 }
 
 Tensor & relu_(Tensor & self) {
+  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min_(self, 0);
 }
 
