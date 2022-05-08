@@ -5,7 +5,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/DimVector.h>
-#include <ATen/core/ITensorListRef.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
@@ -42,7 +42,6 @@ inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
 
 inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITensorListRef& inputs) {
   c10::optional<c10::MemoryFormat> format = c10::nullopt;
-  auto it = inputs.begin();
   for (const Tensor& t : inputs) {
     auto f = t.suggest_memory_format();
     if (f == c10::MemoryFormat::Contiguous) {
@@ -200,6 +199,11 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   // We just need to make sure we don't actually try to resize the (null) storage.
   at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt, /*resize_storage=*/!result.is_meta());
   return result;
+}
+
+Tensor& set_(Tensor& result, const Tensor& storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  TORCH_CHECK(storage.is_contiguous(), "passed in tensor to be used as storage must be contiguous");
+  return result.set_(storage.storage(), storage_offset + storage.storage_offset(), size, stride);
 }
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
@@ -836,6 +840,11 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   auto diag = result.diagonal(offset, dim1, dim2);
   diag.copy_(self);
   return result;
+}
+
+Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
+  auto size = expectIntArrayRef(packed_size);
+  return expand(self, size, implicit);
 }
 
 Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
