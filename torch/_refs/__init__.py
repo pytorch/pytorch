@@ -137,6 +137,7 @@ __all__ = [
     "flatten",
     "flip",
     "permute",
+    "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
     "tensor_split",
@@ -905,6 +906,12 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
+
+
+@out_wrapper
+def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
+    tensors = tuple(unsqueeze(a, dim) for a in tensors)
+    return cat(tensors, dim)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
