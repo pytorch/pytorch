@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/DimVector.h>
+#include <ATen/DimVector.h>
 #include <c10/core/TensorImpl.h>
 #include <caffe2/core/context_base.h>
 #include <caffe2/core/context_base.h>
