@@ -160,7 +160,7 @@ TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
     """
     Checks that two tensor likes have the same shape,
-    dtype, and device, and that both are views or not.
+    dtype and device.
 
     In the future this will validate additional metadata, like
     strides.

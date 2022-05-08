@@ -136,7 +136,6 @@ __all__ = [
     "cat",
     "flatten",
     "permute",
-    "reshape",
     "swap_axes",  # alias for transpose
     "squeeze",
     "tensor_split",
