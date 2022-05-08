@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import \
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 import torch._refs as refs  # noqa: F401
+import torch._refs.special
 
 from distutils.version import LooseVersion
 
@@ -18105,6 +18106,25 @@ python_ref_db = [
         "_refs.tan",
         torch_opinfo_name="tan",
     ),
+    #
+    # Elementwise Unary Special OpInfos
+    #
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.i0e",
+        torch_opinfo_name="special.i0e",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.i1e",
+        torch_opinfo_name="special.i1e",
+    ),
+    #
+    # Elementwise Binary OpInfos
+    #
     ElementwiseBinaryPythonRefInfo(
         "_refs.add",
         torch_opinfo_name="add",
