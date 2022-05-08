@@ -60,6 +60,11 @@ struct MagmaInitializer {
 
 #define AT_MAGMA_VERSION MAGMA_VERSION_MAJOR*100 + MAGMA_VERSION_MINOR*10 + MAGMA_VERSION_PATCH
 
+// Check that MAGMA never releases MAGMA_VERSION_MINOR >= 10 or MAGMA_VERSION_PATCH >= 10
+#if MAGMA_VERSION_MINOR >= 10 || MAGMA_VERSION_PATCH >= 10
+#error "MAGMA release minor or patch version >= 10, please correct AT_MAGMA_VERSION"
+#endif
+
 #else
 const bool use_magma_ = false;
 
