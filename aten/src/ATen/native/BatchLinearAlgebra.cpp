@@ -388,7 +388,7 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
   auto ndim = shape.size();
 
   // prefer column major strides
-  auto ld_strides = at::native::contiguous_strides(shape, /*column_major=*/true);
+  auto ld_strides = at::native::batched_matrix_contiguous_strides(shape, /*column_major=*/true);
   set_output(0, shape, ld_strides, self.options(), {}); // LD
 
   set_output(
@@ -435,7 +435,7 @@ TORCH_META_FUNC(linalg_ldl_solve)
     std::tie(B_broadcast_size, std::ignore) = at::native::_linalg_broadcast_batch_dims(B, LD);
 
   // prefer column major strides
-  auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/true);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/true);
   set_output(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
@@ -516,7 +516,7 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
 
   // This one checks that B can be broadcasted to the shape of A
   auto B_broadcast_size = std::get<0>(at::native::_linalg_broadcast_batch_dims(B, LU));
-  auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/left);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/left);
 
   set_output(0, B_broadcast_size, result_strides, B.options(), {});
 }
