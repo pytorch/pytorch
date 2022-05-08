@@ -1,10 +1,12 @@
 import lldb  # type: ignore[import]
+
 # load into lldb instance with:
 #   command script import tools/lldb/deploy_debugger.py
 
 target = lldb.debugger.GetSelectedTarget()
 bp = target.BreakpointCreateByRegex("__deploy_register_code")
-bp.SetScriptCallbackBody("""\
+bp.SetScriptCallbackBody(
+    """\
 process = frame.thread.GetProcess()
 target = process.target
 symbol_addr = frame.module.FindSymbol("__deploy_module_info").GetStartAddress()
@@ -31,4 +33,5 @@ with NamedTemporaryFile(prefix=stem, suffix='.so', delete=False) as tf:
     lldb.debugger.HandleCommand(cmd2)
 
 return False
-""")
+"""
+)
