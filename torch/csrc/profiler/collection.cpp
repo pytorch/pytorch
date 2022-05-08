@@ -11,7 +11,7 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
-void InputOutputEncoder::push(const std::vector<c10::IValue>& values) {
+void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
   for (const auto& value : values) {
     if (value.isTensor()) {
       push(value.toTensor());
@@ -129,6 +129,10 @@ thread_local SubQueueThreadCache sub_queue_cache_{0, nullptr};
 
 std::string Result::name() const {
   return c10::visit([](auto& e){ return e.name_; }, event_);
+}
+
+uint8_t Result::record_function_scope() const {
+  return c10::visit([](auto& e){ return e.record_function_scope_; }, event_);
 }
 
 uint64_t Result::correlation_id() const {
