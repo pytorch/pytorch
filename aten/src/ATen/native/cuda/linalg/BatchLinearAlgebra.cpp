@@ -58,6 +58,8 @@ struct MagmaInitializer {
 } initializer;
 }  // namespace (anonymous)
 
+#define AT_MAGMA_VERSION MAGMA_VERSION_MAJOR*100 + MAGMA_VERSION_MINOR*10 + MAGMA_VERSION_PATCH
+
 #else
 const bool use_magma_ = false;
 
@@ -291,8 +293,7 @@ void magmaSolveBatched<c10::complex<float>>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-#if MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 && \
-    MAGMA_VERSION_MICRO >= 4
+#if AT_MAGMA_VERSION >= 254
 
 template <>
 void magmaLdlHermitian<double>(
@@ -348,8 +349,7 @@ void magmaLdlHermitian<c10::complex<float>>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-#endif // MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 &&
-       // MAGMA_VERSION_MICRO >= 4
+#endif // AT_MAGMA_VERSION >= 254
 
 template<>
 void magmaLu<double>(
@@ -1439,7 +1439,7 @@ void ldl_factor_kernel(
     // If cusolver and magma 2.5.4+ are both available and hermitian=true,
     // call magma for complex inputs
 #ifdef USE_CUSOLVER
-#if AT_MAGMA_ENABLED() && (MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 && MAGMA_VERSION_MICRO >= 4)
+#if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 254)
       if (LD.is_complex() && hermitian) {
         return ldl_factor_magma(
             LD, pivots, info, upper, hermitian);
