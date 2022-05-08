@@ -38,6 +38,11 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   const char* tensorimpl_type_name() const override;
 
   // TODO: numel_custom and is_contiguous_custom can be profitably overridden
+  // with real implementations
+  int64_t numel_custom() const override;
+  bool is_contiguous_custom(MemoryFormat) const override;
+  IntArrayRef sizes_custom() const override;
+  IntArrayRef strides_custom() const override;
 
  private:
   // Must be called after any changes to our dim() to sync the state

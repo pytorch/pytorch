@@ -67,6 +67,20 @@ void NestedTensorImpl::refresh_dim() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dim() == my_dim);
 }
 
+int64_t NestedTensorImpl::numel_custom() const {
+  TORCH_CHECK(false, "numel is disabled.");
+}
+bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
+  TORCH_CHECK(false, "is_contiguous is disabled.");
+}
+IntArrayRef NestedTensorImpl::sizes_custom() const {
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+}
+
+IntArrayRef NestedTensorImpl::strides_custom() const {
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
+}
+
 const char* NestedTensorImpl::tensorimpl_type_name() const {
   return "NestedTensorImpl";
 }
