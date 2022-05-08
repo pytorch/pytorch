@@ -264,7 +264,7 @@ EXAMPLES = [
             'scale_tril': torch.tensor([[[2.0, 0.0], [-0.5, 0.25]],
                                         [[2.0, 0.0], [0.3, 0.25]],
                                         [[5.0, 0.0], [-0.5, 1.5]]], requires_grad=True),
-            'df': torch.tensor([7., 6.7, 6.3], requires_grad=True),
+            'df': torch.tensor([9.5, 7.5, 6], requires_grad=True),
         },
         {
             'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
