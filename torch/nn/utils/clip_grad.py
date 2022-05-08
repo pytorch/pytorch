@@ -25,7 +25,7 @@ def clip_grad_norm_(
             ``inf``, or ``-inf``. Default: False (will switch to True in the future)
 
     Returns:
-        Total norm of the parameters (viewed as a single vector).
+        Total norm of the parameter gradients (viewed as a single vector).
     """
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
