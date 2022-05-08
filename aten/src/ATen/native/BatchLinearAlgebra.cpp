@@ -388,13 +388,13 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
   auto ndim = shape.size();
 
   // prefer column major strides
-  auto ld_strides = at::native::contiguous_strides(shape, /*column_major=*/true);
-  set_output(0, shape, ld_strides, self.options(), {}); // LD
+  auto ld_strides = at::native::batched_matrix_contiguous_strides(shape, /*column_major=*/true);
+  set_output_raw_strided(0, shape, ld_strides, self.options(), {}); // LD
 
-  set_output(
+  set_output_raw_strided(
       1, shape.slice(0, ndim - 1), {}, self.options().dtype(ScalarType::Int), {}); // pivots
 
-  set_output(
+  set_output_raw_strided(
       2, shape.slice(0, ndim - 2), {}, self.options().dtype(ScalarType::Int), {}); // info
 }
 
@@ -435,8 +435,8 @@ TORCH_META_FUNC(linalg_ldl_solve)
     std::tie(B_broadcast_size, std::ignore) = at::native::_linalg_broadcast_batch_dims(B, LD);
 
   // prefer column major strides
-  auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/true);
-  set_output(0, B_broadcast_size, result_strides, B.options(), {});
+  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/true);
+  set_output_raw_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
 TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
@@ -516,9 +516,9 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
 
   // This one checks that B can be broadcasted to the shape of A
   auto B_broadcast_size = std::get<0>(at::native::_linalg_broadcast_batch_dims(B, LU));
-  auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/left);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/left);
 
-  set_output(0, B_broadcast_size, result_strides, B.options(), {});
+  set_output_raw_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
 
@@ -574,23 +574,23 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (unpack_pivots) {
-    set_output(0, sizes, LU.options());
+    set_output_raw_strided(0, sizes, {}, LU.options(), {});
   } else {
-    set_output(0, {0}, LU.options());
+    set_output_raw_strided(0, {0}, {}, LU.options(), {});
   }
 
   if (unpack_data) {
     // L.shape[-2:] == (m, k)
     sizes.end()[-1] = k;
-    set_output(1, sizes, LU.options());
+    set_output_raw_strided(1, sizes, {}, LU.options(), {});
 
     // U.shape[-2:] == (k, n)
     sizes.end()[-2] = k;
     sizes.end()[-1] = n;
-    set_output(2, sizes, LU.options());
+    set_output_raw_strided(2, sizes, {}, LU.options(), {});
   } else {
-    set_output(1, {0}, LU.options());
-    set_output(2, {0}, LU.options());
+    set_output_raw_strided(1, {0}, {}, LU.options(), {});
+    set_output_raw_strided(2, {0}, {}, LU.options(), {});
   }
 }
 
@@ -605,19 +605,19 @@ TORCH_META_FUNC(linalg_lu)(const Tensor& A, bool pivot) {
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (pivot) {
-    set_output(0, sizes, A.options());
+    set_output_raw_strided(0, sizes, {}, A.options(), {});
   } else {
-    set_output(0, {0}, A.options());
+    set_output_raw_strided(0, {0}, {}, A.options(), {});
   }
 
   // L.shape[-2:] == (m, k)
   sizes.end()[-1] = k;
-  set_output(1, sizes, A.options());
+  set_output_raw_strided(1, sizes, {}, A.options(), {});
 
   // U.shape[-2:] == (k, n)
   sizes.end()[-2] = k;
   sizes.end()[-1] = n;
-  set_output(2, sizes, A.options());
+  set_output_raw_strided(2, sizes, {}, A.options(), {});
 }
 
 } // namespace meta
