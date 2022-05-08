@@ -563,6 +563,7 @@ def gen_inplace_or_view_type_env(
 def gen_inplace_or_view_type(
     out: str,
     native_yaml_path: str,
+    tags_yaml_path: str,
     fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
