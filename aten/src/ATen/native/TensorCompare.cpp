@@ -36,7 +36,8 @@ const OptionalScalarRef max) {
   //Floating is the highest supported
   if (!isFloatingType(result_type)) {
     at::native::ResultTypeState state = {};
-    at::native::update_result_type_state(self, state);
+    state = at::native::update_result_type_state(self, state);
+
     if (min) {
       state = at::native::update_result_type_state(min.get(), state);
     }
