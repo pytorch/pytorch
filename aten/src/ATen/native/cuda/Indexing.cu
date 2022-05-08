@@ -694,6 +694,8 @@ void index_reduce_func_cuda_impl(
   const SCATTER_GATHER_OP& reduce,
   const func_t& reduce_func,
   const Tensor& result) {
+  globalContext().alertNotDeterministic("index_reduce_cuda");
+
   if (!result.is_same(self)) result.copy_(self);
 
   // Scalars are treated as 1-d tensor
@@ -703,10 +705,6 @@ void index_reduce_func_cuda_impl(
   TORCH_CHECK(result.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
   TORCH_CHECK(source.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims" );
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
-
-  TORCH_CHECK(
-    !globalContext().deterministicAlgorithms(),
-    "index_reduce() does not have a deterministic path. Please file a feature request if you need this.");
 
   if (!include_self) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
