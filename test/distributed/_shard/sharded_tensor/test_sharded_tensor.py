@@ -10,19 +10,19 @@ import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import distributed_c10d
-from torch.distributed._shard import (
+from torch.distributed._shard import sharded_tensor
+from torch.distributed._shard.api import (
     shard_parameter,
-    sharded_tensor,
     _shard_tensor,
     load_with_process_group,
+    _collect_local_shard,
+    _reshard_output,
 )
 from torch.distributed._shard.sharded_tensor import (
     sharded_op_impl,
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
-    _collect_local_shard,
-    _reshard_output,
 )
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
@@ -53,31 +53,12 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 from torch.distributed.remote_device import _remote_device
 from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
     _chunk_sharding_specs_list_for_test,
+    MyShardedModel1,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
     sys.exit(0)
-
-class MyShardedModel2(torch.nn.Module):
-    def __init__(self, spec=None, group=None):
-        super(MyShardedModel2, self).__init__()
-        if spec is not None:
-            self.sharded_tensor2 = sharded_tensor.empty(spec, 10, 20, process_group=group, init_rrefs=True)
-        else:
-            self.sharded_tensor2 = None
-        self.random_tensor2 = torch.nn.Parameter(torch.rand(2, 2))
-
-
-class MyShardedModel1(torch.nn.Module):
-    def __init__(self, spec=None, group=None):
-        super(MyShardedModel1, self).__init__()
-        if spec is not None:
-            self.sharded_tensor1 = sharded_tensor.empty(spec, 10, 20, process_group=group, init_rrefs=True)
-        else:
-            self.sharded_tensor1 = None
-        self.random_tensor1 = torch.nn.Parameter(torch.rand(2, 2))
-        self.submodule = MyShardedModel2(spec, group)
 
 class TestShardedTensorMetadata(TestCase):
     def test_serialize_and_deserialize(self):
