@@ -7,7 +7,13 @@ namespace c10 {
 UndefinedTensorImpl::UndefinedTensorImpl()
     : TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), c10::nullopt) {
   set_storage_access_should_throw();
-  set_sizes_strides_policy(SizesStridesPolicy::CustomSizes);
+  // TODO: accessing the sizes on an undefined tensor is not meaningful
+  // and should error too, but empirically it does not!
+  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+}
+
+bool UndefinedTensorImpl::is_contiguous_custom(MemoryFormat format) const {
+  return is_contiguous_default(format);
 }
 
 #ifdef DEBUG
