@@ -97,7 +97,6 @@ __all__ = [
     "broadcast_in_dim",
     "collapse_view",
     "expand_dims",
-    "reshape_view",
     "slice",
     "slice_in_dim",  # implemented using slice -- make this a ref?
     "split_dim",
@@ -854,7 +853,7 @@ broadcast_in_dim = _make_prim(
 
 def _collapse_view_helper(
     a: TensorLikeType, start: int, end: int
-) -> Tuple[ShapeType, StrideType]:
+) -> Tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
     # Special-case for zero dimensional tensors
@@ -862,7 +861,7 @@ def _collapse_view_helper(
         shape = (1,)
         strides = (1,)
     else:
-        shape = a.shape
+        shape = a.shape  # type: ignore[assignment]
         strides = a.stride()
 
     utils.validate_idx(len(shape), start)
@@ -906,7 +905,7 @@ def _collapse_view_aten(a: Tensor, start: int, end: int) -> Tensor:
     if a.ndim == 0:
         shape = (1,)
     else:
-        shape = a.shape
+        shape = a.shape  # type: ignore[assignment]
 
     dim_length = 1
     for idx in range(start, end):
@@ -943,12 +942,12 @@ collapse_view = _make_prim(
 )
 
 
-def expand_dims(a: TensorLikeType, dimensions: DimsType) -> TensorLikeType:
+def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeType:
     """
     Creates a view of a with a.ndim + len(dimensions) dimensions, with new
     dimensions of length one at the dimensions specified by dimensions.
     """
-    dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))
+    dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))  # type: ignore[arg-type]
     if len(set(dims)) != len(dims):
         msg = "Received duplicate dimensions to expand in {0}".format(str(dimensions))
         raise ValueError(msg)
@@ -962,28 +961,6 @@ def expand_dims(a: TensorLikeType, dimensions: DimsType) -> TensorLikeType:
     ]
     return broadcast_in_dim(a, new_shape, broadcast_dimensions)
 
-
-def _reshape_view_meta():
-    pass
-
-
-def _reshape_view_aten(a: Tensor, shape: ShapeType):
-    result = a.reshape(shape)
-
-    assert result._is_view()
-    return result
-
-
-_reshape_view_doc = """
-"""
-
-reshape_view = _make_prim(
-    name="reshape_view",
-    meta=_reshape_view_meta,
-    impl_aten=_reshape_view_aten,
-    return_type=RETURN_TYPE.VIEW,
-    doc=_reshape_view_doc,
-)
 
 # Note: saves the Python slice object because we're about to clobber its name with the slice prim
 pyslice = slice
