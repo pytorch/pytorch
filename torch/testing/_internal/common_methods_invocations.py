@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import \
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 import torch._refs as refs  # noqa: F401
+import torch._refs.nn.functional
 import torch._refs.special
 
 from distutils.version import LooseVersion
@@ -18143,6 +18144,20 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
+    ),
+    #
+    # Elementwise Unary nn.functional OpInfos
+    #
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.elu",
+        torch_opinfo_name="nn.functional.elu",
+        decorators=(
+            # https://github.com/pytorch/pytorch/issues/77054
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency'),
+        ),
     ),
     #
     # Elementwise Binary OpInfos
