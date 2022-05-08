@@ -9,7 +9,7 @@
 #include <sstream>
 #include <type_traits>
 // For quantize_val
-#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <ATen/quantized/Quantizer.h>

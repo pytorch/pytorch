@@ -14,7 +14,7 @@ This file contains some of the auxiliary functions used by both Conv.cpp & Linea
 
 #include <ATen/cudnn/Types.h>
 #include <ATen/Tensor.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/ArrayRef.h>
 #include <cudnn_frontend.h>

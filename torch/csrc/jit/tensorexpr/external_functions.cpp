@@ -8,7 +8,7 @@
 #include <ATen/native/quantized/cpu/qadd.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <aten/src/ATen/Parallel.h>
