@@ -5434,6 +5434,38 @@ class TestNN(NNTestCase):
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1,)))
 
+    def test_nested_tensor_from_mask(self):
+        B = 3
+        L = 7
+        D = 4
+        mask_size = [4, 7, 1]
+        i1 = torch.randn(4, D)
+        i2 = torch.randn(7, D)
+        i3 = torch.randn(1, D)
+
+        input = []
+        for i in [i1, i2, i3]:
+            masked = torch.zeros((L - i.size(0), D))
+            masked = torch.cat((i, masked))
+            input.append(masked.reshape(1, L, D))
+        input = torch.cat(input)
+
+        masks = []
+        for i in range(B):
+            m = []
+            for j in range(L):
+                if j < mask_size[i]:
+                    m.append(False)
+                else:
+                    m.append(True)
+            masks.append(torch.tensor(m).reshape(1, L))
+        mask = torch.cat(masks)
+
+        nt = torch._nested_tensor_from_mask(input, mask)
+        input_convert = nt.to_padded_tensor(0.)
+
+        self.assertEqual(input, input_convert)
+
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     @parametrize_test("average_attn_weights", [True, False])
     def test_multihead_attention(self, average_attn_weights):

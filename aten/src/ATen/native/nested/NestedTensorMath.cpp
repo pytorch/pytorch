@@ -164,6 +164,32 @@ Tensor NestedTensor_gelu(const Tensor& self, c10::string_view approximate) {
       });
 }
 
+Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask, double min_padding_rate) {
+    TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Mask tensor should be Bool");
+    TORCH_CHECK(mask.dim() == 2, "Padding mask should be 2D");
+    TORCH_CHECK(t.dim() == 3, "Input should be a 3D tensor, N * L * D");
+    // One assumption is mask is always padded at the end , never in the middle
+    auto N = t.size(0), L = t.size(1), D = t.size(2);
+    auto NN = mask.size(0), LL = mask.size(1);
+    TORCH_CHECK(N == NN && L == LL, "Mask size should match input size");
+    // N * L
+    Tensor sizes = mask;
+    sizes.logical_not_();
+    auto real_padding_rate = 1 - (sizes.sum().item().toDouble() / sizes.numel());
+    if (real_padding_rate < min_padding_rate) {
+        return t;
+    }
+    // N, ([size1, size2, ... sizeN])
+    sizes = sizes.cumsum(1).select(1, L - 1).reshape({N, 1});
+    // N, ([d1=D, d2=D, ... dN=D])
+    Tensor d = at::full_like(sizes, D);
+
+    // N * 2, ([[size1, D], [size2, D], ..., [sizeN, D]])
+    sizes = at::cat({sizes, d}, 1);
+
+    return at::_nested_from_padded(t, sizes, false);
+}
+
 Tensor nested_tensor(
     TensorList list,
     c10::optional<ScalarType> dtype,
