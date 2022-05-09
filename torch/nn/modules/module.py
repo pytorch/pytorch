@@ -257,18 +257,18 @@ class Module:
         """
         torch._C._log_api_usage_once("python.nn_module")
 
-        self.training = True
-        self._parameters: Dict[str, Optional[Parameter]] = OrderedDict()
-        self._buffers: Dict[str, Optional[Tensor]] = OrderedDict()
-        self._non_persistent_buffers_set: Set[str] = set()
-        self._backward_hooks: Dict[int, Callable] = OrderedDict()
-        self._is_full_backward_hook = None
-        self._forward_hooks: Dict[int, Callable] = OrderedDict()
-        self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
-        self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
-        self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
-        self._load_state_dict_post_hooks: Dict[int, Callable] = OrderedDict()
-        self._modules: Dict[str, Optional['Module']] = OrderedDict()
+        object.__setattr__(self, 'training', True)
+        object.__setattr__(self, '_parameters', OrderedDict())
+        object.__setattr__(self, '_buffers', OrderedDict())
+        object.__setattr__(self, '_non_persistent_buffers_set', set())
+        object.__setattr__(self, '_backward_hooks', OrderedDict())
+        object.__setattr__(self, '_is_full_backward_hook', None)
+        object.__setattr__(self, '_forward_hooks', OrderedDict())
+        object.__setattr__(self, '_forward_pre_hooks', OrderedDict())
+        object.__setattr__(self, '_state_dict_hooks', OrderedDict())
+        object.__setattr__(self, '_load_state_dict_pre_hooks', OrderedDict())
+        object.__setattr__(self, '_load_state_dict_post_hooks', OrderedDict())
+        object.__setattr__(self, '_modules', OrderedDict())
 
     forward: Callable[..., Any] = _forward_unimplemented
 
