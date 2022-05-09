@@ -179,7 +179,7 @@ class TestCudaFuser(JitTestCase):
         # restoring skip node to the configuration before tests
         for op in self.skip_node_list:
             disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-            if !disabled_flag:
+            if not disabled_flag:
                 torch._C._jit_set_nvfuser_skip_node_kind(op, True)
 
         if(RUN_NVFUSER):
