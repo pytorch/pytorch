@@ -693,8 +693,29 @@ inline py::object toPyObject(IValue ivalue) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
-    guardAgainstNamedTensor<at::Tensor>(tensor);
-    return py::cast(autograd::Variable(std::move(tensor)));
+    if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu());
+      auto scalar_type = tensor.scalar_type();
+      switch (scalar_type) {
+        case at::ScalarType::Bool:
+          return py::cast(*tensor.data_ptr<bool>());
+        case at::ScalarType::Long:
+          return py::cast(*tensor.data_ptr<int64_t>());
+        case at::ScalarType::Double:
+          return py::cast(*tensor.data_ptr<double>());
+        case at::ScalarType::ComplexDouble:
+          return py::cast(*tensor.data_ptr<c10::complex<double>>());
+        default:
+          TORCH_CHECK(
+              false,
+              "Missing cases in 'toPyObject' wrapped number handling! Can't convert ",
+              scalar_type,
+              " to a Python object");
+      }
+    } else {
+      guardAgainstNamedTensor<at::Tensor>(tensor);
+      return py::cast(autograd::Variable(std::move(tensor)));
+    }
   } else if (ivalue.isStorage()) {
     return py::cast(ivalue.toStorage());
   } else if (ivalue.isDouble()) {
