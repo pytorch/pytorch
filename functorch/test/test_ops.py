@@ -391,6 +391,11 @@ class TestOperators(TestCase):
         xfail('tensor_split'),
 
         skip('bernoulli'),  # cuda set seed randomness issues
+
+        # BUG: runs and produces numerical differences
+        skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
+        xfail('nn.functional.max_unpool2d', device_type='cpu'),
+        xfail('nn.functional.max_unpool3d'),
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
@@ -478,13 +483,11 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
-        skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.max_unpool1d'),  # Flaky
         skip('nn.functional.max_unpool2d'),  # Flaky
-        xfail('nn.functional.fractional_max_pool3d'),
+        skip('nn.functional.fractional_max_pool2d'), # randomness
+        skip('nn.functional.fractional_max_pool3d'), # randomness
         xfail('nn.functional.binary_cross_entropy'),  # testing problem
-        xfail('nn.functional.max_unpool1d', '', device_type='cpu'),
-        xfail('nn.functional.max_unpool2d', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -599,8 +602,6 @@ class TestOperators(TestCase):
         xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('linalg.slogdet'),  # calls .item()
         xfail('logdet'),  # calls .item()
-        xfail('lu_solve'),  # requires .contiguous() call somewhere rather than fallback
-        xfail('lu_unpack'),  # would benefit from narrow_scatter
         xfail('matrix_exp'),  # would benefit from narrow_scatter
         xfail('nanquantile'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
@@ -616,6 +617,12 @@ class TestOperators(TestCase):
         xfail('double'),
         xfail('float'),
         xfail('half'),
+
+        xfail('scatter_reduce', 'prod'),  # item call
+
+        # NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
+        xfail('nn.functional.max_unpool2d'),
+        xfail('nn.functional.max_unpool2d', 'grad'),
     })
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -699,6 +706,11 @@ class TestOperators(TestCase):
         xfail('stft'),  # something weird is happening with shapes
 
         xfail('double'),  # required rank 4 tensor to use channels_last format
+
+        # BUG: runs and produces numerical differences
+        xfail('nn.functional.max_unpool1d', device_type='cpu'),
+        xfail('nn.functional.max_unpool2d'),
+        xfail('nn.functional.max_unpool3d'),
     })
     def test_vmapjvp(self, device, dtype, op):
         if is_inplace(op, op.get_op()):
@@ -770,6 +782,11 @@ class TestOperators(TestCase):
         xfail('stft'),  # transpose_ fallback
 
         xfail('double'),  # required rank 4 tensor to use channels_last format
+
+        skip('nn.functional.max_unpool1d'),  # Flaky, seems to sometimes his max_unpool2d
+        # BUG: runs and produces numerical differences
+        xfail('nn.functional.max_unpool2d'),
+        xfail('nn.functional.max_unpool3d'),
     }
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
@@ -855,6 +872,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
         xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('nn.functional.max_unpool1d', 'grad'),
+        xfail('lu_unpack')
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1025,8 +1043,6 @@ class TestOperators(TestCase):
         xfail('clamp', ''),
         xfail('fill_'),
         xfail('index_put', ''),
-        xfail('lu_solve'),
-        xfail('lu_unpack'),
         xfail('matrix_exp'),
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
@@ -1115,9 +1131,6 @@ class TestOperators(TestCase):
         xfail('linalg.slogdet', ''),
         xfail('logcumsumexp', ''),
         xfail('logdet', ''),
-        xfail('lu', ''),
-        xfail('lu_solve', ''),
-        xfail('lu_unpack', ''),
         xfail('nanmean', ''),
         xfail('nansum', ''),
         xfail('nn.functional.batch_norm', ''),
@@ -1148,31 +1161,23 @@ class TestOperators(TestCase):
         xfail('symeig', ''),
         xfail('take', ''),
         xfail('var_mean', ''),
-        xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.kl_div', ''),
         xfail('pca_lowrank', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('svd_lowrank', ''),
-        xfail('linalg.lu_factor_ex', ''),
-        xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.multilabel_margin_loss', ''),
         xfail('nn.functional.multilabel_soft_margin_loss', ''),
         xfail('scatter_reduce', 'amax'),
         xfail('scatter_reduce', 'amin'),
-        xfail('nn.functional.max_unpool1d', 'grad'),
-        xfail('nn.functional.max_unpool1d', ''),
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
         xfail('nn.functional.multi_margin_loss', ''),
-        xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.smooth_l1_loss', ''),
-        xfail('nn.functional.max_unpool2d', ''),
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'prod'),
-        xfail('nn.functional.max_unpool3d', ''),
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
     }))
     def test_jvpvjp(self, device, dtype, op):
