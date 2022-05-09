@@ -43,11 +43,11 @@ inline void _vec_log_softmax_lastdim(
       outer_size,
       grain_size,
       [&](int64_t begin, int64_t end) {
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+        scalar_t tmp_sum_scalar[CHUNK_SIZE];
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+        scalar_t max_input_arr[CHUNK_SIZE];
         for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
-          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-          scalar_t tmp_sum_scalar[CHUNK_SIZE];
-          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-          scalar_t max_input_arr[CHUNK_SIZE];
           int64_t loop_end = CHUNK_SIZE;
           if (ii + CHUNK_SIZE > end)
             loop_end = end - ii;
