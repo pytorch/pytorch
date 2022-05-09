@@ -4248,14 +4248,15 @@ Example::
 add_docstr_all('to_sparse_bsr',
                r"""
 to_sparse_bsr(blocksize) -> Tensor
-Convert a tensor to a block based compressed row storage format.
+Convert a CSR tensor to a block sparse row (BSR) storage format of given blocksize.
 
 Example::
 
-    >>> dense = torch.randn(5, 5)
+    >>> dense = torch.randn(10, 10)
     >>> sparse = dense.to_sparse_csr()
-    >>> sparse._nnz()
-    25
+    >>> sparse_bsr = sparse.to_sparse_bsr((5, 5))
+    >>> sparse_bsr.col_indices()
+    tensor([0, 1, 0, 1])
 
 """)
 
