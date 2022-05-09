@@ -92,7 +92,6 @@ bool isUnsupportedOp(Node* node) {
 bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
   // check for sub-blocks
   bool can_support = true;
-  bool has_blocks = false;
   for (auto* node : graph->block()->nodes()) {
     const auto kind = node->kind();
     if (kind == prim::Constant) {
@@ -141,6 +140,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
+  EliminateNoOpSlice(graph);
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
@@ -165,6 +165,7 @@ void OptimizeGraph(
       ReplaceWithMaybeCopy(graph);
     }
     FuseListUnpack(graph);
+    RemoveUnnecessaryOutputs(graph);
 #endif
   }
 
@@ -176,6 +177,7 @@ void OptimizeGraph(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   AddIfThenElseOp(graph);
   UseSplitAndSqueeze(graph);
+  QuantizedLinearReluFusion(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -216,6 +218,11 @@ bool mayContainAlias(
     const FastSet<const Value*>& b) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
+}
+
+bool escapesScope(const AliasDb& db, const Value* a) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.escapesScope({const_cast<Value*>(a)});
 }
 
 void PrepareGraphForStaticModule(
@@ -299,7 +306,7 @@ void ValueGroup::init(const Block& block, const AliasDb& db) {
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, v, external_aliases_)) {
+      if (escapesScope(db, v) || mayContainAlias(db, v, external_aliases_)) {
         external_aliases_.insert(v);
       }
     }
@@ -314,13 +321,6 @@ void ValueGroup::init(const Block& block, const AliasDb& db) {
       continue;
     }
     for (const auto* v : node->outputs()) {
-      // Add values that can aliase input/constant values. Note some output
-      // aliases may end up in this category via collection objects (e.g.,
-      // Tuple).
-      if (mayContainAlias(db, v, external_aliases_)) {
-        external_aliases_.insert(v);
-        continue;
-      }
       if (mayContainAlias(db, v, output_aliases_)) {
         output_aliases_.insert(v);
       }
@@ -1242,17 +1242,16 @@ template <typename IValueList>
 c10::IValue BlockRunner::run_impl_record_functions(
     IValueList&& args,
     const KeywordArgs& kwargs) {
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(
-        at::RecordScope::STATIC_RUNTIME_MODEL, pre_sampled);
-    if (guard.isActive()) {
-      if (guard.needsInputs()) {
-        guard.before("forward", &args);
-      } else {
-        guard.before("forward");
-      }
-    }
+  auto step_callbacks =
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
+  if (!step_callbacks.empty()) {
+    at::RecordFunction guard(std::move(step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    guard.needsInputs()
+        ? guard.before(
+              "forward", c10::ArrayRef<const IValue>(args.data(), args.size()))
+        : guard.before("forward");
+
     return run_impl(std::forward<IValueList>(args), kwargs);
   }
   return run_impl(std::forward<IValueList>(args), kwargs);
@@ -1760,7 +1759,9 @@ bool BlockRunner::checkOutputTensorMemoryLeaks() {
     for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
-      if (!isManagedOutputTensorValue(val)) {
+      if (!isManagedOutputTensorValue(val) || !ival->isTensor()) {
+        // ival can not be a tensor if it's being managed by ops like
+        // to_maybe_copy_out; see ReplaceWithMaybeCopy for details.
         continue;
       }
       const auto& t = ival->toTensor();
@@ -1885,16 +1886,23 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 
 void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(at::RecordScope::STATIC_RUNTIME_OP, pre_sampled);
-    if (guard.isActive()) {
-      if (guard.needsInputs()) {
-        guard.before(get_op_name(), inputs_ivalue_vec());
-      } else {
-        guard.before(get_op_name());
-      }
+  auto step_callbacks =
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_OP);
+  if (!step_callbacks.empty()) {
+    at::RecordFunction guard(std::move(step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    if (guard.needsInputs()) {
+      const auto inputs = inputs_ivalue_vec();
+      guard.before(
+          get_op_name(),
+          c10::ArrayRef<const IValue>(inputs.data(), inputs.size()));
+    } else {
+      guard.before(get_op_name());
     }
+    if (has_out_variant()) {
+      guard._setStaticRuntimeOutVariant();
+    }
+
     fn_->run(this);
   } else {
     fn_->run(this);
