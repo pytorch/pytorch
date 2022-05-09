@@ -48,6 +48,7 @@ struct CacheKey {
   uint8_t output_alignment;
   // default to -1 when no bias
   int8_t bias_alignment;
+  bool kReluFused;
 };
 std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
@@ -96,7 +97,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   // TODO: combine empty & fill_ using full_like or full
   at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   auto act_scale = input.q_scale();
-  auto weight_scale = orig_weight_.q_scale();
+  auto weight_scale = maybe_padded_weight_.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   c10::optional<at::Tensor> bias_multiplier_tensor;
@@ -110,7 +111,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     new_size[0] = bias_.value().size(0);
     broadcasted_bias = bias_.value().reshape(new_size);
     broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
-    broadcasted_bias.value() = broadcasted_bias.value().contiguous(c10::MemoryFormat::ChannelsLast);
+    broadcasted_bias.value() = broadcasted_bias.value().to(c10::MemoryFormat::ChannelsLast);
     bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
     auto bias_multiplier = 1.0 / (act_scale * weight_scale);
     bias_multiplier_tensor.value().fill_(bias_multiplier);
@@ -118,24 +119,30 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
   CacheKey key;
+  // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
+  // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
+  // CacheKey objects have the same user defined parameters, but
+  // different padded values, resulting in different hash outputs.
+  memset(&key, 0, sizeof(key));
   bool deterministic{true};
   bool allow_tf32{false};
   auto padding_vec = padding_.vec();
   auto stride_vec = stride_.vec();
   auto dilation_vec = dilation_.vec();
-  setConvolutionParams(&key.params, input, orig_weight_, padding_vec, stride_vec, dilation_vec, groups_, deterministic, allow_tf32);
+  setConvolutionParams(&key.params, input, maybe_padded_weight_, padding_vec, stride_vec, dilation_vec, groups_, deterministic, allow_tf32);
 
   // operator datatype needs to be int32 for int8 convolution, but we can
   // set the datatype for output tensor to int32 or fp32
   key.params.dataType = CUDNN_DATA_INT32;
   key.input_alignment = cudnn_utils::getAlignment(input);
   key.output_alignment = cudnn_utils::getAlignment(conv_output);
-  key.weight_alignment = cudnn_utils::getAlignment(orig_weight_);
+  key.weight_alignment = cudnn_utils::getAlignment(maybe_padded_weight_);
   if (bias_.has_value()) {
     key.bias_alignment = cudnn_utils::getAlignment(broadcasted_bias.value());
   } else {
     key.bias_alignment = -1;
   }
+  key.kReluFused = kReluFused;
 
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
@@ -144,10 +151,8 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     std::vector<int64_t> uids;
     data_ptrs.reserve(10);
     uids.reserve(10);
-    data_ptrs = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
-                                           reinterpret_cast<int8_t*>(orig_weight_.data_ptr()),
-                                           requantize_multiplier_tensor.data_ptr(),
-                                           reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    data_ptrs = {input.data_ptr<int8_t>(), conv_output.data_ptr(), maybe_padded_weight_.data_ptr<int8_t>(),
+                 requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr<int8_t>()};
     uids = {'x', 'y', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
@@ -184,7 +189,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
       .setxDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_INT8, 'x', key.input_alignment))
       .setyDesc(cudnn_utils::getTensorDescriptor(conv_output, 'y', key.output_alignment))
-      .setwDesc(cudnn_utils::getTensorDescriptor(orig_weight_.sizes(), orig_weight_.strides(), CUDNN_DATA_INT8, 'w', key.weight_alignment))
+      .setwDesc(cudnn_utils::getTensorDescriptor(maybe_padded_weight_.sizes(), maybe_padded_weight_.strides(), CUDNN_DATA_INT8, 'w', key.weight_alignment))
       .setcDesc(getConvDescriptor(key.params.dataType, padding_vec, stride_vec, dilation_vec))
       .build();
   // std::cout << "operator:" << conv_op.describe() << std::endl;
@@ -289,7 +294,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation in Quantized Conv2D Cudnn");
 }
 
 //
@@ -316,13 +321,13 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
-  const int N = act.size(0);
-  const int D = kSpatialDim == 3 ? act.size(2) : 1;
-  const int H = act.size(kSpatialDim);
-  const int W = act.size(kSpatialDim + 1);
-  const int M = orig_weight_.size(0); // output channels
-  std::vector<int64_t> kernel_size = {orig_weight_.size(2), orig_weight_.size(3)};
-  at::SmallVector<int64_t, kSpatialDim + 2> output_shape = MakeConvOutputShape<kSpatialDim>(N, M, {H, W},
+  const auto batch_size = kSpatialDim == 2 ? act.size(0) : 1;
+  const auto num_input_channels = act.size(kSpatialDim - 1);
+  const auto H = act.size(kSpatialDim);
+  const auto W = act.size(kSpatialDim + 1);
+  const auto num_output_channels = maybe_padded_weight_.size(0); // output channels
+  std::vector<int64_t> kernel_size = {maybe_padded_weight_.size(2), maybe_padded_weight_.size(3)};
+  at::SmallVector<int64_t, kSpatialDim + 2> output_shape = MakeConvOutputShape<kSpatialDim>(batch_size, num_output_channels, {H, W},
   kernel_size, stride_, padding_, dilation_);
   at::Tensor quantized_output = at::_empty_affine_quantized(
       output_shape,
@@ -330,10 +335,24 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
       output_scale,
       output_zero_point,
       at::MemoryFormat::ChannelsLast);
-  // requantization
-  // out_int8 = act_int8 * weight_int8 * act_scale * w_scale / output_scale
+
+  // cudnn v8.4.0 expects conv2d's int8 activation tensor's input channels to be a multiple of 4. if it is not
+  // we need to explicitly pad it to a multiple of 4 ourselves as cudnn does not currently support padding.
+  // TODO: when and if cudnn enables padding in their operators, we can remove padding on our end;
+  // currently, limit padding support to groups=1 (ungrouped conv)
+  // TODO: implement this for groups > 1; should be straightforward since we're only padding a single dimension
+  auto act_maybe_padded = act;
+  if (num_input_channels % 4 != 0) {
+    int8_t num_slices = 4 - num_input_channels % 4; // number of slices we need to pad
+    act_maybe_padded = at::pad(act, {0, 0, 0, 0, 0, num_slices, 0, 0}, "constant", 0);
+  }
   apply_impl_helper<kReluFused>(
-      quantized_output, act, output_scale);
+      quantized_output, act_maybe_padded.to(c10::MemoryFormat::ChannelsLast), output_scale);
+
+  // need to return sliced tensor if output_channels was padded
+  if (num_unpadded_output_channels_ != maybe_padded_weight_.size(0)) {
+    return quantized_output.slice(1, 0, num_unpadded_output_channels_);
+  }
   return quantized_output;
 }
 
@@ -375,7 +394,8 @@ class QConvInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-    act = act.contiguous(c10::MemoryFormat::ChannelsLast);
+    TORCH_CHECK(kSpatialDim == 1 || kSpatialDim == 2, "Error in quantized cudnn conv2d operator: "
+                "Expected kSpatialDim == 1 || kSpatialDim == 2; received kSpatialDim=", kSpatialDim);
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
     if (kReluFused) {
       return packed_weight->apply_relu(act, output_scale, output_zero_point);

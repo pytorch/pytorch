@@ -7,9 +7,8 @@ import functools
 import pprint
 import pickle
 import collections
-import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -564,13 +563,17 @@ class TestTorchFunctionOverride(TestCase):
         # did not get wrapped into unary tuples before being passed into
         # handle_torch_function, in contradiction with how Tensor-likes
         # were handled
+        #
+        # NB: this asserts that the arguments get normalized into a tuple
+        # before entering the torch function handler; it could go the
+        # other way but beware https://github.com/pytorch/pytorch/issues/76037
 
         class Dummy:
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
                 inputs, outputs = args
-                self.assertIs(inputs, x)
-                self.assertIs(outputs, x)
+                self.assertEqual(inputs, (x,))
+                self.assertEqual(outputs, (x,))
                 return -1
 
         x = Dummy()
@@ -634,7 +637,7 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append([instance_gen(), instance_gen()])
                 elif t == 'c10::List<c10::optional<Tensor>>':
                     func_args.append([instance_gen(), instance_gen()])
-                elif t == 'IntArrayRef':
+                elif t == 'IntArrayRef' or t == 'SymIntArrayRef':
                     size = arg.get('size', 2)
                     if size == 1:
                         func_args.append(1)
@@ -729,9 +732,6 @@ def generate_tensor_like_override_tests(cls):
         setattr(cls, name, test_method)
 
 generate_tensor_like_override_tests(TestTorchFunctionOverride)
-TestTorchFunctionOverride.test_torch_functional_histogramdd = unittest.skip(
-    "histogramdd is missing __torch_function__ support")(
-        TestTorchFunctionOverride.test_torch_functional_histogramdd)
 
 class Wrapper:
     "Basic data container that knows how to unwrap itself"
@@ -1107,6 +1107,7 @@ class TestTorchFunctionWarning(TestCase):
                 # Function that handles torch_function in C++
                 torch.abs(a)
 
+@skipIfCrossRef
 class TestTorchFunctionMode(TestCase):
     def test_basic(self):
         class A(TorchFunctionMode):

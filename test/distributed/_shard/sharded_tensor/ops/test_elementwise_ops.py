@@ -30,14 +30,18 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestShardedTensorElementWiseOps(ShardedTensorTestBase):
-    def _run_sharded_elementwise_ops(self, spec, input_size, op):
+    def _run_sharded_elementwise_ops(
+        self, spec, input_size, op, reset_seed=None, **kwargs
+    ):
         torch.manual_seed(self.rank)
         st = sharded_tensor.rand(spec, *input_size)
-        new_st = op(st)
+        reset_seed() if reset_seed else None
+        new_st = op(st, **kwargs)
         local_shard = st.local_tensor()
         new_st_local_shard = new_st.local_tensor()
+        reset_seed() if reset_seed else None
         self.assertEqual(
-            op(local_shard),
+            op(local_shard, **kwargs),
             new_st_local_shard,
         )
 
@@ -66,6 +70,37 @@ class TestShardedTensorElementWiseOps(ShardedTensorTestBase):
             self._run_sharded_elementwise_ops(spec, [18, 21], torch.nn.functional.relu)
             self._run_sharded_elementwise_ops(spec, [17, 23], torch.nn.functional.relu)
             self._run_sharded_elementwise_ops(spec, [14, 15], torch.nn.functional.relu)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_sharded_dropout(self):
+        def _reset_random_seed():
+            torch.manual_seed(self.rank + 4)
+
+        specs = generate_chunk_sharding_specs_for_test(
+            0
+        ) + generate_chunk_sharding_specs_for_test(1)
+        for spec in specs:
+            self._run_sharded_elementwise_ops(
+                spec,
+                [12, 17],
+                torch.nn.functional.dropout,
+                p=0.4,
+                reset_seed=_reset_random_seed,
+            )
+            self._run_sharded_elementwise_ops(
+                spec,
+                [18, 21],
+                torch.nn.functional.dropout,
+                p=0.5,
+                reset_seed=_reset_random_seed,
+            )
+            _reset_random_seed()
+            dropout = torch.nn.Dropout(p=0.8)
+            self._run_sharded_elementwise_ops(
+                spec, [17, 23], dropout, reset_seed=_reset_random_seed
+            )
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 #include <test/cpp/lazy/test_lazy_ops_util.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
@@ -51,11 +52,8 @@ class LazyShapeTest : public ::testing::Test {
 class DynamicInputShapeNode : public Node {
  public:
   explicit DynamicInputShapeNode(Shape& shape)
-      : Node(
-            OpKind(),
-            /* num_outputs */ 1,
-            /* hash_func */
-            [&](bool /*bakeInSizes*/) -> hash_t { return 0; }),
+      : Node(OpKind(), /* num_outputs */ 1),
+        hash_(0),
         shape_(shape) {}
   ~DynamicInputShapeNode() override = default;
 
@@ -73,7 +71,11 @@ class DynamicInputShapeNode : public Node {
     return {shape_};
   }
 
+  hash_t hash() const override { return hash_; }
+  hash_t shapeHash() const override { return hash_; }
+
  private:
+  hash_t hash_;
   Shape shape_;
 };
 
