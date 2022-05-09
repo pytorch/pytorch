@@ -15,15 +15,11 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_log_softmax.h>
-#include <ATen/ops/_log_softmax_backward_data_meta.h>
 #include <ATen/ops/_log_softmax_backward_data_native.h>
-#include <ATen/ops/_log_softmax_meta.h>
 #include <ATen/ops/_log_softmax_native.h>
 #include <ATen/ops/_masked_softmax_native.h>
 #include <ATen/ops/_softmax.h>
-#include <ATen/ops/_softmax_backward_data_meta.h>
 #include <ATen/ops/_softmax_backward_data_native.h>
-#include <ATen/ops/_softmax_meta.h>
 #include <ATen/ops/_softmax_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>

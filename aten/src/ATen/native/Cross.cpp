@@ -14,7 +14,6 @@
 #else
 #include <ATen/ops/cross_native.h>
 #include <ATen/ops/linalg_cross.h>
-#include <ATen/ops/linalg_cross_meta.h>
 #include <ATen/ops/linalg_cross_native.h>
 #endif
 

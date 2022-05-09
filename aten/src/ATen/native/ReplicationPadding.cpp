@@ -10,15 +10,11 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/replication_pad1d_backward_meta.h>
 #include <ATen/ops/replication_pad1d_backward_native.h>
-#include <ATen/ops/replication_pad1d_meta.h>
 #include <ATen/ops/replication_pad1d_native.h>
 #include <ATen/ops/replication_pad2d_backward_native.h>
-#include <ATen/ops/replication_pad2d_meta.h>
 #include <ATen/ops/replication_pad2d_native.h>
 #include <ATen/ops/replication_pad3d_backward_native.h>
-#include <ATen/ops/replication_pad3d_meta.h>
 #include <ATen/ops/replication_pad3d_native.h>
 #include <ATen/ops/zeros_like.h>
 #endif

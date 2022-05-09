@@ -8,6 +8,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind AsStrided::class_op_kind(at::aten::as_strided);
+
 AsStrided::AsStrided(
     const Value& input,
     std::vector<int64_t> size,

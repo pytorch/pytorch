@@ -451,6 +451,7 @@ def run_gen_lazy_tensor(
                     "ATen/MetaFunctions.h",
                     "ATen/Operators.h",
                     "ATen/native/CPUFallback.h",
+                    "torch/csrc/lazy/core/ir_builder.h",
                     "torch/csrc/lazy/core/lazy_graph_executor.h",
                     "torch/csrc/lazy/core/metrics.h",
                     "torch/csrc/lazy/core/shape.h",
@@ -516,6 +517,29 @@ def run_gen_lazy_tensor(
             "ir_declarations": list(
                 concat_map_codegen(
                     lazy_ir_generator(backend_indices[backend_key], node_base),
+                    grouped_native_functions,
+                )
+            ),
+            "namespace_prologue": ns_helper.prologue,
+            "namespace_epilogue": ns_helper.epilogue,
+        },
+    )
+    # Generate OpKind definitions for IR node classes
+    fm.write_with_template(
+        "LazyIr.cpp",
+        "LazyIr.cpp",
+        lambda: {
+            "includes": [
+                f"#include <{path}>"
+                for path in [
+                    f"{output_dir}/LazyIr.h",
+                ]
+            ],
+            "opkind_definitions": list(
+                concat_map_codegen(
+                    lazy_ir_generator(
+                        backend_indices[backend_key], node_base
+                    ).gen_opkind_definition,
                     grouped_native_functions,
                 )
             ),

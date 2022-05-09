@@ -35,7 +35,7 @@ def parse_xml_report(
     root = ET.parse(report)
 
     test_cases = []
-    for test_case in root.findall("testcase"):
+    for test_case in root.iter("testcase"):
         case = process_xml_element(test_case)
         case["workflow_id"] = workflow_id
         case["workflow_run_attempt"] = workflow_run_attempt
@@ -133,7 +133,10 @@ def download_and_extract_artifact(
         if atom.startswith("runattempt"):
             found_run_attempt = int(atom[len("runattempt") :])
             if workflow_run_attempt != found_run_attempt:
-                print(f"Skipping {artifact_name} as it is an invalid run attempt.")
+                print(
+                    f"Skipping {artifact_name} as it is an invalid run attempt. "
+                    f"Expected {workflow_run_attempt}, found {found_run_attempt}."
+                )
 
     print(f"Downloading and extracting {artifact_name}")
 
@@ -168,6 +171,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--workflow-run-attempt",
+        type=int,
         required=True,
         help="which retry of the workflow this is",
     )
