@@ -780,7 +780,6 @@ TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
-TEST_WITH_MPS = os.getenv('PYTORCH_TEST_WITH_MPS', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -888,7 +887,7 @@ def skipIfRocm(fn):
 def skipIfMps(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if TEST_WITH_MPS:
+        if torch.backends.mps.is_available():
             raise unittest.SkipTest("test doesn't currently work with MPS")
         else:
             fn(*args, **kwargs)

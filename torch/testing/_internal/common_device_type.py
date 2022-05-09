@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, DeterministicGuard, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
-    TEST_WITH_MPS, TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES
+    TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
 
@@ -511,9 +511,8 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
-
-    if TEST_WITH_MPS:
-        test_bases.append(MPSTestBase)
+        else torch.backends.mps.is_available():
+            test_bases.append(MPSTestBase)
 
     return test_bases
 
