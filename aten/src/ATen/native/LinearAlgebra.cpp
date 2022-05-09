@@ -1647,23 +1647,21 @@ The behavior depends on the dimensionality of the Tensors as follows:
   must be broadcastable).  For example, if tensor1 is a (j x 1 x n x m) Tensor
   and tensor2 is a (k x m x p) Tensor, the returned tensor will be an (j x k x n x p) Tensor.
 */
-Tensor matmul(
-    c10::optional<Tensor> out_opt,
+Tensor _matmul_impl(
+    Tensor& out,
     const Tensor& tensor1,
     const Tensor& tensor2) {
   NoNamesGuard guard;
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
-  auto has_out = out_opt.has_value();
-  Tensor out = out_opt.value_or(Tensor());
+  const bool has_out = out.defined();
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-    return has_out ? at::native::dot_out(tensor1, tensor2, out) : tensor1.dot(tensor2);
+    return has_out ? at::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
     return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
-                   : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
+    return has_out ? at::mv_out(out, tensor2.t(), tensor1) : tensor2.t().mv(tensor1);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (should_fold_into_mm(tensor1, tensor2)) {
@@ -1698,7 +1696,7 @@ Tensor matmul(
 
     const Tensor t2_T = tensor2.transpose(-1, -2);
     const Tensor t1_T = dim_tensor1 == 2 ? tensor1.t() : tensor1.reshape({n, m}).t();
-    const Tensor res_T = matmul(out_opt, t2_T, t1_T);
+    const Tensor res_T = _matmul_impl(out, t2_T, t1_T);
 
     if (dim_tensor1 == 2) {
       Tensor res = res_T.transpose(-1, -2).contiguous();
@@ -1765,25 +1763,26 @@ Tensor matmul(
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-  auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
+  at::Tensor unused;
+  auto result = at::native::_matmul_impl(unused, tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
 Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-  at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
+  at::native::_matmul_impl(result, tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
 // torch.linalg.matmul, alias for torch.matmul
 Tensor linalg_matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  return at::native::matmul(tensor1, tensor2);
+  return at::matmul(tensor1, tensor2);
 }
 
 Tensor& linalg_matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
-  return at::native::matmul_out(tensor1, tensor2, result);
+  return at::matmul_out(result, tensor1, tensor2);
 }
 
 // torch.linalg.diagonal, alias for torch.diagonal with dim1=-2, dim2=-1 as defaults
@@ -1844,8 +1843,10 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
 
   // fill a^2
   if (2 <= num_matrices - 1) {
-    at::native::matmul(
-      buffer.select(0, 2), // out for a^2
+    // out for a^2
+    auto view_out = buffer.select(0, 2);
+    _matmul_impl(
+      view_out,
       buffer.select(0, 1),
       buffer.select(0, 1)
     );
@@ -1853,8 +1854,10 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
 
   // fill a^3
   if (3 <= num_matrices - 1) {
-    at::native::matmul(
-      buffer.select(0, 3), // out for a^3
+    // out for a^3
+    auto view_out = buffer.select(0, 3);
+    _matmul_impl(
+      view_out,
       buffer.select(0, 1),
       buffer.select(0, 2)
     );
@@ -1862,8 +1865,10 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
 
   // fill a^6
   if (4 <= num_matrices - 1) {
-    at::native::matmul(
-      buffer.select(0, 4),
+    // out for a^6
+    auto view_out = buffer.select(0, 4);
+    _matmul_impl(
+      view_out,
       buffer.select(0, 3),
       buffer.select(0, 3)
     );
@@ -1921,9 +1926,10 @@ Tensor compute_T4(const Tensor& A) {
   // 3 for {I, A, A^2}
   _fill_matrix_powers(As, A, 3);
 
-  at::native::matmul(
-    // output for A^2 * (I / 2 + A / 6 + A^2 / 24)
-    As.select(0, 3),
+  // output for A^2 * (I / 2 + A / 6 + A^2 / 24)
+  auto view_out = As.select(0, 3);
+  _matmul_impl(
+    view_out,
     // contains A^2
     As.select(0, 2),
     // computes (I / 2 + A / 6 + A^2 / 24)
@@ -1955,10 +1961,11 @@ Tensor compute_T8(const Tensor& A) {
   // 3 for {I, A, A^2}
   _fill_matrix_powers(As, A, 3);
 
+  // output for A4
+  auto view_out = As.select(0, 3);
   // A4 =  A2 * (x1 * A + x2 * A2)
-  at::native::matmul(
-    // output for A4
-    As.select(0, 3),
+  _matmul_impl(
+    view_out,
     // As.select(0, 2) = A^2
     As.select(0, 2),
     at::native::_compute_linear_combination(
@@ -1968,10 +1975,11 @@ Tensor compute_T8(const Tensor& A) {
     )
   );
 
+  // output for A8
+  view_out = As.select(0, 4);
   // A8 = (x3 * A2 + A4) * (x4 * I + x5 * A + x6 * A2 + x7 * A4)
-  at::native::matmul(
-    // output for A8
-    As.select(0, 4),
+  _matmul_impl(
+    view_out,
     // x3 * A2 + A4
     at::native::_compute_linear_combination(
       As.narrow(0, 2, 2),
@@ -2035,17 +2043,17 @@ Tensor compute_T12(const Tensor& A) {
 
   auto Bs = at::native::_compute_linear_combination(As, bs);
 
+  // output for A6
+  auto view_out = As.select(0, 0);
   // compute A6
-  Bs.select(0, 2).add_(at::native::matmul(
-    // tmp buffer for this matrix product
-    As.select(0, 0),
+  Bs.select(0, 2).add_(_matmul_impl(
+    view_out,
     Bs.select(0, 3),
     Bs.select(0, 3)
   ));
 
-  return Bs.select(0,0).add_(at::native::matmul(
-    // tmp buffer for this matrix product
-    As.select(0, 0),
+  return Bs.select(0, 0).add_(_matmul_impl(
+    view_out,
     Bs.select(0, 1).add_(Bs.select(0, 2)),
     Bs.select(0, 2)
   ));
@@ -2107,17 +2115,17 @@ Tensor compute_T18(const Tensor& A) {
 
   auto Bs = at::native::_compute_linear_combination(As, bs);
 
+  // tmp buffer for this matrix product
+  auto view_out = As.select(0, 0);
   // compute A9
-  Bs.select(0, 3).add_(at::native::matmul(
-    // tmp buffer for this matrix product
-    As.select(0, 0),
+  Bs.select(0, 3).add_(_matmul_impl(
+    view_out,
     Bs.select(0, 0),
     Bs.select(0, 4))
   );
 
-  return Bs.select(0, 1).add_(at::native::matmul(
-    // tmp buffer for this matrix product
-    As.select(0, 0),
+  return Bs.select(0, 1).add_(_matmul_impl(
+    view_out,
     Bs.select(0, 2).add_(Bs.select(0, 3)),
     Bs.select(0, 3)
   ));
@@ -2990,142 +2998,6 @@ struct KronImpl final {
     c10::SmallVector<int64_t, 10> a_reshape;
     c10::SmallVector<int64_t, 10> b_reshape;
 };
-}
-
-DEFINE_DISPATCH(unpack_pivots_stub);
-
-std::tuple<Tensor, Tensor, Tensor> lu_unpack(
-    const Tensor& LU_data,
-    const Tensor& LU_pivots,
-    bool unpack_data,
-    bool unpack_pivots
-    ) {
-  TORCH_CHECK(LU_pivots.is_contiguous() && (LU_pivots.scalar_type() == at::kInt),
-      "lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype."
-      "Note: this function is intended to be used with the output produced by torch{.linalg}.lu");
-
-  // trivial case
-  if (!unpack_data && !unpack_pivots) {
-    return std::make_tuple(Tensor(), Tensor(), Tensor());
-  }
-
-  Tensor L, U;
-  // In the generalized LU factorization, the following shape relations hold:
-  // A.shape[-2:] == (m, n),
-  // P.shape[-2:] == (m, m),
-  // U.shape[-2:] == (m, k),
-  // L.shape[-2:] == (k, n),
-  // where k = min(m, n)
-  int64_t m = LU_data.size(-2);
-  int64_t n = LU_data.size(-1);
-  int64_t k = std::min(m, n);
-
-  if (unpack_data) {
-    U = LU_data.triu();
-    if (m != k) {
-      U = U.narrow(-2, 0, k);
-    }
-
-    L = LU_data.tril();
-    if (k != n) {
-      L = L.narrow(-1, 0, k);
-    }
-    L.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
-  }
-
-  if (!unpack_pivots) {
-    return std::make_tuple(Tensor(), L, U);
-  }
-
-  auto unpacked_pivots_sizes = LU_pivots.sizes().vec();
-  unpacked_pivots_sizes[LU_pivots.dim() - 1] = m;
-  auto unpacked_pivots = at::empty(
-    unpacked_pivots_sizes,
-    LU_pivots.options().memory_format(at::MemoryFormat::Contiguous)
-  );
-
-  // Fill `unpacked_pivots` with identity permutation
-  auto id_perm = at::arange(m, LU_pivots.options());
-  unpacked_pivots.copy_(id_perm);
-
-  // WARNING: we assume that unchanged LAPACK pivots are provided.
-  // Since LAPACK relies on the FORTRAN's 1-based indexing,
-  // we subtract 1 to convert the pivots to the C-style 0-based indexing.
-  // This behaviour could change in the future.
-  auto LU_pivots_zero_idx = LU_pivots - 1;
-
-  auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)
-    .check_all_same_dtype(false)
-    .resize_outputs(false)
-    .declare_static_shape(LU_pivots.sizes(), /*squash_dim=*/LU_pivots.dim() - 1)
-    .add_output(unpacked_pivots)
-    .add_input(LU_pivots_zero_idx)
-    .build();
-  // }
-
-  unpack_pivots_stub(
-    LU_pivots.device().type(),
-    iter,
-    LU_pivots.size(-1)
-  );
-
-  // The permutation matrix is converted to LU_data.dtype
-  // because `matmul` does not work with integer matrices.
-  unpacked_pivots_sizes.push_back(m);
-  auto permutation_matrix = at::zeros(
-    unpacked_pivots_sizes,
-    LU_data.options().memory_format(at::MemoryFormat::Contiguous)
-  );
-
-  // now that we know the final permutation,
-  // scatter 1s at proper locations.
-  permutation_matrix.scatter_(
-    -2,
-    unpacked_pivots.unsqueeze(-2).to(at::kLong),
-    at::ones({1}, permutation_matrix.options()).expand(permutation_matrix.sizes())
-  );
-
-  return std::make_tuple(permutation_matrix, L, U);
-}
-
-using TupleTensorRefs3 = std::tuple<Tensor&, Tensor&, Tensor&>;
-
-TupleTensorRefs3 lu_unpack_out(
-    const Tensor& LU_data,
-    const Tensor& LU_pivots,
-    bool unpack_data,
-    bool unpack_pivots,
-    Tensor& P,
-    Tensor& L,
-    Tensor& U
-    ) {
-  Tensor P_tmp, L_tmp, U_tmp;
-  std::tie(P_tmp, L_tmp, U_tmp) = at::lu_unpack(LU_data, LU_pivots, unpack_data, unpack_pivots);
-
-  if (unpack_pivots) {
-    checkSameDevice("lu_unpack", P, LU_data, "P");
-    // Note that lu_unpack returns P such that P.dtype == LU_data.dtype,
-    // because otherwise we cannot use P in matric products (no int -> float promotion)
-    checkLinalgCompatibleDtype("lu_unpack", P, LU_data, "L");
-
-    at::native::resize_output(P, P_tmp.sizes());
-    P.copy_(P_tmp);
-  }
-
-  if (unpack_data) {
-    checkSameDevice("lu_unpack", L, LU_data, "L");
-    checkSameDevice("lu_unpack", U, LU_data, "U");
-    checkLinalgCompatibleDtype("lu_unpack", L, LU_data, "L");
-    checkLinalgCompatibleDtype("lu_unpack", U, LU_data, "U");
-
-    at::native::resize_output(L, L_tmp.sizes());
-    at::native::resize_output(U, U_tmp.sizes());
-    L.copy_(L_tmp);
-    U.copy_(U_tmp);
-  }
-
-  return TupleTensorRefs3(P, L, U);
 }
 
 /*
