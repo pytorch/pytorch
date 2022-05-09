@@ -3806,7 +3806,6 @@ class TestFunctionalTracing(JitTestCase):
         "gelu": BUILT_IN_FUNC,
         "hardshrink": BUILT_IN_FUNC,
         "hardtanh_": BUILT_IN_FUNC,
-        "layer_norm": BUILT_IN_FUNC,
         "leaky_relu_": BUILT_IN_FUNC,
         "linear": BUILT_IN_FUNC,
         "logsigmoid": BUILT_IN_FUNC,
@@ -3848,6 +3847,7 @@ class TestFunctionalTracing(JitTestCase):
         "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
+        "layer_norm": ARG_TYPE_MISMATCH,
         "lp_pool1d": ARG_TYPE_MISMATCH,
 
         "affine_grid": CONTROL_FLOW,

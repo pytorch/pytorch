@@ -118,25 +118,20 @@ Tensor quantized_instance_norm_impl(
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // TODO: this is kind of... blegh
-  m.impl(
-      TORCH_SELECTIVE_NAME("quantized::layer_norm"),
-      [](Tensor input,
-         std::vector<int64_t>
-             normalized_shape, // because IntArrayRef doesn't work
-         double output_scale,
-         int64_t output_zero_point,
-         c10::optional<Tensor> weight,
-         c10::optional<Tensor> bias,
-         double eps) {
-        return quantized_layer_norm_impl(
-            input,
-            normalized_shape,
-            weight.has_value() ? *weight : Tensor(),
-            bias.has_value() ? *bias : Tensor(),
-            eps,
-            output_scale,
-            output_zero_point);
-      });
+  m.impl(TORCH_SELECTIVE_NAME("quantized::layer_norm"), [](
+    Tensor input,
+    std::vector<int64_t> normalized_shape,  // because IntArrayRef doesn't work
+    c10::optional<Tensor> weight,
+    c10::optional<Tensor> bias,
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+      return quantized_layer_norm_impl(
+          input, normalized_shape,
+          weight.has_value() ? *weight : Tensor(),
+          bias.has_value() ? *bias : Tensor(),
+          eps, output_scale, output_zero_point);
+  });
   m.impl(TORCH_SELECTIVE_NAME("quantized::group_norm"), [](
       Tensor qx,
       int64_t num_groups,

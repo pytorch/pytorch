@@ -2434,6 +2434,24 @@ def instance_norm(
     )
 
 
+def layer_norm(
+    input: Tensor,
+    normalized_shape: List[int],
+    weight: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    eps: float = 1e-5,
+    out: Optional[Tensor] = None
+) -> Tensor:
+    r"""Applies Layer Normalization for last certain number of dimensions.
+    See :class:`~torch.nn.LayerNorm` for details.
+    """
+    if has_torch_function_variadic(input, weight, bias):
+        return handle_torch_function(
+            layer_norm, (input, weight, bias), input, normalized_shape, weight=weight, bias=bias, eps=eps, out=out
+        )
+    return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled, out=out)
+
+
 def group_norm(
     input: Tensor, num_groups: int, weight: Optional[Tensor] = None, bias: Optional[Tensor] = None, eps: float = 1e-5
 ) -> Tensor:
@@ -3535,14 +3553,6 @@ Examples::
       [[13, 14],
        [15, 16]],
      ]]
-""",
-)
-
-layer_norm = _add_docstr(
-    torch.layer_norm,
-    r"""
-Applies Layer Normalization for last certain number of dimensions.
-See :class:`~torch.nn.LayerNorm` for details.
 """,
 )
 
