@@ -334,7 +334,11 @@ class TestCommon(TestCase):
 
             meta_sample = sample.transform(_to_tensormeta)
             meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
-            prims.utils.compare_tensor_meta(result, meta_result)
+            if isinstance(result, torch.Tensor):
+                prims.utils.compare_tensor_meta(result, meta_result)
+            elif isinstance(result, Sequence):
+                for a, b in zip(result, meta_result):
+                    prims.utils.compare_tensor_meta(a, b)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference.
