@@ -9,6 +9,8 @@ namespace lazy {
 
 class TORCH_API AsStridedViewUpdate : public TsNode {
  public:
+  static const OpKind class_op_kind;
+
   AsStridedViewUpdate(
       const Value& target,
       const Value& input,

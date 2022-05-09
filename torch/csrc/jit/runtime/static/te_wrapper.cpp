@@ -181,12 +181,9 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   BufHandle A("A", {N}, kFloat);
-  Tensor B =
-      Compute("B", {N}, [&](const VarHandle& i) { return sigmoid(A.load(i)); });
-  // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor
-  // (Sleef_expf8).
-  constexpr int kSleefWidth = 8;
-  wrap = wrapTECompute(wrap, B, {A, N}, kSleefWidth);
+  Tensor B = Compute(
+      "B", {N}, [&](const VarHandle& i) { return fast_sigmoid(A.load(i)); });
+  wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::sigmoid, wrap);
   return wrap;
 }

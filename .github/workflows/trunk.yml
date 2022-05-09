@@ -224,3 +224,25 @@ jobs:
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
+
+  # please ensure that this and its corresponding job in pull.yml are in sync
+  win-vs2019-cuda11_3-py3-build:
+    name: win-vs2019-cuda11.3-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2019-cuda11.3-py3
+      cuda-version: "11.3"
+
+  win-vs2019-cuda11_3-py3-test:
+    name: win-vs2019-cuda11.3-py3
+    uses: ./.github/workflows/_win-test.yml
+    needs: win-vs2019-cuda11_3-py3-build
+    with:
+      build-environment: win-vs2019-cuda11.3-py3
+      cuda-version: "11.3"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
+        ]}
