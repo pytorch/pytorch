@@ -175,9 +175,11 @@ __device__ void loadGlobalToLocal(
       if (is_volatile) {
         uint3& _to = *reinterpret_cast<uint3*>(to);
         uint3& _from = *reinterpret_cast<uint3*>(from);
+        _to = _from;
       } else {
         uint3& _to = *reinterpret_cast<uint3*>(to);
         uint3& _from = *reinterpret_cast<uint3*>(from);
+        _to = _from;
       }
       break;
     }
@@ -185,9 +187,11 @@ __device__ void loadGlobalToLocal(
       if (is_volatile) {
         uint4& _to = *reinterpret_cast<uint4*>(to);
         uint4& _from = *reinterpret_cast<uint4*>(from);
+        _to = _from;
       } else {
         uint4& _to = *reinterpret_cast<uint4*>(to);
         uint4& _from = *reinterpret_cast<uint4*>(from);
+        _to = _from;
       }
       break;
     }
