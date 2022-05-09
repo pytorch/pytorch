@@ -54,14 +54,13 @@ from ._utils import (
     _apply_to_modules, _apply_to_tensors, _replace_by_prefix,
     _override_batchnorm_mixed_precision, _contains_batchnorm
 )
-from .wrap import _recursive_wrap, wrap_batchnorm_individually, or_policy
 from .flatten_params_wrapper import (
     FLAT_PARAM,
     FPW_MODULE,
     FlatParameter,
     FlattenParamsWrapper,
 )
-from .wrap import _recursive_wrap
+from .wrap import _recursive_wrap, wrap_batchnorm_individually, or_policy
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
@@ -1893,61 +1892,60 @@ class FullyShardedDataParallel(nn.Module):
             return self.load_state_dict(state_dict, *args)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
-        with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
-            self._lazy_init()
+        self._lazy_init()
 
-            # Start of a forward pass.
-            self.training_state = TrainingState_.FORWARD
+        # Start of a forward pass.
+        self.training_state = TrainingState_.FORWARD
 
-            # Cast inputs to their mixed precision type.
+        # Cast inputs to their mixed precision type.
+        if (
+            self._is_root
+            and self._mixed_precision_enabled_for_params()
+        ):
+            input_dtype = self.mixed_precision.param_dtype
+            args, kwargs = self._cast_fp_inputs_to_precision(
+                input_dtype, *args, **kwargs
+            )
+
+        # All-gather full parameters, moving them to compute_device if
+        # necessary.
+        self._rebuild_full_params()
+        # Wait for all_gather full parameters to finish before computation
+        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+        # Register backward hooks to reshard params and reduce-scatter grads.
+        # These need to be re-registered every forward pass in some cases where grad_fn
+        # is mutated.
+        self._register_post_backward_hooks()
+        outputs = self.module(*args, **kwargs)
+
+        if self not in self._fsdp_graph_order:
+            self._my_fsdp_idx_in_graph = len(self._fsdp_graph_order)
+            self._fsdp_graph_order.append(self)
+
+        if self.reshard_after_forward:
+            self._free_full_params()
             if (
-                self._is_root
-                and self._mixed_precision_enabled_for_params()
+                self._mixed_precision_enabled_for_params()
             ):
-                input_dtype = self.mixed_precision.param_dtype
-                args, kwargs = self._cast_fp_inputs_to_precision(
-                    input_dtype, *args, **kwargs
-                )
+                self._free_mp_shard(self.params)
+        # Switch to original local shards of params. We maintain this invariant throughout
+        # the code, i.e., ``p.data == p._local_shard`` after each function. This
+        # also ensures that after the first forward, the optimizer state will be
+        # initialized with the correct dtype and (sharded) size, since optimizer
+        # state is typically initialized lazily in ``optim.step()``. Note that
+        # when CPU offload is enabled, _use_param_local_shard implicitly
+        # offloads the local shard to CPU by making p.data point to
+        # p._local_shard, which would reside on CPU.
+        self._use_param_local_shard()
 
-            # All-gather full parameters, moving them to compute_device if
-            # necessary.
-            self._rebuild_full_params()
-            # Wait for all_gather full parameters to finish before computation
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+        # Register pre-backward hooks to all-gather the params for the backward
+        # pass (if output's grad was needed). This won't register anything if
+        # we are in eval mode.
+        outputs = self._register_pre_backward_hooks(outputs)
 
-            # Register backward hooks to reshard params and reduce-scatter grads.
-            # These need to be re-registered every forward pass in some cases where grad_fn
-            # is mutated.
-            self._register_post_backward_hooks()
-            outputs = self.module(*args, **kwargs)
-
-            if self not in self._fsdp_graph_order:
-                self._my_fsdp_idx_in_graph = len(self._fsdp_graph_order)
-                self._fsdp_graph_order.append(self)
-
-            if self.reshard_after_forward:
-                self._free_full_params()
-                if (
-                    self._mixed_precision_enabled_for_params()
-                ):
-                    self._free_mp_shard(self.params)
-            # Switch to original local shards of params. We maintain this invariant throughout
-            # the code, i.e., ``p.data == p._local_shard`` after each function. This
-            # also ensures that after the first forward, the optimizer state will be
-            # initialized with the correct dtype and (sharded) size, since optimizer
-            # state is typically initialized lazily in ``optim.step()``. Note that
-            # when CPU offload is enabled, _use_param_local_shard implicitly
-            # offloads the local shard to CPU by making p.data point to
-            # p._local_shard, which would reside on CPU.
-            self._use_param_local_shard()
-
-            # Register pre-backward hooks to all-gather the params for the backward
-            # pass (if output's grad was needed). This won't register anything if
-            # we are in eval mode.
-            outputs = self._register_pre_backward_hooks(outputs)
-
-            # Done with a forward pass.
-            self.training_state = TrainingState_.IDLE
+        # Done with a forward pass.
+        self.training_state = TrainingState_.IDLE
 
         return outputs
 
