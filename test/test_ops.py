@@ -335,7 +335,11 @@ class TestCommon(TestCase):
 
             meta_sample = sample.transform(_to_tensormeta)
             meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
-            prims.utils.compare_tensor_meta(result, meta_result)
+            if isinstance(result, torch.Tensor):
+                prims.utils.compare_tensor_meta(result, meta_result)
+            elif isinstance(result, Sequence):
+                for a, b in zip(result, meta_result):
+                    prims.utils.compare_tensor_meta(a, b)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference.
@@ -350,11 +354,21 @@ class TestCommon(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                exact_stride=True,
+                exact_stride=False,
                 exact_device=True,
                 exact_layout=True,
                 exact_is_coalesced=True,
             )
+
+            # TODO: move Sequence case into utils.compare_significant_strides
+            if isinstance(actual, torch.Tensor):
+                prims.utils.compare_significant_strides(actual, expected)
+            if isinstance(actual, Sequence):
+                for a, b in zip(actual, expected):
+                    prims.utils.compare_significant_strides(a, b)
+
+            # TODO: FIXME: enable view consistency testing
+            # self.assertEqual(actual._is_view(), expected._is_view())
 
     @skipMeta
     @onlyNativeDeviceTypes
