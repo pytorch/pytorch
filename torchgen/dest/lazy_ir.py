@@ -17,6 +17,7 @@ from torchgen.api.types import (
 )
 import torchgen.api.dispatcher as dispatcher
 from torchgen.api.lazy import (
+    LazyIrProperties,
     LazyIrSchema,
     LazyArgument,
     getValueT,
@@ -134,21 +135,13 @@ class GenLazyIR(ABC):
 
     # there is no lowering functionality generated unless this IR base class is subclassed and
     # implemented as a backend-specific node
-    def lowering_function(
-        self,
-        schema: LazyIrSchema,
-        declaration_only: bool = False,
-    ) -> str:
+    def lowering_function(self, schema: LazyIrSchema) -> str:
         return ""
 
-    def can_be_reused_function(
-        self, schema: LazyIrSchema, node_ctor_args: str
-    ) -> str:
+    def create_function(self, schema: LazyIrSchema, node_ctor_args: str) -> str:
         return ""
 
-    def can_be_reused_function(
-        self, f: Union[NativeFunctionsGroup, NativeFunction], node_ctor_args: str
-    ) -> str:
+    def can_be_reused_function(self, schema: LazyIrSchema, node_ctor_args: str) -> str:
         return f"""bool CanBeReused({node_ctor_args}) const {{
     return false;
     }}"""
@@ -174,34 +167,31 @@ class GenLazyIR(ABC):
         scalar_args = schema.filtered_args(values=False, scalars=True)
 
         # Shape constuction.
-        # Conditionally build shape depending on whether it is a native function
-        # and whether the shape cache should be used
-        shape_ctor_arg = "std::move(shapes),"
-        if not getattr(schema, "has_shape", True):
-            shape_ctor_arg = ""
-        elif getattr(schema, "is_non_native", False):
-            if getattr(schema, "cache_shape", True):
-                shape_args = [f"operand({i})" for i in range(len(value_args))]
-                shape_ctor_arg = (
-                    f"[&](){{{{ return compute_shape_{schema.name}({{}})[0]; }}}},"
-                )
-            else:
-                shape_args = [a.name for a in value_args]
-                shape_ctor_arg = f"compute_shape_{schema.name}({{}}),"
+        # Conditionally build shape depending on specified shape property
+        if schema.properties.ShapePrecompute:
+            shape_ctor_arg = "std::move(shapes),"
+        elif schema.properties.ShapeCompute:
+            shape_args = [a.name for a in value_args]
             shape_args.extend(a.name for a in scalar_args)
-            shape_ctor_arg = shape_ctor_arg.format(", ".join(shape_args))
+            shape_ctor_arg = f"compute_shape_{schema.name}({', '.join(shape_args)}),"
+        elif schema.properties.ShapeCache:
+            shape_args = [f"operand({i})" for i in range(len(value_args))]
+            shape_args.extend(a.name for a in scalar_args)
+            shape_ctor_arg = f"[&](){{ return compute_shape_{schema.name}({', '.join(shape_args)})[0]; }},"
+        else:
+            shape_ctor_arg = ""
 
         scalar_hashes = ", ".join(f"{a.name}" for a in scalar_args)
 
         return f"""{self.node_base}(
-              {schema.node_name}::class_op_kind,
+              {schema.node_name}::ClassOpKind(),
               OpList{{{base_ctor_value_args}}},
               {shape_ctor_arg}
               /* num_outputs */ {len(schema.returns)},
               torch::lazy::MHash({scalar_hashes}))"""
 
     def gen(self, schema: LazyIrSchema) -> List[str]:
-        opkind = getattr(schema, "opkind", aten_symbol(schema))
+        opkind = schema.opkind or aten_symbol(schema)
 
         # for now, we just want one IR class decl and soon after also the method defs
         # and we use the functional version not out/inplace.
@@ -210,7 +200,8 @@ class GenLazyIR(ABC):
         scalar_args = schema.filtered_args(values=False, scalars=True)
 
         ctor_args = [f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args]
-        if not getattr(schema, "is_non_native", False):
+        reuse_ctor_args = ", ".join(ctor_args)
+        if schema.properties.ShapePrecompute:
             ctor_args.append("std::vector<torch::lazy::Shape>&& shapes")
         node_ctor_args = ", ".join(ctor_args)
 
@@ -252,13 +243,6 @@ class GenLazyIR(ABC):
                 members_to_string.append(f'ss << ", {arg.name}=" << {arg.name};')
         members_to_string_str = "\n    ".join(members_to_string)
 
-        lowering_function = ""
-        if getattr(schema, "is_lowerable", True):
-            lowering_function = self.lowering_function(
-                schema,
-                declaration_only=getattr(schema, "lower_declaration_only", False),
-            )
-
         return [
             f"""\
 class {schema.node_name} : public {self.node_base} {{
@@ -280,9 +264,11 @@ class {schema.node_name} : public {self.node_base} {{
     return ss.str();
   }}
 
-  {self.can_be_reused_function(schema, node_ctor_args)}
+  {self.create_function(schema, reuse_ctor_args)}
 
-  {lowering_function}
+  {self.can_be_reused_function(schema, reuse_ctor_args)}
+
+  {self.lowering_function(schema)}
 
   {scalar_decls}
   {has_optional_decls}
@@ -295,46 +281,57 @@ class {schema.node_name} : public {self.node_base} {{
 
 @dataclass(frozen=True)
 class GenTSLazyIR(GenLazyIR):
-    def lowering_function(
-        self, schema: LazyIrSchema, declaration_only: bool = False
-    ) -> str:
-        if declaration_only:
-            lowering_body = ";"
-        else:
-            lowering_body = f"""
-  {{
+    def lowering_function(self, schema: LazyIrSchema) -> str:
+        signature = """
+  torch::lazy::TSOpVector Lower(
+      std::shared_ptr<torch::jit::GraphFunction> function,
+      torch::lazy::TSLoweringContext* loctx) const override"""
+
+        if schema.properties.LowerDeclOnly:
+            return f"{signature};"
+        elif schema.properties.Lower:
+            return f"""{signature} {{
     {ts_lowering_body(schema)}
   }}
             """
+        else:
+            return ""
 
-        return f"""
-  torch::lazy::TSOpVector Lower(
-      std::shared_ptr<torch::jit::GraphFunction> function,
-      torch::lazy::TSLoweringContext* loctx) const override {lowering_body}
-        """
+    def create_function(self, schema: LazyIrSchema, node_ctor_args: str) -> str:
+        signature = f"static NodePtr Create({node_ctor_args})"
+        if schema.properties.CreateFnDeclOnly:
+            return f"{signature};"
+        elif not schema.properties.CreateFn:
+            return ""
+        return f"""{signature} {{
+    return ReuseOrMakeNode<{schema.node_name}>(data);
+  }}"""
 
-    def can_be_reused_function(
-        self, schema: LazyIrSchema, node_ctor_args: str
-    ) -> str:
-        value_comparsion = []
+    def can_be_reused_function(self, schema: LazyIrSchema, node_ctor_args: str) -> str:
+        signature = f"bool CanBeReused({node_ctor_args}) const"
+        if schema.properties.CanBeReusedDeclOnly:
+            return f"{signature};"
+        elif not schema.properties.CanBeReused:
+            return ""
+        value_comparison = []
         for arg in schema.positional_values:
             if isinstance(arg.lazy_type, OptionalCType):
-                value_comparsion.append(
+                value_comparison.append(
                     f"operand(i++) == {arg.name}.value_or(kNullValue)"
                 )
             else:
-                value_comparsion.append(f"operand(i++) == {arg.name}")
+                value_comparison.append(f"operand(i++) == {arg.name}")
         for arg in schema.positional_scalars:
-            value_comparsion.append(f"this->{arg.name} == {arg.name}")
+            value_comparison.append(f"this->{arg.name} == {arg.name}")
         for arg in schema.keyword_values:
-            value_comparsion.append(f"operand(i++) == {arg.name}")
+            value_comparison.append(f"operand(i++) == {arg.name}")
         for arg in schema.keyword_scalars:
-            value_comparsion.append(f"this->{arg.name} == {arg.name}")
-        value_comparsion_str = " &&\n        ".join(value_comparsion)
+            value_comparison.append(f"this->{arg.name} == {arg.name}")
+        value_comparison_str = " &&\n        ".join(value_comparison)
 
-        return f"""bool CanBeReused({node_ctor_args}) const {{
+        return f"""{signature} {{
     size_t i = 0;
-    return ({value_comparsion_str});
+    return ({value_comparison_str});
   }}"""
 
 
@@ -590,17 +587,11 @@ def generate_non_native_lazy_ir_nodes(
     nodes = []
     for op in non_native:
         schema = LazyIrSchema(FunctionSchema.parse(op["func"]))
-        schema.is_non_native = True
-        opkind = op.get("opkind", None)
-        if opkind:
-            schema._aten_name = opkind
-            if not opkind.startswith("at::"):
-                schema.ltc_name = opkind
-        schema.has_shape = op.get("has_shape", True)
-        schema.cache_shape = op.get("cache_shape", True)
-        schema.is_lowerable = op.get("is_lowerable", False)
-        schema.lower_declaration_only = op.get("lower_declaration_only", True)
-
+        # Set default properties for Non-Native IRs
+        schema.properties = LazyIrProperties("ShapeCache")
+        for p in op.get("properties", []):
+            setattr(schema.properties, p, True)
+        schema.opkind = op.get("opkind")
         nodes.append(gen_lazy_ir.gen(schema)[0])
 
     return nodes

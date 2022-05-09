@@ -1,4 +1,4 @@
-from typing import List, Union, Tuple, Optional
+from typing import Any, Dict, List, Union, Tuple, Optional
 
 from torchgen.model import (
     Type,
@@ -202,6 +202,61 @@ class LazyArgument:
         return self.lazy_type_
 
 
+class LazyIrProperties:
+    """Collection of properties for an IR node
+
+    The property groups are listed below. Each group is mutually
+    exclusive, meaning that only one property from each group can be True
+    at any one time. The properties can be accessed as if they were normal
+    attributes. The mutual exclusivity is automatically handled.
+    """
+
+    Properties: Tuple[Tuple[str, ...], ...] = (
+        (
+            "ShapePrecompute",  # Assume shape has been precomputed
+            "ShapeCompute",  # Need to compute the shape on construction
+            "ShapeCache",  # Utilize the shape cache to defer computation
+        ),
+        (
+            "Lower",  # Codegen full lower function
+            "LowerDeclOnly",  # Codegen only lower function declaration
+        ),
+        (
+            "CanBeReused",  # Codegen full reuse function
+            "CanBeReusedDeclOnly",  # Codegen only reuse function declaration
+        ),
+        (
+            "CreateFn",  # Codegen full create function
+            "CreateFnDeclOnly",  # Codegen only create function declaration
+        ),
+    )
+
+    def __init__(self, *default_properties: str):
+        properties: Dict[Tuple[str, ...], Optional[str]] = {
+            p: None for p in LazyIrProperties.Properties
+        }
+        self.__dict__["properties"] = properties
+        for p in default_properties:
+            setattr(self, p, True)
+
+    def __getattr__(self, key: str) -> Any:
+        properties = self.__dict__["properties"]
+        for values in LazyIrProperties.Properties:
+            if key in values:
+                return properties[values] == key
+
+        return self.__getattribute__(key)
+
+    def __setattr__(self, key: str, value: Any) -> Any:
+        properties = self.__dict__["properties"]
+        for values in LazyIrProperties.Properties:
+            if key in values:
+                properties[values] = key if value else None
+                return
+
+        raise KeyError(f"Invalid property: {key}")
+
+
 # Inspired by a FunctionSchema object, a LazyIrSchema holds the schema of a Lazy IR node.
 # Unlike a FunctionSchema, it has no round-trippable string form (relating to the YAML),
 # but carries type information from a native FunctionSchema modified for use with IR nodes,
@@ -219,6 +274,14 @@ class LazyIrSchema:
     # if this schema has a Generator arg, list its orig ctype/name but don't
     # build a LazyArgument since lazy IR doesn't support it
     generator_arg: Optional[NamedCType] = None
+
+    properties: LazyIrProperties = LazyIrProperties(
+        # default properties
+        "ShapePrecompute",
+        "Lower",
+        "CanBeReused",
+    )
+    opkind: Optional[str] = None
 
     def __init__(self, func: FunctionSchema):
 
@@ -254,7 +317,6 @@ class LazyIrSchema:
         self.keyword_args = tuple(keyword_args)
         self.name = func.name
         self.returns = func.returns
-        self._aten_name = str(self.name.name)
 
     @property
     def node_name(self) -> str:
@@ -270,7 +332,7 @@ class LazyIrSchema:
 
     @property
     def aten_name(self) -> str:
-        return self._aten_name
+        return str(self.name.name)
 
     @property
     def base_name(self) -> str:

@@ -183,16 +183,22 @@ autograd:
 non_native:
   - func: device_data(BackendDataPtr data) -> Tensor
     opkind: ltc_device_data
-    cache_shape: false
+    properties:
+      - ShapeCompute
+      - CanBeReusedDeclOnly
+      - CreateFnDeclOnly
   - func: scalar(ScalarVal value, ScalarType type) -> Tensor
     opkind: at::prim::Constant
-    cache_shape: false
+    properties:
+      - ShapeCompute
   - func: expand(Tensor input, int[] size, bool is_scalar_expand) -> Tensor
   - func: view(Tensor input, int[] output_size) -> Tensor
-    cache_shape: false
+    properties:
+      - ShapeCompute
   - func: cast(Tensor input, ScalarType dtype, ScalarType? stype) -> Tensor
     opkind: ltc_cast
-    cache_shape: false
+    properties:
+      - ShapeCompute
 
   # View ops only required until proper functionalization pass is introduced into LTC
   - func: as_strided_view_update(Tensor target, Tensor input, int[] size, int[] stride, int storage_offset) -> Tensor
@@ -200,7 +206,8 @@ non_native:
   - func: as_strided(Tensor input, int[] size, int[] stride, int storage_offset) -> Tensor
   - func: diagonal_view_update(Tensor target, Tensor input, int offset, int dim1, int dim2) -> Tensor
     opkind: ltc_diagonal_view_update
-    cache_shape: false
+    properties:
+      - ShapeCompute
   - func: diagonal(Tensor input, int offset, int dim1, int dim2) -> Tensor
   - func: narrow_view_update(Tensor input, Tensor source, int[] base_indices) -> Tensor
     opkind: ltc_narrow_view_update
@@ -209,7 +216,8 @@ non_native:
   - func: resize(Tensor input, int[] size) -> Tensor
   - func: select_view_update(Tensor target, Tensor source, int dim, int start, int end, int stride) -> Tensor
     opkind: ltc_select_view_update
-    cache_shape: false
+    properties:
+      - ShapeCompute
   - func: select(Tensor input, int dim, int start, int end, int stride) -> Tensor
   - func: squeeze(Tensor input, int dim) -> Tensor
   - func: unsqueeze(Tensor input, int dim) -> Tensor
