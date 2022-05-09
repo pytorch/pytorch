@@ -429,6 +429,10 @@ class TestFSDPStateDict(FSDPTest):
         else:
             blank_local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
 
+        # Nothing should be FSDP
+        for mod in blank_local_model.modules():
+            self.assertFalse(isinstance(mod, FSDP))
+
         for param in blank_local_model.parameters():
             with torch.no_grad():
                 param.zero_()
