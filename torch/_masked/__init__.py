@@ -518,7 +518,7 @@ def _sparse_coo_scatter_reduction_helper(op,
                                          keepdim: bool,
                                          dtype: Optional[DType] = None) -> Tensor:
     reduce = op.__name__
-    valid_reductions = ['sum', 'prod', 'mean', 'amax', 'amin']
+    valid_reductions = ['sum', 'prod', 'amax', 'amin']
     if reduce not in valid_reductions:
         raise ValueError(f"op must be one of {' '.join(valid_reductions)}, but got {reduce} instead")
 
