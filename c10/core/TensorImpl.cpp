@@ -209,9 +209,9 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+    const auto size_d = sizes_and_strides_.size_at_unchecked(d).unchecked_expect_int();
     if (size_d != 1) {
-      if (sizes_and_strides_.stride_at_unchecked(d) == z) {
+      if (sizes_and_strides_.stride_at_unchecked(d).unchecked_expect_int() == z) {
         z *= size_d;
       } else {
         is_contiguous = false;
@@ -229,9 +229,9 @@ bool TensorImpl::compute_channels_last_contiguous_2d() const {
     case 4: {
       int64_t expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d = sizes_and_strides_.size_at_unchecked(d).unchecked_expect_int();
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d).unchecked_expect_int() != expected) {
             return false;
           }
           expected *= size_d;
@@ -255,9 +255,9 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
     case 5: {
       int64_t expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d = sizes_and_strides_.size_at_unchecked(d).unchecked_expect_int();
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d).unchecked_expect_int() != expected) {
             return false;
           }
           expected *= size_d;
@@ -286,8 +286,8 @@ bool TensorImpl::compute_strides_like_channels_last_3d() const {
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (dim() == 1) {
-    return sizes_and_strides_.size_at_unchecked(0) < 2 ||
-        sizes_and_strides_.stride_at_unchecked(0) == 1;
+    return sizes_and_strides_.size_at_unchecked(0).unchecked_expect_int() < 2 ||
+        sizes_and_strides_.stride_at_unchecked(0).unchecked_expect_int() == 1;
   }
   SmallVector<int64_t, 5> perm;
   perm.resize(dim());
@@ -296,21 +296,21 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   }
   // Sort by strides, leaving 0 and 1 sized dims at the end of the array
   std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
-    if (sizes_and_strides_.size_at_unchecked(a) < 2) {
+    if (sizes_and_strides_.size_at_unchecked(a).unchecked_expect_int() < 2) {
       return false;
-    } else if (sizes_and_strides_.size_at_unchecked(b) < 2) {
+    } else if (sizes_and_strides_.size_at_unchecked(b).unchecked_expect_int() < 2) {
       return true;
     }
-    return sizes_and_strides_.stride_at_unchecked(a) <
-        sizes_and_strides_.stride_at_unchecked(b);
+    return sizes_and_strides_.stride_at_unchecked(a).unchecked_expect_int() <
+        sizes_and_strides_.stride_at_unchecked(b).unchecked_expect_int();
   });
   auto require_stride = 1;
   for (const auto i : c10::irange(dim())) {
-    const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
+    const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]).unchecked_expect_int();
     if (size_perm_i < 2) {
       return true;
     }
-    if (sizes_and_strides_.stride_at_unchecked(perm[i]) != require_stride) {
+    if (sizes_and_strides_.stride_at_unchecked(perm[i]).unchecked_expect_int() != require_stride) {
       return false;
     }
     require_stride *= size_perm_i;
@@ -556,7 +556,8 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
       "Right now Extend is only supported for contiguous Tensor.");
   using SizesVector = SmallVector<int64_t, 5>;
   SizesVector newDims(
-      sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+      reinterpret_cast<int64_t*>(sizes_and_strides_.sizes_begin()),
+      reinterpret_cast<int64_t*>(sizes_and_strides_.sizes_end()));
   newDims[0] += num;
   if (!storage_.data()) {
     Resize(newDims);
@@ -569,11 +570,12 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
     return;
   }
   SizesVector newCapacity(
-      sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+      reinterpret_cast<int64_t*>(sizes_and_strides_.sizes_begin()),
+      reinterpret_cast<int64_t*>(sizes_and_strides_.sizes_end()));
   newCapacity[0] = std::max(
       newDims[0],
       static_cast<int64_t>(std::ceil(
-          sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
+          sizes_and_strides_.size_at_unchecked(0).unchecked_expect_int() * (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
   auto oldSize = numel_;
   Resize(newCapacity);
@@ -612,7 +614,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
   TORCH_CHECK(storage_.unique(), "Can't call ReserveSpace on shared storage.");
   // TODO: eliminate newCapacity.
   SmallVector<int64_t, 5> newCapacity(
-      sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+      reinterpret_cast<int64_t*>(sizes_and_strides_.sizes_begin()), reinterpret_cast<int64_t*>(sizes_and_strides_.sizes_end()));
   newCapacity[0] = outer_dim;
   auto newNumel = c10::multiply_integers(newCapacity);
   if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
@@ -622,7 +624,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
   storage_.data_ptr().clear();
   auto oldSize = numel_;
   SmallVector<int64_t, 5> oldDims(
-      sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+      reinterpret_cast<int64_t*>(sizes_and_strides_.sizes_begin()), reinterpret_cast<int64_t*>(sizes_and_strides_.sizes_end()));
   Resize(newCapacity);
   // Allocate new memory but don't copy over the data
   raw_mutable_data(data_type_);

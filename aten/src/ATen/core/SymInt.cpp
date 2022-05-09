@@ -15,4 +15,13 @@ c10::SymInt SymInt::toSymInt(std::shared_ptr<SymbolicIntNode> sin_sp) {
   auto data = sit.addNode(sin_sp) | SYM_TAG_MASK;
   return c10::SymInt(data);
 }
+
+SymInt SymInt::slow_mul(SymInt other) const {
+  TORCH_CHECK(false, "symbolic mul NYI");
+}
+
+SymInt SymInt::slow_max(SymInt other) const {
+  TORCH_CHECK(false, "symbolic max NYI");
+}
+
 } // namespace c10

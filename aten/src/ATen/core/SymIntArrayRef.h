@@ -160,6 +160,18 @@ class SymIntArrayRef final {
       type&
       operator=(std::initializer_list<U>) = delete;
 
+  // This function has an unchecked precondition that none of the SymInts are
+  // actually symbolic.  This precondition typically cannot be efficiently checked
+  // directly in this struct; e.g., it's tested in TensorImpl.
+  ArrayRef<int64_t> unsafeToIntArrayRef() const {
+    return ArrayRef<int64_t>(reinterpret_cast<const int64_t*>(data()), size());
+  }
+
+  // This conversion is safe without checking
+  static SymIntArrayRef fromIntArrayRef(ArrayRef<int64_t> a) {
+    return SymIntArrayRef(reinterpret_cast<const SymInt*>(a.data()), a.size());
+  }
+
   /// @}
   /// @name Expensive Operations
   /// @{

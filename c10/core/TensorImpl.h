@@ -574,7 +574,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
       return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
     }
-    return sizes_and_strides_.size_at_unchecked(d);
+    return sizes_and_strides_.size_at_unchecked(d).unchecked_expect_int();
   }
 
   /**
@@ -591,7 +591,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
       return strides_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
     }
-    return sizes_and_strides_.stride_at_unchecked(d);
+    return sizes_and_strides_.stride_at_unchecked(d).unchecked_expect_int();
   }
 
   /**
@@ -660,7 +660,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // These are factored into separate functions in case subclasses
   // want to use them
   inline IntArrayRef strides_default() const {
-    return sizes_and_strides_.strides_arrayref();
+    return sizes_and_strides_.strides_arrayref().unsafeToIntArrayRef();
   }
   inline bool is_contiguous_default(at::MemoryFormat memory_format) const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
@@ -672,7 +672,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_;
   }
   inline IntArrayRef sizes_default() const {
-    return sizes_and_strides_.sizes_arrayref();
+    return sizes_and_strides_.sizes_arrayref().unsafeToIntArrayRef();
   }
   inline int64_t dim_default() const {
     return sizes_and_strides_.size();
@@ -1338,8 +1338,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             // Keep stride monotonically increasing to match NumPy.
             sizes_and_strides_.stride_at_unchecked(dim) =
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
-                sizes_and_strides_.stride_at_unchecked(dim + 1);
+                    // This is guaranteed to be int because the input sizes
+                    // set here were integers
+                    sizes_and_strides_.size_at_unchecked(dim + 1).unchecked_expect_int(), 1) *
+                sizes_and_strides_.stride_at_unchecked(dim + 1).unchecked_expect_int();
           }
         }
         if (dim == 0)
@@ -1917,8 +1919,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           for (auto i = last_idx - 1; i >= 0; --i) {
             sizes_and_strides_.stride_at_unchecked(i) =
                 sizes_and_strides_.stride_at_unchecked(i + 1) *
-                std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1), 1);
+                sizes_and_strides_.size_at_unchecked(i + 1).max(1);
           }
         }
         break;
