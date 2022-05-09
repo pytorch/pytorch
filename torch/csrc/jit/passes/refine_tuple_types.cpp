@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/passes/refine_types.h>
+#include <torch/csrc/jit/passes/refine_tuple_types.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
 #include <ATen/core/type_factory.h>
@@ -29,7 +29,7 @@ static void VisitTupleNode(Node* node) {
 }
 } // anonymous namespace
 
-void RefineTypes(std::shared_ptr<Graph>& graph) {
+void RefineTupleTypes(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
   for (auto* node = it.next(); node != nullptr; node = it.next()) {
     if (node->kind() == prim::TupleConstruct) {

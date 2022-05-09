@@ -11239,7 +11239,7 @@ dedent """
         self.run_pass("erase_number_types", graph)
         FileCheck().check_not("int = prim::Constant").run(str(graph))
 
-    def test_refine_types_tuple(self):
+    def test_refine_tuple_types(self):
         # TupleConstruct output type is not correct here.
         graph_str = """
         graph(%a : Float(123), %b : Float(4, 5, 6)):
@@ -11247,7 +11247,7 @@ dedent """
           return (%c)
         """
         graph = parse_ir(graph_str)
-        torch._C._jit_pass_refine_types(graph)
+        torch._C._jit_pass_refine_tuple_types(graph)
 
         # After the pass, the output type should've been updated.
         self.assertTrue('(Float(123), Float(4, 5, 6))' in str(graph.findNode('prim::TupleConstruct').output()))
