@@ -97,4 +97,4 @@ def _backward(*args, **kwargs):
     return _old_backward(*args, **kwargs)
 
 
-torch.Tensor.backwrd = _backward
+torch.Tensor.backward = _backward
