@@ -226,7 +226,7 @@ std::shared_ptr<TEWrapper> createClampNanToNum() {
     auto a = A.load(i);
     auto clamp = tensorexpr::clamp(min_handle, max_handle, a);
     auto is_nan = tensorexpr::isnan(clamp);
-    auto nans_replaced = tensorexpr::ifThenElse(is_nan, nan_replace_val, clamp);
+    auto nans_replaced = tensorexpr::CompareSelect::make(is_nan, 1, nan_replace_val, clamp, kEQ);
     return nans_replaced;
   });
   wrap = wrapTECompute(wrap, result, {A, min_handle, max_handle, nan_replace_val, N});

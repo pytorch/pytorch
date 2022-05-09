@@ -605,15 +605,15 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
 });
 
 REGISTER_OPERATOR_FUNCTOR(static_runtime::clamp_nan_to_num, static_runtime_clamp_nan_to_num, [](Node* n) -> SROperator {
-    auto clamp_min_opt = toIValue(n->input(1));
-    auto clamp_max_opt = toIValue(n->input(2));
+    auto clamp_min_ival_opt = toIValue(n->input(1));
+    auto clamp_max_ival_opt = toIValue(n->input(2));
+    TORCH_CHECK(clamp_min_ival_opt.has_value() && clamp_max_ival_opt.has_value());
+
+    auto clamp_min_opt = clamp_min_ival_opt->toOptional<at::Scalar>();
+    auto clamp_max_opt = clamp_max_ival_opt->toOptional<at::Scalar>();
     TORCH_CHECK(clamp_min_opt.has_value() && clamp_max_opt.has_value());
 
-    auto clamp_min = clamp_min_opt->toOptional<at::Scalar>();
-    auto clamp_max = clamp_max_opt->toOptional<at::Scalar>();
-    TORCH_CHECK(clamp_min.has_value() && clamp_max.has_value());
-
-    return [te = createClampNanToNum(), clamp_min = clamp_min->to<float>(), clamp_max = clamp_max->to<float>()](ProcessedNode* p_node) mutable {
+    return [te = createClampNanToNum(), clamp_min = clamp_min_opt->to<float>(), clamp_max = clamp_max_opt->to<float>()](ProcessedNode* p_node) mutable {
       const auto& in0_t = p_node->Input(0).toTensor();
       if (p_node->Output(0).isNone()) {
         p_node->Output(0) = create_empty_from(in0_t);
