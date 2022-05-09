@@ -41,7 +41,6 @@
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/sort.h>
 #include <ATen/ops/sort_native.h>
-#include <ATen/ops/topk_meta.h>
 #include <ATen/ops/topk_native.h>
 #endif
 

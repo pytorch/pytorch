@@ -19,10 +19,8 @@
 #include <ATen/ops/log_softmax.h>
 #include <ATen/ops/nll_loss.h>
 #include <ATen/ops/nll_loss2d.h>
-#include <ATen/ops/nll_loss_backward_meta.h>
 #include <ATen/ops/nll_loss_backward_native.h>
 #include <ATen/ops/nll_loss_forward.h>
-#include <ATen/ops/nll_loss_forward_meta.h>
 #include <ATen/ops/nll_loss_forward_native.h>
 #include <ATen/ops/nll_loss_native.h>
 #include <ATen/ops/nll_loss_nd.h>

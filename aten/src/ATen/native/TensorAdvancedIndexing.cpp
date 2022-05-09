@@ -90,11 +90,8 @@
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/gather.h>
 #include <ATen/ops/gather_backward_native.h>
-#include <ATen/ops/gather_meta.h>
 #include <ATen/ops/gather_native.h>
-#include <ATen/ops/index_add_meta.h>
 #include <ATen/ops/index_add_native.h>
-#include <ATen/ops/index_copy_meta.h>
 #include <ATen/ops/index_copy_native.h>
 #include <ATen/ops/index_fill_native.h>
 #include <ATen/ops/index_native.h>
@@ -110,11 +107,8 @@
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/put_native.h>
 #include <ATen/ops/quantize_per_tensor.h>
-#include <ATen/ops/scatter_add_meta.h>
 #include <ATen/ops/scatter_add_native.h>
-#include <ATen/ops/scatter_meta.h>
 #include <ATen/ops/scatter_native.h>
-#include <ATen/ops/scatter_reduce_meta.h>
 #include <ATen/ops/scatter_reduce_native.h>
 #include <ATen/ops/take_along_dim_native.h>
 #include <ATen/ops/take_native.h>
@@ -1469,10 +1463,12 @@ static void scatter_reduce_exclude_self_helper(
         init_val = (scalar_t)1;
         break;
       case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
-        init_val = std::numeric_limits<scalar_t>::lowest();
+        init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
+                   : std::numeric_limits<scalar_t>::lowest();
         break;
       case SCATTER_GATHER_OP::REDUCE_MINIMUM:
-        init_val = std::numeric_limits<scalar_t>::max();
+        init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
+                   : std::numeric_limits<scalar_t>::max();
         break;
       case SCATTER_GATHER_OP::REDUCE_MEAN:
         init_val = (scalar_t)0;

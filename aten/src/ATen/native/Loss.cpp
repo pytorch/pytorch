@@ -41,7 +41,6 @@
 #include <ATen/ops/min.h>
 #include <ATen/ops/mse_loss_backward.h>
 #include <ATen/ops/mse_loss_backward_native.h>
-#include <ATen/ops/mse_loss_meta.h>
 #include <ATen/ops/mse_loss_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/neg.h>
@@ -49,7 +48,6 @@
 #include <ATen/ops/poisson_nll_loss_native.h>
 #include <ATen/ops/smooth_l1_loss_backward.h>
 #include <ATen/ops/smooth_l1_loss_backward_native.h>
-#include <ATen/ops/smooth_l1_loss_meta.h>
 #include <ATen/ops/smooth_l1_loss_native.h>
 #include <ATen/ops/soft_margin_loss.h>
 #include <ATen/ops/soft_margin_loss_backward.h>

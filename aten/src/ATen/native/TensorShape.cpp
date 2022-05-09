@@ -2,13 +2,12 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/DimVector.h>
 #include <ATen/core/functional.h>
-#include <ATen/core/ITensorListRef.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
@@ -46,6 +45,7 @@
 #include <ATen/ops/adjoint_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/alias_native.h>
+#include <ATen/ops/arange.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/as_strided_native.h>
 #include <ATen/ops/atleast_1d.h>
@@ -104,6 +104,7 @@
 #include <ATen/ops/reshape_as_native.h>
 #include <ATen/ops/reshape_native.h>
 #include <ATen/ops/resize_native.h>
+#include <ATen/ops/resize_native.h>
 #include <ATen/ops/row_stack_native.h>
 #include <ATen/ops/select.h>
 #include <ATen/ops/select_backward_native.h>
@@ -147,7 +148,6 @@
 #include <ATen/ops/vstack_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
-#include <ATen/ops/zeros_like_ops.h>
 #include <ATen/ops/zeros_native.h>
 #endif
 
@@ -326,6 +326,11 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   // We just need to make sure we don't actually try to resize the (null) storage.
   at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt, /*resize_storage=*/!result.is_meta());
   return result;
+}
+
+Tensor& set_(Tensor& result, const Tensor& storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  TORCH_CHECK(storage.is_contiguous(), "passed in tensor to be used as storage must be contiguous");
+  return result.set_(storage.storage(), storage_offset + storage.storage_offset(), size, stride);
 }
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {

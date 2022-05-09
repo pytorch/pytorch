@@ -13,9 +13,7 @@
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/trace_backward_native.h>
-#include <ATen/ops/tril_meta.h>
 #include <ATen/ops/tril_native.h>
-#include <ATen/ops/triu_meta.h>
 #include <ATen/ops/triu_native.h>
 #include <ATen/ops/zeros.h>
 #endif
