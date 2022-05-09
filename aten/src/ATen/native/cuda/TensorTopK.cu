@@ -709,7 +709,7 @@ void launch(
   }
 
 #if CUB_SUPPORTS_SCAN_BY_KEY()
-  computeBlockwiseKthCounts<Bitwise><<<std::min((numInputSlices + 255) / 256, (uint32_t)65535), 256, 0, stream>>>(
+  computeBlockwiseKthCounts<Bitwise><<<std::min(((int64_t)numInputSlices + 255) / 256, (int64_t)1073741824), 256, 0, stream>>>(
     desired, counts, num_blocks, blocks_per_slice, kthCounts);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   // Do a prefix scan of withinKCounts and kthCounts using slice_idx as keys to get the starting index of each block
