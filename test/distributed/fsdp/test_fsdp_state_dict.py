@@ -156,6 +156,63 @@ class TestFSDPStateDict(FSDPTest):
             else:
                 self.assertEqual(fsdp_state_dict, {})
 
+    def _test_basic_save_and_load_state_dict(self, model_call, cpu_offload, fp16, state_dict_rank0_and_offload):
+        """
+        Tests that we can save a state_dict and load it into a blank model
+        with various configs such as fp16 and cpu offload and parameters
+        match as expected.
+        """
+        model = model_call()
+        full_state_dict_mgr = self._get_full_state_dict_mgr(
+            model, state_dict_rank0_and_offload
+        )
+        with full_state_dict_mgr:
+            fsdp_state_dict = _get_state_dict(model, cpu_offload.offload_params, fp16)
+
+        # For non-FSDP roots, the non FSDP portion can still have parameters on rank 0,
+        # so bypass the check for now.
+        if isinstance(model, FSDP):
+            self._validate_state_dict_contents(
+                fsdp_state_dict, state_dict_rank0_and_offload,
+            )
+        if fp16:
+            # Verify fp16 is the type
+            for tensor in fsdp_state_dict.values():
+                self.assertEqual(tensor.dtype, torch.float16)
+
+        model_new = model_call()
+        if not cpu_offload.offload_params:
+            model_new = model_new.cuda()
+        if fp16:
+            model_new.half()
+
+        # zero the model to ensure parameters are different.
+        _zero_model(model_new)
+
+        with FullyShardedDataParallel.summon_full_params(model):
+            with FullyShardedDataParallel.summon_full_params(model_new):
+                params = list(model.parameters())
+                params_new = list(model_new.parameters())
+                self.assertNotEqual(params, params_new)
+
+        # Verify parameters are the same in the new model.
+        if state_dict_rank0_and_offload:
+            # Broadcast the state dict and move it back to GPU in
+            # preparation for loading.
+            fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
+            for key in fsdp_state_dict.keys():
+                fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
+
+        model_new.load_state_dict(fsdp_state_dict)
+        with FullyShardedDataParallel.summon_full_params(model_new):
+            with FullyShardedDataParallel.summon_full_params(model):
+                params = list(model.parameters())
+                params_new = list(model_new.parameters())
+                self.assertEqual(params, params_new)
+                if fp16:
+                    for tensor in model_new.parameters():
+                        self.assertEqual(tensor.dtype, torch.float16)
+
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
@@ -163,69 +220,43 @@ class TestFSDPStateDict(FSDPTest):
     )
     @parametrize("fp16", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
-    def test_basic_save_and_load_state_dict(self, cpu_offload, fp16, state_dict_rank0_and_offload):
-        """
-        Tests that we can save a state_dict and load it into a blank model
-        with various configs such as fp16 and cpu offload and parameters
-        match as expected.
-        """
-        for model_call in [
-            partial(self._get_non_fsdp_root_module, cpu_offload=cpu_offload),
-            partial(self._get_simple_nested_model, cpu_offload=cpu_offload),
+    def test_basic_save_and_load_state_dict_simple(self, cpu_offload, fp16, state_dict_rank0_and_offload):
+        self._test_basic_save_and_load_state_dict(
             partial(self._get_simple_model, cpu_offload=cpu_offload),
-        ]:
-            model = model_call()
-            if self.rank == 0:
-                print(model)
-            full_state_dict_mgr = self._get_full_state_dict_mgr(
-                model, state_dict_rank0_and_offload
-            )
-            with full_state_dict_mgr:
-                fsdp_state_dict = _get_state_dict(model, cpu_offload.offload_params, fp16)
+            cpu_offload,
+            fp16,
+            state_dict_rank0_and_offload
+        )
 
-            # For non-FSDP roots, the non FSDP portion can still have parameters on rank 0,
-            # so bypass the check for now.
-            if isinstance(model, FSDP):
-                self._validate_state_dict_contents(
-                    fsdp_state_dict, state_dict_rank0_and_offload,
-                )
-            if fp16:
-                # Verify fp16 is the type
-                for tensor in fsdp_state_dict.values():
-                    self.assertEqual(tensor.dtype, torch.float16)
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
+    )
+    @parametrize("fp16", [True, False])
+    @parametrize("state_dict_rank0_and_offload", [True, False])
+    def test_basic_save_and_load_state_dict_nested(self, cpu_offload, fp16, state_dict_rank0_and_offload):
+        self._test_basic_save_and_load_state_dict(
+            partial(self._get_simple_nested_model, cpu_offload=cpu_offload),
+            cpu_offload,
+            fp16,
+            state_dict_rank0_and_offload
+        )
 
-            model_new = model_call()
-            if not cpu_offload.offload_params:
-                model_new = model_new.cuda()
-            if fp16:
-                model_new.half()
-
-            # zero the model to ensure parameters are different.
-            _zero_model(model_new)
-
-            with FullyShardedDataParallel.summon_full_params(model):
-                with FullyShardedDataParallel.summon_full_params(model_new):
-                    params = list(model.parameters())
-                    params_new = list(model_new.parameters())
-                    self.assertNotEqual(params, params_new)
-
-            # Verify parameters are the same in the new model.
-            if state_dict_rank0_and_offload:
-                # Broadcast the state dict and move it back to GPU in
-                # preparation for loading.
-                fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
-                for key in fsdp_state_dict.keys():
-                    fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
-
-            model_new.load_state_dict(fsdp_state_dict)
-            with FullyShardedDataParallel.summon_full_params(model_new):
-                with FullyShardedDataParallel.summon_full_params(model):
-                    params = list(model.parameters())
-                    params_new = list(model_new.parameters())
-                    self.assertEqual(params, params_new)
-                    if fp16:
-                        for tensor in model_new.parameters():
-                            self.assertEqual(tensor.dtype, torch.float16)
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
+    )
+    @parametrize("fp16", [True, False])
+    @parametrize("state_dict_rank0_and_offload", [True, False])
+    def test_basic_save_and_load_state_dict_non_root(self, cpu_offload, fp16, state_dict_rank0_and_offload):
+        self._test_basic_save_and_load_state_dict(
+            partial(self._get_non_fsdp_root_module, cpu_offload=cpu_offload),
+            cpu_offload,
+            fp16,
+            state_dict_rank0_and_offload
+        )
 
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
