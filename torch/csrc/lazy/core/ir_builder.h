@@ -15,9 +15,9 @@ namespace torch {
 namespace lazy {
 
 template <typename T, typename... Args>
-NodePtr ReuseNode(OpKind op, Args&&... args) {
+NodePtr ReuseNode(Args&&... args) {
   if (FLAGS_torch_lazy_reuse_ir) {
-    return LookupNodeFromTrieCache<T>(op, std::forward<Args>(args)...);
+    return LookupNodeFromTrieCache<T>(std::forward<Args>(args)...);
   }
   return nullptr;
 }
@@ -27,7 +27,7 @@ template <typename T, typename... Args>
 NodePtr MakeNode(Args&&... args) {
   NodePtr node = std::make_shared<T>(std::forward<Args>(args)...);
   if (FLAGS_torch_lazy_reuse_ir) {
-      // If ir caching is enabled, we need to record all new nodes
+    // If ir caching is enabled, we need to record all new nodes
     TrieCache::Get()->Insert(node);
   }
   return node;
@@ -35,8 +35,8 @@ NodePtr MakeNode(Args&&... args) {
 
 // op is passed in for a more efficient node casting, see the implementation of NodeCast
 template <typename T, typename... Args>
-NodePtr ReuseOrMakeNode(OpKind op, Args&&... args) {
-  NodePtr node = ReuseNode<T>(op, std::forward<Args>(args)...);
+NodePtr ReuseOrMakeNode(Args&&... args) {
+  NodePtr node = ReuseNode<T>(std::forward<Args>(args)...);
   if (!node) {
     node = MakeNode<T>(std::forward<Args>(args)...);
   }
