@@ -9,9 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/max_pool2d_with_indices_backward_meta.h>
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
-#include <ATen/ops/max_pool2d_with_indices_meta.h>
 #include <ATen/ops/max_pool2d_with_indices_native.h>
 #include <ATen/ops/zeros_like_ops.h>
 #endif

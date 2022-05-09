@@ -9,7 +9,6 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/glu_backward_native.h>
-#include <ATen/ops/glu_meta.h>
 #include <ATen/ops/glu_native.h>
 #include <ATen/ops/sigmoid.h>
 #endif

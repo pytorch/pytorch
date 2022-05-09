@@ -44,7 +44,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     expectedFailureXLA,
     instantiate_device_type_tests,
-    skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta,
@@ -5096,52 +5095,6 @@ else:
         self._test_multinomial_empty(device, False, 1)
         self._test_multinomial_empty(device, False, 2)
 
-    # FIXME: move to elementwise ternary test suite
-    def _test_where_scalar_template(self, device, dtype, exec_fn):
-        for ndims in range(0, 4):
-            shape = self._rand_shape(ndims, min_size=5, max_size=10)
-            for n in range(ndims + 1):
-                for c in combinations(list(range(ndims)), n):
-                    for scalar_type in [int, float, complex]:
-                        if dtype.is_complex:
-                            condition = make_tensor(shape, dtype=dtype, device=device).abs() > 0.5
-                        else:
-                            condition = make_tensor(shape, dtype=dtype, device=device) > 0.5
-
-                        x = make_tensor(shape, dtype=dtype, device=device)
-
-                        if not dtype.is_complex and scalar_type == complex:
-                            continue
-
-                        scalar_1 = scalar_type(random.random())
-
-                        exec_fn(scalar_type, dtype, condition, x, scalar_1)
-
-    # FIXME: move to elementwise ternary test suite
-    # For current implementation,
-    # below are the valid `TensorDtype` and `ScalarType` combinations.
-    def _where_valid_scalar_tensor_combination(self, scalar_type, dtype):
-        if (scalar_type == int and dtype == torch.long):
-            return True
-        elif (scalar_type == float and dtype == torch.double):
-            return True
-        elif (scalar_type == complex and dtype == torch.complex128):
-            return True
-        return False
-
-    # FIXME: move to elementwise ternary test suite
-    @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
-    def test_where_scalar_invalid_combination_raises(self, device, dtype):
-
-        def checkRaises(scalar_type, dtype, condition, x, scalar_1):
-            if not self._where_valid_scalar_tensor_combination(scalar_type, dtype):
-                # Note: This should fail once `where` supports type promotion.
-                with self.assertRaisesRegex(RuntimeError, "expected scalar type"):
-                    torch.where(condition, x, scalar_1)
-
-        self._test_where_scalar_template(device, dtype, checkRaises)
-
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
     @dtypesIfCPU(torch.float, torch.double, torch.bfloat16)
     @dtypes(torch.float, torch.double)
@@ -5168,57 +5121,46 @@ else:
                 return prob_dist
 
     # FIXME: move to elementwise ternary test suite
-    @skipCUDAVersionIn([(11, 2)])  # test fails for 11.2, see https://github.com/pytorch/pytorch/issues/51980
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
-    def test_where_scalar_valid_combination(self, device, dtype):
-
-        def checkResult(scalar_type, dtype, condition, x, scalar_1):
-            if self._where_valid_scalar_tensor_combination(scalar_type, dtype):
-                def x_like(scalar, without_dtype=False):
-                    return torch.tensor(scalar, dtype=dtype, device=device).expand_as(x)
-
-                # X = Tensor, Y = Scalar
-                scalar_out = torch.where(condition, x, scalar_1)
-                tensor_out = torch.where(condition, x, x_like(scalar_1))
-                self.assertEqual(scalar_out, tensor_out)
-
-                # X = Scalar, Y = Tensor
-                scalar_out = torch.where(condition, scalar_1, x)
-                tensor_out = torch.where(condition, x_like(scalar_1), x)
-                self.assertEqual(scalar_out, tensor_out)
-
-        self._test_where_scalar_template(device, dtype, checkResult)
-
-    # FIXME: move to elementwise ternary test suite
     # As the test fails with Runtime Error not raised on XLA
     @onlyNativeDeviceTypes
-    def test_where_scalar_scalar(self, device):
-        # Scalar-Scalar Version
-        height = 5
-        width = 5
-        default_dtype = torch.get_default_dtype()
-        for test_default_dtype in [torch.float, torch.double]:
-            torch.set_default_dtype(test_default_dtype)
-            for scalar_type_1 in [int, float, complex]:
-                for scalar_type_2 in [int, float, complex]:
-                    x1 = scalar_type_1(random.random() * random.randint(10, 20))
-                    x2 = scalar_type_2(random.random() * random.randint(20, 30))
-                    condition = torch.randn(height, width, device=device) > 0.5
-                    if scalar_type_1 != scalar_type_2:
-                        self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(condition, x1, x2))
-                    else:
-                        def get_dtype(scalar_type):
-                            complex_dtype = torch.complex64 if torch.float == torch.get_default_dtype() else torch.complex128
-                            type_map = {int: torch.long, float: torch.get_default_dtype(), complex: complex_dtype}
-                            return type_map[scalar_type]
-                        expected = torch.zeros((height, width), dtype=get_dtype(scalar_type_1))
-                        expected[condition] = x1
-                        expected[~condition] = x2
-                        result = torch.where(condition, x1, x2)
-                        self.assertEqual(expected, result)
+    def test_where_scalar_handcrafted_values(self, device):
+        # Tests ScalarxScalar, ScalarxTensor and TensorxScalar
+        # variant of `where` against NumPy version with
+        # handcrafted values.
+        condition_shape = (5, 5)
+        dtypes = (
+            torch.bool, torch.uint8, torch.int8, torch.int16, torch.int64,
+            torch.float16, torch.float32, torch.float64,
+            torch.complex64, torch.complex128,
+        )
+        shapes = ((), (5,), (1, 5),)
 
-        # Reset the original dtype
-        torch.set_default_dtype(default_dtype)
+        with torch.no_grad():
+            tensors = (torch.empty(shape, dtype=dtype, device=device).fill_(17)
+                       for shape, dtype in product(shapes, dtypes))
+
+        # Use different values for `x` and `y`
+        # as they are the output values which are compared.
+        x_vals = (True, 3, 7.0, 1 + 0.5j)
+        y_vals = itertools.chain((False, 4, 8.0, 2 + 0.5j), tensors)
+        for x in x_vals:
+            for y in y_vals:
+                condition = torch.empty(*condition_shape, dtype=torch.bool, device=device).bernoulli_()
+                common_dtype = torch.result_type(x, y)
+
+                def check_equal(condition, x, y):
+                    condition_np = condition.cpu().numpy()
+                    x_np = x.cpu().numpy() if isinstance(x, torch.Tensor) else x
+                    y_np = y.cpu().numpy() if isinstance(y, torch.Tensor) else y
+
+                    # NumPy aggressively promotes to double, hence cast to output to correct dtype
+                    expected = torch.from_numpy(np.where(condition_np, x_np, y_np)).to(common_dtype)
+                    result = torch.where(condition, x, y)
+                    self.assertEqual(expected, result)
+
+                check_equal(condition, x, y)
+                check_equal(condition, y, x)
+
 
     def test_hook_remove(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/58354
@@ -6581,6 +6523,11 @@ class TestTorch(TestCase):
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor([2.3000+4.j, 7.0000+6.j])''')
 
+        # test complex half tensor
+        x = torch.tensor([1.25 + 4j, -7. + 6j], dtype=torch.chalf)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([ 1.2500+4.j, -7.0000+6.j], dtype=torch.complex32)''')
+
         # test scientific notation for complex tensors
         x = torch.tensor([1e28 + 2j , -1e-28j])
         self.assertEqual(x.__repr__(), str(x))
@@ -7602,7 +7549,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
 
     # FIXME: Port to a more appropriate test suite
-    def test_to(self):
+    def _test_to_with_layout(self, layout):
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, t.to(t, non_blocking=non_blocking))
             self.assertIs(t, t.to(t.dtype, non_blocking=non_blocking))
@@ -7624,16 +7571,33 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 self.assertIsNot(t, t.to(device, t.dtype, non_blocking=non_blocking, copy=True))
 
         a = torch.tensor(5)
+        if layout == torch.sparse_csr:
+            a = torch.tensor([[0, 1, 2], [2, 0, 3]]).to_sparse_csr()
         test_copy_behavior(a)
         self.assertEqual(a.device, a.to('cpu').device)
         self.assertEqual(a.device, a.to('cpu', dtype=torch.float32).device)
         self.assertIs(torch.float32, a.to('cpu', dtype=torch.float32).dtype)
         self.assertEqual(a.device, a.to(torch.float32).device)
         self.assertIs(torch.float32, a.to(dtype=torch.float32).dtype)
-        self.assertEqual(a.data_ptr(), a.to('cpu').data_ptr())
-        self.assertEqual(a.data_ptr(), a.to(dtype=a.dtype, device=a.device, copy=False).data_ptr())
-        self.assertEqual(a.data_ptr(), a.to('cpu', copy=False).data_ptr())
-        self.assertNotEqual(a.data_ptr(), a.to('cpu', copy=True).data_ptr())
+
+        def test_data_ptr(getter):
+            self.assertEqual(getter(a), getter(a.to('cpu')))
+            self.assertEqual(getter(a), getter(a.to(dtype=a.dtype, device=a.device, copy=False)))
+            self.assertEqual(getter(a), getter(a.to('cpu', copy=False)))
+            self.assertNotEqual(getter(a), getter(a.to('cpu', copy=True)))
+        if layout == torch.sparse_csr:
+            # TODO: compressed sparse tensors currently don't support data_ptr.
+            # Exercising failure will allow us to widen coverage of this test once it does.
+            with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer of Tensor that doesn't have storage"):
+                a.data_ptr()
+            # While compressed sparse tensors don't have a concept of data_ptr
+            # the underlying tensors do. The implementation of to appropriately forwards
+            # the call to the components, which is what we're test here.
+            test_data_ptr(lambda a: a.values().data_ptr())
+            test_data_ptr(lambda a: a.crow_indices().data_ptr())
+            test_data_ptr(lambda a: a.col_indices().data_ptr())
+        else:
+            test_data_ptr(lambda a: a.data_ptr())
 
         if torch.cuda.is_available():
             for non_blocking in [True, False]:
@@ -7647,6 +7611,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(a.device, b.to('cpu', dtype=torch.int32, non_blocking=non_blocking).device)
                     self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
                     self.assertEqual(b.device, b.to(dtype=torch.int32).device)
+
+    def test_to(self):
+        self._test_to_with_layout(torch.strided)
+        self._test_to_with_layout(torch.sparse_csr)
 
     # FIXME: describe this test
     def test_as_subclass(self):

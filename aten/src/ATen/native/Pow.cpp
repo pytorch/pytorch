@@ -11,7 +11,6 @@
 #else
 #include <ATen/ops/float_power_native.h>
 #include <ATen/ops/pow.h>
-#include <ATen/ops/pow_meta.h>
 #include <ATen/ops/pow_native.h>
 #include <ATen/ops/result_type.h>
 #endif
