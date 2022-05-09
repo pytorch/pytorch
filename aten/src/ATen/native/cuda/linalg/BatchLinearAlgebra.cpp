@@ -1,4 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <utility>
+
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
@@ -32,6 +34,7 @@
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/linalg_eigh.h>
 #include <ATen/ops/linalg_eigvalsh.h>
+#include <ATen/ops/linalg_solve_triangular.h>
 #include <ATen/ops/lstsq_native.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -2089,7 +2092,7 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
 #if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
-      "Calling torch.lu on a CUDA tensor requires compiling ",
+      "Calling torch.linalg.lu_factor on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   auto input_data = input.data_ptr<scalar_t>();
@@ -2147,7 +2150,6 @@ static void lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, c
 }
 
 static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  auto batch_size = batchCount(input);
   // MAGMA does not work with batch_size == 0.
   // CuSolver does not work when the matrices have no elements
   if (input.numel() == 0) {
@@ -2155,6 +2157,10 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
     infos.zero_();
     return;
   }
+
+  auto batch_size = batchCount(input);
+  (void) batch_size; // Silence unused warning in some builds
+
 
 #if AT_MAGMA_ENABLED()
   const auto lu_factor_magma = [batch_size](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
@@ -3046,48 +3052,48 @@ REGISTER_CUDA_DISPATCH(svd_stub, &svd_kernel)
 /*
   Solves the matrix equation A X = B
   X and B are n-by-nrhs matrices, A is represented using the LU factorization.
-  This is an in-place routine, content of `b` is overwritten.
+  This is an in-place routine, content of `B` is overwritten.
   This is a "looped" variant for calling single input MAGMA function on batched input.
 
   Args:
-  * `b` -  [in] the right hand side matrix B
-           [out] the solution matrix X
-  * `lu` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
+  * `LU` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
   * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
+  * `B` -  [in] the right hand side matrix B
+           [out] the solution matrix X
 
   For further details, please see the MAGMA documentation for magma_dgetrs_gpu.
 */
 template <typename scalar_t>
-static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
+static void apply_lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
 #if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
-      "Calling torch.lu_solve on a CUDA tensor requires compiling ",
+      "Calling linalg.lu_solve on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
   auto trans = to_magma(transpose);
-  auto b_data = b.data_ptr<scalar_t>();
-  auto lu_data = lu.data_ptr<scalar_t>();
+  auto b_data = B.data_ptr<scalar_t>();
+  auto lu_data = LU.data_ptr<scalar_t>();
 
   // MAGMA requires pivots to be a CPU tensor
   Tensor pivots_cpu = pivots.cpu();
   auto pivots_data = pivots_cpu.data_ptr<magma_int_t>();
 
-  auto b_stride = matrixStride(b);
-  auto lu_stride = lu.dim() > 2 ? lu.stride(-3) : 0;
+  auto b_stride = matrixStride(B);
+  auto lu_stride = LU.dim() > 2 ? LU.stride(-3) : 0;
   auto pivots_stride = pivots_cpu.dim() > 1 ? pivots_cpu.stride(-2) : 0;
-  auto batch_size = batchCount(b);
+  auto batch_size = batchCount(B);
 
-  magma_int_t n = magma_int_cast(lu.size(-2), "n");
-  magma_int_t nrhs = magma_int_cast(b.size(-1), "nrhs");
+  magma_int_t n = magma_int_cast(LU.size(-2), "n");
+  magma_int_t nrhs = magma_int_cast(B.size(-1), "nrhs");
   auto leading_dimension = std::max<magma_int_t>(1, n);
 
-  // lu and pivots tensors can be broadcast to b
+  // LU and pivots tensors can be broadcasted to B
   // here we construct a helper indexing tensor to linearly index into lu and pivots
-  IntArrayRef lu_batch_shape(lu.sizes().data(), lu.dim() - 2);
-  IntArrayRef b_batch_shape(b.sizes().data(), b.dim() - 2);
+  IntArrayRef lu_batch_shape(LU.sizes().data(), LU.dim() - 2);
+  IntArrayRef b_batch_shape(B.sizes().data(), B.dim() - 2);
   BroadcastLinearIndices lu_index(
-      batchCount(lu), lu_batch_shape, b_batch_shape);
+      batchCount(LU), lu_batch_shape, b_batch_shape);
 
   int info = 0;
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
@@ -3108,41 +3114,41 @@ static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const
 /*
   Solves the matrix equation A X = B
   X and B are n-by-nrhs matrices, A is represented using the LU factorization.
-  This is an in-place routine, content of `b` is overwritten.
+  This is an in-place routine, content of `B` is overwritten.
   This is a specialized batched variant, it is expected to be faster than the "looped" version only for small inputs.
 
   Args:
-  * `b` -  [in] the right hand side matrix B
-           [out] the solution matrix X
   * `lu` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
   * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
+  * `B` -  [in] the right hand side matrix B
+           [out] the solution matrix X
 
   For further details, please see the MAGMA documentation for magma_dgetrs_batched.
 */
 template <typename scalar_t>
-static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
+static void apply_lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
 #if !AT_MAGMA_ENABLED()
   TORCH_CHECK(
       false,
-      "Calling torch.lu_solve on a CUDA tensor requires compiling ",
+      "Calling linalg.lu_solve on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. Please rebuild with MAGMA.");
 #else
-  TORCH_INTERNAL_ASSERT(batchCount(b) == batchCount(lu), "batch_size of b and lu must be the same");
-  TORCH_INTERNAL_ASSERT(batchCount(lu) == batchCount(pivots.unsqueeze(-1)), "batch_size of lu and pivots must be the same");
+  TORCH_INTERNAL_ASSERT(batchCount(B) == batchCount(LU), "batch_size of LU and B must be the same");
+  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(pivots.unsqueeze(-1)), "batch_size of LU and pivots must be the same");
   auto trans = to_magma(transpose);
-  auto b_data = b.data_ptr<scalar_t>();
-  auto lu_data = lu.data_ptr<scalar_t>();
+  auto b_data = B.data_ptr<scalar_t>();
+  auto lu_data = LU.data_ptr<scalar_t>();
 
-  magma_int_t n = magma_int_cast(lu.size(-2), "n");
-  magma_int_t nrhs = magma_int_cast(b.size(-1), "nrhs");
+  magma_int_t n = magma_int_cast(LU.size(-2), "n");
+  magma_int_t nrhs = magma_int_cast(B.size(-1), "nrhs");
   auto leading_dimension = std::max<magma_int_t>(1, n);
 
   auto pivots_data = pivots.data_ptr<magma_int_t>();
 
-  auto b_stride = matrixStride(b);
-  auto lu_stride = matrixStride(lu);
+  auto b_stride = matrixStride(B);
+  auto lu_stride = matrixStride(LU);
   auto pivots_stride = pivots.size(-1);
-  magma_int_t batch_size = magma_int_cast(batchCount(b), "batchCount");
+  magma_int_t batch_size = magma_int_cast(batchCount(B), "batchCount");
 
   magma_int_t** pivots_array;
   scalar_t** lu_array;
@@ -3158,7 +3164,7 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
     lu_array[i] = &lu_data[i * lu_stride];
   }
 
-  MAGMAQueue magma_queue(b.get_device());
+  MAGMAQueue magma_queue(B.get_device());
 
   // Compute the result in batches of 65535
   // that is the maximum allowed number for batch_size in MAGMA
@@ -3183,82 +3189,173 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
 #endif
 }
 
-static void lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_batched_magma", [&]{
-    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots, trans);
+static void lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  // There is a bug in MAGMA when TransposeType is transpose or conj-transpose.
+  TORCH_INTERNAL_ASSERT(trans == TransposeType::NoTranspose);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_batched_magma", [&]{
+    apply_lu_solve_batched_magma<scalar_t>(LU, pivots, B, trans);
   });
 }
 
-static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_looped_magma", [&]{
-    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots, trans);
+static void lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_looped_magma", [&]{
+    apply_lu_solve_looped_magma<scalar_t>(LU, pivots, B, trans);
   });
 }
 
-namespace {
-
-c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& b, const Tensor& lu) {
-  if (batchCount(b) != batchCount(lu)) {
-    IntArrayRef b_batch_size(b.sizes().data(), b.dim() - 2);
-    DimVector expand_size(b_batch_size);
-    expand_size.insert(expand_size.end(), {lu.size(-2), lu.size(-1)});
+c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& B, const Tensor& LU) {
+  // B and LU have the same number of dimensions
+  if (batchCount(B) != batchCount(LU)) {
+        auto n = B.dim();
+    auto expand_shape = DimVector(B.sizes().slice(0, n - 2));
+    expand_shape.append({LU.size(-2), LU.size(-1)});
     return c10::MaybeOwned<Tensor>::owned(
-        cloneBatchedColumnMajor(lu.expand(expand_size)));
+        cloneBatchedColumnMajor(LU.expand(expand_shape)));
   } else {
-    return c10::MaybeOwned<Tensor>::borrowed(lu);
+    return c10::MaybeOwned<Tensor>::borrowed(LU);
   }
 }
 
-c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& b,const Tensor& pivots) {
-  if (batchCount(b) != batchCount(pivots.unsqueeze(-1))) {
-    IntArrayRef b_batch_size(b.sizes().data(), b.dim() - 2);
-    DimVector expand_size(b_batch_size);
-    expand_size.insert(expand_size.end(), {pivots.size(-1)});
-    return c10::MaybeOwned<Tensor>::owned(
-        pivots.expand(expand_size).clone(at::MemoryFormat::Contiguous));
+c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& B, const Tensor& pivots) {
+  // B and pivots have the same number of dimensions
+  if (batchCount(B) != batchCount(pivots.unsqueeze(-1))) {
+    auto expand_shape = DimVector(B.sizes().slice(0, B.dim() - 2));
+    expand_shape.push_back(pivots.size(-1));
+    return c10::MaybeOwned<Tensor>::owned(pivots.expand(expand_shape).contiguous());
   } else {
     return c10::MaybeOwned<Tensor>::borrowed(pivots);
   }
 }
 
-}  // anonymous namespace
-
-static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
-  auto batch_size = batchCount(b);
-  auto m = lu.size(-2);
-  auto b2 = b.size(-1);
-  bool over_magma_dim_limit = b2 > 1024;  // magma implementation of LU solve cannot handle a b tensor with last dim > 1024 (https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for)
-  // heuristics determined from tests dicussed in https://github.com/pytorch/pytorch/pull/59148
-#ifdef USE_CUSOLVER
-  if ((batch_size == 1 && m > 512) || (batch_size <= 8 && over_magma_dim_limit)) {
-    lu_solve_looped_cusolver(b, lu, pivots, trans);
+static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  // Trivial case. Remove it once `torch.solve` is removed, as linalg.solve already shortcuts this case
+  if (B.numel() == 0) {
+    return;
   }
-#else
-  if (batch_size == 1) {
-    lu_solve_looped_magma(b, lu, pivots, trans);
+
+  auto batch_size = batchCount(B);
+  auto m = LU.size(-2);
+  auto b2 = B.size(-1);
+  // magma implementation of LU solve cannot handle a b tensor with last dim > 1024
+  // See https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for
+  bool over_batched_magma_dim_limit = b2 > 1024;
+  // heuristics determined from tests dicussed in https://github.com/pytorch/pytorch/pull/72935
+
+  // Computes X = U^{-1}L^{-1}P^T B via triangular solves
+  // Helps mitigating the bugs in magma
+  auto lu_solve_triangular = [m](const Tensor& LU, const Tensor& pivots, const Tensor& B, const TransposeType trans) {
+    auto LU_ = maybe_expand_lu(B, LU);
+    auto pivots_ = maybe_expand_pivots(B, pivots);
+    // LAPACK / cublas / etc returns the permutation in an odd format
+    // Here we transform it to a vector representing a permutation, i.e. a (batch of) vectors st. P(i) = j
+    auto perm = at::arange(m, pivots_->options().dtype(kLong)).expand(pivots_->sizes()).contiguous();
+    auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .declare_static_shape(pivots_->sizes(), /*squash_dim=*/pivots_->dim() - 1)
+      .add_output(perm)
+      .add_input(*pivots_)
+      .build();
+    unpack_pivots_stub(pivots_->device().type(), iter, m);
+
+    if (trans == TransposeType::NoTranspose) {
+      // Get the inverse permutation
+      // This is an insertion sort, and it's equivalent to
+      // perm = at::argsort(perm);
+      // but more parallelisable and O(n), exploiting that perm is a permutation
+      auto id_perm = at::arange(m, perm.options()).expand(perm.sizes());
+      auto inv_perm = perm.scatter(-1, perm, id_perm);
+      // B1 = P^T @ B  (must be done out-of-place as B is both source and target)
+      auto B1 = B.scatter(-2, inv_perm.unsqueeze(-1).expand_as(B), B);
+      // B = L^{-1} @ B1
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, std::move(B1), /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
+      // B = U^{-1} @ B
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, B, /*upper=*/true);
+    } else {
+      auto LU_H = LU_->mH();
+      // B = U^{-H} @ B
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU_H, B, /*upper=*/false);
+      // B = L^{-H} @ B
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), LU_H, B, /*upper=*/true, /*left=*/true, /*unitriangular=*/true);
+      // B = P @ B
+      B.scatter_(-2, perm.unsqueeze(-1).expand_as(B), B.clone());
+    }
+  };
+
+#ifdef CUDART_VERSION
+  auto lu_solve_batched_cublas_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+    auto LU_ = maybe_expand_lu(B, LU);
+    auto pivots_ = maybe_expand_pivots(B, pivots);
+    lu_solve_batched_cublas(*LU_, *pivots_, B, trans);
+  };
+#endif
+
+  auto lu_solve_batched_magma_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+    auto LU_ = maybe_expand_lu(B, LU);
+    auto pivots_ = maybe_expand_pivots(B, pivots);
+    lu_solve_batched_magma(*LU_, *pivots_, B, trans);
+  };
+
+
+  // Preferred Backend
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+#ifdef USE_CUSOLVER
+  if (preferred_backend == at::LinalgBackend::Cusolver) {
+    if (batch_size <= 2 && m >= 64) {
+      lu_solve_looped_cusolver(LU, pivots, B, trans);
+    } else {
+      lu_solve_batched_cublas_fn(LU, pivots, B, trans);
+    }
+    return;
+  } else
+#endif // ifdef USE_CUSOLVER
+  if (preferred_backend == at::LinalgBackend::Magma) {
+    // Looped magma is very slow, but batched magma is buggy in these two cases
+    if (!over_batched_magma_dim_limit && trans == TransposeType::NoTranspose) {
+      lu_solve_batched_magma_fn(LU, pivots, B, trans);
+    }
+    else {
+      lu_solve_looped_magma(LU, pivots, B, trans);
+    }
+    return;
+  }
+
+  // Summary: In most cases we use cublas / cusolver
+  // MAGMA is faster for large matrices, but it is buggy for trans != NoTranspose or for large batches.
+  // LU solve is fast in some cases when adjoint=True
+#ifdef CUDART_VERSION
+#ifdef USE_CUSOLVER
+  if (batch_size <= 2 && m >= 64) {
+    lu_solve_looped_cusolver(LU, pivots, B, trans);
+    return;
   }
 #endif // ifdef USE_CUSOLVER
-#ifdef CUDART_VERSION
-  else if ((batch_size > 2 && m <= 128) || (batch_size > 8 && over_magma_dim_limit)) {
-    c10::MaybeOwned<Tensor> lu_ = maybe_expand_lu(b, lu);
-    c10::MaybeOwned<Tensor> pivots_ = maybe_expand_pivots(b, pivots);
-    lu_solve_batched_cublas(b, *lu_, *pivots_, trans);
+  if (trans != TransposeType::NoTranspose && m <= 2 && batch_size >= 128) {
+    lu_solve_triangular(LU, pivots, B, trans);
+  }
+#if AT_MAGMA_ENABLED()
+  else if (!over_batched_magma_dim_limit && trans == TransposeType::NoTranspose && m >= 256 && batch_size >= 128) {
+    lu_solve_batched_magma_fn(LU, pivots, B, trans);
+  }
+#endif
+  else {
+    lu_solve_batched_cublas_fn(LU, pivots, B, trans);
+  }
+#else
+  // If it's not buggy and it's faster than solve triangular (large matrix and large batch regime)
+  // we use batched_magma, otherwise, we resort to two triangular solves
+  // For trans != TransposeType::NoTranspose lu_solve_triangular is faster anyway
+  if (!over_batched_magma_dim_limit && trans == TransposeType::NoTranspose && m >= 256 && batch_size >= 128) {
+    lu_solve_batched_magma_fn(LU, pivots, B, trans);
+  }
+  else {
+    lu_solve_triangular(LU, pivots, B, trans);
   }
 #endif // ifdef CUDART_VERSION
-  else {
-    c10::MaybeOwned<Tensor> lu_ = maybe_expand_lu(b, lu);
-    c10::MaybeOwned<Tensor> pivots_ = maybe_expand_pivots(b, pivots);
-    lu_solve_batched_magma(b, *lu_, *pivots_, trans);
-  }
 }
 
-REGISTER_CUDA_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_dispatch);
-
-static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  lu_solve_trans_dispatch(b, lu, pivots, TransposeType::NoTranspose);
-}
-
-REGISTER_CUDA_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
+REGISTER_CUDA_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

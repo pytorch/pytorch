@@ -352,6 +352,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
     if(BUILD_LAZY_TS_BACKEND)
       list(APPEND GENERATED_CXX_TORCH
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterAutogradLazy.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterLazy.cpp"
@@ -432,6 +433,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
@@ -655,6 +657,26 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
     )
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
+  endif()
+
+  if(USE_MLCOMPUTE)
+    include(../mlc/mlc_build.cmake)
+  endif()
+
+  if(BUILD_ONEDNN_GRAPH)
+    list(APPEND Caffe2_CPU_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/LlgaTensorImpl.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_fuser.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_rewriter.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_helper.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/register_interface.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/interface.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/defer_size_check.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/layout_propagation.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/prepare_binary.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/guard_shape.cpp
+    )
   endif()
 
   if(USE_ROCM)
