@@ -1442,7 +1442,7 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:
     return torch._C._nn.glu(input, dim)
 
 
-def hardtanh(input: Tensor, min_val: float = -1.0, max_val: float = 1.0, inplace: bool = False) -> Tensor:
+def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
@@ -2332,7 +2332,8 @@ def embedding_bag(
     return ret
 
 
-embedding_bag.__doc__ = embedding_bag.__doc__.format(**reproducibility_notes)
+if embedding_bag.__doc__:
+    embedding_bag.__doc__ = embedding_bag.__doc__.format(**reproducibility_notes)
 
 
 def _verify_batch_size(size: List[int]) -> None:
@@ -2566,7 +2567,8 @@ def ctc_loss(
     )
 
 
-ctc_loss.__doc__ = ctc_loss.__doc__.format(**reproducibility_notes)
+if ctc_loss.__doc__:
+    ctc_loss.__doc__ = ctc_loss.__doc__.format(**reproducibility_notes)
 
 
 def nll_loss(
@@ -3670,7 +3672,8 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
-upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
+if upsample.__doc__:
+    upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
@@ -3911,7 +3914,8 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     )
 
 
-interpolate.__doc__ = interpolate.__doc__.format(**reproducibility_notes)
+if interpolate.__doc__:
+    interpolate.__doc__ = interpolate.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
@@ -3948,7 +3952,8 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     return interpolate(input, size, scale_factor, mode="nearest")
 
 
-upsample_nearest.__doc__ = upsample_nearest.__doc__.format(**reproducibility_notes)
+if upsample_nearest.__doc__:
+    upsample_nearest.__doc__ = upsample_nearest.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
@@ -4003,7 +4008,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     return interpolate(input, size, scale_factor, mode="bilinear", align_corners=True)
 
 
-upsample_bilinear.__doc__ = upsample_bilinear.__doc__.format(**reproducibility_notes)
+if upsample_bilinear.__doc__:
+    upsample_bilinear.__doc__ = upsample_bilinear.__doc__.format(**reproducibility_notes)
 
 GRID_SAMPLE_INTERPOLATION_MODES = {
     "bilinear": 0,

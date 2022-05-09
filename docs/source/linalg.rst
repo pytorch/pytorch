@@ -34,6 +34,7 @@ Decompositions
 
     cholesky
     qr
+    lu
     lu_factor
     eig
     eigvals
@@ -94,6 +95,15 @@ Tensor Operations
 
     tensorinv
     tensorsolve
+
+Misc
+----
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    vander
 
 Experimental Functions
 ----------------------
