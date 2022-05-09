@@ -123,6 +123,7 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
         "torch/csrc/lazy/generated/LazyIr.h",
+        "torch/csrc/lazy/generated/LazyIr.cpp",
         "torch/csrc/lazy/generated/LazyNativeFunctions.h",
         "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
         "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
@@ -1906,12 +1907,21 @@ test_suite(
 # as if they are from this package, so we alias them for
 # compatibility.
 
-alias(
-    name = "native_functions.yaml",
-    actual = "aten/src/ATen/native/native_functions.yaml",
-)
-
-alias(
-    name = "tags.yaml",
-    actual = "aten/src/ATen/native/tags.yaml",
-)
+[
+    alias(
+        name = paths.basename(path),
+        actual = path,
+    )
+    for path in [
+        "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
+        "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
+        "aten/src/ATen/templates/LazyIr.cpp",
+        "aten/src/ATen/templates/LazyIr.h",
+        "aten/src/ATen/templates/RegisterDispatchKey.cpp",
+        "aten/src/ATen/native/native_functions.yaml",
+        "aten/src/ATen/native/tags.yaml",
+        "aten/src/ATen/native/ts_native_functions.yaml",
+        "torch/csrc/lazy/core/shape_inference.h",
+        "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
+    ]
+]
