@@ -729,6 +729,7 @@
   variants: function, method
   dispatch:
     ZeroTensor, CPU, CUDA, Meta: as_strided_tensorimpl
+    MPS: as_strided_tensorimpl_mps
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_check: NoCheck
   device_guard: False

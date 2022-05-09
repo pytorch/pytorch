@@ -64,6 +64,16 @@ MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
   return gen;
 }
 
+std::string getStridedKey(const Tensor& self, const IntArrayRef sz,
+                          const IntArrayRef strides, int64_t offset) {
+  // TODO: move storage_offset to a PlaceholderTensor and strides to a
+  // tensor too, to avoid too many cache entries.
+  return std::to_string((uintptr_t)self.storage().data()) +
+              ":" + mps::getArrayRefString(sz) +
+              ":" + mps::getArrayRefString(strides) +
+              ":" + std::to_string(offset);
+}
+
 void runMPSGraph(
     MPSStream* mpsStream,
     MPSGraph* mpsGraph,
@@ -254,6 +264,68 @@ void printTensorNDArray(const Tensor& t) {
                                                          dataType:selfDType];
   [tdata printNDArray];
 }
+
+id<MTLBuffer> gatherViewTensor(const at::Tensor& src, id<MTLBuffer> sourceBuffer) {
+  assert (!src.is_contiguous());
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* stream = getCurrentMPSStream();
+  @autoreleasepool {
+    struct CachedGraph : public MPSCachedGraph
+    {
+      CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+      MPSGraphTensor* inputTensor_ = nil;
+      MPSGraphTensor* outputTensor_ = nil;
+      IntArrayRef size_;
+      IntArrayRef stride_;
+      int64_t storage_offset_;
+    };
+
+    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+    string key = getStridedKey(src, src.sizes(), src.strides(), src.storage_offset());
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    if (cachedGraph) {
+      @autoreleasepool {
+        MPSGraphTensor* inputTensor = cachedGraph->inputTensor_;
+        auto output = at::native::empty_mps(
+                        src.sizes(),
+                        src.scalar_type(),
+                        c10::nullopt,
+                        kMPS,
+                        c10::nullopt,
+                        c10::nullopt);
+        MPSGraphTensorData* inputTensorData = [[MPSGraphTensorData alloc] initWithMTLBuffer: sourceBuffer
+                                                                            shape: [inputTensor shape]
+                                                                            dataType: [inputTensor dataType]];
+        id<MTLBuffer> resultBuffer = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
+        MPSGraphTensorData* outputTensorData = [[MPSGraphTensorData alloc] initWithMTLBuffer: resultBuffer
+                                                                            shape: getMPSShape(src.sizes())
+                                                                            dataType: getMPSDataType(src.scalar_type())];
+        NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+          inputTensor : inputTensorData
+        };
+
+        NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+          cachedGraph->outputTensor_ : outputTensorData
+        };
+
+        runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+#if _DEBUG
+        NSLog(@"%@", [cachedGraph->graph() debugDescription]);
+        TORCH_WARN("We have a non-contiguous tensor in copy_from_mps with key ", key);
+
+        //// Update the Blit sourceBuffer to the result of this operation
+        printTensorNDArray(output);
+#endif
+        return resultBuffer;
+      }
+    } else {
+      TORCH_WARN("We have a non-contiguous tensor in copy_from_mps with no cached graph with key ", key);
+    }
+  }
+  return nil;
+}
+
+
 
 Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape)
 {
