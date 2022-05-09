@@ -183,7 +183,6 @@ class TestCommon(TestCase):
 
         # Checks that dtypes are listed correctly and generates an informative
         #   error message
-
         supported_forward = supported_dtypes - unsupported_dtypes
         partially_supported_forward = supported_dtypes & unsupported_dtypes
         unsupported_forward = unsupported_dtypes - supported_dtypes
@@ -335,11 +334,7 @@ class TestCommon(TestCase):
 
             meta_sample = sample.transform(_to_tensormeta)
             meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
-            if isinstance(result, torch.Tensor):
-                prims.utils.compare_tensor_meta(result, meta_result)
-            elif isinstance(result, Sequence):
-                for a, b in zip(result, meta_result):
-                    prims.utils.compare_tensor_meta(a, b)
+            prims.utils.compare_tensor_meta(result, meta_result)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference.
@@ -347,28 +342,18 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_reference_consistency(self, device, dtype, op):
-        for sample in op.reference_inputs(device, dtype, requires_grad=False):
+        for sample in op.torch_opinfo.reference_inputs(device, dtype, requires_grad=False):
             actual = op(sample.input, *sample.args, **sample.kwargs)
             expected = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
             self.assertEqual(
                 actual,
                 expected,
-                exact_stride=False,
+                exact_stride=True,
                 exact_device=True,
                 exact_layout=True,
                 exact_is_coalesced=True,
             )
-
-            # TODO: move Sequence case into utils.compare_significant_strides
-            if isinstance(actual, torch.Tensor):
-                prims.utils.compare_significant_strides(actual, expected)
-            if isinstance(actual, Sequence):
-                for a, b in zip(actual, expected):
-                    prims.utils.compare_significant_strides(a, b)
-
-            # TODO: FIXME: enable view consistency testing
-            # self.assertEqual(actual._is_view(), expected._is_view())
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -1129,7 +1114,7 @@ class TestMathBits(TestCase):
 
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
-    @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
+    @ops(op_db, allowed_dtypes=(torch.cfloat,))
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
             self.skipTest("Operation doesn't support conjugated inputs.")
@@ -1151,7 +1136,7 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
-    @ops(ops_and_refs, allowed_dtypes=(torch.double,))
+    @ops(op_db, allowed_dtypes=(torch.double,))
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
@@ -1170,7 +1155,7 @@ class TestMathBits(TestCase):
             lambda x: True,
         )
 
-    @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
+    @ops(op_db, allowed_dtypes=(torch.cdouble,))
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
