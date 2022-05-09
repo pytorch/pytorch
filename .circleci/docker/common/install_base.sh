@@ -23,8 +23,7 @@ install_ubuntu() {
   # TODO: Remove this once nvidia package repos are back online
   # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
   # shellcheck disable=SC2046
-  apt-get install -y sudo
-  sudo sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
+  sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
 
   # Install common dependencies
   apt-get update
@@ -52,6 +51,7 @@ install_ubuntu() {
     libsndfile-dev \
     software-properties-common \
     wget \
+    sudo \
     vim
 
   # Should resolve issues related to various apt package repository cert issues
