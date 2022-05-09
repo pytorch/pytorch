@@ -9,6 +9,8 @@
 namespace torch {
 namespace jit {
 
+using ShapeDataMap = std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>;
+
 class ConstantValueMap {
  public:
   static ConstantValueMap& getInstance();
@@ -53,7 +55,7 @@ class ConstantValueMap {
   static c10::optional<c10::SymbolicShape> GetShapeValue(
       const std::string& tensorName);
 
-  static std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>& GetInferredShapeData();
+  static ShapeDataMap& GetInferredShapeData();
 
   static SymbolDimMap& GetSymbolDimMap();
 
@@ -87,7 +89,7 @@ class ConstantValueMap {
   // this tensor represents a shape.
   std::unordered_map<std::string, c10::SymbolicShape> shapeValueMap;
   // Stores earlier data propagation results so that they are accessible during future node-level shape inference.
-  std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> inferredShapeData;
+  ShapeDataMap inferredShapeData;
   SymbolDimMap symbolDimMap;
 };
 

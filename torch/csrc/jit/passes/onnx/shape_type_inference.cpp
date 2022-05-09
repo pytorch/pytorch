@@ -1994,11 +1994,14 @@ void ONNXShapeTypeInference(
         switch (n->kind()) {
           case ::c10::onnx::Shape:
           case ::c10::onnx::Gather: {
-            onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, inferred_shape_data);
+            auto* schema_registry = onnx::OpSchemaRegistry::Instance();
+            onnx::ShapeInferenceOptions options{false, false, true};
+            onnx::shape_inference::InferShapes(*model_proto, schema_registry, options, &inferred_shape_data);
             break;
           }
           default: {
             onnx::shape_inference::InferShapes(*model_proto);
+            break;
           }
         }
         UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_dim_map);
