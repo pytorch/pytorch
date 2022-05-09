@@ -332,10 +332,10 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual(count, len(self.temp_files))
 
         # functional API
-        datapipe2 = datapipe1.open_files(mode='b')
+        datapipe3 = datapipe1.open_files(mode='b')
 
         count = 0
-        for rec in datapipe2:
+        for rec in datapipe3:
             count = count + 1
             self.assertTrue(rec[0] in self.temp_files)
             with open(rec[0], 'rb') as f:
@@ -345,7 +345,7 @@ class TestIterableDataPipeBasic(TestCase):
 
         # __len__ Test
         with self.assertRaises(TypeError):
-            len(datapipe2)
+            len(datapipe3)
 
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
@@ -2147,29 +2147,13 @@ class TestCircularSerialization(TestCase):
         self.assertTrue(str(dp2) in str(res3))  # Quick check to ensure the result isn't blank
         self.assertTrue(str(dp2) in str(res4))
 
-    class LambdaIterDataPipe(IterDataPipe):
-
-        @staticmethod
-        def add_one(x):
-            return x + 1
-
-        @classmethod
-        def classify(cls, x):
-            return 0
-
-        def add_v(self, x):
-            return x + self.v
+    class LambdaIterDataPipe(CustomIterDataPipe):
 
         def __init__(self, fn, source_dp=None):
-            self.v = 1
+            super().__init__(fn, source_dp)
             self.container = [lambda x: x + 1, ]
-            self.fn = fn
             self.lambda_fn = lambda x: x + 1
-            self.source_dp = source_dp if source_dp else dp.iter.IterableWrapper([1, 2, 4])
             self._dp = self.source_dp.map(self.add_one).map(self.lambda_fn).map(self.add_v).demux(2, self.classify)[0]
-
-        def __iter__(self):
-            yield from self._dp
 
     @skipIfNoDill
     def test_circular_serialization_with_dill(self):
