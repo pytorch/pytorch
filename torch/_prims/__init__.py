@@ -8,6 +8,7 @@ from torch._prims.utils import (
     TensorMeta,
     ShapeType,
     getnvFuserDtype,
+    DimsType,
     DimsSequenceType,
     StrideType,
     Number,
@@ -95,17 +96,20 @@ __all__ = [
     #
     "broadcast_in_dim",
     "collapse_view",
+    "expand_dims",
     "slice",
     "slice_in_dim",  # implemented using slice -- make this a ref?
     "split_dim",
     "squeeze",
     "transpose",
+    "view_of",
     #
     # Shape prims
     #
     "collapse",
     "concatenate",
     "reshape",
+    "rev",
     #
     # Conditional prims
     #
@@ -113,6 +117,7 @@ __all__ = [
     #
     # Data conversion and movement prims
     #
+    "clone",
     "convert_element_type",
     "device_put",
     #
@@ -828,10 +833,10 @@ def _broadcast_in_dim_nvfuser(
 
 
 _broadcast_in_dim_doc = """
-  Creates a view of t with the specified shape.
+  Creates a view of a with the specified shape.
 
   Allows adding dimensions of any length and broadcasting
-  dimensions of length one in t to any length.
+  dimensions of length one in a to any length.
 
   The location of the broadcast dimensions must be specified
   using the broadcast_dimensions argument. Changing the
@@ -848,43 +853,67 @@ broadcast_in_dim = _make_prim(
 )
 
 
-def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
+def _collapse_view_helper(
+    a: TensorLikeType, start: int, end: int
+) -> Tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
-    shape = a.shape
-    strides = a.stride()
+    # Special-case for zero dimensional tensors
+    if a.ndim == 0:
+        shape = (1,)
+        strides = (1,)
+    else:
+        shape = a.shape  # type: ignore[assignment]
+        strides = a.stride()
 
-    utils.validate_idx(shape, start)
-    utils.validate_exclusive_idx(shape, end)
+    utils.validate_idx(len(shape), start)
+    utils.validate_exclusive_idx(len(shape), end)
 
     # Verifies end is strictly greater than start
     # (Collapse requires a non-empty interval)
-    assert end > start
+    if end <= start:
+        msg = "Attempting to collapse but end, {0}, is less than or equal to start, {1}!".format(
+            end, start
+        )
+        raise ValueError(msg)
 
     length = 1
     stride = 1
     for idx in range(start, end):
         if idx != (end - 1):
-            assert strides[idx] == strides[idx + 1] * shape[idx + 1]
+            if not (strides[idx] == strides[idx + 1] * shape[idx + 1]):
+                return None, None
         length = length * shape[idx]
         stride = stride * strides[idx]
 
     new_shape = shape[:start] + (length,) + shape[end:]
     new_strides = strides[:start] + (stride,) + shape[end:]
 
+    return new_shape, new_strides
+
+
+def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
+    new_shape, new_strides = _collapse_view_helper(a, start, end)
+
+    if new_shape is None:
+        msg = "Attempting to view a collapsed tensor, but no such view exists!"
+        raise ValueError(msg)
+
     return TensorMeta(a, shape=new_shape, strides=new_strides)
 
 
 def _collapse_view_aten(a: Tensor, start: int, end: int) -> Tensor:
-    # Short-circuits on null op
-    if start == end - 1:
-        return a
+    # Special-cases zero-dim tensors
+    if a.ndim == 0:
+        shape = (1,)
+    else:
+        shape = a.shape  # type: ignore[assignment]
 
     dim_length = 1
     for idx in range(start, end):
-        dim_length = dim_length * a.shape[idx]
+        dim_length = dim_length * shape[idx]
 
-    new_shape = a.shape[0:start] + (dim_length,) + a.shape[end:]
+    new_shape = shape[0:start] + (dim_length,) + shape[end:]
 
     return a.view(new_shape)
 
@@ -913,6 +942,27 @@ collapse_view = _make_prim(
     return_type=RETURN_TYPE.VIEW,
     doc=_collapse_view_doc,
 )
+
+
+def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeType:
+    """
+    Creates a view of a with a.ndim + len(dimensions) dimensions, with new
+    dimensions of length one at the dimensions specified by dimensions.
+    """
+    dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))  # type: ignore[arg-type]
+    if len(set(dims)) != len(dims):
+        msg = "Received duplicate dimensions to expand in {0}".format(str(dimensions))
+        raise ValueError(msg)
+
+    new_shape = list(a.shape)
+    for idx in dims:
+        new_shape.insert(idx, 1)
+
+    broadcast_dimensions = [
+        idx for idx in range(len(new_shape)) if idx not in dimensions
+    ]
+    return broadcast_in_dim(a, new_shape, broadcast_dimensions)
+
 
 # Note: saves the Python slice object because we're about to clobber its name with the slice prim
 pyslice = slice
@@ -1123,17 +1173,22 @@ slice_in_dim = _make_prim(
 
 def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLikeType:
     assert isinstance(a, TensorLike)
-    utils.validate_idx(a.shape, dim)
+    utils.validate_idx(a.ndim, dim)
     utils.validate_dim_length(outer_length)
 
     # Verifies the dim can be split with the specified lhs_length
     _inner_length = a.shape[dim] / outer_length
     inner_length: int = int(_inner_length)
-    assert inner_length == _inner_length
+
+    if inner_length != _inner_length:
+        msg = "Attempting to split dimension of length {0}, but outer length of {1} divides it with a remainder!".format(
+            a.shape[dim], outer_length
+        )
+        raise ValueError(msg)
 
     new_shape: List[int] = []
     new_strides: List[int] = []
-    for idx in a.shape:
+    for idx in range(a.ndim):
         if idx == dim:
             new_shape.extend((outer_length, inner_length))
             new_strides.extend((a.stride()[idx] * inner_length, a.stride()[idx]))
@@ -1172,7 +1227,7 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
     for idx in dimensions:
-        utils.validate_idx(a.shape, idx)
+        utils.validate_idx(a.ndim, idx)
         assert a.shape[idx] == 1
 
     new_shape = []
@@ -1188,8 +1243,10 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
 
 
 def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
+    squeezes = 0
     for idx in dimensions:
-        a = torch.squeeze(a, dim=idx)
+        a = torch.squeeze(a, dim=(idx - squeezes))
+        squeezes = squeezes + 1
 
     return a
 
@@ -1249,6 +1306,27 @@ transpose = _make_prim(
     doc=_transpose_doc,
 )
 
+
+def _view_of_meta(a: TensorLikeType) -> TensorLikeType:
+    return TensorMeta(a)
+
+
+def _view_of_aten(a: Tensor) -> Tensor:
+    return a.view(a.shape)
+
+
+_view_of_doc = """
+    Creates a view of the tensor.
+    """
+
+view_of = _make_prim(
+    name="view_of",
+    meta=_view_of_meta,
+    impl_aten=_view_of_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_view_of_doc,
+)
+
 #
 # Shape operations
 #
@@ -1256,7 +1334,7 @@ def collapse(a: Tensor, start: int, end: int) -> Tensor:
     """
     Wrapper around reshape that collapses a span of dimensions.
 
-    See merge_dims for the corresponding view operation.
+    See collapse_view for the corresponding view operation.
     """
 
     dim_length = 1
@@ -1280,7 +1358,7 @@ def _concatenate_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLike
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
     shape = tensors[0].shape
-    utils.validate_idx(shape, dim)
+    utils.validate_idx(tensors[0].ndim, dim)
 
     # Verifies same shape (except in the concat dimension)
     concat_length = 0
@@ -1321,20 +1399,23 @@ concatenate = _make_prim(
 )
 
 
-# TODO: needs to return the proper meta tensor
-def _reshape_meta(a: TensorLikeType, shape: Sequence):
+def _reshape_meta(a: TensorLikeType, shape: ShapeType):
     assert isinstance(a, TensorLike)
     utils.validate_shape(shape)
 
     # Validates the tensor and the requested shape have the
     # same number of elements
-    numel = reduce(lambda acc, x: acc * x, shape)
-    assert a.numel() == numel
+    numel = reduce(operator.mul, shape)
+    if numel != a.numel():
+        msg = "Attempting to reshape a tensor with {0} elements to a shape with {1} elements!".format(
+            a.numel(), numel
+        )
+        raise ValueError(msg)
+
+    return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
 
 
-def _reshape_aten(
-    a: Tensor, shape: Union[torch.Size, List[int], Tuple[int, ...]]
-) -> Tensor:
+def _reshape_aten(a: Tensor, shape: ShapeType) -> Tensor:
     return a.clone().reshape(shape).contiguous()
 
 
@@ -1348,6 +1429,24 @@ reshape = _make_prim(
     impl_aten=_reshape_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_reshape_doc,
+)
+
+
+def _rev_meta(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    utils.validate_dimension_indices(a.ndim, dims)
+    return TensorMeta(a)
+
+
+_rev_doc = """
+    Reverses the order of elements along the given dimensions.
+    """
+
+rev = _make_prim(
+    name="rev",
+    meta=_rev_meta,
+    impl_aten=torch.flip,
+    return_type=RETURN_TYPE.NEW,
+    doc=_rev_doc,
 )
 
 #
@@ -1389,6 +1488,28 @@ select = _make_prim(
 #
 # Type conversions
 #
+# TODO: model memory format on TensorMeta
+def _clone_meta(
+    a: TensorLikeType, *, memory_format: torch.memory_format
+) -> TensorLikeType:
+    return TensorMeta(a)
+
+
+def _clone_aten(a: Tensor, *, memory_format: torch.memory_format) -> Tensor:
+    return torch.clone(a, memory_format=memory_format)
+
+
+_clone_doc = """
+    Creates a copy of a tensors.
+"""
+
+clone = _make_prim(
+    name="clone",
+    meta=_clone_meta,
+    impl_aten=_clone_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_clone_doc,
+)
 
 
 def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
