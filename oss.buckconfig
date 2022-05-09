@@ -3,13 +3,13 @@ name = BUILD.buck
 
 [repositories]
   pytorch = .
-  #bazel_skylib = third_party:bazel-skylib
+  # bazel_skylib = third_party/bazel-skylib
 
 [download]
   in_build = true
 
 [cxx]
-  cxxflags = -std=c++14
+  cxxflags = -std=c++17
   should_remap_host_platform = true
 
 [project]
