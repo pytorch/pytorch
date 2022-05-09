@@ -35,7 +35,7 @@ from torchgen.api.types import (
 _valueT = None
 
 
-def getValueT():
+def getValueT() -> BaseCppType:
     global _valueT
     if not _valueT:
         raise NotImplementedError(
@@ -45,7 +45,7 @@ def getValueT():
     return _valueT
 
 
-def setValueT(val):
+def setValueT(val: BaseCppType) -> None:
     global _valueT
     _valueT = val
 
