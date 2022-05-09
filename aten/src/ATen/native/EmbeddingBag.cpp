@@ -90,7 +90,8 @@ index_select_add(const Tensor &select_indices,
                              const Tensor& /*offsets*/,
                              bool /*include_last_offset*/,
                              Tensor &bag_size,
-                             index_t padding_idx) {
+                             index_t padding_idx,
+                             _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   TORCH_CHECK(select_indices.numel() == add_indices.numel());
   auto* add_indices_data = add_indices.data_ptr<index_t>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -167,7 +168,8 @@ index_select_add(const Tensor &select_indices,
                              const Tensor& offsets,
                              bool include_last_offset,
                              Tensor &bag_size,
-                             index_t padding_idx) {
+                             index_t padding_idx,
+                             _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   int64_t ddim = src.size(1);
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* output_data = output.data_ptr<at::Half>();
@@ -316,7 +318,8 @@ index_select_add(const Tensor &select_indices,
                              const Tensor& offsets,
                              bool include_last_offset,
                              Tensor &bag_size,
-                             index_t padding_idx) {
+                             index_t padding_idx,
+                             _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   int64_t ddim = src.size(1);
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* output_data = output.data_ptr<float>();
@@ -443,7 +446,8 @@ index_select_scale_add(const Tensor &select_indices,
                                    const Tensor& /*offsets*/,
                                    bool /*include_last_offset*/,
                                    Tensor &bag_size,
-                                   index_t padding_idx) {
+                                   index_t padding_idx,
+                                   _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   AT_ASSERT(select_indices.numel() == add_indices.numel());
   auto* add_indices_data = add_indices.data_ptr<index_t>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -498,7 +502,8 @@ index_select_scale_add(const Tensor &select_indices,
                        const Tensor& offsets,
                        bool include_last_offset,
                        Tensor &bag_size,
-                       index_t padding_idx) {
+                       index_t padding_idx,
+                       _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   int64_t ddim = src.size(1);
   auto* scale_data = scale.data_ptr<at::Half>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -650,7 +655,8 @@ index_select_scale_add(const Tensor &select_indices,
                                           const Tensor& offsets,
                                           bool include_last_offset,
                                           Tensor &bag_size,
-                                          index_t padding_idx) {
+                                          index_t padding_idx,
+                                          _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   int64_t ddim = src.size(1);
   auto* scale_data = scale.data_ptr<float>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -1015,18 +1021,18 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
                             const Tensor &weight, const Tensor &indices,
                             const Tensor &offsets, const int64_t mode,
                             const c10::optional<Tensor>& per_sample_weights,
-                            bool include_last_offset, int64_t padding_idx) {
+                            bool include_last_offset, int64_t padding_idx, _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   if (mode == MODE_MEAN || mode == MODE_SUM) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_no_grad_cpu_out",
-      [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx]() {
+      [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx, &fbgemm_kernel_cache]() {
       AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_no_grad_cpu_out",
-        [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx]() {
+        [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx, &fbgemm_kernel_cache]() {
         if (per_sample_weights.has_value() && per_sample_weights.value().defined()) {
           TORCH_INTERNAL_ASSERT(mode == MODE_SUM);
           index_select_scale_add<scalar_t, index_t>(
-            indices, offset2bag, per_sample_weights.value(), weight, output, offsets, include_last_offset, bag_size, padding_idx);
+            indices, offset2bag, per_sample_weights.value(), weight, output, offsets, include_last_offset, bag_size, padding_idx, fbgemm_kernel_cache);
         } else {
-          index_select_add<scalar_t, index_t>(indices, offset2bag, weight, output, offsets, include_last_offset, bag_size, padding_idx);
+          index_select_add<scalar_t, index_t>(indices, offset2bag, weight, output, offsets, include_last_offset, bag_size, padding_idx, fbgemm_kernel_cache);
         }
       });
     });
@@ -1187,7 +1193,8 @@ void _embedding_bag_cpu_out(
     const bool /* sparse */,
     const c10::optional<at::Tensor>& per_sample_weights,
     const bool include_last_offset,
-    const c10::optional<int64_t>& padding_idx) {
+    const c10::optional<int64_t>& padding_idx,
+    _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   at::native::check_arguments(
       weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
@@ -1226,7 +1233,8 @@ void _embedding_bag_cpu_out(
       mode,
       per_sample_weights,
       include_last_offset,
-      padding_idx.value_or(-1));
+      padding_idx.value_or(-1),
+      fbgemm_kernel_cache);
 }
 
 // Assumes all input tensors are contiguous.
