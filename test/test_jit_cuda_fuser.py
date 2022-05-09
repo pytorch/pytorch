@@ -126,6 +126,17 @@ class TestCudaFuser(JitTestCase):
     def setUp(self):
         super(TestCudaFuser, self).setUp()
 
+        self.skip_node_list = []
+        disabled_ops = ("aten::batch_norm",
+                        "aten::_batch_norm_impl_index",
+                        "aten::_batch_norm_impl_index_backward",
+                        "aten::native_batch_norm_backward")
+        for op in disabled_ops:
+            disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
+            if disabled_flag:
+                torch._C._jit_set_nvfuser_skip_node_kind(op, True)
+                self.skip_node_list.append(op)
+
         # cpu backup to avoid errors in case this is run on a CPU-only machine
         dev = 'cuda' if RUN_NVFUSER else 'cpu'
         self.special_values = torch.tensor(
@@ -165,6 +176,12 @@ class TestCudaFuser(JitTestCase):
             self.cuda_fuser_options = CudaFuserTestOptions()
 
     def tearDown(self):
+        # restoring skip node to the configuration before tests
+        for op in self.skip_node_list:
+            disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
+            if !disabled_flag:
+                torch._C._jit_set_nvfuser_skip_node_kind(op, True)
+
         if(RUN_NVFUSER):
             self.cuda_fuser_options.restore()
         super(TestCudaFuser, self).tearDown()
@@ -1631,10 +1648,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_norm_half_layer(self):
-        op = "aten::batch_norm"
-        disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
         size = [2, 4, 2, 2]
 
         for is_batch_norm_else_instance_norm in [False, True]:
@@ -1642,19 +1655,11 @@ class TestCudaFuser(JitTestCase):
                 self._norm_helper(size, torch.float16, "cuda", 1e-3, is_batch_norm_else_instance_norm,
                                   memory_format=mf, layer_dtype=torch.float16)
 
-        # restore skip set
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_norm_channels_last(self):
-        op = "aten::batch_norm"
-        disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
         size = [3, 4, 5, 6]
 
         with torch.backends.cudnn.flags(enabled=False):
@@ -1662,19 +1667,11 @@ class TestCudaFuser(JitTestCase):
                 for mf in [torch.channels_last, torch.contiguous_format]:
                     self._norm_helper(size, torch.float32, "cuda", 1e-4, is_batch_norm_else_instance_norm, memory_format=mf)
 
-        # restore skip set
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_norm(self):
-        op = "aten::batch_norm"
-        disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
         output_elements = 10000
         channel_sizes = [67, 457, 1024, 4096]
 
@@ -1687,19 +1684,11 @@ class TestCudaFuser(JitTestCase):
                         x[1] = C
                         self._norm_helper(x, torch.float32, "cuda", 1e-4, is_batch_norm_else_instance_norm)
 
-        # restore skip set
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_norm_large(self):
-        op = "aten::batch_norm"
-        disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
         output_elements = 262144
         channel_sizes = 67, 457, 1024
 
@@ -1711,19 +1700,11 @@ class TestCudaFuser(JitTestCase):
                     x[1] = C
                     self._norm_helper(x, torch.float32, "cuda", 1e-4, is_batch_norm_else_instance_norm)
 
-        # restore skip set
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_norm_half(self):
-        op = "aten::batch_norm"
-        disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
         output_elements = 10000
         channel_sizes = [67, 457, 1024, 4096]
 
@@ -1736,20 +1717,12 @@ class TestCudaFuser(JitTestCase):
                         x[1] = C
                         self._norm_helper(x, torch.float16, "cuda", 5e-3, is_batch_norm_else_instance_norm)
 
-        # restore skip set
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     @unittest.skipIf(not TEST_BF16, "device does not support BFloat16")
     def test_norm_bfloat(self):
-        op = "aten::batch_norm"
-        disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
         output_elements = 10000
         channel_sizes = [67, 457, 1024, 4096]
 
@@ -1761,10 +1734,6 @@ class TestCudaFuser(JitTestCase):
                         x = [output_size for idx in range(dims)]
                         x[1] = C
                         self._norm_helper(x, torch.bfloat16, "cuda", 1e-1, is_batch_norm_else_instance_norm)
-
-        # restore skip set
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
 
     def _softmax_helper(self, shape, reduction_axis, is_log_softmax, dtype, device, error):
         class MySoftmax(torch.nn.Module):
@@ -3278,15 +3247,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_batch_norm_half(self):
-        op = "aten::_batch_norm_impl_index"
-        disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-        op_bwd = "aten::_batch_norm_impl_index_backward"
-        disabled_bwd_flag = torch._C._jit_set_nvfuser_skip_node_kind(op_bwd, False)
-        if disabled_bwd_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op_bwd, True)
-
         with torch.backends.cudnn.flags(enabled=True):
             setups = [
                 [True, True],
@@ -3297,26 +3257,11 @@ class TestCudaFuser(JitTestCase):
                 training, track_running_stats = training_and_track
                 self._test_batch_norm_impl_index_helper(4, 8, 5, affine, track_running_stats, training, torch.half)
 
-        # restore skip set
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-        if disabled_bwd_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op_bwd, True)
-
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_batch_norm_impl_index_inner_bcast(self):
-        op = "aten::_batch_norm_impl_index"
-        disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-        op_bwd = "aten::_batch_norm_impl_index_backward"
-        disabled_bwd_flag = torch._C._jit_set_nvfuser_skip_node_kind(op_bwd, False)
-        if disabled_bwd_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op_bwd, True)
-
         # the repro
         self._test_batch_norm_impl_index_helper(2, 1, 1, False, True, True)
 
@@ -3330,26 +3275,11 @@ class TestCudaFuser(JitTestCase):
             training, track_running_stats = training_and_track
             self._test_batch_norm_impl_index_helper(2, 1, 1, affine, track_running_stats, training)
 
-        # restore skip set
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-        if disabled_bwd_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op_bwd, True)
-
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_batch_norm_impl_index_correctness(self):
-        op = "aten::_batch_norm_impl_index"
-        disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-        op_bwd = "aten::_batch_norm_impl_index_backward"
-        disabled_bwd_flag = torch._C._jit_set_nvfuser_skip_node_kind(op_bwd, False)
-        if disabled_bwd_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op_bwd, True)
-
         with torch.backends.cudnn.flags(enabled=True):
             batch = [2, 7, 16]
             channels = [4, 89, 19, 32]
@@ -3369,12 +3299,6 @@ class TestCudaFuser(JitTestCase):
                 for training_and_track, affine in itertools.product(setups, [True, False]):
                     training, track_running_stats = training_and_track
                     self._test_batch_norm_impl_index_helper(b, c, hw, affine, track_running_stats, training)
-
-        # restore skip set
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-        if disabled_bwd_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op_bwd, True)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -4412,11 +4336,6 @@ class TestCudaFuser(JitTestCase):
                      "Requires fusion optimization pass to be effective")
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     def test_native_batch_norm_backward(self):
-        op = "aten::native_batch_norm_backward"
-        disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
-
         grad_output = torch.randn(4, 2, 3, device="cuda")
         input = torch.randn(4, 2, 3, device="cuda")
         weight = torch.randn(2, device="cuda")
@@ -4450,10 +4369,6 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(ref_v, r_v)
             self.assertGraphContains(t_jit.graph_for(grad_output, input, weight, r_m.clone(), r_v.clone, save_mean,
                                                      save_invstd, True, 1e-5, [True, True, True]), FUSION_GUARD)
-
-        # restore skip set
-        if disabled_flag:
-            torch._C._jit_set_nvfuser_skip_node_kind(op, True)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
