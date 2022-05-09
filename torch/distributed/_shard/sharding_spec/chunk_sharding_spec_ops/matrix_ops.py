@@ -4,72 +4,13 @@ import math
 import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import (
-    Shard,
     ShardedTensor,
 )
 
 from ._common import (
     _chunk_sharding_spec_check,
     _register_sharded_op_on_local_tensor,
-    _register_sharded_op_on_local_shards,
 )
-
-
-def sharded_type_as_check(*args, **kwargs):
-    """
-    Perform extra checks for the sharded_type_as op such as the input needs to
-    be either a Tensor or ShardedTensor.
-
-    Args: same as ``torch.Tensor.type_as``.
-
-    Return: None
-    """
-    if len(args) < 2:
-        raise ValueError("Needs to give a tensor to cast type as!")
-    if not isinstance(args[1], torch.Tensor) and not isinstance(args[1], ShardedTensor):
-        raise ValueError("Needs to give a Tensor or ShardedTensor to cast type as!")
-
-
-def same_dtype(*args, **kwargs):
-    """
-    When the dtype is the same, return the original ShardedTensor.
-
-    Args: same as ``torch.Tensor.type_as``.
-
-    Return (bool): Whether to return early or not.
-    """
-    return args[0].dtype == args[1].dtype
-
-
-def sharded_type_as(args, kwargs, pg):
-    """
-    Handles ``__torch_function__`` dispatch for the ``torch.Tensor.type_as`` op.
-
-    Args: same as ``torch.Tensor.type_as``.
-
-    Return:
-        new_local_shards (List[Shard]): Local shards for the new sharded tensor.
-        st_meta (ShardedTensorMetadata): Metadata of the new sharded tensor.
-    """
-    st = args[0]
-    tensor = args[1]
-    if isinstance(tensor, ShardedTensor):
-        tensor = tensor.local_tensor()
-    new_local_shards = []
-    for shard in st.local_shards():
-        new_local_shards.append(Shard(shard.tensor.type_as(tensor), shard.metadata))
-    st_meta = copy.deepcopy(st._metadata)
-    st_meta.tensor_properties.dtype = tensor.dtype
-    return new_local_shards, st_meta
-
-
-_register_sharded_op_on_local_shards(
-    torch.Tensor.type_as,
-    early_stop_func=same_dtype,
-    extra_check=sharded_type_as_check,
-    customized_func=sharded_type_as,
-)
-
 
 def transpose_same_dim(*args, **kwargs):
     """
@@ -147,30 +88,6 @@ _register_sharded_op_on_local_tensor(
     early_stop_func=transpose_same_dim,
     extra_check=sharded_transpose_check,
     customized_func=sharded_transpose,
-)
-
-
-def sharded_softmax_check(*args, **kwargs):
-    """
-    Perform extra checks for ``torch.Tensor.softmax`` op for now we don't support
-    doing softmax on the sharding dim.
-
-    Args: same as ``torch.Tensor.softmax``.
-
-    Return: None
-    """
-    st = args[0]
-    dim = kwargs.get("dim")
-    dim = dim if dim is not None else 1  # If no dim specified, softmax use 1 as dim.
-    if dim == st.sharding_spec().dim:
-        raise NotImplementedError(
-            "Only support performing softmax on non-sharding dim now."
-        )
-
-
-_register_sharded_op_on_local_tensor(
-    torch.nn.functional.softmax,
-    extra_check=sharded_softmax_check,
 )
 
 
@@ -321,4 +238,69 @@ _register_sharded_op_on_local_tensor(
     torch.Tensor.view,
     extra_check=sharded_view_check,
     customized_func=sharded_view,
+)
+
+def sharded_bmm_check(*args, **kwargs):
+    """
+    Perform extra checks for the sharded_bmm op, for example, st2 needs to
+    be a sharded tensor and both tensors need to sharded by dim 0, etc.
+
+    Args: same as ``torch.bmm``.
+
+    Return: None
+    """
+    if len(args) < 2:
+        raise TypeError("Needs two tensors to perform torch.bmm.")
+    st = args[0]
+    st2 = args[1]
+    # Validate types
+    if not isinstance(st2, ShardedTensor):
+        raise TypeError("st2 needs to be a ShardedTensor for torch.bmm.")
+    _chunk_sharding_spec_check(st2.sharding_spec(), torch.bmm)
+    if st.dim() != 3 or st2.dim() != 3:
+        raise TypeError("both st and st2 need to be a 3D ShardedTensor")
+    if (
+        st.sharding_spec().dim != st2.sharding_spec().dim  # type: ignore[attr-defined]
+        or st.sharding_spec().dim != 0
+    ):
+        raise NotImplementedError(
+            "Only support performing bmm on tensors sharded on dim 0 now."
+        )
+    if st.sharding_spec().placements != st2.sharding_spec().placements:  # type: ignore[attr-defined]
+        raise NotImplementedError(
+            "Both st and st2 need to have same placements for bmm."
+        )
+
+def sharded_bmm(args, kwargs, pg):
+    """
+    Handles ``__torch_function__`` dispatch for the sharded_bmm op.
+
+    Warning: For now we only supports the case when both tensors are sharded
+             by dim 0 so that no local communication.
+
+    Args: same as ``torch.bmm``.
+
+    Return:
+        local_tensor (Tensor): New local tensor to build the sharded tensor.
+        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`):
+            sharding spec of the new sharded tensor.
+        new_st_size (torch.Size): Size of the new sharded tensor.
+    """
+    st = args[0]
+    st2 = args[1]
+    local_tensor = torch.bmm(st.local_tensor(), st2.local_tensor())
+    new_st_size = (*st.size()[:-1], st2.size(-1))
+    return local_tensor, st.sharding_spec(), new_st_size
+
+
+_register_sharded_op_on_local_tensor(
+    torch.Tensor.bmm,
+    extra_check=sharded_bmm_check,
+    customized_func=sharded_bmm,
+)
+
+_register_sharded_op_on_local_tensor(
+    torch.bmm,
+    extra_check=sharded_bmm_check,
+    customized_func=sharded_bmm,
 )
