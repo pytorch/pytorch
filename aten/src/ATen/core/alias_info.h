@@ -1,8 +1,8 @@
 #pragma once
-#include <unordered_set>
-#include <vector>
 #include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
+#include <unordered_set>
+#include <vector>
 
 namespace c10 {
 /**
@@ -13,7 +13,7 @@ namespace c10 {
  *
  * There is a `beforeSet` which describes the aliasing information before the
  * operator executes, and an `afterSet` that describes aliasing info
- * after execution.
+ * after execution. what is going on in test
  */
 class AliasInfo {
  public:
@@ -80,10 +80,10 @@ class AliasInfo {
 };
 
 inline bool operator==(const AliasInfo& lhs, const AliasInfo& rhs) {
-  return lhs.isWrite() == rhs.isWrite()
-      && lhs.beforeSets() == rhs.beforeSets()
-      && lhs.afterSets() == rhs.afterSets()
-      && lhs.containedTypes() == rhs.containedTypes();
+  return lhs.isWrite() == rhs.isWrite() &&
+      lhs.beforeSets() == rhs.beforeSets() &&
+      lhs.afterSets() == rhs.afterSets() &&
+      lhs.containedTypes() == rhs.containedTypes();
 }
 
 // this does match the way things are represented in the schema
