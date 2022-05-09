@@ -165,6 +165,9 @@ backend_test.exclude('(test_bernoulli_.*'
                      '|test_optional_.*'
                      '|test_shape_end_.*'
                      '|test_shape_start_.*'
+                     '|test_identity_opt_*'
+                     '|test_loop16_seq_none_*'
+                     '|test_if_opt_*'
                      ')')
 
 # Unsupported ops in opset 16
