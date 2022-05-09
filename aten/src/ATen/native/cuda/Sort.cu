@@ -1,4 +1,4 @@
-#define TORCH_ASSERT_NO_OPERATORS
+//#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/core/Array.h>
@@ -9,6 +9,13 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/SortUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#endif
 
 #include <limits>
 
@@ -254,6 +261,13 @@ inline void segmented_sort_pairs_by_full_sort(
   const int64_t nsegments, const int64_t nsort, const int64_t n, const bool descending,
   const scalar_t *const self_ptr, scalar_t *const values_ptr, int64_t *const indices_ptr
 ) {
+  if (nsegments == 1) {
+    auto indices = at::arange(nsort, TensorOptions().device(at::kCUDA).dtype(at::kLong));
+    at::cuda::cub::radix_sort_pairs<scalar_t, int64_t>(
+    self_ptr, values_ptr, indices.data_ptr<int64_t>(), indices_ptr,
+    n, descending);
+
+  } else {
   int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
 
   const auto numel = nsort * nsegments;
@@ -285,6 +299,7 @@ inline void segmented_sort_pairs_by_full_sort(
 
   sort_postprocess_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
     self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort);
+  }
 }
 
 template<typename scalar_t>
