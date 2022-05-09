@@ -21,7 +21,7 @@ install_ubuntu() {
   fi
 
   # Install common dependencies
-  apt-get update
+  #apt-get update
   # TODO: Some of these may not be necessary
   ccache_deps="asciidoc docbook-xml docbook-xsl xsltproc"
   numpy_deps="gfortran"
