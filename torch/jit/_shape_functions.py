@@ -6,8 +6,7 @@ number = Union[int, float]
 ###
 # There are generated files that depend on this file
 # To re-generate, please run:
-# cd ~/pytorch && python
-# torchgen/shape_functions/gen_jit_shape_functions.py
+# cd ~/pytorch && python torchgen/shape_functions/gen_jit_shape_functions.py
 ####
 
 import torch

@@ -242,7 +242,9 @@ void registerSchema(
     const std::string& shape_compute_function_name,
     std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
     const CompilationUnit& module) {
+  GRAPH_DEBUG("Registering schema: ", *schema_string , " with shape compute func: ", shape_compute_function_name);
   if (reused_functions.count(shape_compute_function_name)) {
+    GRAPH_DEBUG("Registering reused schema");
     auto graph = reused_functions[shape_compute_function_name];
 
     // allow extra unused arguments to map multiple functions to e.g. unary
@@ -258,6 +260,7 @@ void registerSchema(
   std::shared_ptr<Graph> graph =
       toGraphFunction(shape_compute_function).graph();
 
+  GRAPH_DUMP("New shape compute function: ", graph);
   transformShapeFunction(schema_string, graph);
   // NB: we lint the shape functions registered in source
   // in a test file
