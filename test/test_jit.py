@@ -9144,20 +9144,8 @@ dedent """
         inps2 = (stft(*inps), inps[1])
         self.assertEqual(istft(*inps2), torch.jit.script(istft)(*inps2))
 
-        def lu(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return torch.lu(x)
-
-        self.checkScript(lu, (torch.randn(2, 3, 3),))
-
-        def lu_infos(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
-            return torch.lu(x, get_infos=True)
-
-        self.checkScript(lu_infos, (torch.randn(2, 3, 3),))
-
         def lu_unpack(x):
-            A_LU, pivots = torch.lu(x)
+            A_LU, pivots = torch.linalg.lu_factor(x)
             return torch.lu_unpack(A_LU, pivots)
 
         for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
@@ -10427,7 +10415,7 @@ dedent """
         self.assertTrue(n.type() == torch._C.TensorType.getInferred())
 
         with self.assertRaisesRegex(RuntimeError, "Inferred \'x\' to be of type \'Tensor"):
-            fn(1)
+            fn("1")
 
     def test_script_define_order(self):
         class M(torch.jit.ScriptModule):
@@ -15931,7 +15919,7 @@ dedent """
 
         with self.assertRaisesRegex(RuntimeError, (r"Expected a value of type \'Tensor \(inferred\)\'"
                                                    r"[\S\s]*Inferred \'a\' to be of type \'Tensor\'")):
-            foo(1)
+            foo("1")
 
     def test_type_comments_in_body(self):
         @torch.jit.script
