@@ -1,12 +1,16 @@
+import warnings
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
-
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _block_list_in_opset, _try_get_scalar_type, ScalarType
+from torch.onnx.symbolic_helper import (
+    ScalarType,
+    _block_list_in_opset,
+    _try_get_scalar_type,
+    _unimplemented,
+    parse_args,
+)
 from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore[attr-defined]
-
-import warnings
 
 # Note [ONNX operators that are added/updated from opset 8 to opset 9]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -39,11 +43,22 @@ import warnings
 #   Scan
 
 block_listed_operators = [
-    "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
-    "arange", "masked_fill",
-    "index_fill", "index_copy", "repeat_interleave",
+    "nonzero",
+    "where",
+    "scatter",
+    "scatter_add",
+    "erf",
+    "sign",
     "isnan",
-    "any", "all"
+    "gather",
+    "arange",
+    "masked_fill",
+    "index_fill",
+    "index_copy",
+    "repeat_interleave",
+    "isnan",
+    "any",
+    "all",
 ]
 
 for block_listed_op in block_listed_operators:
@@ -52,7 +67,9 @@ for block_listed_op in block_listed_operators:
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):
-        scales, align_corners = sym_help._get_interpolate_attributes(g, interpolate_mode, args)
+        scales, align_corners = sym_help._get_interpolate_attributes(
+            g, interpolate_mode, args
+        )
         sym_help._interpolate_warning(interpolate_mode)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
@@ -61,10 +78,15 @@ def _interpolate(name, dim, interpolate_mode):
         if sym_help._is_value(output_size):
             return _unimplemented(name, "torch._C.Value (output_size) indexing")
         if scales is None:
-            scales = [1. if i < 2 else
-                      float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
-                      for i in range(0, dim)]
+            scales = [
+                1.0
+                if i < 2
+                else float(output_size[-(dim - i)])
+                / float(input.type().sizes()[-(dim - i)])
+                for i in range(0, dim)
+            ]
         return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)
+
     return symbolic_fn
 
 
@@ -76,7 +98,9 @@ upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias):
+def __interpolate(
+    g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
+):
     align_corners = sym_help._maybe_get_const(align_corners, "b")
     if not sym_help._is_none(align_corners) and align_corners:
         return _unimplemented("interpolate", "align_corners == True")
@@ -87,8 +111,9 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
     if not sym_help._is_none(size) and sym_help._is_value(size):
         return _unimplemented("interpolate", "dynamic size in opset 8")
 
-    scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
-                                                             mode , align_corners)
+    scales, mode = sym_help._interpolate_get_scales_and_mode(
+        g, input, size, scale_factor, mode, align_corners
+    )
     return g.op("Upsample", input, mode_s=mode, scales_f=scales)
 
 
@@ -108,9 +133,11 @@ def _try_cast_integer_to_float(g, *args):
         else:
             return (None,) + args
     else:
-        warnings.warn("Only floating datatype is supported for these operators: "
-                      "{Greater, Less, MatMul, PRelu, Gemm, Flatten}. This might cause "
-                      "the onnx model to be incorrect, if inputs have integer datatypes.")
+        warnings.warn(
+            "Only floating datatype is supported for these operators: "
+            "{Greater, Less, MatMul, PRelu, Gemm, Flatten}. This might cause "
+            "the onnx model to be incorrect, if inputs have integer datatypes."
+        )
     return (old_type,) + args
 
 
@@ -167,7 +194,9 @@ def mm(g, self, other):
     C = g.constant(0, [1], ty)
     if _try_get_scalar_type(self):
         old_type, self, other, C = _try_cast_integer_to_float(g, self, other, C)
-        return _cast_to_type(g, g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0), old_type)
+        return _cast_to_type(
+            g, g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0), old_type
+        )
     else:
         return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
@@ -177,10 +206,26 @@ def addmm(g, self, mat1, mat2, beta, alpha):
     if _try_get_scalar_type(self):
         old_type, self, mat1, mat2 = _try_cast_integer_to_float(g, self, mat1, mat2)
         return _cast_to_type(
-            g, g.op("Gemm", mat1, mat2, self,
-                    beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha)), old_type)
+            g,
+            g.op(
+                "Gemm",
+                mat1,
+                mat2,
+                self,
+                beta_f=sym_help._scalar(beta),
+                alpha_f=sym_help._scalar(alpha),
+            ),
+            old_type,
+        )
     else:
-        return g.op("Gemm", mat1, mat2, self, beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha))
+        return g.op(
+            "Gemm",
+            mat1,
+            mat2,
+            self,
+            beta_f=sym_help._scalar(beta),
+            alpha_f=sym_help._scalar(alpha),
+        )
 
 
 def flatten(g, input, start_dim, end_dim):
@@ -188,19 +233,23 @@ def flatten(g, input, start_dim, end_dim):
     end_dim_i = sym_help._get_const(end_dim, "i", "end_dim")
 
     dim = input.type().dim()
-    if end_dim_i < 0 :
+    if end_dim_i < 0:
         end_dim_i = dim + end_dim_i
     # use ONNX's Flatten operator for cases where the output shape is 2D
-    if start_dim_i == 1 and end_dim_i == dim - 1 :
+    if start_dim_i == 1 and end_dim_i == dim - 1:
         if _try_get_scalar_type(input):
             old_type, input = _try_cast_integer_to_float(g, input)
-            return _cast_to_type(g, g.op("Flatten", input, axis_i=start_dim_i), old_type)
+            return _cast_to_type(
+                g, g.op("Flatten", input, axis_i=start_dim_i), old_type
+            )
         else:
             return g.op("Flatten", input, axis_i=start_dim_i)
-    if start_dim_i == 0 and end_dim_i == dim - 2 :
+    if start_dim_i == 0 and end_dim_i == dim - 2:
         if _try_get_scalar_type(input):
             old_type, input = _try_cast_integer_to_float(g, input)
-            return _cast_to_type(g, g.op("Flatten", input, axis_i=end_dim_i + 1), old_type)
+            return _cast_to_type(
+                g, g.op("Flatten", input, axis_i=end_dim_i + 1), old_type
+            )
         else:
             return g.op("Flatten", input, axis_i=end_dim_i + 1)
 
@@ -212,10 +261,24 @@ def _constant_fill(g, sizes, dtype, const_value):
         dtype = ScalarType.FLOAT
     if not sym_help.scalar_type_to_pytorch_type[dtype].is_floating_point:
         result = g.op(
-            "ConstantFill", sizes, dtype_i=sym_help.cast_pytorch_to_onnx["Float"], input_as_shape_i=1, value_f=const_value)
-        return sym_help._cast_func_template(sym_help.scalar_type_to_onnx[dtype], g, result, None)
+            "ConstantFill",
+            sizes,
+            dtype_i=sym_help.cast_pytorch_to_onnx["Float"],
+            input_as_shape_i=1,
+            value_f=const_value,
+        )
+        return sym_help._cast_func_template(
+            sym_help.scalar_type_to_onnx[dtype], g, result, None
+        )
     else:
-        return g.op("ConstantFill", sizes, dtype_i=sym_help.scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=const_value)
+        return g.op(
+            "ConstantFill",
+            sizes,
+            dtype_i=sym_help.scalar_type_to_onnx[dtype],
+            input_as_shape_i=1,
+            value_f=const_value,
+        )
+
 
 @parse_args("v", "i", "v", "v", "v", "v")
 def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
@@ -225,6 +288,7 @@ def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None)
 @parse_args("v", "i", "v", "v", "v", "v")
 def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     return zeros_like(g, input, dtype, layout, device, pin_memory)
+
 
 @parse_args("v", "i", "v", "v", "v")
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
@@ -260,7 +324,9 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
 
 
 @parse_args("v", "f", "i", "v", "v", "v", "v")
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None):
+def full_like(
+    g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None
+):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, fill_value)
 
@@ -277,5 +343,7 @@ def repeat(g, self, repeats):
         sizes = self.type().sizes()
         diff_dims = repeat_size_len - len(sizes)
         if diff_dims > 0:
-            self = sym_opset9.view(g, self, g.op("Constant", value_t=torch.tensor([1] * diff_dims + sizes)))
+            self = sym_opset9.view(
+                g, self, g.op("Constant", value_t=torch.tensor([1] * diff_dims + sizes))
+            )
     return g.op("Tile", self, repeats)

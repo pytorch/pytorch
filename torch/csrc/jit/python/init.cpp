@@ -8,6 +8,9 @@
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+#include <torch/csrc/jit/codegen/onednn/interface.h>
+#endif
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -630,6 +633,10 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+      .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
+      .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
+#endif
       .def(
           "_jit_set_nvfuser_skip_node_kind",
           // Args:
@@ -642,7 +649,7 @@ void initJITBindings(PyObject* module) {
           [](const std::string& op_name, bool flip = true) {
             return fuser::cuda::skipNode(op_name, flip);
           })
-      .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+      .def("_jit_set_nvfuser_enabled", &fuser::cuda::setEnabled)
       .def(
           "_jit_set_nvfuser_single_node_mode",
           [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
@@ -662,7 +669,7 @@ void initJITBindings(PyObject* module) {
             fuser::cuda::getCudaFusionGuardMode() = profiling_flag;
             return oldState;
           })
-      .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
+      .def("_jit_nvfuser_enabled", &fuser::cuda::isEnabled)
       .def(
           "_jit_nvfuser_set_comparison_callback",
           [](bool run_fallback, py::function fn) {
@@ -1338,6 +1345,11 @@ void initJITBindings(PyObject* module) {
             docstring << "  " << op->schema() << "\n";
           }
 
+          py::list overload_names;
+          for (const auto& op : operations) {
+            overload_names.append(py::str(op->schema().overload_name()));
+          }
+
           auto func = py::cpp_function(
               [operations, symbol](py::args args, py::kwargs kwargs) {
                 return _get_operation_for_overload_or_packet(
@@ -1345,7 +1357,7 @@ void initJITBindings(PyObject* module) {
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
-          return func;
+          return py::make_tuple(func, overload_names);
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
