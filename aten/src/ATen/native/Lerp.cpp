@@ -7,7 +7,6 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/lerp_meta.h>
 #include <ATen/ops/lerp_native.h>
 #endif
 

@@ -41,7 +41,6 @@
 #include <ATen/ops/native_batch_norm_backward.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
-#include <ATen/ops/renorm_meta.h>
 #include <ATen/ops/renorm_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sqrt.h>

@@ -9,9 +9,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/addcdiv_meta.h>
 #include <ATen/ops/addcdiv_native.h>
-#include <ATen/ops/addcmul_meta.h>
 #include <ATen/ops/addcmul_native.h>
 #endif
 
