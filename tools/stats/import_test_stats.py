@@ -95,13 +95,15 @@ def get_disabled_tests(
                 body = item["body"]
                 platforms_to_skip = []
                 key = "platforms:"
-                for line in body.splitlines():
-                    line = line.lower()
-                    if line.startswith(key):
-                        pattern = re.compile(r"^\s+|\s*,\s*|\s+$")
-                        platforms_to_skip.extend(
-                            [x for x in pattern.split(line[len(key) :]) if x]
-                        )
+                # When the issue has no body, it is assumed that all platforms should skip the test
+                if body is not None:
+                    for line in body.splitlines():
+                        line = line.lower()
+                        if line.startswith(key):
+                            pattern = re.compile(r"^\s+|\s*,\s*|\s+$")
+                            platforms_to_skip.extend(
+                                [x for x in pattern.split(line[len(key) :]) if x]
+                            )
                 disabled_test_from_issues[test_name] = (
                     item["html_url"],
                     platforms_to_skip,
