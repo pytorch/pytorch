@@ -13,9 +13,7 @@
 #else
 #include <ATen/ops/upsample_linear1d.h>
 #include <ATen/ops/upsample_linear1d_backward.h>
-#include <ATen/ops/upsample_linear1d_backward_meta.h>
 #include <ATen/ops/upsample_linear1d_backward_native.h>
-#include <ATen/ops/upsample_linear1d_meta.h>
 #include <ATen/ops/upsample_linear1d_native.h>
 #endif
 

@@ -8,9 +8,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/adaptive_max_pool3d_backward_meta.h>
 #include <ATen/ops/adaptive_max_pool3d_backward_native.h>
-#include <ATen/ops/adaptive_max_pool3d_meta.h>
 #include <ATen/ops/adaptive_max_pool3d_native.h>
 #endif
 

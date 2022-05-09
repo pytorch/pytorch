@@ -11,15 +11,11 @@
 #else
 #include <ATen/ops/_upsample_nearest_exact2d.h>
 #include <ATen/ops/_upsample_nearest_exact2d_backward.h>
-#include <ATen/ops/_upsample_nearest_exact2d_backward_meta.h>
 #include <ATen/ops/_upsample_nearest_exact2d_backward_native.h>
-#include <ATen/ops/_upsample_nearest_exact2d_meta.h>
 #include <ATen/ops/_upsample_nearest_exact2d_native.h>
 #include <ATen/ops/upsample_nearest2d.h>
 #include <ATen/ops/upsample_nearest2d_backward.h>
-#include <ATen/ops/upsample_nearest2d_backward_meta.h>
 #include <ATen/ops/upsample_nearest2d_backward_native.h>
-#include <ATen/ops/upsample_nearest2d_meta.h>
 #include <ATen/ops/upsample_nearest2d_native.h>
 #endif
 

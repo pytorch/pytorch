@@ -13,9 +13,7 @@
 #else
 #include <ATen/ops/upsample_trilinear3d.h>
 #include <ATen/ops/upsample_trilinear3d_backward.h>
-#include <ATen/ops/upsample_trilinear3d_backward_meta.h>
 #include <ATen/ops/upsample_trilinear3d_backward_native.h>
-#include <ATen/ops/upsample_trilinear3d_meta.h>
 #include <ATen/ops/upsample_trilinear3d_native.h>
 #endif
 

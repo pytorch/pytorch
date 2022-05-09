@@ -13,15 +13,11 @@
 #else
 #include <ATen/ops/_upsample_bilinear2d_aa.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_backward.h>
-#include <ATen/ops/_upsample_bilinear2d_aa_backward_meta.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_backward_native.h>
-#include <ATen/ops/_upsample_bilinear2d_aa_meta.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_native.h>
 #include <ATen/ops/upsample_bilinear2d.h>
 #include <ATen/ops/upsample_bilinear2d_backward.h>
-#include <ATen/ops/upsample_bilinear2d_backward_meta.h>
 #include <ATen/ops/upsample_bilinear2d_backward_native.h>
-#include <ATen/ops/upsample_bilinear2d_meta.h>
 #include <ATen/ops/upsample_bilinear2d_native.h>
 #endif
 
