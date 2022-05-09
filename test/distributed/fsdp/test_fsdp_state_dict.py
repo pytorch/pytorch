@@ -199,6 +199,14 @@ class TestFSDPStateDict(FSDPTest):
         if state_dict_rank0_and_offload:
             # Broadcast the state dict and move it back to GPU in
             # preparation for loading.
+            if not isinstance(model, FSDP):
+                # Some portions of the model on rank 0 might not be on CPU,
+                # move everything to CPU to avoid running into
+                # https://github.com/pytorch/pytorch/issues/77113.
+                for k, t in fsdp_state_dict.items():
+                    if t.device != torch.device("cpu"):
+                        fsdp_state_dict[k] = t.cpu()
+
             fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
             for key in fsdp_state_dict.keys():
                 fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
@@ -441,6 +449,14 @@ class TestFSDPStateDict(FSDPTest):
         # expected.
         if state_dict_rank0_and_offload:
             # Broadcast + CUDA state_dict
+            if not isinstance(model, FSDP):
+                # Some portions of the model on rank 0 might not be on CPU,
+                # move everything to CPU to avoid running into
+                # https://github.com/pytorch/pytorch/issues/77113.
+                for k, t in fsdp_state_dict.items():
+                    if t.device != torch.device("cpu"):
+                        fsdp_state_dict[k] = t.cpu()
+
             fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
             for key in fsdp_state_dict.keys():
                 fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
