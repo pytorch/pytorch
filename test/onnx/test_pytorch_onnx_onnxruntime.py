@@ -47,7 +47,7 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
 import torch
 import torch.nn.functional as F
-import torch.onnx.verify as verify
+import torch.onnx.verification as verification
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.nn.utils.rnn import PackedSequence
@@ -65,7 +65,7 @@ def run_model_test(self, *args, **kwargs):
     kwargs["ort_providers"] = _ORT_PROVIDERS
     kwargs["opset_version"] = self.opset_version
     kwargs["keep_initializers_as_inputs"] = self.keep_initializers_as_inputs
-    return verify.verify(*args, **kwargs)
+    return verification.verify(*args, **kwargs)
 
 
 def run_model_test_with_external_data(self, *args, **kwargs):
@@ -9894,24 +9894,24 @@ class _TestONNXRuntime:
         x = torch.randn(10)
         model.train()
 
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             model,
             input=(x,),
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_outs = run_ort(ort_sess, (x,))
+        ort_outs = verification._run_ort(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
         script_model = torch.jit.script(model)
         output = model(x)
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             script_model,
             input=(x,),
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_outs = run_ort(ort_sess, (x,))
+        ort_outs = verification._run_ort(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -9935,13 +9935,13 @@ class _TestONNXRuntime:
         nb_elements = torch.numel(input)
 
         model.train()
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             model,
             input=(x,),
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_outs = run_ort(ort_sess, (x,))
+        ort_outs = verification._run_ort(ort_sess, (x,))
 
         y = model(input)
         output = y.cpu().numpy()
@@ -9956,13 +9956,13 @@ class _TestONNXRuntime:
         script_model = torch.jit.script(model)
         y = model(input)
         output = y.cpu().numpy()
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             script_model,
             input=(x,),
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_outs = run_ort(ort_sess, (x,))
+        ort_outs = verification._run_ort(ort_sess, (x,))
         ort_mask = np.where(ort_outs[0] != 0, 1, 0)
         pyt_mask = np.where(output != 0, 1, 0)
 
@@ -10068,7 +10068,7 @@ class _TestONNXRuntime:
         proposal = [torch.randn(2, 4), torch.randn(2, 4)]
 
         with self.assertRaises(RuntimeError) as cm:
-            convert_to_onnx(model, input=(box_regression, proposal))
+            verification._convert_to_onnx(model, input=(box_regression, proposal))
 
     def test_initializer_sequence(self):
         class MyModule(torch.nn.Module):
@@ -11864,14 +11864,14 @@ class _TestONNXRuntime:
 
         model_export = M()
         dummy_input = (torch.tensor([expected_mean]), torch.tensor([expected_std]))
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             model_export,
             input=dummy_input,
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.EVAL,
         )
 
-        ort_out = run_ort(ort_sess, inputs=dummy_input)
+        ort_out = verification._run_ort(ort_sess, inputs=dummy_input)
 
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
@@ -11909,14 +11909,14 @@ class _TestONNXRuntime:
 
         model_export = M()
         dummy_input = (torch.tensor([expected_min]), torch.tensor([expected_max]))
-        ort_sess = convert_to_onnx(
+        ort_sess = verification._convert_to_onnx(
             model_export,
             input=dummy_input,
             opset_version=self.opset_version,
             training=torch.onnx.TrainingMode.EVAL,
         )
 
-        ort_out = run_ort(ort_sess, inputs=dummy_input)
+        ort_out = verification._run_ort(ort_sess, inputs=dummy_input)
         actual_min = np.min(ort_out)
         actual_max = np.max(ort_out)
         actual_mean = np.mean(ort_out)

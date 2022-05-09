@@ -1,3 +1,10 @@
+"""Functions to verify exported ONNX model against original PyTorch model.
+
+ONNXRuntime is required, and is used as the ONNX backend for export verification.
+The goal is to verify that the exported ONNX model is functionally equivalent to the
+original PyTorch model.
+"""
+
 import copy
 import io
 import os
@@ -48,7 +55,7 @@ def _to_numpy(elem):
 
 def _convert_to_onnx(
     model,
-    model_f: Union[str, io.BytesIO],
+    model_f: Optional[Union[str, io.BytesIO]] = None,
     input=None,
     opset_version=None,
     do_constant_folding=True,
@@ -62,6 +69,8 @@ def _convert_to_onnx(
     ort_providers=_ORT_PROVIDERS,
     ort_optim_on=True,
 ):
+    if model_f is None:
+        model_f = io.BytesIO()
     input_copy = copy.deepcopy(input)
 
     torch.onnx._export(
