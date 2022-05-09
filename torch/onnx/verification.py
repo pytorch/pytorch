@@ -5,11 +5,11 @@ The goal is to verify that the exported ONNX model is functionally equivalent to
 original PyTorch model.
 """
 
+import contextlib
 import copy
 import io
 import os
 import tempfile
-from contextlib import ExitStack
 from typing import Optional, Union
 
 import numpy as np
@@ -212,7 +212,7 @@ def verify(
         if not dict_check and isinstance(input[-1], dict):
             input = input + ({},)
 
-        with ExitStack() as stack:
+        with contextlib.ExitStack() as stack:
             model_f: Union[str, io.BytesIO] = io.BytesIO()
             if use_external_data:
                 tmpdirname = stack.enter_context(tempfile.TemporaryDirectory())
