@@ -153,10 +153,11 @@ void OptimizeGraph(
         graph,
         fromQualString("fb::sigrid_transforms_torch_bind"),
         fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
+    // These fused ops only have out variants - we can't do the fusion when
+    // out variants are disabled.
     FuseSignLog1P(graph);
+    FuseClampNaNToNum(graph);
 
-    // TODO: we can avoid this guard by moving operations
-    // to exposed folders.
 #ifdef FBCODE_CAFFE2
     if (opts.use_copy_variants && !opts.enable_tensorexpr_fusion) {
       ReplaceWithCopy(graph);

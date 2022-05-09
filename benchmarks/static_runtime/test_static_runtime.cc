@@ -3336,3 +3336,44 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16ReluFusion) {
   EXPECT_FALSE(hasNodeWithKind(graph, "quantized::linear_dynamic_fp16"));
   EXPECT_TRUE(hasNodeWithKind(graph, "quantized::linear_relu_dynamic_fp16"));
 }
+
+TEST(StaticRuntime, ClampNaNToNum) {
+  const auto src1 = R"JIT(
+    def forward(self, a):
+        return torch.clamp(a, min=1.0, max=2.0).nan_to_num().clone()
+  )JIT";
+
+  const auto src2 = R"JIT(
+    def forward(self, a, nan: float):
+        return torch.clamp(a, min=-1.0, max=2.0).nan_to_num(nan=nan).clone()
+  )JIT";
+
+  const auto src3 = R"JIT(
+    def forward(self, a):
+        return torch.clamp(a, min=1.0, max=-1.0).nan_to_num().clone()
+  )JIT";
+
+  auto a = at::tensor({
+      std::numeric_limits<float>::quiet_NaN(),
+      std::numeric_limits<float>::infinity(),
+      -std::numeric_limits<float>::infinity(),
+      0.0f,
+      3.0f
+    });
+  auto b = a.repeat({10, 5});
+
+  // Have to use_allclose even though all NaNs will be replaced - testStaticRuntime
+  // also checks inputs at the end to make sure they're not changed
+  testStaticRuntime(src1, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src1, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  testStaticRuntime(src2, {a, 42.0}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src2, {a, 2.0}, {b, 1.0}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  testStaticRuntime(src3, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src3, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  // Non-NNC path
+  testStaticRuntime(src1, {a.to(at::kDouble)}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src1, {a.to(at::kDouble)}, {b.to(at::kDouble)}, /*use_allclose=*/true, /*use_equalnan=*/true);
+}
