@@ -568,6 +568,8 @@ StaticModule::StaticModule(
     auto& block_info = block_and_info.second;
     block_info.prepare_for_memory_planner(alias_db, opts);
   }
+
+  cached_runtime_ = std::make_unique<StaticRuntime>(*this);
 }
 
 size_t StaticModule::prepareBlockInfo(
@@ -776,14 +778,12 @@ size_t StaticModule::num_inputs() const {
   return num_inputs_;
 }
 
-StaticRuntime& StaticModule::runtime() {
-  if (!cached_runtime_) {
-    cached_runtime_ = std::make_unique<StaticRuntime>(*this);
-  }
+StaticRuntime& StaticModule::runtime() const {
+  DCHECK(cached_runtime_ != nullptr);
   return *cached_runtime_;
 }
 
-StaticRuntime StaticModule::clone_runtime_from_cached() {
+StaticRuntime StaticModule::clone_runtime_from_cached() const {
   return runtime().clone();
 }
 
