@@ -266,7 +266,7 @@ Examples::
 
     >>> A = torch.randn(2, 3, 4, 4)  # Batch of matrices
     >>> Ainv = torch.linalg.inv(A)
-    >>> torch.dist(A @ Ainv, torch.eye(4)))
+    >>> torch.dist(A @ Ainv, torch.eye(4))
     tensor(1.9073e-06)
 
     >>> A = torch.randn(4, 4, dtype=torch.complex128)  # Complex matrix
