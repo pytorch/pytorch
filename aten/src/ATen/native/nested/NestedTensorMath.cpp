@@ -175,10 +175,14 @@ Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask,
     // N * L
     Tensor sizes = mask;
     sizes.logical_not_();
-    auto real_padding_rate = 1 - (sizes.sum().item().toDouble() / sizes.numel());
-    if (real_padding_rate < min_padding_rate) {
+
+    if (min_padding_rate > 0){
+      auto real_padding_rate = 1 - (sizes.sum().item().toDouble() / sizes.numel());
+      if (real_padding_rate < min_padding_rate) {
         return t;
+      }
     }
+
     // N, ([size1, size2, ... sizeN])
     sizes = sizes.cumsum(1).select(1, L - 1).reshape({N, 1});
     // N, ([d1=D, d2=D, ... dN=D])
