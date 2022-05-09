@@ -105,7 +105,7 @@ class MemoryPlanner {
   MemoryPlanner& operator=(MemoryPlanner&&) = delete;
   virtual ~MemoryPlanner() = default;
 
-  virtual std::unique_ptr<MemoryPlanner> maybeClone(
+  virtual std::unique_ptr<MemoryPlanner> maybe_clone(
       BlockRunner* /*new_block_runner*/,
       const FastMap<at::Tensor*, at::Tensor*>& /*old_tensor_to_new*/) const {
     return nullptr;
@@ -122,31 +122,31 @@ class MemoryPlanner {
   // does _all_ required cleanup.
   virtual bool shouldFallBackToStandardStrategy() const = 0;
 
-  size_t totalNumManagedTensors() const {
+  size_t total_num_managed_tensors() const {
     return num_managed_tensors_;
   }
 
-  size_t totalReusedTensors() const {
+  size_t total_reused_tensors() const {
     return reused_tensors_;
   }
 
-  size_t totalNumManagedOutputTensors() const {
+  size_t total_num_managed_output_tensors() const {
     return managed_output_tensors_.size();
   }
 
-  size_t totalNumUnmanaged() const {
-    return numUnmanagedNonScalars() + numUnmanagedScalars();
+  C10_NODISCARD size_t total_num_unmanaged() const {
+    return num_unmanaged_non_scalars() + num_unmanaged_scalars();
   }
 
-  size_t numUnmanagedNonScalars() const {
+  C10_NODISCARD size_t num_unmanaged_non_scalars() const {
     return unmanaged_ivalues_.size() + unmanaged_borrowed_ivalues_.size();
   }
 
-  size_t numUnmanagedScalars() const {
+  C10_NODISCARD size_t num_unmanaged_scalars() const {
     return num_unmanaged_scalar_ivalues_;
   }
 
-  size_t totalManaged() const {
+  size_t total_managed() const {
     return managed_bytes_;
   }
 
@@ -175,7 +175,7 @@ class MemoryPlanner {
     if (output_buffer_bytes_ == 0 || output_buffer_start_ == nullptr) {
       return false;
     }
-    DCHECK_NE(output_buffer_end_, nullptr);
+    DCHECK(output_buffer_end_ != nullptr);
     if (!tensor.has_storage() || !tensor.storage().data_ptr()) {
       return false;
     }
@@ -297,7 +297,7 @@ class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
     size_t offset;
   };
 
-  std::unique_ptr<MemoryPlanner> maybeClone(
+  std::unique_ptr<MemoryPlanner> maybe_clone(
       BlockRunner* new_block_runner,
       const FastMap<at::Tensor*, at::Tensor*>& old_tensor_to_new)
       const override;

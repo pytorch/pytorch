@@ -106,8 +106,8 @@ TEST(StaticModule, ValueGroup) {
   torch::jit::StaticModule sm(input_graph);
   const Graph& graph = sm.graph();
   std::vector<const Node*> nodes(graph.nodes().begin(), graph.nodes().end());
-  auto* root_block = sm.rootBlock();
-  const auto& value_group = sm.blockInfo(root_block).valueGroup();
+  auto* root_block = sm.root_block();
+  const auto& value_group = sm.block_info(root_block).value_group();
 
   std::vector<const Value*> expected_input_aliases{
       graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
@@ -139,11 +139,11 @@ TEST(StaticModule, IsOptimizableContainerType_NonOptimizableInputs) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
-  auto* root_block = sm.rootBlock();
-  const auto& block_info = sm.blockInfo(root_block);
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(block_info.nodeIsOptimizableContainerType(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -161,11 +161,11 @@ TEST(StaticModule, IsOptimizableContainerType_WrongType) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
-  auto* root_block = sm.rootBlock();
-  const auto& block_info = sm.blockInfo(root_block);
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(block_info.nodeIsOptimizableContainerType(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -180,14 +180,14 @@ TEST(StaticModule, IsOptimizableContainerType_CanUseOutVariant) {
     )JIT";
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
-  auto* root_block = sm.rootBlock();
-  const auto& block_info = sm.blockInfo(root_block);
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
     if (n->kind() == c10::prim::ListConstruct) {
-      EXPECT_TRUE(block_info.nodeIsOptimizableContainerType(n));
+      EXPECT_TRUE(block_info.node_is_optimizable_container_type(n));
     } else {
-      EXPECT_FALSE(block_info.nodeIsOptimizableContainerType(n));
+      EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
     }
   }
 }
@@ -224,7 +224,7 @@ TEST(StaticRuntime, ReplaceWithCopy_replaces_reshape) {
     EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
     EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
 
-    replaceWithCopy(graph);
+    ReplaceWithCopy(graph);
 
     // aten::reshape -> static_runtime::reshape_copy
     EXPECT_FALSE(graphHasOp(graph, "aten::reshape"));
@@ -261,7 +261,7 @@ TEST(
     EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
     EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
 
-    replaceWithCopy(graph);
+    ReplaceWithCopy(graph);
 
     // No Replacement
     EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
@@ -438,8 +438,9 @@ TEST(StaticRuntime, LongModel) {
   std::vector<c10::IValue> input_tensors({a, b, c});
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
-  smod.runtime().checkForMemoryLeak();
-  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+  smod.runtime().check_for_memory_leak();
+  EXPECT_TRUE(
+      torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 }
 
 TEST(StaticRuntime, TrivialModel) {
@@ -456,8 +457,9 @@ TEST(StaticRuntime, TrivialModel) {
   std::vector<c10::IValue> input_tensors({a, b, c});
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
-  smod.runtime().checkForMemoryLeak();
-  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+  smod.runtime().check_for_memory_leak();
+  EXPECT_TRUE(
+      torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 }
 
 TEST(StaticRuntime, DeepWide) {
@@ -481,8 +483,9 @@ TEST(StaticRuntime, DeepWide) {
       auto outputs = smod(input_tensors, {}).toTupleRef().elements();
       ASSERT_TRUE(outputs.size() > 0);
       at::Tensor output_2 = outputs[0].toTensor();
-      smod.runtime().checkForMemoryLeak();
-      EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+      smod.runtime().check_for_memory_leak();
+      EXPECT_TRUE(
+          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
     }
   }
 }
@@ -506,10 +509,11 @@ TEST(StaticRuntime, KWargsAPI_1) {
 
         // run static runtime
         c10::IValue output_ivalue = smod(inputs, {});
-        smod.runtime().checkForMemoryLeak();
+        smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
-        EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+        EXPECT_TRUE(
+            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -550,10 +554,11 @@ TEST(StaticRuntime, KWargsAPI_2) {
 
         // run static runtime
         c10::IValue output_ivalue = smod(std::vector<IValue>{}, kwargs);
-        smod.runtime().checkForMemoryLeak();
+        smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
-        EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+        EXPECT_TRUE(
+            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -629,8 +634,8 @@ TEST(StaticRuntime, CleanUpMemory) {
             auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
             ASSERT_TRUE(outputs.size() > 0);
             auto output_2 = outputs[0].toTensor();
-            runtime.checkForMemoryLeak();
-            EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+            runtime.check_for_memory_leak();
+            EXPECT_TRUE(torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
           }
         }
       }
@@ -682,14 +687,14 @@ TEST(
     ASSERT_TRUE(tuple.isTuple());
     ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
     IValue element = tuple.toTupleRef().elements()[0];
-    runtime.checkForMemoryLeak();
+    runtime.check_for_memory_leak();
   }
   // Second run that manages output tensors.
   {
     IValue tuple = runtime(args, {});
     ASSERT_TRUE(tuple.isTuple());
     ASSERT_EQ(tuple.toTupleRef().elements().size(), 1);
-    runtime.checkForMemoryLeak();
+    runtime.check_for_memory_leak();
     // Destruct tuple at the end of the scope, exercising the
     // deallocation code.
   }
@@ -713,8 +718,7 @@ TEST(StaticRuntime, ManageOutputTensorsManyIters) {
     auto wide = torch::randn({batch_size, num_features});
     std::vector<c10::IValue> input_tensors({ad_emb_packed, user_emb, wide});
     runtime(input_tensors, {});
-    // Destruct the output tensors, exercising the deallocation code
-    runtime.checkForMemoryLeak();
+    runtime.check_for_memory_leak();
   }
 }
 
@@ -743,7 +747,8 @@ TEST(StaticRuntime, FusionPass) {
       }
       EXPECT_TRUE(hit);
       auto output_2 = getTensor(module.forward(inputs));
-      EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+      EXPECT_TRUE(
+          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
     }
   }
 }
@@ -778,10 +783,10 @@ TEST(
   StaticNodeInfo static_node_info(
       sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
   ProcessedNode pnode(static_node_info, values.data());
-  EXPECT_TRUE(pnode.verifyNoMemoryOverlap(/* force_check*/ true));
+  EXPECT_TRUE(pnode.verify_no_memory_overlap(/* force_check*/ true));
 
-  pnode.output(0) = values[0];
-  EXPECT_FALSE(pnode.verifyNoMemoryOverlap(/* force_check*/ true));
+  pnode.Output(0) = values[0];
+  EXPECT_FALSE(pnode.verify_no_memory_overlap(/* force_check*/ true));
 }
 
 TEST(ProcessedNode, VerifyNoMemoryOverlapWithImmutableInputsWithInplaceOps) {
@@ -799,11 +804,11 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithImmutableInputsWithInplaceOps) {
       sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
   ProcessedNode pnode(static_node_info, values.data());
 
-  ASSERT_EQ(&pnode.output(0), &values[1]);
-  EXPECT_TRUE(pnode.verifyNoMemoryOverlap());
+  ASSERT_EQ(&pnode.Output(0), &values[1]);
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
-  pnode.output(0) = values[0];
-  EXPECT_TRUE(pnode.verifyNoMemoryOverlap());
+  pnode.Output(0) = values[0];
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 }
 
 TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
@@ -828,7 +833,8 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
     ProcessedNode list_unpack_pnode(
         list_unpack_static_node_info, values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
-    EXPECT_TRUE(list_unpack_pnode.verifyNoMemoryOverlap(/* force_check*/ true));
+    EXPECT_TRUE(
+        list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
   }
   {
     std::array<IValue, 3> values = {
@@ -842,10 +848,10 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
     ProcessedNode list_unpack_pnode(
         list_unpack_static_node_info, values.data());
     auto b = at::randn({2, 3});
-    list_unpack_pnode.output(0) = b;
-    list_unpack_pnode.output(1) = b;
+    list_unpack_pnode.Output(0) = b;
+    list_unpack_pnode.Output(1) = b;
     EXPECT_FALSE(
-        list_unpack_pnode.verifyNoMemoryOverlap(/* force_check*/ true));
+        list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
   }
 }
 
@@ -1482,7 +1488,7 @@ TEST(CreateOwnedRefsForSpecialValues, TopLevel) {
   )IR";
 
   auto graph = getGraphFromIR(src);
-  createOwnedRefsForSpecialIValues(*graph);
+  CreateOwnedRefsForSpecialValues(*graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
 }
 
@@ -1499,7 +1505,7 @@ TEST(CreateOwnedRefsForSpecialValues, ValueFromOuterScope) {
   )IR";
 
   auto graph = getGraphFromIR(src);
-  createOwnedRefsForSpecialIValues(*graph);
+  CreateOwnedRefsForSpecialValues(*graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
 }
 
@@ -1520,7 +1526,7 @@ TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
   )IR";
 
   auto graph = getGraphFromIR(src);
-  forceNonEmptyOutputs(*graph);
+  ForceNonEmptyOutputs(*graph);
 
   for (auto* node : graph->nodes()) {
     if (node->blocks().empty()) {
@@ -1533,7 +1539,7 @@ TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
   }
 }
 
-TEST(EliminateExtraPermuteOps, FusesCorrectly) {
+TEST(EliminateExtraPermuteOps, FusesSumCorrectly) {
   const auto src = R"JIT(
     def forward(self, x):
         y = torch.permute(x, (0, 2, 1))
@@ -1546,7 +1552,7 @@ TEST(EliminateExtraPermuteOps, FusesCorrectly) {
   auto graph = mod.get_method("forward").graph();
   // turn the ListConstruct(%constant) into proper constant lists
   ConstantPropagation(graph);
-  eliminateExtraPermuteOps(graph);
+  EliminateExtraPermuteOps(graph);
 
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::permute"));
   auto* sum = getNodeWithKind(graph, "aten::sum");
@@ -1556,7 +1562,7 @@ TEST(EliminateExtraPermuteOps, FusesCorrectly) {
   EXPECT_EQ(dim->toIntList(), c10::List<int64_t>{1});
 }
 
-TEST(EliminateExtraPermuteOps, DoesNotFuseWrongDim) {
+TEST(EliminateExtraPermuteOps, DoesNotFuseSumWrongDim) {
   const auto src = R"JIT(
     def forward(self, x):
         y = torch.permute(x, (0, 2, 1))
@@ -1569,12 +1575,12 @@ TEST(EliminateExtraPermuteOps, DoesNotFuseWrongDim) {
   auto graph = mod.get_method("forward").graph();
   // turn the ListConstruct(%constant) into proper constant lists
   ConstantPropagation(graph);
-  eliminateExtraPermuteOps(graph);
+  EliminateExtraPermuteOps(graph);
 
   EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
 }
 
-TEST(EliminateExtraPermuteOps, DoesNotFuseNonConstantDim) {
+TEST(EliminateExtraPermuteOps, DoesNotFuseSumNonConstantDim) {
   const auto src = R"JIT(
     def forward(self, x, dim: int):
         y = torch.permute(x, (0, 2, 1))
@@ -1587,8 +1593,66 @@ TEST(EliminateExtraPermuteOps, DoesNotFuseNonConstantDim) {
   auto graph = mod.get_method("forward").graph();
   // turn the ListConstruct(%constant) into proper constant lists
   ConstantPropagation(graph);
-  eliminateExtraPermuteOps(graph);
+  EliminateExtraPermuteOps(graph);
 
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(EliminateExtraPermuteOps, FusesSoftmaxCorrectly) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        a = torch.permute(x, [0, 2, 1])
+        b = torch.softmax(a, 2)
+        c = torch.permute(b, [0, 2, 1])
+        return c.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+  graph->dump();
+
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::permute"));
+  auto* softmax = getNodeWithKind(graph, "aten::softmax");
+  ASSERT_NE(softmax, nullptr);
+  auto dim = toIValue(softmax->input(1));
+  ASSERT_TRUE(dim.has_value() && dim->isInt());
+  EXPECT_EQ(dim->toInt(), 1);
+
+  std::vector<IValue> args{at::randn({3, 4, 5})};
+  testStaticRuntime(src, args, /*args2=*/{}, /*use_allclose=*/true);
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseSoftmaxWrongPermuteDim) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        a = torch.permute(x, [0, 1, 2])
+        b = torch.softmax(a, 2)
+        c = torch.permute(b, [0, 1, 2])
+        return c.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseSoftmaxWrongSoftmaxDim) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        a = torch.permute(x, [0, 2, 1])
+        b = torch.softmax(a, 0)
+        c = torch.permute(b, [0, 2, 1])
+        return c.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
 }
 
@@ -1604,10 +1668,35 @@ TEST(UseSplitAndSqueeze, Fusion) {
       return (%c, %d)
   )IR";
   auto graph = getGraphFromIR(src);
-  useSplitAndSqueeze(graph);
+  UseSplitAndSqueeze(graph);
   EXPECT_TRUE(
-      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze"));
+      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze_copy"));
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::split"));
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::squeeze"));
   EXPECT_FALSE(hasNodeWithKind(graph, "prim::ListUnpack"));
+}
+
+TEST(EliminateNoOpSlice, IntegerStart) {
+  const auto src = R"JIT(
+    def forward(self, x: List[int]) -> List[int]:
+        return x[0:]
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::slice"));
+  EliminateNoOpSlice(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::slice"));
+}
+
+TEST(EliminateNoOpSlice, NoneStart) {
+  const auto src = R"JIT(
+    def forward(self, x: List[int]) -> List[int]:
+        return x[:]
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  EliminateNoOpSlice(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::slice"));
 }
