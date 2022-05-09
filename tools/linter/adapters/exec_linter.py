@@ -51,13 +51,17 @@ def check_file(filename: str) -> Optional[LintMessage]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="native functions linter", fromfile_prefix_chars="@",
+        description="exec linter",
+        fromfile_prefix_chars="@",
     )
     parser.add_argument(
-        "--verbose", action="store_true", help="location of native_functions.yaml",
+        "--verbose",
+        action="store_true",
     )
     parser.add_argument(
-        "filenames", nargs="+", help="paths to lint",
+        "filenames",
+        nargs="+",
+        help="paths to lint",
     )
 
     args = parser.parse_args()
