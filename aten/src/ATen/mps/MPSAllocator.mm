@@ -25,7 +25,7 @@ HeapBlock* MPSHeapAllocatorImpl::get_free_heap(AllocParams& p)
 
       if (debug_info_enabled()) {
         static unsigned int heap_counter = 0;
-        std::cout << "\nAllocated "
+        std::cerr << "\nAllocated "
                   << (pool->is_small ? "small " : "large ")
                   << (pool->is_shared ? "shared " : "private ")
                   << "heap of size " << format_size(heap_size)
@@ -61,7 +61,7 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& p)
   m_total_allocated_memory += p.size();
 
   if (debug_info_enabled()) {
-    std::cout << "Allocated "
+    std::cerr << "Allocated "
               << (p.pool->is_shared ? "shared" : "private")
               << " buffer #" << p.buffer_block->buf_id
               << " with aligned size " << format_size(p.size())
@@ -87,7 +87,7 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& p)
   p.buffer_block = *it;
   pool.buffers.erase(it);
   if (debug_info_enabled()) {
-    std::cout << "Reusing "
+    std::cerr << "Reusing "
               << (p.pool->is_shared ? "shared" : "private")
               << " buffer #" << p.buffer_block->buf_id
               << " with aligned size " << format_size(p.buffer_block->size)
@@ -177,7 +177,7 @@ void MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
   pool->heaps.erase(heap);
   heap->releaseMTLBuffer(buffer_block->buffer);
   if (debug_info_enabled()) {
-    std::cout << "Released buffer #" << buffer_block->buf_id
+    std::cerr << "Released buffer #" << buffer_block->buf_id
               << " of size " << format_size(buffer_block->size)
               << " (heap size: " << format_size(heap->size.available)
               << ", total allocated: " << format_size(m_total_allocated_memory) << ")\n";
@@ -188,7 +188,7 @@ void MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
   if (remove_empty_heap && heap->n_buffers == 0) {
     heap->releaseMTLHeap();
     if (debug_info_enabled()) {
-      std::cout << "Released heap of size " << format_size(heap->size.total)
+      std::cerr << "Released heap of size " << format_size(heap->size.total)
                 << " (free memory: " << format_size(max_available_size()) << ")\n";
     }
     delete heap;
@@ -264,7 +264,7 @@ public:
     if (enable_debug_info) {
       s_allocatorImpl.enable_debug_info();
       if (!m_use_shared_storage || m_has_unified_memory) {
-        std::cout << "Initializing "
+        std::cerr << "Initializing "
                   << (useSharedStorage ? "shared" : "private")
                   << " heap allocator on "
                   << (m_has_unified_memory ? "unified" : "discrete")
