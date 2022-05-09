@@ -15,12 +15,4 @@ namespace at { namespace native {
 
 using addr_fn = void (*)(TensorIterator &, const Scalar& beta, const Scalar& alpha);
 DECLARE_DISPATCH(addr_fn, addr_stub);
-
-using unpack_pivots_fn = void(*)(
-  TensorIterator& iter,
-  int64_t dim_size
-);
-DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
-
-
 }} // namespace at::native
