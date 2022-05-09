@@ -146,17 +146,6 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.5.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
     CUDA_VERSION=11.6.0
     CUDNN_VERSION=8
