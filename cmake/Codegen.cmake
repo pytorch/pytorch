@@ -136,6 +136,7 @@ if(INTERN_BUILD_ATEN_OPS)
         COMMAND ${GEN_UNBOXING_COMMAND_sources}
         DEPENDS ${all_unboxing_script} ${sources_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
   else() # Otherwise do not generate or include sources into build.
@@ -154,7 +155,6 @@ if(INTERN_BUILD_ATEN_OPS)
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${CUSTOM_BUILD_FLAGS}
-      ${GEN_VULKAN_FLAGS}
   )
 
   file(GLOB_RECURSE headers_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
@@ -211,6 +211,7 @@ if(INTERN_BUILD_ATEN_OPS)
       COMMAND ${GEN_COMMAND_${gen_type}}
       DEPENDS ${all_python} ${${gen_type}_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
       WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
   endforeach()
