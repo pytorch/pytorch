@@ -452,8 +452,8 @@ class TORCH_API StaticModule {
     return module_.has_value();
   }
 
-  StaticRuntime& runtime();
-  StaticRuntime clone_runtime_from_cached();
+  StaticRuntime& runtime() const;
+  StaticRuntime clone_runtime_from_cached() const;
 
   // See [Shared values array]
   size_t value_buffer_size() const {
