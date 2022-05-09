@@ -722,7 +722,7 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
     if (backend_data) {
       /* Acceptable race condition: HasValue may return false. This is OK
        * since the conditional barrier is a performance optimization. */
-      if (!backend_data->data()->HasValue()) {
+      if (!backend_data->HasValue()) {
         TensorCollectionBarrier(coll);
       }
       BackendData::Handle handle = backend_data->GetHandle();
