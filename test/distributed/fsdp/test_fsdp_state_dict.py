@@ -90,18 +90,24 @@ class TestFSDPStateDict(FSDPTest):
         dist.broadcast_object_list(olist)
         return olist[0]
 
-    def _get_simple_nested_model(self, *fsdp_args, **fsdp_kwargs):
-        model = FSDP(
-            nn.Sequential(
-                FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs),
+    def _get_simple_nested_model(self, *fsdp_args, wrap=True, **fsdp_kwargs):
+        if wrap:
+            model = FSDP(
+                nn.Sequential(
+                    FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs),
+                    nn.Linear(10, 10, bias=False).cuda(),
+                ),
+                *fsdp_args,
+                **fsdp_kwargs,
+            )
+        else:
+            model = nn.Sequential(
                 nn.Linear(10, 10, bias=False).cuda(),
-            ),
-            *fsdp_args,
-            **fsdp_kwargs,
-        )
+                nn.Linear(10, 10, bias=False).cuda()
+            )
         return model
 
-    def _get_non_fsdp_root_module(self, *fsdp_args, **fsdp_kwargs):
+    def _get_non_fsdp_root_module(self, *fsdp_args, wrap=True, **fsdp_kwargs):
         class FSDPContainer(nn.Module):
             def __init__(self, fsdp_1, fsdp_2):
                 super().__init__()
@@ -109,9 +115,15 @@ class TestFSDPStateDict(FSDPTest):
                 self.fsdp_1 = fsdp_1
                 self.fsdp_2 = fsdp_2
 
+            def forward(self, x):
+                x = self.non_fsdp_lin(x)
+                x = self.fsdp_1(x)
+                x = self.fsdp_2(x)
+                return x
+
         return FSDPContainer(
-            self._get_simple_nested_model(*fsdp_args, **fsdp_kwargs),
-            self._get_simple_nested_model(*fsdp_args, **fsdp_kwargs),
+            self._get_simple_nested_model(*fsdp_args, wrap=wrap, **fsdp_kwargs),
+            self._get_simple_nested_model(*fsdp_args, wrap=wrap, **fsdp_kwargs),
         )
 
     def _get_simple_model(self, *fsdp_args, **fsdp_kwargs):
@@ -163,15 +175,20 @@ class TestFSDPStateDict(FSDPTest):
             partial(self._get_simple_model, cpu_offload=cpu_offload),
         ]:
             model = model_call()
+            if self.rank == 0:
+                print(model)
             full_state_dict_mgr = self._get_full_state_dict_mgr(
                 model, state_dict_rank0_and_offload
             )
             with full_state_dict_mgr:
                 fsdp_state_dict = _get_state_dict(model, cpu_offload.offload_params, fp16)
 
-            self._validate_state_dict_contents(
-                fsdp_state_dict, state_dict_rank0_and_offload
-            )
+            # For non-FSDP roots, the non FSDP portion can still have parameters on rank 0,
+            # so bypass the check for now.
+            if isinstance(model, FSDP):
+                self._validate_state_dict_contents(
+                    fsdp_state_dict, state_dict_rank0_and_offload,
+                )
             if fp16:
                 # Verify fp16 is the type
                 for tensor in fsdp_state_dict.values():
@@ -343,13 +360,20 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_rank0_and_offload", [True, False])
-    def test_state_dict_load_into_local_module(self, state_dict_rank0_and_offload):
+    @parametrize("fsdp_root", [True, False])
+    def test_state_dict_load_into_local_module(self, state_dict_rank0_and_offload, fsdp_root):
         """
         Tests that FSDP's state_dict can be loaded into a local model.
         """
-        model = self._initialize_model(wrap_fsdp=True)
+        if not fsdp_root:
+            model = self._get_non_fsdp_root_module()
+        else:
+            model = self._initialize_model(wrap_fsdp=True)
         optim = SGD(model.parameters(), lr=0.1)
-        in_data = torch.rand(64, 4, requires_grad=True, device=torch.device("cuda"))
+        if not fsdp_root:
+            in_data = torch.randn(1, 10, requires_grad=True, device=torch.device("cuda"))
+        else:
+            in_data = torch.rand(64, 4, requires_grad=True, device=torch.device("cuda"))
         for _ in range(3):
             out = model(in_data)
             out.sum().backward()
@@ -364,11 +388,16 @@ class TestFSDPStateDict(FSDPTest):
         with sd_mgr:
             fsdp_state_dict = model.state_dict()
 
-        self._validate_state_dict_contents(
-            fsdp_state_dict, state_dict_rank0_and_offload
-        )
+        if isinstance(model, FSDP):
+            self._validate_state_dict_contents(
+                fsdp_state_dict, state_dict_rank0_and_offload
+            )
         # Create zeroed local model
-        blank_local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
+        if not fsdp_root:
+            blank_local_model = self._get_non_fsdp_root_module(wrap=False)
+        else:
+            blank_local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
+
         for param in blank_local_model.parameters():
             with torch.no_grad():
                 param.zero_()
