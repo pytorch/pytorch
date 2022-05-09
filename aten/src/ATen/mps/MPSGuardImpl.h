@@ -99,6 +99,67 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
 
 };
 
+/// A variant of OptionalDeviceGuard that is specialized for MPS.
+struct OptionalMPSGuard {
+  explicit OptionalMPSGuard() : guard_() {}
+
+  explicit OptionalMPSGuard(optional<Device> device_opt)
+      : guard_(device_opt) {}
+
+  /// Set the current MPS device to the passed device index, if it is not
+  /// nullopt
+  explicit OptionalMPSGuard(optional<DeviceIndex> device_index_opt)
+      : guard_(device_index_opt) {}
+
+  // Copy is not allowed
+  OptionalMPSGuard(const OptionalMPSGuard&) = delete;
+  OptionalMPSGuard& operator=(const OptionalMPSGuard&) = delete;
+  OptionalMPSGuard(OptionalMPSGuard&& other) = delete;
+  OptionalMPSGuard& operator=(OptionalMPSGuard&& other) = delete;
+
+  /// Sets the MPS device to the given device, initializing the guard if it
+  /// is not already initialized.  Errors if the given device is not a MPS
+  /// device.
+  void set_device(Device device) {
+    guard_.set_device(device);
+  }
+
+  /// Sets the MPS device to the given device, initializing the guard if it is
+  /// not already initialized.  Errors if the given device is not a MPS device.
+  void reset_device(Device device) {
+    guard_.reset_device(device);
+  }
+
+  /// Sets the MPS device to the given device index, initializing the guard if
+  /// it is not already initialized.
+  void set_index(DeviceIndex device_index) {
+    guard_.set_index(device_index);
+  }
+
+  /// Returns the device that was set immediately prior to initialization of the
+  /// guard, or nullopt if the guard is uninitialized.
+  optional<Device> original_device() const {
+    return guard_.original_device();
+  }
+
+  /// Returns the most recent device that was set using this device guard,
+  /// either from construction, or via set_device, if the guard is initialized,
+  /// or nullopt if the guard is uninitialized.
+  optional<Device> current_device() const {
+    return guard_.current_device();
+  }
+
+  /// Restore the original MPS device, resetting this guard to uninitialized
+  /// state.
+  void reset() {
+    guard_.reset();
+  }
+
+ private:
+  c10::impl::InlineOptionalDeviceGuard<MPSGuardImpl> guard_;
+};
+
+
 C10_REGISTER_GUARD_IMPL(MPS, MPSGuardImpl);
 
 }} // namespace at::mps
