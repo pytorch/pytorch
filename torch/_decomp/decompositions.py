@@ -7,7 +7,6 @@ import torch.nn.functional as F
 import functools
 from torch.utils._pytree import tree_map, tree_flatten
 import torch._prims.utils as utils
-import torch._refs as refs
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -25,11 +24,11 @@ class Reduction(Enum):
 # This wraps a decomposition and performs various type promotion logic within it, depending on the strategy provided
 # We're currently re-using ELEMENTWISE_TYPE_PROMOTION_KIND, although some of the usages are on non-elementwise ops
 # Will need to validate the non-elementwise uses
-def type_casts(f: Callable, type_promotion: refs.ELEMENTWISE_TYPE_PROMOTION_KIND):
+def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND):
     @functools.wraps(f)
     def inner(*args, **kwargs):
         flat_args = [x for x in tree_flatten((args, kwargs))[0] if isinstance(x, Tensor)]
-        computation_dtype, result_dtype = refs._elementwise_dtypes(*flat_args, type_promotion=type_promotion)
+        computation_dtype, result_dtype = utils.elementwise_dtypes(*flat_args, type_promotion_kind=type_promotion)
 
         # TODO: pretty sure this is not quite right
         def increase_prec(x):
@@ -49,9 +48,9 @@ def type_casts(f: Callable, type_promotion: refs.ELEMENTWISE_TYPE_PROMOTION_KIND
 
     return inner
 
-pw_cast_for_opmath = functools.partial(type_casts, type_promotion=refs.ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH)
-reduction_complex_to_real = functools.partial(type_casts, type_promotion=refs.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
-pw_cast_for_int_to_real = functools.partial(type_casts, type_promotion=refs.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+pw_cast_for_opmath = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH)
+reduction_complex_to_real = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
+pw_cast_for_int_to_real = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 
 # This expands x until x.dim() == dim. Might be useful as an operator
 def _unsqueeze_to_dim(x: Tensor, dim: int):
@@ -1007,18 +1006,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
 
 
 # TODO: these logical decomps are buggy for complex inputs
-
-
-@register_decomposition(aten.logical_and)
-def logical_and(self: Tensor, other: Tensor) -> Tensor:
-    return self.to(dtype=torch.bool) & other.to(dtype=torch.bool)
-
-
-@register_decomposition(aten.logical_or)
-def logical_or(self: Tensor, other: Tensor) -> Tensor:
-    return self.to(dtype=torch.bool) | other.to(dtype=torch.bool)
-
-
 @register_decomposition(aten.logical_xor)
 def logical_xor(self: Tensor, other: Tensor) -> Tensor:
     return self.to(dtype=torch.bool) ^ other.to(dtype=torch.bool)
