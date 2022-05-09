@@ -1739,9 +1739,9 @@ class FullyShardedDataParallel(nn.Module):
     def _full_post_load_state_dict_hook(self, *args, **kwargs) -> None:
         # We should exit summon_full_params context.
         self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
-        assert getattr(self, '_entered_full_param_ctx', None) is not None
-        self._entered_full_param_ctx.__exit__(None, None, None)
-        self._entered_full_param_ctx = None
+        assert getattr(self, '_full_param_ctx', None) is not None
+        self._full_param_ctx.__exit__(None, None, None)
+        self._full_param_ctx = None
 
     def _full_pre_load_state_dict_hook(
         self,
@@ -1750,12 +1750,12 @@ class FullyShardedDataParallel(nn.Module):
     ) -> None:
         # We do not expect to be calling pre-hooks twice without post-hook
         # call in between.
-        assert getattr(self, '_entered_full_param_ctx', None) is None
+        assert getattr(self, '_full_param_ctx', None) is None
         # Note that it needs writeback=True to persist.
-        self._entered_full_param_ctx = self._summon_full_params(
+        self._full_param_ctx = self._summon_full_params(
             recurse=False, writeback=True
         )
-        self._entered_full_param_ctx.__enter__()
+        self._full_param_ctx.__enter__()
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_WRAPPED_MODULE}.")
 
     def _local_post_load_state_dict_hook(self, *args, **kwargs) -> None:
