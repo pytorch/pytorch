@@ -1737,9 +1737,6 @@ Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
 }
 
 Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Tensor& mask) {
-  if (areAnyTensorSubclassLike({grad, input, mask})) {
-    return at::zeros_like(input, input.options()).masked_scatter(mask, grad);
-  }
   // The following could just be written as `zeros_like(input).masked_scatter(mask, grad)`.
   // However, as an optimization, we call the in-place variant of masked_scatter.
   // Unfortunately, that doesn't allow for the broadcasting of the LHS, so we need
@@ -1747,7 +1744,9 @@ Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Ten
   // implicitly handles broadcasting).
   auto result = at::zeros_like(
       input.expand(at::infer_size(input.sizes(), mask.sizes())), at::MemoryFormat::Preserve);
-  return result.masked_scatter_(mask, grad);
+  return areAnyTensorSubclassLike({grad, input, mask})
+      ? result.masked_scatter(mask, grad)
+      : result.masked_scatter_(mask, grad);
 }
 
 namespace {
