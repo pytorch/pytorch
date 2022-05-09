@@ -52,6 +52,9 @@ void Val::dispatch(T handler, Val* val) {
           ptr(handler)->handle(val->as<Double>());
           return;
         case DataType::Int:
+        case DataType::Int32:
+          // Dispatch to Int even with Int32 as we don't have Int32 IR
+          // node.
           ptr(handler)->handle(val->as<Int>());
           return;
         case DataType::ComplexDouble:
@@ -199,6 +202,9 @@ void Val::constDispatch(T handler, const Val* val) {
           ptr(handler)->handle(val->as<Double>());
           return;
         case DataType::Int:
+        case DataType::Int32:
+          // Dispatch to Int even with Int32 as we don't have Int32 IR
+          // node.
           ptr(handler)->handle(val->as<Int>());
           return;
         case DataType::ComplexDouble:

@@ -800,7 +800,8 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
                   launch_params_.gdimy() * launch_params_.gdimz(),
           "Wanted to launch a cooperative kernel, however the number of blocks is greater than ",
           "what can be resident on the GPU at once. Need: ",
-          launch_params_.gdimx() * launch_params_.gdimy() * launch_params_.gdimz(),
+          launch_params_.gdimx() * launch_params_.gdimy() *
+              launch_params_.gdimz(),
           " but limited to ",
           num_blocks_per_SM,
           " * ",

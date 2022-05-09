@@ -21176,7 +21176,9 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
   tv2->setMemoryType(MemoryType::Global);
   tv3->setMemoryType(MemoryType::Global);
 
-  GpuLower gpulw(&fusion);
+  // Use Int32 as the index type to verify Int32 is used as the type
+  // of hoisted indices
+  GpuLower gpulw(&fusion, DataType::Int32);
   auto kernel = gpulw.kernel();
 
   auto is_index_times_ns = [](Val* val, Val* index, std::string name) -> bool {
@@ -21206,6 +21208,10 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
         "Invalid expression: ",
         exprs.at(0)->toString());
     auto hoisted_index = exprs.at(0)->as<kir::Allocate>()->buffer();
+    TORCH_CHECK(
+        hoisted_index->dtype() == DataType::Int32,
+        "Invalid data type of hoisted indices. Should be Int32 but: ",
+        hoisted_index->dtype());
     kir::Predicate* pred = nullptr;
     for (auto expr : exprs) {
       if (expr->isA<kir::IfThenElse>()) {

@@ -99,13 +99,21 @@ const std::vector<Expr*>& Val::uses() const {
   return uses_;
 }
 
+// Converts the data type of TensorView or Scalar representing index
+// values. The data type of the original input should be
+// DataType::Index, but DataType::Int is also allowed as it is used
+// for index expressions.
 void Val::resolveIndexDtype() {
   TORCH_INTERNAL_ASSERT(
-      vtype_ == ValType::TensorView,
-      "Resolving index type is currently only supported on tensor view values.");
+      vtype_ == ValType::TensorView || vtype_ == ValType::Scalar,
+      "Resolving index type is currently only supported on tensor view or scalar values. "
+      "Value type: ",
+      vtype_);
   TORCH_INTERNAL_ASSERT(
-      dtype_ == DataType::Index,
-      "Can only resolve index type if a tensor has an Index DataType.");
+      dtype_ == DataType::Index || dtype_ == DataType::Int,
+      "Can only resolve index type if a Val has an Index or Int DataType. ",
+      "Data type: ",
+      dtype_);
   TORCH_INTERNAL_ASSERT(
       container()->isA<kir::Kernel>(),
       "Index type can only be resolved at compile time.");

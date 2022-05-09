@@ -272,13 +272,19 @@ class CommonIndexInserter : private kir::ExprMutator {
     }
 
     for (const auto& key : innermost_loop_map_it->second) {
-      const auto common_index = common_index_map_.commonIndexMap().at(key);
+      auto common_index = common_index_map_.commonIndexMap().at(key);
 
       // Insert only when the index is used multiple times and is not
       // yet inserted.
       if (inserted_indices_.find(common_index) != inserted_indices_.end()) {
         continue;
       }
+
+      // Make the type of the hoisted index be the index type of the
+      // kernel, which can be either int64_t or int. Not very clean,
+      // but this seems to be the quickest way to use the index type
+      // as we don't have a scalar IR node for the index type.
+      common_index->resolveIndexDtype();
 
       auto alloc = IrBuilder::create<kir::Allocate>(
           common_index,
