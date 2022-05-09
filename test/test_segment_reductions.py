@@ -7,13 +7,12 @@ import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
-    onlyCPU
 )
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     gradcheck,
-    parametrize
+    parametrize,
 
 )
 
@@ -300,7 +299,6 @@ class TestSegmentReductions(TestCase):
         )
     )
     @parametrize("reduce", ['sum', 'prod', 'min', 'max', 'mean'])
-    @onlyCPU  # will be removed in next PR where CUDA implementation of segment_reduce is adjusted
     def test_pytorch_scatter_test_cases(self, device, dtypes, reduce):
         val_dtype, length_dtype = dtypes
         # zero-length segments are filled with reduction inits contrary to pytorch_scatter.
@@ -384,10 +382,9 @@ class TestSegmentReductions(TestCase):
                 axis=dim,
                 unsafe=True,
             )
-
             self.assertEqual(actual_result, expected)
 
-            if val_dtype == torch.float64:
+            if val_dtype == torch.float64 and device == 'cpu':
                 def fn(x):
                     initial = 1
                     # supply initial values to prevent gradcheck from failing for 0 length segments

@@ -13,6 +13,8 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cumsum.h>
 #endif
 
 namespace at {
@@ -152,6 +154,75 @@ __global__ void segment_reduce_forward_kernel(
     initial_value = initial_value / lengths_data[row_id];
   }
   int64_t output_index = (row_id * stride_count) + lane_id;
+  output_data[output_index] = initial_value;
+}
+
+template <typename scalar_t, typename index_t>
+__global__ void segment_reduce_forward_kernel2(
+    SegmentReductionType reduction,
+    scalar_t* output_data,
+    scalar_t* values_data,
+    const index_t* lengths_data,
+    const index_t* lengths_cumsum_data,
+    const int64_t segment_count,
+    const int64_t lengths_stride_axis,
+    bool is_initial_set,
+    scalar_t initial_value,
+    const int64_t outer_offset,
+    const int64_t inner_offset,
+    const int64_t data_stride_axis,
+    const int64_t data_size_axis,
+    const int64_t output_stride_axis,
+    const int64_t output_size_axis,
+    const int64_t lengths_cumsum_stride_axis) {
+  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= (outer_offset * segment_count * inner_offset)) {
+    return;
+  }
+  int64_t row_id = idx / inner_offset;
+  int64_t lane_id = idx % inner_offset;   // lane_id is the inner_idx
+  int64_t outer_idx = row_id / segment_count;
+  int64_t dim_idx = row_id % segment_count;
+
+  int64_t offset_idx = outer_idx * lengths_cumsum_stride_axis * (segment_count + 1) + dim_idx;
+  index_t offset_start = lengths_cumsum_data[offset_idx];
+  index_t offset_end = lengths_cumsum_data[offset_idx + 1];
+
+  // ===== step2: apply reduction
+  for (index_t j = offset_start; j < offset_end; ++j) {
+    int64_t data_index = outer_idx * data_stride_axis * data_size_axis
+                         + j * data_stride_axis + lane_id;
+    const auto data = values_data[data_index];
+    // TODO: There is no need to branch with every element
+    if (reduction == SegmentReductionType::MAX) {
+      initial_value =
+          at::_isnan(data) ? data : std::max<scalar_t>(initial_value, data);
+    } else if (
+        reduction == SegmentReductionType::MEAN ||
+        reduction == SegmentReductionType::SUM) {
+      initial_value = initial_value + data;
+    } else if (reduction == SegmentReductionType::MIN) {
+      initial_value =
+          at::_isnan(data) ? data : std::min<scalar_t>(initial_value, data);
+    } else if (
+      reduction == SegmentReductionType::PROD) {
+      initial_value = initial_value * data;
+    }
+  }
+
+  // ===== step3: finalize reduction
+  int64_t lengths_idx = outer_idx * lengths_stride_axis * segment_count + dim_idx;
+  CUDA_KERNEL_ASSERT(lengths_data[lengths_idx] >= 0);
+  if (lengths_data[lengths_idx] == 0 && !is_initial_set &&
+      reduction == SegmentReductionType::MEAN) {
+    initial_value = static_cast<scalar_t>(NAN);
+  } else if (
+      reduction == SegmentReductionType::MEAN && lengths_data[lengths_idx] > 0 &&
+      !at::_isnan(initial_value)) {
+    initial_value = initial_value / lengths_data[lengths_idx];
+  }
+  int64_t output_index = outer_idx * output_stride_axis * output_size_axis
+                         + dim_idx * output_stride_axis + lane_id;
   output_data[output_index] = initial_value;
 }
 
@@ -319,21 +390,43 @@ Tensor _segment_reduce_cuda_kernel(
     const Tensor& lengths,
     int64_t axis,
     const c10::optional<Scalar>& initial) {
-  int64_t segment_count = lengths.numel();
+  // data and lengths should be contiguous from the call to .contiguous in segment_reduce_kernel
+  TORCH_CHECK(data.is_contiguous(), "Expected data to be contiguous.");
+  TORCH_CHECK(lengths.is_contiguous(), "Expected lengths to be contiguous.");
+  axis = lengths.dim() - 1;
+  int64_t segment_count = lengths.size(axis);
+  int64_t lengths_stride_axis = lengths.stride(axis);
   auto output_shape = data.sizes().vec();
   output_shape[axis] = segment_count;
   auto output = at::empty(output_shape, data.options());
 
-  int64_t stride_count = data.numel() / data.size(axis);
+  // _get_complete_sum only supports 1D?
+  auto zeros_shape = lengths.sizes().vec();
+  zeros_shape[axis] = 1;
+  auto offsets = at::cat({at::zeros(zeros_shape, lengths.options()), lengths}, axis);
+  offsets.cumsum_(axis);
 
-  auto offsets = _get_complete_sum(lengths);
+  // outer_offset is the size of the outer dimensions of output (before axis)
+  // inner_offset is the size of the inner dimensions of output (after axis)
+  int64_t outer_offset = 1, inner_offset = 1;
+  for (int64_t d = 0; d < axis; d++) {
+    outer_offset *= output.size(d);
+  }
+  for (int64_t d = axis + 1; d < output.dim(); d++) {
+    inner_offset *= output.size(d);
+  }
 
   constexpr int threads_per_block = 256;
-  int64_t num_blocks =
-      ((segment_count * stride_count) + threads_per_block - 1) /
-      threads_per_block;
+  // segment_count * stride_count is just output.numel() ?
+  int64_t num_blocks = (output.numel() + threads_per_block - 1) / threads_per_block;
 
   num_blocks = std::max(num_blocks, (int64_t)1);
+
+  auto data_stride_axis = data.stride(axis);
+  auto data_size_axis = data.size(axis);
+  auto output_stride_axis = output.stride(axis);
+  auto output_size_axis = output.size(axis);
+  auto offsets_stride_axis = offsets.stride(axis);
 
   AT_DISPATCH_INDEX_TYPES(
       lengths.type(), "_segment_reduce_cuda_kernel1", ([&] {
@@ -365,7 +458,7 @@ Tensor _segment_reduce_cuda_kernel(
               }
 
               if (output_shape.size() > 1) {
-                segment_reduce_forward_kernel<scalar_t>
+                segment_reduce_forward_kernel2<scalar_t>
                     <<<num_blocks,
                        threads_per_block,
                        0,
@@ -376,9 +469,17 @@ Tensor _segment_reduce_cuda_kernel(
                         lengths_data_ptr,
                         offsets_data_ptr,
                         segment_count,
-                        stride_count,
+                        lengths_stride_axis,
                         initial.has_value(),
-                        initial_value);
+                        initial_value,
+                        outer_offset,
+                        inner_offset,
+                        data_stride_axis,
+                        data_size_axis,
+                        output_stride_axis,
+                        output_size_axis,
+                        offsets_stride_axis
+                      );
                 C10_CUDA_KERNEL_LAUNCH_CHECK();
               } else {
                 if (reduction == SegmentReductionType::MAX) {
