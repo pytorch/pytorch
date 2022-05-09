@@ -1520,6 +1520,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           // 1 <= n_threads_src <= std::min(ceil(src.numel() / src_grain_size), max_threads)
           1, std::min<int64_t>((src_len + src_grain_size - 1) / src_grain_size, at::get_num_threads())
       );
+      const auto chunk_size_src = (src_len + n_threads_src - 1) / n_threads_src;
 
       const std::vector<int64_t> src_n_threads_shape = {
         n_threads_src, (src_len + n_threads_src - 1) / n_threads_src
@@ -1543,10 +1544,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const auto* ptr_sorted_start = ptr_sorted;
         const auto* ptr_sorted_end = ptr_sorted + sorted_len;
 
-        const auto chunk_size = (src_len + n_threads_src - 1) / n_threads_src;
         at::parallel_for(0, n_threads_src, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
-            const auto start = tid * chunk_size;
-            const auto end = std::min(start + chunk_size, src_len);
+            const auto start = tid * chunk_size_src;
+            const auto end = std::min(start + chunk_size_src, src_len);
             auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
@@ -1604,10 +1604,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
         const auto thread_offsets = compressed_int_counts.cumsum(0).sub_(compressed_int_counts);
         const auto* ptr_sorted_idx = sorted_idx.data_ptr<int64_t>();
-        const auto chunk_size = (src_len + n_threads_src - 1) / n_threads_src;
         at::parallel_for(0, n_threads_src, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
-            const auto start = tid * chunk_size;
-            const auto end = std::min(start + chunk_size, src_len);
+            const auto start = tid * chunk_size_src;
+            const auto end = std::min(start + chunk_size_src, src_len);
             const auto tid_offset = thread_offsets.data_ptr<int64_t>()[tid];
             const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
             const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
