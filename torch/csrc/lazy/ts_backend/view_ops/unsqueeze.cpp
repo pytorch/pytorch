@@ -5,6 +5,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind Unsqueeze::class_op_kind(at::aten::unsqueeze);
+
 Unsqueeze::Unsqueeze(const torch::lazy::Value& input, int dim)
     : torch::lazy::TsNode(
           torch::lazy::OpKind(at::aten::unsqueeze),
