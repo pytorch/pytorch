@@ -5,6 +5,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind NarrowViewUpdate::class_op_kind(ltc_narrow_view_update);
+
 NarrowViewUpdate::NarrowViewUpdate(
     const Value& input,
     const Value& source,
