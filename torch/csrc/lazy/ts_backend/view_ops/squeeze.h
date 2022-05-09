@@ -7,8 +7,6 @@ namespace lazy {
 
 class TORCH_API Squeeze : public TsNode {
  public:
-  static const OpKind class_op_kind;
-
   // Squeeze out the specified dimension index, -1 for all trivial dimensions.
   Squeeze(const torch::lazy::Value& input, int dim);
 

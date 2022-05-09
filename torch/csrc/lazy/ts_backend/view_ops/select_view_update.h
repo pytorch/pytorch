@@ -7,8 +7,6 @@ namespace lazy {
 
 class TORCH_API SelectViewUpdate : public TsNode {
  public:
-  static const OpKind class_op_kind;
-
   SelectViewUpdate(
       const Value& target,
       const Value& source,

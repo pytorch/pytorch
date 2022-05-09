@@ -52,11 +52,11 @@ class TORCH_API TrieCache {
 };
 
 template <typename T, typename... Args>
-NodePtr LookupNodeFromTrieCache(Args&&... args) {
+NodePtr LookupNodeFromTrieCache(OpKind op, Args&&... args) {
   auto& successors = TrieCache::Get()->Current()->successors;
   for (auto it = successors.begin(); it != successors.end(); it++) {
     NodePtr ir_node = (*it)->ir_node;
-    const T* concrete_node = NodeCast<T>(ir_node.get());
+    const T* concrete_node = NodeCast<T>(ir_node.get(), op);
     if (concrete_node && concrete_node->Equal(std::forward<Args>(args)...)) {
       TORCH_LAZY_COUNTER("IrNodeReused::" + std::string(typeid(T).name()), 1);
       TrieCache::Get()->SetCurrent(it);
