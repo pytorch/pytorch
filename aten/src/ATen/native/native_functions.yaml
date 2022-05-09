@@ -4320,7 +4320,12 @@
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+# Overload without center & pad mode, needed for forward-compatibility
+- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+  variants: function, method
+  cpp_no_default_args: ['hop_length', 'win_length', 'window', 'normalized']
+
+- func: stft.center(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   variants: function, method
 
 - func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
@@ -7061,8 +7066,8 @@
     QuantizedCPU: index_select_quantized_cpu_
     CUDA: index_select_cuda
     QuantizedCUDA: index_select_quantized_cuda
-    SparseCPU: index_select_sparse
-    SparseCUDA: index_select_sparse
+    SparseCPU: index_select_sparse_cpu
+    SparseCUDA: index_select_sparse_cuda
 
 - func: index_select.dimname_out(Tensor self, Dimname dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -7339,9 +7344,13 @@
   variants: function
 
 - func: lu_solve.out(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: lu_solve_out
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
+  dispatch:
+    CPU, CUDA: lu_solve
 
 # lu_unpack
 - func: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
@@ -11020,19 +11029,6 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_lu_out
-
-# linalg.lu_solve
-- func: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
-  python_module: linalg
-  structured_delegate: linalg_lu_solve.out
-  variants: function
-
-- func: linalg_lu_solve.out(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
-  variants: function
-  structured: True
-  dispatch:
-    CPU, CUDA: linalg_lu_solve_out
 
 # linalg.det
 - func: linalg_det(Tensor self) -> Tensor

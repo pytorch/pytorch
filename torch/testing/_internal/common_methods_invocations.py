@@ -6468,7 +6468,7 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
     make_arg = partial(make_fn, dtype=dtype, device=device, requires_grad=requires_grad)
 
     def out_fn(output):
-        if op_info.name == "linalg.lu":
+        if op_info.name in ("linalg.lu"):
             return output[1], output[2]
         else:
             return output
@@ -6484,42 +6484,35 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
         yield SampleInput(A, kwargs={"pivot": pivot}, output_process_fn_grad=out_fn)
 
 def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs):
-    """ Samples the inputs for both linalg.lu_solve and lu_solve """
     make_fn = make_fullrank_matrices_with_distinct_singular_values
     make_a = partial(make_fn, dtype=dtype, device=device)
     make_b = partial(make_tensor, dtype=dtype, device=device)
 
-    def clone(X, requires_grad):
-        Y = X.clone()
-        Y.requires_grad_(requires_grad)
-        return Y
-
-    is_linalg_lu_solve = (op_info.name == "linalg.lu_solve")
-
     batches = ((), (0, ), (2, ))
-    ns = (3, 1, 0)
-    nrhs = (4, 1, 0)
+    ns = (5, 3, 0)
+    nrhs = (0, 1, 6)
 
     for n, batch, rhs in product(ns, batches, nrhs):
-        A = make_a(*(batch + (n, n)))
-        LU, pivots = torch.linalg.lu_factor(A)
+        shape_a = batch + (n, n)
+        a = make_a(*shape_a)
+        lu, pivs = a.lu()
+        lu = lu.contiguous()
 
-        B = make_b(batch + (n, rhs))
+        shape_b = batch + (n, rhs)
+        b = make_b(shape_b)
 
         grads = (False,) if not requires_grad else (True, False)
         # we try all possible combinations of requires_grad for each input
-        for LU_grad, B_grad in product(grads, grads):
+        for lu_grad, b_grad in product(grads, grads):
             # when requires_grad == True, at least one input has to have requires_grad enabled
-            if requires_grad and not LU_grad and not B_grad:
+            if requires_grad and not lu_grad and not b_grad:
                 continue
 
-            if is_linalg_lu_solve:
-                for adjoint, left in product((True, False), repeat=2):
-                    yield SampleInput(clone(LU, LU_grad),
-                                      args=(pivots, clone(B if left else B.mT, B_grad)),
-                                      kwargs=dict(adjoint=adjoint, left=left))
-            else:
-                yield SampleInput(clone(B, B_grad), args=(clone(LU, LU_grad), pivots))
+            lu_ = lu.clone()
+            lu_.requires_grad_(lu_grad)
+            b_ = b.clone()
+            b_.requires_grad_(b_grad)
+            yield SampleInput(b_, args=(lu_, pivs))
 
 def sample_inputs_lu_unpack(op_info, device, dtype, requires_grad=False, **kwargs):
     def out_fn(output):
@@ -11168,9 +11161,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_kthvalue,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            error_inputs_func=error_inputs_kthvalue),
     BinaryUfuncInfo('le',
                     aliases=('less_equal',),
@@ -11729,27 +11719,17 @@ op_db: List[OpInfo] = [
     OpInfo('lu_solve',
            op=torch.lu_solve,
            dtypes=floating_and_complex_types(),
+           check_batched_gradgrad=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_lu_solve,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
-               DecorateInfo(unittest.skip("Tests different backward paths"),
+               DecorateInfo(unittest.skip("Tests different backward implementations"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
-           decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver]),
-    OpInfo('linalg.lu_solve',
-           op=torch.linalg.lu_solve,
-           aten_name='linalg_lu_solve',
-           dtypes=floating_and_complex_types(),
-           supports_forward_ad=True,
-           check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_lu_solve,
-           skips=(
-               DecorateInfo(unittest.skip("Tests different backward paths"),
-                            "TestCommon", "test_floating_inputs_are_differentiable"),),
-           decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver]),
+           ),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
@@ -11832,9 +11812,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            supports_forward_ad=True),
     OpInfo('max',
            variant_test_name='reduction_no_dim',
@@ -11850,9 +11827,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16),
@@ -11861,9 +11835,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -11962,9 +11933,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            supports_forward_ad=True),
     OpInfo('min',
            variant_test_name='reduction_no_dim',
@@ -11979,7 +11947,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            # See https://github.com/pytorch/pytorch/issues/66357
@@ -11993,7 +11960,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            # See https://github.com/pytorch/pytorch/issues/66357
            # Relies on copy_ to broadcast, but the forward AD path calls broadcast_to which
@@ -13545,9 +13511,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            sample_inputs_func=sample_inputs_topk),
     # Multiple variants for batch_norm to test with and without cuDNN disabled
     # See https://github.com/pytorch/pytorch/pull/63218#discussion_r688549391 for more details
@@ -13797,7 +13760,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Resized a non-empty tensor but did not warn about it
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            sample_inputs_func=sample_inputs_mode,),
     MvlGammaInfo(variant_test_name='mvlgamma_p_1',
@@ -15328,10 +15290,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sort,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           )),
+           supports_fwgrad_bwgrad=True),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
@@ -15921,9 +15880,6 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            sample_inputs_func=sample_inputs_msort),
     OpInfo('movedim',
            aliases=('moveaxis',),
