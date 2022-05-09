@@ -20,8 +20,13 @@ install_ubuntu() {
     maybe_libiomp_dev="libiomp-dev"
   fi
 
+  # TODO: Remove this once nvidia package repos are back online
+  # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
+  # shellcheck disable=SC2046
+  sudo sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
+
   # Install common dependencies
-  #apt-get update
+  apt-get update
   # TODO: Some of these may not be necessary
   ccache_deps="asciidoc docbook-xml docbook-xsl xsltproc"
   numpy_deps="gfortran"
