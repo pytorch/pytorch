@@ -51,6 +51,7 @@ class DestructableMock : public intrusive_ptr_target {
       : resourcesReleased_(resourcesReleased), wasDestructed_(wasDestructed) {}
 
   ~DestructableMock() override {
+    *resourcesReleased_ = true;
     *wasDestructed_ = true;
   }
 
