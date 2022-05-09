@@ -57,6 +57,13 @@ struct MagmaInitializer {
 } initializer;
 }  // namespace (anonymous)
 
+#define AT_MAGMA_VERSION MAGMA_VERSION_MAJOR*100 + MAGMA_VERSION_MINOR*10 + MAGMA_VERSION_MICRO
+
+// Check that MAGMA never releases MAGMA_VERSION_MINOR >= 10 or MAGMA_VERSION_MICRO >= 10
+#if MAGMA_VERSION_MINOR >= 10 || MAGMA_VERSION_MICRO >= 10
+#error "MAGMA release minor or micro version >= 10, please correct AT_MAGMA_VERSION"
+#endif
+
 #else
 const bool use_magma_ = false;
 
@@ -200,8 +207,7 @@ void magmaGels(
     scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb,
     scalar_t* hwork, magma_int_t lwork, magma_int_t* info);
 
-#if MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 && \
-    MAGMA_VERSION_MICRO >= 4
+#if AT_MAGMA_VERSION >= 254
 
 template <>
 void magmaLdlHermitian<double>(
@@ -257,8 +263,7 @@ void magmaLdlHermitian<c10::complex<float>>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-#endif // MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 &&
-       // MAGMA_VERSION_MICRO >= 4
+#endif // AT_MAGMA_VERSION >= 254
 
 template<>
 void magmaLu<double>(
@@ -1322,7 +1327,10 @@ void ldl_factor_magma(
   if (LD.is_complex()) {
     TORCH_CHECK(
         hermitian,
-        "torch.linalg.ldl_factor: complex tensors with hermitian=False flag are not supported.");
+        "torch.linalg.ldl_factor: complex tensors with hermitian=False flag are not supported with MAGMA backend. ",
+        "Currently preferred backend is ",
+        at::globalContext().linalgPreferredBackend(),
+        ", please set 'default' or 'cusolver' backend with torch.backends.cuda.preferred_linalg_library");
   }
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       LD.scalar_type(), "ldl_factor_magma", [&] {
@@ -1348,7 +1356,7 @@ void ldl_factor_kernel(
     // If cusolver and magma 2.5.4+ are both available and hermitian=true,
     // call magma for complex inputs
 #ifdef USE_CUSOLVER
-#if AT_MAGMA_ENABLED() && (MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 && MAGMA_VERSION_MICRO >= 4)
+#if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 254)
       if (LD.is_complex() && hermitian) {
         return ldl_factor_magma(
             LD, pivots, info, upper, hermitian);
