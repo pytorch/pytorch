@@ -46,7 +46,7 @@ Decl mergeTypesFromTypeComment(
 }
 
 struct ParserImpl {
-  explicit ParserImpl(const std::shared_ptr<SourceView>& source)
+  explicit ParserImpl(const std::shared_ptr<Source>& source)
       : L(source), shared(sharedParserData()) {}
 
   Ident parseIdent() {
@@ -801,7 +801,7 @@ struct ParserImpl {
   SharedParserData& shared;
 };
 
-Parser::Parser(const std::shared_ptr<SourceView>& src)
+Parser::Parser(const std::shared_ptr<Source>& src)
     : pImpl(new ParserImpl(src)) {}
 
 Parser::~Parser() = default;

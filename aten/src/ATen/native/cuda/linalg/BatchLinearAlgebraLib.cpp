@@ -92,23 +92,23 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 }
 
 template <typename scalar_t>
-static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
+static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
 #ifndef CUDART_VERSION
   TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
 #else
-  TORCH_INTERNAL_ASSERT(batchCount(b) == batchCount(lu), "batch_size of b and lu must be the same");
-  TORCH_INTERNAL_ASSERT(batchCount(lu) == batchCount(pivots.unsqueeze(-1)), "batch_size of lu and pivots must be the same");
+  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(B), "batch_size of LU and B must be the same");
+  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(pivots.unsqueeze(-1)), "batch_size of LU and pivots must be the same");
   const auto trans = to_cublas(transpose);
 
   auto pivots_data = pivots.data_ptr<int>();
-  auto batch_size = cuda_int_cast(batchCount(lu), "batch_size");;
-  auto m = cuda_int_cast(lu.size(-2), "m");
-  auto nrhs = cuda_int_cast(b.size(-1), "nrhs");
+  auto batch_size = cuda_int_cast(batchCount(LU), "batch_size");;
+  auto m = cuda_int_cast(LU.size(-2), "m");
+  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
   auto lda = cuda_int_cast(std::max<int>(1, m), "lda");
   int info = 0;
 
-  Tensor lu_ptr_array = get_device_pointers<scalar_t>(lu);
-  Tensor b_ptr_array = get_device_pointers<scalar_t>(b);
+  Tensor lu_ptr_array = get_device_pointers<scalar_t>(LU);
+  Tensor b_ptr_array = get_device_pointers<scalar_t>(B);
   auto lu_ptr_array_data = reinterpret_cast<scalar_t**>(lu_ptr_array.data_ptr());
   auto b_ptr_array_data = reinterpret_cast<scalar_t**>(b_ptr_array.data_ptr());
 
@@ -119,10 +119,182 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
 #endif
 }
 
-void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(lu.scalar_type(), "lu_solve_cublas", [&]{
-    apply_lu_solve_batched_cublas<scalar_t>(b, lu, pivots, trans);
+void lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_cublas", [&]{
+    apply_lu_solve_batched_cublas<scalar_t>(LU, pivots, B, trans);
   });
+}
+
+namespace {
+
+template <typename scalar_t>
+void apply_ldl_factor_cusolver(
+    const Tensor& A,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper) {
+#ifndef USE_CUSOLVER
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.ldl_factor on a CUDA tensor requires compiling ",
+      "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
+#else
+  auto batch_size = batchCount(A);
+  auto n = cuda_int_cast(A.size(-2), "A.size(-2)");
+  auto lda = cuda_int_cast(A.stride(-1), "A.stride(-1)");
+  auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+
+  auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+
+  auto a_data = A.data_ptr<scalar_t>();
+  auto pivots_data = pivots.data_ptr<int>();
+  auto info_data = info.data_ptr<int>();
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+  int lwork = 0;
+  at::cuda::solver::sytrf_bufferSize(handle, n, a_data, lda, &lwork);
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto work = allocator.allocate(sizeof(scalar_t) * lwork);
+
+  for (const auto i : c10::irange(batch_size)) {
+    auto* a_working_ptr = &a_data[i * a_stride];
+    auto* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    auto* info_working_ptr = &info_data[i];
+    at::cuda::solver::sytrf(
+        handle,
+        uplo,
+        n,
+        a_working_ptr,
+        lda,
+        pivots_working_ptr,
+        reinterpret_cast<scalar_t*>(work.get()),
+        lwork,
+        info_working_ptr);
+  }
+#endif
+}
+
+template <typename scalar_t>
+void apply_ldl_solve_cusolver(
+    const Tensor& A,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper) {
+#if !(defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && \
+    CUSOLVER_VERSION >= 11102)
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.ldl_solve on a CUDA tensor requires compiling ",
+      "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER 11.1.2+ (CUDA 11.3.1+) support.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(pivots.unsqueeze(-1)) > 0);
+  auto batch_size = batchCount(B);
+  auto n = A.size(-2);
+  auto nrhs = B.size(-1);
+  auto lda = A.stride(-1);
+  auto ldb = B.stride(-1);
+  auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+
+  auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
+  auto b_stride = B.dim() > 2 ? B.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+
+  auto a_data = A.data_ptr<scalar_t>();
+  auto b_data = B.data_ptr<scalar_t>();
+
+  auto pivots_ = pivots.to(kLong);
+  auto pivots_data = pivots_.data_ptr<int64_t>();
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  auto datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
+  size_t worksize_device = 0;
+  size_t worksize_host = 0;
+
+  TORCH_CUSOLVER_CHECK(cusolverDnXsytrs_bufferSize(
+      handle,
+      uplo,
+      n,
+      nrhs,
+      datatype,
+      a_data,
+      lda,
+      pivots_data,
+      datatype,
+      b_data,
+      ldb,
+      &worksize_device,
+      &worksize_host));
+
+  // allocate workspace storage
+  auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
+  auto workdata_device = device_allocator.allocate(worksize_device);
+  void* workdata_device_ptr = workdata_device.get();
+
+  auto& host_allocator = *at::getCPUAllocator();
+  auto workdata_host = host_allocator.allocate(worksize_host);
+  void* workdata_host_ptr = workdata_host.get();
+
+  Tensor info = at::zeros({}, A.options().dtype(at::kInt));
+  for (const auto i : c10::irange(batch_size)) {
+    auto* a_working_ptr = &a_data[i * a_stride];
+    auto* b_working_ptr = &b_data[i * b_stride];
+    auto* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    TORCH_CUSOLVER_CHECK(cusolverDnXsytrs(
+        handle,
+        uplo,
+        n,
+        nrhs,
+        datatype,
+        a_working_ptr,
+        lda,
+        pivots_working_ptr,
+        datatype,
+        b_working_ptr,
+        ldb,
+        workdata_device_ptr,
+        worksize_device,
+        workdata_host_ptr,
+        worksize_host,
+        info.data_ptr<int>()));
+  }
+
+  // info from sytrs only reports if the i-th parameter is wrong
+  // so we don't need to check it all the time
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
+#endif
+}
+
+} // anonymous namespace
+
+void ldl_factor_cusolver(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian) {
+  if (LD.is_complex()) {
+    TORCH_CHECK(
+        !hermitian,
+        "torch.linalg.ldl_factor: complex tensors with hermitian=True flag are not supported.");
+  }
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      LD.scalar_type(), "ldl_factor_looped_cusolver", [&] {
+        apply_ldl_factor_cusolver<scalar_t>(LD, pivots, info, upper);
+      });
+}
+
+void ldl_solve_cusolver(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      LD.scalar_type(), "ldl_solve_looped_cusolver", [&] {
+        apply_ldl_solve_cusolver<scalar_t>(LD, pivots, B, upper);
+      });
 }
 
 template <typename scalar_t>
@@ -1443,28 +1615,28 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
   }
 }
 
-void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
+void lu_solve_looped_cusolver(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_cusolver", [&] {
     const auto trans = to_cublas(transpose);
-    int n = cuda_int_cast(lu.size(-2), "n");
-    int nrhs = cuda_int_cast(b.size(-1), "nrhs");
-    auto batch_size = batchCount(b);
-    auto info = at::zeros({1}, lu.options().dtype(kInt));
+    int n = cuda_int_cast(LU.size(-2), "n");
+    int nrhs = cuda_int_cast(B.size(-1), "nrhs");
+    auto batch_size = batchCount(B);
+    auto info = at::zeros({1}, LU.options().dtype(kInt));
     auto info_data = info.data_ptr<int>();
-    auto b_data = b.data_ptr<scalar_t>();
-    auto lu_data = lu.data_ptr<scalar_t>();
+    auto b_data = B.data_ptr<scalar_t>();
+    auto lu_data = LU.data_ptr<scalar_t>();
     auto pivots_data = pivots.data_ptr<int>();
     auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
-    auto lu_stride = lu.dim() > 2 ? lu.stride(-3) : 0;
-    auto b_stride = matrixStride(b);
+    auto lu_stride = LU.dim() > 2 ? LU.stride(-3) : 0;
+    auto b_stride = matrixStride(B);
     int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
 
     // lu and pivots tensors can be broadcast to b
     // here we construct a helper indexing tensor to linearly index into lu and pivots
-    IntArrayRef lu_batch_shape(lu.sizes().data(), lu.dim() - 2);
-    IntArrayRef b_batch_shape(b.sizes().data(), b.dim() - 2);
+    IntArrayRef lu_batch_shape(LU.sizes().data(), LU.dim() - 2);
+    IntArrayRef b_batch_shape(B.sizes().data(), B.dim() - 2);
     BroadcastLinearIndices lu_index(
-        batchCount(lu), lu_batch_shape, b_batch_shape);
+        batchCount(LU), lu_batch_shape, b_batch_shape);
 
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
