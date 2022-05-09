@@ -382,7 +382,7 @@ $0 = input('x')
 $1 = input('x.grad')
 $2 = torch._ops.aten.pow.Tensor_Scalar($0, 2)
 $3 = input('grad_output')
-$4 = torch._ops.aten.mul.Tensor($3, tensor(2))
+$4 = torch._ops.aten.mul.Tensor($3, 2)
 $5 = torch._ops.aten.mul.Tensor($4, $0)
 $6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
