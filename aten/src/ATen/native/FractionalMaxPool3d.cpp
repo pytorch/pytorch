@@ -12,7 +12,6 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/fractional_max_pool3d_backward_native.h>
-#include <ATen/ops/fractional_max_pool3d_meta.h>
 #include <ATen/ops/fractional_max_pool3d_native.h>
 #endif
 

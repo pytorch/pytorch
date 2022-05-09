@@ -9,9 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/fractional_max_pool2d_backward_meta.h>
 #include <ATen/ops/fractional_max_pool2d_backward_native.h>
-#include <ATen/ops/fractional_max_pool2d_meta.h>
 #include <ATen/ops/fractional_max_pool2d_native.h>
 #endif
 
