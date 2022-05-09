@@ -2144,6 +2144,14 @@ def generate_elementwise_binary_extremal_value_tensors(
 
     yield SampleInput(lhs, args=(rhs,))
 
+    # Test case for NaN propagation
+    nan = float('nan') if dtype.is_floating_point else complex(float('nan'), float('nan'))
+    lhs = make_tensor((128, 128), device=device, dtype=dtype, requires_grad=requires_grad)
+    lhs.flatten()[::3] = nan
+    rhs = make_tensor((128, 128), device=device, dtype=dtype, requires_grad=requires_grad)
+    rhs.flatten()[::3] = nan
+
+    yield SampleInput(lhs, args=(rhs,))
 
 # Returns a generator of pairs of contiguous and noncontiguous tensors that
 #   require broadcasting
@@ -2529,21 +2537,12 @@ def _replace_values_in_tensor(tensor, condition, safe_value):
 
 
 # Helper to create a unary elementwise tensor with valid inputs
-def _make_unary_elementwise_tensor(shape, *, op, device, dtype, requires_grad=False):
+def _make_unary_elementwise_tensor(shape, *, op, dtype, **kwargs):
     low, high = op.domain
     low = low if low is None else low + op._domain_eps
     high = high if high is None else high - op._domain_eps
 
-    make_arg = partial(
-        make_tensor,
-        low=low,
-        high=high,
-        device=device,
-        dtype=dtype,
-        requires_grad=requires_grad,
-    )
-
-    a = make_arg(shape)
+    a = make_tensor(shape, low=low, high=high, dtype=dtype, **kwargs)
 
     if op.reference_numerics_filter is not None and dtype is not torch.bool:
         condition, safe_value = op.reference_numerics_filter
@@ -2656,9 +2655,9 @@ def generate_elementwise_unary_extremal_value_tensors(
 def generate_elementwise_unary_noncontiguous_tensors(
     op, *, device, dtype, requires_grad=False
 ):
-    low, high = op_info.domain
-    low = low if low is None else low + op_info._domain_eps
-    high = high if high is None else high - op_info._domain_eps
+    low, high = op.domain
+    low = low if low is None else low + op._domain_eps
+    high = high if high is None else high - op._domain_eps
 
     make_arg = partial(
         _make_unary_elementwise_tensor,
@@ -2707,9 +2706,10 @@ def _reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwar
         yield from generate_elementwise_unary_large_value_tensors(
             op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
         )
-    yield from generate_elementwise_unary_extremal_value_tensors(
-        op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
-    )
+    if dtype.is_floating_point or dtype.is_complex:
+        yield from generate_elementwise_unary_extremal_value_tensors(
+            op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
+        )
 
 
 def reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwargs):
@@ -2770,6 +2770,7 @@ class UnaryUfuncInfo(OpInfo):
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
             sample_inputs_func=sample_inputs_func,
+            reference_inputs_func=reference_inputs_func,
             supports_sparse=supports_sparse,
             **kwargs,
         )
@@ -2798,11 +2799,17 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     lhs = make_arg((S, S), **op.lhs_make_tensor_kwargs)
     rhs = make_arg((S, S), **op.rhs_make_tensor_kwargs)
-    yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': 2})
+    if dtype is not torch.bool:
+        yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': 2})
+    else:
+        yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': True})
     neg_alpha = -3.14 if (dtype.is_floating_point or dtype.is_complex) else -3
     lhs = make_arg((S, S), **op.lhs_make_tensor_kwargs)
     rhs = make_arg((S, S), **op.rhs_make_tensor_kwargs)
-    yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': neg_alpha})
+    if dtype is not torch.bool:
+        yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': neg_alpha})
+    else:
+        yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
 
 def sample_inputs_isclose(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
@@ -9529,6 +9536,16 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_two_python_scalars=True,
                     skips=(
+                        # boolean alpha not handled properly
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestCudaFuserOpInfo',
+                                     'test_nvfuser_correctness',
+                                     dtypes=(torch.bool,)),
+                        # boolean alpha not handled properly
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestNNCOpInfo',
+                                     'test_nnc_correctness',
+                                     dtypes=(torch.bool,)),
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestCommon',
                                      'test_reference_testing',
@@ -9702,6 +9719,7 @@ op_db: List[OpInfo] = [
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                             dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', dtypes=(torch.bool,)),
            ),
            sample_inputs_func=sample_inputs_addr,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -11012,6 +11030,8 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Skip since real and imag don't have out variants.
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
+                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
+                                    dtypes=(torch.complex32,)),
                    )),
     OpInfo('gradient',
            dtypes=floating_and_complex_types_and(torch.int8, torch.int16,
@@ -12136,6 +12156,7 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Resizing an out= argument with no elements threw a resize warning!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cpu'),
            )),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
@@ -12861,6 +12882,8 @@ op_db: List[OpInfo] = [
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cpu'),
                # RuntimeError: "max_pool1d_impl" not implemented for 'BFloat16'
+               DecorateInfo(unittest.skip("Works on some configs"), 'TestMeta',
+                            'test_meta', dtypes=(torch.bfloat16,)),
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.bfloat16,)),
                DecorateInfo(unittest.skip("Works on some conifgs"), 'TestCudaFuserOpInfo',
@@ -13892,6 +13915,8 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Skip since real and imag don't have out variants.
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
+                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
+                                    dtypes=(torch.complex32,)),
                    )),
     OpInfo('roll',
            ref=np.roll,
@@ -14772,6 +14797,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               # stride mismatch
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda',
+                            dtypes=(torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('linalg.svd',
            op=torch.linalg.svd,
@@ -14790,6 +14818,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               # stride mismatch
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda',
+                            dtypes=(torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('linalg.svdvals',
            op=torch.linalg.svdvals,
@@ -14828,6 +14859,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               # stride mismatch
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda', active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('pca_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -14852,6 +14885,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               # stride mismatch
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda', active_if=not TEST_WITH_ROCM),
            )),
     BinaryUfuncInfo('polar',
                     dtypes=floating_types(),
@@ -18060,6 +18095,14 @@ python_ref_db = [
                 device_type='cpu'
             ),
         ),
+        # https://github.com/pytorch/pytorch/issues/76944
+        supports_two_python_scalars=False,
+        supports_one_python_scalar=True,
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/76944
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
+        )
+
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
@@ -18120,22 +18163,35 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.maximum",
         torch_opinfo_name="maximum",
-        supports_rhs_python_scalar=True,
-        supports_one_python_scalar=True
+        # https://github.com/pytorch/pytorch/issues/76555
+        # supports_one_python_scalar=True
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/76555
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.minimum",
         torch_opinfo_name="minimum",
-        supports_rhs_python_scalar=True,
-        supports_one_python_scalar=True
+        # https://github.com/pytorch/pytorch/issues/76555
+        # supports_one_python_scalar=True
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/76555
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.mul",
         torch_opinfo_name="mul",
+        # https://github.com/pytorch/pytorch/issues/76944
+        supports_two_python_scalars=False,
+        supports_one_python_scalar=True,
         skips=(
+            # https://github.com/pytorch/pytorch/issues/76944
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
                          dtypes=(torch.chalf,), device_type='cuda', active_if=(not TEST_WITH_ROCM)),
-        )
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.ne",
@@ -18165,10 +18221,24 @@ python_ref_db = [
                 device_type='cpu'
             ),
         ),
+        # https://github.com/pytorch/pytorch/issues/76944
+        supports_two_python_scalars=False,
+        supports_one_python_scalar=True,
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/76944
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.true_divide",
         torch_opinfo_name="true_divide",
+        # https://github.com/pytorch/pytorch/issues/76944
+        supports_two_python_scalars=False,
+        supports_one_python_scalar=True,
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/76944
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
+        ),
     ),
     #
     # View & Shape OpInfos
