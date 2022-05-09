@@ -7336,7 +7336,7 @@ The :attr:`std` is a tensor with the standard deviation of
 each output element's normal distribution
 
 The shapes of :attr:`mean` and :attr:`std` don't need to match,
-but they must be :ref:`broadcastable
+but they must be :ref:`broadcastable`.
 
 .. note:: The returned shape will be the broadcast shape.
 
