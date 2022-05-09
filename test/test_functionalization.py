@@ -290,9 +290,9 @@ $2 = torch._ops.aten.index_put.default($1, [tensor([0, 1, 2, 3])], tensor([0., 1
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
 $1 = torch._ops.aten.view_copy.default($0, [4, 2])
-$2 = torch._ops.aten.add.Tensor($1, tensor(1))
-$3 = torch._ops.aten.mul.Tensor($2, tensor(2))
-$4 = torch._ops.aten.div.Tensor($3, tensor(1))""")
+$2 = torch._ops.aten.add.Tensor($1, 1)
+$3 = torch._ops.aten.mul.Tensor($2, 2)
+$4 = torch._ops.aten.div.Tensor($3, 1)""")
 
     def test_only_one_view(self):
         def f(x):
@@ -446,23 +446,6 @@ $1 = torch._ops.aten._to_copy.default($0, dtype=6, layout=0, device=device(type=
 $2 = torch._ops.aten.expand_copy.default($1, [2])
 $3 = torch._ops.aten.add.Tensor($2, $0)""")
 
-    # zero_ gets its own test because of the newly added at::zero operator.
-    def test_zero_(self):
-        def f(x):
-            y = x + x
-            z = y.diagonal()
-            z.zero_()
-            return y
-
-        self.assert_functionalization(f, torch.ones(2, 2))
-        logs = self.get_logs(f, torch.ones(2, 2))
-        # zero() should decompose into zeros_like(), which will show up in the trace
-        self.assertExpectedInline('\n'.join(logs), """\
-$0 = input('input')
-$1 = torch._ops.aten.add.Tensor($0, $0)
-$2 = torch._ops.aten.diagonal_copy.default($1)
-$3 = torch._ops.aten.zeros_like.default($2)""")
-
     def test_fill_(self):
         def f(x):
             y = x + x
@@ -510,7 +493,7 @@ $3 = torch._ops.aten.fill.Scalar($2, 0)""")
         # with a functional + non-functional tensor, and wrapped the output appropriately.
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)
-$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
+$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
     def test_mixed_wrappers_invalid(self):
         x1_not_functional = torch.ones(4)
@@ -537,8 +520,8 @@ $3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
 
         # Since both wrappers were unctionalized, they both log "add"
         self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add.Tensor($0, tensor(1))
-$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
+$1 = torch._ops.aten.add.Tensor($0, 1)
+$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
         # Test 2: only the inner wrapper is "functionalized"
         x_only_inner_functional = InplaceLoggingTensor(torch._to_functional_tensor(LoggingTensor(torch.ones(4))))
@@ -548,8 +531,8 @@ $3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
 
         # Since only the inner wrapper is functionalized, then the inner (first) log is functionalized
         self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add.Tensor($0, tensor(1))
-$3 = torch._ops.aten.add_.Tensor($2, tensor(1))""")
+$1 = torch._ops.aten.add.Tensor($0, 1)
+$3 = torch._ops.aten.add_.Tensor($2, 1)""")
 
         # Test 3: only the inner wrapper is "functionalized"
         x_only_outer_functional = torch._to_functional_tensor(InplaceLoggingTensor(LoggingTensor(torch.ones(4))))
@@ -560,8 +543,8 @@ $3 = torch._ops.aten.add_.Tensor($2, tensor(1))""")
         # Only the outer add_ is functionalized
         # Since only the outer wrapper is functionalized, then the outer (second) log is functionalized
         self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add_.Tensor($0, tensor(1))
-$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
+$1 = torch._ops.aten.add_.Tensor($0, 1)
+$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
 if __name__ == '__main__':
     run_tests()
