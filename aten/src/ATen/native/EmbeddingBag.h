@@ -1,4 +1,9 @@
 #include <ATen/ATen.h>
+#include <cstdint>
+
+#ifdef USE_FBGEMM
+#include <fbgemm/FbgemmEmbedding.h>
+#endif
 
 namespace at {
 namespace native {
@@ -38,8 +43,24 @@ void make_offset2bag_out(
     const c10::optional<Tensor>& per_sample_weights,
     const int64_t padding_idx = -1);
 
+#ifdef USE_FBGEMM
 struct _EmbeddingBagKernelCache {
+
+    template<bool has_weight, typename TIndex, typename TData>
+    typename fbgemm::EmbeddingSpMDMKernelSignature<TData, TIndex, TIndex, TData>::Type getCallback(int64_t block_size) {
+        return fbgemm::GenerateEmbeddingSpMDM<TData, TIndex, TIndex, TData>(
+        block_size,
+        has_weight,
+        /* normalize_by_lengths */false,
+        /* prefetch */16,
+        /* is_weight_positional */false,
+        /* use_offsets */true
+      );
+    }
 };
+#else
+struct _EmbeddingBagKernelCache {};
+#endif
 
 void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
     Tensor& bag_size, Tensor* max_indices,
