@@ -16,7 +16,7 @@ def _contains_batchnorm(module):
 def _override_batchnorm_mixed_precision(module):
     for mod in module.modules():
         if isinstance(mod, _BatchNorm):
-            mod._wrap_overrides = {"mixed_precision": None}
+            mod._wrap_overrides = {"mixed_precision": None}  # type: ignore[assignment]
 
 def _apply_to_tensors(
     fn: Callable, container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
