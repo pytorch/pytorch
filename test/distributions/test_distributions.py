@@ -481,27 +481,27 @@ EXAMPLES = [
     Example(Wishart, [
         {
             'covariance_matrix': torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True),
-            'df': torch.tensor([4.], requires_grad=True),
+            'df': torch.tensor([3.], requires_grad=True),
         },
         {
             'precision_matrix': torch.tensor([[2.0, 0.1, 0.0],
                                               [0.1, 0.25, 0.0],
                                               [0.0, 0.0, 0.3]], requires_grad=True),
-            'df': torch.tensor([2.5, 3], requires_grad=True),
+            'df': torch.tensor([5., 4], requires_grad=True),
         },
         {
             'scale_tril': torch.tensor([[[2.0, 0.0], [-0.5, 0.25]],
                                         [[2.0, 0.0], [0.3, 0.25]],
                                         [[5.0, 0.0], [-0.5, 1.5]]], requires_grad=True),
-            'df': torch.tensor([5., 3.5, 2], requires_grad=True),
+            'df': torch.tensor([5., 3.5, 3], requires_grad=True),
         },
         {
             'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-            'df': torch.tensor([2.0]),
+            'df': torch.tensor([3.0]),
         },
         {
             'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-            'df': 2.0,
+            'df': 3.0,
         },
     ]),
     Example(MixtureSameFamily, [
@@ -2221,6 +2221,7 @@ class TestDistributions(TestCase):
 
     # We applied same tests in Multivariate Normal distribution for Wishart distribution
     def test_wishart_shape(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
 
         df = torch.rand(5, requires_grad=True) + ndim
@@ -2281,6 +2282,7 @@ class TestDistributions(TestCase):
         wishart_log_prob_gradcheck(df_no_batch, None, None, scale_tril_batched)
 
     def test_wishart_stable_with_precision_matrix(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 10
         x = torch.randn(ndim)
         P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
@@ -2288,6 +2290,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_wishart_log_prob(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
         # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
@@ -2359,6 +2362,7 @@ class TestDistributions(TestCase):
                                     multivariate=True)
 
     def test_wishart_properties(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 5
         df = torch.rand([]) + ndim - 1
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
@@ -4927,7 +4931,7 @@ class TestJit(TestCase):
     def _perturb_tensor(self, value, constraint):
         if isinstance(constraint, constraints._IntegerGreaterThan):
             return value + 1
-        if isinstance(constraint, constraints._PositiveDefinite):
+        if isinstance(constraint, constraints._PositiveDefinite) or isinstance(constraint, constraints._PositiveSemidefinite):
             return value + torch.eye(value.shape[-1])
         if value.dtype in [torch.float, torch.double]:
             transform = transform_to(constraint)
