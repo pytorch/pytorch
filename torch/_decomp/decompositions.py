@@ -1006,18 +1006,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
 
 
 # TODO: these logical decomps are buggy for complex inputs
-
-
-@register_decomposition(aten.logical_and)
-def logical_and(self: Tensor, other: Tensor) -> Tensor:
-    return self.to(dtype=torch.bool) & other.to(dtype=torch.bool)
-
-
-@register_decomposition(aten.logical_or)
-def logical_or(self: Tensor, other: Tensor) -> Tensor:
-    return self.to(dtype=torch.bool) | other.to(dtype=torch.bool)
-
-
 @register_decomposition(aten.logical_xor)
 def logical_xor(self: Tensor, other: Tensor) -> Tensor:
     return self.to(dtype=torch.bool) ^ other.to(dtype=torch.bool)
