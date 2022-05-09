@@ -2354,6 +2354,27 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_profile_ivalue_multiple_profiles(self):
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn([7, 4, 7], dtype=dtype, device=device)
+
+        def t(x, num: int):
+            for i in range(num):
+                # varying reduction axes should break profile_ivalue
+                tmp = x.sum(i, keepdim=True)
+                # inplace add on input/output, can't be functionalized/fused
+                x += tmp
+            return x
+
+        with nvfuser_singleton_fusion(True):
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, x, 3, num_fusion=0)
+
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_sum_to_size(self):
         dtype = torch.float
         device = "cuda"

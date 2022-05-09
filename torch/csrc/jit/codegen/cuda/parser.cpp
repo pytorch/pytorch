@@ -66,6 +66,7 @@ const auto& boolListAttr = Symbol::attr("profiled_bool_list");
 const auto& boolAttr = Symbol::attr("profiled_bool");
 const auto& strAttr = Symbol::attr("profiled_str");
 const auto& ivalAttr = Symbol::attr("profiled_ival");
+const auto& profileFailedAttr = Symbol::attr("profile_failed");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
@@ -1482,7 +1483,15 @@ class IrParser {
                   ValueHolder(TensorViewBuilder().build(), format));
             }
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -1515,7 +1524,15 @@ class IrParser {
               value_map.emplace(node->output()->unique(), input);
             }
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -1753,6 +1770,9 @@ class IrParser {
                       node->input(0)->type()->cast<TensorType>())) {
                 return false;
               }
+              if (node->input(5)->node()->kind() != prim::Constant) {
+                return false;
+              }
               return true;
             },
             [](const Node* node) -> OperatorType {
@@ -1958,6 +1978,31 @@ class IrParser {
                       node->input(1)->type()->cast<TensorType>())) {
                 return false;
               }
+              if (node->kind() ==
+                  c10::Symbol::fromQualString(
+                      "aten::_batch_norm_impl_index_backward")) {
+                if (node->inputs()[8]->node()->kind() != prim::Constant) {
+                  return false;
+                }
+                if (node->inputs()[10]->node()->kind() != prim::Constant) {
+                  return false;
+                }
+              } else if (
+                  node->kind() ==
+                  c10::Symbol::fromQualString(
+                      "aten::native_batch_norm_backward")) {
+                if (node->inputs()[7]->node()->kind() != prim::Constant) {
+                  return false;
+                }
+                if (node->inputs()[9]->node()->kind() != prim::Constant) {
+                  return false;
+                }
+              } else {
+                TORCH_INTERNAL_ASSERT(
+                    false,
+                    "Forgot to update profiled constant check for",
+                    node->kind().toDisplayString());
+              }
               return true;
             },
             [](const Node* node) -> OperatorType {
@@ -2028,6 +2073,9 @@ class IrParser {
             [](const Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
                       node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              if (node->inputs()[1]->node()->kind() != prim::Constant) {
                 return false;
               }
               return true;
@@ -2132,6 +2180,12 @@ class IrParser {
           [](const Node* node) -> bool {
             if (isReductionNonCompatibleTensor(
                     node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            if (node->inputs()[7]->node()->kind() != prim::Constant) {
               return false;
             }
             return true;
@@ -2290,6 +2344,9 @@ class IrParser {
                 return false;
               }
               if (node->inputs()[2]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              if (node->inputs()[3]->node()->kind() != prim::Constant) {
                 return false;
               }
               return true;
@@ -2604,7 +2661,20 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            // we do not support explicit memory_format on output
+            if (!node->inputs()[4]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -2719,7 +2789,15 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->input(1)->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -2753,7 +2831,15 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(grad_in, format));
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->input(2)->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -3026,6 +3112,9 @@ class IrParser {
               if (!isInputNonSizeZeroTensor(node)) {
                 return false;
               }
+              if (node->input(1)->node()->kind() != prim::Constant) {
+                return false;
+              }
               auto optional_sizes = tensor_type->sizes().concrete_sizes();
               return tensor_type->sizes().concrete_sizes().has_value();
             },
@@ -3254,15 +3343,26 @@ void profileReductionSize(ProfilingRecord* pr, Node* node, size_t offset) {
           "profileReductionSize does not support data type: ",
           value.tagKind());
     }
-    if (!pn->hasAttribute(reductionSizeAttr)) {
-      pn->is_(reductionSizeAttr, size_vec);
+    // We stop profiling when it has failed
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(reductionSizeAttr)) {
+        pn->is_(reductionSizeAttr, size_vec);
+      } else {
+        auto profiled_ints = pn->is(reductionSizeAttr);
+        if (profiled_ints.size() != size_vec.size() ||
+            !std::equal(
+                profiled_ints.begin(), profiled_ints.end(), size_vec.begin())) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+          pn->removeAttribute(reductionSizeAttr);
+        }
+      }
     } else {
-      auto profiled_ints = pn->is(reductionSizeAttr);
       TORCH_INTERNAL_ASSERT(
-          profiled_ints.size() == size_vec.size() &&
-              std::equal(
-                  profiled_ints.begin(), profiled_ints.end(), size_vec.begin()),
-          "profiling ivalue doesn't support merge");
+          !pn->hasAttribute(reductionSizeAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3283,18 +3383,28 @@ void profileViewSize(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isIntList(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(viewSizeAttr)) {
-      pn->is_(viewSizeAttr, value.toIntVector());
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(viewSizeAttr)) {
+        pn->is_(viewSizeAttr, value.toIntVector());
+      } else {
+        auto profiled_ints = pn->is(viewSizeAttr);
+        auto input_ints = value.toIntList();
+        if (profiled_ints.size() != input_ints.size() ||
+            !std::equal(
+                profiled_ints.begin(),
+                profiled_ints.end(),
+                input_ints.begin())) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+          pn->removeAttribute(viewSizeAttr);
+        }
+      }
     } else {
-      auto profiled_ints = pn->is(viewSizeAttr);
-      auto input_ints = value.toIntList();
       TORCH_INTERNAL_ASSERT(
-          profiled_ints.size() == input_ints.size() &&
-              std::equal(
-                  profiled_ints.begin(),
-                  profiled_ints.end(),
-                  input_ints.begin()),
-          "profiling ivalue doesn't support merge");
+          !pn->hasAttribute(viewSizeAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3316,18 +3426,28 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isIntList(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(intListAttr)) {
-      pn->is_(intListAttr, value.toIntVector());
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(intListAttr)) {
+        pn->is_(intListAttr, value.toIntVector());
+      } else {
+        auto profiled_ints = pn->is(intListAttr);
+        auto input_ints = value.toIntList();
+        if (profiled_ints.size() != input_ints.size() ||
+            !std::equal(
+                profiled_ints.begin(),
+                profiled_ints.end(),
+                input_ints.begin())) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+          pn->removeAttribute(intListAttr);
+        }
+      }
     } else {
-      auto profiled_ints = pn->is(intListAttr);
-      auto input_ints = value.toIntList();
       TORCH_INTERNAL_ASSERT(
-          profiled_ints.size() == input_ints.size() &&
-              std::equal(
-                  profiled_ints.begin(),
-                  profiled_ints.end(),
-                  input_ints.begin()),
-          "profiling ivalue doesn't support merge");
+          !pn->hasAttribute(intListAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3349,13 +3469,24 @@ void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isString(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(strAttr)) {
-      pn->s_(strAttr, value.toStringRef());
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(strAttr)) {
+        pn->s_(strAttr, value.toStringRef());
+      } else {
+        const auto& profiled_str = pn->s(strAttr);
+        const auto& input_str = value.toStringRef();
+        if (input_str != profiled_str) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+          pn->removeAttribute(strAttr);
+        }
+      }
     } else {
-      const auto& profiled_str = pn->s(strAttr);
-      const auto& input_str = value.toStringRef();
       TORCH_INTERNAL_ASSERT(
-          input_str == profiled_str, "profiling ivalue doesn't support merge");
+          !pn->hasAttribute(strAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3377,14 +3508,24 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isBool(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(boolAttr)) {
-      pn->i_(boolAttr, value.toBool());
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(boolAttr)) {
+        pn->i_(boolAttr, value.toBool());
+      } else {
+        auto profiled_bool = pn->i(boolAttr);
+        auto input_bool = value.toBool();
+        if (input_bool != profiled_bool) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+          pn->removeAttribute(boolAttr);
+        }
+      }
     } else {
-      auto profiled_bool = pn->i(boolAttr);
-      auto input_bool = value.toBool();
       TORCH_INTERNAL_ASSERT(
-          input_bool == profiled_bool,
-          "profiling ivalue doesn't support merge");
+          !pn->hasAttribute(boolAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3406,13 +3547,24 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isInt(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(intAttr)) {
-      pn->i_(intAttr, value.toInt());
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(intAttr)) {
+        pn->i_(intAttr, value.toInt());
+      } else {
+        auto profiled_int = pn->i(intAttr);
+        auto input_int = value.toInt();
+        if (input_int != profiled_int) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+          pn->removeAttribute(intAttr);
+        }
+      }
     } else {
-      auto profiled_int = pn->i(intAttr);
-      auto input_int = value.toInt();
       TORCH_INTERNAL_ASSERT(
-          input_int == profiled_int, "profiling ivalue doesn't support merge");
+          !pn->hasAttribute(intAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3433,12 +3585,23 @@ void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, frame_id);
     IValue value;
     pop(stack, value);
-    if (!pn->hasAttribute(ivalAttr)) {
-      pn->ival_(ivalAttr, value);
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(ivalAttr)) {
+        pn->ival_(ivalAttr, value);
+      } else {
+        auto profiled_ival = pn->ival(ivalAttr);
+        if (value != profiled_ival) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+          pn->removeAttribute(ivalAttr);
+        }
+      }
     } else {
-      auto profiled_ival = pn->ival(ivalAttr);
       TORCH_INTERNAL_ASSERT(
-          value == profiled_ival, "profiling ivalue doesn't support merge");
+          !pn->hasAttribute(ivalAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3460,20 +3623,30 @@ void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isBoolList(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(boolListAttr)) {
-      auto list = value.toBoolList();
-      std::vector<int64_t> val(list.begin(), list.end());
-      pn->is_(boolListAttr, val);
+    if (!pn->hasAttribute(profileFailedAttr)) {
+      if (!pn->hasAttribute(boolListAttr)) {
+        auto list = value.toBoolList();
+        std::vector<int64_t> val(list.begin(), list.end());
+        pn->is_(boolListAttr, val);
+      } else {
+        auto profiled_ints = pn->is(boolListAttr);
+        auto input_bools = value.toBoolList();
+        if (profiled_ints.size() != input_bools.size() ||
+            !std::equal(
+                input_bools.begin(),
+                input_bools.end(),
+                profiled_ints.begin())) {
+          TORCH_WARN(
+              __FUNCTION__,
+              " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
+          pn->s_(profileFailedAttr, "varying profile values");
+          pn->removeAttribute(boolListAttr);
+        }
+      }
     } else {
-      auto profiled_ints = pn->is(boolListAttr);
-      auto input_bools = value.toBoolList();
       TORCH_INTERNAL_ASSERT(
-          profiled_ints.size() == input_bools.size() &&
-              std::equal(
-                  input_bools.begin(),
-                  input_bools.end(),
-                  profiled_ints.begin()),
-          "profiling ivalue doesn't support merge");
+          !pn->hasAttribute(boolListAttr),
+          "profiled attribute should have been removed when profiling is marked as failed");
     }
     push(stack, value);
   };
@@ -3546,23 +3719,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       getOperatorForLiteral(
           "aten::dropout(Tensor input, float p, bool train) -> Tensor")
           ->schema();
-  if (node->matches(dropout_schema)) {
-    switch (offset) {
-      // argument 2: Is training?
-      case 2:
-        profileBool(pr, node, offset);
-        break;
-      default:
-        return false;
-    }
-    return true;
-  }
-
   static auto native_dropout_schema =
       getOperatorForLiteral(
           "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)")
           ->schema();
-  if (node->matches(native_dropout_schema)) {
+  if (node->matches(dropout_schema) || node->matches(native_dropout_schema)) {
     switch (offset) {
       // argument 2: Is training?
       case 2:
@@ -3895,6 +4056,9 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   if (node->matches(log_softmax_backward_data_schema) ||
       node->matches(softmax_backward_data_schema)) {
     switch (offset) {
+      case 2:
+        profileInt(pr, node, offset);
+        return true;
       case 3:
         profileInt(pr, node, offset);
         return true;
