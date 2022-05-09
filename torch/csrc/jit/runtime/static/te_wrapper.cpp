@@ -210,7 +210,8 @@ std::shared_ptr<TEWrapper> createClamp() {
 }
 
 std::shared_ptr<TEWrapper> createClampNanToNum() {
-  static auto symbol = c10::Symbol::fromQualString("static_runtime::clamp_nan_to_num");
+  static auto symbol =
+      c10::Symbol::fromQualString("static_runtime::clamp_nan_to_num");
   auto wrap = lookupNNCCache(symbol);
   if (wrap) {
     return wrap;
@@ -226,10 +227,12 @@ std::shared_ptr<TEWrapper> createClampNanToNum() {
     auto a = A.load(i);
     auto clamp = tensorexpr::clamp(min_handle, max_handle, a);
     auto is_nan = tensorexpr::isnan(clamp);
-    auto nans_replaced = tensorexpr::CompareSelect::make(is_nan, 1, nan_replace_val, clamp, kEQ);
+    auto nans_replaced =
+        tensorexpr::CompareSelect::make(is_nan, 1, nan_replace_val, clamp, kEQ);
     return nans_replaced;
   });
-  wrap = wrapTECompute(wrap, result, {A, min_handle, max_handle, nan_replace_val, N});
+  wrap = wrapTECompute(
+      wrap, result, {A, min_handle, max_handle, nan_replace_val, N});
   updateNNCCache(symbol, wrap);
   return wrap;
 }

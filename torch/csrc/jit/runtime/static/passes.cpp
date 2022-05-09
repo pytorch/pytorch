@@ -1321,13 +1321,15 @@ void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {
   };
 
   auto clampValuesAreConstant =
-      [&isConstantAndNotNone](const Match& match,
-         const std::unordered_map<std::string, Value*>& vmap) {
+      [&isConstantAndNotNone](
+          const Match& match,
+          const std::unordered_map<std::string, Value*>& vmap) {
         // Get the nodes in the real graph from the nodes in the template
         // pattern graph
         const auto& node_map = match.nodes_map;
         auto* clamp_node = node_map.at(vmap.at("x")->node());
-        return isConstantAndNotNone(clamp_node->input(1)) && isConstantAndNotNone(clamp_node->input(2));
+        return isConstantAndNotNone(clamp_node->input(1)) &&
+            isConstantAndNotNone(clamp_node->input(2));
       };
 
   SubgraphRewriter fuse;
