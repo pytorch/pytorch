@@ -360,7 +360,6 @@ class TestSparse(TestCase):
             test_tensor(x, res)
 
     @coalescedonoff
-    @skipIfRocm
     @dtypes(torch.float16, torch.bfloat16, torch.float64, torch.int, torch.cfloat, torch.cdouble)
     def test_to_sparse(self, device, dtype, coalesced):
         shape = [5, 2, 10, 4]
@@ -667,7 +666,6 @@ class TestSparse(TestCase):
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
     @coalescedonoff
-    @skipIfRocm
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 2e-2})
     def test_Sparse_to_Sparse_copy_(self, device, dtype, coalesced):
@@ -1675,7 +1673,6 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/73173")
     def test_sparse_mask(self, device, dtype, coalesced):
         def _test_sparse_mask_fixed():
             i = self.index_tensor([
@@ -3568,6 +3565,7 @@ class TestSparseMaskedReductions(TestCase):
         """
 
         samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
+        op_name = op.name.replace('_masked.', '')
         for sample_input in samples:
             if sample_input.kwargs.get('dim') != 0:
                 continue
@@ -3576,6 +3574,12 @@ class TestSparseMaskedReductions(TestCase):
 
             t = sample_input.input
             mask = sample_input_kwargs.get('mask')
+            if mask is None and op_name in {'prod', 'amax', 'amin'}:
+                # FIXME: for now reductions with non-zero reduction identity and
+                # unspecified mask are not supported for sparse COO
+                # tensors, see torch._masked.prod implementation
+                # for details.
+                continue
             sparse_op_kwargs = dict(sample_input_kwargs)
             actual = op(t.to_sparse(), *sample_input.args, **sample_input_kwargs)
             self.assertEqual(actual.layout, torch.sparse_coo)

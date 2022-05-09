@@ -51,6 +51,54 @@ Tensor _to_copy(
   // memory_format is handled separately due to MemoryFormat::Preserve logic
   options = self.options().merge_in(options).memory_format(c10::nullopt);
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
+  // TODO: Use the dispatcher for this.
+  // Currently there are unenumerated extensibility issues preventing this.
+  if (self.is_sparse_csr()) {
+    TORCH_CHECK(
+        memory_format == MemoryFormat::Preserve,
+        "sparse_csr only supports memory format Preserve, but got ",
+        memory_format,
+        " instead.");
+
+    auto new_values = at::native::to(
+        self.values(),
+        dtype,
+        c10::kStrided, // values are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    auto new_crow_indices = at::native::to(
+        self.crow_indices(),
+        self.crow_indices().scalar_type(), // indices are integral
+        c10::kStrided, // indices are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    auto new_col_indices = at::native::to(
+        self.col_indices(),
+        self.col_indices().scalar_type(), // indices are integral
+        c10::kStrided, // indices are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    return at::native::_sparse_csr_tensor_unsafe(
+        new_crow_indices,
+        new_col_indices,
+        new_values,
+        self.sizes(),
+        new_values.scalar_type(),
+        self.layout(),
+        new_values.device());
+  }
 
   bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
                   (options.layout() == c10::kStrided));
@@ -76,9 +124,13 @@ Tensor _to_copy(
     }
   }
   // See Note [Explicit nullopt MemoryFormat argument]
-  auto r = at::empty(self.sizes(),
-                     options.memory_format(memory_format).pinned_memory(pin_out),
-                     c10::nullopt);
+  // TODO: empty_quantized does not work here. It raises an exception in CheckMemoryFormat.h prior to
+  // empty_affine_quantizd/_empty_per_channel_affine_quantized calls
+  // at::empty also does not work here because there is no proper at::empty support for quantized tensors
+  // as it would return a quantized tensor with an UnknownQuantizer
+  auto r = self.is_quantized() ? at::empty_like(self, memory_format)
+                               : at::empty(self.sizes(),
+                                 options.memory_format(memory_format).pinned_memory(pin_out), c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
 }
@@ -247,7 +299,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.layout() == c10::kStrided) {
     return grad.to_dense();
   }
-  AT_ERROR("Unsupported input layout: ", input_.layout());
+  AT_ERROR("to_dense_backward: Unsupported input layout: ", input_.layout());
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
@@ -414,7 +466,17 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
 }
 
 Tensor csr_to_sparse_csr(const Tensor& self) {
-  return self;
+  // Just returning self doesn't work
+  // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152,
+  // please report a bug to PyTorch. aten::to_sparse_csr
+  return at::native::_sparse_csr_tensor_unsafe(
+      self.crow_indices(),
+      self.col_indices(),
+      self.values(),
+      self.sizes(),
+      self.scalar_type(),
+      c10::kSparseCsr,
+      self.device());
 }
 
 Tensor coo_to_sparse_csr(const Tensor& self) {

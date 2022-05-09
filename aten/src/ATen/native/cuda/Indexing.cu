@@ -1,11 +1,13 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
@@ -13,6 +15,18 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_quantized.h>
+#include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/masked_fill_native.h>
+#endif
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
@@ -209,13 +223,12 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
-  if (!self.is_contiguous()) {
-    self = self.contiguous();
-  }
+  bool self_contiguous = self.is_contiguous();
+  auto self_ = self_contiguous ? self : self.contiguous();
   Tensor linearIndex, src, expandedValue = value;
   int64_t nElemBefore, strideBefore, sliceSize;
   std::vector<int64_t> inversePerm;
-  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices, !unsafe);
+  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self_, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
 
   if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
@@ -255,7 +268,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       auto range = at::arange(num_indices, linearIndex.options());
       // linearIndex can not be negative, and we take advantage of this
       // fact to sort on less bits for better performance.
-      int64_t nbits = cuda::cub::get_num_bits(largestIndex(self) / sliceSize);
+      int64_t nbits = cuda::cub::get_num_bits(largestIndex(self_) / sliceSize);
       cuda::cub::radix_sort_pairs(
         linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
         range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
@@ -291,6 +304,8 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
 
       if (permuted) {
         self.copy_(src_.permute(inversePerm));
+      } else if (!self_contiguous) {
+        self.copy_(self_);
       }
   }
 }
