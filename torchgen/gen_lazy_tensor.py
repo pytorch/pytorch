@@ -276,6 +276,10 @@ def run_gen_lazy_tensor(
     metrics_counter: str = 'TORCH_LAZY_FN_COUNTER("lazy::")',
     create_tensor: str = "LazyTensor::Create",
     create_from_first_tensor: bool = False,
+    create_aten_from_ltc_tensor: str = "torch::lazy::CreateAtenFromLtcTensor",
+    tuple_aten_from_ltc_tensors: str = "torch::lazy::TupleAtenFromLtcTensors",
+    lazy_value_class: str = "torch::lazy::Value",
+    lazy_tensor_ptr: str = "LazyTensorPtr",
 ) -> None:
 
     template_dir = os.path.join(aten_path, "templates")
@@ -288,7 +292,8 @@ def run_gen_lazy_tensor(
     fm = make_file_manager(output_dir)
 
     native_yaml_path = os.path.join(aten_path, "native/native_functions.yaml")
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(aten_path, "native/tags.yaml")
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
@@ -446,6 +451,7 @@ def run_gen_lazy_tensor(
                     "ATen/MetaFunctions.h",
                     "ATen/Operators.h",
                     "ATen/native/CPUFallback.h",
+                    "torch/csrc/lazy/core/ir_builder.h",
                     "torch/csrc/lazy/core/lazy_graph_executor.h",
                     "torch/csrc/lazy/core/metrics.h",
                     "torch/csrc/lazy/core/shape.h",
@@ -475,6 +481,10 @@ def run_gen_lazy_tensor(
                         metrics_counter,
                         create_tensor,
                         create_from_first_tensor,
+                        create_aten_from_ltc_tensor,
+                        tuple_aten_from_ltc_tensors,
+                        lazy_value_class,
+                        lazy_tensor_ptr,
                     ),
                     grouped_native_functions,
                     codegenInplaceVariant=True,
@@ -507,6 +517,29 @@ def run_gen_lazy_tensor(
             "ir_declarations": list(
                 concat_map_codegen(
                     lazy_ir_generator(backend_indices[backend_key], node_base),
+                    grouped_native_functions,
+                )
+            ),
+            "namespace_prologue": ns_helper.prologue,
+            "namespace_epilogue": ns_helper.epilogue,
+        },
+    )
+    # Generate OpKind definitions for IR node classes
+    fm.write_with_template(
+        "LazyIr.cpp",
+        "LazyIr.cpp",
+        lambda: {
+            "includes": [
+                f"#include <{path}>"
+                for path in [
+                    f"{output_dir}/LazyIr.h",
+                ]
+            ],
+            "opkind_definitions": list(
+                concat_map_codegen(
+                    lazy_ir_generator(
+                        backend_indices[backend_key], node_base
+                    ).gen_opkind_definition,
                     grouped_native_functions,
                 )
             ),
