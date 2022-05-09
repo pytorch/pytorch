@@ -988,11 +988,6 @@ def native_batch_norm(
     return output, save_mean, save_invstd
 
 
-@register_decomposition(aten.isnan)
-def isnan(self: Tensor) -> Tensor:
-    return self != self
-
-
 @register_decomposition(aten.clamp_min)
 def clamp_min(self: Tensor, min: float):
     return torch.clamp(self, min=min)
