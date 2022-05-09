@@ -32,7 +32,8 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 // This function does step 3 described above.
 TORCH_API mobile::Module initialize_mobile_module(
     mobile::serialization::Module* flatbuffer_module,
-    c10::optional<at::Device> device = c10::nullopt);
+    c10::optional<at::Device> device = c10::nullopt,
+    bool should_copy_tensor_memory = false);
 
 // Parse a mobile::Module from raw bytes.
 // ownership of data is shared to the returned Module.
@@ -109,6 +110,14 @@ class TORCH_API FlatbufferLoader {
     return module_;
   }
 
+  bool getShouldCopyTensorMemory() {
+    return should_copy_tensor_memory_;
+  }
+
+  void setShouldCopyTensorMemory(bool should_copy_tensor_memory) {
+    should_copy_tensor_memory_ = should_copy_tensor_memory;
+  }
+
   std::shared_ptr<mobile::CompilationUnit> mcu_;
   std::shared_ptr<CompilationUnit> cu_;
 
@@ -131,6 +140,7 @@ class TORCH_API FlatbufferLoader {
   TypeResolver type_resolver_ = nullptr;
   mobile::serialization::Module* module_ = nullptr;
   bool module_parsed_ = false;
+  bool should_copy_tensor_memory_ = false;
 };
 
 } // namespace jit
