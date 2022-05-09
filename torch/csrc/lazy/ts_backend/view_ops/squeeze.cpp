@@ -6,6 +6,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind Squeeze::class_op_kind(at::aten::squeeze);
+
 Squeeze::Squeeze(const torch::lazy::Value& input, int dim)
     : torch::lazy::TsNode(torch::lazy::OpKind(at::aten::squeeze), {input},
                           /*num_outputs=*/1, torch::lazy::MHash(dim)),
