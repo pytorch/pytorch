@@ -17,7 +17,6 @@ Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
   auto output = at::empty({0}, self.options());
   output.resize_(self.sizes(), memory_format);
   auto input = self.contiguous(memory_format);
-  TORCH_CHECK(input.numel() != 0, "Input tensor should have no zeros");
   channel_shuffle_kernel(kCPU, output, input, groups);
   return namedinference::propagate_names_if_nonempty(
       output,
@@ -29,7 +28,7 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
               "channel_shuffle expects input with > 2 dims, but got input with sizes ",
               self.sizes());
   int64_t c = self.size(1);
-  TORCH_CHECK(self.numel() != 0, "Input Tensor should have no zeros");
+  TORCH_CHECK(self.numel() != 0, "channel_shuffle: Input tensor must not be empty");
   TORCH_CHECK(groups > 0,
               "Number of groups to divide channels in must be positive.",
               " Value of groups:", groups);
