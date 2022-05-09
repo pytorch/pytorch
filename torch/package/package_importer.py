@@ -237,7 +237,7 @@ class PackageImporter(Importer):
         # Load the data (which may in turn use `persistent_load` to load tensors)
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
-        unpickler.persistent_load = persistent_load
+        unpickler.persistent_load = persistent_load  # type: ignore[assignment]
 
         @contextmanager
         def set_deserialization_context():

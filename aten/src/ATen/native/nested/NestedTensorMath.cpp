@@ -303,7 +303,10 @@ Tensor nested_from_padded_generic(
       std::move(new_buffer), sizes);
 }
 
-Tensor NestedTensor_to_padded_tensor_generic(const Tensor& t, double padding) {
+Tensor NestedTensor_to_padded_tensor_generic(
+    const Tensor& t,
+    double padding,
+    OptionalIntArrayRef output_size) {
   // TODO: skipped optimization for case of all 1x1 tensors
   auto& nt = *get_nested_tensor_impl(t);
   auto max_size = NestedTensor_get_max_size(nt);
@@ -356,7 +359,22 @@ Tensor NestedTensor_to_padded_tensor_generic(const Tensor& t, double padding) {
     buffers.push_back(pad_tensor_to_shape(to_pad, max_size, padding));
     sizes_ptr += sizes_num_columns;
   }
-  return at::stack(buffers);
+  auto ret_val = at::stack(buffers);
+
+  // Pad output tensor to output_size if provided
+  if (output_size.has_value()) {
+    auto output_size_ = output_size.value();
+    TORCH_CHECK(
+        (int64_t)output_size_.size() == ret_val.dim(),
+        "Length of output_size does not match NestedTensor dims. Broadcasting is not supported.");
+    for (int64_t i = 0; i < (int64_t)ret_val.dim(); i++) {
+      TORCH_CHECK(
+          output_size_[i] >= ret_val.size(i),
+          "Value in output_size is less than NestedTensor padded size. Truncation is not supported.");
+    }
+    return pad_tensor_to_shape(ret_val, output_size_, padding);
+  }
+  return ret_val;
 }
 
 Tensor NestedTensor_embedding(
@@ -385,5 +403,119 @@ Tensor NestedTensor_embedding(
   return at::detail::make_tensor<NestedTensorImpl>(
       result_buffer.reshape({-1}), std::move(new_sizes));
 }
+
+std::pair<NestedTensorImpl*, NestedTensorImpl*>
+get_elementwise_nested_tensor_impl(
+    const Tensor& self,
+    const Tensor& other,
+    const std::string& op_name) {
+  if (self.is_nested() && !(other.is_nested())) {
+    TORCH_CHECK(
+        false,
+        "Expected both self and other to be nested, but got a nested self and non-nested other");
+  } else if (!(self.is_nested()) && other.is_nested()) {
+    TORCH_CHECK(
+        false,
+        "Expected both self and other to be nested, but got a non-nested self and nested other");
+  } else if (!(self.is_nested()) || !(other.is_nested())) {
+    TORCH_CHECK(
+        false,
+        "Expected both self and other to be nested, but got a non-nested self and non-nested other");
+  }
+
+  auto self_ptr = get_nested_tensor_impl(self);
+  auto other_ptr = get_nested_tensor_impl(other);
+
+  TORCH_CHECK(
+      self.dim() == other.dim(),
+      op_name,
+      " does not support broadcasting when given a NestedTensor");
+  TORCH_CHECK(
+      at::equal(
+          self_ptr->get_nested_size_tensor(),
+          other_ptr->get_nested_size_tensor()),
+      op_name,
+      " does not support broadcasting when given a NestedTensor");
+  TORCH_CHECK(
+      nested_tensor_impl_is_contiguous(self_ptr) &&
+          nested_tensor_impl_is_contiguous(other_ptr),
+      op_name,
+      " does not support non-contiguous NestedTensor inputs");
+  return std::make_pair(self_ptr, other_ptr);
+}
+
+template <typename Func>
+Tensor NestedTensor_elementwise_Tensor(
+    const Tensor& self,
+    const Tensor& other,
+    const std::string& op_name,
+    Func f) {
+  NestedTensorImpl* self_impl = nullptr;
+  NestedTensorImpl* other_impl = nullptr;
+  std::tie(self_impl, other_impl) =
+      get_elementwise_nested_tensor_impl(self, other, op_name);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl);
+  const auto& nt_self = *self_impl;
+  const auto& nt_other = *other_impl;
+  const auto& self_sizes = nt_self.get_nested_size_tensor();
+  return wrap_buffer(
+      f(nt_self.get_buffer().reshape({-1}),
+        nt_other.get_buffer().reshape({-1})),
+      self_sizes);
+}
+
+Tensor NestedTensor_add_Tensor(
+    const Tensor& self,
+    const Tensor& other,
+    const Scalar& alpha) {
+  return NestedTensor_elementwise_Tensor(
+      self, other, "add", [alpha](const Tensor& b1, const Tensor& b2) {
+        return at::add(b1, b2, alpha);
+      });
+}
+
+Tensor NestedTensor_mul_Tensor(const Tensor& self, const Tensor& other) {
+  return NestedTensor_elementwise_Tensor(
+      self, other, "mul", [](const Tensor& b1, const Tensor& b2) {
+        return at::mul(b1, b2);
+      });
+}
+
+template <typename Func>
+Tensor& NestedTensor_elementwise__Tensor(
+    Tensor& self,
+    const Tensor& other,
+    const std::string& op_name,
+    Func f) {
+  NestedTensorImpl* self_impl = nullptr;
+  NestedTensorImpl* other_impl = nullptr;
+  std::tie(self_impl, other_impl) =
+      get_elementwise_nested_tensor_impl(self, other, op_name);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl);
+  const auto& nt_self = *self_impl;
+  const auto& nt_other = *other_impl;
+  f(nt_self.get_buffer().view({-1}), nt_other.get_buffer().view({-1}));
+  return self;
+}
+
+Tensor& NestedTensor_add__Tensor(
+    Tensor& self,
+    const Tensor& other,
+    const Scalar& alpha) {
+  return NestedTensor_elementwise__Tensor(
+      self, other, "add_", [alpha](const Tensor& b1, const Tensor& b2) {
+        return b1.add_(b2, alpha);
+      });
+}
+
+Tensor& NestedTensor_mul__Tensor(Tensor& self, const Tensor& other) {
+  return NestedTensor_elementwise__Tensor(
+      self, other, "mul_", [](const Tensor& b1, const Tensor& b2) {
+        return b1.mul_(b2);
+      });
+}
+
 } // namespace native
 } // namespace at
