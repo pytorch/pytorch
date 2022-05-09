@@ -731,6 +731,12 @@
   other: grad * other / result
   result: self_t * self_p / result + other_t * other_p / result
 
+- name: special_fresnel_integral_c(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_fresnel_integral_s(Tensor self) -> Tensor
+  self: non_differentiable
+
 - name: i0(Tensor self) -> Tensor
   self: grad * at::special_i1(self)
   result: auto_element_wise

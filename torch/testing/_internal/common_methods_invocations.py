@@ -17807,6 +17807,41 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
+    UnaryUfuncInfo(
+        'special.fresnel_integral_c',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.fresnel(x)[1] if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.fresnel_integral_s',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.int16: tol(atol=1e-2, rtol=0),
+                        torch.int32: tol(atol=1e-2, rtol=0),
+                        torch.int64: tol(atol=1e-2, rtol=0),
+                        torch.float32: tol(atol=1e-2, rtol=0),
+                        torch.float64: tol(atol=1e-2, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.fresnel(x)[0] if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
 ]
 
 # NOTE [Python References]

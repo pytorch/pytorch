@@ -3119,6 +3119,8 @@
     "exp2",
     "expit",
     "expm1",
+    "fresnel_integral_c",
+    "fresnel_integral_s",
     "gammainc",
     "gammaincc",
     "gammaln",

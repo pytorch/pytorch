@@ -565,4 +565,22 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// See https://pytorch.org/docs/master/special.html#torch.special.fresnel_integral_c.
+inline Tensor fresnel_integral_c(const Tensor& self) {
+  return torch::special_fresnel_integral_c(self);
+}
+
+inline Tensor& fresnel_integral_c_out(Tensor& result, const Tensor& self) {
+  return torch::special_fresnel_integral_c_out(result, self);
+}
+
+/// See https://pytorch.org/docs/master/special.html#torch.special.fresnel_integral_s.
+inline Tensor fresnel_integral_s(const Tensor& self) {
+  return torch::special_fresnel_integral_s(self);
+}
+
+inline Tensor& fresnel_integral_s_out(Tensor& result, const Tensor& self) {
+  return torch::special_fresnel_integral_s_out(result, self);
+}
+
 }} // torch::special

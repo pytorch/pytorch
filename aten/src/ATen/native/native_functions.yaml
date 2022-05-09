@@ -10497,6 +10497,32 @@
 - func: special_erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
+- func: special_fresnel_integral_c(Tensor self) -> Tensor
+  python_module: special
+  structured_delegate: special_fresnel_integral_c.out
+  variants: function
+
+- func: special_fresnel_integral_c.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_fresnel_integral_c_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_fresnel_integral_s(Tensor self) -> Tensor
+  python_module: special
+  structured_delegate: special_fresnel_integral_s.out
+  variants: function
+
+- func: special_fresnel_integral_s.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_fresnel_integral_s_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
 - func: special_ndtr(Tensor self) -> Tensor
   python_module: special
   variants: function

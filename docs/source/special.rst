@@ -13,10 +13,6 @@ Functions
 -----------------------
 
 .. autofunction:: entr
-.. autofunction:: erf
-.. autofunction:: erfc
-.. autofunction:: erfcx
-.. autofunction:: erfinv
 .. autofunction:: expit
 .. autofunction:: expm1
 .. autofunction:: exp2
@@ -44,3 +40,20 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+
+Error Functions and and Exponential Integrals
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Error Functions
+"""""""""""""""
+
+.. autofunction:: erf
+.. autofunction:: erfc
+.. autofunction:: erfcx
+.. autofunction:: erfinv
+
+Fresnel Integrals
+"""""""""""""""""
+
+.. autofunction:: fresnel_integral_c
+.. autofunction:: fresnel_integral_s
