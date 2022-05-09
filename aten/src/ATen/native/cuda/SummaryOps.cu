@@ -341,9 +341,10 @@ Tensor _bincount_cuda_template(
 
   const int64_t nbins =
       std::max(self.max().item<input_t>() + (int64_t)1, minlength);
-  using bounds_t =
-      at::acc_type<input_t, /*is_cuda=*/true>; // in particular int64_t for
-                                               // integers
+
+  // we are using acc_type for the bounds, in particular int64_t for integers
+  // in order to avoid overflows (e.g. using 256 bins for dtype uint8)
+  using bounds_t = at::acc_type<input_t, /*is_cuda=*/true>;
   const bounds_t minvalue = 0;
   const bounds_t maxvalue = nbins;
   // alloc output counter on GPU
