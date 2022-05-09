@@ -954,17 +954,27 @@
   result: self_t.zero_()
 
 - name: linalg_lu_factor_ex(Tensor A, *, bool pivot=True, bool check_errors=False) -> (Tensor LU, Tensor pivots, Tensor info)
-  A: lu_factor_ex_backward(grad, A, LU, pivots)
-  LU: lu_factor_ex_jvp(A_t, LU, pivots)
+  A: lu_factor_ex_backward(grad, LU, pivots, pivot)
+  LU: lu_factor_ex_jvp(A_t, LU, pivots, pivot)
   output_differentiability: [True, False, False]
 
-- name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
-  self, LU_data: lu_solve_backward(grad, result, LU_data, LU_pivots, grad_input_mask)
-  result: lu_solve_jvp(result, LU_data_p, LU_data_t, self_t, LU_pivots)
+- name: linalg_lu(Tensor A, *, bool pivot=True) -> (Tensor P, Tensor L, Tensor U)
+  A: linalg_lu_backward(grad_L, grad_U, P, L, U, pivot)
+  L: std::get<0>(linalg_lu_jvp(A_t, P, L, U, pivot))
+  U: std::get<1>(linalg_lu_jvp(A_t, P, L, U, pivot))
+  output_differentiability: [False, True, True]
+
+- name: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
+  LU: linalg_lu_solve_LU(grad, LU, pivots, result, left, adjoint)
+  B: "at::linalg_lu_solve(LU, pivots, grad, left, !adjoint)"
+  result: linalg_lu_solve_jvp(result, LU_p, pivots, LU_t, B_t, left, adjoint)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
-  LU_data: lu_unpack_backward(grads, LU_data, unpack_data)
+  LU_data: lu_unpack_backward(grad_L, grad_U, LU_data.size(-2), LU_data.size(-1))
   LU_pivots: non_differentiable
+  L: "LU_data_t.size(-2) >= LU_data_t.size(-1) ? LU_data_t.tril(-1) : LU_data_t.narrow(-1, 0, LU_data_t.size(-2)).tril(-1)"
+  U: "LU_data_t.size(-1) >= LU_data_t.size(-2) ? LU_data_t.triu() : LU_data_t.narrow(-2, 0, LU_data_t.size(-1)).triu()"
+  output_differentiability: [False, True, True]
 
 - name: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
   self: grad.masked_fill(mask, 0)
@@ -1246,10 +1256,9 @@
   index: non_differentiable
   source: grad.take(index).reshape_as(source)
 
-- name: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
-  self: linalg_qr_backward(grads, self, mode, Q, R)
-  Q: linalg_qr_jvp_Q(self_t, Q, R)
-  R: linalg_qr_jvp_R(self_t, Q, R)
+- name: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
+  A: linalg_qr_backward(grad_Q, grad_R, Q, R, mode)
+  Q, R: linalg_qr_jvp(A_t, Q, R, mode)
 
 - name: rad2deg(Tensor self) -> Tensor
   self: rad2deg_backward(grad)
@@ -2089,12 +2098,12 @@
   output_differentiability: [True, False]
 
 - name: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  self: max_unpool2d_backward(grad, self, indices, output_size)
+  self: max_pool_double_backward(grad, indices, 2)
   indices: non_differentiable
   result: auto_linear
 
 - name: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
-  self: max_unpool3d_backward(grad, self, indices, output_size, stride, padding)
+  self: max_pool_double_backward(grad, indices, 3)
   indices: non_differentiable
   result: auto_linear
 
@@ -2271,11 +2280,6 @@
   self: zeros_like(self)
   indices: non_differentiable
   result: auto_linear
-
-- name: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  grad_output: max_unpool2d(grad, indices, output_size)
-  self: zeros_like(self)
-  indices: non_differentiable
 
 - name: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: mse_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
