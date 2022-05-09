@@ -11090,11 +11090,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
-    def test_channel_shuffle_warnings(self):
+    def test_channel_shuffle_runtime_errors(self):
         # gh-76616: nn.ChannelShuffle will crash with empty input tensor
         groups = 3
         input_tensor = torch.rand([0, 9, 4, 4])
-        with self.assertRaisesRegex(RuntimeError, "channel_shuffle: Input tensor must not be empty"):
+        with self.assertRaisesRegex(RuntimeError, "nn.ChannelShuffle: Input tensor must not be empty"):
             torch.nn.ChannelShuffle(groups)(input_tensor)
 
     def test_upsamplingLinear1d(self):

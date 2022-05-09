@@ -28,7 +28,7 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
               "channel_shuffle expects input with > 2 dims, but got input with sizes ",
               self.sizes());
   int64_t c = self.size(1);
-  TORCH_CHECK(self.numel() != 0, "channel_shuffle: Input tensor must not be empty");
+  TORCH_CHECK(self.numel() != 0, "nn.ChannelShuffle: Input tensor must not be empty");
   TORCH_CHECK(groups > 0,
               "Number of groups to divide channels in must be positive.",
               " Value of groups:", groups);
