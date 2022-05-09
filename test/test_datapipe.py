@@ -1404,7 +1404,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
 
-    def test_streaw_reader_iterdatapipe(self):
+    def test_stream_reader_iterdatapipe(self):
         from io import StringIO
 
         input_dp = dp.iter.IterableWrapper([("f1", StringIO("abcde")), ("f2", StringIO("bcdef"))])

@@ -1,3 +1,4 @@
+                                                \
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 
@@ -62,6 +63,10 @@ hash_t TsNode::hash() const { return dag_hash_; }
 
 hash_t TsNode::shapeHash() const { return shape_hash_; }
 
+const std::string TsNode::getPythonStacktrace() const {
+  return GetFirstUserFrameInPythonIfEnabled();
+}
+
 TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                          TSLoweringContext* loctx) const {
   // TODO(whc) beginning to invert the design here.  Move to provide a Lower()
@@ -71,6 +76,8 @@ TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
   // old lowering path.
   return {};
 }
+
+const OpKind TensorList::class_op_kind(tensor_list_opkind);
 
 TensorList::TensorList(OpList values)
   : TsNode(/*op=*/tensor_list_opkind,
