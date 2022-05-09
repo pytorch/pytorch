@@ -2,7 +2,6 @@
 
 import sys
 import contextlib
-import copy
 from functools import partial
 from itertools import product
 
@@ -36,7 +35,6 @@ from torch.testing._internal.common_cuda import CUDA11OrLater
 
 try:
     import torchvision
-
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
@@ -405,14 +403,16 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     @skip_if_lt_x_gpu(2)
     @skipIfNoTorchVision
     def test_mixed_precision_resnet(self):
+        """
+        End to end test to ensure mixed precision + auto_wrap works
+        for ResNet model.
+        """
         resnet_model = torchvision.models.resnet50().cuda()
         resnet_model = nn.SyncBatchNorm.convert_sync_batchnorm(
-            copy.deepcopy(resnet_model),
+            resnet_model,
             process_group=dist.distributed_c10d._get_default_group()
         )
-        n_bn = len(
-            [x for x in resnet_model.modules() if isinstance(x, _BatchNorm)]
-        )
+        n_bn = sum(1 if isinstance(x, _BatchNorm) else 0 for x in resnet_model.modules())
         inp = torch.ones(1, 3, 1000, 1000, device='cuda')
         mp_config = MixedPrecision(
             param_dtype=torch.float16,
@@ -439,7 +439,8 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         loss.backward()
 
     @skip_if_lt_x_gpu(2)
-    def test_mp_batchnorm(self):
+    @parametrize("convert_sync_bn", [True, False])
+    def test_mp_batchnorm(self, convert_sync_bn):
         class BatchNormNet(nn.Module):
             def __init__(self, affine=True):
                 super(BatchNormNet, self).__init__()
@@ -457,43 +458,40 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         def never_wrap_policy(*args, **kwargs):
             return False
 
-        for convert in [True, False]:
-            net = BatchNormNet().cuda()
-            if convert:
-                net = nn.SyncBatchNorm.convert_sync_batchnorm(
-                    copy.deepcopy(net)
-                )
-            # FSDP detects that mixed precision + batchnorm will cause issues
-            # and thus wrap batchnorm in a distinct FSDP unit that does not
-            # use mixed precision.
-            mp_config = MixedPrecision(
-                param_dtype=torch.float16,
-                reduce_dtype=torch.float16,
-                buffer_dtype=torch.float16,
+        net = BatchNormNet().cuda()
+        if convert_sync_bn:
+            net = nn.SyncBatchNorm.convert_sync_batchnorm(net)
+        # FSDP detects that mixed precision + batchnorm will cause issues
+        # and thus wrap batchnorm in a distinct FSDP unit that does not
+        # use mixed precision.
+        mp_config = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+        )
+        with self.assertWarnsRegex(
+            expected_warning=UserWarning,
+            expected_regex="BatchNorm units will be wrapped as a separate"
+        ):
+            model = FSDP(
+                net,
+                mixed_precision=mp_config,
+                auto_wrap_policy=never_wrap_policy,
             )
-            with self.assertWarnsRegex(
-                expected_warning=UserWarning,
-                expected_regex="BatchNorm units will be wrapped as a separate"
-            ):
-                model = FSDP(
-                    net,
-                    mixed_precision=mp_config,
-                    auto_wrap_policy=never_wrap_policy,
-                )
 
-            bn = model.bn
-            self.assertTrue(isinstance(bn, FSDP))
-            # policy should not have wrapped any other submodules
-            self.assertFalse(isinstance(model.fc1, FSDP))
-            self.assertFalse(isinstance(model.fc2, FSDP))
-            self.assertEqual(None, bn.mixed_precision)
-            self.assertNotEqual(None, model.mixed_precision)
+        bn = model.bn
+        self.assertTrue(isinstance(bn, FSDP))
+        # policy should not have wrapped any other submodules
+        self.assertFalse(isinstance(model.fc1, FSDP))
+        self.assertFalse(isinstance(model.fc2, FSDP))
+        self.assertEqual(None, bn.mixed_precision)
+        self.assertNotEqual(None, model.mixed_precision)
 
-            inp = torch.randn((1, 2), device='cuda')
-            # Without FSDP BN mixed precision fix, this would result in
-            # RuntimeError: Expected counts to have type Half but got Float
-            # for syncBN
-            model(inp).sum().backward()
+        inp = torch.randn((1, 2), device='cuda')
+        # Without FSDP BN mixed precision fix, this would result in
+        # RuntimeError: Expected counts to have type Half but got Float
+        # for syncBN
+        model(inp).sum().backward()
 
 
 class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):

@@ -17,9 +17,9 @@ from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
     default_auto_wrap_policy,
     enable_wrap,
+    or_policy,
     wrap,
     wrap_batchnorm_individually,
-    or_policy,
 )
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
@@ -146,24 +146,24 @@ class TestFSDPWrap(FSDPTest):
             mod = FSDP(wrapped_fsdp, auto_wrap_policy=default_auto_wrap_policy)
 
     @skip_if_lt_x_gpu(2)
-    def test_wrap_batchnorm_individually(self):
+    @parametrize("use_or_policy", [True, False])
+    def test_wrap_batchnorm_individually(self, use_or_policy):
         def never_wrap_policy(*args, **kwargs):
             return False
 
-        for policy in [
-            wrap_batchnorm_individually,
+        policy = (
             functools.partial(
                 or_policy,
                 policies=[never_wrap_policy, wrap_batchnorm_individually]
-            )
-        ]:
-            model = BatchNormNet()
-            fsdp = FSDP(model, auto_wrap_policy=policy)
-            # Batchnorms should be wrapped
-            for layer in [fsdp.bn1, fsdp.bn2, fsdp.bn3, fsdp.sync_bn]:
-                self.assertTrue(isinstance(layer, FSDP))
+            ) if use_or_policy else wrap_batchnorm_individually
+        )
+        model = BatchNormNet()
+        fsdp = FSDP(model, auto_wrap_policy=policy)
+        # Batchnorms should be wrapped
+        for layer in [fsdp.bn1, fsdp.bn2, fsdp.bn3, fsdp.sync_bn]:
+            self.assertTrue(isinstance(layer, FSDP))
 
-            self.assertFalse(isinstance(fsdp.lin, FSDP))
+        self.assertFalse(isinstance(fsdp.lin, FSDP))
 
     @skip_if_lt_x_gpu(2)
     def test_bn_always_wrapped_individually(self):

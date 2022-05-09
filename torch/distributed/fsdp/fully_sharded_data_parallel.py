@@ -491,7 +491,7 @@ class FullyShardedDataParallel(nn.Module):
             care to disable mixed precision for ``BatchNorm`` units by wrapping
             them separately in their own FSDP unit with ``mixed_precision=None``.
             This is done because several ``BatchNorm`` kernels do not implement
-            reduced type support at the moment. If individually wrapping model,
+            reduced type support at the moment. If individually wrapping the model,
             users must take care to set ``mixed_precision=None`` for
             ``BatchNorm`` units.
             (Default: ``None``)
