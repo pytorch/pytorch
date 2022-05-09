@@ -176,19 +176,18 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
     const Vec negcoef_vec(negcoef);
     const Vec negiptcoef_vec(negiptcoef);
     const Vec poscoef_vec(poscoef);
-    const Vec one_vec(static_cast<scalar_t>(1));
     const Vec zero_vec(static_cast<scalar_t>(0));
     cpu_kernel_vec(
         it,
         [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
-          return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
+          return a <= scalar_t(0) ? std::expm1(a * negiptcoef) * negcoef : a * poscoef;
         },
-        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vec a) -> Vec {
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec](Vec a) -> Vec {
           auto cmp = (a > zero_vec);
           if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
             return a * poscoef_vec;
           } else {
-            return Vec::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
+            return Vec::blendv((a * negiptcoef_vec).expm1() * negcoef_vec, a * poscoef_vec, cmp);
           }
         });
   });
