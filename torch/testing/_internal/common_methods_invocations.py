@@ -17577,6 +17577,15 @@ op_db: List[OpInfo] = [
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_segment_reduce,
+        skips=(
+            # FIXME: CUDA driver API confirmed a leak in __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cuda",
+            ),
+        ),
     ),
 ]
 
