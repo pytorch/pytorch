@@ -657,7 +657,7 @@ void launch(
   auto ks_to_find_buffer = allocator.allocate(numInputSlices * sizeof(uint32_t));
   uint32_t* ks_to_find = reinterpret_cast<uint32_t*>(ks_to_find_buffer.get());
   uint32_t k_to_find = largest ? inputSliceSize - outputSliceSize + 1: outputSliceSize;
-  fill<uint32_t><<<std::min((numInputSlices + 511) / 512, (uint32_t)65535), 512, 0, stream>>>(
+  fill<uint32_t><<<std::min(((int64_t)numInputSlices + 511) / 512, (int64_t)1073741824), 512, 0, stream>>>(
     ks_to_find, k_to_find, numInputSlices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
