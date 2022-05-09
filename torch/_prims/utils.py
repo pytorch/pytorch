@@ -228,6 +228,10 @@ def validate_idx(rank: int, idx: int):
 
     assert idx >= 0 and idx < rank or idx == 0
 
+def validate_dimension_indices(rank: int, indices: DimsSequenceType):
+    for idx in indices:
+        validate_idx(rank, idx)
+
 
 def validate_exclusive_idx(rank: int, ex_idx: int):
     """
@@ -546,6 +550,7 @@ def get_higher_dtype(
     raise RuntimeError("Unexpected termination!")
 
 
+# TODO: maybe unify with can_cast_to?
 def is_weakly_lesser_type(a: type, b: type) -> bool:
     """
     Compares two types, a and b, returning True if a is weakly "less" than b.

@@ -1433,6 +1433,7 @@ reshape = _make_prim(
 
 
 def _rev_meta(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    utils.validate_dimension_indices(a.ndim, dims)
     return TensorMeta(a)
 
 

@@ -941,6 +941,7 @@ def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     return prims.transpose(a, _permutation)
 
 
+# update to cat then view instead of unsqueezing each tensor
 @out_wrapper
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     tensors = tuple(unsqueeze(a, dim) for a in tensors)
