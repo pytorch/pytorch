@@ -191,7 +191,7 @@ void cat_interleave4_impl(scalar_t* result, scalar_t* input0, scalar_t* input1, 
   });
 }
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER) && !defined(C10_MOBILE)
 template <>
 void cat_interleave4_impl<float>(float* result, float* input0, float* input1, int64_t outer_size) {
   using Vec = vec::Vectorized<float>;
