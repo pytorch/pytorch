@@ -7,4 +7,4 @@ def is_built():
 
 def is_available():
     r"""Returns whether PyTorch is built with MPS support."""
-    return torch._C.has_mps
+    return torch._C.is_mps_available
