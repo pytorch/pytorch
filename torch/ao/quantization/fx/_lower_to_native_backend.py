@@ -58,6 +58,7 @@ def is_fixed_qparams_node(node, modules):
         torch.nn.Hardsigmoid,
         torch.nn.Sigmoid,
         torch.nn.Tanh,
+        torch.nn.Softmax,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
@@ -236,6 +237,7 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
     nn.InstanceNorm3d: nnq.InstanceNorm3d,
     nn.LayerNorm: nnq.LayerNorm,
     nn.Dropout: nnq.Dropout,
+    nn.Softmax: nnq.Softmax,
     nni.BNReLU2d: nniq.BNReLU2d,
     nni.BNReLU3d: nniq.BNReLU3d,
 }
@@ -823,7 +825,8 @@ def special_pattern_replacement(model: QuantizedGraphModule):
     for n in model.graph.nodes:
         q_node = n
         is_quantize = q_node.target == torch.quantize_per_tensor
-        is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16
+        is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and \
+            len(q_node.args) == 2 and q_node.args[1] == torch.float16
         if not (is_quantize or is_to_fp16):
             continue
         ref_node = q_node.args[0]
