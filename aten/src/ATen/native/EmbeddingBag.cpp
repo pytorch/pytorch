@@ -169,7 +169,7 @@ index_select_add(const Tensor &select_indices,
                              bool include_last_offset,
                              Tensor &bag_size,
                              index_t padding_idx,
-                             _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
+                             _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* output_data = output.data_ptr<at::Half>();
@@ -198,7 +198,8 @@ index_select_add(const Tensor &select_indices,
 
 #ifdef USE_FBGEMM
     using float16 = uint16_t;
-    auto kernel_fp16_index_t =
+    auto kernel_fp16_index_t = fbgemm_kernel_cache ?
+      fbgemm_kernel_cache->getCallback</* has_weight */ false, index_t, float16>(ddim) :
       fbgemm::GenerateEmbeddingSpMDM<float16, index_t, index_t, float16>(
         /* block_size */ddim,
         /* has_weight */false,
@@ -319,7 +320,7 @@ index_select_add(const Tensor &select_indices,
                              bool include_last_offset,
                              Tensor &bag_size,
                              index_t padding_idx,
-                             _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
+                             _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* output_data = output.data_ptr<float>();
@@ -348,6 +349,8 @@ index_select_add(const Tensor &select_indices,
 
 #ifdef USE_FBGEMM
     auto kernel_fp32_index_t =
+      fbgemm_kernel_cache ?
+      fbgemm_kernel_cache->getCallback</* has_weight */ false, index_t, float>(ddim) :
       fbgemm::GenerateEmbeddingSpMDM<float, index_t, index_t>(
         /* block_size */ddim,
         /* has_weight */false,
@@ -447,7 +450,7 @@ index_select_scale_add(const Tensor &select_indices,
                                    bool /*include_last_offset*/,
                                    Tensor &bag_size,
                                    index_t padding_idx,
-                                   _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
+                                  _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   AT_ASSERT(select_indices.numel() == add_indices.numel());
   auto* add_indices_data = add_indices.data_ptr<index_t>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -503,7 +506,7 @@ index_select_scale_add(const Tensor &select_indices,
                        bool include_last_offset,
                        Tensor &bag_size,
                        index_t padding_idx,
-                       _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
+                       _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
   auto* scale_data = scale.data_ptr<at::Half>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -536,6 +539,8 @@ index_select_scale_add(const Tensor &select_indices,
     using float16 = uint16_t;
     fbgemm::Float16ToFloat_simd(reinterpret_cast<const float16*>(scale_data), scale_data_fp32, scale_fp32.numel());
     auto kernel_fp16_index_t =
+      fbgemm_kernel_cache ?
+      fbgemm_kernel_cache->getCallback</* has_weight */ true, index_t, float16>(ddim) :
       fbgemm::GenerateEmbeddingSpMDM<float16, index_t, index_t, float16>(
         /* block_size */ddim,
         /* has_weight */true,
@@ -656,7 +661,7 @@ index_select_scale_add(const Tensor &select_indices,
                                           bool include_last_offset,
                                           Tensor &bag_size,
                                           index_t padding_idx,
-                                          _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
+                                          _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
   auto* scale_data = scale.data_ptr<float>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -684,6 +689,8 @@ index_select_scale_add(const Tensor &select_indices,
 
 #ifdef USE_FBGEMM
     auto kernel_fp32_index_t =
+      fbgemm_kernel_cache ?
+      fbgemm_kernel_cache->getCallback</* has_weight */ true, index_t, float>(ddim) :
       fbgemm::GenerateEmbeddingSpMDM<float, index_t, index_t>(
         /* block_size */ddim,
         /* has_weight */true,
