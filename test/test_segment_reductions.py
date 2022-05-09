@@ -384,7 +384,7 @@ class TestSegmentReductions(TestCase):
             )
             self.assertEqual(actual_result, expected)
 
-            if val_dtype == torch.float64 and device == 'cpu':
+            if val_dtype == torch.float64:
                 def fn(x):
                     initial = 1
                     # supply initial values to prevent gradcheck from failing for 0 length segments
