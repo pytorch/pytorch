@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/refine_types.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 
 #include <ATen/core/type_factory.h>
 
@@ -11,11 +12,10 @@ static void VisitTupleNode(Node* node) {
       node->outputs().size() == 1, "Tuple must have exactly one output!");
 
   Value* output = node->outputs()[0];
-  TupleType* tuple_type = dynamic_cast<TupleType*>(output->type().get());
+  auto tuple_type = output->type()->expectRef<TupleType>();
 
-  TORCH_CHECK(tuple_type, "Existing result type must be a Tuple!");
   TORCH_CHECK(
-      tuple_type->containedTypes().size() == node->inputs().size(),
+      tuple_type.containedTypes().size() == node->inputs().size(),
       "Number of contained types does not match number of inputs!");
 
   // Extract updated types from input values.
@@ -25,29 +25,17 @@ static void VisitTupleNode(Node* node) {
   }
 
   // Construct new tuple type based on input types.
-  if (tuple_type->names()) {
-    output->setType(c10::TupleType::createNamed(
-        tuple_type->name(), tuple_type->names().value(), types));
-  } else {
-    output->setType(c10::TupleType::create(types));
-  }
-}
-
-static void VisitNode(Node* node) {
-  if (node->kind() == prim::TupleConstruct) {
-    VisitTupleNode(node);
-  }
-}
-
-static void RefineTypes(Block* block) {
-  for (const auto& n : block->nodes()) {
-    VisitNode(n);
-  }
+  output->setType(tuple_type.withContained(types));
 }
 } // anonymous namespace
 
-void RefineTypes(const std::shared_ptr<Graph>& graph) {
-  RefineTypes(graph->block());
+void RefineTypes(std::shared_ptr<Graph>& graph) {
+  DepthFirstGraphNodeIterator it(graph);
+  for (auto* node = it.next(); node != nullptr; node = it.next()) {
+    if (node->kind() == prim::TupleConstruct) {
+      VisitTupleNode(node);
+    }
+  }
 }
 
 } // namespace jit
