@@ -10162,7 +10162,19 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_clamp),
+           sample_inputs_func=sample_inputs_clamp,
+           skips=(
+               # boolean alpha not handled properly
+               DecorateInfo(unittest.expectedFailure,
+                            'TestCudaFuserOpInfo',
+                            'test_nvfuser_correctness',
+                            dtypes=(torch.bool, torch.int32, torch.int64)),
+               # boolean alpha not handled properly
+               DecorateInfo(unittest.expectedFailure,
+                            'TestNNCOpInfo',
+                            'test_nnc_correctness',
+                            dtypes=(torch.bool, torch.int32, torch.int64)),
+           )),
     UnaryUfuncInfo('clamp',
                    variant_test_name='scalar',
                    aliases=('clip', ),
