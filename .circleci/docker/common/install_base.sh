@@ -23,6 +23,7 @@ install_ubuntu() {
   # TODO: Remove this once nvidia package repos are back online
   # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
   # shellcheck disable=SC2046
+  apt-get install -y sudo
   sudo sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
 
   # Install common dependencies
@@ -50,7 +51,6 @@ install_ubuntu() {
     libasound2-dev \
     libsndfile-dev \
     software-properties-common \
-    sudo \
     wget \
     vim
 
