@@ -200,7 +200,7 @@ def _elementwise_meta(*args, type_promotion):
     assert len(args) > 0
 
     utils.check_same_device(*args, allow_cpu_scalar_tensors=True)
-    utils.check_same_shape(*args)
+    utils.check_same_shape(*args, allow_cpu_scalar_tensors=True)
     utils.check_same_dtype(*args)
 
     strides = None
@@ -644,14 +644,26 @@ lt = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
+
+def _wrap_scalar(a: NumberType, *, dtype: torch.dtype = None) -> torch.Tensor:
+    """
+    Wraps a Number into a Tensor of corresponding dtype.
+
+    Note: this should not generally be used, but some torch functions don't
+    accept scalars, so it's necessary for their prims to do so.
+    """
+    dtype = dtype if dtype is not None else utils.type_to_dtype(type(a))
+    return torch.tensor(a, dtype=dtype)
+
+
 # Note: the following impls are because torch.maximum and torch.mininum do not support scalar inputs
 def _max_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = utils.wrap_scalar(b, dtype=a.dtype)
+        b = _wrap_scalar(b, dtype=a.dtype)
     elif isinstance(b, TensorLike) and isinstance(a, Number):
-        a = utils.wrap_scalar(a, dtype=b.dtype)
+        a = _wrap_scalar(a, dtype=b.dtype)
 
     return torch.maximum(a, b)  # type: ignore[arg-type]
 
@@ -668,9 +680,9 @@ def _min_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = utils.wrap_scalar(b, dtype=a.dtype)
+        b = _wrap_scalar(b, dtype=a.dtype)
     elif isinstance(b, TensorLike) and isinstance(a, Number):
-        a = utils.wrap_scalar(a, dtype=b.dtype)
+        a = _wrap_scalar(a, dtype=b.dtype)
 
     return torch.minimum(a, b)  # type: ignore[arg-type]
 
@@ -951,10 +963,8 @@ def _slice_meta(
 
     for x, y, z in zip(limit_indices, a.shape, start_indices):
         if x < 0:
-            msg = (
-                "Attempting to slice a tensor with a negative stop index of {0}!".format(
-                    x
-                )
+            msg = "Attempting to slice a tensor with a negative stop index of {0}!".format(
+                x
             )
             raise ValueError(msg)
         if x > y:
@@ -1259,7 +1269,9 @@ def collapse(a: Tensor, start: int, end: int) -> Tensor:
 
 # TODO: review stride logic
 def _concatenate_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
-    assert len(tensors) > 0
+    if len(tensors) == 0:
+        msg = "concatenate expects at least one tensor, but received zero!"
+        raise ValueError(msg)
 
     for tensor in tensors:
         assert isinstance(tensor, TensorLike)
@@ -1347,7 +1359,7 @@ def _select_meta(
     pred: TensorLikeType, a: TensorLikeType, b: TensorLikeType
 ) -> TensorLikeType:
     utils.check_same_device(pred, a, b, allow_cpu_scalar_tensors=True)
-    utils.check_same_shape(pred, a, b)
+    utils.check_same_shape(pred, a, b, allow_cpu_scalar_tensors=True)
     assert pred.dtype is torch.bool
 
     return _elementwise_meta(
@@ -1445,10 +1457,11 @@ def _copy_to_meta(a: TensorLikeType, b: TensorLikeType):
     assert isinstance(b, TensorLike)
 
     # Validates the cast is safe
-    a_typ = utils.dtype_to_type(a.dtype)
-    b_typ = utils.dtype_to_type(b.dtype)
-    if a_typ is not utils.get_higher_type(a_typ, b_typ):
-        raise RuntimeError(str(b.dtype), " can't be cast safely to ", str(a.dtype), "!")
+    # TODO: move this as an option on the reference
+    # a_typ = utils.dtype_to_type(a.dtype)
+    # b_typ = utils.dtype_to_type(b.dtype)
+    # if a_typ is not utils.get_higher_type(a_typ, b_typ):
+    #     raise RuntimeError(str(b.dtype), " can't be cast safely to ", str(a.dtype), "!")
 
     # Validates the tensors have the same number of elements
     if a.numel() != b.numel():
