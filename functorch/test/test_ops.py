@@ -408,7 +408,7 @@ class TestOperators(TestCase):
         else:
             ref_jvp_local = ref_jvp
 
-        if not op.supports_forward_ad:
+        if not op.supports_forward_ad and op.name not in VJP_DECOMP:
             self.skipTest("Skipped! Forward AD not supported.")
             return
 
