@@ -26,7 +26,6 @@ export TEST_DIR_WIN
 export PYTORCH_FINAL_PACKAGE_DIR="${PYTORCH_FINAL_PACKAGE_DIR:-/c/users/circleci/workspace/build-results}"
 PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR_WIN
-export PYTORCH_TEST_SKIP_NOARCH=1
 
 mkdir -p "$TMP_DIR"/build/torch
 
@@ -66,13 +65,13 @@ run_tests() {
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
         "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
-        if [[ "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
+        if [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat
             "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
             if [[ "${USE_CUDA}" == "1" ]]; then
               "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
             fi
-        elif [[ "${JOB_BASE_NAME}" == *-test2 || ("${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1) ]]; then
+        elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat
             "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
             "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat

@@ -21,7 +21,7 @@ bool isUnmanagedSpecialCase(const ProcessedNode& pnode, size_t output_idx) {
   // first iteration, assume it will continue to not do anything
   // and avoid managing its output.
   return pnode.node()->kind() == to_maybe_copy_out_symbol &&
-      pnode.output(output_idx).isNone();
+      pnode.Output(output_idx).isNone();
 }
 
 void mapOverManagedTensors(
@@ -37,7 +37,7 @@ void mapOverManagedTensors(
         continue;
       }
 
-      auto& ival = pnode.output(output_idx);
+      auto& ival = pnode.Output(output_idx);
 
       // ival is allowed to be None in special cases, e.g. to_maybe_copy_out
       DCHECK(
@@ -261,7 +261,7 @@ std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
   std::vector<std::pair<size_t, at::Tensor*>> managed_output_tensors;
   for (auto& pnode : block_runner->nodes()) {
     for (const auto i : c10::irange(pnode.outputs().size())) {
-      auto& ival = pnode.output(i);
+      auto& ival = pnode.Output(i);
       const auto* val = pnode.node()->outputs()[i];
       if (!setIncludes(managed_output_tensor_values, val) ||
           isUnmanagedSpecialCase(pnode, i)) {
@@ -282,10 +282,10 @@ MemoryPlanner::MemoryPlanner(
     const BlockInfo& block_info,
     bool enable_out_variant,
     bool manage_output_tensors) {
-  const auto& managed_tensor_values = block_info.managedTensorValues();
+  const auto& managed_tensor_values = block_info.managed_tensor_values();
   const auto& managed_output_tensor_values =
-      block_info.manageOutputTensorValues();
-  const auto& leaked_values = block_info.leakedValues();
+      block_info.managed_output_tensor_values();
+  const auto& leaked_values = block_info.leaked_values();
 
   // collect unmanaged output ivalues
   FastSet<IValue*> unmanaged_ivalues;
@@ -313,10 +313,10 @@ MemoryPlanner::MemoryPlanner(
         // Scalars do not need to be freed after each iteration.
         num_unmanaged_scalar_ivalues_++;
       } else if (borrows_outputs) {
-        IValue& out = pnode.output(i);
+        IValue& out = pnode.Output(i);
         unmanaged_borrowed_ivalues.insert(&out);
       } else {
-        IValue& out = pnode.output(i);
+        IValue& out = pnode.Output(i);
         unmanaged_ivalues.insert(&out);
       }
     }
@@ -451,14 +451,14 @@ StandardMemoryPlanner::StandardMemoryPlanner(
           block_info,
           enable_out_variant,
           manage_output_tensors) {
-  const auto& managed_tensor_values = block_info.managedTensorValues();
+  const auto& managed_tensor_values = block_info.managed_tensor_values();
   if (enable_out_variant) {
     const auto tensor_value_to_tensor =
         tensorValueToTensor(block_runner->nodes(), managed_tensor_values);
     if (optimize_memory) {
       managed_tensors_ = assignStorageToManagedTensors(
-          block_info.nodePtrs(),
-          block_info.managedTensorRanges(),
+          block_info.node_ptrs(),
+          block_info.managed_tensor_ranges(),
           tensor_value_to_tensor);
     } else {
       for (auto& tensor : tensor_value_to_tensor) {
@@ -522,7 +522,6 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
   for (auto& ms : managed_tensors_) {
     const auto& tensors = ms.group();
     size_t max = ms.maxTensorSize();
-    auto tensor_idx = 0;
     for (auto& tensor : tensors) {
       const auto& storage = tensor->storage();
       size_t current_size = compute_aligned_tensor_size(storage.nbytes());
@@ -605,7 +604,7 @@ PrecomputedOffsetsMemoryPlanner::PrecomputedOffsetsMemoryPlanner(
       optimize_memory_(optimize_memory),
       max_allowed_reallocs_(max_allowed_reallocs) {}
 
-std::unique_ptr<MemoryPlanner> PrecomputedOffsetsMemoryPlanner::maybeClone(
+std::unique_ptr<MemoryPlanner> PrecomputedOffsetsMemoryPlanner::maybe_clone(
     BlockRunner* new_block_runner,
     const FastMap<at::Tensor*, at::Tensor*>& old_tensor_to_new) const {
   auto result = std::make_unique<PrecomputedOffsetsMemoryPlanner>(
@@ -666,7 +665,7 @@ void PrecomputedOffsetsMemoryPlanner::deallocateManagedTensors() {
   const bool first_time = managed_tensor_storage_impls_.empty();
   if (C10_UNLIKELY(first_time)) {
     auto managed_tensors_and_values = collectManagedTensors(
-        block_runner_->nodes(), block_info_.managedTensorValues());
+        block_runner_->nodes(), block_info_.managed_tensor_values());
     managed_tensor_storage_impls_.reserve(managed_tensors_and_values.size());
     for (auto& tensor_and_value : managed_tensors_and_values) {
       auto* tensor = tensor_and_value.first;
@@ -692,7 +691,7 @@ void PrecomputedOffsetsMemoryPlanner::deallocateManagedTensors() {
     }
     if (optimize_memory_) {
       managed_bytes_ = assignOffsetsOptimized(
-          managed_tensors_, block_info_.managedTensorRanges());
+          managed_tensors_, block_info_.managed_tensor_ranges());
     } else {
       managed_bytes_ = assignOffsetsNaive(managed_tensors_);
     }

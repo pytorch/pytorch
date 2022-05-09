@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
+#include <torch/csrc/jit/testing/file_check.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <stdexcept>
 
@@ -171,6 +173,44 @@ TEST(StaticRuntime, Clamp) {
 
   testStaticRuntime(clamp_script_1, {a, -1, 1}, {b, -1, 1});
   testStaticRuntime(clamp_script_2, {a, min_t, max_t}, {b, max_t1, min_t1});
+}
+
+TEST(StaticRuntime, ClampMinOnly) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, min: float):
+        a = torch.clamp(inp, min, None).clone()
+        return (a)
+  )JIT";
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+  testStaticRuntime(src, {a, 0.5});
+  testStaticRuntime(src, {a, 0.5}, {b, 0.25});
+}
+
+TEST(StaticRuntime, ClampMaxOnly) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, max: float):
+        a = torch.clamp(inp, None, max).clone()
+        return (a)
+  )JIT";
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+  testStaticRuntime(src, {a, 0.5});
+  testStaticRuntime(src, {a, 0.5}, {b, 0.25});
+}
+
+TEST(StaticRuntime, ClampIntTensor) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, min: float, max: float):
+        a = torch.clamp(inp, min, max).clone()
+        return (a)
+  )JIT";
+  auto a = at::randint(0, 20, {2, 3});
+  auto b = at::randint(0, 20, {4, 3, 2});
+  auto min = 5.0f;
+  auto max = 5.0f;
+  testStaticRuntime(src, {a, min, max});
+  testStaticRuntime(src, {a, min, max}, {b, min, max});
 }
 
 TEST(StaticRuntime, LenWithTuple) {
@@ -394,6 +434,99 @@ TEST(StaticRuntime, EmbeddingBagWithManagedOutput) {
 
   testStaticRuntime(embedding_bag_managed_output, args);
   testStaticRuntime(embedding_bag_managed_output, args, args2);
+}
+
+TEST(StaticRuntime, EmbeddingBagWithExtraneousOutput) {
+  const std::string embedding_bag_default_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=0]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  auto graph = getGraphFromIR(embedding_bag_default_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_mean_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=1]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_mean_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_max_last_offset_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=2]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=1]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_max_last_offset_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_normal_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=0]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res0 : Tensor = aten::clone(%y0, %none)
+        %res1 : Tensor = aten::clone(%y1, %none)
+        %res2 : Tensor = aten::clone(%y2, %none)
+        %res3 : Tensor = aten::clone(%y3, %none)
+        return (%res0, %res1, %res2, %res3)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_normal_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check_not("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  at::Tensor weight = torch::randn({3, 11}, at::ScalarType::Float);
+  at::Tensor input = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset = torch::tensor({0, 2, 4});
+  std::vector<IValue> args{weight, input, offset};
+  testStaticRuntime(embedding_bag_default_ir, args);
+  testStaticRuntime(embedding_bag_mean_ir, args);
+  testStaticRuntime(embedding_bag_max_last_offset_ir, args);
+
+  at::Tensor weight2 = torch::randn({10, 11}, at::ScalarType::Float);
+  at::Tensor input2 = torch::tensor({0, 1, 0, 2, 1});
+  at::Tensor offset2 = torch::tensor({0, 1, 2, 3, 4, 5});
+  std::vector<IValue> args2{weight2, input2, offset2};
+  testStaticRuntime(embedding_bag_default_ir, args, args2);
+  testStaticRuntime(embedding_bag_mean_ir, args, args2);
+  testStaticRuntime(embedding_bag_max_last_offset_ir, args, args2);
 }
 
 TEST(StaticRuntime, LayerNorm) {
@@ -1308,13 +1441,39 @@ TEST(StaticRuntime, FullLike) {
 
   auto a = at::randn({2, 3});
   auto b = at::randn({3, 4, 2});
-  auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
   std::vector<IValue> args{
-      a, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
+      a,
+      4,
+      at::ScalarType::Int,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
+  std::vector<IValue> args1{
+      a,
+      4,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
   std::vector<IValue> args2{
-      b, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
+      b,
+      4,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
   testStaticRuntime(full_like_script, args);
+  testStaticRuntime(
+      full_like_script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
   testStaticRuntime(full_like_script, args, args2);
 }
 
@@ -1497,7 +1656,7 @@ TEST(StaticRuntime, LeakyReLU) {
   std::vector<c10::IValue> input_tensors({inputs});
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
-  smod.runtime().checkForMemoryLeak();
+  smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
@@ -2013,7 +2172,7 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
         %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
         %output = quantized::linear_dynamic_fp16(%input, %packed_params)
         %ret = aten::clone(%output, %bias)
-        return (%output)
+        return (%ret)
   )IR";
   at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
   at::Tensor input = torch::randn({3, 2}, torch::kFloat);
@@ -2023,6 +2182,27 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
 
   testStaticRuntime(
       quantized_linear_dynamic_fp16_script,
+      {input, weight},
+      {input_2, weight_2});
+}
+
+TEST(StaticRuntime, QuantizedLinearReluDynamicFp16) {
+  const std::string quantized_linear_relu_dynamic_fp16_script = R"IR(
+    graph(%input: Tensor, %weights: Tensor):
+        %bias: None = prim::Constant()
+        %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+        %output = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
+        %ret = aten::clone(%output, %bias)
+        return (%ret)
+  )IR";
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({5, 3}, torch::kFloat);
+
+  testStaticRuntime(
+      quantized_linear_relu_dynamic_fp16_script,
       {input, weight},
       {input_2, weight_2});
 }
@@ -2594,13 +2774,13 @@ TEST(StaticRuntime, ModelCrashOnFirstRun) {
   EXPECT_THROW(runtime(args_crash, {}), std::runtime_error);
 
   // The run didn't finish, we didn't allocate the memory planner
-  EXPECT_EQ(runtime.getMemoryPlanner(), nullptr);
-  runtime.checkForMemoryLeak();
+  EXPECT_EQ(runtime.get_memory_planner(), nullptr);
+  runtime.check_for_memory_leak();
 
   // We guarantee that the runtime is still usable after the crash.
   // Run again to verify this.
   compareResultsWithJIT(runtime, graph, args_no_crash);
-  EXPECT_NE(runtime.getMemoryPlanner(), nullptr);
+  EXPECT_NE(runtime.get_memory_planner(), nullptr);
 }
 
 TEST(StaticRuntime, ModelCrashOnSecondRun) {
@@ -2620,11 +2800,11 @@ TEST(StaticRuntime, ModelCrashOnSecondRun) {
   std::vector<IValue> args_crash{at::randn({1}), true};
   std::vector<IValue> args_no_crash{at::randn({1}), false};
   runtime(args_no_crash, {});
-  EXPECT_NE(runtime.getMemoryPlanner(), nullptr);
-  runtime.checkForMemoryLeak();
+  EXPECT_NE(runtime.get_memory_planner(), nullptr);
+  runtime.check_for_memory_leak();
 
   EXPECT_THROW(runtime(args_crash, {}), std::runtime_error);
-  runtime.checkForMemoryLeak();
+  runtime.check_for_memory_leak();
 
   // We guarantee that the runtime is still usable after the crash.
   // Run again to verify this.
@@ -2690,7 +2870,7 @@ TEST(StaticRuntime, ReplaceWithMaybeCopy) {
   // Static Runtime.
   torch::jit::StaticModule smodule(g);
   auto actual = smodule(args, {}).toTensor();
-  smodule.runtime().checkForMemoryLeak();
+  smodule.runtime().check_for_memory_leak();
 
   EXPECT_TRUE(expected.equal(actual));
   EXPECT_FALSE(hasProcessedNodeWithName(smodule, "aten::to"));
@@ -3104,6 +3284,60 @@ TEST(StaticRuntime, MoveCtor) {
   compareResults(expected, actual);
 }
 
+TEST(StaticRuntime, SingleBlockIfReturnList) {
+  const auto src = R"JIT(
+    def forward(self, a, b, cond: bool):
+        lst = []
+        if cond:
+            lst.append(a + b)
+        return lst
+  )JIT";
+  std::vector<IValue> args1{at::randn({1}), at::randn({1}), true};
+  std::vector<IValue> args2{at::randn({42, 42}), at::randn({42, 42}), false};
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, NestedBlockIfReturnList) {
+  const auto src = R"JIT(
+    def forward(self, a, b, cond1: bool, cond2: bool):
+        if cond1:
+            lst = []
+            if cond2:
+                lst.append(a + b)
+            lst.append(a * b)
+            return lst
+        return []
+  )JIT";
+  std::vector<IValue> args1{at::randn({1}), at::randn({1}), true, true};
+  std::vector<IValue> args2{
+      at::randn({42, 42}), at::randn({42, 42}), true, false};
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, QuantizedLinearDynamicFp16ReluFusion) {
+  const auto src = R"IR(
+    graph(%input: Tensor, %weights: Tensor):
+        %bias: None = prim::Constant()
+        %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+        %x = quantized::linear_dynamic_fp16(%input, %packed_params)
+        %y = aten::relu(%x)
+        %ret = aten::clone(%y, %bias)
+        return (%ret)
+  )IR";
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({5, 3}, torch::kFloat);
+
+  testStaticRuntime(src, {input, weight}, {input_2, weight_2});
+
+  auto graph = getGraphFromIR(src);
+  QuantizedLinearReluFusion(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "quantized::linear_dynamic_fp16"));
+  EXPECT_TRUE(hasNodeWithKind(graph, "quantized::linear_relu_dynamic_fp16"));
+}
+
 namespace {
 void testClone(MemoryPlannerAlgorithm algorithm) {
   auto mod = getDeepAndWideSciptModel();
@@ -3153,7 +3387,7 @@ TEST(StaticRuntime, MemoryPlannerFallback) {
   // First run, profiling.
   runtime(args1);
 
-  const auto* first_memory_planner = runtime.getMemoryPlanner();
+  const auto* first_memory_planner = runtime.get_memory_planner();
   EXPECT_NE(first_memory_planner, nullptr);
   EXPECT_NE(
       dynamic_cast<const PrecomputedOffsetsMemoryPlanner*>(
@@ -3165,7 +3399,7 @@ TEST(StaticRuntime, MemoryPlannerFallback) {
 
   // Run again to reset the memory planner
   runtime(args1);
-  const auto* second_memory_planner = runtime.getMemoryPlanner();
+  const auto* second_memory_planner = runtime.get_memory_planner();
   EXPECT_NE(second_memory_planner, nullptr);
   EXPECT_NE(
       dynamic_cast<const StandardMemoryPlanner*>(second_memory_planner),

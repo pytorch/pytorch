@@ -39,7 +39,7 @@ bool forwardHasOp(
 
 namespace {
 C10_UNUSED
-void concatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
+void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g, %h, %i, %j):
@@ -93,7 +93,7 @@ void concatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
 }
 
 C10_UNUSED
-void castedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
+void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g):
@@ -124,7 +124,7 @@ void castedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
 }
 
 C10_UNUSED
-void concatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
+void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f):
@@ -143,7 +143,7 @@ void concatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void clipRangesGatherRangesLengthsToOffsets(
+C10_UNUSED void ClipRangesGatherRangesLengthsToOffsets(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -161,7 +161,7 @@ C10_UNUSED void clipRangesGatherRangesLengthsToOffsets(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void clipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
+C10_UNUSED void ClipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   // fuse without lengths-to-offsets
   std::string pattern = R"IR(
@@ -178,7 +178,7 @@ C10_UNUSED void clipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void precomputeMultiplierShiftForSigridHash(
+C10_UNUSED void PrecomputeMultiplierShiftForSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d):
@@ -196,7 +196,7 @@ C10_UNUSED void precomputeMultiplierShiftForSigridHash(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void clipRangesToGatherToOffsets(
+C10_UNUSED void ClipRangesToGatherToOffsets(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %to0_in0, %to0_in1, %to0_in2):
@@ -226,8 +226,35 @@ C10_UNUSED void clipRangesToGatherToOffsets(
   fuse.runOnGraph(graph);
 }
 
+C10_UNUSED void ToLengthsToOffsets(std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
+        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy, %memoryformat)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
+        return (%y1))IR";
+  std::string fused_pattern = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
+        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %includelastoffset, %dtype)
+        return (%y0))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy):
+        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
+        return (%y1))IR";
+  std::string fused_pattern2 = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy):
+        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %includelastoffset, %dtype)
+        return (%y0))IR";
+  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
+  fuse.runOnGraph(graph);
+}
+
 C10_UNUSED
-void clipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
+void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g, %h):
@@ -243,7 +270,7 @@ void clipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void clipRangesGatherRangesSigridHash(
+C10_UNUSED void ClipRangesGatherRangesSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g):
@@ -261,7 +288,7 @@ C10_UNUSED void clipRangesGatherRangesSigridHash(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void clipRangesGatherRangesX2SigridHashPrecompute(
+C10_UNUSED void ClipRangesGatherRangesX2SigridHashPrecompute(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // Placeholder is a dummy op used to capture the first subgraph
   std::string pattern = R"IR(
@@ -302,39 +329,41 @@ C10_UNUSED void clipRangesGatherRangesX2SigridHashPrecompute(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void splitOutPrecomputeOpsForSparseNN(
+C10_UNUSED void SplitOutPrecomputeOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
-  precomputeMultiplierShiftForSigridHash(graph);
+  PrecomputeMultiplierShiftForSigridHash(graph);
   ConstantPropagation(graph);
   ConstantPooling(graph);
 #endif
 }
 } // namespace
 
-void fuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
+void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
-  splitOutPrecomputeOpsForSparseNN(graph);
+  SplitOutPrecomputeOpsForSparseNN(graph);
 
-  concatAddMulReplaceNaNClip(graph);
-  castedBatchOneHotLengths(graph);
-  concatBatchMatMulBatchGather(graph);
+  ConcatAddMulReplaceNaNClip(graph);
+  CastedBatchOneHotLengths(graph);
+  ConcatBatchMatMulBatchGather(graph);
 
   if (FLAGS_enable_clip_ranges_gather_fusions) {
-    clipRangesGatherRangesLengthsToOffsets(graph);
+    ClipRangesGatherRangesLengthsToOffsets(graph);
   }
-  clipRangesGatherSigridHash(graph);
-  clipRangesGatherRangesSigridHash(graph);
+  ClipRangesGatherSigridHash(graph);
+  ClipRangesGatherRangesSigridHash(graph);
 
-  clipRangesGatherRangesX2SigridHashPrecompute(graph);
+  ClipRangesGatherRangesX2SigridHashPrecompute(graph);
 
   if (FLAGS_enable_clip_ranges_gather_fusions) {
     // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
     // clip_ranges+gather_ranges
-    clipRangesGather(graph);
+    ClipRangesGather(graph);
 
-    clipRangesToGatherToOffsets(graph);
+    ClipRangesToGatherToOffsets(graph);
   }
+
+  ToLengthsToOffsets(graph);
 #endif
 }
 
@@ -388,10 +417,18 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::select_tensor(Tensor(a) a, Tensor(b) b, bool use_b) -> Tensor(a|b)",
       c10::AliasAnalysisKind::FROM_SCHEMA));
-  m.def(torch::schema("static_runtime::create_owned_ref(...) -> ..."));
+  m.def(torch::schema(
+      "static_runtime::create_owned_ref(...) -> ...",
+      c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
+      "static_runtime::embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
-void fuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
+void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%input):
         %0 : Tensor = aten::sign(%input)
@@ -416,7 +453,7 @@ namespace {
 
 using TupleUnpackBlock = std::vector<Node*>;
 
-std::vector<TupleUnpackBlock> collectVariadicTupleUnpackFusionCandidates(
+std::vector<TupleUnpackBlock> CollectVariadicTupleUnpackFusionCandidates(
     const std::shared_ptr<Graph>& graph) {
   std::vector<TupleUnpackBlock> candidates;
   auto nodes = graph->nodes();
@@ -435,7 +472,7 @@ std::vector<TupleUnpackBlock> collectVariadicTupleUnpackFusionCandidates(
   return candidates;
 }
 
-void fuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
+void FuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
   TORCH_CHECK(nodes.size() > 0);
   auto graph = nodes[0]->owningGraph();
   auto var_unpack = graph->create(
@@ -458,9 +495,9 @@ void fuseTupleUnpackBlock(const TupleUnpackBlock& nodes) {
 
 } // namespace
 
-void useVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
-  for (auto& c : collectVariadicTupleUnpackFusionCandidates(graph)) {
-    fuseTupleUnpackBlock(c);
+void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
+  for (auto& c : CollectVariadicTupleUnpackFusionCandidates(graph)) {
+    FuseTupleUnpackBlock(c);
   }
 }
 
@@ -514,7 +551,7 @@ void useVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
 //                         |
 //                         v
 
-void replaceWithMaybeCopy(
+void ReplaceWithMaybeCopy(
     std::shared_ptr<Graph>& graph,
     bool outputs_are_immutable) {
   AliasDb db(graph);
@@ -597,7 +634,7 @@ void replaceWithMaybeCopy(
 #endif
 }
 
-void replaceWithCopy(
+void ReplaceWithCopy(
     std::shared_ptr<Graph>& graph,
     bool outputs_are_immutable) {
   AliasDb db(graph);
@@ -685,7 +722,7 @@ void replaceWithCopy(
 #endif
 }
 
-void eliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
+void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
   const auto equally_split = fromQualString("fb::equally_split");
   std::vector<Node*> to_remove;
   DepthFirstGraphNodeIterator graph_it(graph);
@@ -753,7 +790,7 @@ bool shouldNotFuseListUnpackSpecialCase(const Node* node) {
 
 } // namespace
 
-void fuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
       OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
       OP_PAIR(
@@ -777,7 +814,8 @@ void fuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
           "fb::gather_ranges_to_dense_v2",
           "static_runtime::fused_gather_ranges_to_dense_v2"),
       OP_PAIR(
-          "fb::split_and_squeeze", "static_runtime::fused_split_and_squeeze")};
+          "fb::split_and_squeeze",
+          "static_runtime::fused_split_and_squeeze_copy")};
 
   // replacement contains (old_node, new_node, list_unpack_node)
   std::vector<std::tuple<Node*, Node*, Node*>> replacement;
@@ -833,7 +871,7 @@ void fuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   }
 } // namespace jit
 
-void removeImmutableInputDictLookups(
+void RemoveImmutableInputDictLookups(
     std::shared_ptr<torch::jit::Graph>& graph) {
   auto nodes = graph->nodes();
   AliasDb db(graph);
@@ -904,7 +942,7 @@ void removeImmutableInputDictLookups(
   marker->destroy();
 }
 
-void useVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
+void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
   // Migration to v2 is still in progress. For now, SR will support
   // both versions of this op.
   UseVariadicOp(
@@ -919,10 +957,10 @@ void useVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
 
 namespace {
 
-void createOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
+void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
   for (auto* node : block->nodes()) {
     for (auto* sub_block : node->blocks()) {
-      createOwnedRefsForSpecialValuesHelper(graph, sub_block);
+      CreateOwnedRefsForSpecialValuesHelper(graph, sub_block);
     }
   }
 
@@ -951,7 +989,7 @@ void createOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
   }
 }
 
-void forceNonEmptyOutputsHelper(Value* none_value, Block* block) {
+void ForceNonEmptyOutputsHelper(Value* none_value, Block* block) {
   for (auto* node : block->nodes()) {
     bool needs_output = false;
     for (auto* sub_block : node->blocks()) {
@@ -960,7 +998,7 @@ void forceNonEmptyOutputsHelper(Value* none_value, Block* block) {
         needs_output = true;
       }
 
-      forceNonEmptyOutputsHelper(none_value, sub_block);
+      ForceNonEmptyOutputsHelper(none_value, sub_block);
     }
 
     if (needs_output) {
@@ -994,43 +1032,53 @@ Node* findOrCreateNoneConstant(Graph& graph) {
 
 } // namespace
 
-void createOwnedRefsForSpecialIValues(Graph& graph) {
-  createOwnedRefsForSpecialValuesHelper(graph, graph.block());
+void CreateOwnedRefsForSpecialValues(Graph& graph) {
+  CreateOwnedRefsForSpecialValuesHelper(graph, graph.block());
 }
 
-void forceNonEmptyOutputs(Graph& graph) {
+void ForceNonEmptyOutputs(Graph& graph) {
   auto* none_node = findOrCreateNoneConstant(graph);
-  forceNonEmptyOutputsHelper(none_node->output(), graph.block());
+  ForceNonEmptyOutputsHelper(none_node->output(), graph.block());
   if (!none_node->hasUses()) {
     none_node->destroy();
   }
 }
 
-void eliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
-  auto input_is_constant_list =
-      [](Node* node, size_t input_idx, const c10::List<int64_t>& expected) {
-        auto input_opt = toIValue(node->input(input_idx));
-        if (!input_opt.has_value() || !input_opt->isIntList()) {
-          return false;
-        }
-        return input_opt->toIntList() == expected;
-      };
+namespace {
 
+bool inputIsConstantList(
+    Node* node,
+    size_t input_idx,
+    const c10::List<int64_t>& expected) {
+  auto input_opt = toIValue(node->input(input_idx));
+  if (!input_opt.has_value() || !input_opt->isIntList()) {
+    return false;
+  }
+  return input_opt->toIntList() == expected;
+}
+
+bool inputIsConstantInt(Node* node, size_t input_idx, int64_t expected) {
+  auto input_opt = toIValue(node->input(input_idx));
+  if (!input_opt.has_value() || !input_opt->isInt()) {
+    return false;
+  }
+  return input_opt->toInt() == expected;
+}
+
+void eliminatePermuteOpsSumPattern(std::shared_ptr<Graph>& graph) {
   // SubgraphRewriter can't pattern-match on constants, so we use this
   // extra filter to make sure the values of the `dim` arguments are
   // correct.
   auto dims_are_valid_constants =
-      [&input_is_constant_list](
-          const Match& match,
-          const std::unordered_map<std::string, Value*>& vmap) {
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
         // Get the nodes in the real graph from the nodes in the template
         // pattern graph
         const auto& node_map = match.nodes_map;
         auto* sum_node = node_map.at(vmap.at("c")->node());
         auto* permute_node = node_map.at(vmap.at("b")->node());
-        return input_is_constant_list(sum_node, 1, c10::List<int64_t>{-1}) &&
-            input_is_constant_list(
-                   permute_node, 1, c10::List<int64_t>{0, 2, 1});
+        return inputIsConstantList(sum_node, 1, c10::List<int64_t>{-1}) &&
+            inputIsConstantList(permute_node, 1, c10::List<int64_t>{0, 2, 1});
       };
 
   const auto pattern = R"IR(
@@ -1050,6 +1098,48 @@ void eliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
   fuse.runOnGraph(graph, dims_are_valid_constants);
 }
 
+void eliminatePermuteOpsSoftmaxPattern(std::shared_ptr<Graph>& graph) {
+  const auto pattern = R"IR(
+    graph(%a, %permute_dim_1, %permute_dim_2, %softmax_dim, %softmax_dtype):
+        %b = aten::permute(%a, %permute_dim_1)
+        %c = aten::softmax(%b, %softmax_dim, %softmax_dtype)
+        %d = aten::permute(%c, %permute_dim_2)
+        return (%d)
+  )IR";
+
+  const auto fused_pattern = R"IR(
+    graph(%a, %permute_dim_1, %permute_dim_2, %softmax_dim, %softmax_dtype):
+        %new_softmax_dim: int = prim::Constant[value=1]()
+        %e = aten::softmax(%a, %new_softmax_dim, %softmax_dtype)
+        return (%e)
+  )IR";
+
+  // Check that permute_dim is (0, 2, 1) and softmax_dim is 2
+  auto dims_are_valid_constants =
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
+        const auto& node_map = match.nodes_map;
+        auto* permute_node_1 = node_map.at(vmap.at("b")->node());
+        auto* permute_node_2 = node_map.at(vmap.at("d")->node());
+        auto* softmax_node = node_map.at(vmap.at("c")->node());
+        return inputIsConstantInt(softmax_node, 1, 2) &&
+            inputIsConstantList(
+                   permute_node_1, 1, c10::List<int64_t>{0, 2, 1}) &&
+            inputIsConstantList(permute_node_2, 1, c10::List<int64_t>{0, 2, 1});
+      };
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph, dims_are_valid_constants);
+}
+
+} // namespace
+
+void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
+  eliminatePermuteOpsSumPattern(graph);
+  eliminatePermuteOpsSoftmaxPattern(graph);
+}
+
 namespace {
 
 Node* maybeUserWithKind(Value* value, c10::Symbol kind) {
@@ -1066,7 +1156,7 @@ Node* maybeUserWithKind(Value* value, c10::Symbol kind) {
 
 } // namespace
 
-void useSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
+void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
   std::vector<Node*> to_erase;
   for (auto* node : graph->nodes()) {
     if (node->kind() != aten::split) {
@@ -1101,7 +1191,8 @@ void useSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
       continue;
     }
     auto* split_and_squeeze_node = graph->create(
-        c10::Symbol::fromQualString("static_runtime::fused_split_and_squeeze"),
+        c10::Symbol::fromQualString(
+            "static_runtime::fused_split_and_squeeze_copy"),
         num_outputs);
     split_and_squeeze_node->addInput(node->input(0));
     split_and_squeeze_node->addInput(node->input(1));
@@ -1120,6 +1211,89 @@ void useSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
   for (auto* node : to_erase) {
     node->destroy();
   }
+}
+
+C10_UNUSED void RemoveUnnecessaryOutputs(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  RemoveUnnecessaryEmbeddingBagOutputs(graph);
+}
+
+C10_UNUSED void RemoveUnnecessaryEmbeddingBagOutputs(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        return (%y2, %y1, %y0))IR";
+  std::string transformed_pattern = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor = static_runtime::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        return (%y2, %y1, %y0))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, transformed_pattern);
+  fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx)
+        return (%y2, %y1, %y0))IR";
+  std::string transformed_pattern2 = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor = static_runtime::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx)
+        return (%y2, %y1, %y0))IR";
+  fuse.RegisterRewritePattern(pattern2, transformed_pattern2);
+  fuse.runOnGraph(graph);
+}
+
+namespace {
+bool isNoOpSlice(Node* node) {
+  DCHECK(node->kind() == aten::slice);
+  auto step = toIValue(node->input(3));
+  if (!step.has_value() || step->toInt() != 1) {
+    return false;
+  }
+  auto start = toIValue(node->input(1));
+  if (!start.has_value() || (start->isInt() && start->toInt() != 0)) {
+    return false;
+  }
+  auto end = toIValue(node->input(2));
+  // Could also look at list length, but most models that have this pattern are
+  // just doing list[0:], so it's not needed for now.
+  return end.has_value() && end->isNone();
+}
+} // namespace
+
+void EliminateNoOpSlice(std::shared_ptr<Graph>& graph) {
+  DepthFirstGraphNodeIterator it(graph);
+  auto schema = torch::schema(
+      "aten::slice.t(t[] l, int? start=None, int? end=None, int step=1) -> t[]");
+  Node* node = nullptr;
+  std::vector<Node*> to_delete;
+  while ((node = it.next()) != nullptr) {
+    if (!node->matches(schema) || !isNoOpSlice(node)) {
+      continue;
+    }
+
+    node->output()->replaceAllUsesWith(node->input(0));
+    to_delete.push_back(node);
+  }
+  for (auto* node : to_delete) {
+    node->destroy();
+  }
+}
+
+void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%input, %packed_params):
+        %x : Tensor = quantized::linear_dynamic_fp16(%input, %packed_params)
+        %y : Tensor = aten::relu(%x)
+        return (%y))IR";
+  std::string fused_pattern = R"IR(
+    graph(%input, %packed_params):
+        %x : Tensor = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
+        return (%x))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
 }
 
 } // namespace jit

@@ -35,7 +35,7 @@ class ProcessedNodeInputs {
   }
 
   uint16_t& operator[](uint16_t idx) {
-    if (C10_LIKELY(repr_.isInline())) {
+    if (C10_LIKELY(repr_.is_inline())) {
       DCHECK_LT(idx, repr_.inline_repr_.size);
       return repr_.inline_repr_.inputs[idx];
     } else {
@@ -44,7 +44,7 @@ class ProcessedNodeInputs {
   }
 
   C10_NODISCARD uint16_t size() const {
-    if (C10_LIKELY(repr_.isInline())) {
+    if (C10_LIKELY(repr_.is_inline())) {
       return repr_.inline_repr_.size;
     } else {
       return repr_.outline_repr_.size();
@@ -137,7 +137,7 @@ class ProcessedNodeInputs {
   // awkward.
 #pragma pack(push, 2)
   union Repr {
-    C10_NODISCARD bool isInline() const {
+    C10_NODISCARD bool is_inline() const {
       uint8_t tag;
       // Use of reinterpret_cast to pointer to char or unsigned char
       // is defined behavior; see
@@ -160,7 +160,7 @@ class ProcessedNodeInputs {
     }
 
     Repr(const Repr& rhs) {
-      if (rhs.isInline()) {
+      if (rhs.is_inline()) {
         std::memcpy(&inline_repr_, &rhs.inline_repr_, sizeof(inline_repr_));
       } else {
         new (&outline_repr_) OutlineRepr(rhs.outline_repr_);
@@ -171,12 +171,12 @@ class ProcessedNodeInputs {
       if (&rhs == this) {
         return *this;
       }
-      if (rhs.isInline()) {
+      if (rhs.is_inline()) {
         destroyIfOutline();
         new (&inline_repr_) InlineRepr();
         std::memcpy(&inline_repr_, &rhs.inline_repr_, sizeof(inline_repr_));
       } else {
-        if (isInline()) {
+        if (is_inline()) {
           new (&outline_repr_) OutlineRepr(rhs.outline_repr_);
         } else {
           outline_repr_ = rhs.outline_repr_;
@@ -186,7 +186,7 @@ class ProcessedNodeInputs {
     }
 
     Repr(Repr&& rhs) noexcept {
-      if (rhs.isInline()) {
+      if (rhs.is_inline()) {
         std::memcpy(&inline_repr_, &rhs.inline_repr_, sizeof(inline_repr_));
       } else {
         new (&outline_repr_) OutlineRepr(std::move(rhs.outline_repr_));
@@ -198,12 +198,12 @@ class ProcessedNodeInputs {
         return *this;
       }
 
-      if (rhs.isInline()) {
+      if (rhs.is_inline()) {
         destroyIfOutline();
         new (&inline_repr_) InlineRepr();
         std::memcpy(&inline_repr_, &rhs.inline_repr_, sizeof(inline_repr_));
       } else {
-        if (isInline()) {
+        if (is_inline()) {
           new (&outline_repr_) OutlineRepr(std::move(rhs.outline_repr_));
         } else {
           outline_repr_ = std::move(rhs.outline_repr_);
@@ -226,7 +226,7 @@ class ProcessedNodeInputs {
 
    private:
     void destroyIfOutline() {
-      if (!isInline()) {
+      if (!is_inline()) {
         outline_repr_.~OutlineRepr();
       }
     }
