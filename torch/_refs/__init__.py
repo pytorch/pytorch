@@ -123,6 +123,7 @@ __all__ = [
     #
     # Data conversion and movement references
     #
+    "clone",
     "copy_to",  # TODO: add opinfo
     #
     # Reduction ops
@@ -134,8 +135,10 @@ __all__ = [
     # View & Shape Ops
     #
     "cat",
+    "chunk",
     "flatten",
     "flip",
+    "narrow",
     "permute",
     "stack",
     "swap_axes",  # alias for transpose
@@ -721,6 +724,10 @@ def where(
 #
 # Data Movement References
 #
+def clone(
+    a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
+) -> TensorLikeType:
+    return prims.clone(a, memory_format=memory_format)
 
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
@@ -882,6 +889,27 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return prims.concatenate(tensors, _dim)
 
 
+def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
+    if chunks <= 0:
+        msg = "Expected at least one chunk, but got {0}!".format(chunks)
+        raise ValueError(msg)
+
+    dim = utils.canonicalize_dim(a.ndim, dim)
+    length = a.shape[dim]
+    chunk_size = math.ceil(length / chunks)
+    full_chunks = math.floor(length / chunk_size)
+    tail_chunk_size = length % chunk_size
+
+    result = []
+    for i in range(full_chunks):
+        result.append(narrow(a, dim, i * chunk_size, chunk_size))
+
+    if tail_chunk_size != 0:
+        result.append(narrow(a, dim, full_chunks * chunk_size, tail_chunk_size))
+
+    return tuple(result)
+
+
 # Note: flatten, unlike prim.collapse and prim.collapse_view has an inclusive end_dim
 def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorLikeType:
     start_dim = utils.canonicalize_dim(a.ndim, start_dim)
@@ -901,6 +929,11 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
     return prims.rev(a, dims)
+
+
+def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
+    dim = utils.canonicalize_dim(a.ndim, dim)
+    return prims.slice_in_dim(a, start, start + length, axis=dim)
 
 
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:

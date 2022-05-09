@@ -5568,6 +5568,7 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), (-1, 2, 2)),
         ((S, S, S), (1, 0, 0)),
         ((S, S, S), (-1, 0, 0)),
+        ((S, S, S), (2, 1, 2)),
     )
 
     for shape, args in shapes_and_args:
@@ -8053,7 +8054,7 @@ def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
                           kwargs=dict(as_tuple=as_tuple)))
 
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     cases = (((S, S, S), (2,)),
              ((S, S, S), (S, 1)),
@@ -8061,7 +8062,32 @@ def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
 
     for case in cases:
         shape, args = case
-        yield(SampleInput(make_arg(shape, requires_grad=requires_grad), args=args))
+        yield(SampleInput(make_arg(shape), args=args))
+
+def reference_inputs_chunk(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_chunk(op, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # shape x chunks x dim
+    cases = (
+        ((13, 9, 11), 17, -1),
+        ((13, 9, 11), 11, -1),
+        ((13,), 12, -1),
+        ((15,), 12, -1),
+        ((15,), 7, 0),
+        ((15,), 9, 0),
+        ((3, 7), 9, 1),
+        ((3, 7), 9, 0),
+        ((3, 7), 2, 0),
+        ((3, 7), 3, 0),
+        ((3, 7), 1, 0),
+        ((3, 7), 1, 1),
+        ((4, 4), 2, 0),
+    )
+
+    for shape, chunks, dim in cases:
+        yield SampleInput(make_arg(shape), args=(chunks, dim))
 
 def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
@@ -10085,6 +10111,7 @@ op_db: List[OpInfo] = [
     OpInfo('chunk',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            sample_inputs_func=sample_inputs_chunk,
+           reference_inputs_func=reference_inputs_chunk,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -18340,6 +18367,13 @@ python_ref_db = [
         ),
     ),
     #
+    # Data Conversion & Data Movement Opinfos
+    #
+    PythonRefInfo(
+        "_refs.clone",
+        torch_opinfo_name="clone",
+    ),
+    #
     # View & Shape OpInfos
     #
     PythonRefInfo(
@@ -18355,12 +18389,20 @@ python_ref_db = [
         )
     ),
     PythonRefInfo(
+        "_refs.chunk",
+        torch_opinfo_name="chunk",
+    ),
+    PythonRefInfo(
         "_refs.flatten",
         torch_opinfo_name="flatten",
     ),
     PythonRefInfo(
         "_refs.flip",
         torch_opinfo_name="flip",
+    ),
+    PythonRefInfo(
+        "_refs.narrow",
+        torch_opinfo_name="narrow",
     ),
     PythonRefInfo(
         "_refs.permute",

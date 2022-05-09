@@ -117,6 +117,7 @@ __all__ = [
     #
     # Data conversion and movement prims
     #
+    "clone",
     "convert_element_type",
     "device_put",
     #
@@ -1486,6 +1487,28 @@ select = _make_prim(
 #
 # Type conversions
 #
+# TODO: model memory format on TensorMeta
+def _clone_meta(
+    a: TensorLikeType, *, memory_format: torch.memory_format
+) -> TensorLikeType:
+    return TensorMeta(a)
+
+
+def _clone_aten(a: Tensor, *, memory_format: torch.memory_format) -> Tensor:
+    return torch.clone(a, memory_format=memory_format)
+
+
+_clone_doc = """
+    Creates a copy of a tensors.
+"""
+
+clone = _make_prim(
+    name="clone",
+    meta=_clone_meta,
+    impl_aten=_clone_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_clone_doc,
+)
 
 
 def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:

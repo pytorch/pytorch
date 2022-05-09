@@ -380,18 +380,22 @@ _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
 
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
+    assert isinstance(dtype, torch.dtype)
     return dtype is torch.bool
 
 
 def is_integer_dtype(dtype: torch.dtype) -> bool:
+    assert isinstance(dtype, torch.dtype)
     return dtype in _integer_dtypes
 
 
 def is_float_dtype(dtype: torch.dtype) -> bool:
+    assert isinstance(dtype, torch.dtype)
     return dtype in _float_dtypes
 
 
 def is_complex_dtype(dtype: torch.dtype) -> bool:
+    assert isinstance(dtype, torch.dtype)
     return dtype in _complex_dtypes
 
 
