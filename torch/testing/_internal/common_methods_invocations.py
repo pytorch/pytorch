@@ -18378,9 +18378,6 @@ python_ref_db = [
             # torch function issue:
             # ValueError: Callable cat has no meta function!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
-            # eager torch.cat incorrectly throws an error for a chalf x double x half type promotion case
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
         )
     ),
     PythonRefInfo(
