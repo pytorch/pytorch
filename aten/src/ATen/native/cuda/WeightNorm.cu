@@ -14,8 +14,8 @@
 #else
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
-#include <ATen/ops/_weight_norm_cuda_interface_native.h>
-#include <ATen/ops/_weight_norm_cuda_interface_backward_native.h>
+#include <ATen/ops/_weight_norm_interface_native.h>
+#include <ATen/ops/_weight_norm_interface_backward_native.h>
 #endif
 
 

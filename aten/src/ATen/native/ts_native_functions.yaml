@@ -140,6 +140,7 @@ full_codegen:
   - upsample_nearest2d
   - upsample_nearest2d_backward
   - zero_
+  - narrow_copy.SymInt
 supported:
   - as_strided
   - as_strided_
@@ -151,6 +152,7 @@ supported:
   - empty_strided
   - expand
   - fill_.Scalar
+  - narrow
   - native_batch_norm
   - native_batch_norm_backward
   - normal_
