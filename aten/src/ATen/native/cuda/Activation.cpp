@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/Activation.h>
 
-#include <ATen/DimVector.h>
+#include <ATen/core/DimVector.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
