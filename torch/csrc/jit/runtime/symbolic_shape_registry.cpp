@@ -228,10 +228,11 @@ void transformShapeFunction(
   if (schema_string->returns().size() > 1) {
     TORCH_INTERNAL_ASSERT(
         graph->outputs().size() == 1 &&
-        graph->outputs().at(0)->node()->kind() == prim::TupleConstruct);
+        graph->outputs().at(0)->type()->cast<TupleType>());
     auto tuple_node = graph->outputs().at(0)->node();
-    graph->eraseOutput(0);
-    for (Value* v : tuple_node->inputs()) {
+    WithInsertPoint guard(graph->return_node());
+    auto tuple_unpack_values = createTupleUnpack(tuple_node->output());
+    for (Value* v : tuple_unpack_values) {
       graph->registerOutput(v);
     }
   }
