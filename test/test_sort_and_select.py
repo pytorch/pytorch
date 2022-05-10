@@ -136,7 +136,7 @@ class TestSortAndSelect(TestCase):
         x = torch.randn(4, 1024000, device=device)
         res1val, res1ind = torch.sort(x, stable=True)
         torch.cuda.synchronize()
-        #assertIsOrdered is too slow, so just compare to cpu
+        # assertIsOrdered is too slow, so just compare to cpu
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), stable=True)
         self.assertEqual(res1val, res1val_cpu.cuda())
         self.assertEqual(res1ind, res1ind_cpu.cuda())
