@@ -36,6 +36,31 @@ void glu_kernel(TensorIteratorBase& iter) {
 }
 
 // -----------------------------------
+// glu forward ad
+// -----------------------------------
+void glu_jvp_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "glu_cuda", [&]() {
+      using acc_t = at::acc_type<scalar_t, true>;
+      gpu_kernel(iter, [] GPU_LAMBDA (
+            scalar_t res_,
+            scalar_t b_,
+            scalar_t da_,
+            scalar_t db_) -> scalar_t {
+          const acc_t res = res_;
+          const acc_t b = b_;
+          const acc_t da = da_;
+          const acc_t db = db_;
+          const acc_t one = acc_t(1);
+
+          const acc_t sig_b = one / (one + std::exp(-b));
+          return (
+              da * sig_b + res * (db - sig_b * db)
+          );
+      });
+  });
+}
+
+// -----------------------------------
 // glu backward
 // -----------------------------------
 
@@ -641,6 +666,7 @@ REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
 REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(glu_stub, &glu_kernel);
+REGISTER_DISPATCH(glu_jvp_stub, &glu_jvp_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
 REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
