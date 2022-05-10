@@ -99,7 +99,7 @@ class NVFuserEnabler {
       }
     });
     // 0. opportunity to force disable NVFuser
-    if (getCachedNNCNotNVFuser() {
+    if (getCachedNNCNotNVFuser()) {
       return false;
     }
     // 1. if user has explicitly assigned fuser value, that value takes
