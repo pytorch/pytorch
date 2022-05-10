@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, load_test
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, get_all_math_dtypes, floating_types
+    all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes
 )
 
 import numpy as np
@@ -189,6 +189,8 @@ class TestTypePromotion(TestCase):
             if dtype in (torch.float16, torch.float32, torch.float64, torch.cfloat, torch.cdouble):
                 # Handles bfloat16 x float16 -> float32 promotion
                 expected_dtype = dtype if dtype != torch.half else torch.float32
+            elif dtype is torch.chalf:
+                expected_dtype = torch.cfloat
             elif dtype in (torch.bool, torch.uint8,
                            torch.int8, torch.int16, torch.int32, torch.int64, torch.bfloat16):
                 expected_dtype = torch.bfloat16
@@ -198,6 +200,39 @@ class TestTypePromotion(TestCase):
             self.assertEqual(torch.promote_types(dtype, torch.bfloat16), expected_dtype)
             self.assertEqual(torch.promote_types(torch.bfloat16, dtype), expected_dtype)
             self.assertEqual((bf + t).dtype, expected_dtype)
+
+    @onlyNativeDeviceTypes
+    def test_complex_half(self, device):
+        # with scalar
+        chalf = torch.tensor(5.5, dtype=torch.chalf, device=device)
+        for scalar in (2.2, 5, 100000):   # chalf + 100000 is inf
+            self.assertEqual((chalf * scalar).dtype, torch.chalf)
+            self.assertEqual(scalar * chalf, chalf * scalar)
+
+        for scalar in (complex(1, 1), complex(-2, 0), complex(0, -3)):
+            self.assertEqual((chalf * scalar).dtype, torch.chalf)
+            self.assertEqual(chalf * scalar, scalar * chalf)
+
+        # with tensor
+        dtypes = all_types_and_complex_and(torch.chalf, torch.half, torch.bfloat16, torch.bool)
+        for dtype in dtypes:
+            t = torch.tensor(1, dtype=dtype, device=device)
+            self.assertEqual(chalf * t, t * chalf)
+            if dtype in (torch.float16, torch.chalf):
+                expected_dtype = torch.chalf
+            elif dtype in (torch.float, torch.double, torch.bfloat16):
+                expected_dtype = torch.cdouble if dtype is torch.double else torch.cfloat
+            elif dtype in (torch.cfloat, torch.cdouble):
+                expected_dtype = dtype
+            elif dtype in (torch.bool, torch.uint8,
+                           torch.int8, torch.int16, torch.int32, torch.int64):
+                expected_dtype = torch.chalf
+            else:
+                raise AssertionError(f'Missing dtype {dtype} not tested.')
+
+            self.assertEqual(torch.promote_types(dtype, torch.chalf), expected_dtype)
+            self.assertEqual(torch.promote_types(torch.chalf, dtype), expected_dtype)
+            self.assertEqual((chalf * t).dtype, expected_dtype)
 
     @float_double_default_dtype
     def test_alternate_result(self, device):
@@ -520,12 +555,16 @@ class TestTypePromotion(TestCase):
             dict(name="ne", compare_op=lambda x, y: x != y, ),
         ]
         for op in comparison_ops:
-            for dt1 in get_all_math_dtypes(device):
-                for dt2 in get_all_math_dtypes(device):
-                    if (dt1.is_complex or dt2.is_complex) and not (op["name"] == "eq" or op["name"] == "ne"):
-                        u = torch.tensor([1], dtype=dt1, device=device)
-                        v = torch.tensor([2], dtype=dt2, device=device)
-                        self.assertRaises(RuntimeError, lambda: torch.tensor([op["compare_op"](u, v)], dtype=torch.bool))
+            is_cuda = torch.device(device).type == 'cuda'
+            dtypes = get_all_dtypes(include_half=is_cuda,
+                                    include_bfloat16=False, include_bool=False,
+                                    include_complex32=True)
+
+            for dt1, dt2 in itertools.product(dtypes, dtypes):
+                if (dt1.is_complex or dt2.is_complex) and not (op["name"] == "eq" or op["name"] == "ne"):
+                    u = torch.tensor([1], dtype=dt1, device=device)
+                    v = torch.tensor([2], dtype=dt2, device=device)
+                    self.assertRaises(RuntimeError, lambda: torch.tensor([op["compare_op"](u, v)], dtype=torch.bool))
 
     @float_double_default_dtype
     def test_lt_with_type_promotion(self, device):
@@ -562,7 +601,7 @@ class TestTypePromotion(TestCase):
 
     @float_double_default_dtype
     def test_promote_self(self, device):
-        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
+        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf, torch.bool):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
     @expectedFailureMeta
