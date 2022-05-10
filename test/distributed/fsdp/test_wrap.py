@@ -15,7 +15,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
-    default_auto_wrap_policy,
+    size_based_auto_wrap_policy,
     enable_wrap,
     wrap,
     transformer_auto_wrap_policy,
@@ -135,7 +135,7 @@ class TestFSDPWrap(FSDPTest):
             wrapped_fsdp = wrapped_fsdp.cuda()
 
         with self.assertRaisesRegex(ValueError, "to NOT be FullyShardedDataParallel"):
-            mod = FSDP(wrapped_fsdp, auto_wrap_policy=default_auto_wrap_policy)
+            mod = FSDP(wrapped_fsdp, auto_wrap_policy=size_based_auto_wrap_policy)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -181,7 +181,7 @@ class TestFSDPWrap(FSDPTest):
         wrapped_model = FSDP(
             model,
             auto_wrap_policy=functools.partial(
-                default_auto_wrap_policy,
+                size_based_auto_wrap_policy,
                 min_num_params=0,  # wrap all modules
             ),
             cpu_offload=cpu_offload,
@@ -238,7 +238,7 @@ class TestAutoWrap(TestCase):
             layer = FSDP(
                 nn.Linear(5, 5),
                 process_group=self.process_group,
-                auto_wrap_policy=functools.partial(default_auto_wrap_policy, min_num_params=1)
+                auto_wrap_policy=functools.partial(size_based_auto_wrap_policy, min_num_params=1)
             )
         self.assertTrue(isinstance(layer, FSDP))
         self.assertEqual(layer.rank, self.process_group.rank())
@@ -303,7 +303,7 @@ class TestAutoWrap(TestCase):
         """
         sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
         my_auto_wrap_policy = functools.partial(
-            default_auto_wrap_policy, min_num_params=40
+            size_based_auto_wrap_policy, min_num_params=40
         )
         model = FSDP(
             sequential,
@@ -317,11 +317,11 @@ class TestAutoWrap(TestCase):
     def test_auto_wrap_preset_exclude_wrap(self):
         """
         Test to ensure excluded modules are not wrapped, regardless if the total param size is greater than the
-        min_num_params. the default_auto_wrap_policy excludes wrapping for {nn.ModuleList, nn.ModuleDict}
+        min_num_params. the size_based_auto_wrap_policy excludes wrapping for {nn.ModuleList, nn.ModuleDict}
         """
         sequential = nn.ModuleList([nn.Linear(5, 5), nn.Linear(5, 5)])
         my_auto_wrap_policy = functools.partial(
-            default_auto_wrap_policy, min_num_params=40
+            size_based_auto_wrap_policy, min_num_params=40
         )
 
         model = FSDP(
@@ -341,7 +341,7 @@ class TestAutoWrap(TestCase):
         """
         sequential = nn.ModuleList([nn.Linear(10, 10)])
         my_auto_wrap_policy = functools.partial(
-            default_auto_wrap_policy, min_num_params=40
+            size_based_auto_wrap_policy, min_num_params=40
         )
         model = FSDP(sequential, process_group=self.process_group, auto_wrap_policy=my_auto_wrap_policy)
 
@@ -351,11 +351,11 @@ class TestAutoWrap(TestCase):
     def test_auto_wrap_preset_force_leaf(self):
         """
         Test to ensure force-leaf modules are not wrapped, and children are not wrapped. The
-        default_auto_wrap_policy forces leaf modules of type {nn.MultiheadAttention} to not be wrapped
+        size_based_auto_wrap_policy forces leaf modules of type {nn.MultiheadAttention} to not be wrapped
         """
         sequential = nn.Sequential(nn.Linear(10, 10), nn.MultiheadAttention(100, 1))
         my_auto_wrap_policy = functools.partial(
-            default_auto_wrap_policy, min_num_params=40
+            size_based_auto_wrap_policy, min_num_params=40
         )
         model = FSDP(sequential, process_group=self.process_group, auto_wrap_policy=my_auto_wrap_policy)
         self.assertTrue(isinstance(model.module[0], FSDP))
@@ -368,9 +368,9 @@ class TestAutoWrap(TestCase):
         Test to ensure force-leaf modules are not wrapped.
         """
         my_auto_wrap_policy = functools.partial(
-            default_auto_wrap_policy,
+            size_based_auto_wrap_policy,
             min_num_params=40,
-            force_leaf_modules=default_auto_wrap_policy.FORCE_LEAF_MODULES.union(
+            force_leaf_modules=size_based_auto_wrap_policy.FORCE_LEAF_MODULES.union(
                 {nn.Linear}
             ),
         )
@@ -417,7 +417,7 @@ class TestAutoWrap(TestCase):
         try:
             sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=(not cuda_after_init))
             my_auto_wrap_policy = functools.partial(
-                default_auto_wrap_policy, min_num_params=40
+                size_based_auto_wrap_policy, min_num_params=40
             )
             model = FSDP(sequential, cpu_offload=cpu_offload, auto_wrap_policy=my_auto_wrap_policy)
             TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
@@ -464,7 +464,7 @@ class TestAutoWrap(TestCase):
         sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
         ignored_modules = [sequential[1], sequential[2][0]]
         my_auto_wrap_policy = functools.partial(
-            default_auto_wrap_policy, min_num_params=40,
+            size_based_auto_wrap_policy, min_num_params=40,
         )
         fsdp_kwargs = {
             "process_group": self.process_group,

@@ -17527,6 +17527,9 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # Prexisting issue with linalg.vector_norm
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                         dtypes=[torch.complex128]),
             # RuntimeError: "clamp_min_cpu" not implemented for 'Half'
             DecorateInfo(unittest.expectedFailure, 'TestMasked', 'test_reference_masked',
                          device_type='cpu', dtypes=[torch.half]),
