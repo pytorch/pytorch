@@ -261,15 +261,15 @@ inline void segmented_sort_pairs_by_full_sort(
   const int64_t nsegments, const int64_t nsort, const int64_t n, const bool descending,
   const scalar_t * self_ptr, scalar_t * values_ptr, int64_t * indices_ptr
 ) {
-  if (nsegments == 1 || nsort > 1000000) { //rough heuristics where even a single sort occupies GPU
+  if (nsegments == 1 || nsort >= 1000000) { //rough heuristics where even a single sort occupies GPU
     for (auto i: c10::irange(nsegments)){
       auto indices = at::arange(nsort, TensorOptions().device(at::kCUDA).dtype(at::kLong));
       at::cuda::cub::radix_sort_pairs<scalar_t, int64_t>(
       self_ptr, values_ptr, indices.data_ptr<int64_t>(), indices_ptr,
       nsort, descending);
-      indices_ptr += n;
-      self_ptr += n;
-      values_ptr += n;
+      indices_ptr += nsort;
+      self_ptr += nsort;
+      values_ptr += nsort;
     }
   } else {
     int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
