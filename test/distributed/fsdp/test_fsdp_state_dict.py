@@ -64,13 +64,15 @@ STATE_DICT_MAPPING = {
 
 
 class Model(Module):
-    def __init__(self, wrap_fsdp, register_buffer=False):
+    def __init__(self, wrap_fsdp, register_buffers=False):
         super().__init__()
         self.inner = Linear(*INNER_SHAPE)
+        if register_buffers:
+            self.inner.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
         if wrap_fsdp:
             self.inner = FSDP(self.inner)
         self.outer = Linear(*OUTER_SHAPE)
-        if register_buffer:
+        if register_buffers:
             self.outer.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
 
     def forward(self, x):
@@ -322,11 +324,16 @@ class TestFSDPStateDict(FSDPTest):
         loaded_params = _get_full_detached_param(model)
         self.assertEqual(loaded_params, trained_params)
 
-    def _initialize_model(self, wrap_fsdp: bool, wrap_ddp: bool = True):
+    def _initialize_model(
+        self,
+        wrap_fsdp: bool,
+        wrap_ddp: bool = True,
+        register_buffers: bool = False,
+    ):
         # keep everything deterministic for input data
         torch.manual_seed(0)
 
-        model = Model(wrap_fsdp).cuda()
+        model = Model(wrap_fsdp, register_buffers=register_buffers).cuda()
         if wrap_fsdp:
             model = FSDP(model)
         elif wrap_ddp:
@@ -407,7 +414,7 @@ class TestFSDPStateDict(FSDPTest):
         if not fsdp_root:
             model = self._get_non_fsdp_root_module()
         else:
-            model = self._initialize_model(wrap_fsdp=True)
+            model = self._initialize_model(wrap_fsdp=True, register_buffers=True)
         optim = SGD(model.parameters(), lr=0.1)
         if not fsdp_root:
             in_data = torch.randn(1, 10, requires_grad=True, device=torch.device("cuda"))
@@ -435,7 +442,9 @@ class TestFSDPStateDict(FSDPTest):
         if not fsdp_root:
             blank_local_model = self._get_non_fsdp_root_module(wrap=False)
         else:
-            blank_local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
+            blank_local_model = self._initialize_model(
+                wrap_fsdp=False, wrap_ddp=False, register_buffers=True
+            )
 
         # Nothing should be FSDP
         for mod in blank_local_model.modules():
@@ -543,24 +552,30 @@ class TestFSDPStateDict(FSDPTest):
     def test_state_dict_with_ignored_modules(self):
         # Initialize an FSDP-wrapped model with an ignored module that includes
         # both parameters and a buffer
-        model = Model(wrap_fsdp=True, register_buffer=True).cuda()
+        model = Model(wrap_fsdp=True, register_buffers=True).cuda()
         ignored_modules = [model.outer]
         ignored_tensor_to_tensor_name = {
             model.outer.bias: "outer.bias", model.outer.weight: "outer.weight",
             model.outer.buffer: "outer.buffer",
+        }
+        buffer_to_buffer_name = {
+            model.inner.buffer: "inner.buffer", model.outer.buffer: "outer.buffer",
         }
         fsdp_model = FSDP(model, ignored_modules=ignored_modules)
         with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
             sd1 = fsdp_model.state_dict()
         with FSDP.summon_full_params(fsdp_model):
             fsdp_params = deepcopy(list(fsdp_model.parameters()))
-        # Check that the ignored parameters are not cloned
-        for tensor, tensor_name in ignored_tensor_to_tensor_name.items():
+        # Check that the ignored parameters and all buffers are not cloned
+        for tensor, tensor_name in {
+            **ignored_tensor_to_tensor_name,
+            **buffer_to_buffer_name,
+        }.items():
             self.assertTrue(tensor_name in sd1)
             self.assertEqual(tensor.data_ptr(), sd1[tensor_name].data_ptr())
         # Check that the state dict can be loaded into a non-wrapped version of
         # the model
-        nonwrapped_model = Model(wrap_fsdp=False, register_buffer=True).cuda()
+        nonwrapped_model = Model(wrap_fsdp=False, register_buffers=True).cuda()
         for param in nonwrapped_model.parameters():
             with torch.no_grad():
                 param.zero_()
@@ -569,10 +584,13 @@ class TestFSDPStateDict(FSDPTest):
         for fsdp_param, local_param in zip(fsdp_params, local_params):
             self.assertEqual(fsdp_param, local_param)
         # Check that if we save a state dict again, the ignored parameters and
-        # buffers still have the same data pointer
+        # buffer still have the same data pointer
         with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
             sd2 = fsdp_model.state_dict()
-        for tensor, tensor_name in ignored_tensor_to_tensor_name.items():
+        for tensor, tensor_name in {
+            **ignored_tensor_to_tensor_name,
+            **buffer_to_buffer_name,
+        }.items():
             self.assertTrue(tensor_name in sd1)  # check again just in case
             self.assertTrue(tensor_name in sd2)
             self.assertEqual(tensor.data_ptr(), sd2[tensor_name].data_ptr())
