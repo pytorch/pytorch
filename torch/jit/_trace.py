@@ -489,13 +489,22 @@ def _check_trace(
                         orig = orig.to_dense()
                     if ref.is_mkldnn:
                         ref = ref.to_dense()
-                    torch.testing.assert_close(
-                        orig.double(),
-                        ref.double(),
-                        rtol=check_tolerance,
-                        atol=default_tolerances(orig, ref)[1],
-                        equal_nan=True,
-                    )
+                    if ref.is_complex() or orig.is_complex():
+                        torch.testing.assert_close(
+                            orig.to(torch.cdouble),
+                            ref.to(torch.cdouble),
+                            rtol=check_tolerance,
+                            atol=default_tolerances(orig, ref)[1],
+                            equal_nan=True,
+                        )
+                    else:
+                        torch.testing.assert_close(
+                            orig.double(),
+                            ref.double(),
+                            rtol=check_tolerance,
+                            atol=default_tolerances(orig, ref)[1],
+                            equal_nan=True,
+                        )
                 except AssertionError as e:
                     maybe_warn_nondeterministic()
                     warnings.warn(

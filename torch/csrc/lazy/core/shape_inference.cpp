@@ -146,7 +146,7 @@ std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, c10::optiona
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_bernoulli_functional(const at::Tensor & self, double p, c10::optional<at::Generator> generator) {
+std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, double p, c10::optional<at::Generator> generator) {
   return compute_shape_bernoulli(self, generator);
 }
 

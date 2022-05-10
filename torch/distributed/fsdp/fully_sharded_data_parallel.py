@@ -436,6 +436,10 @@ class FullyShardedDataParallel(nn.Module):
         results since FSDP will use the newly-reduced gradient instead of
         accumulating with any existing gradient.
 
+    .. warning::
+        Changing the original parameter variable names after construction will
+        lead to undefined behavior.
+
     Args:
         module (nn.Module):
             module to be wrapped with FSDP.
@@ -458,13 +462,17 @@ class FullyShardedDataParallel(nn.Module):
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
             the returned FSDP root instance.
-            ``default_auto_wrap_policy`` written in ``torch.distributed.fsdp.wrap`` is
+            ``size_based_auto_wrap_policy`` written in ``torch.distributed.fsdp.wrap`` is
             an example of ``auto_wrap_policy`` callable, this policy wraps layers
-            with parameter sizes larger than 100M. Users can supply the customized
+            with the number of parameters larger than 100M. ``transformer_auto_wrap_policy``
+            written in ``torch.distributed.fsdp.wrap`` is an example of ``auto_wrap_policy``
+            callable for tranformer-like model architectures. Users can supply the customized
             ``auto_wrap_policy`` callable that should accept following arguments:
             ``module: nn.Module``, ``recurse: bool``, ``unwrapped_params: int``,
             extra customized arguments could be added to the customized
-            ``auto_wrap_policy`` callable as well.
+            ``auto_wrap_policy`` callable as well. It is a good practice to print out
+            the sharded model and check whether the sharded model is what
+            the application wants and then adjust accordingly.
 
             Example::
 
@@ -523,12 +531,12 @@ class FullyShardedDataParallel(nn.Module):
                 >>> module = MyModule(device="meta")
                 >>> def my_init_fn(module):
                 >>>     # responsible for initializing a module, such as with reset_parameters
-                >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=default_auto_wrap_policy)
+                >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=size_based_auto_wrap_policy)
                 >>> print(next(fsdp_model.parameters()).device) # current CUDA device
                 >>> # With torchdistX
                 >>> module = deferred_init.deferred_init(MyModule, device="cuda")
                 >>> # Will initialize via deferred_init.materialize_module().
-                >>> fsdp_model = FSDP(module, auto_wrap_policy=default_auto_wrap_policy)
+                >>> fsdp_model = FSDP(module, auto_wrap_policy=size_based_auto_wrap_policy)
 
     """
 
@@ -546,10 +554,23 @@ class FullyShardedDataParallel(nn.Module):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        # Save the ignored modules and their parameters, including the
-        # parameter names, which are needed to filter the model state dict
-        self._ignored_modules = self._get_ignored_modules(ignored_modules)
-        ignored_params = self._get_ignored_parameters()
+        # Validate the ignored modules and derive the ignored parameters/buffers
+        ignored_modules = self._get_ignored_modules(module, ignored_modules)
+        ignored_params, ignored_param_names = \
+            self._get_ignored_params(module, ignored_modules)
+        buffer_names = self._get_buffer_names(module)
+        # Compute the names to ignore for full state dict cloning (i.e. those
+        # of the ignored modules' parameters and of all modules' buffers)
+        self._ignored_param_names = ignored_param_names
+        self._buffer_names = buffer_names
+        # NOTE: Since the names are computed at construction time, if the user
+        # changes them later, then FSDP will not properly ignore them. However,
+        # the `FlatParameter` implementation already relies on this assumption.
+        # We do this at construction time since we want the fully prefixed
+        # parameter names matching the keys in the model state dict (namely,
+        # including the wrapped module's name in the prefix), which may be done
+        # most non-intrusively here before flattening.
+
         # if auto_wrap_policy is specified, submodules should not be
         # already wrapped, otherwise we'd attempt to double wrap them resulting
         # in errors.
@@ -563,7 +584,7 @@ class FullyShardedDataParallel(nn.Module):
                 module,
                 auto_wrap_policy=auto_wrap_policy,
                 wrapper_cls=FullyShardedDataParallel,
-                ignored_modules=self._ignored_modules,
+                ignored_modules=ignored_modules,
                 ignored_params=ignored_params,
                 # Note that we have the recursive_wrap skip wrapping for
                 # the outermost (this) module otherwise it will result in a
@@ -728,18 +749,20 @@ class FullyShardedDataParallel(nn.Module):
 
     def _get_ignored_modules(
         self,
+        root_module: torch.nn.Module,
         _ignored_modules: Any,
     ) -> Set[torch.nn.Module]:
         """
-        Checks that ``_ignored_modules`` is an iterable of ``torch.nn.Module``
-        s without any :class:`FullyShardedDataParallel` instances and then
-        returns them and their children as a :class:`set`, excluding nested
-        :class:`FullyShardedDataParallel` instances.
+        Checks that ``_ignored_modules`` (1) is an iterable of
+        ``torch.nn.Module`` s without any :class:`FullyShardedDataParallel`
+        instances and does not contain the top-level ``module`` itself, and
+        then returns them and their children as a :class:`set`, excluding
+        nested :class:`FullyShardedDataParallel` instances.
 
-        We include the child modules to better match user intuition since
-        ignoring a module should ignore its child modules as well, and we
-        exclude :class:`FullyShardedDataParallel` instances since ``self`` may
-        be the intended root instance that manages them.
+        We include the child modules of modules in ``_ignored_modules`` to be
+        more intuitive since ignoring a module should ignore its child modules
+        as well, and we exclude :class:`FullyShardedDataParallel` instances
+        since ``self`` may be the intended root instance that manages them.
         """
         if _ignored_modules is None:
             return set()
@@ -765,67 +788,65 @@ class FullyShardedDataParallel(nn.Module):
             if not isinstance(child, FullyShardedDataParallel) and
             not isinstance(child, FlattenParamsWrapper)
         )
+        if root_module in ignored_modules:
+            raise ValueError(
+                "Trying to ignore the top-level module passed into the FSDP "
+                "constructor itself will result in all parameters being "
+                f"ignored and is not supported: {module}"
+            )
         return ignored_modules
 
-    def _get_ignored_parameters(self) -> Set[torch.nn.Parameter]:
-        """Returns the parameters of the modules in ``ignored_modules`` as a
-        :class:`set`, excluding any :class:`FlatParameter` s.
+    def _get_ignored_params(
+        self,
+        root_module: torch.nn.Module,
+        ignored_modules: Set[torch.nn.Module],
+    ) -> Tuple[Set[torch.nn.Parameter], Set[str]]:
         """
-        assert hasattr(self, "_ignored_modules"), \
-            "Expects `self._ignored_modules` to be initialized"
-        return set(
-            p for m in self._ignored_modules for p in m.parameters()
+        Returns the parameters of the modules in ``ignored_modules``,
+        excluding any :class:`FlatParameter` s and their fully prefixed names,
+        both as :class:`set` s.
+
+        Args:
+            root_module (torch.nn.Module): Top-level module passed into the
+                FSDP constructor from which to derive the fully prefixed names.
+            ignored_modules (Set[torch.nn.Module]): Modules to ignore.
+        """
+        ignored_params = set(
+            p for m in ignored_modules for p in m.parameters()
             if not isinstance(p, FlatParameter)
         )
+        param_to_unflat_param_names = _get_param_to_unflat_param_names(
+            root_module, dedup_shared_params=False,
+        )
+        ignored_param_names = set()
+        for param in ignored_params:
+            unflat_param_names = param_to_unflat_param_names[param]
+            ignored_param_names.update(unflat_param_names)
+        return ignored_params, ignored_param_names
 
-    def _get_ignored_named_tensors(
-        self,
-        ignored_modules: Set[torch.nn.Module],
-        named_tensor_fn: Callable,
-    ) -> Set[Tuple[str, torch.Tensor]]:
+    def _get_buffer_names(self, root_module: torch.nn.Module) -> Set[str]:
         """
-        This performs a module walk to get the full parameter and buffer names
-        depending on ``named_tensor_fn``, which should either be
-        ``named_parameters()`` or ``named_buffers()`. We require a separate
-        :meth:`_get_ignored_parameters` that does not use this module walk
-        since that method needs to be called in the FSDP constructor before any
-        wrapping occurs, which means that we cannot start a module walk from
-        ``self`` as in this method.
+        Returns the fully prefixed names of all buffers in the module hierarchy
+        rooted at ``root_module`` as a class:`set`.
+
+        Args:
+            root_module (torch.nn.Module): Top-level module passed into the
+                FSDP constructor from which to derive the fully prefixed names.
         """
-        def module_fn(module, prefix, ignored_named_tensors, ignored_modules):
-            if module in ignored_modules:
-                assert not isinstance(module, FullyShardedDataParallel) and \
-                    not isinstance(module, FlattenParamsWrapper), \
-                    "Ignoring FSDP modules is meaningless since their " \
-                    "parameters are not flattened into this FSDP module anyway"
-                for param_name, param in named_tensor_fn(module):
-                    prefixed_param_name = clean_param_name(prefix + param_name)
-                    ignored_named_tensors.add((prefixed_param_name, param))
+        def module_fn(module, prefix, buffer_names):
+            # For FSDP modules, only add the entry when considering the
+            # contained `FlattenParamsWrapper` to avoid duplication
+            if not isinstance(module, FullyShardedDataParallel):
+                for buffer_name, _ in module.named_buffers(recurse=False):
+                    prefixed_buffer_name = clean_tensor_name(prefix + buffer_name)
+                    buffer_names.add(prefixed_buffer_name)
 
-        def return_fn(ignored_named_tensors, *args):
-            return ignored_named_tensors
+        def return_fn(buffer_names, *args):
+            return buffer_names
 
-        ignored_named_tensors = set()
+        buffer_names: Set[str] = set()
         return _apply_to_modules(
-            self, module_fn, return_fn, ignored_named_tensors, ignored_modules,
-        )
-
-    def _get_ignored_named_parameters(self) -> Set[Tuple[str, torch.Tensor]]:
-        """Returns the named parameters of the modules in ``ignored_modules``,
-        excluding any :class:`FlatParameter` s."""
-        assert hasattr(self, "_ignored_modules"), \
-            "Expects `self._ignored_modules` to be initialized"
-        return self._get_ignored_named_tensors(
-            self._ignored_modules, lambda m: m.named_parameters(recurse=False),
-        )
-
-    def _get_ignored_named_buffers(self) -> Set[Tuple[str, torch.Tensor]]:
-        """Returns the named buffers of the modules in ``ignored_modules``,
-        excluding any :class:`FlatParameter` s."""
-        assert hasattr(self, "_ignored_modules"), \
-            "Expects `self._ignored_modules` to be initialized"
-        return self._get_ignored_named_tensors(
-            self._ignored_modules, lambda m: m.named_buffers(recurse=False),
+            root_module, module_fn, return_fn, buffer_names,
         )
 
     @classmethod
@@ -1402,8 +1423,12 @@ class FullyShardedDataParallel(nn.Module):
                 m._streams = self._streams
                 m._fsdp_graph_order = self._fsdp_graph_order
                 # Give each non-root FSDP module an alias to the root's
-                # execution order data structure
+                # execution order data structure and the root's ignored
+                # parameters and all buffer names since only the root's names
+                # are fully prefixed like the state dict keys
                 m._exec_order_data = self._exec_order_data
+                m._ignored_param_names = self._ignored_param_names
+                m._buffer_names = self._buffer_names
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -1531,24 +1556,28 @@ class FullyShardedDataParallel(nn.Module):
         "_fsdp_wrapped_module" prefix.
         """
         self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
-        # state_dict would be blank if rank0_only was enabled.
+        # state_dict is empty for nonzero ranks if `rank0_only` was enabled.
         if not state_dict:
             return state_dict
 
-        ignored_named_params = self._get_ignored_named_parameters()
-        ignored_named_buffers = self._get_ignored_named_buffers()
-        ignored_names = set(n for n, _ in ignored_named_params)
-        ignored_names.update(n for n, _ in ignored_named_buffers)
+        offload_to_cpu = self._state_dict_config.offload_to_cpu
+        cpu_device = torch.device("cpu")
         for key in state_dict:
-            # Do not need to clone ignored parameters and buffers since they
-            # are not sharded
-            if clean_param_name(key) in ignored_names:
+            clean_key = clean_tensor_name(key)
+            # Do not need to clone buffers since they are not sharded
+            if clean_key in self._buffer_names:
+                # Offload the buffer to CPU if needed -- we do not do this in
+                # `_summon_full_params()` since without care, that would free
+                # the original buffer's GPU memory and require reallocating
+                # that memory later; this only affects the state dict's buffer
+                # variable and leaves the original buffer's GPU memory intact
+                if offload_to_cpu and state_dict[key].device != cpu_device:
+                    state_dict[key] = state_dict[key].to(cpu_device)
                 continue
-            # Due to recursive call of summon_full_params, avoid unnecessary
-            # reclone of tensors in case they have already been cloned.
-            if (
-                not getattr(state_dict[key], "_has_been_cloned", False)
-            ):
+            # Clone non-ignored parameters before exiting the
+            # `_summon_full_params()` context
+            if clean_key not in self._ignored_param_names and \
+                    not getattr(state_dict[key], "_has_been_cloned", False):
                 try:
                     state_dict[key] = state_dict[key].clone().detach()
                     state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
@@ -3500,10 +3529,11 @@ def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Ten
 
 def _get_param_to_unflat_param_names(
     model: torch.nn.Module,
+    dedup_shared_params: bool = True,
 ) -> Dict[torch.nn.Parameter, List[str]]:
     """
-    Constructs a mapping from flattened parameters (including non-FSDP-module
-    parameters) to their unflattened parameter names. For non-FSDP-module
+    Constructs a mapping from flattened parameter (including non-FSDP-module
+    parameters) to its unflattened parameter names. For non-FSDP-module
     parameters, these mapped-to lists always contain a single element. The
     unflattened parameter names should match the keys of the model state dict.
 
@@ -3513,16 +3543,22 @@ def _get_param_to_unflat_param_names(
     Args:
         model (torch.nn.Module): Root module (which may or may not be a
             :class:`FullyShardedDataParallel` instance).
+        dedup_shared_params (bool): If ``True``, only includes the first
+            list of unflattened parameter names corresponding to a parameter
+            in the module walk order; if ``False``, then includes all of the
+            unflattened parameter names.
     """
     def _clean_param_name(prefix, param_info):
         """This replicates the parameter name cleaning logic in model state
         dict but avoids gathering any parameters."""
-        name = clean_param_name(
+        name = clean_tensor_name(
             prefix + param_info.module_name + "." + param_info.param_name
         )
         return name
 
     def module_fn(module, prefix, param_to_unflat_param_names):
+        # For FSDP modules, only add the entry when considering the contained
+        # `FlattenParamsWrapper` to avoid duplication
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
                 prefixed_param_names = [
@@ -3534,6 +3570,8 @@ def _get_param_to_unflat_param_names(
                 is_shared_param = param in param_to_unflat_param_names
                 if not is_shared_param:
                     param_to_unflat_param_names[param] = prefixed_param_names
+                elif not dedup_shared_params:
+                    param_to_unflat_param_names[param].extend(prefixed_param_names)
 
     def return_fn(param_to_unflat_param_names):
         return param_to_unflat_param_names
@@ -3583,10 +3621,11 @@ def _get_param_name_to_param(
     return dict(zip(param_to_param_name.values(), param_to_param_name.keys()))
 
 
-def clean_param_name(param_name: str) -> str:
-    """Cleans the parameter name by removing any FSDP-related prefixes."""
-    # FSDP full parameter names may not have both (i.e. `FSDP_PREFIX`), so we
+def clean_tensor_name(tensor_name: str) -> str:
+    """Cleans the parameter or buffer name by removing any FSDP-related
+    prefixes."""
+    # FSDP full tensor names may not have both (i.e. `FSDP_PREFIX`), so we
     # call `replace()` twice separately
-    param_name = param_name.replace(FSDP_WRAPPED_MODULE + ".", "")
-    param_name = param_name.replace(FPW_MODULE + ".", "")
-    return param_name
+    tensor_name = tensor_name.replace(FSDP_WRAPPED_MODULE + ".", "")
+    tensor_name = tensor_name.replace(FPW_MODULE + ".", "")
+    return tensor_name

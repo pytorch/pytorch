@@ -218,6 +218,17 @@ class TestScatterGather(TestCase):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                     is_scalar=False, reduction='amax', unique_indices=False,
                                     include_self=include_self)
+            # simple test for nan/inf propagation
+            if (dtype.is_floating_point):
+                input = torch.zeros(3, device=device, dtype=dtype)
+                src = torch.tensor([1, float('nan'), -float('inf'), -float('inf'), 2, float('inf')], device=device, dtype=dtype)
+                idx = torch.tensor([0, 0, 1, 1, 2, 2], device=device)
+                input.scatter_reduce_(0, idx, src, 'amax', include_self=include_self)
+                expected_result = torch.tensor([float('nan'), -float('inf'), float('inf')], device=device, dtype=dtype)
+                if (include_self):
+                    expected_result[1] = 0
+                self.assertEqual(input, expected_result)
+
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
@@ -226,6 +237,16 @@ class TestScatterGather(TestCase):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
                                     is_scalar=False, reduction='amin', unique_indices=False,
                                     include_self=include_self)
+            # simple test for nan/inf propagation
+            if (dtype.is_floating_point):
+                input = torch.zeros(3, device=device, dtype=dtype)
+                src = torch.tensor([1, float('nan'), -2, -float('inf'), float('inf'), float('inf')], device=device, dtype=dtype)
+                idx = torch.tensor([0, 0, 1, 1, 2, 2], device=device)
+                input.scatter_reduce_(0, idx, src, 'amin', include_self=include_self)
+                expected_result = torch.tensor([float('nan'), -float('inf'), float('inf')], device=device, dtype=dtype)
+                if (include_self):
+                    expected_result[2] = 0
+                self.assertEqual(input, expected_result)
 
 
 # Generic Device Test Framework instantation, see
