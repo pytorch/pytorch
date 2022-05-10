@@ -677,6 +677,7 @@ Workspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
   using search = algorithm_search<algo_t>;
   miopenConvSolution_t solution = search::getSolution(args, false);
   try {
+    *solution_id = solution.solution_id;
     return Workspace(solution.workspace_size);
   } catch (const std::exception& e) {
     hipGetLastError(); // clear OOM error
