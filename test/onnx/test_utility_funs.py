@@ -33,7 +33,6 @@ from torch.onnx.symbolic_helper import (
     _unpack_list,
     parse_args,
 )
-from torch.onnx.flags import _FLAGS
 
 skip = unittest.skip
 
