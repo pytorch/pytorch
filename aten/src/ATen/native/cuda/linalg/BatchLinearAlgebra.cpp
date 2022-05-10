@@ -2506,7 +2506,7 @@ std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, c10::strin
   std::tie(compute_q, reduced) = _parse_qr_mode(mode);
 
   // Setup input geometry and inputs for apply_qr
-  std::vector<int64_t> q_sizes, q_strides;
+  DimVector q_sizes, q_strides;
   int64_t n_columns_q;
   std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, reduced);
   Tensor q_working_copy, r_working_copy;
