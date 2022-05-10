@@ -12158,7 +12158,7 @@ op_db: List[OpInfo] = [
                         # MISSING 'aten::isnan'
                         DecorateInfo(unittest.expectedFailure,
                                      'TestMeta', 'test_meta',
-                                     device_type='cpu', dtypes=floating_types_and(torch.half, torch.bfloat16)),
+                                     dtypes=floating_types_and(torch.half, torch.bfloat16)),
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -16145,7 +16145,7 @@ op_db: List[OpInfo] = [
                # RuntimeError: "abs_cpu" not implemented for 'Bool'
                # RuntimeError: value cannot be converted to type int without overflow
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
-                            dtypes=integral_types_and(torch.bool), device_type='cpu'),
+                            dtypes=integral_types_and(torch.bool)),
            )),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
