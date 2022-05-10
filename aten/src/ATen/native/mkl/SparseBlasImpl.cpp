@@ -179,26 +179,53 @@ void addmm_dense_result(
   matrix_descr descrA;
   descrA.type = SPARSE_MATRIX_TYPE_GENERAL;
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      C.scalar_type(), "addmm_out_sparse_csr_impl_mkl", [&] {
-        auto beta_ = beta.to<scalar_t>();
-        auto alpha_ = alpha.to<scalar_t>();
+  // TODO: Presumably could use the AT_DISPATCH_SPARSE_LAYOUTS
+  // macros if MklSparseCsr/BsrDescriptor can be instantiated based using layout
+  if (A.layout() == kSparseCsr) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+        C.scalar_type(), "addmm_out_sparse_csr_impl_mkl", [&] {
+          auto beta_ = beta.to<scalar_t>();
+          auto alpha_ = alpha.to<scalar_t>();
 
-        auto mkl_sparse_mat =
-            at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(A);
-        at::mkl::sparse::mm<scalar_t>(
-            SPARSE_OPERATION_NON_TRANSPOSE,
-            alpha_,
-            mkl_sparse_mat.descriptor(),
-            descrA,
-            order,
-            B_->data_ptr<scalar_t>(),
-            columns_C,
-            ldb,
-            beta_,
-            C_->data_ptr<scalar_t>(),
-            ldc);
-      });
+          auto mkl_sparse_mat =
+              at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(A);
+          at::mkl::sparse::mm<scalar_t>(
+              SPARSE_OPERATION_NON_TRANSPOSE,
+              alpha_,
+              mkl_sparse_mat.descriptor(),
+              descrA,
+              order,
+              B_->data_ptr<scalar_t>(),
+              columns_C,
+              ldb,
+              beta_,
+              C_->data_ptr<scalar_t>(),
+              ldc);
+        });
+  } else if (A.layout() == kSparseBsr) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+        C.scalar_type(), "addmm_out_sparse_csr_impl_mkl", [&] {
+          auto beta_ = beta.to<scalar_t>();
+          auto alpha_ = alpha.to<scalar_t>();
+
+          auto mkl_sparse_mat =
+              at::mkl::sparse::MklSparseBsrDescriptor<scalar_t>(A);
+          at::mkl::sparse::mm<scalar_t>(
+              SPARSE_OPERATION_NON_TRANSPOSE,
+              alpha_,
+              mkl_sparse_mat.descriptor(),
+              descrA,
+              order,
+              B_->data_ptr<scalar_t>(),
+              columns_C,
+              ldb,
+              beta_,
+              C_->data_ptr<scalar_t>(),
+              ldc);
+        });
+  } else {
+   AT_ERROR("MKL only support CSR and BSR layout, but got ", A.layout(), " instead.");
+  }
 
   if (!C.is_same(*C_)) {
     C.copy_(*C_);
