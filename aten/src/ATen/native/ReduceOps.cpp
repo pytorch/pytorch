@@ -206,16 +206,19 @@ TORCH_META_FUNC2(mean, dim)
   auto in_dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
 
   if (!at::isFloatingType(in_dtype) && !at::isComplexType(in_dtype)) {
-    std::string opt_dtype_str("None");
+    std::string what = "Input";
+    std::string dtype = toString(self.scalar_type());
+
     if (opt_dtype.has_value()) {
-      opt_dtype_str = toString(opt_dtype.value());
+      what = "Optional";
+      dtype = toString(opt_dtype.value());
     }
 
     TORCH_CHECK(
         false,
-        "mean(): at least one of (i) the input dtype and (ii) the desired output dtype should be "
-        "either floating point or complex. "
-        "Got (i) ", self.scalar_type(), " and (ii) ", opt_dtype_str, " instead.");
+        "mean(): could not infer output dtype. ",
+        what, " dtype must be either a floating point or complex dtype. ",
+        "Got: ", dtype);
   }
 
   auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());

@@ -9466,15 +9466,23 @@ def generate_std_var_kwargs(t: torch.Tensor, **kwargs):
         yield ((), {'correction': numel // 2})
 
 def error_inputs_mean(op_info, device, **kwargs):
-    err_msg1 = (r"mean\(\): at least one of \(i\) the input dtype and "
-                r"\(ii\) the desired output dtype should be either floating point or complex. "
-                r"Got \(i\) Long and \(ii\) None instead.")
+    err_msg1 = (r"mean\(\): could not infer output dtype. "
+                r"Input dtype must be either a floating point or complex dtype. "
+                r"Got: Long")
     si1 = SampleInput(
         make_tensor((3, 4, 5), dtype=torch.int64, device=device),
         args=([],))
 
-    err_msg2 = "Expected out tensor to have dtype double, but got float instead"
+    err_msg2 = (r"mean\(\): could not infer output dtype. "
+                r"Optional dtype must be either a floating point or complex dtype. "
+                r"Got: Long")
     si2 = SampleInput(
+        make_tensor((3, 4, 5), dtype=torch.float32, device=device),
+        args=([],),
+        kwargs={"dtype": torch.int64})
+
+    err_msg3 = "Expected out tensor to have dtype double, but got float instead"
+    si3 = SampleInput(
         make_tensor((3, 4, 5), dtype=torch.int64, device=device),
         args=([],),
         kwargs={
@@ -9483,7 +9491,8 @@ def error_inputs_mean(op_info, device, **kwargs):
         })
 
     return (ErrorInput(si1, error_regex=err_msg1),
-            ErrorInput(si2, error_regex=err_msg2))
+            ErrorInput(si2, error_regex=err_msg2),
+            ErrorInput(si3, error_regex=err_msg3))
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
