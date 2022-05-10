@@ -1,8 +1,6 @@
 import torch
 
-Library = torch.library.Library
-
-meta_lib = Library("aten", "IMPL", "Meta")
+meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
 @torch.library.impl(meta_lib, "index_select")
@@ -34,15 +32,11 @@ def meta_inverse_out(self, out):
 def meta_max(self):
     return self.new_empty(())
 
-@torch.library.impl(meta_lib, "max.out")
-def meta_max_out(self, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(meta_inverse(self))
-
 @torch.library.impl(meta_lib, "abs")
 def meta_abs(self):
     if self.is_complex():
-        float_type = self.real.dtype
+        from_complex = {torch.chalf: torch.half, torch.cfloat: torch.float, torch.cdouble: torch.double}
+        float_type = from_complex[self.dtype]
         return self.new_empty(self.size(), dtype=float_type)
     else:
         return self.new_empty(self.size())
@@ -55,8 +49,3 @@ def meta_abs_out(self, out):
 @torch.library.impl(meta_lib, "min")
 def meta_min(self):
     return self.new_empty(())
-
-@torch.library.impl(meta_lib, "min.out")
-def meta_min_out(self, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(meta_min(self))

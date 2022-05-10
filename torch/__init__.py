@@ -919,4 +919,4 @@ def _register_device_module(device_type, module):
 # expose return_types
 from . import return_types
 from . import library
-from . import meta_registrations
+from . import _meta_registrations
