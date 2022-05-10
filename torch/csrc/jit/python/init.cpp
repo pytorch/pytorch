@@ -1,11 +1,16 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
+#include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+#include <torch/csrc/jit/codegen/onednn/interface.h>
+#endif
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -14,7 +19,6 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
-#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -89,6 +93,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
@@ -167,7 +172,7 @@ void initJITBindings(PyObject* module) {
             if (!n->maybeSchema()) {
               return c10::nullopt;
             }
-            return DecompositionGraphForSchema(n->schema());
+            return GetDecomposition(n->schema());
           })
       .def("_jit_pass_run_decompositions", RunDecompositions)
       // using Node* here instead of Schema because looking up the schema
@@ -182,6 +187,16 @@ void initJITBindings(PyObject* module) {
             } else {
               TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
             }
+          })
+      .def(
+          "_jit_register_decomposition_for_schema",
+          [](const FunctionSchema& s, std::shared_ptr<Graph>& graph) {
+            // because this is invoked by python, the function schema *
+            // becomes different, and we need to find and reuse the
+            // one that is used for caching
+            auto op =
+                findOperatorFor(c10::OperatorName(s.name(), s.overload_name()));
+            RegisterDecomposition(op->schema(), graph);
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def(
@@ -233,11 +248,6 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_cse",
           [](std::shared_ptr<Graph>& g) {
             return EliminateCommonSubexpression(g); // overload resolution
-          })
-      .def(
-          "_jit_pass_common_expression_hoisting",
-          [](std::shared_ptr<Graph>& g) {
-            return HoistCommonExpression(g); // overload resolution
           })
       .def(
           "_jit_pass_fuse_quantized_add_relu",
@@ -623,6 +633,10 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+      .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
+      .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
+#endif
       .def(
           "_jit_set_nvfuser_skip_node_kind",
           // Args:
@@ -635,7 +649,7 @@ void initJITBindings(PyObject* module) {
           [](const std::string& op_name, bool flip = true) {
             return fuser::cuda::skipNode(op_name, flip);
           })
-      .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+      .def("_jit_set_nvfuser_enabled", &fuser::cuda::setEnabled)
       .def(
           "_jit_set_nvfuser_single_node_mode",
           [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
@@ -655,7 +669,7 @@ void initJITBindings(PyObject* module) {
             fuser::cuda::getCudaFusionGuardMode() = profiling_flag;
             return oldState;
           })
-      .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
+      .def("_jit_nvfuser_enabled", &fuser::cuda::isEnabled)
       .def(
           "_jit_nvfuser_set_comparison_callback",
           [](bool run_fallback, py::function fn) {
@@ -873,7 +887,10 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_fuse_tensorexprs",
-          [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
+          [](std::shared_ptr<Graph>& g) {
+            FuseTensorExprs(g);
+            RemoveTensorTypeSpecializations(g);
+          })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, const std::vector<at::Tensor>& inps) {
@@ -1328,6 +1345,11 @@ void initJITBindings(PyObject* module) {
             docstring << "  " << op->schema() << "\n";
           }
 
+          py::list overload_names;
+          for (const auto& op : operations) {
+            overload_names.append(py::str(op->schema().overload_name()));
+          }
+
           auto func = py::cpp_function(
               [operations, symbol](py::args args, py::kwargs kwargs) {
                 return _get_operation_for_overload_or_packet(
@@ -1335,7 +1357,7 @@ void initJITBindings(PyObject* module) {
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
-          return func;
+          return py::make_tuple(func, overload_names);
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
@@ -1617,6 +1639,7 @@ void initJITBindings(PyObject* module) {
   initJitBackendBindings(module);
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
+  initNvFuserPythonBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
