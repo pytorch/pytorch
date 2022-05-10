@@ -232,6 +232,7 @@ class BatchSampler(Sampler[List[int]]):
         self.drop_last = drop_last
 
     def __iter__(self) -> Iterator[List[int]]:
+        # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
         if self.drop_last:
             sampler_iter = iter(self.sampler)
             while True:
