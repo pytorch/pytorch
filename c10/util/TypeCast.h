@@ -4,6 +4,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 
+#include <cstring>
 #include <type_traits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -16,25 +17,43 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 
 namespace c10 {
 
-template <typename dest_t, typename src_t>
-struct needs_real {
-  constexpr static bool value =
-      (is_complex<src_t>::value && !is_complex<dest_t>::value);
-};
+namespace detail {
 
-template <bool, typename src_t>
+template <bool /*false*/>
 struct maybe_real {
-  C10_HOST_DEVICE static inline src_t apply(src_t src) {
+  template <typename src_t>
+  C10_HOST_DEVICE static inline constexpr src_t apply(src_t src) {
     return src;
   }
 };
 
-template <typename src_t>
-struct maybe_real<true, src_t> {
-  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
+template <>
+struct maybe_real<true> {
+  template <typename src_t>
+  C10_HOST_DEVICE static inline constexpr decltype(auto) apply(src_t src) {
     return src.real();
   }
 };
+
+template <typename dest_t, typename src_t>
+C10_HOST_DEVICE constexpr auto convert_preprocess(src_t src) {
+  return src;
+}
+
+template <typename dest_t, typename src_real_t>
+C10_HOST_DEVICE constexpr auto convert_preprocess(c10::complex<src_real_t> src) {
+  return maybe_real<!c10::is_complex<dest_t>::value>::apply(src);
+}
+
+template <typename dest_t>
+C10_HOST_DEVICE constexpr int convert_preprocess(bool src) {
+  // Normalize boolean values to 1 or 0 (gh-54789)
+  // memcpy is needed to work-around optimizations in the compiler,
+  // otherise it will just generate a mov instruction
+  char tmp = 0;
+  std::memcpy(&tmp, &src, 1);
+  return tmp ? 1 : 0;
+}
 
 // Note: deliberately ignores undefined behavior, consistent with NumPy.
 // PyTorch's type conversions can cause a variety of undefined behavior,
@@ -44,9 +63,7 @@ template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(
       src_t src) {
-    constexpr bool real = needs_real<dest_t, src_t>::value;
-    auto r = maybe_real<real, src_t>::apply(src);
-    return static_cast<dest_t>(r);
+    return static_cast<dest_t>(src);
   }
 };
 
@@ -63,9 +80,7 @@ template <typename src_t>
 struct static_cast_with_inter_type<uint8_t, src_t> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline uint8_t apply(
       src_t src) {
-    constexpr bool real = needs_real<uint8_t, src_t>::value;
-    return static_cast<uint8_t>(
-        static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
+    return static_cast<uint8_t>(static_cast<int64_t>(src));
   }
 };
 
@@ -98,6 +113,27 @@ struct static_cast_with_inter_type<
         static_cast<c10::complex<float>>(src));
   }
 };
+
+} // namespace detail
+
+template <typename To, typename From>
+constexpr C10_HOST_DEVICE C10_ALWAYS_INLINE To convert(From f) {
+  auto tmp = c10::detail::convert_preprocess<To>(f);
+  return c10::detail::static_cast_with_inter_type<To, decltype(tmp)>::apply(
+      tmp);
+}
+
+// Define separately to avoid being inlined and prevent code-size bloat
+C10_API void report_overflow(const char* name);
+
+template <typename To, typename From>
+To checked_convert(From f, const char* name) {
+  // Converting to bool can't overflow so we exclude this case from checking.
+  if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
+    report_overflow(name);
+  }
+  return convert<To, From>(f);
+}
 
 // Dynamic type casting utils:
 // - fetch_and_cast
@@ -155,7 +191,8 @@ struct static_cast_with_inter_type<
 // dest_t.
 #define FETCH_AND_CAST_CASE(type, scalartype) \
   case ScalarType::scalartype:                \
-    return static_cast_with_inter_type<dest_t, type>::apply(*(const type*)ptr);
+    return c10::convert<dest_t>(*(const type*)ptr);
+
 template <typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(
     const ScalarType src_type,
@@ -170,9 +207,9 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(
 
 // Cast a value with static type src_t into dynamic dest_type, and store it to
 // ptr.
-#define CAST_AND_STORE_CASE(type, scalartype)                             \
-  case ScalarType::scalartype:                                            \
-    *(type*)ptr = static_cast_with_inter_type<type, src_t>::apply(value); \
+#define CAST_AND_STORE_CASE(type, scalartype) \
+  case ScalarType::scalartype:                \
+    *(type*)ptr = c10::convert<type>(value);  \
     return;
 template <typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(
@@ -206,23 +243,6 @@ AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
 #undef CAST_AND_STORE_CASE
 #undef DEFINE_UNCASTABLE
 #undef ERROR_UNSUPPORTED_CAST
-
-template <typename To, typename From>
-To convert(From f) {
-  return static_cast_with_inter_type<To, From>::apply(f);
-}
-
-// Define separately to avoid being inlined and prevent code-size bloat
-C10_API void report_overflow(const char* name);
-
-template <typename To, typename From>
-To checked_convert(From f, const char* name) {
-  // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
-    report_overflow(name);
-  }
-  return convert<To, From>(f);
-}
 
 } // namespace c10
 

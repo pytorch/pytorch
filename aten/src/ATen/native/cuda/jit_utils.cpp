@@ -218,56 +218,64 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   template <typename T>
   struct is_complex<std::complex<T>> : public std::true_type {};
 
-  template <typename dest_t, typename src_t>
-  struct needs_real {
-    constexpr static bool value =
-        (is_complex<src_t>::value && !is_complex<dest_t>::value);
-  };
-
-  template <bool, typename src_t>
+  template <bool /*false*/>
   struct maybe_real {
-    static inline src_t apply(src_t src) {
+    template <typename src_t>
+    static inline constexpr src_t apply(src_t src) {
       return src;
     }
   };
 
-  template <typename src_t>
-  struct maybe_real<true, src_t> {
-    static inline decltype(auto) apply(src_t src) {
+  template <>
+  struct maybe_real<true> {
+    template <typename src_t>
+    static inline constexpr decltype(auto) apply(src_t src) {
       return src.real();
     }
   };
 
   template <typename dest_t, typename src_t>
+  constexpr auto convert_preprocess(src_t src) {
+    return src;
+  }
+
+  template <typename dest_t, typename src_real_t>
+  constexpr auto convert_preprocess(std::complex<src_real_t> src) {
+    return maybe_real<!is_complex<dest_t>::value>::apply(src);
+  }
+
+  template <typename dest_t>
+  constexpr int convert_preprocess(bool src) {
+    char tmp;
+    memcpy(&tmp, &src, 1);
+    return tmp ? 1 : 0;
+  }
+
+  template <typename dest_t, typename src_t>
   struct static_cast_with_inter_type {
-    static inline dest_t apply(
-        src_t src) {
-      constexpr bool real = needs_real<dest_t, src_t>::value;
-      return static_cast<dest_t>(maybe_real<real, src_t>::apply(src));
+    static inline dest_t apply(src_t src) {
+      return static_cast<dest_t>(src);
     }
   };
 
   template <typename src_t>
   struct static_cast_with_inter_type<uint8_t, src_t> {
-    static inline uint8_t apply(
-        src_t src) {
-      constexpr bool real = needs_real<uint8_t, src_t>::value;
-      return static_cast<uint8_t>(
-          static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
+    static inline uint8_t apply(src_t src) {
+      return static_cast<uint8_t>(static_cast<int64_t>(src));
     }
   };
 
   template <>
   struct static_cast_with_inter_type<std::complex<at::Half>, at::BFloat16> {
     static inline std::complex<at::Half> apply(at::BFloat16 src) {
-      return static_cast<std::complex<at::Half>>(float{src});
+      return static_cast<std::complex<at::Half>>(std::complex<float>{src});
     }
   };
 
   template <>
   struct static_cast_with_inter_type<std::complex<at::Half>, at::Half> {
     static inline std::complex<at::Half> apply(at::Half src) {
-      return static_cast<std::complex<at::Half>>(float{src});
+      return static_cast<std::complex<at::Half>>(std::complex<float>{src});
     }
   };
 
@@ -276,14 +284,21 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
       std::complex<at::Half>,
       std::complex<double>> {
     static inline std::complex<at::Half> apply(std::complex<double> src) {
-      return static_cast<std::complex<at::Half>>(static_cast<std::complex<float>>(src));
+      return static_cast<std::complex<at::Half>>(
+          static_cast<std::complex<float>>(src));
     }
   };
+
+  template <typename To, typename From>
+  __device__ To convert(From f) {
+    auto tmp = convert_preprocess<To>(f);
+    return static_cast_with_inter_type<To, decltype(tmp)>::apply(tmp);
+  }
 
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
   #define FETCH_AND_CAST_CASE(type, scalartype) \
     case ScalarType::scalartype:                \
-      return static_cast_with_inter_type<dest_t, type>::apply(*(const type*)ptr);
+      return convert<dest_t>(*(const type*)ptr);
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
@@ -297,7 +312,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   // Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
   #define CAST_AND_STORE_CASE(type, scalartype)                             \
     case ScalarType::scalartype:                                            \
-      *(type*)ptr = static_cast_with_inter_type<type, src_t>::apply(value); \
+      *(type*)ptr = convert<type>(value);                              \
       return;
   template<typename src_t>
   __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {

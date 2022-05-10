@@ -975,7 +975,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #endif
   for (const auto i : c10::irange(n)) {
     (void)i; //Suppress unused variable warning
-    *dst = c10::static_cast_with_inter_type<dst_T, src_T>::apply(*src);
+    *dst = c10::convert<dst_T>(*src);
     src++;
     dst++;
   }

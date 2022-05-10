@@ -46,6 +46,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 import torch._prims as prims
+from torch.utils._pytree import tree_map
 
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
@@ -951,6 +952,37 @@ class TestCommon(TestCase):
                 **transformed_sample.kwargs,
             )
             self.assertEqual(actual, expected, exact_dtype=False)
+
+    @ops(op_db, allowed_dtypes=(torch.bool,))
+    def test_non_standard_bool_values(self, device, dtype, op):
+        # Test boolean values other than 0x00 and 0x01 (gh-54789)
+        def convert_boolean_tensors(x):
+            if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
+                return x
+
+            # Map False -> 0 and True -> Random value in [2, 255]
+            true_vals = torch.randint(2, 255, x.shape, dtype=torch.uint8, device=x.device)
+            false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
+            x_int = torch.where(x, true_vals, false_vals)
+
+            # Reinterpret the storage as a boolean tensor
+            ret = torch.empty_like(x).set_(
+                x_int.storage()._untyped(),
+                storage_offset=x_int.storage_offset(),
+                size=x_int.shape,
+                stride=x_int.stride())
+            self.assertEqual(ret, x)
+            return ret
+
+        for sample in op.sample_inputs(device, dtype):
+            expect = op(sample.input, *sample.args, **sample.kwargs)
+
+            inp = convert_boolean_tensors(sample.input)
+            args = tree_map(convert_boolean_tensors, sample.args)
+            kwargs = tree_map(convert_boolean_tensors, sample.kwargs)
+            actual = op(inp, *args, **kwargs)
+
+            self.assertEqual(expect, actual)
 
 
 class TestCompositeCompliance(TestCase):

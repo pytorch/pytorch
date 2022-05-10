@@ -98,8 +98,9 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
         // If done correctly, the above command should have no output.
         //
         // See: https://github.com/pytorch/pytorch/issues/31271
-        cpu_kernel(iter, [](scalar_t src) -> dest_t {
-          return c10::static_cast_with_inter_type<dest_t, scalar_t>::apply(src); });
+        cpu_kernel(iter, [&](scalar_t src) -> dest_t {
+          return c10::convert<dest_t>(src);
+        });
       });
     });
 
