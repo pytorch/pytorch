@@ -2762,11 +2762,11 @@ class FullyShardedDataParallel(nn.Module):
         Executing in ``no_sync()`` does not affect this check for
         ``FULL_SHARD`` and ``SHARD_GRAD_OP``: (1) Being in ``no_sync()`` in the
         first iteration does not yield a different forward
-        `_rebuild_full_params()` sequence, and (2) being in ``no_sync()`` in a
-        later iteration does not give false positive warnings since the forward
-        `_rebuild_full_params()` sequence still matches the first iteration
-        sequence (for ``FULL_SHARD``) or the first iteration sequence's prefix
-        (for ``SHARD_GRAD_OP``).
+        :meth:`_rebuild_full_params()` sequence, and (2) being in ``no_sync()``
+        in a later iteration does not give false positive warnings since the
+        forward :meth:`_rebuild_full_params()` sequence still matches the first
+        iteration sequence (for ``FULL_SHARD``) or the first iteration
+        sequence's prefix (for ``SHARD_GRAD_OP``).
         """
         # Only check all-gathers when rebuilding the full parameters in the
         # forward pass and in train mode
