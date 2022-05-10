@@ -1329,6 +1329,7 @@ void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph) {
 }
 
 void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {
+#ifdef FBCODE_CAFFE2
   std::string pattern = R"IR(
     graph(%input, %clamp_min: Scalar?, %clamp_max: Scalar?, %nan, %posinf, %neginf):
         %x : Tensor = aten::clamp(%input, %clamp_min, %clamp_max)
@@ -1364,6 +1365,7 @@ void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph, clampValuesAreConstant);
+#endif
 }
 
 } // namespace jit

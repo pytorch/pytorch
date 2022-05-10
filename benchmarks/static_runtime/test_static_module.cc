@@ -1699,6 +1699,8 @@ TEST(EliminateNoOpSlice, NoneStart) {
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::slice"));
 }
 
+#ifdef FBCODE_CAFFE2
+// FuseClampNaNToNum pass is disabled externally to avoid MSVC errors in CI
 TEST(FuseClampNaNToNum, FusionHappens) {
   const auto src = R"JIT(
     def forward(self, x):
@@ -1761,3 +1763,4 @@ TEST(FuseClampNaNToNum, NoFusion) {
   checkScript(src3);
   checkScript(src4);
 }
+#endif

@@ -604,6 +604,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
   };
 });
 
+#ifdef FBCODE_CAFFE2
+// Disable externally to avoid MSVC errors in open-source CI
+
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::clamp_nan_to_num,
     static_runtime_clamp_nan_to_num,
@@ -657,6 +660,8 @@ REGISTER_OPERATOR_FUNCTOR(
              &output_size});
       };
     });
+
+#endif
 
 REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
