@@ -1821,22 +1821,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 # should not crash as in https://github.com/pytorch/pytorch/issues/75825
                 prepare_fx(m, qconfig_dict)
 
-    def test_qconfig_dict_validity(self):
-        r"""
-        Verifies that if a user passes an invalid key or makes a typo when
-        constructing a qconfig_dict, an error will be thrown and users will be
-        notified of what keys are supported.
-        """
-        m = ConvModel().eval()
-        qconfig_dict = {"object_typo": [(torch.nn.Conv2d, default_qconfig)]}
-
-        with self.assertRaises(ValueError) as context:
-            m = prepare_fx(m, qconfig_dict)
-        self.assertTrue(
-            'Expected qconfig_dict to have the following keys:' in str(context.exception)
-        )
-        self.assertTrue('But found \'object_typo\' instead.' in str(context.exception))
-
     def test_prepare_custom_config_dict_validity(self):
         r"""
         Verifies that if a user passes an invalid key or makes a typo when
@@ -3976,7 +3960,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # checking result match
             self.assertTrue(torch.equal(out_ref, out))
 
-    def test_convert_qconfig_dict(self):
+    def test_convert_qconfig_container(self):
         class Linear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -4066,7 +4050,7 @@ class TestQuantizeFx(QuantizationTestCase):
                     ns.call_module(nn.Linear),
                 ]
 
-            converted = convert_fx(prepared, qconfig_dict=convert_qconfig_dict)
+            converted = convert_fx(prepared, qconfig_container=convert_qconfig_dict)
             converted(torch.rand(5, 5))
             self.checkGraphModuleNodes(
                 converted,
@@ -6943,7 +6927,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict)
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,
-                                     qconfig_dict=qconfig_dict)
+                                     qconfig_container=qconfig_dict)
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.
@@ -6983,7 +6967,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict)
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,
-                                     qconfig_dict=qconfig_dict)
+                                     qconfig_container=qconfig_dict)
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.

@@ -21,13 +21,14 @@ from ..qconfig import (
     QConfigAny,
     qconfig_equals
 )
+from ..qconfig_container import QConfigContainer
 from ..qconfig_dict_utils import (
-    convert_dict_to_ordered_dict,
+    convert_lists_to_ordered_dicts,
     update_qconfig_for_qat,
 )
 from .qconfig_utils import (
     generate_qconfig_map,
-    compare_prepare_convert_qconfig_dict,
+    compare_prepare_convert_qconfig_containers,
     update_qconfig_for_fusion,
     is_qconfig_supported_by_dtype_configs,
 )
@@ -513,7 +514,7 @@ def convert(
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True,
-        convert_qconfig_dict: Dict[str, Any] = None,
+        convert_qconfig_container: QConfigContainer = None,
         backend_config_dict: Optional[Dict[str, Any]] = None) -> torch.nn.Module:
     """
     We will convert an observed model (a module with observer calls) to a reference
@@ -560,23 +561,24 @@ def convert(
 
     # TODO refactor this code once we update the prepare logic to have additional information on
     # which graph nodes have been observed and share that with convert to decide which observers to ignore.
-    if convert_qconfig_dict:
-        prepare_qconfig_dict: Dict[str, Dict[Any, Any]] = model._qconfig_dict  # type: ignore[assignment]
+    if convert_qconfig_container:
+        prepare_qconfig_container: QConfigContainer = model._qconfig_container # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
-        convert_dict_to_ordered_dict(convert_qconfig_dict)
-        if model._is_qat:
-            convert_qconfig_dict = update_qconfig_for_qat(convert_qconfig_dict, {})
-        convert_qconfig_dict = update_qconfig_for_fusion(model, convert_qconfig_dict)
 
-        compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)  # type: ignore[arg-type]
-        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, convert_qconfig_dict, node_name_to_scope)
+        convert_lists_to_ordered_dicts(convert_qconfig_container)
+        if model._is_qat:
+            update_qconfig_for_qat(convert_qconfig_container, {})
+        update_qconfig_for_fusion(model, convert_qconfig_container)
+
+        compare_prepare_convert_qconfig_containers(prepare_qconfig_container, convert_qconfig_container)  # type: ignore[arg-type]
+        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, convert_qconfig_container, node_name_to_scope)
         # check the convert_qconfig_map generated and ensure that all the values either match what was set in prepare qconfig_map
         # or are set to None in the convert_qconfig_map.
         for k, v in qconfig_map.items():
             assert k in convert_qconfig_map, 'Expected key {} in convert qconfig_map'.format(k)
             if convert_qconfig_map[k] is not None:
-                assert qconfig_equals(v, convert_qconfig_map[k]), 'Expected k {} to have the same value in prepare qconfig_dict \
-                and convert qconfig_dict, found {} updated to {}.'.format(k, v, convert_qconfig_map[k])
+                assert qconfig_equals(v, convert_qconfig_map[k]), 'Expected k {} to have the same value in prepare qconfig_container \
+                and convert qconfig_container, but {} was updated to {}.'.format(k, v, convert_qconfig_map[k])
         qconfig_map = convert_qconfig_map
 
     custom_module_classes = get_custom_module_class_keys(

@@ -17,9 +17,10 @@ from ..observer import (
     ObserverBase,
 )
 from ..qconfig import QConfigAny, is_reuse_input_qconfig
+from ..qconfig_container import QConfigContainer
 from ..qconfig_dict_utils import (
     get_flattened_qconfig_dict,
-    convert_dict_to_ordered_dict,
+    convert_lists_to_ordered_dicts,
     update_qconfig_for_qat,
 )
 from .qconfig_utils import (
@@ -93,6 +94,7 @@ from .backend_config_utils import (
     get_pattern_to_quantize_handlers,
 )
 
+import copy
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
 from collections import defaultdict
 
@@ -1331,7 +1333,7 @@ def save_state(
     node_name_to_scope: Dict[str, Tuple[str, type]],
     prepare_custom_config_dict: Dict[str, Any],
     equalization_qconfig_map: Dict[str, Any],
-    qconfig_dict: Dict[str, Dict[Any, Any]],
+    qconfig_container: QConfigContainer,
     is_qat: bool,
     observed_node_names: Set[str],
 ) -> None:
@@ -1340,17 +1342,17 @@ def save_state(
         prepare_custom_config_dict  # type: ignore[assignment]
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
     observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
-    observed._qconfig_dict = qconfig_dict  # type: ignore[assignment]
+    observed._qconfig_container = qconfig_container  # type: ignore[assignment]
     observed._is_qat = is_qat  # type: ignore[assignment]
     observed._observed_node_names = observed_node_names  # type: ignore[assignment]
 
 def prepare(
         model: GraphModule,
-        qconfig_dict: Any,
+        qconfig_container: QConfigContainer,
         is_qat: bool,
         node_name_to_scope: Dict[str, Tuple[str, type]],
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
-        equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
+        equalization_qconfig_container: Optional[QConfigContainer] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
         is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
@@ -1375,8 +1377,8 @@ def prepare(
     """
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
-    if equalization_qconfig_dict is None:
-        equalization_qconfig_dict = {}
+    if equalization_qconfig_container is None:
+        equalization_qconfig_container = QConfigContainer()
 
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,
@@ -1416,18 +1418,18 @@ def prepare(
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
-    convert_dict_to_ordered_dict(qconfig_dict)
-    convert_dict_to_ordered_dict(equalization_qconfig_dict)
-    qconfig_dict = update_qconfig_for_fusion(model, qconfig_dict)
-    equalization_qconfig_dict = update_qconfig_for_fusion(model, equalization_qconfig_dict)
-    flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
+    convert_lists_to_ordered_dicts(qconfig_container)
+    convert_lists_to_ordered_dicts(equalization_qconfig_container)
+    update_qconfig_for_fusion(model, qconfig_container)
+    update_qconfig_for_fusion(model, equalization_qconfig_container)
+    flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_container)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config_dict)
 
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config_dict)
         qat_swap_modules(model, module_to_qat_module)
-        qconfig_dict = update_qconfig_for_qat(qconfig_dict, {})
+        update_qconfig_for_qat(qconfig_container, {})
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -1439,8 +1441,8 @@ def prepare(
     modules = dict(model.named_modules(remove_duplicate=False))
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
-    equalization_qconfig_map = generate_qconfig_map(model, modules, model.graph, equalization_qconfig_dict, node_name_to_scope)
-    qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_dict, node_name_to_scope)
+    equalization_qconfig_map = generate_qconfig_map(model, modules, model.graph, equalization_qconfig_container, node_name_to_scope)
+    qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_container, node_name_to_scope)
 
     # match the patterns that will get quantized
     standalone_module_name_configs = prepare_custom_config_dict.get(
@@ -1480,7 +1482,7 @@ def prepare(
         is_qat)
 
     save_state(model, qconfig_map, node_name_to_scope,
-               prepare_custom_config_dict, equalization_qconfig_map, qconfig_dict, is_qat, observed_node_names)
+               prepare_custom_config_dict, equalization_qconfig_map, qconfig_container, is_qat, observed_node_names)
 
     preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
     model = ObservedGraphModule(model, model.graph, preserved_attributes)
