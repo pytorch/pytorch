@@ -442,7 +442,7 @@ def _nll_loss_backward(
     if weight is not None:
         new_shape = [1 for _ in range(self.dim())]
         new_shape[channel_dim] = weight.shape[0]
-        weight.reshape(new_shape)
+        weight = weight.reshape(new_shape)
         grad_output = grad_output * weight
 
     has_ignore_index = ignore_index >= 0
