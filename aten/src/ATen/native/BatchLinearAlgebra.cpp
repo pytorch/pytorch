@@ -382,7 +382,7 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
   auto ndim = shape.size();
 
   // prefer column major strides
-  auto ld_strides = at::native::batched_matrix_contiguous_strides(shape, /*column_major=*/true);
+  auto ld_strides = at::native::contiguous_strides(shape, /*column_major=*/true);
   set_output(0, shape, ld_strides, self.options(), {}); // LD
 
   set_output(
@@ -429,7 +429,7 @@ TORCH_META_FUNC(linalg_ldl_solve)
     std::tie(B_broadcast_size, std::ignore) = at::native::_linalg_broadcast_batch_dims(B, LD);
 
   // prefer column major strides
-  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/true);
+  auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/true);
   set_output(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
@@ -446,11 +446,11 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
     std::tie(self_broadcast_size, A_broadcast_size) = at::native::_linalg_broadcast_batch_dims(self, A);
 
     // make column major strides for BLAS
-    const auto solution_strides = at::native::batched_matrix_contiguous_strides(self_broadcast_size, /*f-contig=*/true);
+    const auto solution_strides = at::native::contiguous_strides(self_broadcast_size, /*f-contig=*/true);
     set_output(0, self_broadcast_size, solution_strides, self.options(), {});
 
     // make column major strides for BLAS
-    auto clone_A_strides = at::native::batched_matrix_contiguous_strides(A_broadcast_size, /*f_contig=*/true);
+    auto clone_A_strides = at::native::contiguous_strides(A_broadcast_size, /*f_contig=*/true);
     set_output(1, A_broadcast_size, clone_A_strides, A.options(), {});
   } else if (A.layout() == Layout::SparseCsr) {
     // no broadcasting for non-strided layout
@@ -469,7 +469,7 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
   const auto n = sizes.cend()[-1];
 
   // make column major strides for BLAS
-  auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
+  auto LU_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
   set_output(0, sizes, LU_strides, A.options(), {});
 
   // Set sizes to the size of pivots
@@ -510,7 +510,7 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
 
   // This one checks that B can be broadcasted to the shape of A
   auto B_broadcast_size = std::get<0>(at::native::_linalg_broadcast_batch_dims(B, LU));
-  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/left);
+  auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/left);
 
   set_output(0, B_broadcast_size, result_strides, B.options(), {});
 }
@@ -529,7 +529,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   // Prepare sizes for U
   if (compute_uv) {
     sizes.back() = full_matrices ? m : k;
-    auto U_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
+    auto U_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
     set_output(0, sizes, U_strides, A.options(), {});
 
     // Prepare sizes for Vh
@@ -539,7 +539,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
     // We need to distinguish the cuSOLVER case, as the cuSOLVER algorithms we use
     // expect F-contig matrices, but they compute V rather than Vh
     const bool use_cusolver = at::native::svd_uses_cusolver(A);
-    auto Vh_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
+    auto Vh_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
     set_output(2, sizes, Vh_strides, A.options(), {});
   } else {
     set_output(0, {0}, {}, A.options(), {});
@@ -2138,17 +2138,6 @@ std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
 
 // TODO Deprecate this function in favour of linalg_lu_factor_ex
 std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool) {
-   TORCH_WARN_ONCE(
-    "torch.lu is deprecated in favor of torch.linalg.lu_factor / torch.linalg.lu_factor_ex and will be ",
-    "removed in a future PyTorch release.\n",
-    "LU, pivots = torch.lu(A, compute_pivots)\n",
-    "should be replaced with\n",
-    "LU, pivots = torch.linalg.lu_factor(A, compute_pivots)\n",
-    "and\n",
-    "LU, pivots, info = torch.lu(A, compute_pivots, get_infos=True)\n",
-    "should be replaced with\n",
-    "LU, pivots, info = torch.linalg.lu_factor_ex(A, compute_pivots)"
-  );
   return at::linalg_lu_factor_ex(self, compute_pivots, false);
 }
 
@@ -2321,26 +2310,10 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
 }
 
 Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
-  TORCH_WARN_ONCE(
-    "torch.lu_solve is deprecated in favor of torch.linalg.lu_solve",
-    "and will be removed in a future PyTorch release.\n",
-    "Note that torch.linalg.lu_solve has its arguments reversed.\n",
-    "X = torch.lu_solve(B, LU, pivots)\n",
-    "should be replaced with\n",
-    "X = torch.linalg.lu_solve(LU, pivots, B)"
-  );
   return at::linalg_lu_solve(LU_data, LU_pivots, self);
 }
 
 Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, Tensor& result) {
-  TORCH_WARN_ONCE(
-    "torch.lu_solve is deprecated in favor of torch.linalg.lu_solve",
-    "and will be removed in a future PyTorch release.\n",
-    "Note that torch.linalg.lu_solve has its arguments reversed.\n",
-    "X = torch.lu_solve(B, LU, pivots)\n",
-    "should be replaced with\n",
-    "X = torch.linalg.lu_solve(LU, pivots, B)"
-  );
   return at::linalg_lu_solve_out(result, LU_data, LU_pivots, self);
 }
 

@@ -6468,7 +6468,7 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
     make_arg = partial(make_fn, dtype=dtype, device=device, requires_grad=requires_grad)
 
     def out_fn(output):
-        if op_info.name == "linalg.lu":
+        if op_info.name in ("linalg.lu"):
             return output[1], output[2]
         else:
             return output
@@ -10164,16 +10164,15 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_clamp,
            skips=(
-               # boolean alpha not handled properly
+               # nvFuser and NNC appear to not handle boolean clamp
                DecorateInfo(unittest.expectedFailure,
                             'TestCudaFuserOpInfo',
                             'test_nvfuser_correctness',
-                            dtypes=(torch.bool, torch.int32, torch.int64)),
-               # boolean alpha not handled properly
+                            dtypes=(torch.bool,)),
                DecorateInfo(unittest.expectedFailure,
                             'TestNNCOpInfo',
                             'test_nnc_correctness',
-                            dtypes=(torch.bool, torch.int32, torch.int64)),
+                            dtypes=(torch.bool,)),
            )),
     UnaryUfuncInfo('clamp',
                    variant_test_name='scalar',
@@ -10189,6 +10188,15 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/54841
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.bfloat16]),
+                       # nvFuser and NNC appear to not handle clamp type promotion
+                       DecorateInfo(unittest.expectedFailure,
+                                    'TestCudaFuserOpInfo',
+                                    'test_nvfuser_correctness',
+                                    dtypes=(torch.bool, torch.int32, torch.int64)),
+                       DecorateInfo(unittest.skip("Failing on some jobs!"),
+                                    'TestNNCOpInfo',
+                                    'test_nnc_correctness',
+                                    dtypes=(torch.bool, torch.int8, torch.int16, torch.int32, torch.int64)),
                    ),
                    sample_kwargs=sample_kwargs_clamp_scalar,
                    sample_inputs_func=sample_inputs_clamp_scalar),
