@@ -2090,6 +2090,9 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("set_parameter_list", [](ConcreteModuleTypeBuilder& self) {
         self.setIterableModuleKind(IterableModuleKind::PARAMLIST);
+      })
+      .def("set_parameter_dict", [](ConcreteModuleTypeBuilder& self) {
+        self.setIterableModuleKind(IterableModuleKind::PARAMDICT);
       });
 
   py::class_<ConcreteModuleType, std::shared_ptr<ConcreteModuleType>>(

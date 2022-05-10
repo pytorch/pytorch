@@ -131,6 +131,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         concrete_type_builder.set_module_list()
     if isinstance(nn_module, (torch.nn.ParameterList)):
         concrete_type_builder.set_parameter_list()
+    if isinstance(nn_module, (torch.nn.ParameterDict)):
+        concrete_type_builder.set_parameter_dict()
 
     class_annotations = getattr(nn_module, '__annotations__', {})
     if isinstance(nn_module, (torch.ao.quantization.QuantWrapper)):
