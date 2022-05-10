@@ -180,6 +180,26 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
             False,  # cuda_enabled
         )
 
+class MkldnnPrelu(torch.jit.ScriptModule):
+    def __init__(self, dense_module, dtype):
+        super(MkldnnPrelu, self).__init__()
+        self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
+
+    @torch.jit.script_method
+    def __getstate__(self):
+        return (self.weight.to_dense(), self.training)
+
+    @torch.jit.script_method
+    def __setstate__(self, state):
+        self.weight = state[0].to_mkldnn()
+        self.training = state[1]
+
+    @torch.jit.script_method
+    def forward(self, x):
+        x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
+        y_mkldnn = torch.prelu(x_mkldnn, self.weight)
+        y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
+        return y
 
 def to_mkldnn(module, dtype=torch.float):
     assert dtype in [torch.float, torch.bfloat16], \
@@ -198,6 +218,8 @@ def to_mkldnn(module, dtype=torch.float):
             # For batchnorm bf16 path, OneDNN requires weight and bias need fp32 dtype.
             # so it doesn't need dtype argument.
             return MkldnnBatchNorm(m)
+        elif isinstance(m, torch.nn.PReLU):
+            return MkldnnPrelu(m, d)
         else:
             return m
 
