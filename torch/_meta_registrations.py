@@ -13,7 +13,7 @@ def meta_index_select(self, dim, index):
 @torch.library.impl(meta_lib, "index_select.out")
 def meta_index_select_out(self, out):
     torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(meta_index_select(self))
+    return out.copy_(torch.index_select(self))
 
 @torch.library.impl(meta_lib, "inverse")
 def meta_inverse(self):
@@ -26,7 +26,7 @@ def meta_inverse(self):
 @torch.library.impl(meta_lib, "inverse.out")
 def meta_inverse_out(self, out):
     torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(meta_inverse(self))
+    return out.copy_(torch.inverse(self))
 
 @torch.library.impl(meta_lib, "max")
 def meta_max(self):
@@ -44,7 +44,7 @@ def meta_abs(self):
 @torch.library.impl(meta_lib, "abs.out")
 def meta_abs_out(self, out):
     torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(meta_abs(self))
+    return out.copy_(torch.abs(self))
 
 @torch.library.impl(meta_lib, "min")
 def meta_min(self):
