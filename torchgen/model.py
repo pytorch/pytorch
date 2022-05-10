@@ -414,7 +414,7 @@ class NativeFunction:
     # We parse both the NativeFunction + backend-specific information about it, which it stored in a corresponding BackendIndex.
     @staticmethod
     def from_yaml(
-        ei: Dict[str, object], loc: "Location", valid_tags: Set[str]
+        ei: Dict[str, object], loc: "Location", valid_tags: Set[str], ignore_keys: Optional[Set[DispatchKey]] = None
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
@@ -532,6 +532,8 @@ class NativeFunction:
                 assert isinstance(ks, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
+                    if ignore_keys and dispatch_key in ignore_keys:
+                        continue
                     assert dispatch_key in dispatch_keys, (
                         f"Dispatch key {dispatch_key} of kernel {v} "
                         "is not a supported dispatch key."

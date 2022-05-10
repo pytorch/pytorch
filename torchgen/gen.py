@@ -153,7 +153,7 @@ ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
 
 
 def parse_native_yaml_struct(
-    es: object, valid_tags: Set[str], path: str = "<stdin>"
+    es: object, valid_tags: Set[str], ignore_keys: Set[DispatchKey], path: str = "<stdin>"
 ) -> ParsedYaml:
     assert isinstance(es, list)
     rs: List[NativeFunction] = []
@@ -163,7 +163,7 @@ def parse_native_yaml_struct(
         loc = Location(path, e["__line__"])
         funcs = e.get("func")
         with context(lambda: f"in {loc}:\n  {funcs}"):
-            func, m = NativeFunction.from_yaml(e, loc, valid_tags)
+            func, m = NativeFunction.from_yaml(e, loc, valid_tags, ignore_keys)
             rs.append(func)
             BackendIndex.grow_index(bs, m)
     error_check_native_functions(rs)
@@ -216,7 +216,7 @@ def parse_tags_yaml(path: str) -> Set[str]:
     return valid_tags
 
 
-def parse_native_yaml(path: str, tags_yaml_path: str) -> ParsedYaml:
+def parse_native_yaml(path: str, tags_yaml_path: str, ignore_keys: Optional[Set[DispatchKey]] = None) -> ParsedYaml:
     # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
@@ -224,7 +224,7 @@ def parse_native_yaml(path: str, tags_yaml_path: str) -> ParsedYaml:
         with open(path, "r") as f:
             es = yaml.load(f, Loader=LineLoader)
         _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(
-            es, valid_tags, path=path
+            es, valid_tags, ignore_keys, path=path
         )
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
@@ -2259,7 +2259,6 @@ def gen_declarations_yaml(
         lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]),
     )
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate ATen source files")
     parser.add_argument(
@@ -2290,6 +2289,11 @@ def main() -> None:
         "--rocm",
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
+    )
+    parser.add_argument(
+        "--mps",
+        action="store_true",
+        help="Generate MPS registration code when set",
     )
     # TODO: --op_registration_whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
@@ -2339,6 +2343,7 @@ def main() -> None:
         default=["headers", "sources", "declarations_yaml"],
         help="Generate only a subset of files",
     )
+
     options = parser.parse_args()
 
     selector = get_custom_build_selector(
@@ -2348,7 +2353,18 @@ def main() -> None:
 
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
     tags_yaml_path = os.path.join(options.source_path, "native/tags.yaml")
-    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
+
+    from torchgen.model import dispatch_keys
+
+    # TODO: stop generating CUDA kernels for non-CUDA builds
+    ignore_keys = set()
+    if not options.mps:
+        ignore_keys.add(DispatchKey.MPS)
+
+        if DispatchKey.MPS in dispatch_keys:
+            del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
+
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
@@ -2396,8 +2412,6 @@ def main() -> None:
 #include <ATen/hip/ATenHIPGeneral.h>
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>"""
-
-    from torchgen.model import dispatch_keys
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
