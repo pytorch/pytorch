@@ -1392,12 +1392,14 @@
     SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
-  dispatch: {}
+  dispatch:
+    MPS: _copy_from_mps
 
 # We need this to be able to properly copy from a CPU to an XLA tensor with different sizes.
 # See https://github.com/pytorch/xla/issues/2881
 - func: _copy_from_and_resize(Tensor self, Tensor dst) -> Tensor
-  dispatch: {}
+  dispatch:
+    MPS: _copy_from_and_resize_mps
 
 - func: cos(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
