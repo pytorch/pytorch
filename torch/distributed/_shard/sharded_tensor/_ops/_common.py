@@ -29,7 +29,7 @@ def _basic_validation(op, args=(), kwargs=None):
     if not has_distributed_tensor:
         raise TypeError(
             f"torch function '{op.__name__}', with args: {args} and "
-            f"kwargs: {kwargs} are called without any DistributedTensor!"
+            f"kwargs: {kwargs} are called without any distributed tensor!"
         )
 
     # Validate all DistributedTensors use the same PG.
