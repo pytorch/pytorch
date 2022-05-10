@@ -230,14 +230,14 @@
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
-  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
-  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
+  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), mat1.layout(), alpha)
+  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), mat2.layout(), alpha)
   result: maybe_multiply(self_t, beta) + maybe_multiply(mat1_t.mm(mat2_p), alpha) + maybe_multiply(mat1_p.mm(mat2_t), alpha)
 
 - name: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
   sparse: _sparse_addmm_sparse_backward(grad, sparse, dense, alpha)
-  dense: mm_mat2_backward(grad, sparse, dense.sizes(), dense.strides(), alpha)
+  dense: mm_mat2_backward(grad, sparse, dense.sizes(), dense.strides(), dense.layout(), alpha)
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
@@ -402,7 +402,7 @@
   result: auto_linear
 
 - name: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
-  self: grad.to(self.options(), /*non_blocking*/false, /*copy*/false)
+  self: _to_copy_backward(grad, self.options())
   result: _to_copy(self_t, dtype, layout, device, pin_memory, non_blocking, memory_format)
   # The condition is: if dtype is not nullopt, then isDifferentiableType(*dtype)
   # (If dtype IS nullopt, we rely on the regular check that any input requires grad).
@@ -516,6 +516,7 @@
 - name: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   self: norm_backward(grad, self - other, p, result)
   other: -norm_backward(grad, self - other, p, result)
+  result: norm_jvp(self_p - other_p, self_t - other_t, p, result, {}, false)
 
 # The backward formula is done in this order to improve numerical stability
 # of the higher order derivatives, see https://github.com/pytorch/pytorch/issues/43414
@@ -603,6 +604,10 @@
   self: at::sum_to(grad, self.sizes())
   result: auto_linear
 
+- name: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
+  self: at::sum_to(grad, c10::expectIntArrayRef(self.sym_sizes()))
+  result: auto_linear
+
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
   result: self_t.zero_()
@@ -624,6 +629,15 @@
 
 - name: _fused_moving_avg_obs_fq_helper(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor output, Tensor mask)
   self: fake_quantize_per_tensor_affine_cachemask_backward(grad, mask)
+
+- name: fill.Scalar(Tensor self, Scalar value) -> Tensor
+  self: zeros_like(grad)
+  result: at::fill(self_t, 0)
+
+- name: fill.Tensor(Tensor self, Tensor value) -> Tensor
+  self: zeros_like(grad)
+  value: grad.sum()
+  result: at::fill(self_t, value_t)
 
 - name: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   self: zeros_like(grad)
@@ -754,8 +768,12 @@
   index: non_differentiable
   result: at::index_add(self_t, dim, index, maybe_multiply(source_t, alpha))
 
+- name: _index_reduce(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor
+  self, source: _index_reduce_backward(grad, self, dim, index, source, reduce, include_self, result)
+  index: non_differentiable
+
 - name: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
-  self: grad.clone().index_fill_(dim, index, 0)
+  self: grad.index_fill(dim, index, 0)
   # The case source.dim() == 0 is necessary to support scalar tensors of the form
   # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
   # This is because source is not broadcastable to index, as source.dim() < index.dim()
@@ -936,17 +954,27 @@
   result: self_t.zero_()
 
 - name: linalg_lu_factor_ex(Tensor A, *, bool pivot=True, bool check_errors=False) -> (Tensor LU, Tensor pivots, Tensor info)
-  A: lu_factor_ex_backward(grad, A, LU, pivots)
-  LU: lu_factor_ex_jvp(A_t, LU, pivots)
+  A: lu_factor_ex_backward(grad, LU, pivots, pivot)
+  LU: lu_factor_ex_jvp(A_t, LU, pivots, pivot)
   output_differentiability: [True, False, False]
 
-- name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
-  self, LU_data: lu_solve_backward(grad, result, LU_data, LU_pivots, grad_input_mask)
-  result: lu_solve_jvp(result, LU_data_p, LU_data_t, self_t, LU_pivots)
+- name: linalg_lu(Tensor A, *, bool pivot=True) -> (Tensor P, Tensor L, Tensor U)
+  A: linalg_lu_backward(grad_L, grad_U, P, L, U, pivot)
+  L: std::get<0>(linalg_lu_jvp(A_t, P, L, U, pivot))
+  U: std::get<1>(linalg_lu_jvp(A_t, P, L, U, pivot))
+  output_differentiability: [False, True, True]
+
+- name: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
+  LU: linalg_lu_solve_LU(grad, LU, pivots, result, left, adjoint)
+  B: "at::linalg_lu_solve(LU, pivots, grad, left, !adjoint)"
+  result: linalg_lu_solve_jvp(result, LU_p, pivots, LU_t, B_t, left, adjoint)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
-  LU_data: lu_unpack_backward(grads, LU_data, unpack_data)
+  LU_data: lu_unpack_backward(grad_L, grad_U, LU_data.size(-2), LU_data.size(-1))
   LU_pivots: non_differentiable
+  L: "LU_data_t.size(-2) >= LU_data_t.size(-1) ? LU_data_t.tril(-1) : LU_data_t.narrow(-1, 0, LU_data_t.size(-2)).tril(-1)"
+  U: "LU_data_t.size(-1) >= LU_data_t.size(-2) ? LU_data_t.triu() : LU_data_t.narrow(-2, 0, LU_data_t.size(-1)).triu()"
+  output_differentiability: [False, True, True]
 
 - name: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
   self: grad.masked_fill(mask, 0)
@@ -1055,8 +1083,8 @@
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
-  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), 1)
-  mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
+  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), self.layout(), 1)
+  mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), mat2.layout(), 1)
   result: at::mm(self_t, mat2_p) + at::mm(self_p, mat2_t)
 
 - name: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
@@ -1129,18 +1157,23 @@
 
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)
+  result: norm_jvp(self_p, self_t, p, result)
 
 - name: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
   self: norm_backward(grad, self, p, result, dim, keepdim)
+  result: norm_jvp(self_p, self_t, p, result, dim, keepdim)
 
 - name: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result)
+  result: norm_jvp(self_p, self_t, p, result)
 
 - name: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim)
+  result: norm_jvp(self_p, self_t, p, result, dim, keepdim)
 
 - name: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: linalg_vector_norm_backward(grad, self, ord, result, dim, keepdim)
+  result: linalg_vector_norm_jvp(self_p, self_t, ord, result, dim, keepdim)
 
 - name: _pdist_forward(Tensor self, float p=2) -> Tensor
   self: _pdist_backward(grad, self, p, result)
@@ -1223,10 +1256,9 @@
   index: non_differentiable
   source: grad.take(index).reshape_as(source)
 
-- name: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
-  self: linalg_qr_backward(grads, self, mode, Q, R)
-  Q: linalg_qr_jvp_Q(self_t, Q, R)
-  R: linalg_qr_jvp_R(self_t, Q, R)
+- name: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
+  A: linalg_qr_backward(grad_Q, grad_R, Q, R, mode)
+  Q, R: linalg_qr_jvp(A_t, Q, R, mode)
 
 - name: rad2deg(Tensor self) -> Tensor
   self: rad2deg_backward(grad)
@@ -1476,10 +1508,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim)
   result: auto_linear
 
-- name: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes()).to(self.scalar_type()) * self.isnan().logical_not()
-
-- name: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: nansum(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
@@ -1490,22 +1519,18 @@
                    full_matrices ? U.narrow(-1, 0, S.size(-1)) : U,
                    S,
                    full_matrices ? Vh.narrow(-2, 0, S.size(-1)) : Vh)"
-  U: std::get<0>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
-  S: std::get<1>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
-  Vh: std::get<2>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
+  U, S, Vh: linalg_svd_jvp(A_t, U, S, Vh, full_matrices)
 
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors_return, /*is_hermitian=*/true, /*symeig_eigenvector=*/eigenvectors)
 
 - name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/true)
-  eigenvalues: std::get<0>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/true))
-  eigenvectors: std::get<1>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/true))
+  eigenvalues, eigenvectors: linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/true)
 
 - name: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: handle_r_to_c(self.scalar_type(), linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/false))
-  eigenvalues: std::get<0>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/false))
-  eigenvectors: std::get<1>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/false))
+  eigenvalues, eigenvectors: linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/false)
 
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
@@ -1865,6 +1890,10 @@
 - name: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _sparse_log_softmax_backward_data(grad, result, dim, self)
 
+- name: _masked_softmax(Tensor self, Tensor mask, int? dim=None) -> Tensor
+  self: _masked_softmax_backward(grad, result, mask, dim)
+  mask: non_differentiable
+
 - name: prelu(Tensor self, Tensor weight) -> Tensor
   self, weight: "grad.defined() ? prelu_backward(grad, self, weight) : std::tuple<Tensor, Tensor>()"
 
@@ -2069,12 +2098,12 @@
   output_differentiability: [True, False]
 
 - name: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  self: max_unpool2d_backward(grad, self, indices, output_size)
+  self: max_pool_double_backward(grad, indices, 2)
   indices: non_differentiable
   result: auto_linear
 
 - name: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
-  self: max_unpool3d_backward(grad, self, indices, output_size, stride, padding)
+  self: max_pool_double_backward(grad, indices, 3)
   indices: non_differentiable
   result: auto_linear
 
@@ -2252,11 +2281,6 @@
   indices: non_differentiable
   result: auto_linear
 
-- name: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  grad_output: max_unpool2d(grad, indices, output_size)
-  self: zeros_like(self)
-  indices: non_differentiable
-
 - name: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: mse_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
   self: mse_loss_double_backward(grad * grad_output, self, reduction)
@@ -2306,6 +2330,11 @@
   grad_output: replication_pad3d(grad, padding)
   self: zeros_like(self)
   result: replication_pad3d_backward(grad_output_t, self_p, padding)
+
+- name: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  self: maybe_multiply(grad, beta.conj())
+  mat1: maybe_multiply(grad.sparse_mask(self).mm(mat2.mH()), alpha.conj())
+  mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, beta)

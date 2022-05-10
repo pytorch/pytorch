@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import os
 import sys
 from contextlib import suppress
 from copy import deepcopy
@@ -31,13 +30,13 @@ class FSDPInitMode(Enum):
     CUDA_NEVER = 3
 
 def _get_full_detached_param(fsdp_model: FullyShardedDataParallel):
-    with fsdp_model.summon_full_params():
+    with FullyShardedDataParallel.summon_full_params(fsdp_model):
         params = list(p.clone().detach_() for p in fsdp_model.parameters())
 
     return params
 
 def _zero_model(fsdp_model: FullyShardedDataParallel):
-    with fsdp_model.summon_full_params():
+    with FullyShardedDataParallel.summon_full_params(fsdp_model):
         for param in fsdp_model.parameters():
             with torch.no_grad():
                 param.zero_()
@@ -59,7 +58,7 @@ def subtest_name(test_name_mapping, *args):
 # also automatically move the parameters to GPU, due to _rebuild_full_params
 # call.
 def get_full_params(model, recurse=True):
-    with model.summon_full_params(recurse=recurse):
+    with FullyShardedDataParallel.summon_full_params(model, recurse=recurse):
         return deepcopy(list(model.parameters()))
 
 def _maybe_cuda(model, move_to_cuda):
@@ -154,6 +153,9 @@ class TransformerWithSharedParams(nn.Module):
 
     def run_backward(self, loss):
         loss.backward()
+
+    def get_ignored_modules(self):
+        return [self.transformer]
 
 
 class NestedWrappedModule(nn.Module):
@@ -378,10 +380,7 @@ class FSDPTest(MultiProcessTestCase):
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there is no enough GPUs.
-
-        backend = os.environ.get("BACKEND", None)
-        if backend is None:
-            backend = "nccl" if torch.cuda.is_available() else "gloo"
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
 
         try:
             dist.init_process_group(
@@ -607,26 +606,24 @@ class FSDPTest(MultiProcessTestCase):
             )
 
     def _get_wrapped_model(
-        self, group, cuda_first=False, config=None, **model_kwargs,
+        self, group, cuda_first=False, ignore_modules=False, config=None,
+        **model_kwargs,
     ) -> FullyShardedDataParallel:
         if config is None:
             config = {}
         move_to_cuda = not (
             "cpu_offload" in config and config["cpu_offload"].offload_params
         )
-        if cuda_first:
-            transformer = TransformerWithSharedParams(group, **model_kwargs)
-            if move_to_cuda:
-                transformer = transformer.cuda()
-            model = FullyShardedDataParallel(transformer, group, **config)
-        else:
-            model = FullyShardedDataParallel(
-                TransformerWithSharedParams(group, **model_kwargs),
-                group,
-                **config,
-            )
-            if move_to_cuda:
-                model = model.cuda()
+        transformer = TransformerWithSharedParams(group, **model_kwargs)
+        if cuda_first and move_to_cuda:
+            transformer = transformer.cuda()
+        if ignore_modules:
+            assert "ignored_modules" not in config, \
+                "Do not pass in `ignored_modules` via `config`"
+            config["ignored_modules"] = transformer.get_ignored_modules()
+        model = FullyShardedDataParallel(transformer, group, **config)
+        if not cuda_first and move_to_cuda:
+            model = model.cuda()
         return model
 
     def _get_nonwrapped_model(
