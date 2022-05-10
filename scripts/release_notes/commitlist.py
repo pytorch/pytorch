@@ -112,7 +112,7 @@ class CommitList:
         if 'bc_breaking' in labels:
             topic = 'bc-breaking'
         if 'module: deprecation' in labels:
-            topic = 'module: deprecation'
+            topic = 'deprecation'
 
         files_changed = features['files_changed']
         for file in files_changed:
