@@ -335,6 +335,9 @@ else:
     TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
+# https://github.com/pytorch/pytorch/issues/75665
+if TEST_WITH_ROCM:
+    TIMEOUT_OVERRIDE["test_join_kwargs"] = 200
 
 def create_device(interface=None):
     if sys.platform == "win32" or interface is None:
