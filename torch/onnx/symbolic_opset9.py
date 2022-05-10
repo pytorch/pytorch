@@ -9,12 +9,12 @@ from typing import Optional
 import torch
 import torch.onnx
 import torch.onnx.symbolic_helper as sym_help
+from torch._C import ListType, OptionalType
+from torch.nn.modules.utils import _pair, _single, _triple
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
-import torch.onnx.utils
-from torch._C import ListType, OptionalType
-from torch.nn.modules.utils import _pair, _single, _triple
+from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx.flags import _FLAGS
 from torch.onnx.symbolic_helper import (
     ScalarType,
