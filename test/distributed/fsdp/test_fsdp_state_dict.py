@@ -460,7 +460,7 @@ class TestFSDPStateDict(FSDPTest):
             sd1 = fsdp_model.state_dict()
         with FSDP.summon_full_params(fsdp_model):
             fsdp_params = deepcopy(list(fsdp_model.parameters()))
-        # Check that the ignored parameters are not cloned
+        # Check that the ignored parameters and buffer are not cloned
         for tensor, tensor_name in ignored_tensor_to_tensor_name.items():
             self.assertTrue(tensor_name in sd1)
             self.assertEqual(tensor.data_ptr(), sd1[tensor_name].data_ptr())
@@ -475,7 +475,7 @@ class TestFSDPStateDict(FSDPTest):
         for fsdp_param, local_param in zip(fsdp_params, local_params):
             self.assertEqual(fsdp_param, local_param)
         # Check that if we save a state dict again, the ignored parameters and
-        # buffers still have the same data pointer
+        # buffer still have the same data pointer
         with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
             sd2 = fsdp_model.state_dict()
         for tensor, tensor_name in ignored_tensor_to_tensor_name.items():
