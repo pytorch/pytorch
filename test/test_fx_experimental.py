@@ -3,7 +3,9 @@
 import math
 import numbers
 import operator
+import pickle
 import sys
+import tempfile
 import unittest
 from typing import Callable, Dict, Union, List, Optional
 from types import BuiltinFunctionType
@@ -26,7 +28,7 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
-from torch.fx.experimental.meta_tracer import MetaTracer
+import torch.fx.experimental.meta_tracer
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
@@ -670,8 +672,6 @@ class TestFXExperimental(JitTestCase):
         self.assertEqual(traced(3, 3), m(3, 3))
 
     def test_meta_tracer(self):
-        mt = MetaTracer()
-
         class MetaTracerTestModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -680,15 +680,26 @@ class TestFXExperimental(JitTestCase):
 
             def forward(self, x):
                 emb = self.emb(x)
+                emb = emb + torch.arange(emb.shape[-1], dtype=torch.float, device=emb.device)
                 lol = self.layernorm(emb)
                 return torch.relu(lol) if lol.shape[0] < 30 else torch.sigmoid(lol)
 
         mttm = MetaTracerTestModule()
         for BS in [15, 35]:
             x = torch.zeros(BS, dtype=torch.long).random_(42)
-            graph = mt.trace(mttm, meta_args={'x' : x.to(device='meta')})
-            gm = torch.fx.GraphModule(mttm, graph)
+            meta_args = {'x' : x.to(device='meta')}
+            gm = torch.fx.experimental.meta_tracer.symbolic_trace(mttm, meta_args=meta_args)
             torch.testing.assert_close(gm(x), mttm(x))
+
+            # Test serialization/deserialization
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                with open(f'{tmp_dir}/meta_module.pkl', 'wb') as f:
+                    pickle.dump(gm, f)
+
+                with open(f'{tmp_dir}/meta_module.pkl', 'rb') as f:
+                    loaded = pickle.load(f)
+
+                torch.testing.assert_close(loaded(x), mttm(x))
 
     def test_proxy_tensor(self):
         def f(x):
