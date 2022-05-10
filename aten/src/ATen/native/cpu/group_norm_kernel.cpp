@@ -107,9 +107,9 @@ std::tuple<T, T> ColumnwiseMoments(
       acc1_vec += x_vec * x_vec;
     }
   }
-  // horizontal add fast path
-  T mean_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc0_vec);
-  T rstd_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc1_vec);
+  // TODO: use fast path
+  T mean_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc0_vec, Vec::size());
+  T rstd_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc1_vec, Vec::size());
   return std::tuple<T, T>(mean_val, rstd_val);
 }
 
@@ -149,9 +149,9 @@ std::tuple<float, float> ColumnwiseMoments(
       }
     }
   }
-  // horizontal add fast path
-  float mean_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc0_fvec);
-  float rstd_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc1_fvec);
+  // TODO: use fast path
+  float mean_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc0_fvec, fVec::size());
+  float rstd_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc1_fvec, fVec::size());
   return std::tuple<float, float>(mean_val, rstd_val);
 }
 

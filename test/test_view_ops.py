@@ -11,7 +11,7 @@ import random
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
-    torch_to_numpy_dtype_dict,
+    numpy_to_torch_dtype_dict,
 )
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipMeta)
@@ -130,7 +130,7 @@ class TestViewOps(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test_view_dtype_new(self, device, dtype):
-        dtypes = torch_to_numpy_dtype_dict.copy()
+        dtypes = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
         del dtypes[torch.bool]
 
         def generate_inputs():
@@ -907,6 +907,24 @@ class TestViewOps(TestCase):
 
             op = partial(fn, source=0, destination=1)
             run_test(device, op)
+
+    # Testing that the generated view_copy kernel and its derivative are implemented correctly
+    def test_view_copy(self, device):
+        a = torch.randn(4, device=device, requires_grad=True)
+        a_ref = a.clone().detach().requires_grad_()
+        a_view = a_ref.view(2, 2)
+        a_view_copy = torch.view_copy(a, (2, 2))
+
+        # view_copy ops don't preserve view relationship
+        self.assertTrue(self.is_view_of(a_ref, a_view))
+        self.assertFalse(self.is_view_of(a, a_view_copy))
+
+        a_view_copy.sum().backward()
+        a_view.sum().backward()
+
+        # forward and backward give the same shape + result
+        self.assertEqual(a_view_copy, a_view)
+        self.assertEqual(a.grad, a_ref.grad)
 
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):

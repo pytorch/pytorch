@@ -3,7 +3,7 @@ This script will generate default values of quantization configs.
 These are for use in the documentation.
 """
 
-from torch.ao.quantization.fx.backend_config import get_native_backend_config_dict
+from torch.ao.quantization.backend_config import get_native_backend_config_dict
 import os.path
 from pprint import pprint
 
