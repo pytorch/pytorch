@@ -9,8 +9,8 @@ class AOMigrationTestCase(TestCase):
         (except the dunder methods)."""
         if base is None:
             base = 'quantization'
-        old_base = 'torch' + base
-        new_base = 'torch.ao' + base
+        old_base = 'torch.' + base
+        new_base = 'torch.ao.' + base
         old_module = importlib.import_module(f'{old_base}.{package_name}')
         new_module = importlib.import_module(f'{new_base}.{package_name}')
         old_module_dir = set(dir(old_module))
@@ -47,8 +47,8 @@ class AOMigrationTestCase(TestCase):
         and their hashes."""
         if base is None:
             base = 'quantization'
-        old_base = 'torch' + base
-        new_base = 'torch.ao' + base
+        old_base = 'torch.' + base
+        new_base = 'torch.ao.' + base
         old_location = importlib.import_module(f'{old_base}.{package_name}')
         new_location = importlib.import_module(f'{new_base}.{package_name}')
         for dict_name in dict_list:
