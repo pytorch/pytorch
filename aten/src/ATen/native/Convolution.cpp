@@ -19,6 +19,10 @@
 #include <nnpack.h>
 #endif
 
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/Utils.h>
+#endif
+
 constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
@@ -227,6 +231,9 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
+  }
+  if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
+    return true;
   }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.device().is_cpu() &&

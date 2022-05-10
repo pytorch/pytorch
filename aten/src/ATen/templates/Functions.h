@@ -69,8 +69,7 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
-
-${static_dispatch_extra_headers}
+#include <c10/util/OptionalArrayRef.h>
 
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/tensor.h>

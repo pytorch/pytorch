@@ -4,12 +4,13 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 #include <memory>
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/lazy/core/dynamic_ir.h>
+#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 
 namespace torch {
 namespace lazy {
@@ -17,7 +18,8 @@ namespace lazy {
 class TestLeafNode : public Node {
  public:
   explicit TestLeafNode(size_t param)
-      : Node(OpKind(), /* num_outputs */ 1, /* hash_func */[&](bool /*bakeInSizes*/) -> hash_t { return Hash(param); }),
+      : Node(OpKind(), /* num_outputs */ 1),
+        hash_(Hash(param)),
         param_(param) {}
   ~TestLeafNode() override = default;
 
@@ -28,7 +30,11 @@ class TestLeafNode : public Node {
   const Output& operand(size_t i) const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of leaf node");
   }
+
+  hash_t hash() const override { return hash_; }
+  hash_t shapeHash() const override { return hash_; }
  private:
+  hash_t hash_;
   size_t param_;
 };
 

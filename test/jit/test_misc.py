@@ -12,6 +12,7 @@ import sys
 import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
+from torch.testing._internal.common_utils import freeze_rng_state
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -171,6 +172,22 @@ class TestMisc(JitTestCase):
 
         self.checkScript(if_function, (torch.randn(5),))
 
+    def test_hacked_twin(self):
+
+        def gen_data():
+            with freeze_rng_state():
+                return torch.randn(10), torch.randint(10, (20,)), torch.randn(20)
+
+        input, index, value, = gen_data()
+        input1, index1, value1, = gen_data()
+        out1 = torch.ops.aten.index_put.hacked_twin(input, [index], value, accumulate=False)
+        out2 = torch.index_put(input1, [index1], value1, accumulate=False)
+        self.assertEqual(out1, out2)
+
+        torch.ops.aten.index_put_.hacked_twin(input, [index], value, accumulate=False)
+        torch.index_put_(input1, [index1], value1, accumulate=False)
+        self.assertEqual(input, input1)
+
     def test_export_opnames_interface(self):
 
         @torch.jit.interface
@@ -328,3 +345,38 @@ class TestMisc(JitTestCase):
 
         self.assertTrue(torch.jit.script(sum_i)(4) == 8)
         self.assertTrue(torch.jit.script(sum_f)(4.5) == 9.)
+
+    def test_parse_ir_annotate(self):
+        ir = """
+        graph():
+          %3 : int[] = prim::Constant[value=annotate(List[int], [])]()
+          return (%3)
+        """
+        graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret == [])
+
+    def test_parse_ir_single_element_tensor_positive(self):
+        ir = """
+        graph():
+          %7 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+          return (%7)
+        """
+        graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret.numel() == 1)
+        self.assertTrue(len(ret.size()) == 1)
+
+    def test_parse_ir_single_element_tensor_negative(self):
+        ir = """
+        graph():
+          %7 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={-17}]()
+          return (%7)
+        """
+        graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret.numel() == 1)
+        self.assertTrue(len(ret.size()) == 1)

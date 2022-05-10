@@ -45,6 +45,10 @@
 #include <hip/hip_fp16.h>
 #endif
 
+#ifdef SYCL_LANGUAGE_VERSION
+#include <CL/sycl.hpp>
+#endif
+
 // Standard check for compiling CUDA with clang
 #if defined(__clang__) && defined(__CUDA__) && defined(__CUDA_ARCH__)
 #define C10_DEVICE_HOST_FUNCTION __device__ __host__
@@ -390,6 +394,10 @@ struct alignas(2) Half {
   inline C10_HOST_DEVICE Half(const __half& value);
   inline C10_HOST_DEVICE operator __half() const;
 #endif
+#ifdef SYCL_LANGUAGE_VERSION
+  inline C10_HOST_DEVICE Half(const sycl::half& value);
+  inline C10_HOST_DEVICE operator sycl::half() const;
+#endif
 };
 
 // TODO : move to complex.h
@@ -404,7 +412,7 @@ struct alignas(4) complex<Half> {
   // be constexpr
   C10_HOST_DEVICE explicit inline complex(const Half& real, const Half& imag)
       : real_(real), imag_(imag) {}
-  C10_HOST_DEVICE explicit inline complex(const c10::complex<float>& value)
+  C10_HOST_DEVICE inline complex(const c10::complex<float>& value)
       : real_(value.real()), imag_(value.imag()) {}
 
   // Conversion operator
