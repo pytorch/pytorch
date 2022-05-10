@@ -18,4 +18,4 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - run: |
-          curl -H "Accept: application/vnd.github.v3+json" https://api.github.com/rate_limit
+        curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit
