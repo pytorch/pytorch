@@ -155,7 +155,7 @@ ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
 def parse_native_yaml_struct(
     es: object,
     valid_tags: Set[str],
-    ignore_keys: Set[DispatchKey],
+    ignore_keys: Optional[Set[DispatchKey]] = None,
     path: str = "<stdin>",
 ) -> ParsedYaml:
     assert isinstance(es, list)
