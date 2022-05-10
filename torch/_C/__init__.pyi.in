@@ -716,7 +716,7 @@ def _valgrind_toggle_and_dump_stats() -> None: ...  # CALLGRIND_TOGGLE_COLLECT a
 has_openmp: _bool
 has_mkl: _bool
 has_mps: _bool
-is_mps_available: _bool
+_is_mps_available: _bool
 has_lapack: _bool
 has_cuda: _bool
 has_mkldnn: _bool

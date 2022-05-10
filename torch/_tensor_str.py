@@ -81,7 +81,7 @@ def set_printoptions(
     PRINT_OPTS.sci_mode = sci_mode
 
 def tensor_totype(t):
-    dtype = torch.float if t.is_mps() else torch.double
+    dtype = torch.float if t.is_mps else torch.double
     return t.to(dtype=dtype)
 
 class _Formatter(object):

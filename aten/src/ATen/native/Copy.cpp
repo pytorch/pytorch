@@ -240,9 +240,11 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
+#ifdef __APPLE__
   if (self.device().type() == at::kMPS || src.device().type() == at::kMPS) {
     return at::native::mps::mps_copy_(self, src, non_blocking);
   }
+#endif
 
   if(!self.is_complex() && src.is_complex()) {
     TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
