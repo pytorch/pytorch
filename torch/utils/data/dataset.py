@@ -9,6 +9,7 @@ from typing import (
     Sequence,
     Tuple,
     TypeVar,
+    TYPE_CHECKING,
 )
 
 # No 'default_generator' in torch/__init__.pyi
@@ -52,6 +53,10 @@ class Dataset(Generic[T_co]):
 
     def __add__(self, other: 'Dataset[T_co]') -> 'ConcatDataset[T_co]':
         return ConcatDataset([self, other])
+
+    if TYPE_CHECKING:
+        # Convince type checkers that Dataset objects are iterable
+        def __iter__(self) -> Iterator[T_co]: ...
 
     # No `def __len__(self)` default?
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
