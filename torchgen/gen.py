@@ -181,8 +181,11 @@ def pre_group_native_functions(
 #   (2) Gives the functionalization pass functional variants to work with, so we don't need to
 #       manually implement functional variants of all operators to get support for all mutable operators.
 def add_generated_native_functions(
-    rs: List[NativeFunction], indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]
-) -> Tuple[List[NativeFunction], Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]]:
+    rs: List[NativeFunction],
+    indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]],
+) -> Tuple[
+    List[NativeFunction], Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]
+]:
     pre_grouped_native_functions = pre_group_native_functions(rs)
     for k, d in pre_grouped_native_functions.items():
         has_functional = SchemaKind.functional in d
@@ -205,8 +208,8 @@ def add_generated_native_functions(
             are_manual = all(f.manual_cpp_binding for f in d.values())
             # Don't bother generating functional + out= variants for view operators
             has_view_ops = (
-                (has_inplace and "inplace_view" in d[SchemaKind.inplace].tags) or any(f.is_view_op for f in d.values())
-            )
+                has_inplace and "inplace_view" in d[SchemaKind.inplace].tags
+            ) or any(f.is_view_op for f in d.values())
             # Don't generate the other variants for CompositeImplicitAutograd operators.
             # We could probably do this, but the main benefit of generating the function triplets
             # is for transforms that need them, and transforms don't need to act directly
@@ -226,13 +229,22 @@ def add_generated_native_functions(
                 # (you can always add a functional variant yourself if you want to add a new out= operator).
                 #
                 # We should probably fix the existing cases; this check is to prevent us from adding more over time.
-                if str(d[SchemaKind.out].func.name) not in OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY:
-                    raise AssertionError(f"Found an out= operator that we could not find any other variants of: {str(d[SchemaKind.out].func)}")
+                if (
+                    str(d[SchemaKind.out].func.name)
+                    not in OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY
+                ):
+                    raise AssertionError(
+                        f"Found an out= operator that we could not find any other variants of: {str(d[SchemaKind.out].func)}"
+                    )
                 continue
 
             # Some inplace ops that have problematic schemas (that we should fix), which prevent us
             # from generating out= and functional variants
-            if has_inplace and str(d[SchemaKind.inplace].func.name) in INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY:
+            if (
+                has_inplace
+                and str(d[SchemaKind.inplace].func.name)
+                in INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY
+            ):
                 continue
 
             base_fn = (
@@ -247,25 +259,40 @@ def add_generated_native_functions(
             # We can only generate an out= variant if either:
             # - the original function has tensor-like returns (since we can convert them to out kwargs)
             # - or it's inplace (since we can convert `self` to an out kwarg)
-            # There are only two functions that don't fit this criteria today though, and they both look like they should be fixed to be out= variants,
+            # There are only two functions that don't fit this criteria today though,
+            # and they both look like they should be fixed to be out= variants,
             # so if feels safer to ban this schema all-together
             gets_out_variant = not has_out and (
-                base_fn.func.kind() == SchemaKind.inplace or any(r.type.is_tensor_like() for r in base_fn.func.returns)
+                base_fn.func.kind() == SchemaKind.inplace
+                or any(r.type.is_tensor_like() for r in base_fn.func.returns)
             )
             if not has_out and not gets_out_variant:
-                if str(base_fn.func.name) not in MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT:
-                    raise AssertionError(f"Found a mutable operator that we could not generate an out= variant for: {str(base_fn.func)}. These operators are problematic, because we can't easily auto-generate functionalization code for them. If you really need the operator have the schema mentioned, that add the name of the operator to the allow-list. Otherwise if possible, please convert it to an inplace operator")
+                if (
+                    str(base_fn.func.name)
+                    not in MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT
+                ):
+                    raise AssertionError(
+                        f"""Found a mutable operator that we could not generate an out= variant for: {str(base_fn.func)}.
+These operators are problematic, because we can't easily auto-generate functionalization code for them. If you really need
+the operator have the schema mentioned, that add the name of the operator to the allow-list. Otherwise if possible,
+please convert it to an inplace operator"""
+                    )
 
             # Generate an out= variant
             if gets_out_variant:
-                fn, metadata = NativeFunctionsGroup.generate_function(base_fn, SchemaKind.out)
+                fn, metadata = NativeFunctionsGroup.generate_function(
+                    base_fn, SchemaKind.out
+                )
                 d[SchemaKind.out] = fn
                 BackendIndex.grow_index(indices, metadata)
 
             # Generate a functional variant, but only do it if the operator got an out= variant
-            # (Functional variants are only useful if we can group up the variants, which we can only do if they have an out= variant)
+            # (Functional variants are only useful if we can group up the variants,
+            # which we can only do if they have an out= variant)
             if not has_functional and (has_out or gets_out_variant):
-                fn, metadata = NativeFunctionsGroup.generate_function(base_fn, SchemaKind.functional)
+                fn, metadata = NativeFunctionsGroup.generate_function(
+                    base_fn, SchemaKind.functional
+                )
                 d[SchemaKind.functional] = fn
                 BackendIndex.grow_index(indices, metadata)
 
@@ -273,6 +300,7 @@ def add_generated_native_functions(
         concatMap(lambda d: list(d.values()), pre_grouped_native_functions.values())
     )
     return new_fns, indices
+
 
 def parse_native_yaml_struct(
     es: object, valid_tags: Set[str], path: str = "<stdin>"
@@ -1450,7 +1478,7 @@ def get_grouped_native_functions(
         if r is None:
             # Invariant: any NativeFunctions that are code-generated
             # should have been grouped into NativeFunctionsGroup objects
-            assert not any('generated' in f.tags for f in d.values())
+            assert not any("generated" in f.tags for f in d.values())
             return list(d.values())
         else:
             return [r]
@@ -2279,14 +2307,23 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
             ),
         }
 
-    all_groups: List[Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]] = list(structured_native_functions) + list(view_groups)  # type: ignore[assignment, arg-type, operator]
+    all_groups: List[
+        Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
+    ] = list(structured_native_functions) + list(
+        view_groups  # type: ignore[assignment, arg-type, operator]
+    )
     # Note: all operators that functionalization needs to handle (mutable and aliasing ops) should be grouped properly.
     # The only reason we really need to deal with direct NativeFunctions here (instead of the groups) is because:
     # (1) We can provide better error checking (error out if someone introduces a mutable op that doesn't obey the grouping logic)
     # (2) functionalization needs to manually register CompositeImplicitAutograd kernels, which might not be grouped.
     #     Although this could go away long-term if we add a dedicated dispatch key for decompositions.
-    structured_map: Dict[OperatorName, NativeFunction] = {f.func.name: f for f in concatMap(lambda g: list(g.functions()), structured_native_functions)}
-    view_map: Dict[OperatorName, NativeFunction] = {f.func.name: f for f in concatMap(lambda g: list(g.functions()), view_groups)}
+    structured_map: Dict[OperatorName, NativeFunction] = {
+        f.func.name: f
+        for f in concatMap(lambda g: list(g.functions()), structured_native_functions)
+    }
+    view_map: Dict[OperatorName, NativeFunction] = {
+        f.func.name: f for f in concatMap(lambda g: list(g.functions()), view_groups)
+    }
     for f in native_functions:
         if f.func.name not in structured_map and f.func.name not in view_map:
             all_groups.append(f)
@@ -2314,7 +2351,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                     lambda g: gen_functionalization_view_inverse_declaration(
                         selector, g
                     ),
-                    view_groups
+                    view_groups,
                 )
             )
         },
@@ -2347,29 +2384,22 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                     )
                 )
                 for g in view_groups
-            ] + [
+            ]
+            + [
                 "\n".join(
                     f"#include <ATen/ops/{f.root_name}_ops.h>"
-                    for f in [g.inplace, g.mutable] if f is not None and 'generated' not in f.tags
+                    for f in [g.inplace, g.mutable]
+                    if f is not None and "generated" not in f.tags
                 )
                 for g in structured_native_functions
             ],
             "CompositeViewCopyKernel_Definitions": list(
-                mapMaybe(
-                    gen_composite_view_copy_kernel,
-                    [
-                        g
-                        for g in view_groups
-                    ],
-                )
+                mapMaybe(gen_composite_view_copy_kernel, view_groups)
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
                     gen_composite_functional_kernel,
-                    [
-                        g
-                        for g in structured_native_functions
-                    ],
+                    structured_native_functions,
                 )
             ),
         },
@@ -2487,7 +2517,9 @@ def main() -> None:
         native_functions
     )
     view_groups = [
-        g for g in native_functions_with_view_groups if isinstance(g, NativeFunctionsViewGroup)
+        g
+        for g in native_functions_with_view_groups
+        if isinstance(g, NativeFunctionsViewGroup)
     ]
 
     template_dir = os.path.join(options.source_path, "templates")

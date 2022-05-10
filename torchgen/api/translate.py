@@ -1,5 +1,6 @@
 from typing import Dict, Sequence, List, NoReturn, Union
 from torchgen.api.types import (
+    ListCType,
     tensorListT,
     BaseCType,
     Binding,
@@ -18,6 +19,7 @@ from torchgen.api.types import (
     layoutT,
     optionalTensorRefT,
     iTensorListRefT,
+    iOptTensorListRefT,
     scalarT,
     optionalScalarRefT,
     VectorCType,
@@ -184,6 +186,12 @@ def translate(
             ctx[
                 NamedCType(t.name, BaseCType(iTensorListRefT))
             ] = f"at::ITensorListRef({b.expr})"
+
+        # [Note: IOptTensorListRef]
+        if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):
+            ctx[
+                NamedCType(t.name, BaseCType(iOptTensorListRefT))
+            ] = f"at::IOptTensorListRef({b.expr})"
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
@@ -366,7 +374,9 @@ Check this module for more information.
             # with the "allow_tensor_const_flag".
             # We could probably generalize this to non-tensor types too.
             if goal.type == MutRefCType(BaseCType(tensorT)):
-                const_ref_tensor_ctype = NamedCType(goal.name, ConstRefCType(BaseCType(tensorT)))
+                const_ref_tensor_ctype = NamedCType(
+                    goal.name, ConstRefCType(BaseCType(tensorT))
+                )
                 argname = direct_solve(const_ref_tensor_ctype)
                 return f"const_cast<Tensor&>({argname})"
 
