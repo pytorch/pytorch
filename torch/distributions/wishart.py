@@ -6,7 +6,7 @@ from typing import Union
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import lazy_property
+from torch.distributions.utils import lazy_property, first_attribute
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 
 
@@ -120,6 +120,11 @@ class Wishart(ExponentialFamily):
                 ).expand(batch_shape + (-1,))
             )
         )
+
+    @property
+    def _reshape_args(self):
+        yield 'df'
+        yield first_attribute(self, 'covariance_matrix', 'precision_matrix', 'scale_tril')
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Wishart, _instance)

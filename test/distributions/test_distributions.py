@@ -982,6 +982,61 @@ class TestDistributions(TestCase):
                 except NotImplementedError:
                     pass
 
+    def test_distribution_reshape(self):
+        def factorize_int(n):
+            if n == 1:
+                yield n
+            while n > 1:
+                for k in range(2, n + 1):
+                    if n % k == 0:
+                        n //= k
+                        yield k
+                        break
+
+        def factorize_shape(shape):
+            factorized = []
+            for k in shape:
+                factorized.extend(factorize_int(k))
+            return tuple(factorized)
+
+
+        def reshape_and_check_sample_shape(dist, batch_shape):
+            reshaped = dist.reshape(batch_shape)
+            self.assertEqual(batch_shape, reshaped.batch_shape)
+            self.assertEqual(reshaped.sample().shape, batch_shape + dist.event_shape)
+            try:
+                self.assertEqual(reshaped.mean, dist.mean.reshape(batch_shape + dist.event_shape))
+            except NotImplementedError:
+                pass
+
+
+        for Dist, params in EXAMPLES:
+            if Dist in {Independent, TransformedDistribution, MixtureSameFamily}:
+                continue
+
+            for param in params:
+                dist = Dist(**param)
+                # Add dimensions on the left. This should be equivalent to expand.
+                for k in range(1, 3):
+                    shape = (1,) * k + dist.batch_shape
+                    reshaped = dist.reshape(shape)
+                    self.assertEqual(shape, reshaped.batch_shape)
+                    expanded = dist.expand(shape)
+                    self.assertEqual(expanded.sample().shape, reshaped.sample().shape)
+
+                # Add dimensions on the right and compare shapes of the mean.
+                for k in range(1, 3):
+                    shape = dist.batch_shape + (1,) * k
+                    reshape_and_check_sample_shape(dist, shape)
+
+                # Reshape the distribution by finding the factorization of the batch shape.
+                shape = factorize_shape(dist.batch_shape)
+                reshape_and_check_sample_shape(dist, shape)
+
+                # Ravel the batch shape.
+                shape = (dist.batch_shape.numel(),)
+                reshape_and_check_sample_shape(dist, shape)
+
     def test_distribution_expand(self):
         shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
         for Dist, params in EXAMPLES:

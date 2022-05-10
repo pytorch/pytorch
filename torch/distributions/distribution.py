@@ -2,7 +2,7 @@ import torch
 import warnings
 from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Iterable, Union, Tuple
 
 
 class Distribution(object):
@@ -78,9 +78,46 @@ class Distribution(object):
 
         Returns:
             New distribution instance with batch dimensions expanded to
-            `batch_size`.
+            `batch_shape`.
         """
         raise NotImplementedError
+
+    @property
+    def _reshape_args(self) -> Iterable[Union[str, Tuple[str, bool]]]:
+        """
+        Yields the arguments of the distribution that need to be handled for
+        reshaping. If it yields a tuple `(name, reshape)`, the parameter with
+        the given name is reshaped if `reshape` evaluates to `True` and the
+        parameter is passed through as is if `reshape` evaluates to `True`.
+        Yielding only a name is equivalent to `(name, True)`.
+        """
+        return self.arg_constraints
+
+    def reshape(self, batch_shape):
+        """
+        Returns a new distribution instance with batch dimensions reshaped to
+        `batch_shape`.
+
+        Args:
+            batch_shape (torch.Size): the desired reshaped size.
+
+        Returns:
+            New distribution instance with batch dimensions reshaped to
+            `batch_shape`.
+        """
+        parameters = {}
+        for key in self._reshape_args:
+            if not isinstance(key, str):
+                key, reshape = key
+                if not reshape:
+                    parameters[key] = getattr(self, key)
+                    continue
+
+            value = getattr(self, key)
+            parameter_shape = value.shape[len(self.batch_shape):]
+            shape = batch_shape + parameter_shape
+            parameters[key] = value.reshape(shape)
+        return self.__class__(**parameters, validate_args=False)
 
     @property
     def batch_shape(self):

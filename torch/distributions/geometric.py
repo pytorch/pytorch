@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, first_attribute
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
@@ -55,6 +55,10 @@ class Geometric(Distribution):
                     f"of distribution {repr(self)} "
                     f"to be positive but found invalid values:\n{invalid_value}"
                 )
+
+    @property
+    def _reshape_args(self):
+        yield first_attribute(self, 'logits', 'probs')
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Geometric, _instance)

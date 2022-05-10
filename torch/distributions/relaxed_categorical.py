@@ -54,6 +54,11 @@ class ExpRelaxedCategorical(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @property
+    def _reshape_args(self):
+        yield 'temperature', False
+        yield from self._categorical._reshape_args
+
+    @property
     def param_shape(self):
         return self._categorical.param_shape
 
@@ -117,6 +122,10 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(RelaxedOneHotCategorical, _instance)
         return super(RelaxedOneHotCategorical, self).expand(batch_shape, _instance=new)
+
+    @property
+    def _reshape_args(self):
+        yield from self.base_dist._reshape_args
 
     @property
     def temperature(self):

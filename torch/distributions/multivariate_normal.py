@@ -3,7 +3,7 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import _standard_normal, lazy_property
+from torch.distributions.utils import _standard_normal, lazy_property, first_attribute
 
 
 def _batch_mv(bmat, bvec):
@@ -151,6 +151,11 @@ class MultivariateNormal(Distribution):
             self._unbroadcasted_scale_tril = torch.linalg.cholesky(covariance_matrix)
         else:  # precision_matrix is not None
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
+
+    @property
+    def _reshape_args(self):
+        yield 'loc'
+        yield first_attribute(self, 'covariance_matrix', 'precision_matrix', 'scale_tril')
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(MultivariateNormal, _instance)

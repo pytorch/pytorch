@@ -153,3 +153,13 @@ def vec_to_tril_matrix(vec, diag=0):
     tril_mask = arange < arange.view(-1, 1) + (diag + 1)
     mat[..., tril_mask] = vec
     return mat
+
+
+def first_attribute(instance, *attrs):
+    """
+    Return the first attribute that exists or raise a ValueError if none of the attributes exist.
+    """
+    for attr in attrs:
+        if attr in instance.__dict__:
+            return attr
+    raise ValueError(f"{instance} has none of the attributes {', '.join(attrs)}")

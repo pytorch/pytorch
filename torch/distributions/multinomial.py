@@ -48,6 +48,11 @@ class Multinomial(Distribution):
     total_count: int
 
     @property
+    def _reshape_args(self):
+        yield 'total_count', False
+        yield from self._categorical._reshape_args
+
+    @property
     def mean(self):
         return self.probs * self.total_count
 

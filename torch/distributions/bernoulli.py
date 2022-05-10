@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, first_attribute
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
@@ -62,6 +62,10 @@ class Bernoulli(ExponentialFamily):
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
+
+    @property
+    def _reshape_args(self):
+        yield first_attribute(self, 'probs', 'logits')
 
     @property
     def mean(self):

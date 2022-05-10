@@ -68,6 +68,11 @@ class LKJCholesky(Distribution):
         self._beta = Beta(beta_conc1, beta_conc0)
         super(LKJCholesky, self).__init__(batch_shape, event_shape, validate_args)
 
+    @property
+    def _reshape_args(self):
+        yield 'dim', False
+        yield 'concentration'
+
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(LKJCholesky, _instance)
         batch_shape = torch.Size(batch_shape)

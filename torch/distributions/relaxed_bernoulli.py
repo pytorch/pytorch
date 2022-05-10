@@ -4,7 +4,8 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import SigmoidTransform
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs, \
+    first_attribute
 
 
 class LogitRelaxedBernoulli(Distribution):
@@ -46,6 +47,11 @@ class LogitRelaxedBernoulli(Distribution):
         else:
             batch_shape = self._param.size()
         super(LogitRelaxedBernoulli, self).__init__(batch_shape, validate_args=validate_args)
+
+    @property
+    def _reshape_args(self):
+        yield 'temperature', False
+        yield first_attribute(self, 'probs', 'logits')
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(LogitRelaxedBernoulli, _instance)
@@ -119,6 +125,10 @@ class RelaxedBernoulli(TransformedDistribution):
         super(RelaxedBernoulli, self).__init__(base_dist,
                                                SigmoidTransform(),
                                                validate_args=validate_args)
+
+    @property
+    def _reshape_args(self):
+        yield from self.base_dist._reshape_args
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(RelaxedBernoulli, _instance)

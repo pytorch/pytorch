@@ -1,7 +1,7 @@
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
+from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs, first_attribute
 
 
 def _clamp_by_zero(x):
@@ -49,6 +49,11 @@ class Binomial(Distribution):
         self._param = self.probs if probs is not None else self.logits
         batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
+
+    @property
+    def _reshape_args(self):
+        yield 'total_count'
+        yield first_attribute(self, 'probs', 'logits')
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Binomial, _instance)

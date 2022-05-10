@@ -4,7 +4,8 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs, \
+    first_attribute
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
@@ -61,6 +62,10 @@ class ContinuousBernoulli(ExponentialFamily):
             batch_shape = self._param.size()
         self._lims = lims
         super(ContinuousBernoulli, self).__init__(batch_shape, validate_args=validate_args)
+
+    @property
+    def _reshape_args(self):
+        yield first_attribute(self, 'logits', 'probs')
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(ContinuousBernoulli, _instance)

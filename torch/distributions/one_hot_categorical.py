@@ -55,6 +55,10 @@ class OneHotCategorical(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @property
+    def _reshape_args(self):
+        yield from self._categorical._reshape_args
+
+    @property
     def _param(self):
         return self._categorical._param
 
