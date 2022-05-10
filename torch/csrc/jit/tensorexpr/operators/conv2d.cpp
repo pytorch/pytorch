@@ -1,3 +1,5 @@
+#include <ATen/Parallel.h>
+#include <ATen/native/ConvUtils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
@@ -279,6 +281,35 @@ bool conv2dIsSupported(
     GRAPH_DEBUG("conv2dIsSupported: inputs are the wrong size");
     return false;
   }
+#if AT_MKLDNN_ENABLED()
+  if (stride.size() != 2) {
+    GRAPH_DEBUG("conv2dIsSupported: unsupported stride");
+    return false;
+  }
+  if (pad.size() != 2) {
+    GRAPH_DEBUG("conv2dIsSupported: unsupported pad");
+    return false;
+  }
+  if (dilation.size() != 2) {
+    GRAPH_DEBUG("conv2dIsSupported: unsupported dilation");
+    return false;
+  }
+
+  at::native::ConvParams params;
+  params.stride = stride;
+  params.padding = pad;
+  params.dilation = dilation;
+  params.groups = groups;
+
+  bool use_mkldnn = (params.is_strided() || params.is_dilated() ||
+                     input.dims[0] >= 16 || weight.dims[2] != 1 ||
+                     weight.dims[3] != 1 || at::get_num_threads() > 1) &&
+      (params.groups > 1 || (weight.dims[2] > 3 && weight.dims[3] > 3) ||
+       input.dims[0] > 1 ||
+       input.dims[0] * input.dims[1] * input.dims[2] * input.dims[3] > 20480);
+  GRAPH_DEBUG("conv2dIsSupported: ", use_mkldnn);
+  return use_mkldnn;
+#endif
   auto Cin = input.dims[1];
   auto Cout = weight.dims[0];
   auto CperG = weight.dims[1];
@@ -424,6 +455,25 @@ Tensor computePrepackedLinearClampRun(
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_prepacked_linear_clamp_run", {inp, prepacked}, {});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeMkldnnPrepackedConvRun(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("mkldnn_prepacked_conv_run", outputShape, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf, "nnc_mkldnn_prepacked_conv_run", {inp, prepacked}, {});
   return Tensor(ResultBuf.node(), s);
 }
 

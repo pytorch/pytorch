@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/mkldnn_rewrite.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -1487,6 +1488,8 @@ void TensorExprKernel::compile() {
 
   device_ = *pickDeviceType(graph_);
   OptimizeCat(graph_);
+
+  FuseConvWithEltwise(graph_);
 
   has_symbolic_shapes_ = !symbolic_shape_inputs_.empty();
   nInputs_ = graph_->inputs().size();
