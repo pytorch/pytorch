@@ -20,7 +20,7 @@ import torch.jit._trace
 import torch.serialization
 from torch.onnx import (
     _constants,
-    _patch_torch,
+    _patch_torch,  # noqa: E401
     symbolic_caffe2,
     symbolic_helper,
     symbolic_registry,
