@@ -1347,15 +1347,16 @@ class TestSparseCSR(TestCase):
             # dense * csr -> csr with csr, dense gradients
             x_a = x.clone().requires_grad_()
             y_a = y.to_dense().clone().requires_grad_()
-            with self.assertRaisesRegex(RuntimeError, "Function MulBackward0 returned an invalid gradient at index 0 - expected layout Strided but got SparseCsr"):
+            err_msg = "Function MulBackward0 returned an invalid gradient at index 0 - expected layout Strided but got SparseCsr"
+            with self.assertRaisesRegex(RuntimeError, err_msg):
                 fn(y_a, x_a).backward(z)
 
             # csr * dense -> csr with dense, csr gradients
             x_a = x.to_dense().clone().requires_grad_()
             y_a = y.clone().requires_grad_()
-            with self.assertRaisesRegex(RuntimeError, "Function MulBackward0 returned an invalid gradient at index 1 - expected layout Strided but got SparseCsr"):
+            err_msg = "Function MulBackward0 returned an invalid gradient at index 1 - expected layout Strided but got SparseCsr"
+            with self.assertRaisesRegex(RuntimeError, err_msg):
                 fn(y_a, x_a).backward(z)
-
 
         _test_spadd_shape(torch.mul, 10, [10, 10])
         _test_spadd_shape(torch.mul, 0, [10, 10])
