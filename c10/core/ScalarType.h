@@ -1,10 +1,8 @@
 #pragma once
 
-#include <c10/util/ArrayRef.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Half.h>
-#include <c10/util/Optional.h>
-#include <c10/util/OptionalArrayRef.h>
 #include <c10/util/complex.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>

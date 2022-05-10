@@ -7,6 +7,7 @@ import enum
 import copy
 from functools import reduce
 import operator
+import warnings
 
 import torch
 from torch.nn import functional
@@ -101,6 +102,10 @@ class CudaFuserTestOptions():
         torch._C._jit_set_autocast_mode(self.old_value)
 
 class TestCudaFuser(JitTestCase):
+    def assertEqual(self, *args, **kwargs):
+        kwargs["exact_layout"] = True
+        super(JitTestCase, self).assertEqual(*args, **kwargs)
+
     def _getSubgraphInFusion(self, graph):
         num_node = 0
         subgraph = None
@@ -221,6 +226,7 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(oo.dtype, jit_oo.dtype)
             self.assertEqual(oo, jit_oo)
         self.assertGraphContains(t_jit.graph_for(x, y, z, alpha), FUSION_GUARD)
+
 
     @unittest.skipIf(not TEST_BF16, "device does not support BFloat16")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -2118,6 +2124,62 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
         self.assertTrue(jit_o.is_contiguous(memory_format=torch.channels_last))
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_permutation_preservation_edge_case_0(self):
+        sizes = [2, 3, 4, 5]
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=torch.channels_last)
+        # mismatch rank with *note* different permutation recognized by PE
+        bias = torch.randn(3, dtype=dtype, device=device).unsqueeze(-1).unsqueeze(-1)
+
+        def t(x, y):
+            return x + y
+
+        t_jit = torch.jit.script(t)
+        with nvfuser_singleton_fusion(True):
+            for _ in range(5):
+                jit_o = t_jit(x, bias)
+
+        o = t(x, bias)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o, jit_o)
+        self.assertEqual(o.stride(), jit_o.stride())
+        self.assertGraphContains(t_jit.graph_for(x, bias), FUSION_GUARD)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_permutation_preservation_edge_case_1_broken(self):
+        sizes = [2, 3, 4, 5]
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=torch.channels_last)
+        # in-compatible permutation, this will cause format propagation to break
+        bias = torch.randn(4, 5, dtype=dtype, device=device)
+
+        def t(x, y):
+            return x + y
+
+        t_jit = torch.jit.script(t)
+        with nvfuser_singleton_fusion(True):
+            for _ in range(5):
+                jit_o = t_jit(x, bias)
+
+        o = t(x, bias)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o, jit_o)
+        try:
+            # nvfuser does not support in-compatible permutation, this will throw
+            self.assertEqual(o.stride(), jit_o.stride())
+        except Exception as e:
+            warnings.warn(
+                "permutation propagatoin is broken, proper support should come after nvfuser permutation scheduler update")
+        self.assertGraphContains(t_jit.graph_for(x, bias), FUSION_GUARD)
+
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -4487,6 +4549,7 @@ class TestCudaFuser(JitTestCase):
                 self._run_helper(t_jit, t, x)
 
 
+
 class TestPassManagerCudaFuser(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -4581,7 +4644,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
 
             val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-            self.assertEqual(ref, val)
+            self.assertEqual(ref, val, exact_layout=True)
 
         # https://github.com/pytorch/pytorch/issues/35600
         # each torch.jit.trace adds state to the _python_cu compilation unit
