@@ -332,7 +332,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "to_sparse",
     "sparse_sampled_addmm",
     "linalg_lu",
-    "linalg_lu_solve",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
