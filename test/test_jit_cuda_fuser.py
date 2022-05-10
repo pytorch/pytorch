@@ -40,11 +40,8 @@ CUDA_MAJOR, CUDA_MINOR = 0, 0
 if RUN_NVFUSER and torch.version.cuda is not None:
     CUDA_MAJOR, CUDA_MINOR = (int(x) for x in torch.version.cuda.split('.')[:2])
 
-os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = '1'
-os.environ['PYTORCH_NVFUSER_DISABLE_FMA'] = '1'
-os.environ['PYTORCH_NVFUSER_DISABLE_FASTMATH'] = '1'
+os.environ['PYTORCH_NVFUSER_DISABLE'] = 'fallback,fma,unroll_with_rng'
 os.environ['PYTORCH_NVFUSER_JIT_OPT_LEVEL'] = '0'
-os.environ['PYTORCH_NVFUSER_DISABLE_RNG_UNROLL'] = '1'
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_texpr_fuser_enabled(False)
