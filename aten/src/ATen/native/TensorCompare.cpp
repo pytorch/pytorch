@@ -59,10 +59,7 @@ const Tensor& self,
 const OptionalTensorRef min,
 const OptionalTensorRef max) {
   TORCH_CHECK(min || max, "torch.clamp: At least one of 'min' or 'max' must not be None");
-  //Manual type promotion, since scalars have to participate in it
-  ScalarType result_type = self.scalar_type();
-  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
-  //Floating is the highest supported
+  TORCH_CHECK(!isComplexType(self.scalar_type()), "clamp is not supported for complex types");
   #define CLAMP_CONFIG()                    \
     TensorIteratorConfig()                  \
       .set_check_mem_overlap(true)          \
