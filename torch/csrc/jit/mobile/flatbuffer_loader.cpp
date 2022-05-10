@@ -24,6 +24,11 @@
 
 #include <flatbuffers/flatbuffers.h>
 
+#ifndef DISABLE_UPGRADER
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
+#endif
+
 #if defined(HAVE_MMAP)
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -210,6 +215,15 @@ mobile::Module FlatbufferLoader::parseModule(
   module_parsed_ = true;
   return mobile::Module(module_ivalue.toObject(), mcu_);
 }
+namespace {
+void appendUpgraderFunctions(mobile::Function* function) {
+#ifndef DISABLE_UPGRADER
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    function->append_function(byteCodeFunctionWithOperator.function);
+  }
+#endif
+}
+} // namespace
 
 std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     const mobile::serialization::Function* method) {
@@ -227,7 +241,13 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
   }
 
   std::unordered_set<std::string> unsupported_op_names;
-  const int64_t model_version = 0x6L;
+
+  appendUpgraderFunctions(function.get());
+  // 2. Decides if upgrader is needed
+  const uint32_t operator_version = module_->operator_version();
+  bool use_upgrader =
+      (operator_version < caffe2::serialize::kProducedFileFormatVersion);
+
   for (const auto* op : *method->operators()) {
     c10::optional<int> num_args = c10::nullopt;
     if (op->num_args_serialized() > -1) {
@@ -235,7 +255,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     }
 
     auto op_found = function->append_operator(
-        op->name()->str(), op->overload_name()->str(), num_args, model_version);
+        op->name()->str(), op->overload_name()->str(), num_args);
 
     if (!op_found) {
       unsupported_op_names.emplace(
@@ -250,6 +270,15 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
 
   for (const auto i : *method->type_annotations()) {
     function->append_type(getOrCreateTypeAnnotations(i));
+  }
+
+  // 3. If upgrader is needed, change change the OP instrunction to CALL
+  // instruction (In next PR, use_upgrader will be parsed to parseInstruction
+  // function and do the actual change)
+  if (use_upgrader) {
+#ifndef DISABLE_UPGRADER
+    applyUpgrader(function.get(), operator_version);
+#endif
   }
 
   function->set_register_size(method->register_size());
@@ -554,8 +583,16 @@ c10::Storage FlatbufferLoader::getStorage(uint32_t index) {
   if (!storage_loaded_[index]) {
     auto* storage = module_->storage_data()->GetMutableObject(index);
     size_t size = storage->data()->size();
-    void* ptr = static_cast<void*>(storage->mutable_data()->data());
-    at::DataPtr data(ptr, ptr, deleteNothing2, DeviceType::CPU);
+
+    at::DataPtr data;
+    if (should_copy_tensor_memory_) {
+      auto* allocator = at::GetCPUAllocator();
+      data = allocator->allocate(size);
+      memcpy(data.get(), storage->data()->data(), size);
+    } else {
+      void* ptr = static_cast<void*>(storage->mutable_data()->data());
+      data = at::DataPtr(ptr, ptr, deleteNothing2, DeviceType::CPU);
+    }
     storages_[index] =
         c10::Storage(c10::Storage::use_byte_size_t(), size, std::move(data));
     storage_loaded_[index] = true;
@@ -649,8 +686,11 @@ mobile::Module parse_and_initialize_mobile_module(
 
 mobile::Module initialize_mobile_module(
     mobile::serialization::Module* flatbuffer_module,
-    c10::optional<at::Device>) {
-  mobile::Module m = FlatbufferLoader().parseModule(flatbuffer_module);
+    c10::optional<at::Device>,
+    bool should_copy_tensor_memory) {
+  auto flatbufferLoader = FlatbufferLoader();
+  flatbufferLoader.setShouldCopyTensorMemory(should_copy_tensor_memory);
+  mobile::Module m = flatbufferLoader.parseModule(flatbuffer_module);
   return m;
 }
 

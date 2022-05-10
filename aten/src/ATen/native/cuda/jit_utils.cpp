@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
@@ -6,7 +7,6 @@
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/llvm_jit_strings.h>
@@ -83,7 +83,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(void, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                             \
 
-  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(_)       \
   _(uint8_t, Byte)                                                 \
   _(int8_t, Char)                                                  \
   _(int16_t, Short)                                                \
@@ -92,6 +92,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::Half, Half)                                                \
   _(float, Float)                                                  \
   _(double, Double)                                                \
+  _(std::complex<at::Half>, ComplexHalf)                           \
   _(std::complex<float>, ComplexFloat)                             \
   _(std::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
@@ -129,6 +130,7 @@ const std::string jit_common_types = R"ESCAPE(
   ${half_string}
   ${bfloat16_string}
   ${complex_body_string}
+  ${complex_half_body_string}
   ${complex_math_string}
 
 
@@ -255,6 +257,29 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     }
   };
 
+  template <>
+  struct static_cast_with_inter_type<std::complex<at::Half>, at::BFloat16> {
+    static inline std::complex<at::Half> apply(at::BFloat16 src) {
+      return static_cast<std::complex<at::Half>>(float{src});
+    }
+  };
+
+  template <>
+  struct static_cast_with_inter_type<std::complex<at::Half>, at::Half> {
+    static inline std::complex<at::Half> apply(at::Half src) {
+      return static_cast<std::complex<at::Half>>(float{src});
+    }
+  };
+
+  template <>
+  struct static_cast_with_inter_type<
+      std::complex<at::Half>,
+      std::complex<double>> {
+    static inline std::complex<at::Half> apply(std::complex<double> src) {
+      return static_cast<std::complex<at::Half>>(static_cast<std::complex<float>>(src));
+    }
+  };
+
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
   #define FETCH_AND_CAST_CASE(type, scalartype) \
     case ScalarType::scalartype:                \
@@ -262,7 +287,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
-        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(FETCH_AND_CAST_CASE)
         default:
           ERROR_UNSUPPORTED_CAST
     }
@@ -277,7 +302,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   template<typename src_t>
   __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(CAST_AND_STORE_CASE)
       default:;
   }
   ERROR_UNSUPPORTED_CAST
@@ -720,7 +745,10 @@ std::string generate_code(
     functor_args << "arg0[j], scalar_val";
   }
   env.s("args", functor_args.str());
-  if (f_inputs_type == "at::Half" || result_type == "at::Half" || dynamic_casting) {
+  if (f_inputs_type == "at::Half" || result_type == "at::Half" ||
+      f_inputs_type == "std::complex<at::Half>" ||
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
+    // complex<Half> depends on complex<T> and Half dtypes.
     env.s("half_string", jiterator_half_support_literal);
   } else {
     env.s("half_string", "");
@@ -733,7 +761,9 @@ std::string generate_code(
   // the definition of complex math functions is only needed when the compute type is complex
   // but the definition of std::complex is needed for dynamic casting even if the compute type is not complex
   if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
-      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>") {
+      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>" ||
+      f_inputs_type == "std::complex<at::Half>" || result_type == "std::complex<at::Half>") {
+    // complex<Half> depends on complex<T> and Half dtypes.
     env.s("traits_string", get_traits_string());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
@@ -745,6 +775,15 @@ std::string generate_code(
     env.s("traits_string", "");
     env.s("complex_body_string", "");
     env.s("complex_math_string", "");
+  }
+  if (f_inputs_type == "std::complex<at::Half>" ||
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
+    // dynamic_casting requires the definition of all types
+    // include complex<at::Half>
+    // Look at the definition of `StoreWithCast` and `LoadWithCast`.
+    env.s("complex_half_body_string", get_complex_half_body_string());
+  } else {
+    env.s("complex_half_body_string", "");
   }
 
   if (!vectorized) {
@@ -930,6 +969,12 @@ std::string generate_reduction_code(
         env.s("complex_body_string", "");
         env.s("complex_math_string", "");
         env.s("complex", std::to_string(0));
+      }
+      if (f_inputs_type == "std::complex<at::Half>") {
+        TORCH_CHECK(
+            false, "complex<Half> reduction not supported by JITERATOR");
+      } else {
+        env.s("complex_half_body_string", "");
       }
       env.s("cmath_string", get_cmath_string());
       env.s("functor", func);
