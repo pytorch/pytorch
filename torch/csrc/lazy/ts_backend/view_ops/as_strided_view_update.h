@@ -3,7 +3,7 @@
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 #include <vector>
-#include "lazy/core/internal_ops/ltc_ops.h"
+#include <lazy/core/internal_ops/ltc_ops.h>
 
 namespace torch {
 namespace lazy {
