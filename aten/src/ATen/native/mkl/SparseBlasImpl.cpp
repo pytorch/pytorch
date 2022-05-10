@@ -224,7 +224,7 @@ void addmm_dense_result(
               ldc);
         });
   } else {
-   AT_ERROR("MKL only support CSR and BSR layout, but got ", A.layout(), " instead.");
+   AT_ERROR("MKL only supports CSR and BSR layout, but got ", A.layout(), " instead.");
   }
 
   if (!C.is_same(*C_)) {
@@ -416,23 +416,45 @@ void addmv_out_sparse_csr(
   matrix_descr descrA;
   descrA.type = SPARSE_MATRIX_TYPE_GENERAL;
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      result.scalar_type(), "addmv_out_sparse_csr_impl_mkl", [&] {
-        auto beta_ = beta.to<scalar_t>();
-        auto alpha_ = alpha.to<scalar_t>();
+  if (mat.layout() == kSparseCsr) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+        result.scalar_type(), "addmv_out_sparse_csr_impl_mkl", [&] {
+          auto beta_ = beta.to<scalar_t>();
+          auto alpha_ = alpha.to<scalar_t>();
 
-        auto mkl_sparse_mat =
-            at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(mat);
+          auto mkl_sparse_mat =
+              at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(mat);
 
-        at::mkl::sparse::mv<scalar_t>(
-            opA,
-            alpha_,
-            mkl_sparse_mat.descriptor(),
-            descrA,
-            vec_->data_ptr<scalar_t>(),
-            beta_,
-            result_->data_ptr<scalar_t>());
-      });
+          at::mkl::sparse::mv<scalar_t>(
+              opA,
+              alpha_,
+              mkl_sparse_mat.descriptor(),
+              descrA,
+              vec_->data_ptr<scalar_t>(),
+              beta_,
+              result_->data_ptr<scalar_t>());
+        });
+  } else if (mat.layout() == kSparseBsr) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+        result.scalar_type(), "addmv_out_sparse_csr_impl_mkl", [&] {
+          auto beta_ = beta.to<scalar_t>();
+          auto alpha_ = alpha.to<scalar_t>();
+
+          auto mkl_sparse_mat =
+              at::mkl::sparse::MklSparseBsrDescriptor<scalar_t>(mat);
+
+          at::mkl::sparse::mv<scalar_t>(
+              opA,
+              alpha_,
+              mkl_sparse_mat.descriptor(),
+              descrA,
+              vec_->data_ptr<scalar_t>(),
+              beta_,
+              result_->data_ptr<scalar_t>());
+        });
+  } else {
+   AT_ERROR("MKL only supports CSR and BSR layout, but got ", mat.layout(), " instead.");
+  }
 
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
