@@ -20,7 +20,9 @@ import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
 
 __all__ = [
-    "always_wrap_policy", "transformer_auto_wrap_policy", "default_auto_wrap_policy", "enable_wrap", "wrap"
+    "always_wrap_policy", "transformer_auto_wrap_policy",
+    "default_auto_wrap_policy", "enable_wrap", "wrap",
+    "or_policy", "wrap_batchnorm_individually",
 ]
 
 
