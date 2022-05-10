@@ -35,7 +35,7 @@ void neg_kernel_cuda(TensorIteratorBase& iter) {
         return -a;
       }
   ); // neg_string
-  AT_DISPATCH_COMPLEX_TYPES(dtype, "neg_cuda", [&]() {
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "neg_cuda", [&]() {
       jitted_gpu_kernel<
         /*name=*/ neg_name,
         /*return_dtype=*/ scalar_t,
@@ -43,7 +43,7 @@ void neg_kernel_cuda(TensorIteratorBase& iter) {
         /*arity=*/ 1>(iter, neg_string);
   });
 #else
-  AT_DISPATCH_COMPLEX_TYPES(dtype, "neg_cuda", [&]() {
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "neg_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
         return -a;
       });
