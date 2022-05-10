@@ -17,11 +17,18 @@ def _change_class(module) -> None:
             return func_params[name]
         return cls.__getattribute__(self, name)
 
+    def _setattr(self, name: str, value: Any) -> None:
+        if name in func_params:
+            func_params[name] = value
+        else:
+            return cls.__setattr__(self, name, value)
+
     param_cls = type(
         f"StatelessReplacer{cls.__name__}",
         (cls,),
         {
             "__getattribute__": _getattribute,
+            "__setattr__": _setattr,
         },
     )
 
