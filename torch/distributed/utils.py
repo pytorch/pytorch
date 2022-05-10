@@ -8,8 +8,9 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     Recursively moves input to the target_gpu.
     """
     # Define within to avoid ciruclar import
-    from ._functions import _get_stream
-    from .scatter_gather import is_namedtuple
+    from ._functions import _get_stream  # type: ignore[import]
+    from .scatter_gather import is_namedtuple  # type: ignore[import]
+
     def to_map(obj):
         if isinstance(obj, torch.Tensor):
             if obj.device == torch.device("cuda", target_gpu):
@@ -29,7 +30,7 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
                     current_stream.wait_stream(stream)
                     # Ensure tensor memory is not reused until work on
                     # main stream is complete
-                    output.record_stream(current_stream)
+                    output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
         if is_namedtuple(obj):
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]
@@ -41,13 +42,13 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
             return [obj]
         if isinstance(obj, collections.abc.Sequence) and len(obj) > 0:
             try:
-                return [type(obj)(i) for i in zip(*map(to_map, obj))]
+                return [type(obj)(i) for i in zip(*map(to_map, obj))]  # type: ignore[call-arg]
             except TypeError:
                 # The sequence type may not support `__init__(iterable)` (e.g., `range`).
                 return [list(i) for i in zip(*map(to_map, obj))]
         if isinstance(obj, collections.abc.Mapping) and len(obj) > 0:
             try:
-                return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
+                return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]   # type: ignore[call-arg]
             except TypeError:
                 # The mapping type may not support `__init__(iterable)`.
                 return [dict(i) for i in zip(*map(to_map, obj.items()))]
@@ -57,7 +58,7 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     try:
         res = to_map(inputs)
     finally:
-        to_map = None
+        to_map = None  # type: ignore[assignment]
     return res
 
 

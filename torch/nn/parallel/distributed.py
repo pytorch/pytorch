@@ -1,5 +1,4 @@
 import sys
-import collections.abc
 import copy
 from dataclasses import dataclass
 from typing import Callable, Any, Type
@@ -37,7 +36,6 @@ if torch.distributed.rpc.is_available():
 from torch._utils import _get_device_index
 
 from ..modules import Module
-from ._functions import _get_stream
 from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
 from .scatter_gather import gather, scatter_kwargs
 
