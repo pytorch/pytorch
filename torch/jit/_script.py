@@ -72,9 +72,6 @@ else:
         return value
 
 Attribute.__doc__ = """
-    Note that it is now preferred to annotate the types in the class, as shown
-    in the `Attributes` documentation.
-
     This method is a pass-through function that returns `value`, mostly
     used to indicate to the TorchScript compiler that the left-hand side
     expression is a class instance attribute with type of `type`. Note that
@@ -114,6 +111,27 @@ Attribute.__doc__ = """
         # m will contain two attributes
         # 1. foo of type float
         # 2. names_ages of type Dict[str, int]
+
+    .. testcleanup::
+
+        del AttributeModule
+        del m
+
+    Note: it's now preferred to instead use type annotations instead of `torch.jit.Annotate`:
+
+    .. testcode::
+
+        import torch
+        from typing import Dict
+
+        class AttributeModule(torch.nn.Module):
+            names: Dict[str, int]
+
+            def __init__(self):
+                super(AttributeModule, self).__init__()
+                self.names = {}
+
+        m = AttributeModule()
 
     .. testcleanup::
 
