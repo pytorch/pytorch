@@ -1243,10 +1243,9 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
                decorators=[
-                   DecorateInfo(
-                       toleranceOverride({
-                           torch.float32: tol(atol=1e-4, rtol=1e-4),
-                       'TestModule', 'test_non_contiguous_tensors', device_type='cpu', active_if=IS_WINDOWS)),
+                   DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                                'TestModule', 'test_non_contiguous_tensors',
+                                device_type='cpu', active_if=IS_WINDOWS),
                ],
                skips=(
                    # No channels_last support for TransformerEncoderLayer currently.
