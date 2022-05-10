@@ -4752,16 +4752,21 @@ See :func:`torch.dsplit`
 """)
 
 add_docstr_all('stft',
+               "stft(n_fft, hop_length=None, win_length=None, window=None, center=True, "
+               "pad_mode='reflect', normalized=False, onesided=None, return_complex=None) -> Tensor"
                r"""
-stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
 
 See :func:`torch.stft`
+
+.. warning::
+   This function changed signature at version 0.4.1. Calling with
+   the previous signature may cause error or return incorrect result.
 """)
 
 add_docstr_all('istft',
+               "istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, "
+               "normalized=False, onesided=None, length=None, return_complex=False) -> Tensor"
                r"""
-istft(n_fft, hop_length=None, win_length=None, window=None,
- center=True, normalized=False, onesided=True, length=None) -> Tensor
 
 See :func:`torch.istft`
 """)
@@ -4884,14 +4889,6 @@ add_docstr_all('masked_fill',
 masked_fill(mask, value) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_fill_`
-""")
-
-add_docstr_all('grad',
-               r"""
-This attribute is ``None`` by default and becomes a Tensor the first time a call to
-:func:`backward` computes gradients for ``self``.
-The attribute will then contain the gradients computed and future calls to
-:func:`backward` will accumulate (add) gradients into it.
 """)
 
 add_docstr_all('retain_grad',
