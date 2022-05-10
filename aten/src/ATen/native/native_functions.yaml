@@ -747,7 +747,7 @@
   device_guard: False
   tags: inplace_view
   dispatch:
-    CompositeExplicitAutograd: as_strided_
+    ZeroTensor, CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: as_strided_
 
 - func: asin(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
