@@ -63,6 +63,7 @@
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
@@ -1391,7 +1392,12 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
+  auto result = grad.new_zeros(self.sizes());
+  // for composite compliance, use out-of-place variant of 
+  // `scatter_add` if any tensor is a Tensor Subclass.
+  return areAnyTensorSubclassLike({grad, self, index})
+      ? result.scatter_add(dim, index, grad)
+      : result.scatter_add_(dim, index, grad);
 }
 
 static void scatter_reduce_exclude_self_helper(
