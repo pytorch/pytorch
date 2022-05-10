@@ -639,7 +639,14 @@ class FullyShardedDataParallel(nn.Module):
         # parameters in the model) when checkpointing.
         self._orig_buffer_dtypes: Dict[str, torch.dtype] = {}
         if hasattr(module, "_fsdp_params_and_buffers_to_ignore"):
-            self.parameters_to_ignore = set(module._fsdp_params_and_buffers_to_ignore)
+            self.parameters_to_ignore = set()
+            for p in module.parameters():
+                if p in set(module._fsdp_params_and_buffers_to_ignore):
+                    self.parameters_to_ignore.add(p)
+            for p in module.buffers():
+                if p in set(module._fsdp_params_and_buffers_to_ignore):
+                    self.parameters_to_ignore.add(p)
+            #self.parameters_to_ignore = set(p for p in module._fsdp_params_and_buffers_to_ignore if p in module.parameters())
             self.parameters_to_ignore_to_name = {}
             for module_name, mod in module.named_modules():
                 for param_name, param in mod.named_parameters(recurse=False):
@@ -791,6 +798,12 @@ class FullyShardedDataParallel(nn.Module):
         module, params_and_buffers_to_ignore
     ):
         module._fsdp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
+        for submodule in module.modules():
+            if submodule is not module:
+                if not hasattr(submodule, '_fsdp_params_and_buffers_to_ignore'):
+                    submodule._fsdp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
+                else:
+                    submodule._fsdp_params_and_buffers_to_ignore.extend(params_and_buffers_to_ignore)
 
     def _get_ignored_parameters(self) -> Set[torch.nn.Parameter]:
         """Returns the parameters of the modules in ``ignored_modules`` as a
