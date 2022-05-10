@@ -13,6 +13,9 @@ import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager
 
+from torch.utils._python_dispatch import push_torch_dispatch_mode, TorchDispatchMode
+
+
 __all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx"]
 aten = torch.ops.aten
 
@@ -37,6 +40,27 @@ def decompose(decomposition_table):
         yield CURRENT_DECOMPOSITION_TABLE
     finally:
         CURRENT_DECOMPOSITION_TABLE = old_decomposition_table
+
+
+def wrap_output(real_out, proxy_out):
+    def wrap_with_proxy(e, proxy):
+        if type(e) == torch.Tensor:
+            with no_dispatch():
+                return ProxyTensor(e, proxy)
+        else:
+            return e
+
+    # Unfortunately, tree_map cannot directly be used here. As the resulting
+    # object may be a proxy that represents a tuple, we may need to
+    # explicitly unwrap the proxy by simulating the flattening operations.
+    if isinstance(real_out, tuple):
+        return tuple(wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out))
+    elif isinstance(real_out, list):
+        return list([wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out)])
+    elif isinstance(real_out, torch.Tensor):
+        return wrap_with_proxy(real_out, proxy_out)
+    else:
+        return real_out
 
 
 class ProxyTensor(torch.Tensor):
@@ -86,23 +110,7 @@ class ProxyTensor(torch.Tensor):
         with no_dispatch():
             real_out = func_overload(*args, **kwargs)
 
-        def wrap_with_proxy(e, proxy):
-            if type(e) == torch.Tensor:
-                return ProxyTensor(e, proxy)
-            else:
-                return e
-
-        # Unfortunately, tree_map cannot directly be used here. As the resulting
-        # object may be a proxy that represents a tuple, we may need to
-        # explicitly unwrap the proxy by simulating the flattening operations.
-        if isinstance(real_out, tuple):
-            return tuple(wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out))
-        elif isinstance(real_out, list):
-            return list([wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out)])
-        elif isinstance(real_out, torch.Tensor):
-            return wrap_with_proxy(real_out, proxy_out)
-        else:
-            return real_out
+        return wrap_output(real_out, proxy_out)
 
 
 class PythonKeyTracer(Tracer):
@@ -136,6 +144,10 @@ class PythonKeyTracer(Tracer):
             return self.create_node('get_attr', qualname, (), {})
         return super().create_arg(a)
 
+    def trace(self, root, concrete_args):
+        with push_torch_dispatch_mode(functools.partial(ProxyTorchDispatchMode, self)):
+            return super().trace(root, concrete_args)
+
 
 def dispatch_trace(
     root: Union[torch.nn.Module, Callable], concrete_args: Optional[Tuple[Any, ...]] = None
@@ -155,7 +167,8 @@ def wrap_key(f, inps):
         assert(len(flat_args) == len(flat_inps))
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
-                flat_args[idx] = ProxyTensor(flat_inps[idx], arg)
+                with no_dispatch():
+                    flat_args[idx] = ProxyTensor(flat_inps[idx], arg)
             else:
                 flat_args[idx] = flat_inps[idx]
 
@@ -168,6 +181,24 @@ def wrap_key(f, inps):
         return pytree.tree_unflatten(flat_outs, out_spec)
 
     return wrapped
+
+
+class ProxyTorchDispatchMode(TorchDispatchMode):
+    def __init__(self, tracer):
+        self.tracer = tracer
+
+    def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
+        func = func_overload.overloadpacket
+        if any(tuple(isinstance(arg, ProxyTensor) for arg in args)):
+            return func(*args, **kwargs)  # mode is disabled, this redispatches to ProxyTensor's torch dispatch
+        else:
+            proxy_out = self.tracer.create_proxy('call_function', func, args, kwargs,
+                                     name=self.tracer.graph._target_to_str(func.__name__))
+
+            with no_dispatch():
+                real_out = func_overload(*args, **kwargs)
+
+            return wrap_output(real_out, proxy_out)
 
 
 def make_fx(f, decomposition_table=None):
