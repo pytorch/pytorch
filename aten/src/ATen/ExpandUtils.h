@@ -6,7 +6,7 @@
 #include <ATen/ops/view_copy.h>
 #endif
 
-#include <ATen/DimVector.h>
+#include <ATen/core/DimVector.h>
 #include <ATen/Tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/MaybeOwned.h>

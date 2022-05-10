@@ -3,7 +3,7 @@
 #include <c10/util/SmallVector.h>
 #include <cstdint>
 
-namespace c10 {
+namespace at {
 
 constexpr size_t kDimVectorStaticSize = 5;
 

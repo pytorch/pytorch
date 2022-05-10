@@ -5,7 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtilsMulti.h>
-#include <ATen/DimVector.h>
+#include <ATen/core/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 

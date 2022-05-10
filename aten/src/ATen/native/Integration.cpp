@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/DimVector.h>
+#include <ATen/core/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
