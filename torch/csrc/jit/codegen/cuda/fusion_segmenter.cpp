@@ -1930,6 +1930,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   //  largely taken from batchnorm cpp benchmark
   auto& in_root = in_val->getRootDomain();
   auto& out_root = out_avg->getRootDomain();
+  TORCH_INTERNAL_ASSERT(in_root.size() <= out_root.size());
   std::vector<int> red_axes;
 
   // Create scalar version of the feature element
