@@ -109,3 +109,6 @@ target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STD
 target_link_libraries(torch_deployinterpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_INSTALL_DIR}/lib/libssl.a ${PYTHON_INSTALL_DIR}/lib/libcrypto.a)
 target_link_libraries(torch_deployinterpreter PRIVATE pybind::pybind11)
+
+# expose torch_python_obj_static for multipy
+install(TARGETS torch_python_obj_static DESTINATION "${TORCH_INSTALL_LIB_DIR}")
