@@ -33,7 +33,7 @@ constexpr int64_t kVmapTransformStaticInputSize = 4;
 using VmapPhysicalViewVec = SmallVector<VmapPhysicalView, kVmapTransformStaticInputSize>;
 
 // Pytorch generally advertises good performance for <= 5 dims.
-// (see c10/util/DimVector.h). We add a few extra dims (~3) for vmap
+// (see ATen/core/DimVector.h). We add a few extra dims (~3) for vmap
 // dimensions to get 8. Adjust this number as necessary
 constexpr int64_t kVmapStaticDimVecSize = 8;
 using VmapDimVector = SmallVector<int64_t, kVmapStaticDimVecSize>;
