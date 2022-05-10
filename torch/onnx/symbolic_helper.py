@@ -1308,7 +1308,6 @@ def _set_operator_export_type(operator_export_type):
 
 
 def _set_training_mode(training_mode):
-    global _training_mode
     _FLAGS.training_mode = training_mode
 
 
