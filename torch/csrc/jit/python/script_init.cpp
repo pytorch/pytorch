@@ -2088,9 +2088,11 @@ void initJitScriptBindings(PyObject* module) {
           [](ConcreteModuleTypeBuilder& self) {
             self.setIterableModuleKind(IterableModuleKind::LIST);
           })
-      .def("set_parameter_list", [](ConcreteModuleTypeBuilder& self) {
-        self.setIterableModuleKind(IterableModuleKind::PARAMLIST);
-      })
+      .def(
+          "set_parameter_list",
+          [](ConcreteModuleTypeBuilder& self) {
+            self.setIterableModuleKind(IterableModuleKind::PARAMLIST);
+          })
       .def("set_parameter_dict", [](ConcreteModuleTypeBuilder& self) {
         self.setIterableModuleKind(IterableModuleKind::PARAMDICT);
       });

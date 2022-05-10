@@ -703,5 +703,3 @@ class TestModuleContainers(JitTestCase):
                 return self.parameter_dict['a'] * x + self.parameter_dict['b'] * self.parameter_dict['c']
 
         self.checkModule(MyModule(), (torch.ones(1),))
-
-        self.checkModule(MyModule(), (torch.ones(1),))

@@ -337,7 +337,9 @@ SugaredValuePtr ModuleValue::getitem(
       std::shared_ptr<SugaredDict> sd;
       if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
         sd = getSugaredDict(loc, m);
-      } else if (concreteType_->getIterableModuleKind() == IterableModuleKind::PARAMDICT) {
+      } else if (
+          concreteType_->getIterableModuleKind() ==
+          IterableModuleKind::PARAMDICT) {
         sd = getSugaredNamedParameterDict(loc, m);
       }
       auto idx_str = ivalue->toStringRef();
@@ -529,14 +531,6 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedParameterDict(
   for (const auto& name : paramNames) {
     auto name_v =
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
-    /*
-    Value*  = m.graph()->insertGetAttr(self_, name);
-    auto mod_v = std::make_shared<ModuleValue>(
-        module_v, concreteType_->findSubmoduleConcreteType(name));
-
-    keys.push_back(name_v);
-    values.push_back(mod_v); */
-
     m.graph()->insertGetAttr(self_, name);
     values.push_back(tryGetAttr(loc, m, name));
     keys.push_back(name_v);
