@@ -56,7 +56,8 @@ class Dataset(Generic[T_co]):
 
     if TYPE_CHECKING:
         # Convince type checkers that Dataset objects are iterable
-        def __iter__(self) -> Iterator[T_co]: ...
+        def __iter__(self) -> Iterator[T_co]:
+            ...
 
     # No `def __len__(self)` default?
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
