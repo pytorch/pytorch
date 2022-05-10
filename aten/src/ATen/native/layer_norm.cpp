@@ -211,9 +211,6 @@ Tensor& layer_norm_out(
   auto gamma = weight.expect_contiguous();
   auto beta = bias.expect_contiguous();
 
-  Tensor mean = at::empty({M}, X->options());
-  Tensor rstd = at::empty({M}, X->options());
-
   TORCH_CHECK(canCast(
       typeMetaToScalarType(input.dtype()),
       typeMetaToScalarType(output.dtype())));
@@ -226,14 +223,32 @@ Tensor& layer_norm_out(
         c10::nullopt /* device */,
         c10::nullopt /* pin_memory */,
         at::MemoryFormat::Contiguous);
-    layer_norm_with_mean_rstd_out(
-        Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
+    LayerNormKernel(
+        input.device().type(),
+        *X,
+        *gamma,
+        *beta,
+        M,
+        N,
+        eps,
+        &Y,
+        /*mean=*/nullptr,
+        /*rstd=*/nullptr);
     resize_output(output, Y.sizes());
     output.copy_(std::move(Y));
   } else {
     resize_output(output, input.sizes());
-    layer_norm_with_mean_rstd_out(
-        output, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
+    LayerNormKernel(
+        input.device().type(),
+        *X,
+        *gamma,
+        *beta,
+        M,
+        N,
+        eps,
+        &output,
+        /*mean=*/nullptr,
+        /*rstd=*/nullptr);
   }
 
   return output;
