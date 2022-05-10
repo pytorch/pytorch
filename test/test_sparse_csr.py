@@ -1358,10 +1358,10 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 fn(y_a, x_a).backward(z)
 
-        _test_spadd_shape(torch.mul, 10, [10, 10])
-        _test_spadd_shape(torch.mul, 0, [10, 10])
-        _test_spadd_shape(torch.mul, 10, [10, 1])
-        _test_spadd_shape(torch.mul, 10, [1, 10])
+        _test_spadd_shape(torch.mul, 100, [100, 100])
+        _test_spadd_shape(torch.mul, 0, [100, 100])
+        _test_spadd_shape(torch.mul, 100, [100, 1])
+        _test_spadd_shape(torch.mul, 100, [1, 100])
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
