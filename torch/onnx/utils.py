@@ -18,7 +18,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.jit._trace
 import torch.serialization
-from torch.onnx import _constants, symbolic_caffe2, symbolic_helper, symbolic_registry
+from torch.onnx import (
+    _constants,
+    _patch_torch,
+    symbolic_caffe2,
+    symbolic_helper,
+    symbolic_registry,
+)
 from torch.onnx.flags import _FLAGS
 
 # the flag to tell the user whether it's in the middle of ONNX export or not

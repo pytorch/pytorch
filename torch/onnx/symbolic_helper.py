@@ -7,11 +7,11 @@ from typing import Set
 
 import torch
 import torch.onnx
+from torch._C import OptionalType
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
-import torch.onnx._patch_torch
-from torch._C import OptionalType
+from torch.onnx import _patch_torch
 from torch.onnx.flags import _FLAGS
 
 # Note [Edit Symbolic Files]

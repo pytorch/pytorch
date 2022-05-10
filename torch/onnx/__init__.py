@@ -1,7 +1,7 @@
 from typing import Dict
 
 import torch._C as _C
-from torch.onnx import _patch_torch, utils
+from torch.onnx import utils
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
