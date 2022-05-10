@@ -135,12 +135,16 @@ def custom_sharding_spec_op(sharding_spec_class, func):
         func(Callable): The op to override (ex: torch.bmm)
     """
     def decorator_sharded_func(wrapped_func):
-        _register_custom_op(sharding_spec_class, func, wrapped_func)
+        from torch.distributed._shard.sharded_tensor._ops._common import _basic_validation
 
         @functools.wraps(wrapped_func)
-        def wrapper(*args, **kwargs):
-            return wrapped_func(*args, **kwargs)
+        def wrapper(types, args, kwargs):
+            _basic_validation(func, args, kwargs)
+            return wrapped_func(types, args, kwargs)
+
+        _register_custom_op(sharding_spec_class, func, wrapper)
         return wrapper
+
     return decorator_sharded_func
 
 
