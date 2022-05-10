@@ -26,16 +26,17 @@ enum class DeviceType : int8_t {
   Vulkan = 10, // Vulkan
   Metal = 11, // Metal
   XPU = 12, // XPU
-  MLC = 13, // ML Compute / Apple
+  MPS = 13, // MPS
   Meta = 14, // Meta (tensors with no data)
   HPU = 15, // HPU / HABANA
   VE = 16, // SX-Aurora / NEC
   Lazy = 17, // Lazy Tensors
+  IPU = 18, // Graphcore IPU
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 18,
+  COMPILE_TIME_MAX_DEVICE_TYPES = 19,
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;
@@ -44,7 +45,7 @@ constexpr DeviceType kHIP = DeviceType::HIP;
 constexpr DeviceType kFPGA = DeviceType::FPGA;
 constexpr DeviceType kORT = DeviceType::ORT;
 constexpr DeviceType kXLA = DeviceType::XLA;
-constexpr DeviceType kMLC = DeviceType::MLC;
+constexpr DeviceType kMPS = DeviceType::MPS;
 constexpr DeviceType kMeta = DeviceType::Meta;
 constexpr DeviceType kVulkan = DeviceType::Vulkan;
 constexpr DeviceType kMetal = DeviceType::Metal;
@@ -52,18 +53,19 @@ constexpr DeviceType kXPU = DeviceType::XPU;
 constexpr DeviceType kHPU = DeviceType::HPU;
 constexpr DeviceType kVE = DeviceType::VE;
 constexpr DeviceType kLazy = DeviceType::Lazy;
+constexpr DeviceType kIPU = DeviceType::IPU;
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =
     static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
 
 static_assert(
-    COMPILE_TIME_MAX_DEVICE_TYPES <= 18,
+    COMPILE_TIME_MAX_DEVICE_TYPES <= 19,
     "Hey!  You seem to be adding a lot of new DeviceTypes.  The intent was "
     "for this constant to reflect the actual number of DeviceTypes we support "
     "in PyTorch; it's important that this number is not too large as we "
     "use this to allocate stack arrays in some places in our code.  If you "
-    "are indeed just adding the 18th device type, feel free to change "
+    "are indeed just adding the 19th device type, feel free to change "
     "the check to 32; but if you are adding some sort of extensible device "
     "types registration, please be aware that you are affecting code that "
     "this number is small.  Try auditing uses of this constant.");

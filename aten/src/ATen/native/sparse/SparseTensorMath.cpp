@@ -709,8 +709,8 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
 
 Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
   // // TODO: Use a specialized CSR kernel for performance if needed
-  TORCH_CHECK(t_.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
-  TORCH_CHECK(src_.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
+  TORCH_CHECK(t_.is_sparse_csr() || (t_.layout() == c10::kStrided && t_.dim() == 0), "mul(dense, sparse_csr) is not supported");
+  TORCH_CHECK(src_.is_sparse_csr() || (src_.layout() == c10::kStrided && src_.dim() == 0), "mul(sparse_csr, dense) is not supported");
   TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
   Tensor t = t_.to_sparse();
   Tensor src = src_.to_sparse();
@@ -895,10 +895,22 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     const Scalar& alpha
 ) {
   // TODO: This error message seems awfully opaque
-  TORCH_CHECK(!t.is_cuda(),  "Expected all tensors to be on the same device. addmm expected 't' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!r.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!sparse_.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
-  TORCH_CHECK(!dense.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(
+      t.is_cpu(),
+      "Expected all tensors to be on the same device. addmm expected 't' to be CPU tensor, but got tensor on ",
+      t.device());
+  TORCH_CHECK(
+      r.is_cpu(),
+      "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got tensor on ",
+      t.device());
+  TORCH_CHECK(
+      sparse_.is_cpu(),
+      "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got tensor on ",
+      t.device());
+  TORCH_CHECK(
+      dense.is_cpu(),
+      "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got tensor on ",
+      t.device());
 
   TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: matrices expected, got ", sparse_.sparse_dim(), "D tensor");
   TORCH_CHECK(sparse_.dense_dim() == 0, "addmm: scalar values expected, got ", sparse_.dense_dim(), "D values");

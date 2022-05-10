@@ -20,8 +20,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    skipIfRocm
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -227,6 +226,12 @@ class TestOptim(TestCase):
 
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
+
+        # Make sure that device of state['step'] is still CPU
+        new_state_dict = optimizer_cuda.state_dict()
+        if 'step' in state_dict['state'][0] and torch.is_tensor(state_dict['state'][0]['step']):
+            for state in new_state_dict['state'].values():
+                self.assertEqual(state['step'].device.type, 'cpu')
 
         for _i in range(20):
             optimizer.step(fn)
@@ -614,26 +619,29 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
-    @skipIfRocm
     def test_adadelta(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 4e-3
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias])
+                lambda weight, bias, maximize: optimizer([weight, bias], maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95))
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95), maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95)),
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95), maximize=maximize),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], weight_decay=1)
+                lambda weight, bias, maximize: optimizer([weight, bias], weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
@@ -677,30 +685,38 @@ class TestOptim(TestCase):
     def test_adagrad(self):
         for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1
-                )
+                lambda weight, bias, maximize: optimizer(
+                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1, maximize=maximize,
+                ),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1)
+                    lr=1e-1,
+                    maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1),
-                [lambda opt: ReduceLROnPlateau(opt)]
+                    lr=1e-1,
+                    maximize=maximize),
+                [lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1),
+                    lr=1e-1,
+                    maximize=maximize),
                 [lambda opt: ReduceLROnPlateau(opt),
-                 lambda opt: ExponentialLR(opt, gamma=0.99)]
+                 lambda opt: ExponentialLR(opt, gamma=0.99)],
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
                 optimizer(None, lr=1e-2, lr_decay=-0.5)
@@ -1321,6 +1337,18 @@ class TestLRScheduler(TestCase):
         scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
         closed_form_scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
         self._test_against_closed_form(scheduler, closed_form_scheduler, epochs)
+
+    def test_cos_anneal_lr_continue(self):
+        eta_min = 0.1
+        T_max = 5
+        scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
+        self.opt.step()
+        scheduler.step()
+        original_lrs = scheduler._last_lr
+        new_scheduler = CosineAnnealingLR(
+            self.opt, T_max=T_max, eta_min=eta_min, last_epoch=0)
+        new_lrs = new_scheduler._last_lr
+        torch.testing.assert_allclose(original_lrs, new_lrs, rtol=1e-4, atol=1e-5)
 
     def test_reduce_lr_on_plateau1(self):
         epochs = 10
