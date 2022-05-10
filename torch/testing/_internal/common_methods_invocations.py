@@ -18118,9 +18118,11 @@ python_ref_db = [
             # https://github.com/pytorch/pytorch/issues/73502
             # On CUDA
             # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency'
+                         dtypes=(torch.chalf,)),
             # Same reason as `test_python_reference_consistency`
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'
+                         dtypes=(torch.chalf,)),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
