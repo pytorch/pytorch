@@ -34,8 +34,6 @@ from torch.onnx.symbolic_helper import (
     parse_args,
 )
 
-skip = unittest.skip
-
 
 class _BaseTestCase(TestCase):
     def setUp(self):
