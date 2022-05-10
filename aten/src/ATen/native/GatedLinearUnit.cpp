@@ -30,6 +30,8 @@ namespace native {
 DEFINE_DISPATCH(glu_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_backward_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(glu_jvp_stub);
 
 TORCH_IMPL_FUNC(glu_out) (const Tensor& self, int64_t dim, const Tensor& out) {
   glu_stub(device_type(), *this);
@@ -68,6 +70,29 @@ Tensor glu_backward_cpu(const Tensor& grad_output, const Tensor& input, int64_t 
   auto grad_input = at::empty({0}, input.options());
   return glu_backward_cpu_out(grad_output, input, dim, grad_input);
 }
+
+Tensor glu_jvp(
+    const Tensor& glu,
+    const Tensor& x,
+    const Tensor& dx,
+    int64_t dim
+) {
+  const auto glu_size = glu.size(dim);
+  const auto b = x.narrow(dim, glu_size, glu_size);
+  const auto da = dx.narrow(dim, 0, glu_size);
+  const auto db = dx.narrow(dim, glu_size, glu_size);
+  auto dglu = at::empty_like(glu);
+  auto iter = at::TensorIteratorConfig()
+    .add_output(dglu)
+    .add_input(glu)
+    .add_input(b)
+    .add_input(da)
+    .add_input(db)
+    .build();
+  glu_jvp_stub(iter.device_type(), iter);
+  return dglu;
+}
+
 
 } // at::native
 } // at
