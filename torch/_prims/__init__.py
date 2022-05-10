@@ -1453,7 +1453,7 @@ _rev_doc = """
     """
 
 rev = _make_prim(
-    schema="rev(Tensor a) -> Tensor",
+    schema="rev(Tensor a, int[] dims) -> Tensor",
     meta=_rev_meta,
     impl_aten=torch.flip,
     return_type=RETURN_TYPE.NEW,

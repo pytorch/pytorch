@@ -66,9 +66,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::SymIntType:
       return py::cast<int64_t>(obj);
     case TypeKind::IntType:
-    // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
+    // NB: Typically, these switches are completely dead, because
+    // Argument::type() will always report IntType for these types.
+    // So this is a bit overly permissive: we'll accept a dtype
+    // passed to an int argument, for example.
     case TypeKind::LayoutType:
     case TypeKind::ScalarTypeType:
+    case TypeKind::MemoryFormatType:
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
@@ -80,6 +84,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (THPLayout_Check(obj.ptr())) {
         auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
         return static_cast<int8_t>(layout->layout);
+      }
+      if (THPMemoryFormat_Check(obj.ptr())) {
+        auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
+        return static_cast<int8_t>(memory_format->memory_format);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:

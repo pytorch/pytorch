@@ -104,10 +104,10 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(const c10::OperatorHa
     if (arg.real_type()->kind() == c10::ScalarTypeType::Kind) {
       auto* obj = getTHPDtype(static_cast<c10::ScalarType>(arguments[idx].toInt()));
       return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(obj));
-    if (arg.real_type()->kind() == c10::LayoutType::Kind) {
+    } else if (arg.real_type()->kind() == c10::LayoutType::Kind) {
       auto* obj = getTHPLayout(static_cast<c10::Layout>(arguments[idx].toInt()));
       return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(obj));
-    if (arg.real_type()->kind() == c10::MemoryFormatType::Kind) {
+    } else if (arg.real_type()->kind() == c10::MemoryFormatType::Kind) {
       // TODO: https://github.com/pytorch/pytorch/issues/77135
       auto* obj = THPMemoryFormat_New(static_cast<c10::MemoryFormat>(arguments[idx].toInt()), "unused");
       return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(obj));
