@@ -4,7 +4,7 @@ import importlib
 from typing import List, Optional
 
 class AOMigrationTestCase(TestCase):
-    def _test_package_import(self, package_name: str, base: Optional[str]=None):
+    def _test_package_import(self, package_name: str, base: Optional[str] = None):
         r"""Tests the module import by making sure that all the internals match
         (except the dunder methods)."""
         if base is None:
@@ -24,7 +24,7 @@ class AOMigrationTestCase(TestCase):
             f"{old_module_dir - new_module_dir}"
 
     def _test_function_import(self, package_name: str, function_list: List[str],
-                              base: Optional[str]=None):
+                              base: Optional[str] = None):
         r"""Tests individual function list import by comparing the functions
         and their hashes."""
         if base is None:
@@ -42,7 +42,7 @@ class AOMigrationTestCase(TestCase):
                 f"{new_function}({hash(new_function)})"
 
     def _test_dict_import(self, package_name: str, dict_list: List[str],
-                          base: Optional[str]=None):
+                          base: Optional[str] = None):
         r"""Tests individual function list import by comparing the functions
         and their hashes."""
         if base is None:
