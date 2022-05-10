@@ -22,9 +22,10 @@ from .resharding import (
 )
 
 from .storage import (
-    CheckpointException,
     StorageWriter,
 )
+
+from .api import CheckpointException
 
 # -------------- private functions --------------
 
@@ -128,21 +129,28 @@ def save_state_dict(
         >>>     state_dict=model_state_dict,
         >>>     storage_writer=fs_stroage_writer,
         >>> )
+
+    .. note:: save_state_dict uses collectives to coordinate writes across ranks.
+        For NCCL-based process groups, internal tensor representations of objects
+        must be moved to the GPU device before communication takes place. In this
+        case, the device used is given by ``torch.cuda.current_device()`` and it
+        is the user's responsibility to ensure that this is set so that each rank
+        has an individual GPU, via ``torch.cuda.set_device()``
     """
     is_coordinator = not dist.is_initialized() or dist.get_rank(process_group) == coordinator_rank
-    data: List[Optional[BaseException]] = [None]
+    exceptions: List[Optional[BaseException]] = [None]
     if is_coordinator:
         try:
             storage_writer.prepare()
         except BaseException as e:
-            data = [e]
+            exceptions = [e]
 
     # Writing can only start once prepare has finished
     if dist.is_initialized():
-        dist.broadcast_object_list(data, group=process_group, src=coordinator_rank)
+        dist.broadcast_object_list(exceptions, group=process_group, src=coordinator_rank)
 
-    if data[0] is not None:
-        raise CheckpointException("failed to prepare storage", {coordinator_rank : data[0]})
+    if exceptions[0] is not None:
+        raise CheckpointException("failed to prepare storage", {coordinator_rank : exceptions[0]})
 
     rank_write_error: Optional[BaseException]
     try:
@@ -184,8 +192,7 @@ def save_state_dict(
             message = "Failed to write data"
         else:
             try:
-                storage_writer.write_metadata(metadata=metadata)
-                storage_writer.finish()
+                storage_writer.finish(metadata=metadata)
             except BaseException as e:
                 all_errors[coordinator_rank] = e
                 message = "Failed to finish checkpoint"

@@ -1,4 +1,3 @@
-import traceback
 import io
 from typing import Any, Dict, List, Tuple, Optional, cast
 
@@ -27,9 +26,9 @@ from .resharding import (
 )
 from .storage import (
     StorageReader,
-    CheckpointException,
 )
 
+from .api import CheckpointException
 
 def _reshard_and_prepare_read_request(
     state_dict: Dict[str, Any], metadata_from_storage: Metadata
@@ -93,7 +92,8 @@ def _reshard_and_prepare_read_request(
 def load_state_dict(
     state_dict: Dict[str, Any],
     storage_reader: StorageReader,
-    process_group: Optional[dist.ProcessGroup] = None
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
 ) -> None:
     """
     Load a distributed state_dict in SPMD style.
@@ -118,6 +118,7 @@ def load_state_dict(
             state dict will updated in places.
         storage_reader (StorageReader): StorageReader used to load data from.
         process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
+        coordinator_rank (int): Rank to use to coordinate the checkpoint, rank0 is used by default
 
     Returns:
         None.
@@ -137,7 +138,16 @@ def load_state_dict(
         >>> # to flush the state_dict, must call it to
         >>> # ensure correct behavior.
         >>> my_model.load_state_dict(model_state_dict)
+
+    .. note:: load_state_dict uses collectives to coordinate reads across ranks.
+        For NCCL-based process groups, internal tensor representations of objects
+        must be moved to the GPU device before communication takes place. In this
+        case, the device used is given by ``torch.cuda.current_device()`` and it
+        is the user's responsibility to ensure that this is set so that each rank
+        has an individual GPU, via ``torch.cuda.set_device()``
     """
+    is_coordinator = not dist.is_initialized() or dist.get_rank(process_group) == coordinator_rank
+
     try:
         metadata = storage_reader.read_metadata()
         bytes_read_requests, tensor_read_requests = _reshard_and_prepare_read_request(
@@ -159,28 +169,30 @@ def load_state_dict(
         tensor_futures.wait()
         result = None
     except BaseException as e:
-        traceback.print_exc()
         result = e
 
     global_result: List[Optional[CheckpointException]] = [None]
     if dist.is_initialized():
         # FIXME we could do an all_to_all_object if once existed
         all_errors = [None] * dist.get_world_size(process_group)
-        is_rank0 = dist.get_rank(process_group) == 0
+
         dist.gather_object(
             obj=result,
-            object_gather_list=all_errors if is_rank0 else None,
+            object_gather_list=all_errors if is_coordinator else None,
+            dst=coordinator_rank,
         )
 
-        if is_rank0:
+        if is_coordinator:
             node_failures = cast(Dict[int, BaseException], {i: err for i, err in enumerate(all_errors) if err is not None})
             if len(node_failures) > 0:
                 global_result[0] = CheckpointException("failed to read checkpoint", node_failures)
+
         dist.broadcast_object_list(
             object_list=global_result,
-            group=process_group)
+            group=process_group,
+            src=coordinator_rank)
     elif result is not None:
-        global_result = [CheckpointException("failed to read storage", {0 : result})]
+        global_result = [CheckpointException("failed to read storage", {coordinator_rank : result})]
 
     if global_result[0] is not None:
         raise global_result[0]

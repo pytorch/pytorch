@@ -3,10 +3,12 @@
 import random
 import sys
 from typing import Optional, List, Union
-from torch.distributed._shard.checkpoint.storage import (
+from torch.distributed._shard.checkpoint import (
     StorageReader,
     StorageWriter,
     CheckpointException,
+    load_state_dict,
+    save_state_dict,
 )
 
 import torch
@@ -24,12 +26,10 @@ from torch.distributed._shard.checkpoint.resharding import (
 from torch.distributed._shard import sharded_tensor
 from torch.distributed._shard.checkpoint.state_dict_loader import (
     validate_metadata,
-    load_state_dict,
 )
 
 from torch.distributed._shard.checkpoint.state_dict_saver import (
     _prepare,
-    save_state_dict,
 )
 
 from torch.distributed._shard.checkpoint.metadata import (
@@ -330,10 +330,7 @@ class TestStorageWriter(TestStorageBase, StorageWriter):
         self._fail_rank("fail_write_tensors_on_ranks")
         return self._fail_rank_async("fail_write_tensors_on_ranks_async")
 
-    def write_metadata(self, metadata: Metadata) -> None:
-        self._fail_rank("fail_write_metadata")
-
-    def finish(self) -> None:
+    def finish(self, metadata: Metadata) -> None:
         self._fail_rank("fail_finish")
 
     def prepare_storage(self, storage_writes: List[Union[TensorWriteRequest, BytesWriteRequest]]) -> None:
@@ -419,12 +416,13 @@ class TestDistributedFailure(ShardedTensorTestBase):
             )
         self._test_dist_failure(_save, kwargs)
 
-    def _test_load(self, state_dict, **kwargs):
+    def _test_load(self, state_dict, coordinator=0, **kwargs):
         def _load():
             metadata, _, _ = _prepare(state_dict)
             load_state_dict(
                 state_dict,
                 storage_reader=TestStorageReader(metadata, kwargs),
+                coordinator_rank=coordinator,
             )
 
         self._test_dist_failure(_load, kwargs)
@@ -440,7 +438,6 @@ class TestDistributedFailure(ShardedTensorTestBase):
         }
 
         self._test_save(state_dict, fail_prepare=[0])
-        self._test_save(state_dict, fail_write_metadata=[0])
         self._test_save(state_dict, fail_finish=[0])
 
         self._test_save(state_dict, fail_prepare_storage=[0])
@@ -452,7 +449,6 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_save(state_dict, fail_write_tensors_on_ranks_async=[1, 3])
 
         self._test_save(state_dict, coordinator=1, fail_prepare=[1])
-        self._test_save(state_dict, coordinator=1, fail_write_metadata=[1])
         self._test_save(state_dict, coordinator=1, fail_finish=[1])
 
 
@@ -465,7 +461,6 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self.assertFalse(dist.is_initialized())
 
         self._test_save(state_dict, fail_prepare=[0])
-        self._test_save(state_dict, fail_write_metadata=[0])
         self._test_save(state_dict, fail_finish=[0])
 
         self._test_save(state_dict, fail_prepare_storage=[0])
@@ -492,6 +487,11 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_load(state_dict, fail_read_tensors_async=[1])
         # We don't want to depend on the actual exception raised by pickle
         self._test_load(state_dict, fail_deser_bytes=[2], ignore_exception_type=True)
+
+        self._test_load(state_dict, coordinator=1, fail_read_metadata=[3])
+        self._test_load(state_dict, coordinator=2, fail_read_bytes=[0])
+        self._test_load(state_dict, coordinator=3, fail_read_tensors_async=[2])
+
 
     def test_load_error_handling_no_dist(self) -> None:
         state_dict = {

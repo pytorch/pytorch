@@ -103,11 +103,11 @@ class ShardedTensor(object):
             Default: ``False``.
 
     .. note:: ShardedTensor uses collectives to do various operations, i.e. it
-        uses all_gather to do cross rank validations. For NCCL-based processed
+        uses all_gather to do cross rank validations. For NCCL-based process
         groups, internal tensor representations of objects must be moved to the
         GPU device before communication takes place. In this case, the device
         used is given by ``torch.cuda.current_device()`` and it is the user's
-        responsiblity to ensure that this is set so that each rank has an
+        responsibility to ensure that this is set so that each rank has an
         individual GPU, via ``torch.cuda.set_device()``
 
     """
