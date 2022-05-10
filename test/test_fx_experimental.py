@@ -1678,6 +1678,13 @@ class TestModule(torch.nn.Module):
         )
         self.assertEqual(norm_args_and_kwargs.args, tuple())
 
+    def test_normalize_args_op_overload(self):
+        for target in [torch.ops.aten.resize_as_.default, torch.ops.aten.resize_as_]:
+            inp1 = torch.rand([1])
+            inp2 = torch.rand([4])
+            args, kwargs = normalize_function(target, (inp1,), {"the_template": inp2}, normalize_to_only_use_kwargs=True)
+            self.assertIs(kwargs["input"], inp1)
+            self.assertIs(kwargs["the_template"], inp2)
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 
