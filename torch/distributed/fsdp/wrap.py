@@ -50,7 +50,7 @@ def transformer_auto_wrap_policy(
         # if not recursing, decide whether we should wrap for the leaf node or reminder
         return isinstance(module, tuple(transformer_layer_cls))
 
-def wrap_batchnorm_individually(
+def _wrap_batchnorm_individually(
     module: nn.Module,
     recurse: bool,
     *args,

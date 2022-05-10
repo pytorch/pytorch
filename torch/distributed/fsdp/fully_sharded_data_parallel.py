@@ -60,7 +60,7 @@ from .flatten_params_wrapper import (
     FlatParameter,
     FlattenParamsWrapper,
 )
-from .wrap import _recursive_wrap, wrap_batchnorm_individually, _or_policy
+from .wrap import _recursive_wrap, _wrap_batchnorm_individually, _or_policy
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
@@ -574,7 +574,7 @@ class FullyShardedDataParallel(nn.Module):
                 _override_batchnorm_mixed_precision(module)
                 policy_to_use = functools.partial(
                     _or_policy,
-                    policies=[wrap_batchnorm_individually, auto_wrap_policy]
+                    policies=[_wrap_batchnorm_individually, auto_wrap_policy]
                 )
                 warnings.warn(
                     "Mixed precision was specified for FSDP module with"
