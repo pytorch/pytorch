@@ -15,14 +15,14 @@ from ._common import (
     _handle_max_norm_col_wise,
 )
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
+from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
     ShardedTensor
 )
 
 
-@sharded_op_impl(torch.nn.functional.embedding_bag)
-def sharded_embedding_bag(types, args, kwargs, pg):
+@custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.embedding_bag)
+def sharded_embedding_bag(types, args, kwargs):
     """
     Handles ``__torch_function__`` dispatch for ``torch.nn.functional.embedding_bag``.
     This method computes a sharded embedding bag aggregation and has the following limitations:
@@ -123,6 +123,7 @@ def sharded_embedding_bag(types, args, kwargs, pg):
     include_last_offset = kwargs.get("include_last_offset")
     padding_idx = kwargs.get("padding_idx")
 
+    pg = weight._process_group
     local_shard = weight.local_tensor().contiguous()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
