@@ -1413,9 +1413,8 @@ class TestNN(NNTestCase):
                                     "expected torch.Tensor or Tensor-like object from checkpoint but received"):
             m.load_state_dict(state_dict)
 
-    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_load_state_dict_type(self):
-        m = torch.nn.Linear(2, 2, bias=False)
+        m = nn.Module()
 
         with self.assertRaisesRegex(TypeError,
                                     "Expected state_dict to be dict-like, got"):
