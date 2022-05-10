@@ -148,6 +148,8 @@ struct SchemaParser {
   }
 
   Argument parseArgument(size_t /*idx*/, bool is_return, bool kwarg_only) {
+    // fake and real type coincide except for Layout/MemoryFormat/ScalarType
+    // the fake type for these is Int instead
     auto p = type_parser.parseFakeAndRealType();
     auto fake_type = std::move(std::get<0>(p));
     auto real_type = std::move(std::get<1>(p));
@@ -168,8 +170,10 @@ struct SchemaParser {
       }
       alias_info = std::move(container);
       if (L.nextIf('?')) {
-        fake_type = c10::TypeFactory::create<c10::OptionalType>(std::move(fake_type));
-        real_type = c10::TypeFactory::create<c10::OptionalType>(std::move(real_type));
+        fake_type =
+            c10::TypeFactory::create<c10::OptionalType>(std::move(fake_type));
+        real_type =
+            c10::TypeFactory::create<c10::OptionalType>(std::move(real_type));
       }
     }
     if (is_return) {

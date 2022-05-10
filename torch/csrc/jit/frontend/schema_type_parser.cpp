@@ -311,7 +311,8 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
   return std::make_pair(std::move(std::get<0>(r)), std::move(std::get<2>(r)));
 }
 
-std::tuple</*fake*/TypePtr, /*real*/TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseFakeAndRealType() {
+std::tuple</*fake*/ TypePtr, /*real*/ TypePtr, c10::optional<AliasInfo>>
+SchemaTypeParser::parseFakeAndRealType() {
   TypePtr fake_value;
   TypePtr real_value;
   c10::optional<AliasInfo> alias_info;
@@ -325,7 +326,8 @@ std::tuple</*fake*/TypePtr, /*real*/TypePtr, c10::optional<AliasInfo>> SchemaTyp
         alias_info->addContainedType(std::move(*r.second));
       }
     });
-    fake_value = real_value = c10::TypeFactory::create<TupleType>(std::move(types));
+    fake_value = real_value =
+        c10::TypeFactory::create<TupleType>(std::move(types));
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
     L.next(); // Future
     L.expect('(');
@@ -354,7 +356,8 @@ std::tuple</*fake*/TypePtr, /*real*/TypePtr, c10::optional<AliasInfo>> SchemaTyp
     auto value_type = parseType().first;
     L.expect(')');
     alias_info = parseAliasAnnotation();
-    fake_value = real_value = c10::TypeFactory::create<DictType>(key_type, value_type);
+    fake_value = real_value =
+        c10::TypeFactory::create<DictType>(key_type, value_type);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
     L.next();
     L.expect('(');
@@ -366,7 +369,8 @@ std::tuple</*fake*/TypePtr, /*real*/TypePtr, c10::optional<AliasInfo>> SchemaTyp
     }
     L.expect(')');
     alias_info = parseAliasAnnotation();
-    fake_value = real_value = c10::TypeFactory::create<c10::UnionType>(std::move(types));
+    fake_value = real_value =
+        c10::TypeFactory::create<c10::UnionType>(std::move(types));
   } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {
@@ -401,7 +405,9 @@ std::tuple</*fake*/TypePtr, /*real*/TypePtr, c10::optional<AliasInfo>> SchemaTyp
     }
   } else {
     real_value = parseBaseType();
-    if (real_value->kind() == ScalarTypeType::Kind || real_value->kind() == MemoryFormatType::Kind || real_value->kind() == LayoutType::Kind) {
+    if (real_value->kind() == ScalarTypeType::Kind ||
+        real_value->kind() == MemoryFormatType::Kind ||
+        real_value->kind() == LayoutType::Kind) {
       fake_value = c10::TypeFactory::get<IntType>();
     } else {
       fake_value = real_value;
@@ -426,7 +432,8 @@ std::tuple</*fake*/TypePtr, /*real*/TypePtr, c10::optional<AliasInfo>> SchemaTyp
       break;
     }
   }
-  return std::make_tuple(std::move(fake_value), std::move(real_value), std::move(alias_info));
+  return std::make_tuple(
+      std::move(fake_value), std::move(real_value), std::move(alias_info));
 }
 
 void SchemaTypeParser::parseList(

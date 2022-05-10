@@ -705,7 +705,8 @@ inline py::object toPyObject(IValue ivalue) {
           return py::cast(*tensor.data_ptr<double>());
         case at::ScalarType::ComplexDouble:
           // TODO: https://github.com/pytorch/pytorch/issues/77134
-          return py::cast(static_cast<std::complex<double>>(*tensor.data_ptr<c10::complex<double>>()));
+          return py::cast(static_cast<std::complex<double>>(
+              *tensor.data_ptr<c10::complex<double>>()));
         default:
           TORCH_CHECK(
               false,
