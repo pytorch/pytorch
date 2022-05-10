@@ -80,12 +80,11 @@ def set_printoptions(
         PRINT_OPTS.linewidth = linewidth
     PRINT_OPTS.sci_mode = sci_mode
 
+def tensor_totype(t):
+    dtype = torch.float if t.is_mps() else torch.double
+    return t.to(dtype=dtype)
 
 class _Formatter(object):
-    def tensor_totype(t):
-        dtype = torch.float if t.is_mps() else torch.double
-        return t.to(dtype=dtype)
-
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
         self.int_mode = True

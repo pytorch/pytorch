@@ -92,7 +92,7 @@ MPSGraphTensor* chainViewOperation(MPSGraph* mpsGraph, IntArrayRef size,
 //                T = Tensor
 //                 ----------
 //                 | Orig T |
-//                 ---------- 
+//                 ----------
 //                /     |     \
 //             View T  View T  NonView T
 //             /      /    \      |
@@ -155,7 +155,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
 
                 // Self is the input tensor we are creating view of
                 MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : getMPSShape(self)
-                                                                    dataType : getMPSDataType(self.scalar_type()) 
+                                                                    dataType : getMPSDataType(self.scalar_type())
                                                                     name : nil];
                 newCachedGraph->inputTensor_ = inputTensor;
                 newCachedGraph->outputTensor_ = chainViewOperation(mpsGraph, size,
@@ -182,7 +182,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
         cachedGraph->storage_offset_ = storage_offset;
       }
     }
-  } 
+  }
   return result;
 }
 
