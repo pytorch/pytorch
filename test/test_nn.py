@@ -21436,18 +21436,20 @@ class TestStateDictHooks(TestCase):
         self.assertEqual(2, hook_called)
 
     def test_no_extra_ref_to_module(self):
-        gc.disable()
-        m = nn.Linear(10, 10)
+        try:
+            gc.disable()
+            m = nn.Linear(10, 10)
 
-        def hook_with_module(*args, **kwargs):
-            pass
+            def hook_with_module(*args, **kwargs):
+                pass
 
-        m._register_load_state_dict_pre_hook(hook_with_module, True)
-        weak_m = weakref.ref(m)
-        del m
+            m._register_load_state_dict_pre_hook(hook_with_module, True)
+            weak_m = weakref.ref(m)
+            del m
 
-        self.assertEqual(weak_m(), None)
-        gc.enable()
+            self.assertEqual(weak_m(), None)
+        finally:
+            gc.enable()
 
 
     def test_load_state_dict_module_pre_hook(self):
