@@ -1395,9 +1395,11 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   auto result = grad.new_zeros(self.sizes());
   // for composite compliance, use out-of-place variant of
   // `scatter_add` if any tensor is a Tensor Subclass.
-  return areAnyTensorSubclassLike({grad, self, index})
-      ? result.scatter_add(dim, index, grad)
-      : result.scatter_add_(dim, index, grad);
+  if (areAnyTensorSubclassLike({grad, self, index})) {
+    return result.scatter_add(dim, index, grad);
+  }
+  result.scatter_add_(dim, index, grad);
+  return result;
 }
 
 static void scatter_reduce_exclude_self_helper(
