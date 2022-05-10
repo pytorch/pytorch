@@ -259,7 +259,9 @@ def normalize_function(
     if kwargs is None:
         kwargs = {}
     new_args_and_kwargs = None
-    if not isinstance(target, types.BuiltinFunctionType) and not (isinstance(target, OpOverloadPacket) or isinstance(target, OpOverload)):
+    if not isinstance(target, types.BuiltinFunctionType) and not (
+        isinstance(target, OpOverloadPacket) or isinstance(target, OpOverload)
+    ):
         target_for_analysis = target
         if target in boolean_dispatched:
             # HACK: `boolean_dispatch` as used in `torch.nn.functional` makes it so that we have
