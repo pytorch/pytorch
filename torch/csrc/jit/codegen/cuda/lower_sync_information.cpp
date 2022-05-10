@@ -213,7 +213,13 @@ void SyncMap::build(Fusion* fusion) {
           // If consumer is parallelized with this type but producer is
           //  predicated redundant on this type. This parallel dimension
           //  is a RAW dimension. See test: FusionSeriaSmemWriteParallelRead1/2
-          if (c_id != nullptr && producer_redundant_types.get(parallel_type)) {
+          //
+          // Even if consumer is not parallelized with this type, would still
+          //  need a raw sync unless all use chain of the producer end with an
+          //  output with the same redundant type.
+          // TODO: need a separate pass to detect the case where no raw sync
+          //  is needed in this case, i.e. all use-def chains are redundant.
+          if (producer_redundant_types.get(parallel_type)) {
             raw_dims.set(parallel_type);
             continue;
           }

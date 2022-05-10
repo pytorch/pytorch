@@ -20741,6 +20741,12 @@ TEST_F(NVFuserTest, FusionSmemBlockGemmCacheDoubleBuffer_CUDA) {
 
   testValidate(
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+  // The smem cache write in this test case is redundant predicated,
+  //   and also double buffered. Currently we are relying on WAR sync
+  //   insertion to ensure ordering of double buffered tensor access.
+  // The check below makes sure that the sync is inserted so that the
+  //   test isn't running on a race condition.
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count > 0);
 }
 
 TEST_F(NVFuserTest, FusionIntermediateTensorVectorize_CUDA) {
@@ -22690,6 +22696,72 @@ TEST_F(NVFuserMultithreadedTest, MultipleFunctions_CUDA) {
   for (auto& t : threads) {
     t.join();
   }
+}
+
+// Test sync insertion with redundant predicates
+TEST_F(NVFuserTest, FusionRedundantPredSync_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeConcreteTensor({32});
+  TensorView* tv1 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv0, {true, false});
+  auto tv3 = add(tv2, tv1);
+
+  fusion.addOutput(tv3);
+
+  auto tv0c = tv0->cacheAfter();
+
+  // Make a redundant write through smem
+  tv0c->setMemoryType(MemoryType::Shared);
+
+  tv0->computeAt(tv3, 0);
+  tv1->computeAt(tv3, 0);
+
+  tv0c->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::TIDy);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv3->axis(0)->parallelize(ParallelType::TIDy);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  // Utility class to make sure one block sync
+  //  is inserted by RAW pass.
+  class SyncChecker : public kir::IrVisitor {
+   public:
+    using kir::IrVisitor::handle;
+    bool result() {
+      return sync_seen_;
+    }
+
+   private:
+    void handle(kir::BlockSync*) final {
+      sync_seen_ = true;
+    }
+
+   private:
+    bool sync_seen_ = false;
+  } checker;
+
+  GpuLower gpulw(&fusion);
+  checker.handle(gpulw.kernel()->topLevelExprs());
+  TORCH_INTERNAL_ASSERT(checker.result(), "Expected block sync not inserted");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({32}, options);
+  at::Tensor t1 = at::randn({32, 32}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit
