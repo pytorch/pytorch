@@ -2130,7 +2130,7 @@ inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
-  return alias_with_sizes_and_strides(self, inferred_size, *stride);
+  return self.as_strided(inferred_size, *stride);
 
 }
 
