@@ -207,7 +207,7 @@ class GenLazyIR(ABC):
             f"""\
 class {schema.node_name} : public {self.node_base} {{
  public:
-  static OpKind class_op_kind() {{
+  static OpKind ClassOpKind() {{
     return OpKind({aten_symbol(schema)});
   }}
 

@@ -1945,6 +1945,15 @@
     QuantizedCPU: quantized_resize_cpu_
     SparseCsrCPU, SparseCsrCUDA: resize_sparse_csr_
 
+# This is a utility function to enable users to resize out tensor while registering kernels for out variants.
+# Eventually, we can consider exposing `resize_output` as a public API to ship it with python op registration
+# to make it easy to register out variants for ops.
+- func: _resize_output_(Tensor(a!) self, int[] size, Device device) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
+  variants: function
+  dispatch:
+    Meta: _resize_output_
+
 - func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   category_override: factory
   variants: function
@@ -3790,12 +3799,14 @@
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
   dispatch:
+    MkldnnCPU: mkldnn_prelu
     CPU: prelu_cpu
     CUDA: prelu_cuda
 
 - func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   variants: function, method
   dispatch:
+    MkldnnCPU: mkldnn_prelu_backward
     CPU: prelu_backward_cpu
     CUDA: prelu_backward_cuda
 
@@ -10967,6 +10978,8 @@
   python_module: linalg
   variants: function
   structured_delegate: linalg_cross.out
+  dispatch:
+    ZeroTensor: linalg_cross_zerotensor
 
 - func: linalg_cross.out(Tensor self, Tensor other, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
