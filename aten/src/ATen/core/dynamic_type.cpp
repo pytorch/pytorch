@@ -226,6 +226,9 @@ TypePtr DynamicType::fallback() const {
     case Tag::Bool:
       return BoolType::get();
     case Tag::Int:
+    case Tag::ScalarType:
+    case Tag::Layout:
+    case Tag::MemoryFormat:
       return IntType::get();
     case Tag::SymInt:
       return SymIntType::get();
