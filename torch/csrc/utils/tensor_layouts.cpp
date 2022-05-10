@@ -52,13 +52,12 @@ void initializeLayouts() {
   }
   registerLayoutObject((THPLayout*)mkldnn_layout, at::Layout::Mkldnn);
 
-  PyObject *zendnn_layout = THPLayout_New(at::Layout::Zendnn, "torch._zendnn");
+  PyObject* zendnn_layout = THPLayout_New(at::Layout::Zendnn, "torch._zendnn");
   Py_INCREF(zendnn_layout);
   if (PyModule_AddObject(torch_module, "_zendnn", zendnn_layout) != 0) {
     throw python_error();
   }
   registerLayoutObject((THPLayout*)zendnn_layout, at::Layout::Zendnn);
-
 }
 
 } // namespace utils

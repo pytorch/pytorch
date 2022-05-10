@@ -2011,6 +2011,7 @@
     MPS: empty_symint_mps
     Meta: empty_symint_meta
     MkldnnCPU: empty_symint_mkldnn
+    ZendnnCPU: empty_symint_zendnn
     SparseCPU, SparseCUDA, SparseMeta: empty_symint_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_symint_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_symint_unknown_quantized

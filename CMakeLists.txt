@@ -131,12 +131,10 @@ if(APPLE)
 endif()
 
 set(CPU_AARCH64 OFF)
-set(CPU_INTEL OFF)
-set(CPU_AMD OFF)
+set(CPU_X64 OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
-  set(CPU_INTEL ON)
-  set(CPU_AMD ON)
+  set(CPU_X64 ON)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
   set(CPU_AARCH64 ON)
 endif()
@@ -310,8 +308,8 @@ IF(USE_ZENDNN AND USE_MKLDNN)
 ENDIF(USE_ZENDNN AND USE_MKLDNN)
 
 cmake_dependent_option(
-     USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." "${CPU_INTEL}"
-     "CPU_INTEL OR CPU_AARCH64;NOT USE_ZENDNN" OFF)
+     USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." "${CPU_X64}"
+     "CPU_X64 OR CPU_AARCH64;NOT USE_ZENDNN" OFF)
 
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
@@ -324,21 +322,12 @@ option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 
 
 cmake_dependent_option(
-  USE_ZENDNN "Use ZENDNN. Only available on x86 and x86_64." "${CPU_AMD}"
-  "CPU_AMD;USE_ZENDNN" OFF)
+  USE_ZENDNN "Use ZENDNN. Only available on x86 and x86_64." "${CPU_X64}"
+  "CPU_X64;USE_ZENDNN" OFF)
 set(ZENDNN_ENABLE_CONCURRENT_EXEC ${USE_ZENDNN})
 cmake_dependent_option(
     USE_ZENDNN_CBLAS "Use CBLAS in ZENDNN" OFF
     "USE_ZENDNN" OFF)
-IF(USE_ZENDNN)
-  IF(NOT BLAS_SET_BY_USER)
-     SET(BLAS "BLIS")
-  ENDIF(NOT BLAS_SET_BY_USER)
-  IF(NOT BLAS STREQUAL "BLIS")
-      MESSAGE(FATAL_ERROR "ZenDNN requires blis library,set BLAS=BLIS")
-      RETURN()
-  ENDIF(NOT BLAS STREQUAL "BLIS")
-ENDIF(USE_ZENDNN)
 
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(

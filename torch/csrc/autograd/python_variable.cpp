@@ -1324,10 +1324,9 @@ PyObject* THPVariable_is_mkldnn(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_is_zendnn(THPVariable *self, void *unused)
-{
+PyObject* THPVariable_is_zendnn(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject *)self)) {
+  if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_zendnn");
   }
   auto& self_ = THPVariable_Unpack(self);

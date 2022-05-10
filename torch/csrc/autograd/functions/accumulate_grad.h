@@ -114,8 +114,7 @@ struct TORCH_API AccumulateGrad : public Node {
           !new_grad.is_sparse_csr() &&
           !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
           new_grad.use_count() <= num_expected_refs &&
-          (new_grad.is_mkldnn() ||
-          new_grad.is_zendnn() ||
+          (new_grad.is_mkldnn() || new_grad.is_zendnn() ||
            utils::obeys_layout_contract(new_grad, variable))) {
         // we aren't setting up for double-backward
         // not sparse
@@ -125,8 +124,7 @@ struct TORCH_API AccumulateGrad : public Node {
         // assuming it obeys layout_contract. Under these conditions, we can
         // steal new_grad without a deep copy.
         update_grad(new_grad.detach());
-      }
-      else if (
+      } else if (
           !GradMode::is_enabled() && new_grad.is_sparse() &&
           new_grad._indices().is_contiguous() &&
           new_grad._values().is_contiguous() &&

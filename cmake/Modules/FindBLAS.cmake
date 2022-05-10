@@ -108,22 +108,15 @@ endif()
 #BLIS?
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "blis")))
-  FIND_PACKAGE(BLIS)
-  IF(BLIS_FOUND)
-    SET(BLAS_INFO "blis")
-    SET(BLAS_LIBRARIES ${BLIS_LIB})
-    SET(BLAS_INCLUDE_DIR ${BLIS_INCLUDE_DIR})
-  ELSE(BLIS_FOUND)
-    check_fortran_libraries(
-    BLAS_LIBRARIES
-    BLAS
-    sgemm
-    ""
-    "blis-mt")
-    if(BLAS_LIBRARIES)
-      set(BLAS_INFO "blis")
-    endif(BLAS_LIBRARIES)
-  ENDIF(BLIS_FOUND)
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "blis")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "blis")
+  endif(BLAS_LIBRARIES)
 endif()
 
 # Apple BLAS library?

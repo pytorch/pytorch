@@ -670,7 +670,7 @@ class TestProfiler(TestCase):
 
         if torch._C.has_zendnn:
             create_zendnn_tensor()
-            stats = run_profiler(create_zendnn_tensor, "cpu_memory_usage")
+            stats = run_profiler(create_zendnn_tensor)
             check_metrics(
                 stats,
                 "cpu_memory_usage",
