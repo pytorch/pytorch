@@ -312,7 +312,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   // Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
   #define CAST_AND_STORE_CASE(type, scalartype)                             \
     case ScalarType::scalartype:                                            \
-      *(type*)ptr = convert<type>(value);                              \
+      *(type*)ptr = convert<type>(value);                                   \
       return;
   template<typename src_t>
   __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {

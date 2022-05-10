@@ -12054,7 +12054,7 @@ op_db: List[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
                                      device_type='cuda'),
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
                     )),
     BinaryUfuncInfo('heaviside',
                     ref=lambda a, b: (

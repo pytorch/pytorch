@@ -41,7 +41,8 @@ C10_HOST_DEVICE constexpr auto convert_preprocess(src_t src) {
 }
 
 template <typename dest_t, typename src_real_t>
-C10_HOST_DEVICE constexpr auto convert_preprocess(c10::complex<src_real_t> src) {
+C10_HOST_DEVICE constexpr auto convert_preprocess(
+    c10::complex<src_real_t> src) {
   return maybe_real<!c10::is_complex<dest_t>::value>::apply(src);
 }
 
