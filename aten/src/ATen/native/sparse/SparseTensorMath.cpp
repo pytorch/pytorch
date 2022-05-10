@@ -709,8 +709,12 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
 
 Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
   // // TODO: Use a specialized CSR kernel for performance if needed
-  TORCH_CHECK(t_.is_sparse_csr() || (t_.layout() == c10::kStrided && t_.dim() == 0), "mul(dense, sparse_csr) is not supported");
-  TORCH_CHECK(src_.is_sparse_csr() || (src_.layout() == c10::kStrided && src_.dim() == 0), "mul(sparse_csr, dense) is not supported");
+  if (t_.is_sparse_csr() && src_.layout() == kStrided) {
+    return mul_out_sparse_csr(t_, src_.sparse_mask(t_), r);
+  }
+  if (t_.layout() == kStrided && src_.is_sparse_csr()) {
+    return mul_out_sparse_csr(t_, src_.sparse_mask(t_), r);
+  }
   TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
   Tensor t = t_.to_sparse();
   Tensor src = src_.to_sparse();
@@ -723,6 +727,12 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
 
 Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
+  if (self.is_sparse_csr() && other.layout() == kStrided) {
+    return mul_sparse_csr(self, other.sparse_mask(self));
+  }
+  if (self.layout() == kStrided && other.is_sparse_csr()) {
+    return mul_sparse_csr(self, other.sparse_mask(self));
+  }
   TORCH_CHECK(self.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
   TORCH_CHECK(other.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
   auto result_options = self.options().dtype(commonDtype);
