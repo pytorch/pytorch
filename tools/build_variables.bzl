@@ -1079,6 +1079,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/MkldnnTensorMath.cpp",
     "aten/src/ATen/native/mkldnn/Normalization.cpp",
     "aten/src/ATen/native/mkldnn/Pooling.cpp",
+    "aten/src/ATen/native/mkldnn/Prelu.cpp",
     "aten/src/ATen/native/mkldnn/Relu.cpp",
     "aten/src/ATen/native/mkldnn/SoftMax.cpp",
     "aten/src/ATen/native/mkldnn/TensorFactories.cpp",
