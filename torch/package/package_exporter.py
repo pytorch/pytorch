@@ -197,6 +197,8 @@ class PackageExporter:
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
         """
+        torch._C._log_api_usage_once("torch.package.PackageExporter")
+
         if isinstance(f, (Path, str)):
             f = str(f)
             self.buffer: Optional[BinaryIO] = None

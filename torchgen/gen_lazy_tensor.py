@@ -16,12 +16,16 @@ from typing import (
     Tuple,
     Type,
 )
+from torchgen.api.types import BaseCppType
 from torchgen.dest.lazy_ir import GenLazyIR, GenTSLazyIR
 from torchgen.gen import (
     get_grouped_native_functions,
     parse_native_yaml,
     NamespaceHelper,
 )
+
+from torchgen.api.lazy import setValueT
+
 from torchgen.model import (
     FunctionSchema,
     NativeFunction,
@@ -281,7 +285,10 @@ def run_gen_lazy_tensor(
     lazy_value_class: str = "torch::lazy::Value",
     lazy_tensor_ptr: str = "LazyTensorPtr",
 ) -> None:
-
+    lv_tokens = lazy_value_class.split("::")
+    lv_class = lv_tokens[-1]
+    lv_ns = "::".join(lv_tokens[:-1])
+    setValueT(BaseCppType(lv_ns, lv_class))
     template_dir = os.path.join(aten_path, "templates")
 
     def make_file_manager(install_dir: str) -> FileManager:
@@ -451,6 +458,7 @@ def run_gen_lazy_tensor(
                     "ATen/MetaFunctions.h",
                     "ATen/Operators.h",
                     "ATen/native/CPUFallback.h",
+                    "torch/csrc/lazy/core/ir_builder.h",
                     "torch/csrc/lazy/core/lazy_graph_executor.h",
                     "torch/csrc/lazy/core/metrics.h",
                     "torch/csrc/lazy/core/shape.h",
@@ -482,7 +490,6 @@ def run_gen_lazy_tensor(
                         create_from_first_tensor,
                         create_aten_from_ltc_tensor,
                         tuple_aten_from_ltc_tensors,
-                        lazy_value_class,
                         lazy_tensor_ptr,
                     ),
                     grouped_native_functions,

@@ -139,6 +139,14 @@ class TestLinalg(TestCase):
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
 
+    def test_solve_removed_error(self, device):
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
+        b = make_tensor(5, 1, device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            torch.solve(b, a)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            b.solve(a)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -3265,93 +3273,6 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_solve(self, device, dtype):
-        for (k, n) in zip([2, 3, 5], [3, 5, 7]):
-            b, A = self.solve_test_helper((n, n), (n, k), device, dtype)
-            x = torch.solve(b, A)[0]
-            self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_solve_batched(self, device, dtype):
-        def solve_batch_helper(A_dims, b_dims):
-            b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
-            x_exp_list = []
-            for i in range(b_dims[0]):
-                x_exp_list.append(torch.solve(b[i], A[i])[0])
-            x_exp = torch.stack(x_exp_list)  # Stacked output
-            x_act = torch.solve(b, A)[0]  # Actual output
-            self.assertEqual(x_exp, x_act)  # Equality check
-            Ax = np.matmul(A.cpu(), x_act.cpu())
-            self.assertEqual(b, Ax)
-
-        for batchsize in [1, 3, 4]:
-            solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10))
-
-    @slowTest
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_solve_batched_many_batches(self, device, dtype):
-        for A_dims, b_dims in zip([(256, 256, 5, 5), (3, 3)], [(5, 1), (512, 512, 3, 1)]):
-            b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
-            x, _ = torch.solve(b, A)
-            Ax = torch.matmul(A, x)
-            self.assertEqual(Ax, b.expand_as(x))
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_solve_batched_broadcasting(self, device, dtype):
-        from numpy.linalg import solve
-
-        def run_test(A_dims, b_dims):
-            A_matrix_size = A_dims[-1]
-            A_batch_dims = A_dims[:-2]
-            b, A = self.solve_test_helper(A_batch_dims + (A_matrix_size, A_matrix_size), b_dims, device, dtype)
-            x, _ = torch.solve(b, A)
-            x_exp = solve(A.cpu().numpy(), b.cpu().numpy())
-            self.assertEqual(x, x_exp)
-
-        # test against numpy.linalg.solve
-        run_test((2, 1, 3, 4, 4), (2, 1, 3, 4, 6))  # no broadcasting
-        run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting b
-        run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
-        run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_solve_errors_and_warnings(self, device, dtype):
-        # dtypes should be safely castable
-        a = torch.eye(2, dtype=dtype, device=device)
-        b = torch.randn(2, 1, dtype=dtype, device=device)
-        out = torch.empty(0, dtype=torch.int, device=device)
-        lu = torch.empty(0, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got solution with dtype Int"):
-            torch.solve(b, a, out=(out, lu))
-
-        out = torch.empty(0, dtype=dtype, device=device)
-        lu = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got lu with dtype Int"):
-            torch.solve(b, a, out=(out, lu))
-
-        # device should match
-        if torch.cuda.is_available():
-            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-            out = torch.empty(0, dtype=dtype, device=wrong_device)
-            lu = torch.empty_like(a)
-            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
-                torch.solve(b, a, out=(out, lu))
-            out = torch.empty(0, dtype=dtype, device=device)
-            lu = torch.empty_like(a).to(wrong_device)
-            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
-                torch.solve(b, a, out=(out, lu))
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     def test_tensorsolve(self, device, dtype):
@@ -3981,14 +3902,14 @@ class TestLinalg(TestCase):
         self.assertEqual(q.shape, (0,))  # empty tensor
         b = torch.sum(r)
         with self.assertRaisesRegex(RuntimeError,
-                                    "The derivative of qr is not implemented when mode='r'"):
+                                    "The derivative of linalg.qr depends on Q"):
             b.backward()
         #
         inp = torch.randn((7, 5), device=device, dtype=dtype, requires_grad=True)
         q, r = torch.linalg.qr(inp, mode='complete')
         b = torch.sum(r)
         with self.assertRaisesRegex(RuntimeError,
-                                    "The derivative of qr is not implemented when mode='complete' and nrows > ncols"):
+                                    "The QR decomposition is not differentiable when mode='complete' and nrows > ncols"):
             b.backward()
 
     @skipCUDAIfNoMagma
@@ -4669,98 +4590,86 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
 
-    def check_single_matmul(self, x, y, shape):
-        a = np.array(x, copy=False)
-        b = np.array(y, copy=False)
-        expected = np.matmul(a, b)
 
+    def check_single_matmul(self, x, y):
+
+        def assertEqual(answer, expected):
+            if x.dtype.is_floating_point or x.dtype.is_complex:
+                k = max(x.shape[-1], 1)  # Scale the atol with the size of the matrix
+                self.assertEqual(answer, expected,
+                                 msg=f"{x.shape} x {y.shape} = {answer.shape}",
+                                 atol=k * 5e-5,
+                                 rtol=1e-4)
+            else:
+                self.assertEqual(answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}")
+
+        # test x @ y
+        expected = np.matmul(x.cpu(), y.cpu())
         ans = torch.matmul(x, y)
         self.assertTrue(ans.is_contiguous())
-        self.assertTrue(np.array_equal(ans, expected))
+        assertEqual(ans, expected)
 
-        out = torch.zeros(*shape, dtype=torch.int64).to(x.device)
+        # test out
+        out = torch.empty_like(ans)
         ans = torch.matmul(x, y, out=out)
         self.assertIs(ans, out)
         self.assertTrue(ans.is_contiguous())
-        self.assertTrue(np.array_equal(ans, expected))
+        assertEqual(ans, expected)
 
-    # TODO: update to run on CUDA, too
-    @onlyCPU
-    def test_matmul_small_brute_force_1d_Nd(self, device):
-        # Issue #20452: range(0, 10) does not work.
-        n = 1
-        for m in range(1, 8):
-            for p in range(1, 8):
-                for o in range(1, 5):
-                    # 1d, 3d, inner dimensions C
-                    x = torch.arange(m, device=device)
-                    y = torch.arange(o * m * p, device=device).reshape(o, m, p)
-                    self.check_single_matmul(x, y, (o, n, p))
+    def gen_sizes_matmul(self, x_dim, y_dim=4, matrix_size=4, batch_size=3):
+        """
+        Generates sequences of tuples (x, y) of with size(x) = x_dim and
+        size(y) <= y_dim that are compatible wrt. matmul
+        """
+        assert x_dim >= 1
+        assert y_dim >= 2
+        x = x_dim
+        for y in range(1, y_dim + 1):
+            for batch, mn in product(product(range(batch_size), repeat=max(x - 2, y - 2, 0)),
+                                     product(range(matrix_size), repeat=min(y, 2))):
+                if x == 1:
+                    size_x = mn[:1]
+                    size_y = batch + mn
+                    yield size_x, size_y
+                else:
+                    for k in range(matrix_size):
+                        size_x = (k,) + mn[:1]
+                        if x > 2:
+                            size_x = batch[-(x - 2):] + size_x
+                        size_y = mn
+                        if y > 2:
+                            size_y = batch[-(y - 2):] + size_y
+                        yield size_x, size_y
 
-                    # 1d, 3d, inner dimensions Fortran
-                    x = torch.arange(m, device=device)
-                    y = torch.arange(o * p * m, device=device).reshape(o, p, m).mT
-                    self.check_single_matmul(x, y, (o, n, p))
+    @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
+    @dtypes(torch.int64, torch.float, torch.complex64)
+    def test_matmul_small_brute_force_1d_Nd(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-                    # 1d, 3d, inner dimensions non-contiguous
-                    x = torch.arange(2 * m, device=device)[::2]
-                    y = torch.arange(o * m * 2 * p, device=device).reshape(o, m, 2 * p)[:, :, ::2]
-                    self.check_single_matmul(x, y, (o, n, p))
+        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
 
-                    for r in range(1, 5):
-                        # 1d, 4d, inner dimensions C
-                        x = torch.arange(m)
-                        y = torch.arange(r * o * m * p, device=device).reshape(r, o, m, p)
-                        self.check_single_matmul(x, y, (r, o, n, p))
+    @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
+    @dtypes(torch.int64, torch.float, torch.complex64)
+    def test_matmul_small_brute_force_2d_Nd(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-                        # 1d, 4d, inner dimensions Fortran
-                        x = torch.arange(m)
-                        y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).mT
-                        self.check_single_matmul(x, y, (r, o, n, p))
+        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2), (True, False), (True, False)):
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
 
-                        # 1d, 4d, inner dimensions non-contiguous
-                        x = torch.arange(2 * m, device=device)[::2]
-                        y = torch.arange(r * o * m * 2 * p, device=device).reshape(r, o, m, 2 * p)[:, :, :, ::2]
-                        self.check_single_matmul(x, y, (r, o, n, p))
+    @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
+    @dtypes(torch.int64, torch.float, torch.complex64)
+    def test_matmul_small_brute_force_3d_Nd(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-    # TODO: update to run on CUDA, too
-    @onlyCPU
-    def test_matmul_small_brute_force_2d_Nd(self, device):
-        # Issue #20452: range(0, 10) does not work.
-        for n in range(1, 5):
-            for m in range(1, 5):
-                for p in range(1, 5):
-                    for o in range(1, 3):
-                        # 2d, 3d, inner dimensions C
-                        x = torch.arange(n * m, device=device).reshape(n, m)
-                        y = torch.arange(o * m * p, device=device).reshape(o, m, p)
-                        self.check_single_matmul(x, y, (o, n, p))
-
-                        # 2d, 3d, inner dimensions Fortran
-                        x = torch.arange(m * n, device=device).reshape(m, n).mT
-                        y = torch.arange(o * p * m, device=device).reshape(o, p, m).mT
-                        self.check_single_matmul(x, y, (o, n, p))
-
-                        # 2d, 3d, inner dimensions non-contiguous
-                        x = torch.arange(n * 2 * m, device=device).reshape(n, 2 * m)[:, ::2]
-                        y = torch.arange(o * m * 2 * p, device=device).reshape(o, m, 2 * p)[:, :, ::2]
-                        self.check_single_matmul(x, y, (o, n, p))
-
-                        for r in range(1, 2):
-                            # 2d, 4d, inner dimensions C
-                            x = torch.arange(n * m, device=device).reshape(n, m)
-                            y = torch.arange(r * o * m * p, device=device).reshape(r, o, m, p)
-                            self.check_single_matmul(x, y, (r, o, n, p))
-
-                            # 2d, 4d, inner dimensions Fortran
-                            x = torch.arange(m * n, device=device).reshape(m, n).mT
-                            y = torch.arange(r * o * p * m, device=device).reshape(r, o, p, m).mT
-                            self.check_single_matmul(x, y, (r, o, n, p))
-
-                            # 2d, 4d, inner dimensions non-contiguous
-                            x = torch.arange(n * 2 * m, device=device).reshape(n, 2 * m)[:, ::2]
-                            y = torch.arange(r * o * m * 2 * p, device=device).reshape(r, o, m, 2 * p)[:, :, :, ::2]
-                            self.check_single_matmul(x, y, (r, o, n, p))
+        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(3), (True, False), (True, False)):
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
 
     def test_linear_algebra_scalar_raises(self, device) -> None:
         m = torch.randn(5, 5, device=device)
@@ -5306,8 +5215,11 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    def test_linalg_lu_factor_and_lu(self, device, dtype):
-        # Tests lu, linalg.lu_factor and linalg.lu_factor_ex
+    def test_linalg_lu_factor_and_lu_and_lu_unpack(self, device, dtype):
+        # Tests torch.lu
+        #       torch.linalg.lu_factor
+        #       torch.linalg.lu_factor_ex
+        #       torch.lu_unpack
         from torch.testing._internal.common_utils import random_matrix
 
         def run_test(A, pivot, singular, fn):
@@ -5330,9 +5242,14 @@ class TestLinalg(TestCase):
             if not pivot:
                 self.assertEqual(pivots, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(batch + (k, )))
 
-            P, L, U = torch.lu_unpack(LU, pivots)
+            P, L, U = torch.lu_unpack(LU, pivots, unpack_pivots=pivot)
 
-            self.assertEqual(P @ L @ U, A)
+            self.assertEqual(P @ L @ U if pivot else L @ U, A)
+
+            PLU = torch.linalg.lu(A, pivot=pivot)
+            self.assertEqual(P, PLU.P)
+            self.assertEqual(L, PLU.L)
+            self.assertEqual(U, PLU.U)
 
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (2,), (3,), (1, 0), (3, 5))
@@ -5363,39 +5280,10 @@ class TestLinalg(TestCase):
 
         if self.device_type == 'cpu':
             # Error checking, no pivoting variant on CPU
-            with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
-                torch.lu(torch.empty(1, 2, 2), pivot=False)
-
-            with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
-                torch.linalg.lu_factor(torch.empty(1, 2, 2), pivot=False)
-
-    @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @skipCUDAIfRocm
-    @precisionOverride({torch.float: 1e-3})
-    def test_lu_unpack(self, device, dtype):
-        def run_test(pivot):
-            for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
-                a = torch.randn(*shape, dtype=dtype, device=device)
-                a_lu, p = torch.lu(a, pivot=pivot)
-                p_ref, l_ref, u_ref = torch.lu_unpack(a_lu, p)
-                self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
-            for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3),
-                          (3, 5), (5, 3), (3, 3, 5), (3, 5, 3),
-                          (7, 5, 3, 5, 3), (7, 5, 3, 3, 5),
-                          # empty tensors
-                          (0, 0), (0, 0, 0), (0, 3, 3)
-                          ):
-                a = make_tensor(shape, dtype=dtype, device=device, low=-0.1, high=+0.1)
-                a_lu, p = torch.lu(a, pivot=pivot)
-                p_ref, l_ref, u_ref = torch.lu_unpack(a_lu, p)
-                self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
-
-        run_test(True)
-
-        if self.device_type == 'cuda':
-            run_test(False)
+            fns = [torch.lu, torch.linalg.lu_factor, torch.linalg.lu_factor_ex, torch.linalg.lu]
+            for f in fns:
+                with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
+                    f(torch.empty(1, 2, 2), pivot=False)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -5406,16 +5294,14 @@ class TestLinalg(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
             torch.lu_unpack(lu_data, lu_pivots.long())
-        with self.assertRaisesRegex(RuntimeError, "contiguous tensor"):
-            torch.lu_unpack(lu_data, lu_pivots.mT)
 
         # check that onces flags are unset, Nones are returned
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False)
-        self.assertTrue((l == u) and l is None)
+        self.assertTrue(l.numel() == 0 and u.numel() == 0)
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_pivots=False)
-        self.assertTrue(p is None)
+        self.assertTrue(p.numel() == 0)
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False, unpack_pivots=False)
-        self.assertTrue((p == l == u) and p is None)
+        self.assertTrue(p.numel() == 0 and l.numel() == 0 and u.numel() == 0)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -6333,12 +6219,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             b = torch.randn(3, 1, device=b_device)
             A = torch.randn(3, 3, device=A_device)
 
-            # solve and cholesky_solve goes through generic backend dispatch and hit kernel specific device check first
+            # cholesky_solve goes through generic backend dispatch and hit kernel specific device check first
             # triangular_solve goes through specific backend dispatch (CPU/CUDA) and hit auto-generated device check first
             generic_backend_dispatch_err_str = "Expected b and A to be on the same device"
             specific_backend_dispatch_err_str = "Expected all tensors to be on the same device"
-            with self.assertRaisesRegex(RuntimeError, generic_backend_dispatch_err_str):
-                torch.solve(b, A)
 
             with self.assertRaisesRegex(RuntimeError, generic_backend_dispatch_err_str):
                 torch.cholesky_solve(b, A)
