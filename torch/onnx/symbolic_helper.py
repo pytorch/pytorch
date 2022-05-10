@@ -10,9 +10,8 @@ import torch.onnx
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
-import torch.onnx.utils
+import torch.onnx._patch_torch
 from torch._C import OptionalType
-from torch.onnx import _constants
 from torch.onnx.flags import _FLAGS
 
 # Note [Edit Symbolic Files]

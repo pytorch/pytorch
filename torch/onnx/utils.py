@@ -6,16 +6,17 @@ converted to models which run on other deep learning frameworks.
 import contextlib
 import copy
 import inspect
-import numbers
+import itertools
 import os
 import re
 import textwrap
 import typing
 import warnings
 import zipfile
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
+import torch.jit._trace
 import torch.serialization
 from torch.onnx import _constants, symbolic_caffe2, symbolic_helper, symbolic_registry
 from torch.onnx.flags import _FLAGS
@@ -29,6 +30,7 @@ def is_in_onnx_export():
     return __IN_ONNX_EXPORT
 
 
+# TODO(justinchuby): Remove dependency to this global variable from constant_fold.cpp
 # Skip check due to cannot import IValue from torch._C
 _params_dict = {}  # type: ignore[var-annotated]
 
@@ -288,7 +290,7 @@ def _optimize_graph(
 
     # onnx only supports tensors, so we turn all out number types into tensors
     torch._C._jit_pass_erase_number_types(graph)
-    if symbolic_helper._onnx_shape_inference:
+    if _FLAGS.onnx_shape_inference:
         input_names = [] if input_names is None else input_names
         dynamic_axes = {} if dynamic_axes is None else dynamic_axes
         torch._C._jit_pass_onnx_set_dynamic_input_shape(
@@ -318,7 +320,7 @@ def _optimize_graph(
     torch._C._jit_pass_lint(graph)
     graph = torch._C._jit_pass_canonicalize(graph)
     torch._C._jit_pass_lint(graph)
-    if symbolic_helper._onnx_shape_inference:
+    if _FLAGS.onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(
             graph, params_dict, _FLAGS.export_onnx_opset_version
         )
@@ -741,7 +743,7 @@ def _model_to_graph(
             example_outputs_final += unpack_quantized_tensor(example_output)
         out_vars, desc = torch.jit._flatten(example_outputs_final)
         torch._C._jit_pass_onnx_assign_output_shape(
-            graph, out_vars, desc, symbolic_helper._onnx_shape_inference, is_script
+            graph, out_vars, desc, _FLAGS.onnx_shape_inference, is_script
         )
 
     # NB: ONNX requires complete information about output types, which might be
@@ -761,7 +763,7 @@ def _model_to_graph(
                 graph,
                 output_tensors,
                 out_desc,
-                symbolic_helper._onnx_shape_inference,
+                _FLAGS.onnx_shape_inference,
                 is_script,
             )
 
@@ -773,15 +775,14 @@ def _model_to_graph(
 
     if (
         do_constant_folding
-        and _FLAGS.export_onnx_opset_version
-        in _constants.onnx_constant_folding_opsets
+        and _FLAGS.export_onnx_opset_version in _constants.onnx_constant_folding_opsets
     ):
         params_dict = torch._C._jit_pass_onnx_constant_fold(
             graph, params_dict, _FLAGS.export_onnx_opset_version
         )
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
-    if symbolic_helper._onnx_shape_inference:
+    if _FLAGS.onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(
             graph, params_dict, _FLAGS.export_onnx_opset_version
         )
@@ -1235,9 +1236,6 @@ def _set_input_and_output_names(graph, input_names, output_names):
     set_names(list(graph.outputs()), output_names, "output")
 
 
-_attr_pattern = re.compile("^(.+)_(([ifstgz])|(ty))$")
-
-
 def _run_symbolic_method(g, op_name, symbolic_fn, args):
     r"""
     This trampoline function gets invoked for every symbolic method
@@ -1251,145 +1249,6 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
         # you need.
         e.args = ("{} (occurred when translating {})".format(e.args[0], op_name),)
         raise
-
-
-def _is_onnx_list(value):
-    return (
-        not isinstance(value, torch._six.string_classes)
-        and not isinstance(value, torch.Tensor)
-        and isinstance(value, Iterable)
-    )
-
-
-def _add_attribute(node, key, value, aten):
-    r"""Initializes the right attribute based on type of value."""
-    m = _attr_pattern.match(key)
-    if m is None:
-        raise IndexError(
-            (
-                "Invalid attribute specifier '{}' names "
-                + " must be suffixed with type, e.g. 'dim_i' or 'dims_i'"
-            ).format(key)
-        )
-    name, kind = m.group(1), m.group(2)
-    if _is_onnx_list(value):
-        kind += "s"
-
-    if aten and symbolic_helper.is_caffe2_aten_fallback():
-        if isinstance(value, torch.Tensor):
-            # Caffe2 proto does not support tensor attribute.
-            if value.numel() > 1:
-                raise ValueError("Should not pass tensor attribute")
-            value = _scalar(value)
-            if isinstance(value, float):
-                kind = "f"
-            else:
-                kind = "i"
-    return getattr(node, kind + "_")(name, value)
-
-
-def _scalar(x):
-    """Convert a scalar tensor into a Python value."""
-    assert x.numel() == 1
-    return x[0]
-
-
-def _new_node(g: torch._C.Graph, opname: str, outputs, *args, **kwargs):
-    if "::" in opname:
-        aten = False
-        ns_opname = opname
-    else:
-        aten = kwargs.pop("aten", False)
-        ns = "aten" if aten else "onnx"
-        ns_opname = ns + "::" + opname
-    n = g.create(ns_opname, args, outputs)  # type: ignore[attr-defined]
-    for k, v in sorted(kwargs.items()):
-        # TODO: enable inplace in aten exporting mode.
-        if k == "inplace":
-            continue
-        _add_attribute(n, k, v, aten=aten)
-    return n
-
-
-def _graph_op(
-    g: torch._C.Graph,
-    opname: str,
-    *raw_args: torch._C.Node,
-    outputs: int = 1,
-    **kwargs,
-) -> Union[torch._C.Value, Tuple[torch._C.Value, ...]]:
-    r"""Creates an ONNX operator "opname", taking "args" as inputs and attributes "kwargs".
-
-    The set of operators and the inputs/attributes they take
-    is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
-
-    This function is monkey-patched onto Graph.
-
-    Args:
-        g: The Torch graph.
-        opname: The ONNX operator name, e.g., `Abs` or `Add`. TODO(justinchu): Update examples to correct ones.
-        raw_args: The inputs to the operator; usually provided
-            as arguments to the `symbolic` definition.
-        outputs: The number of outputs this operator returns.
-            By default an operator is assumed to return a single output.
-            If `outputs` is greater than one, this functions returns a tuple
-            of output `Node`, representing each output of the ONNX operator
-            in positional.
-        kwargs: The attributes of the ONNX operator, whose keys are named
-            according to the following convention: `alpha_f` indicates
-            the `alpha` attribute with type `f`.  The valid type specifiers are
-            `f` (float), `i` (int), `s` (string) or `t` (Tensor).  An attribute
-            specified with type float accepts either a single float, or a
-            list of floats (e.g., you would say `dims_i` for a `dims` attribute
-            that takes a list of integers).
-
-    Returns:
-        The node representing the single output of this operator (see the `outputs`
-        keyword argument for multi-return nodes).
-    """
-    # Filter out None attributes, this can be convenient client side because
-    # now they can pass through None attributes, and have them not show up
-    kwargs = dict((k, v) for k, v in kwargs.items() if v is not None)
-
-    def const_if_tensor(arg):
-        if arg is None:
-            return arg
-        elif isinstance(arg, torch._C.Value):
-            return arg
-        else:
-            return g.op("Constant", value_z=arg)  # type: ignore[attr-defined]
-
-    args = [const_if_tensor(arg) for arg in raw_args]
-    n = g.insertNode(_new_node(g, opname, outputs, *args, **kwargs))  # type: ignore[attr-defined]
-
-    if symbolic_helper._onnx_shape_inference:
-
-        torch._C._jit_pass_onnx_node_shape_type_inference(
-            n, _params_dict, _FLAGS.export_onnx_opset_version
-        )
-
-    if outputs == 1:
-        return n.output()
-    return tuple(n.outputs())
-
-
-def _block_op(b, opname, *args, **kwargs):
-    if "::" in opname:
-        aten = False
-        ns_opname = opname
-    else:
-        aten = kwargs.pop("aten", False)
-        ns = "aten" if aten else "onnx"
-        ns_opname = ns + "::" + opname
-    n = b.addNode(ns_opname, list(args))
-    for k, v in sorted(kwargs.items()):
-        # TODO: enable inplace in aten exporting mode.
-        if k == "inplace":
-            continue
-        _add_attribute(n, k, v, aten=aten)
-    if len(list(n.outputs())) == 1:
-        return n.output()
-    return tuple(o for o in n.outputs())
 
 
 def _add_block(node: torch._C.Node):
@@ -1488,9 +1347,7 @@ def _run_symbolic_function(
     """
 
     opset_version = _FLAGS.export_onnx_opset_version
-    symbolic_helper.is_caffe2_aten_fallback = (
-        symbolic_helper.is_caffe2_aten_fallback
-    )
+    symbolic_helper.is_caffe2_aten_fallback = symbolic_helper.is_caffe2_aten_fallback
 
     # See Note [Export inplace]
     # TODO(ezyang): I think this is not necessary anymore
@@ -1567,78 +1424,6 @@ def _run_symbolic_function(
         raise
 
 
-# Generate an ONNX ATen op node.
-def _aten_op(g, operator, *args, overload_name="", **kwargs):
-    kwargs["aten"] = True
-    return g.op(
-        "ATen", *args, operator_s=operator, overload_name_s=overload_name, **kwargs
-    )
-
-
-# TODO: We might not need this anymore, since most scalars now show up as tensors
-# TODO(#76254): Remove the helper function if not needed.
-def _graph_constant(
-    g,
-    value,
-    dims,
-    type_: str,
-    *args,
-    **kwargs,
-):
-    """This helper function can create either constant tensor or constant scalar.
-
-    If dims is None or 0 or [0], generate a 0-d tensor (scalar).
-    """
-    assert isinstance(value, numbers.Number)
-    assert type_ is not None
-    isscalar = False
-    if dims is None or dims == 0 or set(dims) == set([0]):
-        dims = [1]
-        isscalar = True
-    type_ = type_.lower()
-    tensor: Union[
-        torch.CharTensor,
-        torch.ShortTensor,
-        torch.IntTensor,
-        torch.LongTensor,
-        torch.HalfTensor,
-        torch.FloatTensor,
-        torch.DoubleTensor,
-    ]
-    if type_ == "char":
-        tensor = torch.CharTensor(*dims)
-    elif type_ == "short":
-        tensor = torch.ShortTensor(*dims)
-    elif type_ == "int":
-        tensor = torch.IntTensor(*dims)
-    elif type_ == "long":
-        tensor = torch.LongTensor(*dims)
-    elif type_ == "half":
-        tensor = torch.HalfTensor(*dims)
-    elif type_ == "float":
-        tensor = torch.FloatTensor(*dims)
-    elif type_ == "double":
-        tensor = torch.DoubleTensor(*dims)
-    else:
-        raise ValueError(
-            "Unknown type, type should be one of the following strings: "
-            "char, short, int, long, half, float, double"
-        )
-    tensor.fill_(value)  # type: ignore[call-overload]
-    if isscalar:
-        return g.op("Constant", *args, value_z=tensor, **kwargs)
-    return g.op("Constant", *args, value_t=tensor, **kwargs)
-
-
-def _node_getitem(self, k):
-    """Gets attributes of a node which is polymorphic over return type.
-
-    This is monkey-patched onto Node.
-    """
-    sel = self.kindOf(k)
-    return getattr(self, sel)(k)
-
-
 def get_ns_op_name_from_custom_op(symbolic_name):
     if not bool(
         re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)
@@ -1672,9 +1457,9 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     """
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
 
-    for version in symbolic_helper._onnx_stable_opsets + [
-        symbolic_helper._onnx_main_opset
-    ]:
+    for version in itertools.chain(
+        _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
+    ):
         if version >= opset_version:
             symbolic_registry.register_op(op_name, symbolic_fn, ns, version)
 
@@ -1682,9 +1467,9 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
 def unregister_custom_op_symbolic(symbolic_name, opset_version):
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
 
-    for version in symbolic_helper._onnx_stable_opsets + [
-        symbolic_helper._onnx_main_opset
-    ]:
+    for version in itertools.chain(
+        _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
+    ):
         if version >= opset_version:
             symbolic_registry.unregister_op(op_name, ns, version)
 
@@ -1737,10 +1522,3 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                 else:
                     value_dict[x] = str(key) + "_dynamic_axes_" + str(i + 1)
             dynamic_axes[key] = value_dict
-
-
-torch._C.Graph.op = _graph_op  # type: ignore[attr-defined]
-torch._C.Graph.at = _aten_op  # type: ignore[attr-defined]
-torch._C.Block.op = _block_op  # type: ignore[attr-defined]
-torch._C.Graph.constant = _graph_constant  # type: ignore[attr-defined]
-torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc, assignment]
