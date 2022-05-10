@@ -1442,7 +1442,7 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:
     return torch._C._nn.glu(input, dim)
 
 
-def hardtanh(input: Tensor, min_val: float = -1.0, max_val: float = 1.0, inplace: bool = False) -> Tensor:
+def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
@@ -2446,11 +2446,16 @@ def layer_norm(
     See :class:`~torch.nn.LayerNorm` for details.
     """
     if has_torch_function_variadic(input, weight, bias):
-        return handle_torch_function(
-            layer_norm, (input, weight, bias), input, normalized_shape, weight=weight, bias=bias, eps=eps, out=out
-        )
-    return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled, out=out)
+        if out is not None:
+            return handle_torch_function(
+                layer_norm, (input, weight, bias), input, normalized_shape, weight=weight, bias=bias, eps=eps, out=out
+            )
+        return handle_torch_function(layer_norm, (input, weight, bias), input, normalized_shape, weight=weight, bias=bias, eps=eps)
 
+    if out is not None:
+        return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled, out=out)
+
+    return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled)
 
 def group_norm(
     input: Tensor, num_groups: int, weight: Optional[Tensor] = None, bias: Optional[Tensor] = None, eps: float = 1e-5
