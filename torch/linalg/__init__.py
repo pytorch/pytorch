@@ -266,7 +266,7 @@ Examples::
 
     >>> A = torch.randn(2, 3, 4, 4)  # Batch of matrices
     >>> Ainv = torch.linalg.inv(A)
-    >>> torch.dist(A @ Ainv, torch.eye(4)))
+    >>> torch.dist(A @ Ainv, torch.eye(4))
     tensor(1.9073e-06)
 
     >>> A = torch.randn(4, 4, dtype=torch.complex128)  # Complex matrix
@@ -336,11 +336,6 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-""" + fr"""
-.. note:: This function is computed using :func:`torch.linalg.lu_factor`.
-          {common_notes["sync_note"]}
-""" + r"""
-
 .. seealso::
 
         :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
@@ -377,7 +372,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: This function is computed using :func:`torch.linalg.lu_factor`.
+.. note:: This function is computed using :func:`torch.lu`.
           {common_notes["sync_note"]}
 """ + r"""
 
@@ -2236,11 +2231,8 @@ the output has the same batch dimensions.
         :func:`torch.linalg.lu_solve` solves a system of linear equations given the output of this
         function provided the input matrix was square and invertible.
 
-        :func:`torch.lu_unpack` unpacks the tensors returned by :func:`~lu_factor` into the three
-        matrices `P, L, U` that form the decomposition.
-
         :func:`torch.linalg.lu` computes the LU decomposition with partial pivoting of a possibly
-        non-square matrix. It is a composition of :func:`~lu_factor` and :func:`torch.lu_unpack`.
+        non-square matrix.
 
         :func:`torch.linalg.solve` solves a system of linear equations. It is a composition
         of :func:`~lu_factor` and :func:`~lu_solve`.
