@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 import torch
 import torch.serialization
 from torch.onnx import _constants, symbolic_caffe2, symbolic_helper, symbolic_registry
+from torch.onnx.flags import _FLAGS
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
@@ -58,12 +59,12 @@ def select_model_mode_for_export(model, mode):
             mode == torch.onnx.TrainingMode.PRESERVE and is_originally_training
         ):
 
-            if symbolic_helper._export_onnx_opset_version < 12:
+            if _FLAGS.export_onnx_opset_version < 12:
                 warnings.warn(
                     "You are exporting the model in training mode with onnx opset version {}. "
                     "Opset versions lower than opset 12 will not be able to export nodes such as "
                     "Dropout and BatchNorm correctly.".format(
-                        symbolic_helper._export_onnx_opset_version
+                        _FLAGS.export_onnx_opset_version
                     )
                 )
             is_export_training = True
@@ -299,12 +300,12 @@ def _optimize_graph(
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_onnx_scalar_type_analysis(
-        graph, True, symbolic_helper._export_onnx_opset_version
+        graph, True, _FLAGS.export_onnx_opset_version
     )
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_onnx_peephole(
-        graph, symbolic_helper._export_onnx_opset_version, fixed_batch_size
+        graph, _FLAGS.export_onnx_opset_version, fixed_batch_size
     )
     torch._C._jit_pass_lint(graph)
 
@@ -319,7 +320,7 @@ def _optimize_graph(
     torch._C._jit_pass_lint(graph)
     if symbolic_helper._onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, symbolic_helper._export_onnx_opset_version
+            graph, params_dict, _FLAGS.export_onnx_opset_version
         )
     return graph
 
@@ -772,24 +773,24 @@ def _model_to_graph(
 
     if (
         do_constant_folding
-        and symbolic_helper._export_onnx_opset_version
-        in symbolic_helper._constant_folding_opset_versions
+        and _FLAGS.export_onnx_opset_version
+        in _constants.onnx_constant_folding_opsets
     ):
         params_dict = torch._C._jit_pass_onnx_constant_fold(
-            graph, params_dict, symbolic_helper._export_onnx_opset_version
+            graph, params_dict, _FLAGS.export_onnx_opset_version
         )
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
     if symbolic_helper._onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, symbolic_helper._export_onnx_opset_version
+            graph, params_dict, _FLAGS.export_onnx_opset_version
         )
 
     params_dict = torch._C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
     # For ONNX opset < 9, constants only have three data types: float16, float, double.
     # In this pass transform constants of other data types to float/double + cast operator.
-    if symbolic_helper._export_onnx_opset_version < 9:
+    if _FLAGS.export_onnx_opset_version < 9:
         torch._C._jit_pass_onnx_cast_all_constant_to_floating(graph)
 
     params_dict = torch._C._jit_pass_filter_non_tensor_arguments(params_dict)
@@ -822,7 +823,7 @@ def export_to_pretty_string(
 ):
 
     if opset_version is None:
-        opset_version = _constants.default_onnx_opset_version
+        opset_version = _constants.onnx_default_opset
     if custom_opsets is None:
         custom_opsets = {}
     symbolic_helper._set_opset_version(opset_version)
@@ -883,7 +884,7 @@ def unconvertible_ops(
         of the unconvertible ops.
     """
 
-    opset_version = opset_version or _constants.default_onnx_opset_version
+    opset_version = opset_version or _constants.onnx_default_opset
     symbolic_helper._set_opset_version(opset_version)
     # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
@@ -1023,7 +1024,7 @@ def _export(
         symbolic_helper._set_onnx_shape_inference(onnx_shape_inference)
 
         if opset_version is None:
-            opset_version = _constants.default_onnx_opset_version
+            opset_version = _constants.onnx_default_opset
         if not operator_export_type:
             if torch.onnx._CAFFE2_ATEN_FALLBACK:
                 operator_export_type = torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -1364,7 +1365,7 @@ def _graph_op(
     if symbolic_helper._onnx_shape_inference:
 
         torch._C._jit_pass_onnx_node_shape_type_inference(
-            n, _params_dict, symbolic_helper._export_onnx_opset_version
+            n, _params_dict, _FLAGS.export_onnx_opset_version
         )
 
     if outputs == 1:
@@ -1486,7 +1487,7 @@ def _run_symbolic_function(
         None when the node gets cloned as is into the new graph.
     """
 
-    opset_version = symbolic_helper._export_onnx_opset_version
+    opset_version = _FLAGS.export_onnx_opset_version
     symbolic_helper.is_caffe2_aten_fallback = (
         symbolic_helper.is_caffe2_aten_fallback
     )
