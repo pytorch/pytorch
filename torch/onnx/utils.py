@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.serialization
-from torch.onnx import symbolic_caffe2, symbolic_helper, symbolic_registry
+from torch.onnx import _constants, symbolic_caffe2, symbolic_helper, symbolic_registry
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
@@ -822,7 +822,7 @@ def export_to_pretty_string(
 ):
 
     if opset_version is None:
-        opset_version = symbolic_helper._default_onnx_opset_version
+        opset_version = _constants.default_onnx_opset_version
     if custom_opsets is None:
         custom_opsets = {}
     symbolic_helper._set_opset_version(opset_version)
@@ -883,7 +883,7 @@ def unconvertible_ops(
         of the unconvertible ops.
     """
 
-    opset_version = opset_version or symbolic_helper._default_onnx_opset_version
+    opset_version = opset_version or _constants.default_onnx_opset_version
     symbolic_helper._set_opset_version(opset_version)
     # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
@@ -1023,7 +1023,7 @@ def _export(
         symbolic_helper._set_onnx_shape_inference(onnx_shape_inference)
 
         if opset_version is None:
-            opset_version = symbolic_helper._default_onnx_opset_version
+            opset_version = _constants.default_onnx_opset_version
         if not operator_export_type:
             if torch.onnx._CAFFE2_ATEN_FALLBACK:
                 operator_export_type = torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
