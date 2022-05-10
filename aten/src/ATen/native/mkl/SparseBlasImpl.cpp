@@ -549,6 +549,7 @@ void triangular_solve_out_sparse_csr(
   descrA.mode = upper ? SPARSE_FILL_MODE_UPPER : SPARSE_FILL_MODE_LOWER;
   descrA.diag = unitriangular ? SPARSE_DIAG_UNIT : SPARSE_DIAG_NON_UNIT;
 
+  if (A.layout() == kSparseCsr) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       X.scalar_type(), "triangular_solve_out_sparse_csr_impl_mkl", [&] {
         auto mkl_sparse_mat =
@@ -585,6 +586,46 @@ void triangular_solve_out_sparse_csr(
               ldx);
         }
       });
+  } else if (A.layout() == kSparseBsr) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      X.scalar_type(), "triangular_solve_out_sparse_csr_impl_mkl", [&] {
+        auto mkl_sparse_mat =
+            at::mkl::sparse::MklSparseBsrDescriptor<scalar_t>(A);
+        scalar_t alpha = 1;
+
+        if (B.size(-1) == 1) {
+          at::mkl::sparse::trsv<scalar_t>(
+              opA,
+              alpha,
+              mkl_sparse_mat.descriptor(),
+              descrA,
+              B_->data_ptr<scalar_t>(),
+              X_->data_ptr<scalar_t>());
+        } else {
+          IntArrayRef B_strides = B_->strides();
+          bool is_B_row_major = (B_strides[ndim - 1] == 1);
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!(is_X_row_major ^ is_B_row_major));
+
+          auto order = is_X_row_major ? SPARSE_LAYOUT_ROW_MAJOR : SPARSE_LAYOUT_COLUMN_MAJOR;
+          auto nrhs = mkl_int_cast(B.size(-1), "nrhs");
+          auto ldx = is_X_row_major ? X_strides[ndim - 2] : X_strides[ndim - 1];
+          auto ldb = is_B_row_major ? B_strides[ndim - 2] : B_strides[ndim - 1];
+          at::mkl::sparse::trsm<scalar_t>(
+              opA,
+              alpha,
+              mkl_sparse_mat.descriptor(),
+              descrA,
+              order,
+              B_->data_ptr<scalar_t>(),
+              nrhs,
+              ldb,
+              X_->data_ptr<scalar_t>(),
+              ldx);
+        }
+      });
+  } else {
+    AT_ERROR("MKL only supports CSR and BSR layout, but got ", A.layout(), " instead.");
+  }
 
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
