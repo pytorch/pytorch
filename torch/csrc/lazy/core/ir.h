@@ -191,7 +191,7 @@ const T* NodeCast(const Node* node, OpKind op) {
 
 template <typename T>
 const T* NodeCast(const Node* node) {
-  if (T::class_op_kind != node->op()) {
+  if (T::ClassOpKind() != node->op()) {
     return nullptr;
   }
 #ifdef NDEBUG

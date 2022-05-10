@@ -77,10 +77,8 @@ TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
   return {};
 }
 
-const OpKind TensorList::class_op_kind(tensor_list_opkind);
-
 TensorList::TensorList(OpList values)
-  : TsNode(/*op=*/tensor_list_opkind,
+  : TsNode(/*op=*/ClassOpKind(),
            /*operands=*/values,
            /*shapes=*/std::vector<Shape>(),
          /*num_outputs=*/1,
