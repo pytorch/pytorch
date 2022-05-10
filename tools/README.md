@@ -35,6 +35,14 @@ Developer tools which you might find useful:
 
 * [linter/clang_tidy](linter/clang_tidy/__main__.py) - Script for running clang-tidy
   on lines of your script which you changed.
+* [extract_scripts.py](extract_scripts.py) - Extract scripts from
+  `.github/workflows/*.yml` into a specified dir, on which linters such as
+  [linter/run_shellcheck.sh](linter/run_shellcheck.sh) can be run. Assumes that every `run`
+  script has `shell: bash` unless a different shell is explicitly listed on that
+  specific step (so `defaults` doesn't currently work), but also has some rules
+  for other situations such as [actions/github-script][]. Exits with nonzero
+  status if any of the extracted scripts contain [GitHub Actions expressions][]:
+  `${{<expression> }}`
 * [git_add_generated_dirs.sh](git_add_generated_dirs.sh) and
   [git_reset_generated_dirs.sh](git_reset_generated_dirs.sh) -
   Use this to force add generated files to your Git index, so that you
