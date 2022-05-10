@@ -888,14 +888,15 @@ class TestSparseCSR(TestCase):
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected)
 
+    @parametrize("noncontiguous", [True, False])
     # TODO: block_size 1 is broken
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_block_addmm(self, device, dtype, index_dtype, block_size):
-        for (m, n, k), noncontiguous in zip(itertools.product([2, 5], repeat=3), [True, False]):
+    def test_block_addmm(self, device, dtype, index_dtype, block_size, noncontiguous):
+        for (m, n, k) in itertools.product([2, 5], repeat=3):
             nnz = random.randint(0, m * k)
             if not noncontiguous:
                 a = self.genSparseCSRTensor((m * block_size, k * block_size), nnz,
