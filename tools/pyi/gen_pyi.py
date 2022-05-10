@@ -109,6 +109,7 @@ blocklist = [
     "block_diag",
     "norm",
     "chain_matmul",
+    "stft",
     "tensordot",
     "unique_consecutive",
     "atleast_1d",
