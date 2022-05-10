@@ -171,7 +171,9 @@ def _make_prim(
 
     """
 
-    def _prim(*args, **kwargs):
+    prim.define(schema)
+
+    def _prim_impl(*args, **kwargs):
         # always run the meta function because aten implementation will
         # typically accept more inputs (e.g., it will do promotion and
         # broadcasting) which we want to reject
@@ -179,6 +181,10 @@ def _make_prim(
         return impl_aten(*args, **kwargs)
 
     name = schema.split('(')[0]
+    prim_impl.impl(name, _prim_impl)
+    # TODO: register meta
+
+    _prim = getattr(torch.ops.prims, name).default
 
     _prim.__name__ = name
     _prim.__doc__ = doc
@@ -186,16 +192,7 @@ def _make_prim(
     _prim.impl_nvfuser = impl_nvfuser  # type: ignore[attr-defined]
     _prim.return_type = return_type  # type: ignore[attr-defined]
 
-    prim.define(schema)
-    prim_impl.impl(name, _prim)
-    # TODO: register meta
-
-    def j(*args, **kwargs):
-        # print(name, args, kwargs)
-        return getattr(torch.ops.prims, name).default(*args, **kwargs)
-    j.overloadpacket = getattr(torch.ops.prims, name)
-
-    return j
+    return _prim
 
 
 class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
