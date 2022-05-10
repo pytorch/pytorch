@@ -1311,9 +1311,13 @@ class TestSparseCSR(TestCase):
             x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
             y = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
 
-            res = fn(y, x)
+            res_sparse_sparse = fn(y, x)
+            res_dense_sparse = fn(y.to_dense(), x)
+            res_sparse_dense = fn(y, x.to_dense())
             expected = fn(y.to_dense(), x.to_dense()).to_sparse_csr()
-            self.assertEqual(res, expected)
+            self.assertEqual(res_sparse_sparse, expected)
+            self.assertEqual(res_dense_sparse.to_dense(), expected.to_dense())
+            self.assertEqual(res_sparse_dense.to_dense(), expected.to_dense())
 
         _test_spadd_shape(torch.mul, 100, [100, 100])
         _test_spadd_shape(torch.mul, 0, [100, 100])
@@ -1323,17 +1327,6 @@ class TestSparseCSR(TestCase):
         s = torch.sparse_coo_tensor([[0], [1]], [5.0], (2, 3), device=device)
         s = s.to_sparse_csr()
         t23 = s.to_dense()
-
-        if device == 'cpu':
-            with self.assertRaisesRegex(RuntimeError, r"mul\(sparse_csr, dense\) is not supported"):
-                s * t23
-            with self.assertRaisesRegex(RuntimeError, r"mul\(dense, sparse_csr\) is not supported"):
-                t23 * s
-        elif device == 'cuda':
-            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
-                s * t23
-            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
-                t23 * s
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)

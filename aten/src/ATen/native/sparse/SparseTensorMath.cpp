@@ -713,7 +713,7 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
     return mul_out_sparse_csr(t_, src_.sparse_mask(t_), r);
   }
   if (t_.layout() == kStrided && src_.is_sparse_csr()) {
-    return mul_out_sparse_csr(t_, src_.sparse_mask(t_), r);
+    return mul_out_sparse_csr(t_.sparse_mask(src_), src_, r);
   }
   TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
   Tensor t = t_.to_sparse();
@@ -731,7 +731,7 @@ Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
     return mul_sparse_csr(self, other.sparse_mask(self));
   }
   if (self.layout() == kStrided && other.is_sparse_csr()) {
-    return mul_sparse_csr(self, other.sparse_mask(self));
+    return mul_sparse_csr(self.sparse_mask(other), other);
   }
   TORCH_CHECK(self.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
   TORCH_CHECK(other.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
