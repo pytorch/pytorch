@@ -206,7 +206,7 @@ $1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functio
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
 $1 = torch._ops.aten.as_strided_copy.default($0, [2], [2], 1)
-$2 = torch._ops.aten.add.Tensor($1, tensor(1))""")
+$2 = torch._ops.aten.add.Tensor($1, 1)""")
 
     def test_tensor_list_composite(self):
         def f(x):
@@ -217,7 +217,7 @@ $2 = torch._ops.aten.add.Tensor($1, tensor(1))""")
         logs = self.get_logs(f, torch.ones(2, 2))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten.copy.functional(tensor([[0., 0.],
+$1 = torch._ops.aten.copy.default(tensor([[0., 0.],
         [0., 0.]]), $0)
 $2 = torch._ops.aten.slice_scatter.default(tensor([[0., 0., 0., 0.],
         [0., 0., 0., 0.]]), $1, 1, 0, 2)
@@ -227,7 +227,7 @@ $3 = torch._ops.aten.slice_scatter.default(tensor([[0., 0., 0., 0.],
         [0., 0., 0., 0.]]), $2, 0, 0, 2)
 $4 = torch._ops.aten.slice_copy.Tensor($3, 0, 2, 4)
 $5 = torch._ops.aten.slice_copy.Tensor($4, 1, 2, 4)
-$6 = torch._ops.aten.copy.functional($5, $0)""")
+$6 = torch._ops.aten.copy.default($5, $0)""")
 
     def test_cat(self):
         def f(x):
@@ -335,9 +335,9 @@ $2 = torch._ops.aten.index_put.default($1, [tensor([0, 1, 2, 3])], tensor([0., 1
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
 $1 = torch._ops.aten.view_copy.default($0, [4, 2])
-$2 = torch._ops.aten.add.Tensor($1, tensor(1))
-$3 = torch._ops.aten.mul.Tensor($2, tensor(2))
-$4 = torch._ops.aten.div.Tensor($3, tensor(1))""")
+$2 = torch._ops.aten.add.Tensor($1, 1)
+$3 = torch._ops.aten.mul.Tensor($2, 2)
+$4 = torch._ops.aten.div.Tensor($3, 1)""")
 
     def test_metadata_change(self):
         def f(x):
@@ -474,7 +474,7 @@ $4 = torch._ops.aten.mul.Tensor($3, $3)""")
         logs = self.get_logs(f, torch.ones(2))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten.copy.functional(tensor([0., 0.]), $0)
+$1 = torch._ops.aten.copy.default(tensor([0., 0.]), $0)
 $2 = torch._ops.aten.add.Tensor($1, $0)""")
 
         # Test 2: copy_() with same dtype, different shape
@@ -482,7 +482,7 @@ $2 = torch._ops.aten.add.Tensor($1, $0)""")
         logs = self.get_logs(f, torch.ones(1))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten.copy.functional(tensor([0., 0.]), $0)
+$1 = torch._ops.aten.copy.default(tensor([0., 0.]), $0)
 $2 = torch._ops.aten.add.Tensor($1, $0)""")
 
         # Test 3: copy_() with different dtype, same shape
@@ -490,7 +490,7 @@ $2 = torch._ops.aten.add.Tensor($1, $0)""")
         logs = self.get_logs(f, torch.ones(2, dtype=torch.long))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten.copy.functional(tensor([0., 0.]), $0)
+$1 = torch._ops.aten.copy.default(tensor([0., 0.]), $0)
 $2 = torch._ops.aten.add.Tensor($1, $0)""")
 
         # Test 4: copy_() with different dtype, different shape
@@ -498,7 +498,7 @@ $2 = torch._ops.aten.add.Tensor($1, $0)""")
         logs = self.get_logs(f, torch.ones(1, dtype=torch.long))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten.copy.functional(tensor([0., 0.]), $0)
+$1 = torch._ops.aten.copy.default(tensor([0., 0.]), $0)
 $2 = torch._ops.aten.add.Tensor($1, $0)""")
 
     def test_fill_(self):
@@ -548,7 +548,7 @@ $3 = torch._ops.aten.fill.Scalar($2, 0)""")
         # with a functional + non-functional tensor, and wrapped the output appropriately.
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)
-$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
+$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
     def test_mixed_wrappers_invalid(self):
         x1_not_functional = torch.ones(4)
@@ -575,8 +575,8 @@ $3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
 
         # Since both wrappers were unctionalized, they both log "add"
         self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add.Tensor($0, tensor(1))
-$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
+$1 = torch._ops.aten.add.Tensor($0, 1)
+$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
         # Test 2: only the inner wrapper is "functionalized"
         x_only_inner_functional = InplaceLoggingTensor(torch._to_functional_tensor(LoggingTensor(torch.ones(4))))
@@ -586,8 +586,8 @@ $3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
 
         # Since only the inner wrapper is functionalized, then the inner (first) log is functionalized
         self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add.Tensor($0, tensor(1))
-$3 = torch._ops.aten.add_.Tensor($2, tensor(1))""")
+$1 = torch._ops.aten.add.Tensor($0, 1)
+$3 = torch._ops.aten.add_.Tensor($2, 1)""")
 
         # Test 3: only the inner wrapper is "functionalized"
         x_only_outer_functional = torch._to_functional_tensor(InplaceLoggingTensor(LoggingTensor(torch.ones(4))))
@@ -598,8 +598,8 @@ $3 = torch._ops.aten.add_.Tensor($2, tensor(1))""")
         # Only the outer add_ is functionalized
         # Since only the outer wrapper is functionalized, then the outer (second) log is functionalized
         self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add_.Tensor($0, tensor(1))
-$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
+$1 = torch._ops.aten.add_.Tensor($0, 1)
+$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
 if __name__ == '__main__':
     run_tests()
