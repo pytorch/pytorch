@@ -153,7 +153,10 @@ ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
 
 
 def parse_native_yaml_struct(
-    es: object, valid_tags: Set[str], ignore_keys: Set[DispatchKey], path: str = "<stdin>"
+    es: object,
+    valid_tags: Set[str],
+    ignore_keys: Set[DispatchKey],
+    path: str = "<stdin>",
 ) -> ParsedYaml:
     assert isinstance(es, list)
     rs: List[NativeFunction] = []
@@ -216,7 +219,9 @@ def parse_tags_yaml(path: str) -> Set[str]:
     return valid_tags
 
 
-def parse_native_yaml(path: str, tags_yaml_path: str, ignore_keys: Optional[Set[DispatchKey]] = None) -> ParsedYaml:
+def parse_native_yaml(
+    path: str, tags_yaml_path: str, ignore_keys: Optional[Set[DispatchKey]] = None
+) -> ParsedYaml:
     # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
@@ -2258,6 +2263,7 @@ def gen_declarations_yaml(
         "Declarations.yaml",
         lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]),
     )
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate ATen source files")

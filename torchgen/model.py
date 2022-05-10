@@ -414,7 +414,10 @@ class NativeFunction:
     # We parse both the NativeFunction + backend-specific information about it, which it stored in a corresponding BackendIndex.
     @staticmethod
     def from_yaml(
-        ei: Dict[str, object], loc: "Location", valid_tags: Set[str], ignore_keys: Optional[Set[DispatchKey]] = None
+        ei: Dict[str, object],
+        loc: "Location",
+        valid_tags: Set[str],
+        ignore_keys: Optional[Set[DispatchKey]] = None,
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
