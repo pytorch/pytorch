@@ -686,7 +686,37 @@ class MyParameterServer:
                     fut.set_result(result)
         return fut
 
-class RpcTestCommon():
+
+class MyConvNetForMNIST(nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(1, 16, 3, 1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, 3, 1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Flatten(1),
+            nn.Linear(4608, 128),
+            nn.ReLU(),
+            nn.Linear(128, 10),
+        ).to(device)
+        self.device = device
+
+    def forward(self, x, is_rref=False):
+        x = x.to_here() if is_rref else x
+        with torch.cuda.stream(torch.cuda.current_stream(self.device)):
+            # intentionally adding delay to current CUDA stream
+            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            return self.net(x)
+
+    def __getstate__(self):
+        # return an empty dict to avoid inspecting the model contents on the
+        # owner
+        return {}
+
+
+class RpcTestCommon:
     def _run_func_in_mode(self, to, fn, mode, args=None, kwargs=None):
         if mode == RPCExecMode.SYNC:
             return rpc.rpc_sync(to, fn, args=args, kwargs=kwargs)
@@ -774,6 +804,34 @@ class RpcTestCommon():
                 args=(x, y),
             )
             self.assertEqual(ret, x * 2)
+
+    def _run_uneven_workload(self, f, x, num_repeat=30):
+        # worker0 drives and waits for worker1 and worker2
+        # throughout the test.
+        if self.rank == 0:
+            self.assertTrue(self.world_size >= 3)
+
+            # Phase 1: Only worker1 has workload.
+            dst = "worker1"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, f, args=(x,))
+                futs.append(fut)
+
+            for fut in torch.futures.collect_all(futs).wait():
+                self.assertEqual(fut.wait(), 0)
+
+            # Phase 2: Only worker2 has workload.
+            # If join is not correctly implemented,
+            # worker2 should be closed by now.
+            dst = "worker2"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, f, args=(x,))
+                futs.append(fut)
+
+            for val in torch.futures.wait_all(futs):
+                self.assertEqual(val, 0)
 
     def _wait_all_workers(self, f, x):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
@@ -982,6 +1040,22 @@ class RpcTestCommon():
             self.assertEqual(len(rrefs), 2)
             self.assertEqual(rrefs[0].to_here(), expected1)
             self.assertEqual(rrefs[1].to_here(), expected2)
+
+    def _trainer_func(self, rref, sparse):
+        m = MyEmbeddingBagModel(sparse=sparse)
+        loss_fn = nn.MSELoss()
+        for i in range(10):
+            outputs = m(torch.rand(10, 10).long())
+            loss_fn(outputs, torch.rand(10, 10)).backward()
+            gradient = list(m.parameters())[0].grad
+            fut = rref.rpc_async().average(rref, i, gradient)
+            gradient = fut.wait()
+            if gradient.is_sparse:
+                gradient = gradient.to_dense().double()
+            ps_gradient = rref.rpc_sync().get_gradient(rref)
+            if ps_gradient.is_sparse:
+                ps_gradient = ps_gradient.to_dense().double()
+            self.assertTrue(torch.equal(gradient, ps_gradient))
 
     def _my_parameter_server(self, sparse):
         ps_rref = RRef(MyParameterServer(self.world_size - 1))
@@ -1484,34 +1558,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         for fut in futs:
             with self.assertRaisesRegex(ValueError, "Expected error"):
                 fut.wait()
-
-    def _run_uneven_workload(self, f, x, num_repeat=30):
-        # worker0 drives and waits for worker1 and worker2
-        # throughout the test.
-        if self.rank == 0:
-            self.assertTrue(self.world_size >= 3)
-
-            # Phase 1: Only worker1 has workload.
-            dst = "worker1"
-            futs = []
-            for _ in range(num_repeat):
-                fut = rpc.rpc_async(dst, f, args=(x,))
-                futs.append(fut)
-
-            for fut in torch.futures.collect_all(futs).wait():
-                self.assertEqual(fut.wait(), 0)
-
-            # Phase 2: Only worker2 has workload.
-            # If join is not correctly implemented,
-            # worker2 should be closed by now.
-            dst = "worker2"
-            futs = []
-            for _ in range(num_repeat):
-                fut = rpc.rpc_async(dst, f, args=(x,))
-                futs.append(fut)
-
-            for val in torch.futures.wait_all(futs):
-                self.assertEqual(val, 0)
 
     @dist_init(setup_rpc=False)
     def test_wait_all_workers_timeout(self):
@@ -4674,25 +4720,74 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         dist.barrier()
 
-    def _trainer_func(self, rref, sparse):
-        m = MyEmbeddingBagModel(sparse=sparse)
-        loss_fn = nn.MSELoss()
-        for i in range(10):
-            outputs = m(torch.rand(10, 10).long())
-            loss_fn(outputs, torch.rand(10, 10)).backward()
-            gradient = list(m.parameters())[0].grad
-            fut = rref.rpc_async().average(rref, i, gradient)
-            gradient = fut.wait()
-            if gradient.is_sparse:
-                gradient = gradient.to_dense().double()
-            ps_gradient = rref.rpc_sync().get_gradient(rref)
-            if ps_gradient.is_sparse:
-                ps_gradient = ps_gradient.to_dense().double()
-            self.assertTrue(torch.equal(gradient, ps_gradient))
-
     @dist_init
     def test_my_parameter_server(self):
         self._my_parameter_server(False)
+
+    @staticmethod
+    def _meta_tensor_method(tensors, device_types, sizes, numels, dtypes, strides, return_rrefs):
+        tensors = [t.to_here() if isinstance(t, torch._C._distributed_rpc.PyRRef) else t for t in tensors]
+        for tensor, device_type, size, numel, dtype, stride in zip(tensors, device_types, sizes, numels, dtypes,
+                                                                   strides):
+            assert tensor.device.type == device_type, f"{tensor.device.type} vs {device_type}"
+            assert tensor.size() == size, f"{tensor.size} vs {size}"
+            assert tensor.numel() == numel, f"{tensor.numel()} vs {numel}"
+            assert tensor.dtype == dtype, f"{tensor.dtype} vs {dtype}"
+            assert tensor.stride() == stride, f"{tensor.stride()} vs {stride}"
+        return [RRef(t) if return_rrefs else t for t in tensors]
+
+    def _test_meta_tensor(self, to, tensors, device_types, sizes, numels, dtypes, strides, return_rrefs):
+        returned_tensors = rpc.rpc_sync(to, RpcTest._meta_tensor_method,
+                                        args=(tensors, device_types, sizes, numels, dtypes, strides, return_rrefs))
+        returned_tensors = [t.to_here() if isinstance(t, torch._C._distributed_rpc.PyRRef) else t for t in
+                            returned_tensors]
+        for tensor, device_type, size, numel, dtype, stride in zip(returned_tensors, device_types, sizes, numels,
+                                                                   dtypes, strides):
+            assert isinstance(tensor, torch.Tensor), f"{type(tensor)}"
+            self.assertEqual(tensor.device.type, device_type)
+            self.assertEqual(tensor.size(), size)
+            self.assertEqual(tensor.numel(), numel)
+            self.assertEqual(tensor.dtype, dtype)
+            self.assertEqual(tensor.stride(), stride)
+
+    @dist_init
+    def test_meta_one_tensor(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        for return_rrefs in [False, True]:
+            self._test_meta_tensor(dst_rank,
+                                   [torch.ones(42, device='meta')], ['meta'],
+                                   [torch.Size((42,))], [42],
+                                   [torch.float], [(1,)],
+                                   return_rrefs=return_rrefs)
+
+    @dist_init
+    def test_meta_one_tensor_rref(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        for return_rrefs in [False, True]:
+            self._test_meta_tensor(dst_rank,
+                                   [RRef(torch.ones(6, 7, device='meta', dtype=torch.int))], ['meta'],
+                                   [torch.Size((6, 7))], [42],
+                                   [torch.int], [(7, 1)],
+                                   return_rrefs=return_rrefs)
+
+    @dist_init
+    def test_meta_multiple_tensors(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        for return_rrefs in [False, True]:
+            self._test_meta_tensor(dst_rank,
+                                   [torch.empty(42, device='meta'),
+                                    torch.empty(6, 7, device='cpu', dtype=torch.bool),
+                                    RRef(torch.empty(2, 21, device='meta', dtype=torch.int)),
+                                    RRef(torch.empty(3, 14, device='cpu', dtype=torch.long))],
+                                   ['meta', 'cpu', 'meta', 'cpu'],
+                                   [torch.Size((42,)), torch.Size((6, 7)), torch.Size((2, 21)), torch.Size((3, 14))],
+                                   [42, 42, 42, 42],
+                                   [torch.float, torch.bool, torch.int, torch.long],
+                                   [(1,), (7, 1), (21, 1), (14, 1)],
+                                   return_rrefs=return_rrefs)
 
 
 class CudaRpcTest(RpcAgentTestFixture):
@@ -5211,34 +5306,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_rref_proxy_timeout(self):
         for rpc_api in ["rpc_sync", "rpc_async", "remote"]:
             self._test_rref_proxy_timeout(rpc_api)
-
-class MyConvNetForMNIST(nn.Module):
-    def __init__(self, device):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(1, 16, 3, 1),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, 3, 1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Flatten(1),
-            nn.Linear(4608, 128),
-            nn.ReLU(),
-            nn.Linear(128, 10),
-        ).to(device)
-        self.device = device
-
-    def forward(self, x, is_rref=False):
-        x = x.to_here() if is_rref else x
-        with torch.cuda.stream(torch.cuda.current_stream(self.device)):
-            # intentionally adding delay to current CUDA stream
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
-            return self.net(x)
-
-    def __getstate__(self):
-        # return an empty dict to avoid inspecting the model contents on the
-        # owner
-        return {}
 
     @dist_init
     def test_send_to_rank_sparse(self):
