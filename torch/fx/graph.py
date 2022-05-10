@@ -151,7 +151,7 @@ class _Namespace:
             num += 1
             candidate = f'{base}_{num}'
 
-        self._used_names.setdefault(candidate)
+        self._used_names.setdefault(candidate, 0)
         if obj is None:
             self._unassociated_names.add(candidate)
         else:
@@ -680,6 +680,7 @@ class Graph:
         memo = memo if memo else {}
         g = Graph(tracer_cls=self._tracer_cls)
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
+        g._codegen = copy.deepcopy(self._codegen)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
         g.output(output_val, type_expr=getattr(old_output_val, 'type', None))

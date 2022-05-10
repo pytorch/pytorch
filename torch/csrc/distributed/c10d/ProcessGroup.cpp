@@ -50,7 +50,8 @@ std::string opTypeToString(OpType opType) {
   return "UNKNOWN";
 }
 
-bool isP2POp(OpType opType) {
+bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
+  if (batchP2P) return false;
   return opType == OpType::SEND || opType == OpType::RECV ||
       opType == OpType::RECVANYSOURCE;
 }
@@ -77,7 +78,7 @@ ProcessGroup::Work::Work(
           inputs.emplace_back(tensor);
         }
       }
-      recordingFunction->before(profilingTitle, inputs);
+      recordingFunction->before(profilingTitle, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
       std::function<void()> end_handler = [recordingFunction]() {
         recordingFunction->end();
       };
