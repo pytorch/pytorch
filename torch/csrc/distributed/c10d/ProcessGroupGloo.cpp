@@ -768,7 +768,7 @@ ProcessGroupGloo::ProcessGroupGloo(
 
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupGloo initialized with the following options:"
-            << "\nTIMEOUT(ms): " << options->timeout;
+            << "\nTIMEOUT(ms): " << options->timeout.count();
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
