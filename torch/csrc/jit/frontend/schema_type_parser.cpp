@@ -20,7 +20,9 @@ using c10::FloatType;
 using c10::FutureType;
 using c10::GeneratorType;
 using c10::IntType;
+using c10::LayoutType;
 using c10::ListType;
+using c10::MemoryFormatType;
 using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
@@ -46,8 +48,8 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Generator", c10::TypeFactory::get<GeneratorType>()},
       {"Dimname", c10::TypeFactory::get<StringType>()},
       {"ScalarType", c10::TypeFactory::get<ScalarTypeType>()},
-      {"Layout", c10::TypeFactory::get<IntType>()},
-      {"MemoryFormat", c10::TypeFactory::get<IntType>()},
+      {"Layout", c10::TypeFactory::get<LayoutType>()},
+      {"MemoryFormat", c10::TypeFactory::get<MemoryFormatType>()},
       {"Storage", c10::TypeFactory::get<StorageType>()},
       {"QScheme", c10::TypeFactory::get<QSchemeType>()},
       {"Quantizer", c10::TypeFactory::get<QuantizerType>()},
@@ -399,7 +401,7 @@ std::tuple</*fake*/TypePtr, /*real*/TypePtr, c10::optional<AliasInfo>> SchemaTyp
     }
   } else {
     real_value = parseBaseType();
-    if (real_value->kind() == ScalarTypeType::Kind) {
+    if (real_value->kind() == ScalarTypeType::Kind || real_value->kind() == MemoryFormatType::Kind || real_value->kind() == LayoutType::Kind) {
       fake_value = c10::TypeFactory::get<IntType>();
     } else {
       fake_value = real_value;
