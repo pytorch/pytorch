@@ -537,13 +537,6 @@
     "set_grad_enabled",
     "variable"
   ],
-  "torch.autograd.anomaly_mode": [
-    "Any"
-  ],
-  "torch.autograd.forward_ad": [
-    "Any",
-    "namedtuple"
-  ],
   "torch.autograd.function": [
     "Any",
     "List",
@@ -554,18 +547,6 @@
   "torch.autograd.functional": [
     "List",
     "Tuple"
-  ],
-  "torch.autograd.gradcheck": [
-    "Callable",
-    "Dict",
-    "Iterable",
-    "List",
-    "Optional",
-    "Tuple",
-    "Union",
-    "is_tensor_like",
-    "product",
-    "vmap"
   ],
   "torch.autograd.graph": [
     "Any",
