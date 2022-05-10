@@ -15,23 +15,6 @@ def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
 
-@torch.library.impl(meta_lib, "inverse")
-def meta_inverse(self):
-    if self.numel() == 0:
-        return self.new_empty(self.size())
-    inverse = self.new_empty(self.size())
-    inverse.transpose_(-2, -1)
-    return inverse
-
-@torch.library.impl(meta_lib, "inverse.out")
-def meta_inverse_out(self, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(torch.inverse(self))
-
-@torch.library.impl(meta_lib, "max")
-def meta_max(self):
-    return self.new_empty(())
-
 @torch.library.impl(meta_lib, "abs")
 def meta_abs(self):
     if self.is_complex():
@@ -45,6 +28,10 @@ def meta_abs(self):
 def meta_abs_out(self, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.abs(self))
+
+@torch.library.impl(meta_lib, "max")
+def meta_max(self):
+    return self.new_empty(())
 
 @torch.library.impl(meta_lib, "min")
 def meta_min(self):

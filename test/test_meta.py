@@ -60,6 +60,7 @@ meta_exclude_set = {
     torch.Tensor.diag,  # MISSING aten::diag.out
     torch.Tensor.diagflat,  # MISSING aten::diag.out
     torch.Tensor.dot,  # MISSING aten::dot
+    torch.Tensor.eig,  # MISSING aten::_local_scalar_dense
     torch.Tensor.equal,  # MISSING aten::equal
     torch.Tensor.flip,  # MISSING aten::flip
     torch.Tensor.fliplr,  # MISSING aten::flip
@@ -75,6 +76,7 @@ meta_exclude_set = {
     torch.Tensor.istft,  # MISSING aten::view_as_complex
     torch.Tensor.kthvalue,  # MISSING aten::kthvalue.values
     torch.Tensor.logcumsumexp,  # MISSING aten::_logcumsumexp
+    torch.Tensor.logdet,  # MISSING aten::_local_scalar_dense
     torch.Tensor.logical_and,  # MISSING aten::logical_and.out
     torch.Tensor.logical_and_,  # MISSING aten::logical_and.out
     torch.Tensor.logical_not,  # MISSING aten::logical_not.out
@@ -83,6 +85,7 @@ meta_exclude_set = {
     torch.Tensor.logical_xor,  # MISSING aten::logical_xor.out
     torch.Tensor.logical_xor_,  # MISSING aten::logical_xor.out
     torch.Tensor.logit,  # MISSING aten::logit
+    torch.Tensor.logsumexp,  # MISSING aten::abs
     torch.Tensor.lstsq,  # MISSING aten::lstsq
     torch.Tensor.masked_select,  # MISSING aten::masked_select
     torch.Tensor.matmul,  # MISSING aten::dot
@@ -242,6 +245,7 @@ meta_exclude_set = {
     torch.diag,  # MISSING aten::diag.out
     torch.diagflat,  # MISSING aten::diag.out
     torch.dot,  # MISSING aten::dot
+    torch.eig,  # MISSING aten::_local_scalar_dense
     torch.equal,  # MISSING aten::equal
     torch.eye,  # MISSING aten::eye.m_out
     torch.fake_quantize_per_channel_affine,  # MISSING aten::fake_quantize_per_channel_affine_cachemask
@@ -286,6 +290,7 @@ meta_exclude_set = {
     torch.histogram,  # MISSING aten::histogram.bin_ct
     torch.histogramdd,  # MISSING aten::_histogramdd_bin_edges
     torch.inner,  # MISSING aten::tensordot.out
+    torch.inverse,  # MISSING aten::_local_scalar_dense
     torch.isnan,  # MISSING aten::isnan
     torch.kthvalue,  # MISSING aten::kthvalue.values
     torch.layer_norm,  # MISSING aten::native_batch_norm
@@ -316,11 +321,13 @@ meta_exclude_set = {
     torch.linalg.tensorsolve,  # MISSING aten::linalg_solve
     torch.linalg.vector_norm,  # MISSING aten::linalg_vector_norm
     torch.logcumsumexp,  # MISSING aten::_logcumsumexp
+    torch.logdet,  # MISSING aten::_local_scalar_dense
     torch.logical_and,  # MISSING aten::logical_and.out
     torch.logical_not,  # MISSING aten::logical_not.out
     torch.logical_or,  # MISSING aten::logical_or.out
     torch.logical_xor,  # MISSING aten::logical_xor.out
     torch.logit,  # MISSING aten::logit
+    torch.logsumexp,  # MISSING aten::abs
     torch.lstsq,  # MISSING aten::lstsq
     torch.masked_select,  # MISSING aten::masked_select
     torch.matmul,  # MISSING aten::dot
@@ -370,6 +377,7 @@ meta_exclude_set = {
     torch.nn.functional.multilabel_margin_loss,  # MISSING aten::multilabel_margin_loss_forward
     torch.nn.functional.multilabel_soft_margin_loss,  # MISSING aten::log_sigmoid_forward
     torch.nn.functional.nll_loss,  # MISSING aten::nll_loss2d_forward
+    torch.nn.functional.one_hot,  # MISSING aten::_local_scalar_dense
     torch.nn.functional.pdist,  # MISSING aten::_pdist_forward
     torch.nn.functional.prelu,  # MISSING aten::prelu
     torch.nn.functional.relu,  # MISSING aten::relu
@@ -377,6 +385,7 @@ meta_exclude_set = {
     torch.nn.functional.rrelu,  # MISSING aten::rrelu_with_noise
     torch.nn.functional.unfold,  # MISSING aten::im2col
     torch.nonzero,  # MISSING aten::nonzero
+    torch.normal,  # MISSING aten::_local_scalar_dense
     torch.orgqr,  # MISSING aten::linalg_householder_product
     torch.ormqr,  # MISSING aten::ormqr
     torch.pinverse,  # MISSING aten::where.self
@@ -398,6 +407,7 @@ meta_exclude_set = {
     torch.slogdet,  # MISSING aten::linalg_slogdet
     torch.solve,  # MISSING aten::_solve_helper
     torch.special.logit,  # MISSING aten::logit
+    torch.special.logsumexp,  # MISSING aten::abs.out
     torch.special.multigammaln,  # MISSING aten::_local_scalar_dense
     torch.square,  # MISSING aten::square.out
     torch.std,  # MISSING aten::std.correction
@@ -504,7 +514,6 @@ meta_exclude_set |= {
     torch.Tensor.__index__,
     torch.Tensor.__contains__,
     torch.Tensor.cpu,
-    torch.isclose,
     torch.Tensor.to,
     torch.Tensor.tolist,
     torch.Tensor.unbind,
