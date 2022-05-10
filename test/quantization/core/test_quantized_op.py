@@ -5176,11 +5176,11 @@ class TestQuantizedConv(TestCase):
            use_relu=st.booleans(),
            # TODO: enable channelwise
            use_channelwise=st.sampled_from([False]))
-    # @skipIfNoFBGEMM
-    # @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    # @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
-    #                "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
-    #                "after it is built by default")
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     def test_qconv1d_cudnn(
         self,
         batch_size,
