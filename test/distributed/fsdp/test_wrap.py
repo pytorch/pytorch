@@ -18,6 +18,7 @@ from torch.distributed.fsdp.wrap import (
     default_auto_wrap_policy,
     enable_wrap,
     wrap,
+    transformer_auto_wrap_policy,
 )
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
@@ -27,6 +28,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     FSDPInitMode,
     _maybe_cuda,
+    TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -36,6 +38,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
 )
+from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 
 class WrapMethod(Enum):
     FSDP_CTOR = auto()
@@ -276,6 +279,23 @@ class TestAutoWrap(TestCase):
         model = FSDP(seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy)
         TestFSDPWrap.NestedSequentialModel.verify_model_all_wrapped(self, model)
 
+    def test_transformer_auto_wrap_policy(self):
+        model = TransformerWithSharedParams(group=self.process_group)
+        my_auto_wrap_policy = functools.partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer}
+        )
+        fsdp_model = FSDP(
+            model,
+            process_group=self.process_group,
+            auto_wrap_policy=my_auto_wrap_policy
+        )
+        self.assertTrue(isinstance(fsdp_model, FSDP))
+        for layer in fsdp_model.module.module.transformer.encoder.layers:
+            self.assertTrue(isinstance(layer, FSDP))
+        for layer in fsdp_model.module.module.transformer.decoder.layers:
+            self.assertTrue(isinstance(layer, FSDP))
+
     def test_auto_wrap_api(self):
         """
         Test to ensure with auto wrap, we wrap child modules correctly based on the min_num_params.
@@ -415,6 +435,60 @@ class TestAutoWrap(TestCase):
         except FileNotFoundError:
             pass
 
+    @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
+    def test_always_wrap_with_ignored_modules(self, wrap_method: WrapMethod):
+        sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
+        ignored_modules = [sequential[1], sequential[2][0]]
+        fsdp_kwargs = {
+            "process_group": self.process_group,
+            "auto_wrap_policy": always_wrap_policy,
+            "ignored_modules": ignored_modules,
+        }
+        if wrap_method == WrapMethod.FSDP_CTOR:
+            model = FSDP(sequential, **fsdp_kwargs)
+        elif wrap_method == WrapMethod.WRAP_API:
+            with enable_wrap(wrapper_cls=FSDP, **fsdp_kwargs):
+                model = wrap(sequential)
+        else:
+            assert 0, f"Unsupported wrap method: {wrap_method}"
+        # All non-ignored modules should be wrapped with FSDP
+        self.assertTrue(isinstance(model, FSDP))
+        self.assertTrue(isinstance(model.module[0], FSDP))
+        self.assertTrue(isinstance(model.module[1], nn.Linear))
+        self.assertTrue(isinstance(model.module[2], FSDP))
+        self.assertTrue(isinstance(model.module[2].module[0], nn.Linear))
+        self.assertTrue(isinstance(model.module[2].module[1], FSDP))
+
+    @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
+    def test_auto_wrap_with_ignored_modules(self, wrap_method: WrapMethod):
+        sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
+        ignored_modules = [sequential[1], sequential[2][0]]
+        my_auto_wrap_policy = functools.partial(
+            default_auto_wrap_policy, min_num_params=40,
+        )
+        fsdp_kwargs = {
+            "process_group": self.process_group,
+            "auto_wrap_policy": my_auto_wrap_policy,
+            "ignored_modules": ignored_modules,
+        }
+        if wrap_method == WrapMethod.FSDP_CTOR:
+            model = FSDP(sequential, **fsdp_kwargs)
+        elif wrap_method == WrapMethod.WRAP_API:
+            with enable_wrap(wrapper_cls=FSDP, **fsdp_kwargs):
+                model = wrap(sequential)
+        else:
+            assert 0, f"Unsupported wrap method: {wrap_method}"
+        # Since the 2nd linear (`sequential[1]`) is ignored, the wrapping
+        # policy does not exceed the parameter threshold before the inner
+        # sequential (`sequential[2]`) anymore; hence, it flattens
+        # `sequential[0]` and `sequential[2][0]` into `model` and leaves
+        # `sequential[1]` and `sequential[2][1]` as-is since they are ignored
+        self.assertTrue(isinstance(model, FSDP))
+        self.assertTrue(isinstance(model.module[0], nn.Linear))
+        self.assertTrue(isinstance(model.module[1], nn.Linear))
+        self.assertTrue(isinstance(model.module[2], nn.Sequential))
+        self.assertTrue(isinstance(model.module[2][0], nn.Linear))
+        self.assertTrue(isinstance(model.module[2][1], nn.Linear))
 
 
 instantiate_parametrized_tests(TestFSDPWrap)

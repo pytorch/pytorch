@@ -27,7 +27,8 @@ TORCH_CUDA_CU_API TensorView* castOp(DataType dtype, TensorView* v1);
 // Perform unary op type and return the output
 TORCH_CUDA_CU_API Val* unaryOp(UnaryOpType type, Val* v1);
 TORCH_CUDA_CU_API TensorView* unaryOp(UnaryOpType type, TensorView* v1);
-
+TORCH_CUDA_CU_API Val* unaryIsOp(UnaryOpType type, Val* v1);
+TORCH_CUDA_CU_API TensorView* unaryIsOp(UnaryOpType type, TensorView* v1);
 TORCH_CUDA_CU_API Val* unaryOp(
     UnaryOpType type,
     Val* v1,
@@ -88,7 +89,8 @@ TORCH_CUDA_CU_API TensorView* reductionOp(
     const std::vector<int>& axes,
     Val* init,
     TensorView* v1,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 //! Auxiliary Struct holding result of
 //! a single welford op in ternsorview
@@ -224,6 +226,24 @@ TORCH_CUDA_CU_API TensorView* trunc(TensorView*);
 // not
 TORCH_CUDA_CU_API Val* notOp(Val*);
 TORCH_CUDA_CU_API TensorView* notOp(TensorView*);
+// isfinite
+TORCH_CUDA_CU_API Val* isfinite(Val*);
+TORCH_CUDA_CU_API TensorView* isfinite(TensorView*);
+// isinf
+TORCH_CUDA_CU_API Val* isinf(Val*);
+TORCH_CUDA_CU_API TensorView* isinf(TensorView*);
+// isnan
+TORCH_CUDA_CU_API Val* isnan(Val*);
+TORCH_CUDA_CU_API TensorView* isnan(TensorView*);
+// isneginf
+TORCH_CUDA_CU_API Val* isneginf(Val*);
+TORCH_CUDA_CU_API TensorView* isneginf(TensorView*);
+// isposinf
+TORCH_CUDA_CU_API Val* isposinf(Val*);
+TORCH_CUDA_CU_API TensorView* isposinf(TensorView*);
+// isreal
+TORCH_CUDA_CU_API Val* isreal(Val*);
+TORCH_CUDA_CU_API TensorView* isreal(TensorView*);
 
 // Broadcasts v1 based on bool vector. Size of broadcast bool vector should be
 // the number of dims desired in the broadcasted tensor. This vector should be
@@ -359,7 +379,8 @@ TORCH_CUDA_CU_API TensorView* xorOp(TensorView* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* sum(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 TORCH_CUDA_CU_API TensorView* max(
     TensorView* v1,

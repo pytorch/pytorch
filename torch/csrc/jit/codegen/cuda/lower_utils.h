@@ -3,6 +3,7 @@
 
 #include <c10/macros/Export.h>
 
+#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
@@ -139,6 +140,62 @@ std::vector<Expr*> replaceInputsInExpr(
 
 // True if an IterDomain does not materialize a loop
 bool isTrivialIterDomain(IterDomain* id);
+
+// Go through all expressions and compute a local ordering of loops. operator<
+// is implemented based on the concrete_id_dependencies analysis done. If
+// there's no dependency between two IDs then order doesn't mater, otherwise we
+// can tell which is inner most by checking if there's any dependency
+// relationships.
+//
+// Dependency relationships in concrete_id_dependencies has a "global" view in
+// the fusion, so it can resolve ordering by only looking at id's and the
+// dependency map.
+//
+// For example two expressions may have domains: [I0], [I1] Yet we
+// won't know the ordering unless we see a domain with: [I0, I1]. This happened
+// in advancedIndexing9 (also see AdvancedLowering6) test when merging T5 with
+// the group containing T10 (cache of T5, which is post broadcasted output) and
+// T6(pre broadcasted output).
+// T5 had the domain [0, 1, 2, 3, 4] produce at 3
+// T6 had the domain [0, 3, 4] compute at 3
+// Merging [0, 1, 2] and [0, 3, 4] resulted in the domain [0, 3, 4, 1, 2]
+//
+// If ID's are not in filter, we don't care about their ordering and ignore
+// them. This is because we're only focused on loops we will have to merge
+// across groups. If the domain is not in a produce at position in the producer
+// edges, or a compute at position in the consumer edges, the expressions we
+// look at may not have a unique ordering.
+
+struct TORCH_CUDA_CU_API IterDomainDependencySorter {
+  IterDomainDependencySorter(
+      const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
+          concrete_id_dependencies,
+      const ComputeAtMap& compute_at_map)
+      : concrete_id_dependencies_(concrete_id_dependencies),
+        compute_at_map_(compute_at_map) {}
+
+  // Return true if id0 should be before id1
+  // Orders such that if x maps to {y}, x comes before y in final ordering.
+  inline bool operator()(IterDomain* id0, IterDomain* id1) {
+    auto concrete_id_0 = compute_at_map_.getConcreteMappedID(id0);
+    auto concrete_id_1 = compute_at_map_.getConcreteMappedID(id1);
+
+    if (concrete_id_dependencies_.find(concrete_id_0) !=
+        concrete_id_dependencies_.end()) {
+      const auto& dependencies_0 = concrete_id_dependencies_.at(concrete_id_0);
+      // if id0 depends on id1 it means id1 is inside id0, so id0 < id1
+      if (dependencies_0.count(concrete_id_1)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
+      concrete_id_dependencies_;
+  const ComputeAtMap& compute_at_map_;
+};
 
 } // namespace cuda
 } // namespace fuser
