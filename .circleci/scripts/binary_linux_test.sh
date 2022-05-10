@@ -88,7 +88,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     else
 
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
-      CUDA_PACKAGE = "cudatoolkit"
+      CUDA_PACKAGE="cudatoolkit"
       if [[ "$DESIRED_CUDA" == "cu116" ]]; then
         CUDA_PACKAGE="cuda"
       fi
