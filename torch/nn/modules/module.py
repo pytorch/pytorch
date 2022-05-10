@@ -1,5 +1,5 @@
 from collections import OrderedDict, namedtuple
-from collections.abc import Mapping
+import collections.abc
 import itertools
 import warnings
 import functools
@@ -1556,9 +1556,9 @@ class Module:
             exists in :attr:`state_dict`, :meth:`load_state_dict` will raise a
             ``RuntimeError``.
         """
-        if not isinstance(state_dict, Mapping):
+        if not isinstance(state_dict, collections.abc.Mapping):
             raise TypeError("Expected state_dict to be dict-like, got {}.".format(type(state_dict)))
-        
+
         missing_keys: List[str] = []
         unexpected_keys: List[str] = []
         error_msgs: List[str] = []
