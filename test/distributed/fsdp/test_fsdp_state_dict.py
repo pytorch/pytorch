@@ -484,6 +484,35 @@ class TestFSDPStateDict(FSDPTest):
             self.assertEqual(tensor.data_ptr(), sd2[tensor_name].data_ptr())
             self.assertEqual(sd1[tensor_name].data_ptr(), sd2[tensor_name].data_ptr())
 
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_with_ignored_params(self):
+        model = Model(wrap_fsdp=True, register_buffer=True).cuda()
+        #ignored_params = list(model.outer.parameters()) + list(model.outer.buffers())
+        # outer.bias is sharded, but not weight.
+        ignored_params = [model.outer.weight] + list(model.outer.buffers())
+        ignored_tensor_to_tensor_name = {
+            model.outer.weight: "outer.weight",
+            model.outer.buffer: "outer.buffer",
+        }
+        FSDP._set_params_and_buffers_to_ignore_for_model(
+            model, ignored_params
+        )
+        print(model.outer.weight.shape)
+        # print(model.inner.weight.shape)
+        fsdp_model = FSDP(model).cuda()
+        print(fsdp_model.outer.weight.shape)
+        sd = fsdp_model.state_dict()
+        for tensor, tensor_name in ignored_tensor_to_tensor_name.items():
+            self.assertTrue(tensor_name in sd)
+            self.assertEqual(tensor.data_ptr(), sd[tensor_name].data_ptr())
+
+        inp = torch.randn(10, 4, device='cuda')
+        for _ in range(6):
+            fsdp_model(inp).sum().backward()
+
+
+
+
 
 instantiate_parametrized_tests(TestFSDPStateDict)
 

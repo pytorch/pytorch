@@ -638,13 +638,32 @@ class FullyShardedDataParallel(nn.Module):
         # to their original type (which may not be the same as that of the
         # parameters in the model) when checkpointing.
         self._orig_buffer_dtypes: Dict[str, torch.dtype] = {}
+        if hasattr(module, "_fsdp_params_and_buffers_to_ignore"):
+            self.parameters_to_ignore = set(module._fsdp_params_and_buffers_to_ignore)
+            self.parameters_to_ignore_to_name = {}
+            for module_name, mod in module.named_modules():
+                for param_name, param in mod.named_parameters(recurse=False):
+                    if param in self.parameters_to_ignore:
+                        self.parameters_to_ignore_to_name[param] = clean_param_name(f"{module_name}.{param_name}")
+                for buffer_name, buffer in mod.named_buffers(recurse=False):
+                    if buffer in self.parameters_to_ignore:
+                        self.parameters_to_ignore_to_name[buffer] = clean_param_name(f"{module_name}.{buffer_name}")
+            # param_to_name = _get_param_to_param_name(module)
+            # self.parameters_to_ignore_to_name = {p : param_to_name[p] for p in self.parameters_to_ignore}
+        else:
+            self.parameters_to_ignore = []
+            self.parameters_to_ignore_to_name = {}
+
+        if self.rank == 0:
+            print(f"Got {len(self.parameters_to_ignore)} params to ignore.")
 
         # Only handle params which are not already sharded. This enables
         # sharding individual layers of a Module, with an outer wrapper to
         # shard any leftover parameters.
         params = [
             p for p in module.parameters()
-            if p not in ignored_params and not isinstance(p, FlatParameter)
+            if p not in ignored_params and p not in self.parameters_to_ignore and not isinstance(p, FlatParameter)
+            # and p not in self.parameters_to_ignore
         ]
 
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
@@ -662,7 +681,7 @@ class FullyShardedDataParallel(nn.Module):
 
         # Make sure all parameters are sharded.
         for n, p in self.named_parameters():
-            if p not in ignored_params and not isinstance(p, FlatParameter):
+            if p not in ignored_params and not isinstance(p, FlatParameter) and p not in self.parameters_to_ignore:
                 raise RuntimeError(
                     f"found unflattened parameter: {n} ; {p.size()} {p.__class__}"
                 )
@@ -766,6 +785,12 @@ class FullyShardedDataParallel(nn.Module):
             not isinstance(child, FlattenParamsWrapper)
         )
         return ignored_modules
+
+    @staticmethod
+    def _set_params_and_buffers_to_ignore_for_model(
+        module, params_and_buffers_to_ignore
+    ):
+        module._fsdp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
 
     def _get_ignored_parameters(self) -> Set[torch.nn.Parameter]:
         """Returns the parameters of the modules in ``ignored_modules`` as a
@@ -1404,6 +1429,7 @@ class FullyShardedDataParallel(nn.Module):
                 # Give each non-root FSDP module an alias to the root's
                 # execution order data structure
                 m._exec_order_data = self._exec_order_data
+                # m.parameters_to_ignore.extend(self.parameters_to_ignore)
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -1540,6 +1566,16 @@ class FullyShardedDataParallel(nn.Module):
         ignored_names = set(n for n, _ in ignored_named_params)
         ignored_names.update(n for n, _ in ignored_named_buffers)
         for key in state_dict:
+            cleaned = clean_param_name(key)
+            names_to_ignore = self.parameters_to_ignore_to_name.values()
+            print(names_to_ignore)
+            if cleaned in names_to_ignore:
+                continue
+            # t = state_dict[key]
+            # dps = {p.data_ptr() for p in self.parameters_to_ignore}
+            # if t.data_ptr() in dps:
+            #     #raise ValueError("found")
+            #     continue
             # Do not need to clone ignored parameters and buffers since they
             # are not sharded
             if clean_param_name(key) in ignored_names:
