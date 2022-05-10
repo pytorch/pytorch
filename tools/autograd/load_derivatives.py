@@ -32,7 +32,11 @@ from torchgen.api.types import (
     stringT,
 )
 from torchgen.api import cpp
-from torchgen.gen import parse_native_yaml, get_grouped_by_view_native_functions
+from torchgen.gen import (
+    parse_native_yaml,
+    get_grouped_by_view_native_functions,
+    get_grouped_native_functions,
+)
 from torchgen.context import with_native_function
 from torchgen.model import (
     FunctionSchema,
@@ -40,6 +44,7 @@ from torchgen.model import (
     Variant,
     Type,
     NativeFunctionsViewGroup,
+    NativeFunctionsGroup,
     OperatorName,
 )
 from torchgen.utils import IDENT_REGEX, split_name_params, YamlLoader, concatMap
@@ -71,6 +76,28 @@ def add_view_copy_derivatives(
     return view_copy_differentiability_infos
 
 
+def add_generated_functional_derivatives(
+    infos: List[DifferentiabilityInfo],
+    grouped_native_functions: List[NativeFunctionsGroup],
+) -> List[DifferentiabilityInfo]:
+    # Get the map from each mutable op's name to its corresponding group
+    mutable_name_to_group: Dict[OperatorName, NativeFunctionsGroup] = {}
+    for g in grouped_native_functions:
+        if g.inplace is not None:
+            mutable_name_to_group[g.inplace.func.name] = g
+        if g.mutable is not None:
+            mutable_name_to_group[g.mutable.func.name] = g
+
+    generated_functional_differentiability_infos = []
+    for info in infos:
+        maybe_group = mutable_name_to_group.get(info.func.func.name, None)
+        if maybe_group is not None and "generated" in maybe_group.functional.tags:
+            functional_info = info.create_functional_derivative(maybe_group)
+            generated_functional_differentiability_infos.append(functional_info)
+
+    return generated_functional_differentiability_infos
+
+
 def load_derivatives(
     derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str
 ) -> Sequence[DifferentiabilityInfo]:
@@ -83,6 +110,11 @@ def load_derivatives(
             definitions = yaml.load(f, Loader=YamlLoader)
 
         funcs = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
+        grouped_native_functions = [
+            g
+            for g in get_grouped_native_functions(funcs)
+            if isinstance(g, NativeFunctionsGroup)
+        ]
         # From the parsed native functions, separate out the (generated) view_copy functions,
         # so we can generate derivatives for them separately.
         native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)
@@ -123,6 +155,7 @@ def load_derivatives(
             for defn in definitions
         ]
         infos += add_view_copy_derivatives(infos, view_groups)
+        infos += add_generated_functional_derivatives(infos, grouped_native_functions)
 
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos
 

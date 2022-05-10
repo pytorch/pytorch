@@ -40,19 +40,19 @@ from typing import List, Optional, Union, Tuple, Callable
 # See Note: [Out ops with functional variants that don't get grouped properly]
 OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
     # This has a functional variant, but it's currently marked private. Promote to public?
-    'adaptive_avg_pool3d_backward.grad_input',
+    "adaptive_avg_pool3d_backward.grad_input",
     # There's a functional variant, _slow_conv2d_backward.output_mask, that isn't grouped properly.
     # Maybe we can kill this operator in favor of convolution_backward?
-    '_slow_conv2d_backward.grad_input',
+    "_slow_conv2d_backward.grad_input",
 ]
 
 
 # See Note: [Mutable ops that cannot get an out variant]
 MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     # should be out=?
-    '_cummax_helper',
+    "_cummax_helper",
     # should be out=?
-    '_cummin_helper',
+    "_cummin_helper",
 ]
 
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
@@ -61,16 +61,21 @@ INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
     # We should either fix this schema so it can be grouped properly,
     # or allow the codegen to generate new functional/out= NativeFunctions for this op
     # (which would require changing its overload name to prevent overload ambiguity).
-    'polygamma_'
+    "polygamma_"
 ]
 
 # Note: [Mutable Ops Not Using Functionalization]
 # Ops in this list currently do not work with functionalization and should be fixed.
-MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY + MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT + INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY + [
-    # It will be BC-breaking, but we should fix their schemas.
-    # should be inplace?
-    'record_stream',
-]
+MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
+    OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY
+    + MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT
+    + INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY
+    + [
+        # It will be BC-breaking, but we should fix their schemas.
+        # should be inplace?
+        "record_stream",
+    ]
+)
 
 # This file contains codegen that relates to the functionalization pass.
 # It includes:
@@ -128,14 +133,16 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
 }}
 """
 
+
 def return_str(rets: Tuple[Return, ...], names: List[str]) -> str:
     assert len(rets) == len(names)
     if len(rets) == 0:
-        return ''
+        return ""
     elif len(rets) == 1:
-        return f'return {names[0]};'
+        return f"return {names[0]};"
     else:
         return f"return {dispatcher.returns_type(rets).cpp_type()}({', '.join(names)});"
+
 
 # Given a function, and the name of a variable correponding to the output of that function,
 # gather up all of the individual returns that are not aliased
@@ -145,18 +152,20 @@ def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> List[str
     is_out_var_a_tuple = len(func.returns) > 1
     for (i, r) in enumerate(aliased_rets):
         if r is None:
-            non_aliased_names.append(f'std::get<{i}>({out_var})' if is_out_var_a_tuple else out_var)
+            non_aliased_names.append(
+                f"std::get<{i}>({out_var})" if is_out_var_a_tuple else out_var
+            )
     return non_aliased_names
 
 
 @with_native_function
 def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
     # We should only be generating these for code-generated NativeFunctions
-    if 'generated' not in g.functional.tags:
+    if "generated" not in g.functional.tags:
         return None
-    if g.inplace is not None and 'generated' not in g.inplace.tags:
+    if g.inplace is not None and "generated" not in g.inplace.tags:
         target_f = g.inplace
-    elif g.mutable is not None and 'generated' not in g.mutable.tags:
+    elif g.mutable is not None and "generated" not in g.mutable.tags:
         target_f = g.mutable
     else:
         # We should be guaranteed to have a valid inplace/mutable variant to call into.
@@ -173,9 +182,14 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
     # We can't just directly pass all of the arguments from the functional op into the mutating op.
     # We need to check for which inputs to the mutating operator are mutable,
     # and clone those inputs first.
-    for a_curr, a_tgt in zip(dispatcher.jit_arguments(g.functional.func), dispatcher.jit_arguments(target_f.func)):
+    for a_curr, a_tgt in zip(
+        dispatcher.jit_arguments(g.functional.func),
+        dispatcher.jit_arguments(target_f.func),
+    ):
         if a_tgt.annotation is not None and a_tgt.annotation.is_write:
-            clone_mutable_inputs.append(f'auto {a_curr.name}_clone = clone_arg({a_curr.name});')
+            clone_mutable_inputs.append(
+                f"auto {a_curr.name}_clone = clone_arg({a_curr.name});"
+            )
             context.append(
                 Expr(
                     expr=f"{a_curr.name}_clone",
@@ -186,12 +200,21 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
             cloned_return_names.append(f"{a_curr.name}_clone")
         else:
             context.append(dispatcher.argument(a_curr))
-    exprs = ", ".join([e.expr for e in translate(context, target_sig.arguments(), allow_tensor_const_cast=True)])
+    exprs = ", ".join(
+        [
+            e.expr
+            for e in translate(
+                context, target_sig.arguments(), allow_tensor_const_cast=True
+            )
+        ]
+    )
 
     out_name = "output"
-    maybe_assign = f'auto {out_name} = ' if len(target_f.func.returns) > 0 else ''
+    maybe_assign = f"auto {out_name} = " if len(target_f.func.returns) > 0 else ""
     inner_return_names = gather_nonaliased_inner_rets(target_f.func, out_name)
-    ret_str = return_str(g.functional.func.returns, inner_return_names + cloned_return_names)
+    ret_str = return_str(
+        g.functional.func.returns, inner_return_names + cloned_return_names
+    )
 
     clone_mutable_inputs_str = "\n".join(clone_mutable_inputs)
     return f"""
@@ -201,6 +224,7 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
   {ret_str}
 }}
 """
+
 
 def modifies_arguments(f: NativeFunction) -> bool:
     return any(
@@ -459,50 +483,74 @@ def maybe_create_output(f: NativeFunction, var_name: str) -> str:
     return_type = dispatcher.returns_type(f.func.returns).remove_const_ref().cpp_type()
     return f"{return_type} {var_name} = "
 
+
 # Given a NativeFunction, and a variable name corresponding to the output of redispatching on the function,
 # this returns two lists of names, consisting of:
 # - the names of returns corresponding to the original (mutable) inputs of the outer function
 # - the names of returns corresponding to the (immutable) outputs of the inner redispatched function
-def get_mutable_redispatch_return_names(f: NativeFunction, inner_return_var: str) -> Tuple[List[str], List[str]]:
+def get_mutable_redispatch_return_names(
+    f: NativeFunction, inner_return_var: str
+) -> Tuple[List[str], List[str]]:
     aliased_returns = []
     non_aliased_returns = []
     for (i, name) in enumerate(f.func.aliased_return_names()):
         if name is not None:
             aliased_returns.append(name)
         else:
-            non_aliased_returns.append(inner_return_var if len(f.func.returns) == 1 else f'std::get<{i}>({inner_return_var})')
+            non_aliased_returns.append(
+                inner_return_var
+                if len(f.func.returns) == 1
+                else f"std::get<{i}>({inner_return_var})"
+            )
     return aliased_returns, non_aliased_returns
+
 
 # When functionalization "no-op's" and redispatches on a mutable operator, we need to take care so that:
 #  - For fresh outputs, we return the result of the redispatch (without wrapping outputs)
 #  - For outputs that were aliased to inputs, we return the inputs directly (since some of them might have been wrapped)
-def return_from_mutable_noop_redispatch(f: NativeFunction, inner_return_var: str) -> str:
+def return_from_mutable_noop_redispatch(
+    f: NativeFunction, inner_return_var: str
+) -> str:
     aliased, non_aliased = get_mutable_redispatch_return_names(f, inner_return_var)
     # Just get all of the return names, and immediately return them
     return return_str(f.func.returns, aliased + non_aliased)
 
+
 def wrap_propagate_mutations_and_return(
-        f: NativeFunction, functional_op: NativeFunction, inner_return_var: str
+    f: NativeFunction, functional_op: NativeFunction, inner_return_var: str
 ) -> str:
     mutable_arg_names = f.func.arguments.mutable_arg_names()
-    aliased_outer_rets, non_aliased_outer_rets, = get_mutable_redispatch_return_names(f, inner_return_var)
-    _, non_aliased_inner_rets = get_mutable_redispatch_return_names(functional_op, inner_return_var)
+    (
+        aliased_outer_rets,
+        non_aliased_outer_rets,
+    ) = get_mutable_redispatch_return_names(f, inner_return_var)
+    _, non_aliased_inner_rets = get_mutable_redispatch_return_names(
+        functional_op, inner_return_var
+    )
     # The outer function may have a mix of aliased and non-aliased outputs,
     # But the inner functional op that we're transforming to should only have non-aliased outputs
-    assert len(mutable_arg_names) + len(non_aliased_outer_rets) == len(non_aliased_inner_rets)
+    assert len(mutable_arg_names) + len(non_aliased_outer_rets) == len(
+        non_aliased_inner_rets
+    )
 
     # First, take all of the newly created outputs from the inner call and wrap them into functional tensors
     updates = []
     non_aliased_wrapped_ret_names = []
-    for (i, inner_ret) in enumerate(non_aliased_inner_rets[:len(non_aliased_outer_rets)]):
-        ret_name = f'output_{i}'
-        updates.append(f"""\
-  auto output_{i} = at::functionalization::impl::to_functional_tensor({inner_ret});""")
+    for (i, inner_ret) in enumerate(
+        non_aliased_inner_rets[: len(non_aliased_outer_rets)]
+    ):
+        ret_name = f"output_{i}"
+        updates.append(
+            f"""\
+  auto output_{i} = at::functionalization::impl::to_functional_tensor({inner_ret});"""
+        )
         non_aliased_wrapped_ret_names.append(ret_name)
 
     # Next, take all of the mutated outputs from the inner call corresponding to mutated inputs,
     # and propogate the mutations
-    for (outer_arg, inner_ret) in zip(mutable_arg_names, non_aliased_inner_rets[len(non_aliased_outer_rets):]):
+    for (outer_arg, inner_ret) in zip(
+        mutable_arg_names, non_aliased_inner_rets[len(non_aliased_outer_rets) :]
+    ):
         updates.append(
             f"""\
   at::functionalization::impl::replace_({outer_arg}, {inner_ret});
@@ -512,8 +560,10 @@ def wrap_propagate_mutations_and_return(
     # Finally, we return:
     # - Any mutable arguments that also returns
     # - Any immutable returns that were created wrapping the output from the inner call
-    returns_str = return_str(f.func.returns, aliased_outer_rets + non_aliased_wrapped_ret_names)
-    updates_str = '\n'.join(updates)
+    returns_str = return_str(
+        f.func.returns, aliased_outer_rets + non_aliased_wrapped_ret_names
+    )
+    updates_str = "\n".join(updates)
     return f"""\
 {updates_str}
     {returns_str}"""
@@ -569,16 +619,12 @@ def emit_inplace_functionalization_body(
 
     # call the out-of-place variant of the op
     return_type = (
-        dispatcher.returns_type(g.functional.func.returns)
-        .remove_const_ref()
-        .cpp_type()
+        dispatcher.returns_type(g.functional.func.returns).remove_const_ref().cpp_type()
     )
     functional_sig = DispatcherSignature.from_schema(g.functional.func)
     functional_exprs = [
         e.expr
-        for e in translate(
-            unwrapped_args_ctx, functional_sig.arguments(), method=False
-        )
+        for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)
     ]
 
     if f.func.is_out_fn():
