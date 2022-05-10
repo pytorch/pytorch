@@ -21,7 +21,7 @@ with FusionDefinition(fusion) as fd :
     t3 = fd.Ops.mul(t2, c0)
     t4 = fd.Ops.mul(t3, s0)
     t5 = fd.Ops.relu(t4)
-    t6 = fd.Ops.sum(t5, [-1], False)
+    t6 = fd.Ops.sum(t5, [-1], False, DataType.Float)
 
     t7 = fd.Ops.cast(DataType.Half, t6)
     fd.add_output(t7)
