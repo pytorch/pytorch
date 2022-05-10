@@ -374,7 +374,7 @@ class GraphModule(torch.nn.Module):
         if self.graph._tracer_cls and '<locals>' not in self.graph._tracer_cls.__qualname__:
             self._tracer_cls = self.graph._tracer_cls
 
-        self._tracer_extras = None
+        self._tracer_extras = {}
         if self.graph._tracer_extras:
             self._tracer_extras = self.graph._tracer_extras
 
