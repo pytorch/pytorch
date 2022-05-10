@@ -45,6 +45,8 @@ class PackageImporter(Importer):
     """The dictionary of already loaded modules from this package, equivalent to ``sys.modules`` but
     local to this importer.
     """
+    torch._C._log_api_usage_once("torch.package.PackageImporter")
+
     modules: Dict[str, types.ModuleType]
 
     def __init__(
