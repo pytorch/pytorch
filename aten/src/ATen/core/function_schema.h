@@ -30,8 +30,19 @@ struct Argument {
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
       c10::optional<AliasInfo> alias_info = c10::nullopt)
+    : Argument(name, type, type, N, default_value, kwarg_only, alias_info) {}
+
+  Argument(
+      std::string name,
+      TypePtr fake_type,
+      TypePtr real_type,
+      c10::optional<int32_t> N = c10::nullopt,
+      c10::optional<IValue> default_value = c10::nullopt,
+      bool kwarg_only = false,
+      c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
-        type_(type ? std::move(type) : TensorType::get()),
+        type_(fake_type ? std::move(fake_type) : TensorType::get()),
+        real_type_(real_type ? std::move(real_type) : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         alias_info_(alias_info ? std::make_unique<AliasInfo>(std::move(*alias_info)) : nullptr),
@@ -46,6 +57,7 @@ struct Argument {
   Argument(const Argument& rhs)
       : name_(rhs.name_),
         type_(rhs.type_),
+        real_type_(rhs.real_type_),
         N_(rhs.N_),
         default_value_(rhs.default_value_),
         alias_info_(rhs.alias_info_ ? std::make_unique<AliasInfo>(*rhs.alias_info_) : nullptr),
@@ -58,6 +70,7 @@ struct Argument {
     if (this != &rhs) {
       name_ = rhs.name_;
       type_ = rhs.type_;
+      real_type_ = rhs.real_type_;
       N_ = rhs.N_;
       default_value_ = rhs.default_value_;
       alias_info_ = rhs.alias_info_ ? std::make_unique<AliasInfo>(*rhs.alias_info_) : nullptr;
@@ -72,6 +85,9 @@ struct Argument {
   }
   const TypePtr& type() const {
     return type_;
+  }
+  const TypePtr& real_type() const {
+    return real_type_;
   }
   c10::optional<int32_t> N() const {
     return N_;
@@ -153,6 +169,7 @@ struct Argument {
  private:
   std::string name_;
   TypePtr type_;
+  TypePtr real_type_; // this is ScalarType, not int, e.g.
   // for list types, an optional statically known length for the list
   // e.g. for int[3]: type = ListType::ofInts(), N = 3
   // If present, this will allow scalars to be broadcast to this length to

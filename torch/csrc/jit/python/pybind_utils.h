@@ -704,7 +704,7 @@ inline py::object toPyObject(IValue ivalue) {
         case at::ScalarType::Double:
           return py::cast(*tensor.data_ptr<double>());
         case at::ScalarType::ComplexDouble:
-          return py::cast(*tensor.data_ptr<c10::complex<double>>());
+          return py::cast(*reinterpret_cast<std::complex<double>*>(tensor.data_ptr<c10::complex<double>>()));
         default:
           TORCH_CHECK(
               false,

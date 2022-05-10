@@ -91,6 +91,9 @@ class TestPrimsBasic(TestCase):
 $0 = input('input')
 $1 = torch._ops.prim.sin.default($0)""")
 
+    def test_mul_complex(self):
+        prims.mul(torch.randn(2), 1 + 1j)
+
 
 instantiate_device_type_tests(TestPrims, globals())
 

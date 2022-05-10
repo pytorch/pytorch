@@ -172,10 +172,6 @@ def _make_prim(
     """
 
     def _prim(*args, **kwargs):
-        # TODO: allow dispatch to be overridden here
-        if has_torch_function(args):
-            return handle_torch_function(_prim, args, *args, **kwargs)
-
         # always run the meta function because aten implementation will
         # typically accept more inputs (e.g., it will do promotion and
         # broadcasting) which we want to reject
@@ -194,7 +190,12 @@ def _make_prim(
     prim_impl.impl(name, _prim)
     # TODO: register meta
 
-    return getattr(torch.ops.prim, name).default
+    def j(*args, **kwargs):
+        # print(name, args, kwargs)
+        return getattr(torch.ops.prim, name).default(*args, **kwargs)
+    j.overloadpacket = getattr(torch.ops.prim, name)
+
+    return j
 
 
 class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
@@ -1089,7 +1090,7 @@ _slice_doc = """
     """
 
 slice = _make_prim(
-    schema="slice(Tensor(a) a, int[] start_indices, int[] limit_indices, int? strides=None) -> Tensor(a)",
+    schema="slice(Tensor(a) a, int[] start_indices, int[] limit_indices, int[]? strides=None) -> Tensor(a)",
     meta=_slice_meta,
     impl_aten=_slice_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1689,7 +1690,7 @@ def _make_reduction_prim(
 ):
     """Creates a reduction prim."""
     return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType output_dtype) -> Tensor",
+        schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
         meta=_reduction_meta,
         impl_aten=impl_aten,
         return_type=RETURN_TYPE.NEW,
@@ -1703,7 +1704,7 @@ def _make_bool_reduction_prim(
 ):
     """Creates a reduction prim that reduces to bool."""
     return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType output_dtype) -> Tensor",
+        schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
         meta=_bool_return_reduction_meta,
         impl_aten=impl_aten,
         return_type=RETURN_TYPE.NEW,
