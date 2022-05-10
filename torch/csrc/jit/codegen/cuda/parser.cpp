@@ -33,7 +33,8 @@ constexpr auto kNumUnaryIsOps = 6;
 
 constexpr auto kNumBinaryFloatOps = 3;
 constexpr auto kNumBinaryComparisonOps = 12;
-constexpr auto kNumBinaryCastOps = 14;
+constexpr auto kNumBinaryCastOps = 15;
+constexpr auto kNumBinaryShiftOps = 4;
 
 constexpr auto kNumBinaryOpsWithAlpha = 6;
 constexpr auto kNumLerpOps = 2;
@@ -1005,11 +1006,12 @@ class IrParser {
         "aten::pow(Scalar self, Tensor exponent) -> Tensor",
         "aten::remainder(Tensor self, Tensor other) -> Tensor",
         "aten::fmod(Tensor self, Tensor other) -> Tensor",
+        "aten::bitwise_and(Tensor self, Tensor other) -> Tensor",
         "aten::__and__(Tensor self, Tensor other) -> Tensor",
+        "aten::bitwise_or(Tensor self, Tensor other) -> Tensor",
         "aten::__or__(Tensor self, Tensor other) -> Tensor",
-        "aten::__xor__(Tensor self, Tensor other) -> Tensor",
-        "aten::__lshift__(Tensor self, Tensor other) -> Tensor",
-        "aten::__rshift__(Tensor self, Tensor other) -> Tensor"};
+        "aten::bitwise_xor(Tensor self, Tensor other) -> Tensor",
+        "aten::__xor__(Tensor self, Tensor other) -> Tensor"};
     for (auto signature : BinaryCastOp) {
       auto ptr_op = getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
@@ -1022,11 +1024,12 @@ class IrParser {
                  {aten::pow, BinaryOpType::Pow},
                  {aten::remainder, BinaryOpType::Remainder},
                  {aten::fmod, BinaryOpType::Fmod},
+                 {aten::bitwise_and, BinaryOpType::And},
                  {aten::__and__, BinaryOpType::And},
+                 {aten::bitwise_or, BinaryOpType::Or},
                  {aten::__or__, BinaryOpType::Or},
-                 {aten::__xor__, BinaryOpType::Xor},
-                 {aten::__lshift__, BinaryOpType::Lshift},
-                 {aten::__rshift__, BinaryOpType::Rshift}});
+                 {aten::bitwise_xor, BinaryOpType::Xor},
+                 {aten::__xor__, BinaryOpType::Xor}});
 
             MemoryFormat format;
             std::list<Val*> list_val;
@@ -1044,6 +1047,42 @@ class IrParser {
                 lhs,
                 rhs,
                 TypePromotion::default_op_config);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
+          },
+          isInputNonSizeZeroTensor,
+          nullptr);
+    }
+
+    std::array<const char*, kNumBinaryShiftOps> BinaryShiftOp = {
+        "aten::bitwise_left_shift(Tensor self, Tensor other) -> Tensor",
+        "aten::__lshift__(Tensor self, Tensor other) -> Tensor",
+        "aten::bitwise_right_shift(Tensor self, Tensor other) -> Tensor",
+        "aten::__rshift__(Tensor self, Tensor other) -> Tensor"};
+    for (auto signature : BinaryShiftOp) {
+      auto ptr_op = getOperatorForLiteral(signature);
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            static std::unordered_map<Symbol, BinaryOpType> op_mapping(
+                {{aten::bitwise_left_shift, BinaryOpType::Lshift},
+                 {aten::__lshift__, BinaryOpType::Lshift},
+                 {aten::bitwise_right_shift, BinaryOpType::Rshift},
+                 {aten::__rshift__, BinaryOpType::Rshift}});
+
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getPWFormatValues(
+                c10::nullopt,
+                value_map[node->inputs()[0]->unique()],
+                value_map[node->inputs()[1]->unique()]);
+            auto lhs = list_val.front();
+            list_val.pop_front();
+            auto rhs = list_val.front();
+            list_val.pop_front();
+
+            auto out =
+                binaryOp(op_mapping[node->kind()], lhs, rhs, lhs->dtype());
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
