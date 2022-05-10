@@ -151,7 +151,7 @@ class _Namespace:
             num += 1
             candidate = f'{base}_{num}'
 
-        self._used_names.setdefault(candidate)
+        self._used_names.setdefault(candidate, 0)
         if obj is None:
             self._unassociated_names.add(candidate)
         else:

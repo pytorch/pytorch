@@ -191,28 +191,10 @@ static void angle_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void real_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "real_cpu", [&]() {
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t a) -> scalar_t { return real_impl(a); },
-        [=](Vectorized<scalar_t> a) { return a.real(); });
-  });
-}
-
-static void imag_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "imag_cpu", [&]() {
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t a) -> scalar_t { return imag_impl(a); },
-        [=](Vectorized<scalar_t> a) { return a.imag(); });
-  });
-}
-
 // NB: Ignores the negative bit on tensors
 void conj_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kBool, kBFloat16, kHalf, kComplexHalf, iter.common_dtype(), "conj_cpu", [&]() {
         cpu_kernel_vec(
             iter,
             [=](scalar_t a) -> scalar_t { return conj_impl(a); },
@@ -621,8 +603,6 @@ REGISTER_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
 REGISTER_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
 REGISTER_DISPATCH(abs_stub, &CPU_CAPABILITY::abs_kernel);
 REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
-REGISTER_DISPATCH(real_stub, &CPU_CAPABILITY::real_kernel);
-REGISTER_DISPATCH(imag_stub, &CPU_CAPABILITY::imag_kernel);
 REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
 REGISTER_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
