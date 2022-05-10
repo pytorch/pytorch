@@ -1136,8 +1136,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', ''),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
         xfail('nn.functional.bilinear', ''),
-        xfail('nn.functional.binary_cross_entropy', ''),
-        xfail('nn.functional.binary_cross_entropy_with_logits', ''),
         xfail('nn.functional.embedding', ''),
         xfail('nn.functional.embedding', 'functorch'),
         xfail('nn.functional.embedding_bag', ''),
@@ -1179,6 +1177,7 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'prod'),
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
+        xfail('nn.functional.binary_cross_entropy_with_logits')
     }))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1229,13 +1228,13 @@ class TestOperators(TestCase):
                     expected = (tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec))
                 return expected
 
-            def compare_jacobians(primals, cotangents):
+            def compare_jacobians(primals, cotangents, in_dims=(0,1)):
                 def get_vjp(primals, cotangents):
                     _, vjp_fn = vjp(fn, *primals)
                     return vjp_fn(cotangents)
 
-                jacobian_jvp = jacfwd(get_vjp, (0, 1))(primals, cotangents)
-                jacobian_vjp = jacrev(get_vjp, (0, 1))(primals, cotangents)
+                jacobian_jvp = jacfwd(get_vjp, in_dims)(primals, cotangents)
+                jacobian_vjp = jacrev(get_vjp, in_dims)(primals, cotangents)
 
                 # For dtype changing operations, the jacobians have different dtype.
                 jacobian_jvp = tree_map(lambda x: x.to(torch.float), jacobian_jvp)
@@ -1254,10 +1253,14 @@ class TestOperators(TestCase):
                 'nn.functional.mse_loss',
                 'softmax',
                 'log_softmax',
-                'nn.functional.cross_entropy'
+                'nn.functional.cross_entropy',
+                'nn.functional.binary_cross_entropy',
             }
             if op.name in FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH:
-                compare_jacobians(primals, cotangents)
+                in_dims = (0, 1)
+                if op.name == 'nn.functional.binary_cross_entropy':  # reverse second derivative wrt target not defined
+                    in_dims = 1
+                compare_jacobians(primals, cotangents, in_dims)
                 return
 
             expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
