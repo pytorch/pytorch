@@ -7,7 +7,6 @@ import torch.nn.functional as F
 import functools
 from torch.utils._pytree import tree_map, tree_flatten
 import torch._prims.utils as utils
-import torch._refs as refs
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -25,11 +24,11 @@ class Reduction(Enum):
 # This wraps a decomposition and performs various type promotion logic within it, depending on the strategy provided
 # We're currently re-using ELEMENTWISE_TYPE_PROMOTION_KIND, although some of the usages are on non-elementwise ops
 # Will need to validate the non-elementwise uses
-def type_casts(f: Callable, type_promotion: refs.ELEMENTWISE_TYPE_PROMOTION_KIND):
+def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND):
     @functools.wraps(f)
     def inner(*args, **kwargs):
         flat_args = [x for x in tree_flatten((args, kwargs))[0] if isinstance(x, Tensor)]
-        computation_dtype, result_dtype = refs._elementwise_dtypes(*flat_args, type_promotion=type_promotion)
+        computation_dtype, result_dtype = utils.elementwise_dtypes(*flat_args, type_promotion_kind=type_promotion)
 
         # TODO: pretty sure this is not quite right
         def increase_prec(x):
@@ -49,9 +48,9 @@ def type_casts(f: Callable, type_promotion: refs.ELEMENTWISE_TYPE_PROMOTION_KIND
 
     return inner
 
-pw_cast_for_opmath = functools.partial(type_casts, type_promotion=refs.ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH)
-reduction_complex_to_real = functools.partial(type_casts, type_promotion=refs.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
-pw_cast_for_int_to_real = functools.partial(type_casts, type_promotion=refs.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+pw_cast_for_opmath = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH)
+reduction_complex_to_real = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
+pw_cast_for_int_to_real = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 
 # This expands x until x.dim() == dim. Might be useful as an operator
 def _unsqueeze_to_dim(x: Tensor, dim: int):
@@ -343,6 +342,10 @@ def to_real_dtype(dtype: torch.dtype):
     elif dtype == torch.complex128:
         return torch.float64
 
+# TODO: None of these loss castings are quite correct, see
+# https://github.com/pytorch/pytorch/issues/76870. Also, the ATen kernels
+# perform the pointwise portion in opmath, but don't maintain it between the
+# pointwise portion and the reduction
 
 @register_decomposition(aten.l1_loss)
 def l1_loss(
@@ -371,6 +374,7 @@ def l1_loss_backward(
 
 
 @register_decomposition(aten.mse_loss)
+@pw_cast_for_opmath
 def mse_loss(
     self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
 ) -> Tensor:
@@ -616,11 +620,6 @@ def masked_fill_Tensor(self: Tensor, mask: Tensor, value: Tensor) -> Tensor:
 @pw_cast_for_opmath
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
-
-
-@register_decomposition(aten.reciprocal)
-def reciprocal(self: Tensor) -> Tensor:
-    return 1 / self
 
 
 @register_decomposition(aten.logit)
@@ -988,11 +987,6 @@ def native_batch_norm(
     return output, save_mean, save_invstd
 
 
-@register_decomposition(aten.isnan)
-def isnan(self: Tensor) -> Tensor:
-    return self != self
-
-
 @register_decomposition(aten.clamp_min)
 def clamp_min(self: Tensor, min: float):
     return torch.clamp(self, min=min)
@@ -1012,18 +1006,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
 
 
 # TODO: these logical decomps are buggy for complex inputs
-
-
-@register_decomposition(aten.logical_and)
-def logical_and(self: Tensor, other: Tensor) -> Tensor:
-    return self.to(dtype=torch.bool) & other.to(dtype=torch.bool)
-
-
-@register_decomposition(aten.logical_or)
-def logical_or(self: Tensor, other: Tensor) -> Tensor:
-    return self.to(dtype=torch.bool) | other.to(dtype=torch.bool)
-
-
 @register_decomposition(aten.logical_xor)
 def logical_xor(self: Tensor, other: Tensor) -> Tensor:
     return self.to(dtype=torch.bool) ^ other.to(dtype=torch.bool)
@@ -1034,14 +1016,14 @@ def logical_not(self: Tensor) -> Tensor:
     return ~self.to(dtype=torch.bool)
 
 
-# Actually, I'm just not sure how to implement this correctly (maybe you need a special case for floating point?)
-# @register_decomposition(aten.xlogy)
-# def xlogy(self: Tensor, other: Tensor) -> Tensor:
-#     return aten.where(aten.isnan(self),
-#                       self,
-#                       aten.where(self == aten.new_zeros(self, ()),
-#                                  aten.new_zeros(self, ()),
-#                                  self * aten.log(other)))
+@register_decomposition(aten.xlogy.Tensor)
+@pw_cast_for_int_to_real
+def xlogy(self: Tensor, other: Tensor) -> Tensor:
+    return aten.where(aten.isnan(self),
+                      self,
+                      aten.where(self == aten.new_zeros(self, ()),
+                                 aten.new_zeros(self, ()),
+                                 self * aten.log(other)))
 
 
 @register_decomposition(aten.var.correction)
@@ -1152,3 +1134,69 @@ def cudnn_batch_norm_backward(
         epsilon,
         [True, True, True],
     )
+
+
+@register_decomposition(aten.rot90.default)
+def rot90(self: Tensor, k: int = 1, dims: List[int] = [0, 1]) -> Tensor:  # noqa: B006
+    total_dims = self.dim()
+    total_rot_dims = len(dims)
+    assert total_rot_dims == 2, f"expected total rotation dims == 2, but got dims = {total_rot_dims}"
+    assert total_dims >= 2, f"expected total dims >= 2, but got total dims = {total_dims}"
+    assert dims[0] != dims[1] and abs(dims[0] - dims[1]) != total_dims,\
+           f"expected rotation dims to be different, but got dim0 = {dims[0]} and dim1 = {dims[1]}"
+    assert dims[0] < total_dims and dims[0] >= -total_dims, f"Rotation dim0 out of range, dim0 = {dims[0]}"
+    assert dims[1] < total_dims and dims[1] >= -total_dims, f"Rotation dim1 out of range, dim1 = {dims[1]}"
+    k = k % 4
+    if k == 1:
+        return self.flip(dims[1]).transpose(dims[0], dims[1])
+    elif k == 2:
+        return self.flip(dims)
+    elif k == 3:
+        return self.flip(dims[0]).transpose(dims[0], dims[1])
+    else:
+        return self.clone(memory_format=torch.contiguous_format)
+
+
+@register_decomposition(aten.transpose.int)
+def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
+    dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
+
+    if self.dim() <= 1:
+        return self
+
+    if dim0 == dim1:
+        return self
+    perm = list(range(self.dim()))
+    perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
+    return torch.permute(self, perm)
+
+
+@register_decomposition(aten.t.default)
+def t(self: Tensor) -> Tensor:
+    return self.transpose(0, 0 if self.dim() < 2 else 1)
+
+
+def check_stack_inputs(tensors: List[Tensor]):
+    entry_shape = tensors[0].shape
+    for i in range(1, len(tensors)):
+        assert tensors[i].shape == entry_shape, (f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
+                                                 f"and {tensors[i].shape} at entry {i}")
+
+
+def get_stack_inputs(tensors: List[Tensor], dim: int):
+    check_stack_inputs(tensors)
+    return [t.unsqueeze(dim) for t in tensors]
+
+
+@register_decomposition(aten.stack.default)
+def stack(tensors: List[Tensor], dim: int = 0) -> Tensor:
+    assert len(tensors) > 0, "stack expects a non-empty TensorList"
+    wrapped_dim = utils.canonicalize_dim(tensors[0].dim() + 1, dim)
+    if wrapped_dim < tensors[0].dim() and not tensors[0].is_sparse:
+        check_stack_inputs(tensors)
+        result_sizes = list(tensors[0].shape)
+        result_sizes.insert(wrapped_dim, len(tensors))
+        out = torch.cat(tensors, wrapped_dim)
+        return out.view(result_sizes)
+    else:
+        return torch.cat(get_stack_inputs(tensors, wrapped_dim), dim)
