@@ -81,7 +81,7 @@ class TestPrims(TestCase):
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
-        self.assertEqual(torch.ops.prim.sin(r), torch.sin(r))
+        self.assertEqual(torch.ops.prims.sin(r), torch.sin(r))
 
         r = LoggingTensor(r)
         with capture_logs() as logs:
@@ -89,7 +89,7 @@ class TestPrimsBasic(TestCase):
             prims.sin(r)
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.prim.sin.default($0)""")
+$1 = torch._ops.prims.sin.default($0)""")
 
     def test_mul_complex(self):
         prims.mul(torch.randn(2), 1 + 1j)

@@ -23,8 +23,8 @@ from enum import Enum
 import operator
 import math
 
-prim = torch.library.Library('prim', 'DEF')
-prim_impl = torch.library.Library('prim', 'IMPL', 'CompositeExplicitAutograd')
+prim = torch.library.Library('prims', 'DEF')
+prim_impl = torch.library.Library('prims', 'IMPL', 'CompositeExplicitAutograd')
 
 # Experimental module containing prototype "primitive" operations.
 
@@ -192,8 +192,8 @@ def _make_prim(
 
     def j(*args, **kwargs):
         # print(name, args, kwargs)
-        return getattr(torch.ops.prim, name).default(*args, **kwargs)
-    j.overloadpacket = getattr(torch.ops.prim, name)
+        return getattr(torch.ops.prims, name).default(*args, **kwargs)
+    j.overloadpacket = getattr(torch.ops.prims, name)
 
     return j
 
