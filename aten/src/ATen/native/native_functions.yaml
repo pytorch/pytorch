@@ -4320,7 +4320,12 @@
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+# Overload without center & pad mode, needed for forward-compatibility
+- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+  variants: function, method
+  cpp_no_default_args: ['hop_length', 'win_length', 'window', 'normalized']
+
+- func: stft.center(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   variants: function, method
 
 - func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
@@ -7056,8 +7061,8 @@
     QuantizedCPU: index_select_quantized_cpu_
     CUDA: index_select_cuda
     QuantizedCUDA: index_select_quantized_cuda
-    SparseCPU: index_select_sparse
-    SparseCUDA: index_select_sparse
+    SparseCPU: index_select_sparse_cpu
+    SparseCUDA: index_select_sparse_cuda
 
 - func: index_select.dimname_out(Tensor self, Dimname dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
 
