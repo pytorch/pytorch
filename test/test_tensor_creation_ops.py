@@ -2062,6 +2062,10 @@ class TestTensorCreation(TestCase):
         expected = torch.tensor([[0., 0.], [0., 0.]], device=device, dtype=torch.complex64)
         self.assertEqual(complexTensor, expected)
 
+        complexHalfTensor = torch.zeros(2, 2, device=device, dtype=torch.complex32)
+        expected = torch.tensor([[0., 0.], [0., 0.]], device=device, dtype=torch.complex32)
+        self.assertEqual(complexHalfTensor, expected)
+
     # TODO: this test should be updated
     def test_zeros_out(self, device):
         shape = (3, 4)
@@ -2093,6 +2097,10 @@ class TestTensorCreation(TestCase):
         res1 = torch.ones(1, 2, device=device, dtype=torch.bool)
         expected = torch.tensor([[True, True]], device=device, dtype=torch.bool)
         self.assertEqual(res1, expected)
+
+        # test chalf
+        self.assertEqual(torch.ones(100, 100, device=device, dtype=torch.chalf),
+                         torch.ones(100, 100, device=device, dtype=torch.cfloat), exact_dtype=False)
 
     # TODO: this test should be updated
     @onlyCPU
