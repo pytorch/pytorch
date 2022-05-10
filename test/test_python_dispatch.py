@@ -4,7 +4,8 @@ import tempfile
 import torch
 from copy import deepcopy
 from torch.library import Library
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.cuda.jiterator import _create_jit_fn
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
@@ -78,6 +79,129 @@ class TestPythonRegistration(TestCase):
         del my_lib1
         # Validate that the old behavior is restored for sum
         self.assertEqual(torch.sum(x), torch.tensor(3))
+
+    def test_override_cuda_with_jiterator(self) -> None:
+        def override_where_cuda() -> None:
+            # Example 1: Invert the behavior of where's condition input
+            not_where_code_string = '''
+            template <typename T> T inverted_where(bool cond, T a, T b){
+                return !cond ? a : b;
+            }
+            '''
+            jitted_where = _create_jit_fn(not_where_code_string)
+
+            CALLED = [False]
+
+            def inverted_where(*args, **kwargs):
+                CALLED[0] = True
+                return jitted_where(*args, **kwargs)
+
+            # overriding where's cuda kernel with Jiterator generated kernel
+            my_lib = Library("aten", "IMPL")
+            my_lib.impl('aten::where.self', inverted_where, "CUDA")
+
+            device = 'cuda'
+            cond = torch.tensor([True, True, False], device=device, dtype=torch.bool)
+            x = torch.tensor([1, 2, 3], device=device)
+            y = torch.tensor([-1, -2, -3], device=device)
+
+            self.assertEqual(torch.where(cond, x, y), torch.tensor([-1, -2, 3]))
+            self.assertTrue(CALLED[0])
+            del my_lib
+
+            # behavior restored after deregistration
+            self.assertEqual(torch.where(cond, x, y), torch.tensor([1, 2, -3]))
+
+        def override_gelu_cuda() -> None:
+            # Example 2: Use relu to approximate gelu for faster compute
+            fastest_gelu_code_string = '''
+            template <typename T> T fast_gelu(T a){
+                return a > 0 ? a : 0;
+            }
+            '''
+            jitted_gelu = _create_jit_fn(fastest_gelu_code_string)
+
+            CALLED = [False]
+
+            def fast_gelu(*args, **kwargs):
+                CALLED[0] = True
+                return jitted_gelu(*args, **kwargs)
+
+            # overriding gelu's cuda kernel with Jiterator generated relu kernel
+            my_lib = Library("aten", "IMPL")
+            my_lib.impl('aten::gelu', fast_gelu, "CUDA")
+
+            x = torch.rand([3, 3], device='cuda', dtype=torch.float)
+            self.assertEqual(torch.nn.functional.gelu(x), torch.nn.functional.relu(x))
+            self.assertTrue(CALLED[0])
+            del my_lib
+
+            # behavior restored after deregistration
+            self.assertNotEqual(torch.nn.functional.gelu(x), torch.nn.functional.relu(x))
+
+        def override_exp_cuda() -> None:
+            # Example 3: Preventing exp from exploding for float16
+            clipped_exp_code_string = '''
+            template <typename T> T clipped_exp(T a){
+                return a > T(10.0) ? T(22026.4657948) : exp(a);
+            }
+            '''
+            jitted_exp = _create_jit_fn(clipped_exp_code_string)
+
+            CALLED = [False]
+
+            def clipped_exp(*args, **kwargs):
+                CALLED[0] = True
+                return jitted_exp(*args, **kwargs)
+
+            # overriding exp's cuda kernel with clipped_exp kernel
+            my_lib = Library("aten", "IMPL")
+            my_lib.impl('aten::exp', clipped_exp, "CUDA")
+
+            x = torch.tensor([0.0, 100.0], device='cuda', dtype=torch.float16)
+            self.assertEqual(torch.exp(x), torch.tensor([1.0, 22026.4657948], dtype=torch.float16))
+            self.assertTrue(CALLED[0])
+            del my_lib
+
+            # behavior restored after deregistration
+            self.assertEqual(torch.exp(x), torch.tensor([1.0, torch.inf], dtype=torch.float16))
+
+        def override_add_cuda() -> None:
+            # Example 4: simulate a hardware bug, where the adder is always off by 1
+            buggy_add_code_string = '''
+            template <typename T> T buggy_add(T a, T b){
+                return a + b + T(1);
+            }
+            '''
+            jitted_add = _create_jit_fn(buggy_add_code_string)
+
+            CALLED = [False]
+
+            def buggy_add(*args, **kwargs):
+                CALLED[0] = True
+                return jitted_add(*args, **kwargs)
+
+            my_lib = Library("aten", "IMPL")
+            my_lib.impl('aten::add.Tensor', buggy_add, "CUDA")
+
+            x_cpu = torch.rand([3, 3], device='cpu')
+            y_cpu = torch.rand([3], device='cpu')
+
+            x_cuda = x_cpu.cuda()
+            y_cuda = y_cpu.cuda()
+
+            self.assertEqual(x_cuda + y_cuda, x_cpu + y_cpu + 1)
+            self.assertTrue(CALLED[0])
+            del my_lib
+
+            # behavior restored after deregistration
+            self.assertEqual(x_cuda + y_cuda, x_cpu + y_cpu)
+
+        if torch.cuda.is_available() and not TEST_WITH_ROCM:
+            override_where_cuda()
+            override_gelu_cuda()
+            override_exp_cuda()
+            override_add_cuda()
 
     def test_extend_library_with_dispatch_key_arg(self):
         def my_sum(*args, **kwargs):
