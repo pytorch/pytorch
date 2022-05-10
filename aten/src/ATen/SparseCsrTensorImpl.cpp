@@ -75,6 +75,9 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
   // crucial invariance.
   TORCH_CHECK(values_.device() == crow_indices_.device(), "Values and crow_indices need to be on the same device.");
   TORCH_CHECK(values_.device() == col_indices_.device(), "Values and col_indices need to be on the same device.");
+  if (layout_ == kSparseCsr || layout_ == kSparseCsc) {
+    TORCH_CHECK(values_.dim() == 1, "Excepted values.dim() to be 1 for layout ", layout_);
+  }
 }
 
 const char* SparseCsrTensorImpl::tensorimpl_type_name() const {
@@ -146,6 +149,9 @@ void SparseCsrTensorImpl::set_member_tensors(
   // crucial invariance.
   TORCH_CHECK(values_.device() == crow_indices_.device(), "Values and crow_indices need to be on the same device.");
   TORCH_CHECK(values_.device() == col_indices_.device(), "Values and col_indices need to be on the same device.");
+  if (layout_ == kSparseCsr || layout_ == kSparseCsc) {
+    TORCH_CHECK(values_.dim() == 1, "Excepted values.dim() to be 1 for layout ", layout_);
+  }
 }
 
 IntArrayRef SparseCsrTensorImpl::strides() const {
