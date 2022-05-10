@@ -81,17 +81,9 @@ namespace {
   }
 }
 
-at::Tensor to_device_functionalize(const at::Tensor & self, at::Device device, at::ScalarType dtype, bool non_blocking, bool copy, c10::optional<at::MemoryFormat> memory_format) {
-  if (!at::functionalization::impl::isFunctionalTensor(self)) {
-    // If the input is not a functional tensor, we want to "lift" the output to be functional.
-    // See Note [Functionalization <> torch.Tensor constructor]
-    at::AutoDispatchSkipFunctionalize guard;
-    auto out = self.to(device, dtype, non_blocking, copy, memory_format);
-    return at::functionalization::impl::to_functional_tensor(std::move(out));
-  } else {
-    // otherwise, to.device is a composite op, so let it decompose normally
-    return at::native::to(self, device, dtype, non_blocking, copy, memory_format);
-  }
+at::Tensor lift_functionalize(const at::Tensor & self) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  return at::functionalization::impl::to_functional_tensor(self);
 }
 
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
@@ -99,5 +91,5 @@ TORCH_LIBRARY_IMPL(_, Functionalize, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
-  m.impl("to.device", TORCH_FN(to_device_functionalize));
+  m.impl("lift", TORCH_FN(lift_functionalize));
 }
