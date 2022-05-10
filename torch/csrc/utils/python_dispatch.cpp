@@ -55,7 +55,7 @@ inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
 }
 
 class PythonKernelHolder : public c10::OperatorKernel {
-  SafePyObject func_;
+  c10::SafePyObject func_;
 public:
   PythonKernelHolder(py::object func) : func_(func.release().ptr(), getPyInterpreter()) {}
 
