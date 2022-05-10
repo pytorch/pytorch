@@ -1371,12 +1371,13 @@ add_docstr(torch.bitwise_left_shift,
 bitwise_left_shift(input, other, *, out=None) -> Tensor
 
 Computes the left arithmetic shift of :attr:`input` by :attr:`other` bits.
-The result will have the same dtype as :attr:`input`.
+The result will have the same dtype as :attr:`input`. The input tensor must
+be of integral types.
 
 The operation applied is:
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i \times 2 ^ {{\text{{other}}_i}}
+    \text{{out}}_i = \text{{input}}_i << \text{{other}}_i
 
 Args:
     input (Tensor or Scalar): the first input tensor
@@ -1396,12 +1397,13 @@ add_docstr(torch.bitwise_right_shift,
 bitwise_right_shift(input, other, *, out=None) -> Tensor
 
 Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
-The result will have the same dtype as :attr:`input`.
+The result will have the same dtype as :attr:`input`. The input tensor must
+be of integral types.
 
 The operation applied is:
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i / 2 ^ {{\text{{other}}_i}}
+    \text{{out}}_i = \text{{input}}_i >> \text{{other}}_i
 
 Args:
     input (Tensor or Scalar): the first input tensor
