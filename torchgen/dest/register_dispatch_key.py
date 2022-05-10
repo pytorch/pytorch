@@ -561,7 +561,9 @@ check_inplace(out, sizes, options);"""
 const auto& out = outputs_[output_idx].get();
 resize_out(out, sizes, strides, options);"""
         elif k is SchemaKind.mutable:
-            raise AssertionError("SchemaKind.mutable structured operators are currently not supported")
+            raise AssertionError(
+                "SchemaKind.mutable structured operators are currently not supported"
+            )
         else:
             assert_never(k)
 
@@ -578,7 +580,9 @@ resize_out(out, sizes, strides, options);"""
             out_refs = ", ".join(f"std::ref(out{i})" for i in range(returns))
             return f"{class_name}({out_args}) : outputs_{{ {out_refs} }} {{}}"
         elif k is SchemaKind.mutable:
-            raise AssertionError("SchemaKind.mutable structured operators are currently not supported")
+            raise AssertionError(
+                "SchemaKind.mutable structured operators are currently not supported"
+            )
         else:
             assert_never(k)
 
