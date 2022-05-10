@@ -121,3 +121,37 @@ class TestAOMIgrationNNQuantized(AOMigrationTestCase):
             'upsample_nearest',
         ]
         self._test_function_import('functional', function_list, base='nn.quantized')
+
+    def test_package_import(self):
+        function_list = [
+            'BatchNorm2d',
+            'BatchNorm3d',
+            # '_ConvNd',
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+            'ConvTranspose1d',
+            'ConvTranspose2d',
+            'ConvTranspose3d',
+            'DeQuantize',
+            'ELU',
+            'Embedding',
+            'EmbeddingBag',
+            'GroupNorm',
+            'Hardswish',
+            'InstanceNorm1d',
+            'InstanceNorm2d',
+            'InstanceNorm3d',
+            'LayerNorm',
+            'LeakyReLU',
+            'Linear',
+            'MaxPool2d',
+            'Quantize',
+            'ReLU6',
+            'Sigmoid',
+            'Dropout',
+            'FloatFunctional',
+            'FXFloatFunctional',
+            'QFunctional',
+        ]
+        self._test_function_import('quantized', function_list, base='nn')
