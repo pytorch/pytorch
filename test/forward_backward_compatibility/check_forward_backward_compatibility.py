@@ -75,6 +75,9 @@ ALLOW_LIST = [
     ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose3d", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose3d_backward", datetime.date(2022, 1, 31)),
+    ("aten::solve", datetime.date(9999, 1, 1)),
+    ("aten::solve.solution", datetime.date(9999, 1, 1)),
+    ("aten::_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::_index_copy_", datetime.date(2022, 5, 31)),
     ("aten::_svd_helper", datetime.date(2022, 3, 31)),
     ("aten::linalg_svdvals", datetime.date(2022, 3, 31)),
@@ -127,6 +130,9 @@ ALLOW_LIST = [
     ("aten::nansum", datetime.date(2022, 5, 15)),
     ("aten::zero", datetime.date(2022, 5, 15)),
     ("aten::_validate_sparse_compressed_tensor_args", datetime.date(2022, 5, 15)),
+    ("aten::stft", datetime.date(2022, 5, 23)),
+    ("aten::linalg_lu_solve", datetime.date(2022, 5, 23)),
+    ("aten::linalg_lu_solve.out", datetime.date(2022, 5, 23)),
 ]
 
 ALLOW_LIST_COMPILED = [
