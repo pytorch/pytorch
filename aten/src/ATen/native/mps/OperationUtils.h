@@ -111,6 +111,8 @@ private:
   NSObject *_object = nullptr;
 };
 
+// TODO: Improve the overall design of MPSGraphCache.
+// https://github.com/pytorch/pytorch/issues/77176
 // Cache holding various keys mapped to graphs
 
 struct MPSGraphCache
