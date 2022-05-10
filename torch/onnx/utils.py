@@ -18,9 +18,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.jit._trace
 import torch.serialization
-from torch.onnx import (
+from torch.onnx import (  # noqa: F401
     _constants,
-    _patch_torch,  # noqa: E401
+    _patch_torch,
     symbolic_caffe2,
     symbolic_helper,
     symbolic_registry,

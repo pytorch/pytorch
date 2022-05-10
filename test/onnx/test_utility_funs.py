@@ -2,7 +2,6 @@
 
 import copy
 import io
-import unittest
 
 import onnx
 import torchvision

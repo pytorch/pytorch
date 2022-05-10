@@ -8,6 +8,7 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.utils
 from torch.nn.modules.utils import _pair, _single, _triple
+from torch.onnx.flags import _FLAGS
 from torch.onnx.symbolic_helper import (
     ScalarType,
     _is_tensor_list,
@@ -1074,7 +1075,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and sym_help._training_mode:
+    if scale_grad_by_freq and _FLAGS.training_mode:
         return sym_help._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )
