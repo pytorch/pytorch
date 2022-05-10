@@ -7,13 +7,14 @@
 namespace at {
 namespace mps {
 
-MPSDevice* MPSDevice::_device = nullptr;
+static std::unique_ptr<MPSDevice> mps_device;
+static std::once_flag mpsdev_init;
 
 MPSDevice* MPSDevice::getInstance() {
-  if (_device == nullptr) {
-    _device = new MPSDevice();
-  }
-  return _device;
+  std::call_once(mpsdev_init, [] {
+      mps_device = std::unique_ptr<MPSDevice>(new MPSDevice());
+  });
+  return mps_device.get();
 }
 
 MPSDevice::~MPSDevice() {
