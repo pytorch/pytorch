@@ -733,8 +733,6 @@ Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
   if (self.layout() == kStrided && other.is_sparse_csr()) {
     return mul_sparse_csr(self.sparse_mask(other), other);
   }
-  TORCH_CHECK(self.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
-  TORCH_CHECK(other.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
   auto result_options = self.options().dtype(commonDtype);
   // CSR is 2d!
   Tensor result = at::empty({0, 0}, result_options);
