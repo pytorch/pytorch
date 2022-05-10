@@ -44,6 +44,8 @@ from torch.testing._internal.common_utils import \
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 import torch._refs as refs  # noqa: F401
+import torch._refs.nn.functional
+import torch._refs.special
 
 from distutils.version import LooseVersion
 
@@ -3735,13 +3737,20 @@ def sample_inputs_comparison_ops(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(lhs, args=(lhs.clone(),))
 
 def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
-    tensors = [
-        make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-        make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-        make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-    ]
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    return (SampleInput(tensors, args=(0,)),)
+    # shape x number of tensors
+    cases = (
+        ((3, 4), 1),
+        ((1, 2, 1, 4), 3),
+        ((0, 1, 0), 2),)
+
+    for shape, num_tensors in cases:
+        tensors = []
+        for _ in range(num_tensors):
+            tensors.append(make_arg(shape))
+        for dim in range(-1, len(shape) - 1):
+            yield SampleInput(tensors, args=(dim,))
 
 def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -5559,6 +5568,7 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), (-1, 2, 2)),
         ((S, S, S), (1, 0, 0)),
         ((S, S, S), (-1, 0, 0)),
+        ((S, S, S), (2, 1, 2)),
     )
 
     for shape, args in shapes_and_args:
@@ -5628,7 +5638,10 @@ def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
         ((3, 4, 5), 3),
         ((3, 4, 5), -1),
         ((3, 4, 5), -3),
-        ((), 0)
+        ((), 0),
+        ((), -1),
+        ((1,), 0),
+        ((1,), -1),
     ]
 
     samples = []
@@ -7781,7 +7794,7 @@ def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
              ((S * S * 2, S), (S, -1)),
              ((S,), (S,)),
              ((), ()),
-             ((), (1,)))
+             ((), (1,)),)
 
     for case in cases:
         shape, args = case
@@ -7792,6 +7805,38 @@ def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
             yield(SampleInput(
                 inp.clone().transpose(0, 1).requires_grad_(requires_grad),
                 args=(args, )))
+
+def reference_inputs_reshape(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_view_reshape(op, device, dtype, requires_grad, **kwargs)
+
+    cases = (
+        ((125,), (25, 5)),
+        ((25, 25), (1, 5, 5, 1, 5, 1, 5, 1)),
+        ((16, 32), (2, 4, 1, 4, 4, 1, 4)),
+        ((16, 12), (12, 16)),
+        ((1, 16, 12), (12, 16)),
+        ((1, 5, 1, 5), (25, 1)),
+        ((2, 4, 2), (4, 4)),
+        ((1, 4), (1, 1, 2, 1, 2)),
+        ((3, 5, 7), (7, 5, 3)),
+        ((1,), ()),
+        ((5, 0, 2, 3), (5, 0, 2, 3)),
+        ((2, 1, 0, 3, 1), (5, 0)),
+        ((1, 0, 3), ())
+    )
+
+    irreversible_cases = (
+        ((), (-1,)),
+    )
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    for a, b in cases:
+        yield SampleInput(make_arg(a), args=(b,))
+        yield SampleInput(make_arg(b), args=(a,))
+        yield SampleInput(make_arg(a, noncontiguous=True).transpose(0, -1), args=(b,))
+
+    for a, b in irreversible_cases:
+        yield SampleInput(make_arg(a), args=(b,))
 
 def sample_inputs_view_as_reshape_as(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
@@ -8002,7 +8047,7 @@ def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
                           kwargs=dict(as_tuple=as_tuple)))
 
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     cases = (((S, S, S), (2,)),
              ((S, S, S), (S, 1)),
@@ -8010,7 +8055,32 @@ def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
 
     for case in cases:
         shape, args = case
-        yield(SampleInput(make_arg(shape, requires_grad=requires_grad), args=args))
+        yield(SampleInput(make_arg(shape), args=args))
+
+def reference_inputs_chunk(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_chunk(op, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # shape x chunks x dim
+    cases = (
+        ((13, 9, 11), 17, -1),
+        ((13, 9, 11), 11, -1),
+        ((13,), 12, -1),
+        ((15,), 12, -1),
+        ((15,), 7, 0),
+        ((15,), 9, 0),
+        ((3, 7), 9, 1),
+        ((3, 7), 9, 0),
+        ((3, 7), 2, 0),
+        ((3, 7), 3, 0),
+        ((3, 7), 1, 0),
+        ((3, 7), 1, 1),
+        ((4, 4), 2, 0),
+    )
+
+    for shape, chunks, dim in cases:
+        yield SampleInput(make_arg(shape), args=(chunks, dim))
 
 def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
@@ -10034,6 +10104,7 @@ op_db: List[OpInfo] = [
     OpInfo('chunk',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            sample_inputs_func=sample_inputs_chunk,
+           reference_inputs_func=reference_inputs_chunk,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -10084,7 +10155,19 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_clamp),
+           sample_inputs_func=sample_inputs_clamp,
+           skips=(
+               # boolean alpha not handled properly
+               DecorateInfo(unittest.expectedFailure,
+                            'TestCudaFuserOpInfo',
+                            'test_nvfuser_correctness',
+                            dtypes=(torch.bool, torch.int32, torch.int64)),
+               # boolean alpha not handled properly
+               DecorateInfo(unittest.expectedFailure,
+                            'TestNNCOpInfo',
+                            'test_nnc_correctness',
+                            dtypes=(torch.bool, torch.int32, torch.int64)),
+           )),
     UnaryUfuncInfo('clamp',
                    variant_test_name='scalar',
                    aliases=('clip', ),
@@ -15025,6 +15108,7 @@ op_db: List[OpInfo] = [
     OpInfo('reshape',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_view_reshape,
+           reference_inputs_func=reference_inputs_reshape,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -15670,6 +15754,11 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/77046
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+           ),
            ),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
@@ -18062,6 +18151,39 @@ python_ref_db = [
         "_refs.tan",
         torch_opinfo_name="tan",
     ),
+    #
+    # Elementwise Unary Special OpInfos
+    #
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.i0e",
+        torch_opinfo_name="special.i0e",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.i1e",
+        torch_opinfo_name="special.i1e",
+    ),
+    #
+    # Elementwise Unary nn.functional OpInfos
+    #
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.elu",
+        torch_opinfo_name="nn.functional.elu",
+        decorators=(
+            # https://github.com/pytorch/pytorch/issues/77054
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    #
+    # Elementwise Binary OpInfos
+    #
     ElementwiseBinaryPythonRefInfo(
         "_refs.add",
         torch_opinfo_name="add",
@@ -18136,8 +18258,24 @@ python_ref_db = [
         torch_opinfo_name="igammac",
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.isclose",
+        torch_opinfo_name="isclose",
+        skips=(
+            # Intentional xfail -- isclose does not type promote
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.le",
         torch_opinfo_name="le",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.logical_and",
+        torch_opinfo_name="logical_and",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.logical_or",
+        torch_opinfo_name="logical_or",
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.lt",
@@ -18224,6 +18362,13 @@ python_ref_db = [
         ),
     ),
     #
+    # Data Conversion & Data Movement Opinfos
+    #
+    PythonRefInfo(
+        "_refs.clone",
+        torch_opinfo_name="clone",
+    ),
+    #
     # View & Shape OpInfos
     #
     PythonRefInfo(
@@ -18239,8 +18384,39 @@ python_ref_db = [
         )
     ),
     PythonRefInfo(
+        "_refs.chunk",
+        torch_opinfo_name="chunk",
+    ),
+    PythonRefInfo(
+        "_refs.flatten",
+        torch_opinfo_name="flatten",
+    ),
+    PythonRefInfo(
+        "_refs.flip",
+        torch_opinfo_name="flip",
+    ),
+    PythonRefInfo(
+        "_refs.narrow",
+        torch_opinfo_name="narrow",
+    ),
+    PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
+    ),
+    PythonRefInfo(
+        "_refs.stack",
+        torch_opinfo_name="stack",
+        skips=(
+            # ValueError: Callable cat has no meta function!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
+            # https://github.com/pytorch/pytorch/issues/77046
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.squeeze",
+        torch_opinfo_name="squeeze",
     ),
     PythonRefInfo(
         "_refs.tensor_split",
@@ -18253,6 +18429,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
+    ),
+    PythonRefInfo(
+        "_refs.unsqueeze",
+        torch_opinfo_name="unsqueeze",
     ),
     #
     # Reduction OpInfos
