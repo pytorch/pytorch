@@ -2777,6 +2777,13 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     return output;
 }
 
+// The default implementation of lift is a no-op.
+// If TLS is set appropriately (for wrapper-tensor keys like Functionalize or functorch transforms),
+// then we'll dispatch to one of their implementations, which will properly lift the tensor into a wrapper.
+at::Tensor lift(const at::Tensor& self) {
+    return self;
+}
+
 at::Tensor& _fw_primal_copy_out(const at::Tensor & self, int64_t level, at::Tensor & out) {
   auto tmp = self._fw_primal(level);
   out.copy_(tmp);
