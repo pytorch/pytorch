@@ -14,11 +14,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  - GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   get-rate-limit:
     runs-on: ubuntu-18.04
     steps:
       - run: |
-        curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit
+          curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit
