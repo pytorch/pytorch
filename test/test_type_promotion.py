@@ -555,7 +555,8 @@ class TestTypePromotion(TestCase):
             dict(name="ne", compare_op=lambda x, y: x != y, ),
         ]
         for op in comparison_ops:
-            dtypes = get_all_dtypes(include_half=device.startswith("cuda"),
+            is_cuda = torch.device(device).type == 'cuda'
+            dtypes = get_all_dtypes(include_half=is_cuda,
                                     include_bfloat16=False, include_bool=False,
                                     include_complex32=True)
 
