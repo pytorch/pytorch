@@ -273,8 +273,8 @@ bool operator==(const IValue& lhs, const IValue& rhs) {
 }
 
 bool IValue::ptrEqual(const IValue& lhs, const IValue& rhs) {
-  TORCH_INTERNAL_ASSERT(lhs.is_intrusive_ptr);
-  TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
+  TORCH_INTERNAL_ASSERT(lhs.isIntrusivePtr());
+  TORCH_INTERNAL_ASSERT(rhs.isIntrusivePtr());
   return lhs.tag == rhs.tag &&
       lhs.payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
 }
@@ -404,8 +404,8 @@ bool IValue::is(const IValue& rhs) const {
     return rhs.isTensor() && lhs.toTensor().is_same(rhs.toTensor());
   }
 
-  if (lhs.is_intrusive_ptr) {
-    return rhs.is_intrusive_ptr && ptrEqual(lhs, rhs);
+  if (lhs.isIntrusivePtr()) {
+    return rhs.isIntrusivePtr() && ptrEqual(lhs, rhs);
   }
   return lhs == rhs;
 }

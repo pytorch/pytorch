@@ -67,6 +67,16 @@ c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
   return c10::nullopt;
 }
 
+c10::optional<BackendDevice> GetBackendDevice(const c10::optional<at::Device>& device) {
+  if (!device) {
+    return c10::nullopt;
+  }
+  if (device->type() != at::kLazy) {
+    return c10::nullopt;
+  }
+  return torch::lazy::atenDeviceToBackendDevice(*device);
+}
+
 c10::optional<BackendDevice> GetBackendDevice() {
   return c10::nullopt;
 }

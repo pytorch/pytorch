@@ -19,7 +19,7 @@ full_codegen:
   - avg_pool2d_backward
   - baddbmm
   - bernoulli
-  - bernoulli.float_functional
+  - bernoulli.p
   - binary_cross_entropy
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
