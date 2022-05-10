@@ -25,6 +25,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
+  # improve rccl performance for distributed tests
+  export HSA_FORCE_FINE_GRAIN_PCIE=1
 fi
 
 # This token is used by a parser on Jenkins logs for determining

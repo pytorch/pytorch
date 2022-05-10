@@ -1,5 +1,5 @@
 ---
-name: "⚠️CI SEV"
+name: "⚠️ CI SEV"
 about: Tracking incidents for PyTorch's CI infra.
 ---
 

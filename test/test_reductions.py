@@ -1102,6 +1102,10 @@ class TestReductions(TestCase):
         self.assertEqual(
             torch.tensor([1, 1, 1, 2], dtype=torch.int64, device=device),
             long_counts)
+        # test avoiding overflow for uint8 (#76979)
+        count_uint8 = torch.tensor([0, 1, 2, 3, 255], dtype=torch.uint8, device=device).bincount()
+        count_int16 = torch.tensor([0, 1, 2, 3, 255], dtype=torch.int16, device=device).bincount()
+        self.assertEqual(count_uint8, count_int16)
         # test minlength functionality
         int_counts = torch.bincount(
             torch.tensor([1, 1, 1, 1], device=device), minlength=5)
