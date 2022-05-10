@@ -207,6 +207,10 @@ class GenLazyIR(ABC):
             f"""\
 class {schema.node_name} : public {self.node_base} {{
  public:
+  static OpKind ClassOpKind() {{
+    return OpKind({aten_symbol(schema)});
+  }}
+
   {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
       : {self.node_base_ctor_call(schema)}{comma_if_scalar_initializers}
         {scalar_initializers}

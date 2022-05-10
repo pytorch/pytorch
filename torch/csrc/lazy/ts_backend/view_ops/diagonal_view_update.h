@@ -1,12 +1,17 @@
 #pragma once
 
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <lazy/core/internal_ops/ltc_ops.h>
 
 namespace torch {
 namespace lazy {
 
 class TORCH_API DiagonalViewUpdate : public TsNode {
  public:
+  static OpKind ClassOpKind() {
+    return ltc_diagonal_view_update;
+  }
+
   DiagonalViewUpdate(
       const Value& target,
       const Value& input,

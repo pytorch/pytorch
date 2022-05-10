@@ -8,7 +8,7 @@ Expand::Expand(
     std::vector<int64_t> size,
     bool is_scalar_expand)
     : TsNode(
-          OpKind(at::aten::expand),
+          ClassOpKind(),
           {input},
           /*num_outputs=*/1,
           MHash(size, is_scalar_expand)),

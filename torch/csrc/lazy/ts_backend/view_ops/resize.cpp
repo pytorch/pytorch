@@ -4,7 +4,6 @@ namespace torch {
 namespace lazy {
 
 namespace {
-
 Shape NodeOutputShape(const Value& input, c10::ArrayRef<int64_t> size) {
   return Shape(input.shape().scalar_type(), size);
 }
@@ -13,7 +12,7 @@ Shape NodeOutputShape(const Value& input, c10::ArrayRef<int64_t> size) {
 
 Resize::Resize(const Value& input, std::vector<int64_t> size)
     : TsNode(
-          OpKind(at::aten::resize),
+          ClassOpKind(),
           {input},
           [&]() { return NodeOutputShape(input, size); },
           /*num_outputs=*/1,

@@ -13,7 +13,7 @@ Diagonal::Diagonal(
     int64_t dim1,
     int64_t dim2)
     : TsNode(
-          OpKind(at::aten::diagonal),
+          ClassOpKind(),
           {input},
           [&]() {
             return MakeDiagonalShape(input.shape(), offset, dim1, dim2);
