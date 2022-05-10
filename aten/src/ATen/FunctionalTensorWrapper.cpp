@@ -194,10 +194,8 @@ void FunctionalTensorWrapper::sync_() {
   if (is_up_to_date()) {
     return;
   }
-  auto any_updates = apply_updates();
-  if (any_updates) {
-    regenerate_from_base();
-  }
+  apply_updates();
+  regenerate_from_base();
 }
 
 void FunctionalTensorWrapper::regenerate_from_base() {
