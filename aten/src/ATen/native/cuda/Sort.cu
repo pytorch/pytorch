@@ -285,8 +285,7 @@ inline void segmented_sort_pairs_by_full_sort(
 
   const auto numel = nsort * nsegments;
   auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
-  auto indices_and_segment = cuda_allocator->allocate(numel * sizeof(int2));
-  auto i_s_ptr = static_cast<int2 *>(indices_and_segment.get());
+  c10::DeviceArray<int2> indices_and_segment(*cuda_allocator, numel);
 
   using namespace at::cuda::detail;
   dim3 block = CUDA_NUM_THREADS;
@@ -294,24 +293,23 @@ inline void segmented_sort_pairs_by_full_sort(
   auto stream = c10::cuda::getCurrentCUDAStream();
   at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
   fill_index_and_segment_kernel<<<grid, block, 0, stream>>>(
-      i_s_ptr, numel, nsort_divider);
+      indices_and_segment.get(), numel, nsort_divider);
 
-  auto indices_and_segment2 = cuda_allocator->allocate(nsegments * nsort * sizeof(int2));
-  auto i_s_ptr2 = static_cast<int2 *>(indices_and_segment2.get());
-
+  c10::DeviceArray<int2> indices_and_segment2(*cuda_allocator, nsegments * nsort);
   at::cuda::cub::radix_sort_pairs<scalar_t, int2>(
-    self_ptr, nullptr, i_s_ptr, i_s_ptr2,
-    n, descending);
+      self_ptr, nullptr, indices_and_segment.get(),
+      indices_and_segment2.get(), n, descending);
 
   TORCH_INTERNAL_ASSERT(segment_bits <= 32);
 
   // sort on lower 32bits, i.e. segment index
   at::cuda::cub::radix_sort_keys<int64_t>(
-    reinterpret_cast<int64_t *>(i_s_ptr2), reinterpret_cast<int64_t *>(i_s_ptr),
-    n, false, 0, segment_bits);
+      reinterpret_cast<int64_t *>(indices_and_segment2.get()),
+      reinterpret_cast<int64_t *>(indices_and_segment.get()),
+      n, false, 0, segment_bits);
 
   sort_postprocess_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
-    self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort);
+      self_ptr, values_ptr, indices_ptr, indices_and_segment.get(), nsegments, nsort);
 }
 
 template<typename scalar_t>
@@ -320,8 +318,7 @@ void segmented_sort_pairs(
     const scalar_t *self_ptr, scalar_t *values_ptr, int64_t *indices_ptr) {
   const auto numel = nsort * nsegments;
   auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
-  auto reverse_indices = cuda_allocator->allocate(numel * sizeof(int64_t));
-  int64_t *reverse_indices_ptr = static_cast<int64_t *>(reverse_indices.get());
+  c10::DeviceArray<int64_t> reverse_indices(*cuda_allocator, numel);
 
   using namespace at::cuda::detail;
   dim3 block = CUDA_NUM_THREADS;
@@ -329,10 +326,10 @@ void segmented_sort_pairs(
   auto stream = c10::cuda::getCurrentCUDAStream();
   at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
   fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
-      reverse_indices_ptr, numel, nsort_divider);
+      reverse_indices.get(), numel, nsort_divider);
 
   at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
-                                      reverse_indices_ptr, indices_ptr, n, nsegments,
+                                      reverse_indices.get(), indices_ptr, n, nsegments,
                                       offset_t{(int)nsort, 0}, offset_t{(int)nsort, 1}, descending);
 }
 
