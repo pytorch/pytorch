@@ -3,7 +3,7 @@
 #include <ATen/TensorNames.h>
 
 #include <ATen/core/Tensor.h>
-#include <ATen/DimVector.h>
+#include <ATen/core/DimVector.h>
 #include <functional>
 
 namespace at {
