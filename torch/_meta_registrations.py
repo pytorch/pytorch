@@ -35,7 +35,7 @@ def meta_max(self):
 @torch.library.impl(meta_lib, "abs")
 def meta_abs(self):
     if self.is_complex():
-        from_complex = {torch.chalf: torch.half, torch.cfloat: torch.float, torch.cdouble: torch.double}
+        from_complex = {torch.complex32: torch.half, torch.cfloat: torch.float, torch.cdouble: torch.double}
         float_type = from_complex[self.dtype]
         return self.new_empty(self.size(), dtype=float_type)
     else:
