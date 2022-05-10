@@ -1744,9 +1744,14 @@ Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Ten
   // implicitly handles broadcasting).
   auto result = at::zeros_like(
       input.expand(at::infer_size(input.sizes(), mask.sizes())), at::MemoryFormat::Preserve);
-  return areAnyTensorSubclassLike({grad, input, mask})
-      ? result.masked_scatter(mask, grad)
-      : result.masked_scatter_(mask, grad);
+
+  // for composite compliance, use out-of-place variant
+  // of `masked_scatter`.
+  if (areAnyTensorSubclassLike({grad, input, mask})) {
+    return result.masked_scatter(mask, grad);
+  }
+  result.masked_scatter_(mask, grad);
+  return result;
 }
 
 namespace {
