@@ -397,6 +397,41 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
         false));
     return perf_results;
   }
+
+  static uint64_t getSolutionId(const ConvolutionArgs& args) {
+    size_t max_solution_count;
+    size_t solution_count;
+    miopenConvSolution_t solutions[20];
+    MIOPEN_CHECK(miopenConvolutionForwardGetSolutionCount(
+        args.handle,
+        args.wdesc.desc(),
+        args.idesc.desc(),
+        args.cdesc.desc(),
+        args.odesc.desc(),
+        &max_solution_count));
+    if (max_solution_count > 20) {
+        fprintf(stderr, "JEFF UH OH in miopenConvFwdAlgorithm_t getSolutionId\n");
+    }
+    fprintf(stderr, "max_solution_count=%zu\n", max_solution_count);
+    MIOPEN_CHECK(miopenConvolutionForwardGetSolution(
+        args.handle,
+        args.wdesc.desc(),
+        args.idesc.desc(),
+        args.cdesc.desc(),
+        args.odesc.desc(),
+        max_solution_count,
+        &solution_count,
+        solutions));
+    for (size_t i=0; i<solution_count; ++i) {
+        fprintf(stderr, "solution[%zu] time=%f size=%zu id=%lu alg=%d\n",
+                i,
+                solutions[i].time,
+                solutions[i].workspace_size,
+                solutions[i].solution_id,
+                solutions[i].algorithm);
+    }
+    return solutions[0].solution_id;
+  }
 };
 
 template<>
@@ -426,6 +461,41 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
         ws.size,
         false));
     return perf_results;
+  }
+
+  static uint64_t getSolutionId(const ConvolutionArgs& args) {
+    size_t max_solution_count;
+    size_t solution_count;
+    miopenConvSolution_t solutions[20];
+    MIOPEN_CHECK(miopenConvolutionBackwardDataGetSolutionCount(
+        args.handle,
+        args.odesc.desc(),
+        args.wdesc.desc(),
+        args.cdesc.desc(),
+        args.idesc.desc(),
+        &max_solution_count));
+    if (max_solution_count > 20) {
+        fprintf(stderr, "JEFF UH OH in miopenConvBwdDataAlgorithm_t getSolutionId\n");
+    }
+    fprintf(stderr, "max_solution_count=%zu\n", max_solution_count);
+    MIOPEN_CHECK(miopenConvolutionBackwardDataGetSolution(
+        args.handle,
+        args.odesc.desc(),
+        args.wdesc.desc(),
+        args.cdesc.desc(),
+        args.idesc.desc(),
+        max_solution_count,
+        &solution_count,
+        solutions));
+    for (size_t i=0; i<solution_count; ++i) {
+        fprintf(stderr, "solution[%zu] time=%f size=%zu id=%lu alg=%d\n",
+                i,
+                solutions[i].time,
+                solutions[i].workspace_size,
+                solutions[i].solution_id,
+                solutions[i].algorithm);
+    }
+    return solutions[0].solution_id;
   }
 };
 
@@ -457,6 +527,41 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
         false));
     return perf_results;
   }
+
+  static uint64_t getSolutionId(const ConvolutionArgs& args) {
+    size_t max_solution_count;
+    size_t solution_count;
+    miopenConvSolution_t solutions[20];
+    MIOPEN_CHECK(miopenConvolutionBackwardWeightsGetSolutionCount(
+        args.handle,
+        args.odesc.desc(),
+        args.idesc.desc(),
+        args.cdesc.desc(),
+        args.wdesc.desc(),
+        &max_solution_count));
+    if (max_solution_count > 20) {
+        fprintf(stderr, "JEFF UH OH in miopenConvBwdWeightsAlgorithm_t getSolutionId\n");
+    }
+    fprintf(stderr, "max_solution_count=%zu\n", max_solution_count);
+    MIOPEN_CHECK(miopenConvolutionBackwardWeightsGetSolution(
+        args.handle,
+        args.odesc.desc(),
+        args.idesc.desc(),
+        args.cdesc.desc(),
+        args.wdesc.desc(),
+        max_solution_count,
+        &solution_count,
+        solutions));
+    for (size_t i=0; i<solution_count; ++i) {
+        fprintf(stderr, "solution[%zu] time=%f size=%zu id=%lu alg=%d\n",
+                i,
+                solutions[i].time,
+                solutions[i].workspace_size,
+                solutions[i].solution_id,
+                solutions[i].algorithm);
+    }
+    return solutions[0].solution_id;
+  }
 };
 
 template<typename algo_t>
@@ -464,6 +569,8 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   using search = algorithm_search<algo_t>;
   auto& cache = search::cache();
   auto& wsscache = search::wsscache();
+
+  (void)getSolutionId(args);
 
   if (cache.find(args.params, algo)) {
     return;
