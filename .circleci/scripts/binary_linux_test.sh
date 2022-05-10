@@ -53,9 +53,9 @@ if [[ "\$python_nodot" = *39*  ]]; then
   NUMPY_PIN=">=1.20"
 fi
 
-if [[ "$DESIRED_CUDA" == "cu116" ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
-fi
+#if [[ "$DESIRED_CUDA" == "cu116" ]]; then
+#  EXTRA_CONDA_FLAGS="-c=conda-forge"
+#fi
 
 # Move debug wheels out of the the package dir so they don't get installed
 mkdir -p /tmp/debug_final_pkgs
@@ -94,7 +94,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       else
         cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
       fi
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
+      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cuda=\${cu_ver}"
     fi
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
