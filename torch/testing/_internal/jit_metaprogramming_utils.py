@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import is_iterable_of_tensors
 
 import collections
 from copy import deepcopy
-from typing import List, Union
+from typing import Any, Dict, List, Union
 import math  # noqa: F401
 
 # Testing utils
@@ -407,23 +407,56 @@ def create_script_fn(self, method_name, func_type):
         return output
     return script_fn
 
-# make a new function where all non-tensor arguments in 'args' have been partially
-# applied, and all tensor arguments remain.
-# used to trace functions when some arguments are not tensors
-def partial_apply_nontensors(fn, args, **kwargs):
+class SplitInputs():
+    all_tensors: List[Any]
+    tensor_args: List[Any]
+    nontensor_args: List[Any]
+    arg_types: List[str]
+    tensor_kwargs: Dict[str, Any]
+    kwarg_order: List[str]
+    nontensor_kwargs: Dict[str, Any]
+    kwarg_types: Dict[str, Any]
+
+    @staticmethod
     def _is_tensor_input(arg):
         return isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)
 
-    source = ['t' if _is_tensor_input(arg) else 's' for arg in args]
+    def __init__(self, args, kwargs):
+        self.arg_types = ['t' if self._is_tensor_input(arg) else 's' for arg in args]
+        self.kwarg_types = {k: 't' if self._is_tensor_input(v) else 's' for k, v in kwargs.items()}
+        self.tensor_args = [arg for arg in args if self._is_tensor_input(arg)]
+        self.nontensor_args = [arg for arg in args if not self._is_tensor_input(arg)]
+        self.tensor_kwargs = {k: v for k, v in kwargs.items() if self._is_tensor_input(v)}
+        self.nontensor_kwargs = {k: v for k, v in kwargs.items() if not self._is_tensor_input(v)}
+        self.all_tensors = [*self.tensor_args, *[v for k, v in self.tensor_kwargs.items()]]
+        self.kwarg_order = [k for k, v in kwargs.items()]
+
+    def nontensors_match(self, other: 'SplitInputs'):
+        if self.arg_types != other.arg_types:
+            return False
+        if self.kwarg_types != other.kwarg_types:
+            return False
+        if self.kwarg_order != other.kwarg_order:
+            return False
+        if self.nontensor_args != other.nontensor_args:
+            return False
+        if self.nontensor_kwargs != other.nontensor_kwargs:
+            return False
+        return True
+
+# make a new function where all non-tensor arguments in 'args' have been partially
+# applied, and all tensor arguments remain.
+# used to trace functions when some arguments are not tensors
+def partial_apply_nontensors(fn, args, kwargs):
+    inputs = SplitInputs(args, kwargs)
 
     def new_fn(*tensors_):
         tensors = iter(tensors_)
-        return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
+        full_args = [args[i] if s == 's' else next(tensors) for i, s in enumerate(inputs.arg_types)]
+        full_kwargs = {k: kwargs[k] if s == 's' else next(tensors) for k, s in inputs.kwarg_types.items()}
+        return fn(*full_args, **full_kwargs)
 
-    tensor_args = [arg for arg in args if _is_tensor_input(arg)]
-    nontensor_args = [arg for arg in args if not _is_tensor_input(arg)]
-
-    return new_fn, tensor_args, nontensor_args
+    return new_fn, inputs
 
 # create a trace function from input fn
 def create_traced_fn(self, fn, cache_traced_fn=False):
@@ -431,21 +464,21 @@ def create_traced_fn(self, fn, cache_traced_fn=False):
         # `check_trace` is set to False because check_trace is run with @no_grad
         # Also, `check_against_reference` already does all the checks
         # against python function
-        fn_tensors, inputs_tensors, inputs_nontensors = partial_apply_nontensors(fn, inputs, **kwargs)
+        fn_tensors, split_inputs = partial_apply_nontensors(fn, inputs, kwargs)
         if not cache_traced_fn or not hasattr(traced_fn, 'traced'):
-            traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
-            self.assertExportImport(traced.graph, inputs_tensors)
-            output = traced(*inputs_tensors)
+            traced = torch.jit.trace(fn_tensors, split_inputs.all_tensors, check_trace=False)
+            self.assertExportImport(traced.graph, split_inputs.all_tensors)
+            output = traced(*split_inputs.all_tensors)
             if cache_traced_fn:
                 traced_fn.traced = traced
-                traced_fn.inputs_nontensors = inputs_nontensors
+                traced_fn.split_inputs = split_inputs
         else:
             # Guard to check that nontensor inputs are the same as during tracing
-            self.assertEqual(inputs_nontensors, traced_fn.inputs_nontensors)
-            output = traced_fn.traced(*inputs_tensors)
+            self.assertTrue(traced_fn.split_inputs.nontensors_match(split_inputs))
+            output = traced_fn.traced(*split_inputs.all_tensors)
             traced = traced_fn.traced
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
-        traced_fn.last_graph = traced.graph_for(*inputs_tensors)  # type: ignore[attr-defined]
+        traced_fn.last_graph = traced.graph_for(*split_inputs.all_tensors)  # type: ignore[attr-defined]
         traced_fn.graph = traced.graph  # type: ignore[attr-defined]
         return output
     return traced_fn

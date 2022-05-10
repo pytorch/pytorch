@@ -2,6 +2,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ThreadLocal.h>
+#include <c10/util/overloaded.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -527,6 +528,56 @@ void RecordFunction::end() {
   }
 }
 
+const char* RecordFunction::name() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      state_, "Called name() on inactive RecordFunction");
+  return c10::visit(
+      c10::overloaded(
+          [](const std::string& name) { return name.c_str(); },
+          [](const schema_ref_t schema) {
+            return schema.get().name().c_str();
+          }),
+      state_->fn_);
+}
+
+size_t RecordFunction::num_inputs() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      state_, "Called num_inputs() on inactive RecordFunction");
+  return c10::visit(
+      c10::overloaded(
+          [&](const std::string&) { return state_->inputs_.size(); },
+          [](const schema_ref_t schema) {
+            return schema.get().arguments().size();
+          }),
+      state_->fn_);
+}
+
+size_t RecordFunction::num_outputs() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      state_, "Called num_outputs() on inactive RecordFunction");
+  return c10::visit(
+      c10::overloaded(
+          [&](const std::string&) { return state_->outputs_.size(); },
+          [](const schema_ref_t schema) {
+            return schema.get().returns().size();
+          }),
+      state_->fn_);
+}
+
+c10::optional<OperatorName> RecordFunction::operator_name() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      state_, "Called operator_name() on inactive RecordFunction");
+  return c10::visit(
+      c10::overloaded(
+          [&](const std::string&) -> c10::optional<OperatorName> {
+            return c10::nullopt;
+          },
+          [](const schema_ref_t schema) -> c10::optional<OperatorName> {
+            return schema.get().operator_name();
+          }),
+      state_->fn_);
+}
+
 StepCallbacks getStepCallbacks(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacks(scope);
 }
@@ -631,39 +682,35 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!isActive()) {
     return;
   }
-  state_->op_input_size = state_->inputs_.size();
-  state_->name_ = name;
+  state_->fn_ = name;
   state_->sequence_nr_ = sequence_nr;
-  state_->operator_name_.reset();
 
   runStartCallbacks();
+  invalidateInputs();
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
   if (!isActive()) {
     return;
   }
-  state_->op_input_size = state_->inputs_.size();
-  state_->name_ = std::move(name);
+  state_->fn_ = std::move(name);
   state_->sequence_nr_ = sequence_nr;
-  state_->operator_name_.reset();
 
   runStartCallbacks();
+  invalidateInputs();
 }
 
 void RecordFunction::before(
-    c10::OperatorHandle const& op,
+    RecordFunction::schema_ref_t schema,
     int64_t sequence_nr) {
   if (!isActive()) {
     return;
   }
   state_->sequence_nr_ = sequence_nr;
-  state_->operator_name_ = op.operator_name();
-  state_->op_input_size = op.schema().arguments().size();
-  state_->op_output_size = op.schema().returns().size();
-  state_->name_ = op.schema().name();
+  state_->fn_ = schema;
 
   runStartCallbacks();
+  invalidateInputs();
 }
 
 /* static */ void RecordFunction::setDefaultNodeId(int64_t newDefaultNodeId) {
