@@ -20,7 +20,6 @@ from torch.onnx.flags import _FLAGS
 
 class TestONNXRuntime_cuda(unittest.TestCase):
 
-
     opset_version = _FLAGS.export_onnx_opset_version
     keep_initializers_as_inputs = True
     onnx_shape_inference = True

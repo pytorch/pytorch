@@ -8,6 +8,7 @@ for v in _constants.onnx_stable_opsets:
     symbolic_registry.register_version("", v)
 symbolic_registry.register_version("", _constants.onnx_main_opset)
 
+
 class _TorchSchema:
     def __init__(self, schema: Union[torch._C.FunctionSchema, str]) -> None:
         if isinstance(schema, torch._C.FunctionSchema):

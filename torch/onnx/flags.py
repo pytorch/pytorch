@@ -6,8 +6,9 @@ import torch.onnx
 from torch.onnx import _constants
 
 
-class _InternalFlags():
+class _InternalFlags:
     """Flags used internally by ONNX exporter."""
+
     def __init__(self):
         self._export_onnx_opset_version = _constants.onnx_default_opset
         self.operator_export_type: Optional[torch.onnx.OperatorExportTypes] = None
