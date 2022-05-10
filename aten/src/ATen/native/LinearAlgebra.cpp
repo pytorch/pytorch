@@ -1603,15 +1603,23 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
 }
 
 bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
+  // Don't fold in this case, as we would have to call mm on the transposed tensor, the result
+  // would be contiguous, and then we would need to transpose it and call contiguous on it, thus
+  // having to copy the tensor
+  if (tensor1.dim() == 2) {
+    return false;
+  }
+
   // We check that we can fold the larger tensor into a matrix and dispatch to mm or mv rather than
   // to bmm. We want to make sure we can do so without incurring in any extra copy
-
-  const auto tensor1_larger = tensor1.dim() > tensor2.dim();
+  const auto tensor1_larger = tensor1.dim() >= tensor2.dim();
 
   // We order the tensors. t1 will be the larger tensor
+  // We can always transpose tensor2 as the dimensions are always >= 1 (precondition from matmul)
+  // and tensor1_larger iff tensor2.dim() > tensor1.dim(9
   const auto t1 = tensor1_larger ? MaybeOwned<Tensor>::borrowed(tensor1)
-                                 : MaybeOwned<Tensor>::borrowed(tensor2);
-  const auto dim_t1 = t1->dim();
+                                 : MaybeOwned<Tensor>::owned(tensor2.mT());
+  const int64_t dim_t1 = t1->dim();
   const auto dim_t2 = tensor1_larger ? tensor2.dim()
                                      : tensor1.dim();
 
@@ -1620,28 +1628,22 @@ bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
     return false;
   }
 
-  // Don't fold in this case, as we would incur in a copy by making the returned tensor contiguous.
-  // See the discussion in
-  // https://github.com/pytorch/pytorch/pull/75197#discussion_r843413208
-  if (!tensor1_larger && dim_t2 == 2) {
-    return false;
+  // Can always fold if the tensor is empty
+  // This serves as a precondition for the code below
+  if (t1->numel() == 0) {
+    return true;
   }
 
+  // t1->view(-1, t1->size(-1)) does not copy only when the first n-1 dimensions are contiguous
+  // in the sense that t1_stride[i] = t1_stride[i+1]*t1_shape[i+1]
+  const auto t1_shape = t1->sizes();
   const auto t1_strides = t1->strides();
-  // t1->view(-1, t1->size(-1)) would copy otherwise
-  // If t1 is not the larger one, (case t1.shape = (2,) and t2.shape == (2, 2, 2))
-  // we are first transposing t2, so we have have to check the second to last index
-  if ((tensor1_larger && t1_strides.back() != 1) || t1_strides.cend()[-2] != 1) {
-    return false;
+  for (auto i = int64_t{0}; i < dim_t1 - int64_t{2}; ++i) {
+    if (t1_strides[i] != t1_strides[i+1] * t1_shape[i+1]) {
+      return false;
+    }
   }
-
-  // For t1->view(-1, t1->size(-1) not to copy we neet to check that t1 is a contiguous block in
-  // memory. To do so, it's enough to check that if `idx = argmax(t1_strides)`,
-  // t1_strides[idx] * t1_sizes[idx] == t1->numel()
-  auto i = std::distance(t1_strides.begin(),
-                         std::max_element(t1_strides.begin(), t1_strides.end()));
-  auto n = t1->numel();
-  return n == 0 || t1_strides.cbegin()[i] * t1->sizes().cbegin()[i] == n;
+  return true;
 }
 
 /*
@@ -1672,7 +1674,6 @@ Tensor _matmul_impl(
               dim_tensor1, "D and ", dim_tensor2, "D");
 
   const bool has_out = out.defined();
-
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
