@@ -15,7 +15,6 @@ from contextlib import contextmanager
 
 from torch.utils._python_dispatch import push_torch_dispatch_mode, TorchDispatchMode
 
-
 __all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx"]
 aten = torch.ops.aten
 
@@ -121,7 +120,7 @@ class PythonKeyTracer(Tracer):
     # this tracer might want to override this in order to turn a couple specific
     # modules into leaves in the traced graph.
     def call_module(
-        self, m: torch.nn.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
+            self, m: torch.nn.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
         return forward(*args, **kwargs)
 
@@ -150,7 +149,7 @@ class PythonKeyTracer(Tracer):
 
 
 def dispatch_trace(
-    root: Union[torch.nn.Module, Callable], concrete_args: Optional[Tuple[Any, ...]] = None
+        root: Union[torch.nn.Module, Callable], concrete_args: Optional[Tuple[Any, ...]] = None
 ) -> GraphModule:
     tracer = PythonKeyTracer()
     graph = tracer.trace(root, concrete_args)
@@ -164,7 +163,7 @@ def wrap_key(f, inps):
     @functools.wraps(f)
     def wrapped(*args):
         flat_args, args_spec = pytree.tree_flatten(args)
-        assert(len(flat_args) == len(flat_inps))
+        assert (len(flat_args) == len(flat_inps))
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
                 with no_dispatch():
@@ -193,7 +192,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             return func(*args, **kwargs)  # mode is disabled, this redispatches to ProxyTensor's torch dispatch
         else:
             proxy_out = self.tracer.create_proxy('call_function', func, args, kwargs,
-                                     name=self.tracer.graph._target_to_str(func.__name__))
+                                                 name=self.tracer.graph._target_to_str(func.__name__))
 
             with no_dispatch():
                 real_out = func_overload(*args, **kwargs)
