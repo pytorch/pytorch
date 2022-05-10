@@ -11,9 +11,9 @@ def meta_index_select(self, dim, index):
     return self.new_empty(result_size)
 
 @torch.library.impl(meta_lib, "index_select.out")
-def meta_index_select_out(self, out):
+def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
-    return out.copy_(torch.index_select(self))
+    return out.copy_(torch.index_select(self, dim, index))
 
 @torch.library.impl(meta_lib, "inverse")
 def meta_inverse(self):
