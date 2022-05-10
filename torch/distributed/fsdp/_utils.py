@@ -4,7 +4,6 @@ from typing import Any, Callable, Dict, List, Set, Tuple, Union
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
 
-from collections import OrderedDict
 from torch.nn.utils.rnn import PackedSequence
 
 """Useful functions to deal with tensor types with other python container types."""
