@@ -327,12 +327,16 @@ TORCH_CUDA_CU_API TensorView* bitwise_and(TensorView* v1, TensorView* v2);
 TORCH_CUDA_CU_API Val* bitwise_left_shift(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* bitwise_left_shift(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* bitwise_left_shift(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* bitwise_left_shift(TensorView* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_left_shift(
+    TensorView* v1,
+    TensorView* v2);
 // bitwise_right_shift
 TORCH_CUDA_CU_API Val* bitwise_right_shift(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* bitwise_right_shift(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* bitwise_right_shift(Val* v1, TensorView* v2);
-TORCH_CUDA_CU_API TensorView* bitwise_right_shift(TensorView* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* bitwise_right_shift(
+    TensorView* v1,
+    TensorView* v2);
 // bitwise_or
 TORCH_CUDA_CU_API Val* bitwise_or(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* bitwise_or(TensorView* v1, Val* v2);
