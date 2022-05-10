@@ -17,7 +17,7 @@ from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
     default_auto_wrap_policy,
     enable_wrap,
-    or_policy,
+    _or_policy,
     wrap,
     wrap_batchnorm_individually,
     transformer_auto_wrap_policy,
@@ -156,7 +156,7 @@ class TestFSDPWrap(FSDPTest):
 
         policy = (
             functools.partial(
-                or_policy,
+                _or_policy,
                 policies=[never_wrap_policy, wrap_batchnorm_individually]
             ) if use_or_policy else wrap_batchnorm_individually
         )
@@ -171,7 +171,7 @@ class TestFSDPWrap(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_bn_always_wrapped_individually(self):
         """
-        Ensures that by using or_policy with wrap_batchnorm_individually, even
+        Ensures that by using _or_policy with wrap_batchnorm_individually, even
         if the other policy results in a module containing a BN unit being
         wrapped, the contained BN unit will still be individually wrapped.
         """
@@ -186,7 +186,7 @@ class TestFSDPWrap(FSDPTest):
             return isinstance(module, BatchNormNet)
 
         my_policy = functools.partial(
-            or_policy,
+            _or_policy,
             policies=[wrap_bn_container, wrap_batchnorm_individually]
         )
         mod = MyModule()

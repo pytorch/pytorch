@@ -19,12 +19,6 @@ from typing import (
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
 
-__all__ = [
-    "always_wrap_policy", "transformer_auto_wrap_policy",
-    "default_auto_wrap_policy", "enable_wrap", "wrap",
-    "or_policy", "wrap_batchnorm_individually",
-]
-
 
 def always_wrap_policy(*args, **kwargs) -> bool:
     """
@@ -73,7 +67,7 @@ def wrap_batchnorm_individually(
         # BN layer or not.
         return isinstance(module, _BatchNorm)
 
-def or_policy(
+def _or_policy(
     module: nn.Module,
     recurse: bool,
     unwrapped_params: int,
