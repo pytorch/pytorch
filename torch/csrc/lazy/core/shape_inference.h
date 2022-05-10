@@ -16,7 +16,7 @@ TORCH_API std::vector<Shape> compute_shape__adaptive_avg_pool2d_backward(const a
 TORCH_API std::vector<Shape> compute_shape_abs(const at::Tensor & self);
 TORCH_API std::vector<Shape> compute_shape_arange(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory);
 TORCH_API std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, c10::optional<at::Generator> generator);
-TORCH_API std::vector<Shape> compute_shape_bernoulli_functional(const at::Tensor & self, double p, c10::optional<at::Generator> generator);
+TORCH_API std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, double p, c10::optional<at::Generator> generator);
 TORCH_API std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction);
 TORCH_API std::vector<Shape> compute_shape_binary_cross_entropy_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction);
 TORCH_API std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim);

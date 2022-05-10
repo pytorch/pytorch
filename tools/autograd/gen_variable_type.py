@@ -332,7 +332,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "to_sparse",
     "sparse_sampled_addmm",
     "linalg_lu",
-    "linalg_lu_solve",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -854,7 +853,12 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
     # TODO: check with Alban/Jeffrey.
     # Now that we have out= ops that can have no returns, how should this work?
-    if info is not None and info.has_derivatives and not requires_derivative and len(f.func.returns) > 0:
+    if (
+        info is not None
+        and info.has_derivatives
+        and not requires_derivative
+        and len(f.func.returns) > 0
+    ):
         raise RuntimeError(
             f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
         )
