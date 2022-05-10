@@ -924,7 +924,6 @@ class TestOperators(TestCase):
             def forward(self, input, input2):
                 return input >> 1, input2 >> 2
 
-        input = torch.arange(24, dtype=torch.float32).reshape(3, 4, 2)
         input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.assertONNX(BitshiftModel(), (input, input2), opset_version=11)
 

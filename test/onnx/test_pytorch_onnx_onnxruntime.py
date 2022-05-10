@@ -3944,7 +3944,6 @@ class _TestONNXRuntime:
                     input2 << 4.2,
                 )
 
-        input = torch.arange(24, dtype=torch.float32).reshape(3, 4, 2)
         input2 = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), (input, input2))
 
