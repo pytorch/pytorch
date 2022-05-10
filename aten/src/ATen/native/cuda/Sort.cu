@@ -263,12 +263,13 @@ inline void segmented_sort_large_segments(
   dim3 grid = GET_BLOCKS(nsort);
   c10::DeviceArray<int64_t> indices(*allocator, nsort);
   at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
+  fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
+      indices.get(), nsort, nsort_divider);
+  const int64_t *initial_indices = indices.get();
 
   for (auto i: c10::irange(nsegments)){
-    fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
-        indices.get(), nsort, nsort_divider);
     at::cuda::cub::radix_sort_pairs<scalar_t, int64_t>(
-        self_ptr, values_ptr, indices.get(), indices_ptr,
+        self_ptr, values_ptr, initial_indices, indices_ptr,
         nsort, descending);
     indices_ptr += nsort;
     self_ptr += nsort;
@@ -367,7 +368,7 @@ void launch_stable_sort_kernel(
         int64_t n = std::min(remaining, nbatch);
         int64_t nsegments = n / nsort;
 
-        if (nsegments == 1 || nsort > 1000000) { //rough heuristics where even a single sort occupies GPU
+        if (nsegments == 1 || nsort >= 1000000) { //rough heuristics where even a single sort occupies GPU
           segmented_sort_large_segments(
               nsegments, nsort, n, descending,
               self_ptr, values_ptr, indices_ptr);
