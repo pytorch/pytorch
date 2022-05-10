@@ -18,8 +18,6 @@
 #include <ATen/ops/zeros_native.h>
 #endif
 
-#include <iostream>
-
 namespace at {
 namespace cuda {
 #define THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM 100
@@ -34,11 +32,11 @@ namespace cuda {
  */
 enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
 namespace {
-template <typename input_t, typename bounds_t, typename IndexType>
+template <typename input_t, typename IndexType>
 __device__ static IndexType getBin(
     input_t bVal,
-    bounds_t minvalue,
-    bounds_t maxvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> minvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> maxvalue,
     int64_t nbins) {
   IndexType bin = (int)(((bVal - minvalue)) * nbins / (maxvalue - minvalue));
   // (only applicable for histc)
@@ -58,7 +56,6 @@ __device__ static IndexType getBin(
 template <
     typename output_t,
     typename input_t,
-    typename bounds_t,
     typename IndexType,
     int ADims,
     int PDims,
@@ -71,8 +68,8 @@ __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
     detail::TensorInfo<input_t, IndexType> b, /* input */
     int64_t nbins,
-    bounds_t minvalue,
-    bounds_t maxvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> minvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> maxvalue,
     IndexType totalElements,
     Op getOp) {
   extern __shared__ unsigned char my_smem[];
@@ -94,8 +91,8 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
-        const IndexType bin = getBin<input_t, bounds_t, IndexType>(
-            bVal, minvalue, maxvalue, nbins);
+        const IndexType bin =
+            getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         gpuAtomicAddNoReturn(&smem[bin], getOp(linearIndex));
       }
     }
@@ -121,8 +118,8 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `p`
-        const IndexType bin = getBin<input_t, bounds_t, IndexType>(
-            bVal, minvalue, maxvalue, nbins);
+        const IndexType bin =
+            getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType pIdx = p.strides[0] * blockIdx.x + bin;
         const IndexType pOffset =
             detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
@@ -153,8 +150,8 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `a`
-        const IndexType bin = getBin<input_t, bounds_t, IndexType>(
-            bVal, minvalue, maxvalue, nbins);
+        const IndexType bin =
+            getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType aOffset =
             detail::IndexToOffset<output_t, IndexType, ADims>::get(bin, a);
         gpuAtomicAddNoReturn(&a.data[aOffset], getOp(linearIndex));
@@ -167,7 +164,6 @@ __global__ void kernelHistogram1D(
   kernelHistogram1D<                                                     \
       output_t,                                                          \
       input_t,                                                           \
-      bounds_t,                                                          \
       IndexType,                                                         \
       1,                                                                 \
       2,                                                                 \
@@ -223,18 +219,14 @@ inline int64_t getFreeGlobalMemory() {
     case: THRESH_NUMBER_BINS_FOR_GLOBAL_MEM <= #bins
         GLOBAL: all threads atomically update to a single **global** hist copy.
  */
-template <
-    typename output_t,
-    typename input_t,
-    typename bounds_t,
-    bool HasWeights>
+template <typename output_t, typename input_t, bool HasWeights>
 bool CUDA_tensor_histogram(
     at::Tensor a, /* output */
     at::Tensor b, /* input */
     at::Tensor c, /* weights(optional) */
     int64_t nbins,
-    bounds_t minvalue,
-    bounds_t maxvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> minvalue,
+    at::acc_type<input_t, /*is_cuda=*/true> maxvalue,
     TensorArgType aType = TensorArgType::ReadWrite,
     TensorArgType bType = TensorArgType::ReadOnly,
     TensorArgType cType = TensorArgType::ReadOnly) {
@@ -356,7 +348,7 @@ Tensor _bincount_cuda_template(
         weights.options().layout_opt(),
         weights.options().device_opt(),
         weights.options().pinned_memory_opt());
-    cuda::CUDA_tensor_histogram<weights_t, input_t, bounds_t, true>(
+    cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
         output, self, weights, nbins, minvalue, maxvalue);
   } else {
     output = native::zeros(
@@ -365,19 +357,19 @@ Tensor _bincount_cuda_template(
         c10::nullopt /* layout */,
         DeviceType::CUDA,
         c10::nullopt /* pin_memory */);
-    cuda::CUDA_tensor_histogram<int64_t, input_t, bounds_t, false>(
+    cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, minvalue, maxvalue);
   }
   return output;
 }
 
 ///////////////// histc /////////////////
-template <typename input_t, typename bounds_t>
+template <typename input_t>
 Tensor _histc_cuda_template(
     const Tensor& self,
     int64_t nbins,
-    bounds_t min,
-    bounds_t max) {
+    at::acc_type<input_t, /*is_cuda=*/true> min,
+    at::acc_type<input_t, /*is_cuda=*/true> max) {
   if (nbins <= 0) {
     AT_ERROR("bins must be > 0");
   }
@@ -419,7 +411,7 @@ Tensor _histc_cuda_template(
 #endif
   TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
 
-  cuda::CUDA_tensor_histogram<input_t, input_t, bounds_t, false>(
+  cuda::CUDA_tensor_histogram<input_t, input_t, false>(
       output, self, Tensor(), nbins, minvalue, maxvalue);
   return output;
 }
@@ -438,11 +430,8 @@ Tensor _bincount_cuda(
   globalContext().alertNotDeterministic("_bincount_cuda");
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cuda", [&] {
     const auto scalar = weights.scalar_type();
-    if (scalar == ScalarType::Undefined || scalar == ScalarType::Float) {
-      std::cerr << "float!\n";
+    if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
       return _bincount_cuda_template<scalar_t, float>(self, weights, minlength);
-    }
-    std::cerr << "double!\n";
     return _bincount_cuda_template<scalar_t, double>(
         self, weights.to(kDouble), minlength);
   });
@@ -461,7 +450,7 @@ Tensor _histc_cuda(
   globalContext().alertNotDeterministic("_histc_cuda");
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
     using bounds_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-    return _histc_cuda_template<scalar_t, bounds_t>(
+    return _histc_cuda_template<scalar_t>(
         self, nbins, min.to<bounds_t>(), max.to<bounds_t>());
   });
 }
