@@ -2776,6 +2776,13 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     slice.copy_(src);
     return output;
 }
+at::Tensor as_strided_scatter(const at::Tensor& self, const at::Tensor& src, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
+    auto output = self.clone();
+    auto slice = output.as_strided(size, stride, storage_offset);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
 
 // The default implementation of lift is a no-op.
 // If TLS is set appropriately (for wrapper-tensor keys like Functionalize or functorch transforms),
