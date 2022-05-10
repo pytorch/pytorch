@@ -6016,6 +6016,8 @@
 
 - func: lift(Tensor self) -> Tensor
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: lift
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method

@@ -330,6 +330,8 @@ Tensor internal_new_from_data(
     tensor = tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
   }
 
+  // lift has no autograd implementation, so we need to make sure we don't try to dispatch to it.
+  at::AutoDispatchBelowADInplaceOrView guard;
   return tensor.lift();
 }
 
