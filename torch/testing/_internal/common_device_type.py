@@ -511,11 +511,10 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
-        else torch.backends.mps.is_available():
+        elif torch.backends.mps.is_available():
             test_bases.append(MPSTestBase)
 
     return test_bases
-
 
 device_type_test_bases = get_device_type_test_bases()
 
