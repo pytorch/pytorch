@@ -4,6 +4,7 @@
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <ATen/ExpandUtils.h>
@@ -38,8 +39,10 @@ void copyScalarTypeAndDeviceToOutput(
   TORCH_INTERNAL_ASSERT(
       out != nullptr,
       "Expect target node's type pointer to be non-nullptr, but get nullptr");
-  out->scalarType() = dtype;
-  out->device() = device;
+  if (!hasTypeAndDevice(out)) {
+    out->scalarType() = dtype;
+    out->device() = device;
+  }
 }
 
 void copyScalarTypeAndDeviceToOutput(
@@ -155,6 +158,17 @@ class NaiveTypePropagator {
         unary_float_type(node);
         break;
       }
+      // unary is
+      case aten::isfinite:
+      case aten::isinf:
+      case aten::isnan:
+      case aten::isneginf:
+      case aten::isposinf:
+      case aten::isreal: {
+        copyScalarTypeAndDeviceToOutput(
+            c10::ScalarType::Bool, c10::nullopt, node);
+        break;
+      }
       // binary float
       case aten::atan2: {
         binary_type(node, TypePromotion::float_op_config);
@@ -254,7 +268,6 @@ class NaiveTypePropagator {
       }
       case aten::_batch_norm_impl_index_backward:
       case aten::native_batch_norm_backward: {
-        int grad_input_index = 1;
         int weight_index = -1;
         int mask_index = -1;
         if (node->kind() ==
@@ -410,6 +423,7 @@ class NaiveTypePropagator {
         break;
       }
       case aten::amax:
+      case aten::amin:
       case aten::mean:
       case aten::sum: {
         auto out_type = getInputTensorType(node, 0);
@@ -485,7 +499,6 @@ class NaiveTypePropagator {
         TORCH_CHECK(
             hasTypeAndDevice(in_type),
             "Type and device propagation has failed, or was not provided enough information.");
-        const auto in_scalar_type = in_type->scalarType();
         const auto in_device = in_type->device();
         const auto cuda_enabled = constant_as<bool>(node->input(1));
         const auto cpu_enabled = constant_as<bool>(node->input(2));
@@ -634,7 +647,9 @@ class NaiveTypePropagator {
 
 void TypePropagate(std::shared_ptr<Graph>& graph) {
   FUSER_PERF_SCOPE("TypePropagate");
+  GRAPH_DUMP("Before TypePropagate: ", graph);
   NaiveTypePropagator(graph).run();
+  GRAPH_DUMP("After TypePropagate: ", graph);
 }
 
 } // namespace cuda

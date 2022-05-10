@@ -3,6 +3,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind Expand::class_op_kind(at::aten::expand);
+
 Expand::Expand(
     const Value& input,
     std::vector<int64_t> size,
@@ -14,7 +16,7 @@ Expand::Expand(
           MHash(size, is_scalar_expand)),
       size_(std::move(size)),
       is_scalar_expand_(is_scalar_expand) {
-  SetShapeDeferred(
+  addComputedShape(
       [&]() { return Shape(input.shape().scalar_type(), size_); });
 }
 

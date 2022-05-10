@@ -748,7 +748,8 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
           sum_val += float(input_ptr[d]);
         }
       }
-      sum_val += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, sum_fvec);
+      // TODO: use fast version
+      sum_val += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, sum_fvec, fVec::size());
       float mean_val = sum_val / N;
       mean_data[c] = param_t(mean_val);
 
@@ -770,7 +771,8 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
           var_val += (data_val - mean_val) * (data_val - mean_val);
         }
       }
-      var_val += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, var_fvec);
+      // TODO: use fast version
+      var_val += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, var_fvec, fVec::size());
       var_sum_data[c] = param_t(var_val);
     }
   });
@@ -961,8 +963,9 @@ void batch_norm_cpu_backward_contiguous_internal(Tensor& grad_input, Tensor& gra
           dotp += (float(x_ptr[d]) - mean) * float(dy_ptr[d]);
         }
       }
-      sum += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, sum_fvec);
-      dotp += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, dotp_fvec);
+      // TODO: use fast version
+      sum += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, sum_fvec, fVec::size());
+      dotp += vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, dotp_fvec, fVec::size());
 
       if (!grad_input_null) {
         if (train) {
