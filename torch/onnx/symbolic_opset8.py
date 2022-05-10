@@ -10,7 +10,6 @@ from torch.onnx.symbolic_helper import (
     _unimplemented,
     parse_args,
 )
-from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore[attr-defined]
 
 # Note [ONNX operators that are added/updated from opset 8 to opset 9]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -129,7 +128,7 @@ def _try_cast_integer_to_float(g, *args):
     if arg0_type is not None:
         old_type = arg0_type
         if old_type not in floating_scalar_types:
-            args = tuple(_cast_Float(g, arg, False) for arg in args)
+            args = tuple(sym_opset9._cast_Float(g, arg, False) for arg in args)
         else:
             return (None,) + args
     else:

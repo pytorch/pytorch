@@ -3,13 +3,9 @@ from sys import maxsize
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
+import torch.onnx.utils
 from torch.onnx.symbolic_helper import _parse_arg, _unimplemented, parse_args
 from torch.onnx.symbolic_opset9 import _reshape_from_tensor, permute
-from torch.onnx.utils import (
-    _add_block,
-    _add_input_to_block,
-    _add_output_to_block,
-)
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -274,9 +270,9 @@ def unfold(g, input, dimension, size, step):
         loop_len = g.op("Min", low_size, hi_size)
         loop = g.op("Loop", loop_len, loop_condition)
 
-        loop_block = _add_block(loop.node())
-        block_input_iter = _add_input_to_block(loop_block)
-        cond = _add_input_to_block(loop_block)
+        loop_block = torch.onnx.utils._add_block(loop.node())
+        block_input_iter = torch.onnx.utils._add_input_to_block(loop_block)
+        cond = torch.onnx.utils._add_input_to_block(loop_block)
 
         starts = loop_block.op("Gather", low_indices, block_input_iter)
         ends = loop_block.op("Gather", hi_indices, block_input_iter)
@@ -292,8 +288,8 @@ def unfold(g, input, dimension, size, step):
         concat = loop_block.op("Concat", *unsqueeze_list, axis_i=0)
 
         cond_out = loop_block.op("Cast", loop_condition, to_i=9)
-        _add_output_to_block(loop_block, cond_out)
-        _add_output_to_block(loop_block, concat)
+        torch.onnx.utils._add_output_to_block(loop_block, cond_out)
+        torch.onnx.utils._add_output_to_block(loop_block, concat)
 
         loop_output = loop.node().output()
         perm = [0, 1, 2, 3, 4]
