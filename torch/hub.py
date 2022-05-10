@@ -10,12 +10,10 @@ import torch
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Callable, Dict, Optional, Union
+from typing import Callable, Dict, Optional, Union, Any
 from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
-
-import torch.nn as nn
 
 try:
     from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
@@ -370,7 +368,8 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
         trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
-            This parameter helps ensuring that users only run code from repos that they trust.
+            This parameter was introduced in v1.12 and helps ensuring that users
+            only run code from repos that they trust.
 
             - If ``False``, a prompt will ask the user whether the repo should
               be trusted.
@@ -384,7 +383,7 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
               is only present for backward compatibility and will be removed in
               v1.14.
 
-            Default is ``None`` and will eventually change to ``"check"`` in a future version.
+            Default is ``None`` and will eventually change to ``"check"`` in v1.14.
 
     Returns:
         list: The available callables entrypoint
@@ -425,7 +424,8 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
         trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
-            This parameter helps ensuring that users only run code from repos that they trust.
+            This parameter was introduced in v1.12 and helps ensuring that users
+            only run code from repos that they trust.
 
             - If ``False``, a prompt will ask the user whether the repo should
               be trusted.
@@ -439,7 +439,7 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
               is only present for backward compatibility and will be removed in
               v1.14.
 
-            Default is ``None`` and will eventually change to ``"check"`` in a future version.
+            Default is ``None`` and will eventually change to ``"check"`` in v1.14.
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
@@ -486,7 +486,8 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
         source (string, optional): 'github' or 'local'. Specifies how
             ``repo_or_dir`` is to be interpreted. Default is 'github'.
         trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
-            This parameter helps ensuring that users only run code from repos that they trust.
+            This parameter was introduced in v1.12 and helps ensuring that users
+            only run code from repos that they trust.
 
             - If ``False``, a prompt will ask the user whether the repo should
               be trusted.
@@ -500,7 +501,7 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
               is only present for backward compatibility and will be removed in
               v1.14.
 
-            Default is ``None`` and will eventually change to ``"check"`` in a future version.
+            Default is ``None`` and will eventually change to ``"check"`` in v1.14.
         force_reload (bool, optional): whether to force a fresh download of
             the github repo unconditionally. Does not have any effect if
             ``source = 'local'``. Default is ``False``.
@@ -666,7 +667,7 @@ def load_state_dict_from_url(
     progress: bool = True,
     check_hash: bool = False,
     file_name: Optional[str] = None
-) -> nn.Module:
+) -> Dict[str, Any]:
     r"""Loads the Torch serialized object at the given URL.
 
     If downloaded file is a zip file, it will be automatically

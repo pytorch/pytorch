@@ -9,6 +9,7 @@ from torchgen.model import (
     Type,
     SchemaKind,
     NativeFunctionsViewGroup,
+    NativeFunctionsGroup,
 )
 from torchgen.utils import IDENT_REGEX
 
@@ -181,6 +182,34 @@ class DifferentiabilityInfo:
             name=view_copy_name,
             func=f,
             op=view_copy_op_name,
+            # But keep all derivative info the same
+            derivatives=self.derivatives,
+            forward_derivatives=self.forward_derivatives,
+            all_saved_inputs=self.all_saved_inputs,
+            all_saved_outputs=self.all_saved_outputs,
+            available_named_gradients=self.available_named_gradients,
+            used_named_gradients=self.used_named_gradients,
+            args_with_derivatives=self.args_with_derivatives,
+            non_differentiable_arg_names=self.non_differentiable_arg_names,
+            output_differentiability=self.output_differentiability,
+            output_differentiability_conditions=self.output_differentiability_conditions,
+        )
+
+    def create_functional_derivative(
+        self, g: NativeFunctionsGroup
+    ) -> "DifferentiabilityInfo":
+        assert "generated" in g.functional.tags
+
+        f = g.functional
+
+        name = str(g.functional.func.name.name)
+        op_name = None if self.op is None else f"{self.op}_functional"
+
+        return DifferentiabilityInfo(
+            # Use the "_functional" version of name/func/op
+            name=name,
+            func=f,
+            op=op_name,
             # But keep all derivative info the same
             derivatives=self.derivatives,
             forward_derivatives=self.forward_derivatives,
