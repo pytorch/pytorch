@@ -1701,7 +1701,7 @@ Tensor _matmul_impl(
         // FIXME This path always does an unnecessary copy when transpose == true as the returned
         // result from BLAS is already C-transposed
         const auto output = at::_unsafe_view(t1_folded.mm(*t2), output_shape);
-        return transpose ? output.transpose_(-2, -1).contiguous() : output;
+        return transpose ? output.mT().contiguous() : output;
       } else {
         return at::_unsafe_view(t1_folded.mv(*t2), output_shape);
       }

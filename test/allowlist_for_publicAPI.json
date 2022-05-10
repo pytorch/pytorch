@@ -2113,6 +2113,7 @@
     "svdvals",
     "tensorinv",
     "tensorsolve",
+    "vander",
     "vector_norm"
   ],
   "torch.multiprocessing": [
