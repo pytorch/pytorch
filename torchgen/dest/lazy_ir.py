@@ -1,5 +1,4 @@
 from abc import ABC
-import re
 from typing import List, Optional, Union
 from dataclasses import dataclass
 from torchgen.context import method_with_native_function
@@ -9,6 +8,7 @@ from torchgen.api.types import (
     OptionalCType,
     VectorCType,
     kernel_signature,
+    deviceT,
 )
 import torchgen.api.dispatcher as dispatcher
 from torchgen.api.lazy import (
@@ -358,9 +358,9 @@ class GenLazyNativeFuncDefinition:
                 f"{self.get_device_fn}({', '.join(value_types_names)})"
             )
         else:
-            optional_device_re = re.compile("(.*::)?optional<(.*::)?Device>")
+            optional_device = OptionalCType(BaseCType(deviceT))
             for a in scalar_args:
-                if optional_device_re.search(a.lazy_type.cpp_type()):
+                if a.lazy_type == optional_device:
                     get_device_str = f"atenDeviceToBackendDevice({a.name})"
                     break
             else:
