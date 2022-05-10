@@ -604,6 +604,65 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
   };
 });
 
+#ifdef FBCODE_CAFFE2
+// Disable externally to avoid MSVC errors in open-source CI
+
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::clamp_nan_to_num,
+    static_runtime_clamp_nan_to_num,
+    [](Node* n) -> SROperator {
+      auto clamp_min_ival_opt = toIValue(n->input(1));
+      auto clamp_max_ival_opt = toIValue(n->input(2));
+      TORCH_CHECK(
+          clamp_min_ival_opt.has_value() && clamp_max_ival_opt.has_value());
+
+      auto clamp_min_opt = clamp_min_ival_opt->toOptional<at::Scalar>();
+      auto clamp_max_opt = clamp_max_ival_opt->toOptional<at::Scalar>();
+      TORCH_CHECK(clamp_min_opt.has_value() && clamp_max_opt.has_value());
+
+      return [te = createClampNanToNum(),
+              clamp_min = clamp_min_opt->to<float>(),
+              clamp_max =
+                  clamp_max_opt->to<float>()](ProcessedNode* p_node) mutable {
+        const auto& in0_t = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = create_empty_from(in0_t);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        auto in3_s = p_node->Input(3).toOptional<double>();
+
+        if (!te || !te->checkInput<float>(in0_t)) {
+          at::cpu::nan_to_num_out(
+              out_t,
+              at::cpu::clamp(in0_t, clamp_min, clamp_max),
+              in3_s,
+              c10::nullopt,
+              c10::nullopt);
+          return;
+        }
+        at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+
+        auto output_size = in0_t.numel();
+
+        // This might be UB if in3_s is absurdly large, but most implementations
+        // just turn it into `inf` in that case. The PyTorch core nan_to_num
+        // kernel just static_cast()s the limits to the destination type, so
+        // we'll ignore overflow issues here as well.
+        auto nan = in3_s.has_value() ? static_cast<float>(*in3_s) : 0.f;
+
+        te->call(
+            {out_t.data_ptr(),
+             in0_t.data_ptr(),
+             &clamp_min,
+             &clamp_max,
+             &nan,
+             &output_size});
+      };
+    });
+
+#endif
+
 REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor"))) {
@@ -623,9 +682,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       auto output_size = in0_t.numel();
       auto min = in1_s.has_value() ? in1_s->toFloat()
-                                   : std::numeric_limits<float>::lowest();
+                                   : -std::numeric_limits<float>::infinity();
       auto max = in2_s.has_value() ? in2_s->toFloat()
-                                   : std::numeric_limits<float>::max();
+                                   : std::numeric_limits<float>::infinity();
       te->call({out_t.data_ptr(), in0_t.data_ptr(), &min, &max, &output_size});
     };
   }
