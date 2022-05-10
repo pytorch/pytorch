@@ -1,10 +1,13 @@
 name: Lint
 
 on:
+  pull_request:
   push:
     branches:
       - master
-  pull_request:
+      - main
+      - release/*
+  workflow_dispatch:
 
 jobs:
   lintrunner:
@@ -22,7 +25,7 @@ jobs:
           submodules: false
 
       - name: Install lintrunner
-        run: pip install lintrunner==0.6.*
+        run: pip install lintrunner==0.8.*
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -33,6 +36,7 @@ jobs:
           python3 -m tools.generate_torch_version --is_debug=false
           python3 -m tools.pyi.gen_pyi \
             --native-functions-path aten/src/ATen/native/native_functions.yaml \
+            --tags-path aten/src/ATen/native/tags.yaml \
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
       - name: Run lintrunner on all files
@@ -44,10 +48,13 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}"
-          echo ""
-          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
-          echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+          set +e
+          if ! lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}" ; then
+              echo ""
+              echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
+              echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+              exit 1
+          fi
 
       - name: Store annotations
         if: always() && github.event_name == 'pull_request'
@@ -59,8 +66,9 @@ jobs:
           # The easiest way to get annotations is to just run lintrunner again
           # in JSON mode and use jq to massage the output into GitHub Actions
           # workflow commands.
-          lintrunner --merge-base-with "${PR_BASE_SHA}" --json | \
+          lintrunner --merge-base-with "${PR_BASE_SHA}" --output=json | \
             jq --raw-output '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))'
+
   quick-checks:
     name: quick-checks
     runs-on: ubuntu-18.04

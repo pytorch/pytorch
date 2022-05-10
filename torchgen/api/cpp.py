@@ -64,7 +64,7 @@ from typing import Optional, Sequence, Union, List, Set
 
 def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False) -> str:
     name = str(func.name.name)
-    if func.name.overload_name == "functional":
+    if 'functional' in func.name.overload_name:
         name += "_functional"
     elif func.is_out_fn():
         if faithful_name_for_out_overloads:
