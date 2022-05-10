@@ -580,6 +580,17 @@ class TestCuda(TestCase):
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
 
+    def test_float32_matmul_precision_get_set(self):
+        self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32, False)
+        for p in ('medium', 'high'):
+            torch.set_float32_matmul_precision(p)
+            self.assertEqual(torch.get_float32_matmul_precision(), p)
+            self.assertTrue(torch.backends.cuda.matmul.allow_tf32, True)
+        torch.set_float32_matmul_precision('highest')
+        self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32, False)
+
     def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
         orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
         self.assertEqual(torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), orig)
@@ -1519,6 +1530,7 @@ except RuntimeError as e:
         self.assertTrue(any([msg in out or msg in err for msg in expected_messages]))
 
     @slowTest
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_multinomial_invalid_probs_cuda(self):
@@ -1956,8 +1968,7 @@ t1.start()
 t2.start()
 """])
 
-    # ROCm doesn't support device side asserts
-    @skipIfRocm
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
@@ -3124,6 +3135,14 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertTrue(b.sum().item() == 11000.)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_capture_oom(self):
+        with self.assertRaisesRegex(RuntimeError, "out of memory"):
+            with torch.cuda.graph(torch.cuda.CUDAGraph()):
+                torch.zeros(2 ** 40, device="cuda")
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or

@@ -31,8 +31,6 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
 namespace {
 
-constexpr int kBytes = 8;
-
 // RAII helper class to manage NCCL group API and CUDA free mutex.
 // The destructor is allowed to throw since this helper class only
 // manages group and lock lifetimes.
@@ -440,10 +438,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
-    // Use the passed in timeout if provided, otherwise use the default
-    // opTimeout for each WorkNCCL object.
-    std::chrono::milliseconds workTimeout =
-        timeout == kNoTimeout ? opTimeout_ : timeout;
     // Wait for the operation to complete.
     while (!isCompleted()) {
       if (timedOut()) {
@@ -607,6 +601,16 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     }
   });
+
+  if (uccLib_ != nullptr) {
+    LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
+    typedef c10::intrusive_ptr<ProcessGroup> fn(const c10::intrusive_ptr<Store>& store, int rank, int size);
+    auto createProcessGroupUCC = reinterpret_cast<fn*>(uccLib_->sym("createProcessGroupUCC"));
+    if (createProcessGroupUCC != nullptr) {
+      uccPG_ = createProcessGroupUCC(store, rank_, size_);
+      LOG(INFO) << "[Rank " << rank_  << "] ProcessGroupUCC created.";
+    }
+  }
 #endif
 }
 
@@ -997,7 +1001,7 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
 
 void ProcessGroupNCCL::broadcastUniqueNCCLID(
     ncclUniqueId* ncclID,
-    OpType opType,
+    bool isSingleP2POp,
     const std::string& p2pKey,
     int p2pRank) {
   // For collective operations:
@@ -1007,7 +1011,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
   // retrieving the contents of that key. A single process group
   // may create multiple NCCL communicators, so we use a sequence
   // number to differentiate between them.
-  // For point-to-point operations:
+  // For single point-to-point operations:
   // The sequence number will only be increased on 2 out of all the
   // processes in a Process Group. So all following collective
   // operations will see different sequence numbers which will cause
@@ -1015,12 +1019,12 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
   // of sequence number for p2p communications.
 
   std::string storeKey;
-  if (!isP2POp(opType)) {
+  if (!isSingleP2POp) {
     storeKey = std::to_string(ncclCommCounter_++);
   } else {
     storeKey = p2pKey;
   }
-  if (rank_ == 0 || (isP2POp(opType) && p2pRank == 0)) {
+  if (rank_ == 0 || (isSingleP2POp && p2pRank == 0)) {
     auto vec = std::vector<uint8_t>(
         reinterpret_cast<uint8_t*>(ncclID),
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
@@ -1111,15 +1115,18 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // Create the unique NCCL ID and broadcast it
   ncclUniqueId ncclID;
 
+  // For batch_isend_irecv, ncclGroupStart() would be called upfront
+  bool batchP2P = ncclActiveGroupCounter_ > 0;
+  bool singleP2POp = isP2POp(opType, batchP2P);
   // For point-to-point communication, lower rank of the two will get unique id.
-  if (rank_ == 0 || (isP2POp(opType) && p2pRank == 0)) {
+  if (rank_ == 0 || (singleP2POp && p2pRank == 0)) {
     C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), c10::nullopt);
   }
 
   // For point-to-point communication on the same process, don't need broadcast.
   if (!isSendRecvSelf) {
     // Broadcast so that each process can have a unique NCCL ID
-    broadcastUniqueNCCLID(&ncclID, opType, devicesKey, p2pRank);
+    broadcastUniqueNCCLID(&ncclID, singleP2POp, devicesKey, p2pRank);
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
@@ -1155,7 +1162,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     // GPU world size and GPU rank
     int numRanks, rank;
 
-    if (!isP2POp(opType)) {
+    if (!singleP2POp) {
+      // Collective, all-to-all, or batch P2P
       numRanks = getSize() * devices.size();
       rank = getRank() * devices.size() + i;
     } else if (isSendRecvSelf) {
@@ -1163,7 +1171,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
       numRanks = 1;
       rank = 0;
     } else {
-      // For point-to-point operation, there are only 2 processes involved so
+      // For single point-to-point operation, there are only 2 processes involved so
       // the GPU rank is either 0 or 1.
       numRanks = 2;
       rank = p2pRank;
@@ -1523,9 +1531,25 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     PostProcess post,
     const char* profilingTitle) {
   const auto devices = getDeviceList(tensors);
-  const auto key = getKeySendRecv(rank_, peer);
-  int p2pRank = rank_ <= peer ? 0 : 1;
-  auto isSendRecvSelf = rank_ == peer;
+  std::string key;
+  int p2pRank = 0, p2pTargetRank = 0;
+  bool isSendRecvSelf = false;
+  // For batch_isend_irecv, ncclGroupStart() would be called upfront
+  bool batchP2P = ncclActiveGroupCounter_ > 0;
+  if (batchP2P) {
+    // For batch P2P, we need to treat it like a collective when selecting
+    // communicator, because other ranks can call into this batch other than my
+    // rank and my peer
+    key = getKeyFromDevices(devices);
+    p2pRank = rank_;
+    p2pTargetRank = peer;
+  } else {
+    // For single P2P, preserve the old two-rank behavior (to avoid perf diff)
+    key = getKeySendRecv(rank_, peer);
+    p2pRank = rank_ <= peer ? 0 : 1;
+    isSendRecvSelf = rank_ == peer;
+    p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
+  }
   auto& ncclComms = getNCCLComm(key, devices, opType, p2pRank, isSendRecvSelf);
 
   // First let NCCL streams wait for input tensors allocation streams
@@ -1577,9 +1601,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     for (const auto i : c10::irange(tensors.size())) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-      // For point-to-point communication, NCCL ranks can only
-      // be 0 or 1.
-      int p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
       C10D_NCCL_CHECK(fn(
           tensors[i], ncclComms[i]->getNcclComm(), ncclStream, p2pTargetRank), ncclComms[i]->getNcclCommFailureReason());
     }
@@ -2282,8 +2303,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
       invalidArgument("requires empty output on non-root");
     }
     outputs = {};
-    // append a empty tensor to the list, we don't use it but
-    // collective function requires it to invoke its macros
+    // append a empty tensor to the list, we don't use it but the
+    // `collective` template function requires it to invoke its function
     outputs.emplace_back();
   }
 
@@ -2360,6 +2381,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
       invalidArgument("requires empty input on non-root");
     }
     inputs = {};
+    // append a empty tensor to the list, we don't use it but the
+    // `collective` template function requires it to invoke its function
+    inputs.emplace_back();
   }
 
   return collective(
@@ -2434,6 +2458,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
 #ifdef USE_NCCL_WITH_UCC
 std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
 #endif
+
+bool ProcessGroupNCCL::isUCCAvailable() const {
+#ifdef USE_NCCL_WITH_UCC
+  return (uccPG_ != nullptr);
+#else
+  return false;
+#endif
+}
 
 } // namespace c10d
 

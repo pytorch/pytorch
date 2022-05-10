@@ -56,7 +56,7 @@ Works only with Python3.\n A few examples:
         "--input-iter",
         type=str,
         default=None,
-        help="a comma separated list of of Tensor dimensions that includes a start, \
+        help="a comma separated list of Tensor dimensions that includes a start, \
               stop, and increment that can be constant or a power of 2 \
               {start:stop:inc,start:stop:pow2}",
     )

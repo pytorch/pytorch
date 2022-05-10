@@ -14,6 +14,7 @@
 // See https://github.com/pytorch/pytorch/issues/37577 for an instance
 // of this bug in the past.
 
+#include <cassert>
 #include <cstring>
 #include <functional>
 #include <cmath>
@@ -133,7 +134,7 @@ public:
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(T);
   }
-  Vectorized() : values{0} {}
+  Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
     for (int i = 0; i != size(); i++) {
       values[i] = val;
