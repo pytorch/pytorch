@@ -2747,24 +2747,26 @@ class FullyShardedDataParallel(nn.Module):
         """
         Checks the validity of a call to :meth:`_rebuild_full_params` in terms
         of the execution order. If on the first iteration, this uses an
-        all-gather to check that all ranks plan to all-gather the same
-        parameter, erroring if not, and on subsequent iterations, if the
-        all-gather order differs from that of the first iteration (meaning that
-        we can no longer guarantee correct execution), then we issue a warning
-        to the user. This only issues warnings on the first deviating iteration
-        and stops checking thereafter.
+        all-gather to check that all ranks are running ``forward()`` with the
+        same parameter, erroring if not, and on subsequent iterations, if the
+        forward order differs from that of the first iteration (meaning that we
+        can no longer guarantee correct execution since all-gathers may be
+        mismatched), then we issue a warning to the user. This only issues
+        warnings on the first deviating iteration and stops checking
+        thereafter.
 
-        For now, only the :meth:`_rebuild_full_params` calls in the forward
-        pass are checked since a correct forward order should imply a correct
+        Only the :meth:`_rebuild_full_params` calls in the forward pass are
+        checked since a correct forward order should imply a correct
         pre-backward order for typical cases.
 
         Executing in ``no_sync()`` does not affect this check for
         ``FULL_SHARD`` and ``SHARD_GRAD_OP``: (1) Being in ``no_sync()`` in the
-        first iteration does not yield a different all-gather sequence, and (2)
-        being in ``no_sync()`` in a later iteration does not give false
-        positive warnings since the all-gather sequence still matches the first
-        iteration sequence (for ``FULL_SHARD``) or the first iteration
-        sequence's prefix (for ``SHARD_GRAD_OP``).
+        first iteration does not yield a different forward
+        `_rebuild_full_params()` sequence, and (2) being in ``no_sync()`` in a
+        later iteration does not give false positive warnings since the forward
+        `_rebuild_full_params()` sequence still matches the first iteration
+        sequence (for ``FULL_SHARD``) or the first iteration sequence's prefix
+        (for ``SHARD_GRAD_OP``).
         """
         # Only check all-gathers when rebuilding the full parameters in the
         # forward pass and in train mode
