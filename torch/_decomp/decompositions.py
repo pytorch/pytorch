@@ -519,7 +519,7 @@ def nll_loss2d_backward(
         total_weight.numel() == 1
     ), (
         "expected total_weight to be a single element tensor, "
-        f"got: {total_weight.sizes()} ( total_weight.numel(), elements)"
+        f"got: {total_weight.shape} ( {total_weight.numel()}, elements)"
     )
 
     return _nll_loss_backward(grad_output, self, target, weight, reduction, ignore_index, total_weight)
