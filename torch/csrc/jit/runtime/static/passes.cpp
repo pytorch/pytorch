@@ -125,7 +125,6 @@ void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
 
 C10_UNUSED
 void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
-  // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f):
         %y0 : Tensor = aten::stack(%a, %b)
@@ -140,6 +139,36 @@ void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
         return (%res))IR";
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
+
+  // this pattern found in several models has a redundant second `flatten`
+  std::string pattern_broadcast = R"IR(
+    graph(%a, %b, %c, %d, %e, %indices):
+        %y0 : Tensor = fb::broadcast_stack(%a, %b)
+        %y1 : Tensor = aten::transpose(%y0, %b, %c)
+        %y2 : Tensor = aten::matmul(%y0, %y1)
+        %y3 : Tensor = aten::flatten(%y2, %b, %e)
+        %y4 : Tensor = aten::flatten(%y3, %d, %d)
+        %res : Tensor = aten::index_select(%y4, %b, %indices)
+        return (%res))IR";
+  std::string fused_pattern_broadcast = R"IR(
+    graph(%a, %b, %c, %d, %e, %indices):
+        %res : Tensor = fb::broadcast_concat_batch_matmul_batch_gather(%indices, %a)
+        return (%res))IR";
+  fuse.RegisterRewritePattern(pattern_broadcast, fused_pattern_broadcast);
+
+  std::string pattern_broadcast2 = R"IR(
+    graph(%a, %b, %c, %d, %indices):
+        %y0 : Tensor = fb::broadcast_stack(%a, %b)
+        %y1 : Tensor = aten::transpose(%y0, %b, %c)
+        %y2 : Tensor = aten::matmul(%y0, %y1)
+        %y3 : Tensor = aten::flatten(%y2, %b, %d)
+        %res : Tensor = aten::index_select(%y3, %b, %indices)
+        return (%res))IR";
+  std::string fused_pattern_broadcast2 = R"IR(
+    graph(%a, %b, %c, %d, %indices):
+        %res : Tensor = fb::broadcast_concat_batch_matmul_batch_gather(%indices, %a)
+        return (%res))IR";
+  fuse.RegisterRewritePattern(pattern_broadcast2, fused_pattern_broadcast2);
   fuse.runOnGraph(graph);
 }
 
