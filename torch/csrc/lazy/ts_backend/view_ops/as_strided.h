@@ -9,8 +9,6 @@ namespace lazy {
 
 class TORCH_API AsStrided : public TsNode {
  public:
-  static const OpKind class_op_kind;
-
   AsStrided(
       const Value& input,
       std::vector<int64_t> size,
