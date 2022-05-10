@@ -1297,10 +1297,10 @@ Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
   if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     result = at::empty({0}, self.options().dtype(default_dtype));
-    return at::native::logsumexp_out(self.to(default_dtype), dims, keepdim, result);
+    return at::logsumexp_outf(self.to(default_dtype), dims, keepdim, result);
   } else {
     result = at::empty({0}, self.options());
-    return at::native::logsumexp_out(self, dims, keepdim, result);
+    return at::logsumexp_outf(self, dims, keepdim, result);
   }
 }
 
