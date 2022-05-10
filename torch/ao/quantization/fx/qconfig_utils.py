@@ -19,11 +19,13 @@ from ..utils import (
     _parent_name,
     get_qconfig_dtypes,
 )
-from ..qconfig_container import (
+from ..quantization_config import (
     OBJECT_TYPE_DICT_KEY,
     MODULE_NAME_DICT_KEY,
     MODULE_NAME_REGEX_DICT_KEY,
-    QConfigContainer,
+    ConvertQuantizationConfig,
+    PrepareQuantizationConfig,
+    QuantizationConfigBase,
 )
 from ..qconfig_dict_utils import (
     get_object_type_qconfig,
@@ -32,13 +34,13 @@ from ..qconfig_dict_utils import (
 
 
 def maybe_adjust_qconfig_for_module_name_object_type_order(
-    qconfig_container: QConfigContainer,
+    quantization_config: QuantizationConfigBase,
     cur_module_path: str,
     cur_object_type: Callable,
     cur_object_type_idx: int,
     fallback_qconfig: QConfigAny,
 ) -> QConfigAny:
-    for qconfig_entry in qconfig_container.module_name_object_type_order_qconfigs:
+    for qconfig_entry in quantization_config.module_name_object_type_order_qconfigs:
         (module_path, object_type, object_type_idx, qconfig) = dataclasses.astuple(qconfig_entry)
         if (
             (module_path == cur_module_path) and
@@ -50,14 +52,14 @@ def maybe_adjust_qconfig_for_module_name_object_type_order(
     return fallback_qconfig
 
 
-def update_qconfig_for_fusion(model: GraphModule, qconfig_container: QConfigContainer):
+def update_qconfig_for_fusion(model: GraphModule, quantization_config: QuantizationConfigBase):
     """
-    Update the QConfigContainer to account for fused modules such as LinearReLU.
-    This assumes the QConfigContainer's attributes have already been converted to OrderedDicts.
+    Update the QuantizationConfigBase to account for fused modules such as LinearReLU.
+    This assumes the QuantizationConfigBase's attributes have already been converted to OrderedDicts.
     """
-    object_type_dict = qconfig_container.object_type_qconfigs
+    object_type_dict = quantization_config.object_type_qconfigs
     if object_type_dict is None:
-        return qconfig_container
+        return quantization_config
 
     modules = dict(model.named_modules())
 
@@ -91,9 +93,9 @@ def generate_qconfig_map(
         root: torch.nn.Module,
         modules: Dict[str, torch.nn.Module],
         input_graph: Graph,
-        qconfig_container: QConfigContainer,
+        quantization_config: QuantizationConfigBase,
         node_name_to_scope: Dict[str, Tuple[str, type]]) -> Dict[str, QConfigAny]:
-    global_qconfig = qconfig_container.global_qconfig
+    global_qconfig = quantization_config.global_qconfig
     qconfig_map = dict()
 
     # example:
@@ -109,23 +111,23 @@ def generate_qconfig_map(
         if node.op == "get_attr":
             module_name, _ = _parent_name(node.target)
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
-                qconfig_container, type(modules[module_name]), module_name, global_qconfig)
+                quantization_config, type(modules[module_name]), module_name, global_qconfig)
             qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
         elif node.op == "call_function":
             # precedence: module_name_qconfig
             # > function_qconfig > global_qconfig
             # module_name takes precedence over function qconfig
             function_qconfig = get_object_type_qconfig(
-                qconfig_container, node.target, global_qconfig)
+                quantization_config, node.target, global_qconfig)
             module_path, module_type = node_name_to_scope[node.name]
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
-                qconfig_container, module_type, module_path, function_qconfig)
+                quantization_config, module_type, module_path, function_qconfig)
 
             cur_object_type_idx = \
                 submodule_to_object_type_to_cur_idx[module_path][node.target]
             submodule_to_object_type_to_cur_idx[module_path][node.target] += 1
             qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
-                qconfig_container, module_path, node.target, cur_object_type_idx, qconfig)
+                quantization_config, module_path, node.target, cur_object_type_idx, qconfig)
             qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
         elif node.op == "call_method":
@@ -134,11 +136,11 @@ def generate_qconfig_map(
             # this is to support configs like
             # "object_type": [("reshpe", qconfig)]
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
-                qconfig_container, node.target, module_path, global_qconfig)
+                quantization_config, node.target, module_path, global_qconfig)
             # if there is no special config for the method, we'll fall back to the
             # config for the module that contains the call_method node
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
-                qconfig_container, module_type, module_path, qconfig)
+                quantization_config, module_type, module_path, qconfig)
             # currently call_method does not support modifying qconfig
             # by order, we can add this later if it is needed.
             qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
@@ -148,7 +150,7 @@ def generate_qconfig_map(
             if is_activation_post_process(modules[node.target]):
                 continue
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
-                qconfig_container, type(modules[node.target]), node.target, global_qconfig)
+                quantization_config, type(modules[node.target]), node.target, global_qconfig)
 
             module_path, module_type = node_name_to_scope[node.name]
             # Note: for call_module, the module_path is the current module's name.
@@ -159,7 +161,7 @@ def generate_qconfig_map(
                 submodule_to_object_type_to_cur_idx[parent_name][module_type]
             submodule_to_object_type_to_cur_idx[parent_name][module_type] += 1
             qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
-                qconfig_container, parent_name, module_type, cur_object_type_idx,
+                quantization_config, parent_name, module_type, cur_object_type_idx,
                 qconfig)
             qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
@@ -240,35 +242,35 @@ def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Optional[Dic
     check_is_valid_config_dict(fuse_custom_config_dict, fuse_custom_config_dict_allowed_keys, "fuse_custom_config_dict")
 
 
-def compare_prepare_convert_qconfig_containers(
-        prepare_qconfig_container: QConfigContainer,
-        convert_qconfig_container: QConfigContainer):
-    r""" Compare the qconfig_container passed in convert to the one from prepare and check the values
+def compare_prepare_convert_quantization_configs(
+        prepare_quantization_config: PrepareQuantizationConfig,
+        convert_quantization_config: ConvertQuantizationConfig):
+    r""" Compare the quantization_config passed in convert to the one from prepare and check the values
 
     Args:
-      `prepare_qconfig_container`: configuration for prepare quantization step
-      `convert_qconfig_container`: configuration for convert quantization step
+      `prepare_quantization_config`: configuration for prepare quantization step
+      `convert_quantization_config`: configuration for convert quantization step
     """
-    assert qconfig_equals(prepare_qconfig_container.global_qconfig, convert_qconfig_container.global_qconfig), \
-        "Expected global qconfigs to be the same in the prepare and convert QConfigContainers"
+    assert qconfig_equals(prepare_quantization_config.global_qconfig, convert_quantization_config.global_qconfig), \
+        "Expected global qconfigs to be the same in the prepare and convert quantization configs"
     prepare_dicts = [
-        prepare_qconfig_container.object_type_qconfigs,
-        prepare_qconfig_container.module_name_qconfigs,
-        prepare_qconfig_container.module_name_regex_qconfigs,
+        prepare_quantization_config.object_type_qconfigs,
+        prepare_quantization_config.module_name_qconfigs,
+        prepare_quantization_config.module_name_regex_qconfigs,
     ]
     convert_dicts = [
-        convert_qconfig_container.object_type_qconfigs,
-        convert_qconfig_container.module_name_qconfigs,
-        convert_qconfig_container.module_name_regex_qconfigs,
+        convert_quantization_config.object_type_qconfigs,
+        convert_quantization_config.module_name_qconfigs,
+        convert_quantization_config.module_name_regex_qconfigs,
     ]
     dict_names = [OBJECT_TYPE_DICT_KEY, MODULE_NAME_DICT_KEY, MODULE_NAME_REGEX_DICT_KEY]
     for i in range(len(prepare_dicts)):
         for name, qconfig in prepare_dicts[i].items():
-            assert name in convert_dicts[i], "Missing key {} {} from convert QConfigContainer \
+            assert name in convert_dicts[i], "Missing key {} {} in ConvertQuantizationConfig \
                 when it was present in prepare".format(dict_names[i], name)
             assert convert_dicts[i][name] is None \
                 or qconfig_equals(prepare_dicts[i][name], convert_dicts[i][name]), \
-                "Expected convert QConfigContainer to have the same qconfig as prepare for key {} {}; \
+                "Expected ConvertQuantizationConfig to have the same qconfig as prepare for key {} {}; \
                 prepare qconfig: {}; convert qconfig {}".format(k, name, prepare_dicts[i][name], convert_dicts[i][name])
 
 def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[Dict[str, Any]]):

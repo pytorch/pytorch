@@ -3960,7 +3960,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # checking result match
             self.assertTrue(torch.equal(out_ref, out))
 
-    def test_convert_qconfig_container(self):
+    def test_convert_quantization_config(self):
         class Linear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -4050,7 +4050,7 @@ class TestQuantizeFx(QuantizationTestCase):
                     ns.call_module(nn.Linear),
                 ]
 
-            converted = convert_fx(prepared, qconfig_container=convert_qconfig_dict)
+            converted = convert_fx(prepared, quantization_config=convert_qconfig_dict)
             converted(torch.rand(5, 5))
             self.checkGraphModuleNodes(
                 converted,
@@ -6927,7 +6927,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict)
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,
-                                     qconfig_container=qconfig_dict)
+                                     quantization_config=qconfig_dict)
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.
@@ -6967,7 +6967,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict)
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,
-                                     qconfig_container=qconfig_dict)
+                                     quantization_config=qconfig_dict)
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.
