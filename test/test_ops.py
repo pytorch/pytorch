@@ -959,7 +959,10 @@ class TestCommon(TestCase):
 
         for sample in op.sample_inputs(device, dtype):
             actual = op(sample.input, *sample.args, **sample.kwargs)
-            transformed_sample = sample.transform(lambda x: x.to(torch.complex64))
+            # sample.transform applies the lambda to torch.Tensor and torch.dtype.
+            # However, we only want to apply it to Tensors.
+            transformed_sample = sample.transform(lambda x:
+                                                  x.to(torch.complex64) if isinstance(x, torch.Tensor) else x)
             expected = op(
                 transformed_sample.input,
                 *transformed_sample.args,

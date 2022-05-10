@@ -19,6 +19,31 @@ struct sum_functor {
   }
 };
 
+const char sum_name[] = "sum";
+template <>
+struct sum_functor<c10::complex<at::Half>> {
+  #if AT_USE_JITERATOR()
+  void operator()(TensorIterator& iter) {
+    using scalar_t = c10::complex<at::Half>;
+    std::string func = jiterator_stringify(
+    arg_t combine(arg_t a, arg_t b) {
+      return a + b;
+    }
+    );
+    jitted_gpu_reduce_kernel<sum_name, scalar_t, scalar_t>(
+        iter, func, 0.);
+  }
+  #else
+  void operator()(TensorIterator& iter) {
+    using scalar_t = c10::complex<at::Half>;
+    gpu_reduce_kernel<scalar_t, scalar_t>(
+        iter, func_wrapper<scalar_t>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> acc_t {
+          return a + b;
+        }));
+  }
+  #endif
+};
+
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct nansum_functor {
   void operator()(TensorIterator& iter) {
@@ -94,8 +119,8 @@ static void reduce_dispatch(TensorIterator& iter, GeneralDispatcher op) {
 
 static void sum_kernel_cuda(TensorIterator& iter){
   auto general_dispatcher = [](TensorIterator& iter) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
-        ScalarType::Bool, iter.dtype(), "sum_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+        kBool, kComplexHalf, iter.dtype(), "sum_cuda", [&]() {
           sum_functor<scalar_t>{}(iter);
         });
   };
@@ -115,7 +140,7 @@ static void nansum_kernel_cuda(TensorIterator& iter) {
 
 static void prod_kernel_cuda(TensorIterator& iter) {
   auto general_dispatcher = [](TensorIterator& iter) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, iter.dtype(), "prod_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kComplexHalf, kBool, iter.dtype(), "prod_cuda", [&]() {
       prod_functor<scalar_t>{}(iter);
     });
   };
