@@ -186,7 +186,6 @@ def _make_prim(
 
     _prim = getattr(torch.ops.prims, name).default
 
-    _prim.__name__ = name
     _prim.__doc__ = doc
     _prim.meta = meta  # type: ignore[attr-defined]
     _prim.impl_nvfuser = impl_nvfuser  # type: ignore[attr-defined]
