@@ -33,7 +33,7 @@ class ReplicatedTensor(torch.Tensor):
     you wish to manually validate tensors are the same across ranks, use `validate()`.
 
     """
-    process_group: distributed_c10d.ProcessGroup
+    _process_group: distributed_c10d.ProcessGroup
 
     __slots__ = ["process_group"]
 
@@ -41,7 +41,7 @@ class ReplicatedTensor(torch.Tensor):
         if data is None:
             data = torch.empty(0)
         r = torch.Tensor._make_subclass(cls, data, data.requires_grad)      # type: ignore[arg-type]
-        r.process_group = (     # type: ignore[attr-defined]
+        r._process_group = (     # type: ignore[attr-defined]
             process_group
             if process_group is not None
             else distributed_c10d._get_default_group()
@@ -52,7 +52,7 @@ class ReplicatedTensor(torch.Tensor):
         if id(self) in memo:
             return memo[id(self)]
         else:
-            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.process_group)
+            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self._process_group)
             memo[id(self)] = result
             return result
 
@@ -81,8 +81,8 @@ class ReplicatedTensor(torch.Tensor):
                 return True, arg.__torch_function__(func, types, args, kwargs)
             if isinstance(arg, ReplicatedTensor):
                 if replicated_pg is None:
-                    replicated_pg = arg.process_group
-                elif replicated_pg != arg.process_group:
+                    replicated_pg = arg._process_group
+                elif replicated_pg != arg._process_group:
                     raise RuntimeError(
                         f"ReplicatedTensor operands must be in the same process group "
                         f"in torch function '{func.__name__}', but found at least two "
@@ -124,7 +124,7 @@ class ReplicatedTensor(torch.Tensor):
                 # ReplicatedTensor according to our inter-op rule
                 rs = rs.as_subclass(ReplicatedTensor)        # type: ignore[arg-type]
                 # propagate the process_group field to result
-                rs.process_group = replicated_pg        # type: ignore[attr-defined]
+                rs._process_group = replicated_pg        # type: ignore[attr-defined]
 
             return rs
 
@@ -142,12 +142,12 @@ class ReplicatedTensor(torch.Tensor):
         Returns:
             True if validation succeed.
         """
-        world_size = dist.get_world_size(self.process_group)
-        current_rank = dist.get_rank(self.process_group)
+        world_size = dist.get_world_size(self._process_group)
+        current_rank = dist.get_rank(self._process_group)
 
         tensors_on_rank = [torch.empty_like(self) for _ in range(world_size)]
 
-        dist.all_gather(tensors_on_rank, self, group=self.process_group)
+        dist.all_gather(tensors_on_rank, self, group=self._process_group)
         # validate and check if all tensors are equal
         for rank, tensor in enumerate(tensors_on_rank):
             if not torch.allclose(self, tensor):
@@ -161,7 +161,7 @@ class ReplicatedTensor(torch.Tensor):
             self.data = state
             self.requires_grad = state.requires_grad
             from torch.distributed._shard.api import _get_current_process_group
-            self.process_group = _get_current_process_group()
+            self._process_group = _get_current_process_group()
 
     def __getstate__(self):
         return self.data
