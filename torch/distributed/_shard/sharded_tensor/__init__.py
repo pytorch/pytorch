@@ -387,11 +387,14 @@ def sharded_op_impl(func):
             implementation (ex: torch.nn.functional.linear)
     """
     def decorator_sharded_func(wrapped_func):
-        _register_sharded_op(func, wrapped_func)
+        from torch.distributed._shard.sharded_tensor._ops._common import _basic_validation
 
         @functools.wraps(wrapped_func)
-        def wrapper(*args, **kwargs):
-            return wrapped_func(*args, **kwargs)
+        def wrapper(types, args, kwargs, process_group):
+            _basic_validation(func, args, kwargs)
+            return wrapped_func(types, args, kwargs, process_group)
+
+        _register_sharded_op(func, wrapper)
         return wrapper
     return decorator_sharded_func
 
