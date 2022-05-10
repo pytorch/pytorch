@@ -2659,6 +2659,10 @@ class FullyShardedDataParallel(nn.Module):
                     # p._is_sharded = False. However when it is set, the
                     # device is always self.compute_device.
                     p.data = p.data.to(self.compute_device, non_blocking=True)
+                # Check the validity of this `_rebuild_full_params()` call in
+                # terms of execution order (regardless of if FSDP actually
+                # needs to all-gather or not)
+                self._check_rebuild_full_params(p)
                 # e.g., when world_size == 1
                 if not p._is_sharded:  # type: ignore[attr-defined]
                     if mixed_precision_cast_ran:
@@ -2719,7 +2723,6 @@ class FullyShardedDataParallel(nn.Module):
                         # Allocate based on full size from all shards.
                         _alloc_storage(p._full_param_padded, size=p_full_size)  # type: ignore[attr-defined]
                         output_tensor = p._full_param_padded  # type: ignore[attr-defined]
-                    self._check_all_gather(p)
                     # Fill output_tensor with (p.data for each shard in self.world_size)
                     dist._all_gather_base(
                         output_tensor, p_data, group=self.process_group
@@ -2740,22 +2743,20 @@ class FullyShardedDataParallel(nn.Module):
                         self._free_mp_shard(cast(List[FlatParameter], [p]))
         return output_tensors
 
-    def _check_all_gather(self, param: FlatParameter):
+    def _check_rebuild_full_params(self, param: FlatParameter):
         """
-        Checks the validity of an all-gather to rebuild the full parameter
-        ``param``. If on the first iteration, this uses an all-gather to check
-        that all ranks plan to all-gather the same parameter, erroring if not,
-        and on subsequent iterations, if the all-gather order differs from that
-        of the first iteration (meaning that we can no longer guarantee correct
-        execution), then we issue a warning to the user. This only issues
-        warnings on the first deviating iteration and stops checking
-        thereafter.
+        Checks the validity of a call to :meth:`_rebuild_full_params` in terms
+        of the execution order. If on the first iteration, this uses an
+        all-gather to check that all ranks plan to all-gather the same
+        parameter, erroring if not, and on subsequent iterations, if the
+        all-gather order differs from that of the first iteration (meaning that
+        we can no longer guarantee correct execution), then we issue a warning
+        to the user. This only issues warnings on the first deviating iteration
+        and stops checking thereafter.
 
-        For now, only the all-gathers to rebuild full parameters in the forward
-        pass are checked since (1) a correct forward order should imply a
-        correct pre-backward order for typical cases and (2) there may be some
-        issues with pre-fetching that need to be looked into:
-        https://github.com/pytorch/pytorch/issues/76553
+        For now, only the :meth:`_rebuild_full_params` calls in the forward
+        pass are checked since a correct forward order should imply a correct
+        pre-backward order for typical cases.
 
         Executing in ``no_sync()`` does not affect this check for
         ``FULL_SHARD`` and ``SHARD_GRAD_OP``: (1) Being in ``no_sync()`` in the
@@ -2766,8 +2767,8 @@ class FullyShardedDataParallel(nn.Module):
         sequence's prefix (for ``SHARD_GRAD_OP``).
         """
         # Only check all-gathers when rebuilding the full parameters in the
-        # forward pass
-        if self.training_state != TrainingState_.FORWARD:
+        # forward pass and in train mode
+        if self.training_state != TrainingState_.FORWARD or not self.training:
             return
         eod = self._exec_order_data
         param_index = eod.get_param_index(param)
@@ -2805,7 +2806,7 @@ class FullyShardedDataParallel(nn.Module):
                     msg_suffix = f"the FSDP module wrapping {param_names}"
                 sub_msg = msg_prefix + msg_suffix
                 warnings.warn(
-                    "All-gather order differs from that of the first iteration "
+                    "Forward order differs from that of the first iteration "
                     f"on rank {self.rank} -- collectives are unchecked and may "
                     "give incorrect results or hang\n" + sub_msg + "\n" +
                     f"First iteration's all-gather sequence: {eod.param_order}"
@@ -2831,10 +2832,11 @@ class FullyShardedDataParallel(nn.Module):
                     r1_param_names = eod.get_unflat_param_names(i1)
                     r2_param_names = eod.get_unflat_param_names(i2)
                     raise RuntimeError(
-                        f"All-gather order differs across ranks: rank {r1} is "
-                        f"all-gathering the flattened parameter wrapping "
-                        f"{r1_param_names} while rank {r2} is all-gathering "
-                        f"the flattened parameter wrapping {r2_param_names}"
+                        f"Forward order differs across ranks: rank {r1} is "
+                        "running `forward()` with the flattened parameter "
+                        f"wrapping {r1_param_names} while rank {r2} is running "
+                        "`forward()` with the flattened parameter wrapping "
+                        f"{r2_param_names}"
                     )
             eod.param_order.append(param_index)
 
