@@ -15,12 +15,16 @@ from torch._prims.utils import (
     NumberType,
 )
 from torch.overrides import has_torch_function, handle_torch_function
+import torch.library
 
 from typing import Sequence, Optional, Union, Callable, List, Tuple, Any
 from functools import reduce, partial
 from enum import Enum
 import operator
 import math
+
+prim = torch.library.Library('prim', 'DEF')
+prim_impl = torch.library.Library('prim', 'IMPL', 'CompositeExplicitAutograd')
 
 # Experimental module containing prototype "primitive" operations.
 
@@ -155,7 +159,7 @@ class RETURN_TYPE(Enum):
 
 def _make_prim(
     *,
-    name: str,
+    schema: str,
     meta: Callable,
     impl_aten: Callable,
     impl_nvfuser: Optional[Callable] = None,
@@ -178,13 +182,19 @@ def _make_prim(
         meta(*args, **kwargs)
         return impl_aten(*args, **kwargs)
 
+    name = schema.split('(')[0]
+
     _prim.__name__ = name
     _prim.__doc__ = doc
     _prim.meta = meta  # type: ignore[attr-defined]
     _prim.impl_nvfuser = impl_nvfuser  # type: ignore[attr-defined]
     _prim.return_type = return_type  # type: ignore[attr-defined]
 
-    return _prim
+    prim.define(schema)
+    prim_impl.impl(name, _prim)
+    # TODO: register meta
+
+    return getattr(torch.ops.prim, name).default
 
 
 class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
@@ -247,7 +257,7 @@ def _make_elementwise_unary_prim(
     """
 
     return _make_prim(
-        name=name,
+        schema=f"{name}(Tensor self) -> Tensor",
         meta=partial(_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
         **kwargs
@@ -262,7 +272,7 @@ def _make_elementwise_binary_prim(
     """
 
     return _make_prim(
-        name=name,
+        schema=f"{name}(Tensor self, Tensor other) -> Tensor",
         meta=partial(_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
         **kwargs
@@ -844,7 +854,7 @@ _broadcast_in_dim_doc = """
   """
 
 broadcast_in_dim = _make_prim(
-    name="broadcast_in_dim",
+    schema="broadcast_in_dim(Tensor(a) a, int[] shape, int[] broadcast_dimensions) -> Tensor(a)",
     meta=_broadcast_in_dim_meta,
     impl_aten=_broadcast_in_dim_aten,
     impl_nvfuser=_broadcast_in_dim_nvfuser,
@@ -936,7 +946,7 @@ _collapse_view_doc = """
   """
 
 collapse_view = _make_prim(
-    name="collapse_view",
+    schema="collapse_view(Tensor(a) a, int start, int end) -> Tensor(a)",
     meta=_collapse_view_meta,
     impl_aten=_collapse_view_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1079,7 +1089,7 @@ _slice_doc = """
     """
 
 slice = _make_prim(
-    name="slice",
+    schema="slice(Tensor(a) a, int[] start_indices, int[] limit_indices, int? strides=None) -> Tensor(a)",
     meta=_slice_meta,
     impl_aten=_slice_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1163,7 +1173,7 @@ _slice_in_dim_doc = """
     """
 
 slice_in_dim = _make_prim(
-    name="slice_in_dim",
+    schema="slice_in_dim(Tensor(a) a, int start_index, int limit_index, int stride=1, int axis=0) -> Tensor(a)",
     meta=_slice_in_dim_meta,
     impl_aten=_slice_in_dim_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1215,7 +1225,7 @@ _split_dim_doc = """
 
 # TODO: consider renaming split_dim_view
 split_dim = _make_prim(
-    name="split_dim",
+    schema="split_dim(Tensor(a) a, int dim, int outer_length) -> Tensor(a)",
     meta=_split_dim_meta,
     impl_aten=_split_dim_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1258,7 +1268,7 @@ _squeeze_doc = """
   """
 
 squeeze = _make_prim(
-    name="squeeze",
+    schema="squeeze(Tensor(a) a, int[] dimensions) -> Tensor(a)",
     meta=_squeeze_meta,
     impl_aten=_squeeze_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1299,7 +1309,7 @@ _transpose_doc = """
     """
 
 transpose = _make_prim(
-    name="transpose",
+    schema="transpose(Tensor(a) a, int[] permutation) -> Tensor(a)",
     meta=_transpose_meta,
     impl_aten=_transpose_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1320,7 +1330,7 @@ _view_of_doc = """
     """
 
 view_of = _make_prim(
-    name="view_of",
+    schema="view_of(Tensor(a) a) -> Tensor",
     meta=_view_of_meta,
     impl_aten=_view_of_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1391,7 +1401,7 @@ _concatenate_doc = """
   """
 
 concatenate = _make_prim(
-    name="concatenate",
+    schema="concatenate(Tensor[] tensors, int dim) -> Tensor",
     meta=_concatenate_meta,
     impl_aten=_concatenate_aten,
     return_type=RETURN_TYPE.NEW,
@@ -1424,7 +1434,7 @@ _reshape_doc = """
   containing a copy of the data in a.
   """
 reshape = _make_prim(
-    name="reshape",
+    schema="reshape(Tensor a, int[] shape) -> Tensor",
     meta=_reshape_meta,
     impl_aten=_reshape_aten,
     return_type=RETURN_TYPE.NEW,
@@ -1442,7 +1452,7 @@ _rev_doc = """
     """
 
 rev = _make_prim(
-    name="rev",
+    schema="rev(Tensor a) -> Tensor",
     meta=_rev_meta,
     impl_aten=torch.flip,
     return_type=RETURN_TYPE.NEW,
@@ -1478,7 +1488,7 @@ _select_doc = """
   """
 
 select = _make_prim(
-    name="select",
+    schema="select(Tensor pred, Tensor a, Tensor b) -> Tensor",
     meta=_select_meta,
     impl_aten=_select_aten,
     return_type=RETURN_TYPE.NEW,
@@ -1504,7 +1514,7 @@ _clone_doc = """
 """
 
 clone = _make_prim(
-    name="clone",
+    schema="clone(Tensor a, *, MemoryFormat memory_format) -> Tensor",
     meta=_clone_meta,
     impl_aten=_clone_aten,
     return_type=RETURN_TYPE.NEW,
@@ -1534,7 +1544,7 @@ _convert_element_type_doc = """
   """
 
 convert_element_type = _make_prim(
-    name="convert_element_type",
+    schema="convert_element_type(Tensor a, ScalarType dtype) -> Tensor",
     meta=_convert_element_type_meta,
     impl_aten=_convert_element_type_aten,
     impl_nvfuser=_convert_element_type_nvfuser,
@@ -1561,7 +1571,7 @@ _device_put_doc = """
   """
 
 device_put = _make_prim(
-    name="device_put",
+    schema="device_put(Tensor a, Device device) -> Tensor",
     meta=_device_put_meta,
     impl_aten=_device_put_aten,
     return_type=RETURN_TYPE.NEW,
@@ -1604,7 +1614,7 @@ _copy_to_doc = """
 
 # TODO: Remove safe casting and implement on reference instead
 copy_to = _make_prim(
-    name="copy_to",
+    schema="copy_to(Tensor(a!) a, Tensor b) -> Tensor(a!)",
     meta=_copy_to_meta,
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
@@ -1630,7 +1640,7 @@ _resize_doc = """
 
 # TODO: review support arbitrary resizes
 resize = _make_prim(
-    name="resize",
+    schema="resize(Tensor(a!) a, int[] shape) -> Tensor(a!)",
     meta=_resize_meta,
     impl_aten=_resize_aten,
     return_type=RETURN_TYPE.INPLACE,
@@ -1672,51 +1682,67 @@ _amin_doc = """
     specified in the dim argument
     """
 
+def _make_reduction_prim(
+    name: str,
+    impl_aten,
+    doc
+):
+    """Creates a reduction prim."""
+    return _make_prim(
+        schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType output_dtype) -> Tensor",
+        meta=_reduction_meta,
+        impl_aten=impl_aten,
+        return_type=RETURN_TYPE.NEW,
+        doc=doc,
+    )
 
-sum = _make_prim(
+def _make_bool_reduction_prim(
+    name: str,
+    impl_aten,
+    doc
+):
+    """Creates a reduction prim that reduces to bool."""
+    return _make_prim(
+        schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType output_dtype) -> Tensor",
+        meta=_bool_return_reduction_meta,
+        impl_aten=impl_aten,
+        return_type=RETURN_TYPE.NEW,
+        doc=doc,
+    )
+
+
+sum = _make_reduction_prim(
     name="sum",
-    meta=_reduction_meta,
     impl_aten=torch.sum,
-    return_type=RETURN_TYPE.NEW,
     doc=_sum_doc,
 )
 
-prod = _make_prim(
+prod = _make_reduction_prim(
     name="prod",
-    meta=_reduction_meta,
     impl_aten=torch.prod,
-    return_type=RETURN_TYPE.NEW,
-    doc=_sum_doc,
+    doc=_sum_doc,  # TODO: fixme
 )
 
-amax = _make_prim(
+amax = _make_reduction_prim(
     name="amax",
-    meta=_reduction_meta,
     impl_aten=torch.amax,
-    return_type=RETURN_TYPE.NEW,
     doc=_amax_doc,
 )
 
-amin = _make_prim(
+amin = _make_reduction_prim(
     name="amin",
-    meta=_reduction_meta,
     impl_aten=torch.amin,
-    return_type=RETURN_TYPE.NEW,
     doc=_amin_doc,
 )
 
-all = _make_prim(
+all = _make_bool_reduction_prim(
     name="all",
-    meta=_bool_return_reduction_meta,
     impl_aten=torch.all,
-    return_type=RETURN_TYPE.NEW,
     doc="",
 )
 
-any = _make_prim(
+any = _make_bool_reduction_prim(
     name="any",
-    meta=_bool_return_reduction_meta,
     impl_aten=torch.any,
-    return_type=RETURN_TYPE.NEW,
     doc="",
 )
