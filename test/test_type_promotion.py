@@ -171,6 +171,7 @@ class TestTypePromotion(TestCase):
         default_tensor = torch.tensor(100000.0, device=device)
         self.assertEqual((half + default_tensor).dtype, torch.get_default_dtype())
 
+    @onlyNativeDeviceTypes
     def test_bfloat16(self, device):
         # with scalar
         bf = torch.tensor(5.5, dtype=torch.bfloat16, device=device)
@@ -201,6 +202,7 @@ class TestTypePromotion(TestCase):
             self.assertEqual(torch.promote_types(torch.bfloat16, dtype), expected_dtype)
             self.assertEqual((bf + t).dtype, expected_dtype)
 
+    @onlyNativeDeviceTypes
     def test_complex_half(self, device):
         # with scalar
         chalf = torch.tensor(5.5, dtype=torch.chalf, device=device)
