@@ -151,8 +151,6 @@ class TestCommon(TestCase):
                     result = op(sample.input, *sample.args, **sample.kwargs)
                     supported_dtypes.add(dtype)
                 except Exception as e:
-                    import traceback
-                    traceback.print_exc()
                     # NOTE: some ops will fail in forward if their inputs
                     #   require grad but they don't support computing the gradient
                     #   in that type! This is a bug in the op!

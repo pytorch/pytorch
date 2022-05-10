@@ -110,7 +110,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(const c10::OperatorHa
     } else if (arg.real_type()->kind() == c10::MemoryFormatType::Kind) {
       // TODO: https://github.com/pytorch/pytorch/issues/77135
       auto* obj = THPMemoryFormat_New(static_cast<c10::MemoryFormat>(arguments[idx].toInt()), "unused");
-      return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(obj));
+      return py::reinterpret_steal<py::object>(reinterpret_cast<PyObject*>(obj));
     } else {
       return torch::jit::toPyObject(arguments[idx]);
     }
