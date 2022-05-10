@@ -155,6 +155,23 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
         self.assertEqual(orig_sn_weight, module.l1.weight)
 
+    def test_setattr(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer('foo', torch.zeros(()))
+
+            def forward(self, x):
+                self.foo = self.foo + 1
+                return x + self.foo
+
+        a = {'foo': torch.zeros(())}
+        mod = Foo()
+        stateless.functional_call(mod, a, torch.ones(()))
+        self.assertEqual(mod.foo, torch.zeros(()))
+        self.assertEqual(a['foo'], torch.ones(()))
+
+
 class TestStatelessDeprecation(TestCase):
     def test_private_stateless_warns(self):
         script = """
