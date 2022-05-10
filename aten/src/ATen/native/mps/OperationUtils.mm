@@ -181,7 +181,7 @@ std::string getArrayRefString(const IntArrayRef s) {
   return ss.str();
 }
 
-std::string getTensorsStringKey(const TensorList tensors) {
+std::string getTensorsStringKey(const TensorList& tensors) {
     std::string str;
     // The key format per tensor would look like ":MPSDataTypeFloat32[1,1,1,10]:"
     for (const Tensor& tensor: tensors) {

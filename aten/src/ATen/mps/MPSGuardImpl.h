@@ -25,6 +25,8 @@
 namespace at {
 namespace mps {
 
+// TODO: Move the MPSGuardImpl to inherit from NoOpDeviceGuardImpl
+// https://github.com/pytorch/pytorch/issues/77170 
 struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::MPS;
 

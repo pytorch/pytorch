@@ -319,6 +319,9 @@ at::Allocator* getMPSSharedAllocator()
 namespace native {
 
 // torch.is_pinned() implementation
+// Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
+// will be able to use SharedStorageMode for MTLBuffer allocations. This will
+// avoid extra copies on DataLoading operations.
 bool is_pinned_mps(const Tensor& self, c10::optional<Device> device)
 {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_mps());
