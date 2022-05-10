@@ -2195,7 +2195,7 @@ class TestCase(expecttest.TestCase):
 
         # TODO: the Tensor compare uses bunch of operations which is currently not
         # supported by MPS. We will remove this move to CPU after all the
-        # support is added.
+        # support is added. https://github.com/pytorch/pytorch/issues/77144
         if isinstance(x, torch.Tensor) and (x.is_mps):
             x = x.to('cpu')
 

@@ -57,7 +57,7 @@ def gen_registration_headers(
         else:
             headers.append("#include <ATen/cuda/EmptyTensor.h>")
     elif backend_index.dispatch_key == DispatchKey.MPS:
-        headers.append("#include <ATen/native/mps/TensorFactory.h>")
+        headers.append("#include <ATen/mps/EmptyTensor.h>")
     elif per_operator_headers:
         headers += [
             "#include <ATen/ops/empty.h>",
