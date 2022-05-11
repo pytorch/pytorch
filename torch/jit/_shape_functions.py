@@ -8,6 +8,9 @@ number = Union[int, float]
 # To re-generate, please run:
 # cd ~/pytorch && python
 # torchgen/shape_functions/gen_jit_shape_functions.py
+
+# For functions that return multiple values, there must be only one `return` statement
+# and it must be a tuple constructor.
 ####
 
 import torch
@@ -724,6 +727,14 @@ def conv2d(
     assert len(input) == 4
     return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
 
+def conv_backwards(grad_output: List[int], input:List[int], weight:List[int], biases:Optional[List[int]]):
+    if biases is None:
+        bias_result = None
+    else:
+        biases_2: List[int] = biases
+        bias_result = _copy(biases_2)
+
+    return _copy(input), _copy(weight), bias_result
 
 def batch_norm(
     input: List[int],
@@ -817,7 +828,6 @@ def permute(input: List[int], dims: List[int]):
         for j in range(i):
             assert seen_dims[i] != seen_dims[j]
     return newSizes
-
 
 def flatten(input: List[int], start_dim: int, end_dim: int):
     start_dim = maybe_wrap_dim(start_dim, len(input))
@@ -918,6 +928,7 @@ add_shape_compute_mapping("aten::conv1d(Tensor input, Tensor weight, Tensor? bia
 add_shape_compute_mapping("aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", conv2d)
 add_shape_compute_mapping("aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", batch_norm)
 add_shape_compute_mapping("aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", conv3d)
+add_shape_compute_mapping("aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", conv_backwards)
 add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", flatten)
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
