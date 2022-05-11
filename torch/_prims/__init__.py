@@ -778,8 +778,11 @@ def _as_strided_meta(
     utils.validate_strides(stride)
     utils.validate_shape(size)
 
-    # TODO: FIXME by modeling storage
-    if isinstance(a, torch.Tensor):
+    if reduce(operator.mul, size) == 0:
+        # NOTE: This special case is to avoid having to acquire the storage below
+        # as_strided to shapes with no elements are trivially valid, so it's OK
+        pass
+    elif isinstance(a, torch.Tensor):
         utils.check_in_bounds_for_storage(a.storage(), size, stride, storage_offset)
 
     return TensorMeta(a, shape=size, strides=stride)
