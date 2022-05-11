@@ -4443,10 +4443,14 @@ class DistributedTest:
             )
             # Only validate the warmup iterations before local SGD is applied,
             # because when `post_local_gradient_allreduce` is disabled, the gradients will not be synchronized at all.
-            # Note that in practice, a model averager has to be applied to run model averaging so local gradient averaging is not necessary.
-            start_localSGD_iter=10
+            # Note that in practice a model averager has to be applied to run model averaging,
+            # so local gradient averaging is not necessary.
+            start_localSGD_iter = 10
             state = post_localSGD.PostLocalSGDState(
-                process_group=None, subgroup=dist.group.WORLD, start_localSGD_iter=start_localSGD_iter, post_local_gradient_allreduce=False
+                process_group=None,
+                subgroup=dist.group.WORLD,
+                start_localSGD_iter=start_localSGD_iter,
+                post_local_gradient_allreduce=False,
             )
             self._test_ddp_hook_parity(
                 state=state, hook=post_localSGD.post_localSGD_hook, num_validated_iters=start_localSGD_iter
