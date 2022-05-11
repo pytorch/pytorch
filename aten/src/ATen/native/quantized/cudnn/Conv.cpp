@@ -429,8 +429,13 @@ class QConvInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d.new"), QConv1dInt8<false>::run);
-  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_relu.new"), QConv1dInt8<true>::run);
+  // the cpu conv1d doesn't use the quantized::conv1d*.new variant for packed weights. instead it just uses
+  // quantized::conv1d for packed weights (see quantized/library.cpp).
+  // this is inconsistent with what has been done for conv2d where new variants use packed weights, and
+  // old variant does not. we adopt this inconsistency for now to be consistent with QuantizedCPU's conv1d
+  // and will eventually deprecate the old variants
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d"), QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_relu"), QConv1dInt8<true>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d.new"), QConvInt8<2, false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu.new"), QConvInt8<2, true>::run);
 }
