@@ -1470,7 +1470,7 @@ class TestSparseCSR(TestCase):
             out = torch.sparse_csr_tensor(
                 *map(torch.clone, (actual.crow_indices(), actual.col_indices())),
                 torch.empty_like(actual.values()),
-                size=c.shape
+                size=actual.shape
             )
             torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
 
@@ -1479,12 +1479,18 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.to_dense(), out.to_dense())
             self.assertEqual(actual.to_dense(), expected)
 
+        mnk = itertools.product([2, 5], repeat=3)
+        batch_shapes = [(), (2,), (2, 3)] if self.device_type == 'cuda' else [(), ]
+        tf = [True, False]
         for index_dtype in [torch.int32, torch.int64]:
-            for (m, n, k), noncontiguous in zip(itertools.product([2, 5], repeat=3), [True, False]):
+            for (m, n, k), b, noncontiguous, bcast_c in itertools.product(mnk, batch_shapes, tf, tf):
+                if bcast_c and len(b) == 0:
+                    continue
                 nnz = random.randint(0, m * n)
-                c = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-                a = make_tensor((m, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
-                b = make_tensor((k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c_batch = () if bcast_c else b
+                c = self.genSparseCSRTensor((*c_batch, m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+                a = make_tensor((*b, m, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((*b, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_a, op_b in itertools.product([True, False], repeat=2):
                     run_test(c, a, b, op_a, op_b)
 
