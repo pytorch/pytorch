@@ -949,6 +949,7 @@ std::string generate_reduction_code(
       // reductions don't support dynamic casting, so the only way to get nonstandard types
       // is through input
       if (f_inputs_type == "at::Half" || f_inputs_type == "std::complex<at::Half>") {
+        // complex<Half> depends on complex<T> and Half dtypes.
         env.s("half_string", jiterator_half_support_literal);
       } else {
         env.s("half_string", "");
@@ -961,6 +962,7 @@ std::string generate_reduction_code(
       if (f_inputs_type == "std::complex<float>" ||
           f_inputs_type == "std::complex<double>" ||
           f_inputs_type == "std::complex<at::Half>" ) {
+        // complex<Half> depends on complex<T> and Half dtypes.
         env.s("traits_string", get_traits_string());
         env.s("complex_body_string", get_complex_body_string());
         env.s("complex_math_string", get_complex_math_string());
