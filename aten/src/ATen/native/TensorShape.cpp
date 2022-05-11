@@ -1430,7 +1430,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
     }
 
-    const auto nneg_index = [&index, index_len, &self, size, dim](void) -> Tensor {
+    const auto nneg_index = [&index, index_len, &self, size, dim]() -> Tensor {
       const auto index_contiguous = index.contiguous();
       auto nneg_index = at::empty_like(index_contiguous);
       // nneg_index = (index < 0) * (index + size) + (index >= 0) * index
@@ -1442,6 +1442,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           for (C10_UNUSED const auto _ : c10::irange(start, end)) {
             auto idx = *src++;
             if (idx < -size || idx >= size) {
+               // Mark self and dim as used if code is compiled with STRIP_ERROR_MESSAGES
+              (void)dim;
+              (void)self;
               TORCH_CHECK_INDEX(false,
                   "index_select(): index contains ", idx, " that is out of range for tensor of size ",
                   self.sizes(), " at dimension ", dim
