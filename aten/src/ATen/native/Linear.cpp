@@ -44,7 +44,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   auto output = at::matmul(input, weight.t());
   if (bias->defined()) {
     // for composite compliance use out-of-place version of `add`
-    if (areAnyTensorSubclassLike({input, weight, *bias})) {
+    if (isTensorSubclassLike(*bias)) {
       output = at::add(output, *bias);
     } else {
       output.add_(*bias);
