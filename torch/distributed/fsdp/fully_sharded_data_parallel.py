@@ -1514,16 +1514,16 @@ class FullyShardedDataParallel(nn.Module):
         # Use default config a state_dict config is not set.
         if state_dict_config is None:
             state_dict_config = _state_dict_type_to_config[state_dict_type]()
-        for module in FullyShardedDataParallel.fsdp_modules(module):
+        for submodule in FullyShardedDataParallel.fsdp_modules(module):
             if prev_state_dict_type is None:
-                prev_state_dict_type = module._state_dict_type
+                prev_state_dict_type = submodule._state_dict_type
             if prev_state_dict_config is None:
-                prev_state_dict_config = module._state_dict_config
-            if prev_state_dict_type != module._state_dict_type:
+                prev_state_dict_config = submodule._state_dict_config
+            if prev_state_dict_type != submodule._state_dict_type:
                 raise RuntimeError(
                     "All FSDP module should the same state_dict_type."
                 )
-            if type(prev_state_dict_config) != type(module._state_dict_config):
+            if type(prev_state_dict_config) != type(submodule._state_dict_config):
                 raise RuntimeError(
                     "All FSDP modules should have the same type of state_dict_config."
                 )
@@ -1533,16 +1533,16 @@ class FullyShardedDataParallel(nn.Module):
                 raise RuntimeError(
                     f"Expected state_dict_config of type {expected_state_dict_config_type} but got {type(state_dict_config)}"
                 )
-            module._state_dict_type = state_dict_type
-            module._state_dict_config = state_dict_config
+            submodule._state_dict_type = state_dict_type
+            submodule._state_dict_config = state_dict_config
         try:
             yield
         finally:
             assert prev_state_dict_type is not None  # Avoid mypy warning
             assert prev_state_dict_config is not None  # Avoid mypy warning
-            for module in FullyShardedDataParallel.fsdp_modules(module):
-                module._state_dict_type = prev_state_dict_type
-                module._state_dict_config = prev_state_dict_config
+            for submodule in FullyShardedDataParallel.fsdp_modules(module):
+                submodule._state_dict_type = prev_state_dict_type
+                submodule._state_dict_config = prev_state_dict_config
 
     def _full_post_state_dict_hook(
         self,
@@ -1609,9 +1609,8 @@ class FullyShardedDataParallel(nn.Module):
         # nn.Module.state_dict() will detach the parameter. Therefore, we need
         # to get flat_param from the FlattenParamsWrapper to get the metadata.
         flat_param = getattr(self.module, FLAT_PARAM, None)
-        assert (
-            flat_param is not None
-        ), "flat_param cannot be None when doing local_state_dict."
+        if flat_param is None:
+            return state_dict
 
         # Construct a ShardedTensor from the flat_param.
         full_numel = flat_param.full_numel
@@ -1740,8 +1739,12 @@ class FullyShardedDataParallel(nn.Module):
                 return {}
 
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
-            assert getattr(self.module, FLAT_PARAM, None) is not None
-            assert isinstance(self.module.flat_param, FlatParameter)
+            if self.module.flat_param is not None:
+                if not self.module.flat_param._is_sharded:
+                    raise RuntimeError(
+                        "local_state_dict/sharded_state_dict can only be called "
+                        "when parameters are flatten and sharded."
+                    )
             return super().state_dict(*args, **kwargs)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
             raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
@@ -1776,6 +1779,11 @@ class FullyShardedDataParallel(nn.Module):
         """
         _replace_by_prefix(state_dict, prefix, f"{prefix}{FSDP_WRAPPED_MODULE}.")
         key = f"{prefix}{FSDP_WRAPPED_MODULE}.{FLAT_PARAM}"
+        if key not in state_dict:
+            assert getattr(self.module, FLAT_PARAM, None) is None, (
+                "No flat parameter in state_dict but self.module.flat_param is not None"
+            )
+            return
         load_tensor = state_dict[key]
         assert isinstance(
             load_tensor, ShardedTensor
