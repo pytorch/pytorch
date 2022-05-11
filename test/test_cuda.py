@@ -576,7 +576,7 @@ class TestCuda(TestCase):
 
     def test_cublas_allow_tf32_get_set(self):
         skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
-            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE']) == True
+            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
         if skip_tf32_cublas:
             self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
             return
@@ -590,7 +590,7 @@ class TestCuda(TestCase):
     def test_float32_matmul_precision_get_set(self):
         self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
         skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
-            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE']) == True
+            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
         if not skip_tf32_cublas:
             self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
         for p in ('medium', 'high'):
