@@ -2438,16 +2438,13 @@ Tensor linalg_matrix_norm(
   auto dim_ = dim.vec();
   maybe_wrap_dims(dim_, A.dim());
 
-
-  auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
-  using Int = IntArrayRef::value_type;
-  auto max_min = [ord](const Tensor& A, int64_t dim, bool keepdim) { return ord > 0 ? A.amax(dim, keepdim) : A.amin(dim, keepdim); };
-
+  auto max_min = [ord, keepdim](const Tensor& A, int64_t dim) { return ord > 0 ? A.amax(dim, keepdim) : A.amin(dim, keepdim); };
   if (abs_ord == 2.) {
     // Move dims to the end
-    auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], A_.dim());
+    auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], A.dim());
 
-    auto result = max_min(at::linalg_svdvals(A_.permute(permutation)), -1, keepdim);
+    auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
+    auto result = max_min(at::linalg_svdvals(A_.permute(permutation)), -1);
     if (keepdim) {
       auto permutation_reverse = create_reverse_permutation(permutation);
       result = result.unsqueeze(-1).permute(permutation_reverse);
@@ -2458,14 +2455,13 @@ Tensor linalg_matrix_norm(
     if (abs_ord == INFINITY) {
       std::swap(dim_[0], dim_[1]);
     }
-    // If the dim of the second reduction is greater than that of the first reduction
-    // and we are not keeping the dims, then the fact that the output of the first
-    // reduction will have one fewer dimension means that the second reduction dim
-    // will be off by one, so we need to correct that.
-    if ((dim_[1] > dim_[0]) && !keepdim) {
+
+    // If the first reduction removes one dim from the front (dim_[0] < dim_[1]), after this
+    // reduction dim_[1] will be off by one
+    if (!keepdim && (dim_[0] < dim_[1])) {
       dim_[1]--;
     }
-    return max_min(A_.abs().sum(dim_[0], keepdim), dim_[1], keepdim);
+    return max_min(at::linalg_vector_norm(A, 1., {dim_[0]}, keepdim, opt_dtype), dim_[1]);
   }
 }
 
@@ -2537,7 +2533,7 @@ Tensor linalg_norm(const Tensor& X, const optional<Scalar>& opt_ord, OptionalInt
   }
 
   // If ord=None, we'll always use the 2-norm or frob norm (which are the same) so we go through
-  // vector_Norm
+  // vector_norm
   if (opt_ord.has_value() &&
        ((opt_dim.has_value() && opt_dim->size() == 2) ||
         (!opt_dim.has_value() && X.dim() == 2))) {
