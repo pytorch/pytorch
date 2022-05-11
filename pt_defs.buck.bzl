@@ -482,7 +482,7 @@ def pt_operator_registry(
         train = False,
         labels = [],
         env = [],
-        template_select = True,
+        template_select = False, # true?
         enforce_traced_op_list = False,
         pt_allow_forced_schema_registration = True,
         enable_flatbuffer = False,

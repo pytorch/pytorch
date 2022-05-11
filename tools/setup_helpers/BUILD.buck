@@ -15,8 +15,8 @@ python_binary(
     name = "generate_code_bin",
     main_module = "tools.setup_helpers.generate_code",
     visibility = ["PUBLIC"],
-    package_style = "standalone",
-    zip_safe = False,
+    package_style = "inplace",
+    zip_safe = True,
     deps = [
         ":generate_code",
     ],
