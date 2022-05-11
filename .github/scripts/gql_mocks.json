@@ -12484,5 +12484,1320 @@
         "team": null
       }
     }
+  },
+  "query_sha=2736c3522193f0300c62943fdfdfd51b3c9ceea5eedc9b3e4608af86570e9228 name=pytorch number=75095 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": true,
+          "isCrossRepository": false,
+          "author": {
+            "login": "mruberry"
+          },
+          "title": "Initial prims, references, and test architecture for them",
+          "body": "This PR adds an initial set of experimental primitive operations and Python references that reimplement existing PyTorch operations using them. See https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-0/577 for additional context.\r\n\r\nThe following experimental primitives are added:\r\n\r\n- Elementwise unary prims -- abs, acos, acosh, asin, atan, cos, cosh, bessel_i0e, bessel_i1e, cbrt, ceil, digamma, erf, erf_inv, erfc, exp, expm1, floor, igamma, igammac, is_finite, lgamma, log, log1p, neg, reciprocal, round, sign, sinh, sqrt, square, tan. \r\n- Elementwise binary prims -- add, atan2, bitwise_and, bitwise_not, bitwise_or, bitwise_xor, div, eq, ge, gt, le, lt, max, min, mul, ne, nextafter, pow, rsqrt, shift_left, shift_right_arithmetic\r\n- View prims -- brodcast_in_dim, collapse_view, split_dim, squeeze\r\n- Shape prims -- collapse, concatenate, reshape\r\n- Conditional prims -- select\r\n- Data conversion & movement prims -- convert_element_type, device_put\r\n- Inplace prims -- copy_to, resize\r\n\r\nThese primitives do not add any new functionality to PyTorch, but are intended to be the semantic building blocks for reference operators. We have tried to make them consistent with the operations in [jax.lax](https://jax.readthedocs.io/en/latest/jax.lax.html) where possible (because PyTorch prefers being consistent with other frameworks), although there are key differences between these prims and operations in jax.lax. Most notably is that these prims model view semantics and inplace operations.\r\n\r\nIn addition to these primitives the following elementwise binary Python references are added:\r\n\r\n- Elementwise binary Python references -- add, atan2, bitwise_and, bitwise_left_shift, bitwise_or, bitwise_right_shift, bitwise_xor, eq, float_power, ge, gt, le, lt, maximum, minimum, mul, ne, nextafter, pow, sub, true_divide\r\n- Conditional Python references - where\r\n- Data conversion & movement references - copy_to\r\n\r\nA Python reference implements the same behavior as its corresponding PyTorch operator (excepting slight numerical differences, bug fixes, and in some cases additional features). \r\n\r\nThe start of an OpInfo-based test architecture for these references is also included in this PR. A new list, `python_ref_db`, is added to `common_methods_invocations.py`. This list introduces the new `ElementwiseBinaryPythonRefInfo`, which inherits input arguments from the original operators' OpInfo, allows them to be overridden, and then constructs the OpInfo for the Python reference using the (potentially modified) arguments. OpInfo-based tests can opt-into testing references by including this new list in the Sequence passed to the `@ops` decorator. \r\n\r\ncc @ngimel @csarofeen @kevinstephano @Lezcano ",
+          "headRefName": "prims_and_references",
+          "headRepository": {
+            "nameWithOwner": "pytorch/pytorch"
+          },
+          "baseRefName": "master",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "a790467c650be92775103cde5e866c90b56f5376"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "bd6fcf50692e208ebecdc2eaa517a2bfcdcd35cf"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "4a119c8f21529fe1375e7e8789b91f41a3df80c5"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "ea6750dc34d66be759fdfe84b09fb0e23ee59c79"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "2eef8a55fe0227e1921b51bf1f56f9d0a29b49ac"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "b886ed6c20dd1785fd31ed6fa6a8c5b6d0d0b16c"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "9ad9b63d09aa4f7a8549bcf1d88ea4ff0674299c"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "63fdd580118477416ae160e0670ae722ea248090"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "0ccf7dc292af1d40d0a094eb2b2fb0c7ab4ccc70"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "e8a8a4d1fbe35f20eb88e1a43cf5a653883638e5"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "186634dfdd25645c05b58a212f9e8d77c4125fc0"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "f5b4741312b5c42a79f6c8a1d3930b79db38ed8f"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "23d50391bb0fd12111fd3171591c4235ffb2fc1a"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "bac9d45422d58f513b60b4b854441cfdc253d4c5"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "13240ae0b4a0332c3167b65ac026a3172da90cb7"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "1ee34468cb1db3dc6cbae204669f4fec20e2a466"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "561d132bc686d00e8911f7feb3da5901b2bdc574"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ngimel"
+                    },
+                    "email": "ngimel@fb.com",
+                    "name": "Natalia Gimelshein"
+                  },
+                  "oid": "ac42bedc84b7c96256376ad09917263bb020b2c3"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ngimel"
+                    },
+                    "email": "ngimel@fb.com",
+                    "name": "Natalia Gimelshein"
+                  },
+                  "oid": "7f7d5ba40a0b5e10526d90b018b30b54673d12d8"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "37a6b4a8b1adb712d5777c7c3479866c27fb3c4e"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ngimel"
+                    },
+                    "email": "ngimel@fb.com",
+                    "name": "Natalia Gimelshein"
+                  },
+                  "oid": "65b613868c44e519c1777af79b9fd3498c5a7e58"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ngimel"
+                    },
+                    "email": "ngimel@fb.com",
+                    "name": "Natalia Gimelshein"
+                  },
+                  "oid": "442c405e9da0d66744ef03e379224c41eedf5b57"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "031ac49ae9c192989385986b6707fa781e3229e0"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "9a6c3b00039c0c985c1c9cb59490012d1c0b38ba"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "d5c30e408af1889b90012d2e09f6ec3cda333bcb"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "db355d55655bb252a699cd532441bb98e52b98d5"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MjY",
+              "hasNextPage": false
+            },
+            "totalCount": 26
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "checkSuites": {
+                    "nodes": [
+                      {
+                        "app": {
+                          "name": "Facebook GitHub Tools",
+                          "databaseId": 12274
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "Facebook CLA Check",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Meta Internal-Only Changes Check",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAW6ux14=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "Netlify",
+                          "databaseId": 13473
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Azure Pipelines",
+                          "databaseId": 9426
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Dependabot",
+                          "databaseId": 29110
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Codecov",
+                          "databaseId": 254
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "PyTorch Bot",
+                          "databaseId": 40112
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "TorchBench CI (pytorch-linux-py3.7-cu102)"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "run-torchbench",
+                              "conclusion": "NEUTRAL"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAW6e-c8=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SKIPPED"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "Lint"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "quick-checks",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "lintrunner",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test tools",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (with_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (without_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "toc",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "workflow-checks",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAW6e-zM=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "pull"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.0-py3.7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cuda11.3-py3 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-custom-build-static / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7-no-ops / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-cuda11.3-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-docs / build-docs (cpp)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-docs / build-docs (python)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (crossref, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / test (default, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 1, 3, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 2, 3, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 3, 3, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8",
+                              "conclusion": "NEUTRAL"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.0-py3.7 / test (default, 1, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.0-py3.7 / test (default, 2, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (deploy, 1, 1, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 1, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 2, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (distributed, 1, 1, linux.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / test (default, 1, 2, windows.4xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / test (default, 2, 2, windows.4xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cuda11.3-py3 / test (default, 1, 2, windows.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cuda11.3-py3 / test (default, 2, 2, windows.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAW6jVK8=",
+                            "hasNextPage": true
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      }
+                    ],
+                    "pageInfo": {
+                      "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXQFDQA=",
+                      "hasNextPage": false
+                    }
+                  },
+                  "oid": "db355d55655bb252a699cd532441bb98e52b98d5"
+                }
+              }
+            ]
+          },
+          "changedFiles": 5,
+          "files": {
+            "nodes": [
+              {
+                "path": "test/test_ops.py"
+              },
+              {
+                "path": "torch/_prims/__init__.py"
+              },
+              {
+                "path": "torch/_prims/utils.py"
+              },
+              {
+                "path": "torch/_refs/__init__.py"
+              },
+              {
+                "path": "torch/testing/_internal/common_methods_invocations.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NQ",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ngimel"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ngimel"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "zou3519"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "peterbell10"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ngimel"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ngimel"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ngimel"
+                },
+                "state": "APPROVED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              }
+            ],
+            "totalCount": 85
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "Ref implementations by themselves can handle any shapes (and broadcast ops by themselves don't bake in any shapes). The question is can we decide if a particular trace is applicable for a different input, but that depends on the tracing technology and what we are caching on, so out of scope for initial PR.",
+                "author": {
+                  "login": "ngimel"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1105643418
+              },
+              {
+                "bodyText": "@pytorchbot merge this please",
+                "author": {
+                  "login": "mruberry"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1108072887
+              },
+              {
+                "bodyText": "Merge failed due to 'mruberry'\nRaised by https://github.com/pytorch/pytorch/actions/runs/2218044244",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1108073536
+              },
+              {
+                "bodyText": "@mruberry has imported this pull request. If you are a Meta employee, you can view this diff on Phabricator.",
+                "author": {
+                  "login": "facebook-github-bot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1108075965
+              },
+              {
+                "bodyText": "Hey @mruberry.\nYou've committed this PR, but it does not have both a 'release notes: ...' and 'topics: ...' label. Please add one of each to the PR. The 'release notes: ...' label should represent the part of PyTorch that this PR changes (fx, autograd, distributed, etc) and the 'topics: ...' label should represent the kind of PR it is (not user facing, new feature, bug fix, perf improvement, etc). The list of valid labels can be found here for the 'release notes: ...' and here for the 'topics: ...'.\nFor changes that are 'topic: not user facing' there is no need for a release notes label.",
+                "author": {
+                  "login": "github-actions"
+                },
+                "authorAssociation": "NONE",
+                "editor": null,
+                "databaseId": 1108351107
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOQebHmg==",
+              "hasPreviousPage": true
+            }
+          }
+        }
+      }
+    }
   }
 }

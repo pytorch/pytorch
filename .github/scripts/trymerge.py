@@ -530,7 +530,12 @@ class GitHubPR:
         authors = self.get_authors()
         if len(authors) == 1:
             return next(iter(authors.values()))
-        return self.get_authors()[self.get_pr_creator_login()]
+        creator = self.get_pr_creator_login()
+        # If PR creator is not among authors
+        # Assume it was authored by first commit author
+        if creator not in authors:
+            return self.get_committer_author(0)
+        return authors[creator]
 
     def get_title(self) -> str:
         return cast(str, self.info["title"])
