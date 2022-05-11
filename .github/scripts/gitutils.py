@@ -219,7 +219,9 @@ class GitRepo:
         if "pytorch/pytorch" in self.remote_url():
             for excluded_commit in {"8e09e20c1dafcdbdb45c2d1574da68a32e54a3a5",
                                     "5f37e5c2a39c3acb776756a17730b865f0953432",
-                                    "b5222584e6d6990c6585981a936defd1af14c0ba"}:
+                                    "b5222584e6d6990c6585981a936defd1af14c0ba",
+                                    "84d9a2e42d5ed30ec3b8b4140c38dd83abbce88d",
+                                    "f211ec90a6cdc8a2a5795478b5b5c8d7d7896f7e"}:
                 if excluded_commit in from_commits:
                     from_commits.remove(excluded_commit)
 

@@ -1,7 +1,14 @@
-from typing import List, Any, Optional, TypeVar, Union, Dict, Callable
+from typing import List, Any, Optional, Union, Dict, Callable
 import math
 number = Union[int, float]
 # flake8: noqa
+
+###
+# There are generated files that depend on this file
+# To re-generate, please run:
+# cd ~/pytorch && python
+# torchgen/shape_functions/gen_jit_shape_functions.py
+####
 
 import torch
 
@@ -837,6 +844,22 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
         shape.append(input[i])
     return shape
 
+def _reduce_along_dim(self: List[int], dim: int, keepdim: bool):
+    dim = maybe_wrap_dim(dim, len(self))
+    out: List[int] = []
+    for i, self_dim in enumerate(self):
+        if i == dim:
+            if keepdim:
+                out.append(1)
+        else:
+            out.append(self_dim)
+    return out
+
+def argmax(self: List[int], dim: Optional[int] = None, keepdim: bool = False) -> List[int]:
+    if dim is None:
+        return []
+    return _reduce_along_dim(self, dim, keepdim)
+
 shape_compute_graph_mapping : Dict[str, torch._C.ScriptFunction] = {}
 script_func_map: Dict[Callable, torch._C.ScriptFunction] = {}
 
@@ -912,6 +935,7 @@ add_shape_compute_mapping("aten::quantize_per_tensor(Tensor self, float scale, i
 add_shape_compute_mapping("aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor", unary)
 add_shape_compute_mapping("aten::dequantize(Tensor self) -> Tensor", unary)
 add_shape_compute_mapping("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc", broadcast)
+add_shape_compute_mapping("aten::argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor", argmax)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp
 # These are duplicated here so that the functions will be serialiazed

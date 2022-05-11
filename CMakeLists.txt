@@ -207,7 +207,6 @@ cmake_dependent_option(
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
-option(USE_BREAKPAD "Use breakpad crash dump library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
@@ -269,10 +268,6 @@ if(NOT DEFINED USE_VULKAN)
   cmake_dependent_option(
       USE_VULKAN "Use Vulkan GPU backend" ON
       "ANDROID" OFF)
-endif()
-
-if(IOS)
-  set(USE_BREAKPAD OFF)
 endif()
 
 option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
@@ -687,6 +682,8 @@ if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VO
   set(USE_FBGEMM OFF)
 endif()
 
+set(BUILD_ONEDNN_GRAPH OFF)
+
 include(cmake/Dependencies.cmake)
 
 if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
@@ -796,6 +793,10 @@ if(NOT MSVC)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
+  endif()
+  if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0.0))
+    # Suppress issue: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43407
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-attributes")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")

@@ -175,15 +175,23 @@ inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
   return stream;
 }
 
-// TODO(alanwaketan): Support r-value reference argument type.
-template <typename T, typename... Args>
-NodePtr MakeNode(Args&&... args) {
-  return std::make_shared<T>(std::forward<Args>(args)...);
-}
-
+// Note: Keep this version of NodeCast for smooth PyTorch/XLA migration, and
+// clean up once the migration is done.
 template <typename T>
 const T* NodeCast(const Node* node, OpKind op) {
   if (op != node->op()) {
+    return nullptr;
+  }
+#ifdef NDEBUG
+  return static_cast<const T*>(node);
+#else
+  return &dynamic_cast<const T&>(*node);
+#endif
+}
+
+template <typename T>
+const T* NodeCast(const Node* node) {
+  if (T::ClassOpKind() != node->op()) {
     return nullptr;
   }
 #ifdef NDEBUG
