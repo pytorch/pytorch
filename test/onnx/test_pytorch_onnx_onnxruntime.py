@@ -3936,17 +3936,16 @@ class _TestONNXRuntime:
 
     def test_bitshift(self):
         class BitshiftModel(torch.nn.Module):
-            def forward(self, input, input2):
+            def forward(self, input):
                 return (
                     input >> 1,
-                    input << 3.1,
-                    input2 >> torch.tensor([1, 2]),
-                    input2 << 4.2,
+                    input << 3,
+                    input >> torch.tensor([1, 2]),
+                    input << 4,
                 )
 
-        input = torch.arange(24, dtype=torch.float32).reshape(3, 4, 2)
-        input2 = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
-        self.run_test(BitshiftModel(), (input, input2))
+        input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
+        self.run_test(BitshiftModel(), input)
 
     def test_bitshift_other_fp(self):
         class BitshiftModel(torch.nn.Module):
