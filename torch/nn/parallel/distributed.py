@@ -37,7 +37,7 @@ from torch._utils import _get_device_index
 
 from ..modules import Module
 from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
-from .scatter_gather import gather, scatter_kwargs
+from .scatter_gather import gather, is_namedtuple, scatter_kwargs  # noqa: F401
 
 
 logger = logging.getLogger(__name__)
