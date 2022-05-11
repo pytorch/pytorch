@@ -6,6 +6,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <array>
 #include <cctype>
@@ -42,7 +43,12 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   }
   auto output = at::matmul(input, weight.t());
   if (bias->defined()) {
-    output.add_(*bias);
+    // for composite compliance use out-of-place version of `add`
+    if (isTensorSubclassLike(*bias)) {
+      output = at::add(output, *bias);
+    } else {
+      output.add_(*bias);
+    }
   }
   return output;
 }

@@ -964,10 +964,9 @@
   U: std::get<1>(linalg_lu_jvp(A_t, P, L, U, pivot))
   output_differentiability: [False, True, True]
 
-- name: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
-  LU: linalg_lu_solve_LU(grad, LU, pivots, result, left, adjoint)
-  B: "at::linalg_lu_solve(LU, pivots, grad, left, !adjoint)"
-  result: linalg_lu_solve_jvp(result, LU_p, pivots, LU_t, B_t, left, adjoint)
+- name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
+  self, LU_data: lu_solve_backward(grad, result, LU_data, LU_pivots, grad_input_mask)
+  result: lu_solve_jvp(result, LU_data_p, LU_data_t, self_t, LU_pivots)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   LU_data: lu_unpack_backward(grad_L, grad_U, LU_data.size(-2), LU_data.size(-1))
@@ -1420,10 +1419,6 @@
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
-- name: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
-  self: solve_backward_self(grad, self, A)
-  A: solve_backward_A(grad, self, A, solution)
-
 - name: linalg_solve(Tensor input, Tensor other) -> Tensor
   input: solve_backward_A(grad, other, input, result)
   other: solve_backward_self(grad, other, input)
@@ -1858,6 +1853,7 @@
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)
+  result: glu_jvp(result, self_p, self_t, dim)
 
 - name: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   self: hardshrink_backward(grad, self, lambd)

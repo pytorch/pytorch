@@ -541,7 +541,8 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(quantile), "quantile.scalar", Tensor(const Tensor &, double, c10::optional<int64_t>, bool, c10::string_view), fp32)
   KERNEL_CPU(ADD_NS(nanquantile), "nanquantile", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>, bool, c10::string_view), fp32)
   KERNEL_CPU(ADD_NS(nanquantile), "nanquantile.scalar", Tensor(const Tensor &, double, c10::optional<int64_t>, bool, c10::string_view), fp32)
-  KERNEL_CPU(ADD_NS(stft), "stft", Tensor(const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, c10::string_view, bool, c10::optional<bool>, c10::optional<bool>), fp32)
+  KERNEL_CPU(ADD_NS(stft), "stft", Tensor(const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, c10::optional<bool>, c10::optional<bool>), fp32)
+  KERNEL_CPU(ADD_NS(stft), "stft.center", Tensor(const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, c10::string_view, bool, c10::optional<bool>, c10::optional<bool>), fp32)
   KERNEL_CPU(ADD_NS(cdist), "cdist", Tensor(const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
   KERNEL_CPU(ADD_NS(cross), "cross", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>), fp32)
   KERNEL_CPU(ADD_NS(cumprod), "cumprod", Tensor(const Tensor &, int64_t, c10::optional<at::ScalarType>), fp32)
@@ -690,12 +691,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  std::tuple<Tensor, Tensor> (const Tensor &, bool),
                                  std::tuple<Tensor, Tensor> (const Tensor &, bool),
                                  &ADD_NS(qr)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::solve"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 &ADD_NS(solve)>::type::call)));
 
   m.impl(TORCH_SELECTIVE_NAME("aten::svd"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,

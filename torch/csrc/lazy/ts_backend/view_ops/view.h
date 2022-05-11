@@ -9,7 +9,9 @@ namespace lazy {
 
 class TORCH_API View : public TsNode {
  public:
-  static const OpKind class_op_kind;
+  static OpKind ClassOpKind() {
+    return OpKind(at::aten::view);
+  }
 
   View(const Value& input, std::vector<int64_t> output_size);
 
