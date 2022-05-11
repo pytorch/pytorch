@@ -28,7 +28,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, int64_t bdim, int64_t level)
   TORCH_INTERNAL_ASSERT(false);
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
-  set_has_contiguity_policy(HasContiguityPolicy::CustomBehavior);
+  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
   checkInvariants();
 
   const auto public_dims = value_.dim() - 1;
@@ -57,7 +57,7 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
-  set_has_contiguity_policy(HasContiguityPolicy::CustomBehavior);
+  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
   checkInvariants();
   refreshTensorMetadata();
 }
@@ -119,6 +119,13 @@ void BatchedTensorImpl::checkInvariants() const {
 }
 
 // The following are publically exposed as methods of Tensor
+
+IntArrayRef BatchedTensorImpl::strides_custom() const {
+  return strides_default();
+}
+
+// TODO: implement proper contiguity on batched tensor, then put
+// sizes_strides_policy back to Default
 bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
       "NYI: querying is_contiguous inside of vmap for memory_format ",
