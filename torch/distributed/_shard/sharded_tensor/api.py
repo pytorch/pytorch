@@ -9,7 +9,6 @@ from typing import (
     Union
 )
 import copy
-import math
 import weakref
 
 import threading
@@ -18,6 +17,10 @@ import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import distributed_c10d
 import torch.distributed._shard.sharding_spec as shard_spec
+from torch.distributed._shard.sharding_spec.api import (
+    _dispatch_custom_op,
+    _has_custom_op,
+)
 from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata,
@@ -40,7 +43,7 @@ _sharded_tensor_current_id = 0
 _sharded_tensor_map: Dict[int, 'weakref.ReferenceType[ShardedTensor]'] = {}
 
 # Custom sharded ops
-_SHARDED_OPS: Dict[str, Callable] = {}
+_SHARDED_OPS: Dict[Callable, Callable] = {}
 def _register_sharded_op(op, func):
     from inspect import signature
     if len(signature(func).parameters) != 4:
@@ -525,6 +528,7 @@ class ShardedTensor(object):
             sharded_tensor_metadata,
             process_group=process_group,
             init_rrefs=init_rrefs,
+            sharding_spec=sharding_spec,
         )
 
     @classmethod
@@ -534,6 +538,7 @@ class ShardedTensor(object):
         sharded_tensor_metadata: ShardedTensorMetadata,
         process_group=None,
         init_rrefs=False,
+        sharding_spec=None,
     ) -> "ShardedTensor":
         """
         Initialize a ShardedTensor with local shards and a global
@@ -616,7 +621,10 @@ class ShardedTensor(object):
 
         # done validation, add local_shards
         sharded_tensor._local_shards = local_shards
-        sharded_tensor._sharding_spec = shard_spec._infer_sharding_spec_from_shards_metadata(shards_metadata)
+        if sharding_spec is None:
+            sharded_tensor._sharding_spec = shard_spec._infer_sharding_spec_from_shards_metadata(shards_metadata)
+        else:
+            sharded_tensor._sharding_spec = sharding_spec
 
         # run post initialization, i.e. map registration, rpc initialization
         sharded_tensor._post_init()
@@ -742,15 +750,26 @@ class ShardedTensor(object):
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if func in _SHARDED_OPS:
-            # Find ShardedTensor instance to get process_group.
-            for arg in args:
-                if isinstance(arg, ShardedTensor):
-                    return _SHARDED_OPS[func](types, args, kwargs, arg._process_group)
+        def dispatch(st: ShardedTensor, func: Callable):
+            # Dispatch to custom sharding spec op if it has one.
+            if _has_custom_op(st._sharding_spec, func):
+                return _dispatch_custom_op(st._sharding_spec, func, types, args, kwargs)
 
-            for kwarg in kwargs.values():
-                if isinstance(kwarg, ShardedTensor):
-                    return _SHARDED_OPS[func](types, args, kwargs, kwarg._process_group)
+            if func in _SHARDED_OPS:
+                return _SHARDED_OPS[func](types, args, kwargs, st._process_group)
+
+            raise RuntimeError(
+                f"torch function '{func.__name__}', with args: {args} and "
+                f"kwargs: {kwargs} not supported for ShardedTensor!")
+
+        # Find ShardedTensor instance to get process_group and sharding_spec.
+        for arg in args:
+            if isinstance(arg, ShardedTensor):
+                return dispatch(arg, func)
+
+        for kwarg in kwargs.values():
+            if isinstance(kwarg, ShardedTensor):
+                return dispatch(kwarg, func)
 
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
@@ -818,6 +837,7 @@ class ShardedTensor(object):
         """
         return len(self._metadata.size)
 
+    # TODO: This op needs further definition of what exactly its behavior will be.
     def contiguous(self) -> ShardedTensor:
         """
         Returns a new sharded tensor with the local tensor is made to contiguous.
@@ -849,39 +869,8 @@ class ShardedTensor(object):
         Returns:
             A :class:`ShardedTensor` object whose shards have been applied masked_fill.
         """
-        if self.dim() < mask.dim():
-            raise ValueError(
-                "mask dim must not greater than the dim of the sharded tensor."
-            )
-        for idx in range(-1, -mask.dim() - 1, -1):
-            if mask.size(idx) != self.size(idx) and mask.size(idx) != 1:
-                raise ValueError(
-                    f"The size of mask {mask.dim() + idx} must match the size of "
-                    f"sharded tensor {self.dim() + idx} at non-singleton dimension {mask.dim() + idx}"
-                )
-        current_rank = dist.get_rank(self._process_group)  # type: ignore[attr-defined]
-        sharding_dim = self.sharding_spec().dim  # type: ignore[attr-defined]
-        narrow_idx = None
-        for idx in range(-1, -mask.dim() - 1, -1):
-            if self.dim() + idx == sharding_dim and mask.size(idx) != 1:
-                narrow_idx = idx
-        if narrow_idx is not None:
-            rank_idx = None
-            for idx, placement in enumerate(self.sharding_spec().placements):  # type: ignore[attr-defined]
-                if placement.rank() == current_rank:  # type: ignore[index]
-                    rank_idx = idx  # type: ignore[attr-defined]
-            shard_metadata = self.metadata().shards_metadata[rank_idx]  # type: ignore[index]
-            mask = mask.narrow(
-                narrow_idx,
-                shard_metadata.shard_offsets[sharding_dim],
-                shard_metadata.shard_sizes[sharding_dim],
-            )
-        local_tensor = self.local_tensor().masked_fill(mask, value)
-        return ShardedTensor._init_from_local_tensor(
-            local_tensor,
-            self.sharding_spec(),
-            self.size(),  # type: ignore[arg-type]
-            process_group=self._process_group,
+        return handle_torch_function(
+            torch.Tensor.masked_fill, (self, mask, value), self, mask, value
         )
 
     def type_as(self, tensor) -> ShardedTensor:
@@ -895,23 +884,7 @@ class ShardedTensor(object):
         Returns:
             A :class:`ShardedTensor` object whose shards have been applied type_as.
         """
-        if isinstance(tensor, ShardedTensor):
-            tensor = tensor.local_tensor()
-        if self.dtype == tensor.dtype:
-            return self
-        local_shards = []
-        for shard in self.local_shards():
-            local_shards.append(
-                Shard(shard.tensor.type_as(tensor), shard.metadata)
-            )
-        st_meta = copy.deepcopy(self._metadata)
-        st_meta.tensor_properties.dtype = tensor.dtype
-        return ShardedTensor._init_from_local_shards_and_global_metadata(
-            local_shards,
-            st_meta,
-            process_group=self._process_group,
-            init_rrefs=self._init_rrefs,
-        )
+        return handle_torch_function(torch.Tensor.type_as, (self, tensor), self, tensor)
 
     def view(self, *shape) -> ShardedTensor:
         """
@@ -928,53 +901,7 @@ class ShardedTensor(object):
             A :class:`ShardedTensor` object whose shards have been applied
                 with view to its local tensor.
         """
-        if len(shape) == 0:
-            raise ValueError("Missing *shape for sharded view op.")
-        if len(shape) <= self.sharding_spec().dim:  # type: ignore[attr-defined]
-            raise NotImplementedError(
-                f"Shape having dim {len(shape)} is not supported "  # type: ignore[attr-defined]
-                f"for sharded tensor sharded on dim {self.sharding_spec().dim}."
-            )
-        st_size = math.prod(self.size())  # type: ignore[attr-defined]
-        shape_size = math.prod(shape)  # type: ignore[attr-defined]
-        neg_sum = sum(i for i in shape if i < 0)
-        if shape_size > st_size or st_size % shape_size:
-            raise ValueError(
-                f"Shape '{list(shape)}' is invalid for sharded tensor size {st_size}."
-            )
-        if neg_sum < -1:
-            raise ValueError("Only one dimension can be inferred for sharded view op.")
-        try:
-            infer_idx = shape.index(-1)
-        except ValueError:
-            infer_idx = None  # type: ignore[assignment]
-
-        # Infer the dim which is specified with -1.
-        if infer_idx is not None:
-            st_size = math.prod(self.size())  # type: ignore[attr-defined]
-            shape_size = -1 * math.prod(shape)  # type: ignore[attr-defined]
-            shape = (*shape[:infer_idx], st_size // shape_size, *shape[infer_idx + 1 :])
-        if self.size() == shape:
-            return self
-
-        sharding_dim = self.sharding_spec().dim  # type: ignore[attr-defined]
-        world_size = dist.get_world_size(self._process_group)
-        if shape[sharding_dim] % world_size:
-            raise NotImplementedError(
-                f"Case when dim '({shape[sharding_dim]})' is not divisible "
-                "by world_size is not supported."
-            )
-        new_local_tensor_size = (
-            *shape[:sharding_dim],
-            shape[sharding_dim] // world_size,
-            *shape[sharding_dim + 1 :],
-        )
-        return ShardedTensor._init_from_local_tensor(
-            self.local_tensor().view(*new_local_tensor_size).contiguous(),
-            self.sharding_spec(),
-            shape,
-            process_group=self._process_group,
-        )
+        return handle_torch_function(torch.Tensor.view, (self, *shape), self, *shape)
 
     def transpose(self, dim0, dim1) -> ShardedTensor:
         """
@@ -991,32 +918,38 @@ class ShardedTensor(object):
             A :class:`ShardedTensor` object whose dims have been transposed
                 specified in the input.
         """
-        def _swap_meta_data(data, idx0, idx1):
-            """
-            Swap the item at idx0 and idx1 in the data list.
-            """
-            data[idx0], data[idx1] = data[idx1], data[idx0]
+        return handle_torch_function(torch.Tensor.transpose, (self, dim0, dim1), self, dim0, dim1)
 
-        if not isinstance(self.sharding_spec(), shard_spec.ChunkShardingSpec):
-            raise NotImplementedError(
-                "Only ChunkShardingSpec supported for 'transpose'."
-            )
-        if dim0 == dim1:
-            return self
-        sharding_spec = copy.deepcopy(self.sharding_spec())
-        if sharding_spec.dim == dim0:  # type: ignore[attr-defined]
-            sharding_spec.dim = dim1  # type: ignore[attr-defined]
-        elif sharding_spec.dim == dim1:  # type: ignore[attr-defined]
-            sharding_spec.dim = dim0  # type: ignore[attr-defined]
+    def bmm(self, st2, *, out=None) -> ShardedTensor:
+        """
+        Performs a batch matrix-matrix product of matrices stored in self and st2.
 
-        st_size = list(self.size())  # type: ignore[arg-type]
-        _swap_meta_data(st_size, dim0, dim1)
-        return ShardedTensor._init_from_local_tensor(
-            self.local_tensor().transpose(dim0, dim1).contiguous(),
-            sharding_spec,
-            tuple(st_size),
-            process_group=self._process_group,
-        )
+        Warning: For now we only supports the case when both tensors are sharded
+            by dim 0 so that no communication is needed.
+
+        Args:
+            st2 (ShardedTensor) – the second batch of sharded matrices to be multiplied.
+
+        Returns:
+            A :class:`ShardedTensor` object which is the result of the batch multiplication.
+        """
+        return handle_torch_function(torch.Tensor.bmm, (self, st2, out), self, st2, out=out)
+
+    def chunk(self, chunks, dim=0) -> List[ShardedTensor]:
+        """
+        Attempts to split a tensor into the specified number of chunks.
+        Each chunk is a view of the input tensor.
+
+        Warnings: Chunk by the sharding dim is not supported.
+
+        Args:
+            chunks (int) – number of chunks to return
+            dim (int) – dimension along which to split the tensor
+
+        Returns:
+            A List of :class:`ShardedTensor` object chunked on dims.
+        """
+        return handle_torch_function(torch.Tensor.chunk, (self, chunks, dim), self, chunks, dim=dim)
 
     @property
     def shape(self):
@@ -1080,6 +1013,12 @@ class ShardedTensor(object):
 
     def __rtruediv__(self, other):
         return handle_torch_function(torch.Tensor.__rdiv__, (self, other), self, other)
+
+    def tanh(self):
+        return handle_torch_function(torch.Tensor.tanh, (self,), self)
+
+    def __getitem__(self, key):
+        return handle_torch_function(torch.Tensor.__getitem__, (self, key), self, key)
 
     @dataclass
     class ProcessGroupState:
