@@ -10,6 +10,8 @@ import unittest.mock as mock
 import itertools
 import warnings
 import pickle
+import gc
+import weakref
 from copy import deepcopy
 from itertools import repeat, product
 from functools import reduce, partial
@@ -5443,6 +5445,50 @@ class TestNN(NNTestCase):
         inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1,)))
+
+    def test_nested_tensor_from_mask(self):
+        N, L, D = 10, 12, 14
+
+        input = torch.rand(N, L, D)
+        mask = torch.ones(N, L, dtype=torch.bool)
+        # Leave first row be all True to maintain the nt's size unchanged
+        for i in range(1, N):
+            end = torch.randint(1, L, size=()).item()
+            mask[i, end:] = False
+
+        nt = torch._nested_tensor_from_mask(input, mask)
+        input_convert = nt.to_padded_tensor(0.)
+        input.masked_fill_(mask.reshape(N, L, 1).logical_not(), 0.)
+
+        self.assertEqual(input, input_convert)
+
+    def test_nested_tensor_from_mask_error(self):
+        N, L, D = 10, 12, 14
+
+        input = torch.rand(N, L, D)
+        # Mask is not bool
+        mask = torch.zeros(N, L, dtype=torch.float)
+        self.assertRaises(RuntimeError, lambda: torch._nested_tensor_from_mask(input, mask))
+
+        # Mask size is not 2
+        mask = torch.zeros(N, L, D, dtype=torch.bool)
+        self.assertRaises(RuntimeError, lambda: torch._nested_tensor_from_mask(input, mask))
+
+        # Input size is not 3
+        mask = torch.zeros(N, L, dtype=torch.bool)
+        input = torch.rand(N, L)
+        self.assertRaises(RuntimeError, lambda: torch._nested_tensor_from_mask(input, mask))
+
+        # Mask size does not match input
+        mask = torch.zeros(N + 1, L + 1, dtype=torch.bool)
+        input = torch.rand(N, L, D)
+        self.assertRaises(RuntimeError, lambda: torch._nested_tensor_from_mask(input, mask))
+
+        # Mask is not padding format
+        mask = torch.ones(N, L, dtype=torch.bool)
+        mask[0, 0] = False
+        mask[0, 2] = False
+        self.assertRaises(RuntimeError, lambda: torch._nested_tensor_from_mask(input, mask))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     @parametrize_test("average_attn_weights", [True, False])
@@ -19114,13 +19160,16 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
             self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
 
-        # non-dilated conv goes to thnn_conv2d
-        # dilated conv goes to slow_conv_dilated2d
         with torch.backends.mkldnn.flags(enabled=False):
+            # non-dilated conv: thnn_conv2d normal path (with im2col)
             helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1)
             helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8)
+            # non-dilated conv: thnn_conv2d fast path (skip im2col)
             helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1)
             helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16)
+            # dilated conv: slow_conv_dilated2d
+            helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1)
+            helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16)
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
@@ -21388,6 +21437,23 @@ class TestStateDictHooks(TestCase):
         m_load._register_load_state_dict_pre_hook(hook_with_module, True)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
+
+    def test_no_extra_ref_to_module(self):
+        try:
+            gc.disable()
+            m = nn.Linear(10, 10)
+
+            def hook_with_module(*args, **kwargs):
+                pass
+
+            m._register_load_state_dict_pre_hook(hook_with_module, True)
+            weak_m = weakref.ref(m)
+            del m
+
+            self.assertEqual(weak_m(), None)
+        finally:
+            gc.enable()
+
 
     def test_load_state_dict_module_pre_hook(self):
         hook_called = 0
