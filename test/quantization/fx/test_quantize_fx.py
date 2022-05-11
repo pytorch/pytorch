@@ -83,13 +83,13 @@ from torch.ao.quantization.fx.pattern_utils import (
 from torch.ao.quantization.fx.utils import NodeInfo
 
 from torch.ao.quantization.fake_quantize import (
-    default_affine_fixed_qparams_fake_quant,
-    default_symmetric_fixed_qparams_fake_quant,
+    default_fixed_qparams_range_0to1_fake_quant,
+    default_fixed_qparams_range_neg1to1_fake_quant,
 )
 
 from torch.ao.quantization.observer import (
-    default_affine_fixed_qparams_observer,
-    default_symmetric_fixed_qparams_observer,
+    default_fixed_qparams_range_0to1_observer,
+    default_fixed_qparams_range_neg1to1_observer,
 )
 
 # test utils
@@ -4085,11 +4085,11 @@ class TestQuantizeFx(QuantizationTestCase):
         class DummyQuant():
             pass
 
-        @register_quant_pattern("dummy_quant2", default_affine_fixed_qparams_observer)
+        @register_quant_pattern("dummy_quant2", default_fixed_qparams_range_0to1_observer)
         class DummyQuant2():
             pass
 
-        @register_quant_pattern("dummy_quant3", default_symmetric_fixed_qparams_observer)
+        @register_quant_pattern("dummy_quant3", default_fixed_qparams_range_neg1to1_observer)
         class DummyQuant3():
             pass
 
@@ -4097,17 +4097,17 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(DEFAULT_QUANTIZATION_PATTERNS["dummy_quant"], DummyQuant)
         self.assertEqual(DEFAULT_QUANTIZATION_PATTERNS["dummy_quant2"], DummyQuant2)
         self.assertEqual(DEFAULT_QUANTIZATION_PATTERNS["dummy_quant3"], DummyQuant3)
-        self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant2"], default_affine_fixed_qparams_observer)
-        self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant3"], default_symmetric_fixed_qparams_observer)
+        self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant2"], default_fixed_qparams_range_0to1_observer)
+        self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant3"], default_fixed_qparams_range_neg1to1_observer)
         self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant2"],
-                                                  default_affine_fixed_qparams_fake_quant)
+                                                  default_fixed_qparams_range_0to1_fake_quant)
         self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant3"],
-                                                  default_symmetric_fixed_qparams_fake_quant)
+                                                  default_fixed_qparams_range_neg1to1_fake_quant)
         output_fake_quantize_map = get_default_output_activation_post_process_map(is_training=True)
         output_observer_map = get_default_output_activation_post_process_map(is_training=False)
-        self.assertEqual(output_observer_map.get("dummy_quant3"), default_symmetric_fixed_qparams_observer)
+        self.assertEqual(output_observer_map.get("dummy_quant3"), default_fixed_qparams_range_neg1to1_observer)
         self._assertFixedQParamsFakeQuantizeEqual(output_fake_quantize_map.get("dummy_quant3"),
-                                                  default_symmetric_fixed_qparams_fake_quant)
+                                                  default_fixed_qparams_range_neg1to1_fake_quant)
 
 
 

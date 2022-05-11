@@ -692,12 +692,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  std::tuple<Tensor, Tensor> (const Tensor &, bool),
                                  &ADD_NS(qr)>::type::call)));
 
-  m.impl(TORCH_SELECTIVE_NAME("aten::solve"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 &ADD_NS(solve)>::type::call)));
-
   m.impl(TORCH_SELECTIVE_NAME("aten::svd"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
                                  std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
