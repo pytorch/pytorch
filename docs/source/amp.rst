@@ -23,6 +23,8 @@ Ordinarily, "automatic mixed precision training" with datatype of ``torch.float1
 :class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>`
 and `CUDA Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_.
 However, :class:`torch.autocast` and :class:`torch.cuda.amp.GradScaler` are modular, and may be used separately if desired.
+As shown in the CPU example section of :class:`torch.autocast`, "automatic mixed precision training/inference" on CPU with
+datatype of ``torch.bfloat16`` only uses :class:`torch.autocast`.
 
 For CUDA and CPU, APIs are also provided seperately:
 
