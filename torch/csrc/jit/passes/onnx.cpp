@@ -435,8 +435,8 @@ void NodeToONNX(
       pyobj = func->get();
     }
 
-    auto opset_version = py::cast<int>(
-        onnx_flags.attr("_FLAGS").attr("export_onnx_opset_version"));
+    py::object opset_version =
+        onnx_flags.attr("_FLAGS").attr("export_onnx_opset_version");
     py::object is_registered_op = onnx_registry.attr("is_registered_op")(
         "PythonOp", "prim", opset_version);
     if (!py::hasattr(pyobj, "symbolic") &&
