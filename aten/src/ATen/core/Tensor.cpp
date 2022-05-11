@@ -21,11 +21,6 @@ const TensorBase& get_tensor_base(const Tensor &t) {
   return t;
 }
 
-TensorBase TensorBase::__dispatch_contiguous(c10::MemoryFormat memory_format) const {
-  OptionalTensorRef self(*this);
-  return at::_ops::contiguous::call(*self, memory_format);
-}
-
 const TensorBase& TensorBase::fill_(const c10::Scalar &fill_value) const {
   Tensor self(*this);
   at::_ops::fill__Scalar::call(self, fill_value);

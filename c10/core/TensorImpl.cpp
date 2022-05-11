@@ -384,6 +384,16 @@ bool TensorImpl::is_contiguous_nondefault_policy_impl(
         "Tensors of type ",
         tensorimpl_type_name(),
         " do not have is_contiguous");
+  } else if (has_contiguity_ ==
+        static_cast<uint8_t>(CustomizableMethodPolicy::CustomPythonBehavior)) {
+    auto* interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+    if (interpreter) {
+      interpreter->is_contiguous(this);
+    }
+    TORCH_CHECK(
+        false,
+        "cannot access PyObject for Tensor on interpreter ",
+        pyobj_interpreter_.load()->name());
   } else {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         has_contiguity_ ==
@@ -397,6 +407,40 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
       false,
       "TensorImpl::is_contiguous_custom should never be called; did you "
       "set_has_contiguity_policy and forget to override is_contiguous_custom?");
+}
+
+at::Tensor& TensorImpl::contiguous_nondefault_policy_impl(
+    at::MemoryFormat memory_format) const {
+  if (has_contiguity_ ==
+      static_cast<uint8_t>(CustomizableMethodPolicy::ContiguityNotSupported)) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Tensors of type ",
+        tensorimpl_type_name(),
+        " do not have contiguous");
+  } else if (has_contiguity_ ==
+        static_cast<uint8_t>(CustomizableMethodPolicy::CustomPythonBehavior)) {
+    auto* interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+    if (interpreter) {
+      interpreter->contiguous(this);
+    }
+    TORCH_CHECK(
+        false,
+        "cannot access PyObject for Tensor on interpreter ",
+        pyobj_interpreter_.load()->name());
+  } else {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        has_contiguity_ ==
+        static_cast<uint8_t>(CustomizableMethodPolicy::CustomBehavior));
+    return contiguous_custom(memory_format);
+  }
+}
+
+at::Tensor& TensorImpl::contiguous_custom(at::MemoryFormat memory_format) const {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "TensorImpl::contiguous_custom should never be called; did you "
+      "set_has_contiguity_policy and forget to override contiguous_custom?");
 }
 
 IntArrayRef TensorImpl::sizes_nondefault_policy_impl() const {

@@ -676,8 +676,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_;
   }
 
+  TENSORIMPL_MAYBE_VIRTUAL at::Tensor& contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    if (C10_UNLIKELY(
+            has_contiguity_ !=
+            static_cast<uint8_t>(HasContiguityPolicy::Default))) {
+      return contiguous_nondefault_policy_impl(memory_format);
+    }
+    return at::_ops::contiguous::call(this, memory_format);
+  }
+
  private:
   bool is_contiguous_nondefault_policy_impl(at::MemoryFormat) const;
+  at::Tensor& contiguous_nondefault_policy_impl(at::MemoryFormat) const;
 
  protected:
   /**
@@ -686,6 +697,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * to be called.
    */
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
+  virtual at::Tensor& contiguous_custom(at::MemoryFormat memory_format) const;
 
   virtual Layout layout_impl() const {
     TORCH_CHECK(
@@ -1364,6 +1376,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_python_dispatch(bool k) {
     if (k) {
       key_set_ = key_set_.add(c10::python_ks);
+      set_has_contiguity_policy(HasContiguityPolicy::CustomPythonBehavior);
     } else {
       key_set_ = key_set_ - c10::python_ks;
     }
@@ -2325,6 +2338,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Call virtual foo_custom method to implement custom foo
     // behavior.
     CustomBehavior,
+    // Custom Python Behavior -- allows foo_custom method to go through __torch_dispatch__
+    CustomPythonBehavior,
   };
 
   // For backward compatibility.

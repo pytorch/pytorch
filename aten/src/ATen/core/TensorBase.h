@@ -121,7 +121,7 @@ class TORCH_API TensorBase {
     if (is_contiguous(memory_format)) {
       return *this;
     } else {
-      return __dispatch_contiguous(memory_format);
+      return impl_->contiguous(memory_format);
     }
   }
 
@@ -801,9 +801,6 @@ public:
 protected:
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
-
-private:
-  TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
 };
 
 inline int64_t get_device(const TensorBase& self) {
@@ -957,7 +954,7 @@ inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat me
   if (is_contiguous(memory_format)) {
     return c10::MaybeOwned<TensorBase>::borrowed(*this);
   } else {
-    return c10::MaybeOwned<TensorBase>::owned(__dispatch_contiguous(memory_format));
+    return c10::MaybeOwned<TensorBase>::owned(impl_->contiguous(memory_format));
   }
 }
 } // namespace at

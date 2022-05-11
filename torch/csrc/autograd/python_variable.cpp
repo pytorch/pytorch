@@ -98,6 +98,7 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj, b
 };
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+c10::intrusive_ptr<TensorImpl> concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 void concrete_dispatch_fn(
     const c10::impl::PyInterpreter*,
     const c10::OperatorHandle& op,
@@ -111,7 +112,8 @@ class PyInterpreterHolder {
             &concrete_name_fn,
             &concrete_decref_fn,
             &concrete_detach_fn,
-            &concrete_dispatch_fn)) {}
+            &concrete_dispatch_fn,
+            &concrete_is_contiguous_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -425,9 +427,9 @@ static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObje
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False)",
+    "_make_subclass(PyObject* cls, Tensor data, bool use_python_dispatch=False, bool require_grad=False)",
   });
-  ParsedArgs<3> parsed_args{};
+  ParsedArgs<4> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
@@ -445,7 +447,10 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   // rnn.flatten_parameters()
   // ```
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
-  data.set_requires_grad(r.toBool(2));
+  data.set_requires_grad(r.toBool(3));
+  if (r.toBool(2)) {
+    data.unsafeGetTensorImpl()->set_python_dispatch(true);
+  }
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       std::move(data),
@@ -458,9 +463,9 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
   static PythonArgParser parser({
-    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, bool use_python_dispatch=False, int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   });
-  ParsedArgs<10> parsed_args{};
+  ParsedArgs<11> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -479,13 +484,13 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
     ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
   const auto options = TensorOptions()
-    .dtype(r.scalartype(5))
-    .device(r.device(7))
-    .layout(r.layoutOptional(6))
+    .dtype(r.scalartype(6))
+    .device(r.device(8))
+    .layout(r.layoutOptional(7))
     // NB: long standing issue, requires_grad is not respected here; you
     // have to set it post facto, see https://github.com/pytorch/pytorch/issues/26428
     // .requires_grad(r.toBool(7))
-    .pinned_memory(r.toBool(8));
+    .pinned_memory(r.toBool(9));
 
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
@@ -499,6 +504,10 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
         .options(options)
         .make_tensor();
   data.set_requires_grad(r.toBool(9));
+
+  if (r.toBool(4)) {
+    data.unsafeGetTensorImpl()->set_python_dispatch(true);
+  }
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
@@ -1929,6 +1938,80 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
           TorchFunctionName::TorchDispatch));
 
   TORCH_CHECK(THPVariable_Check(out.ptr()), "detach returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected Tensor");
+  const Tensor& res_t = THPVariable_Unpack(out.ptr());
+  return res_t.getIntrusivePtr();
+}
+
+c10::intrusive_ptr<TensorImpl> concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  // Setup the arguments expected for the detach call
+  std::vector<py::handle> overloaded_args;
+  // TODO: there should be a shorter way to spell this
+  // TODO: fix the constness of target
+  Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
+  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
+  TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
+  append_overloaded_tensor(&overloaded_args, self_p.ptr());
+  auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
+  PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
+
+  py::dict kwargs;
+
+  auto out = py::reinterpret_steal<py::object>(
+      handle_torch_function_no_python_arg_parser(
+          overloaded_args,
+          args.ptr(),
+          kwargs.ptr(),
+          "is_contiguous",
+          py::module::import("torch")
+              .attr("ops")
+              .attr("aten")
+              .attr("is_contiguous")
+              .attr("default")
+              .ptr(),
+          "torch.ops.aten",
+          TorchFunctionName::TorchDispatch));
+
+  TORCH_CHECK(THPVariable_Check(out.ptr()), "is_contiguous returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected Tensor");
+  const Tensor& res_t = THPVariable_Unpack(out.ptr());
+  return res_t.getIntrusivePtr();
+}
+
+c10::intrusive_ptr<TensorImpl> concrete_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  // Setup the arguments expected for the detach call
+  std::vector<py::handle> overloaded_args;
+  // TODO: there should be a shorter way to spell this
+  // TODO: fix the constness of target
+  Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
+  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
+  TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
+  append_overloaded_tensor(&overloaded_args, self_p.ptr());
+  auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
+  PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
+
+  py::dict kwargs;
+
+  auto out = py::reinterpret_steal<py::object>(
+      handle_torch_function_no_python_arg_parser(
+          overloaded_args,
+          args.ptr(),
+          kwargs.ptr(),
+          "contiguous",
+          py::module::import("torch")
+              .attr("ops")
+              .attr("aten")
+              .attr("contiguous")
+              .attr("default")
+              .ptr(),
+          "torch.ops.aten",
+          TorchFunctionName::TorchDispatch));
+
+  TORCH_CHECK(THPVariable_Check(out.ptr()), "contiguous returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected Tensor");
   const Tensor& res_t = THPVariable_Unpack(out.ptr());
   return res_t.getIntrusivePtr();
 }
