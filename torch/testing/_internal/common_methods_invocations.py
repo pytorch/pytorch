@@ -12128,6 +12128,10 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestCompositeCompliance',
                                      'test_operator'),
+                        # MISSING 'aten::isnan'
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestMeta', 'test_meta',
+                                     dtypes=floating_types_and(torch.half, torch.bfloat16)),
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -12672,7 +12676,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
-           dtypes=floating_types_and(torch.uint8),
+           dtypes=floating_types_and(torch.uint8, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
            sample_inputs_func=partial(sample_inputs_interpolate, 'nearest'),
            skips=(
@@ -12688,7 +12692,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_interpolate, 'linear'),
            skips=(
@@ -12704,7 +12708,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_autograd=True,
            supports_forward_ad=True,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'bilinear'),
@@ -12721,7 +12725,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_interpolate, 'bicubic'),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -12738,7 +12742,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'trilinear'),
@@ -12770,7 +12774,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'bilinear'),
@@ -12795,7 +12799,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types_and(torch.uint8),
+           dtypes=floating_types_and(torch.uint8, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'nearest'),
@@ -13135,7 +13139,8 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_forward_ad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=False,
            supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.elu',
@@ -16101,7 +16106,13 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_logsumexp),
+           sample_inputs_func=sample_inputs_logsumexp,
+           skips=(
+               # RuntimeError: "abs_cpu" not implemented for 'Bool'
+               # RuntimeError: value cannot be converted to type int without overflow
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
+                            dtypes=integral_types_and(torch.bool)),
+           )),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -18369,9 +18380,6 @@ python_ref_db = [
             # torch function issue:
             # ValueError: Callable cat has no meta function!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
-            # eager torch.cat incorrectly throws an error for a chalf x double x half type promotion case
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
         )
     ),
     PythonRefInfo(
