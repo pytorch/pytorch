@@ -7820,8 +7820,8 @@ def reference_inputs_view_reshape(op, device, dtype, requires_grad, **kwargs):
         ((1, 4), (1, 1, 2, 1, 2)),
         ((3, 5, 7), (7, 5, 3)),
         ((1,), ()),
-        # ((5, 0, 2, 3), (5, 0, 2, 3)),  # TODO: enable me!
-        # ((2, 1, 0, 3, 1), (5, 0)),  # FIXME: https://github.com/pytorch/pytorch/issues/77218
+        ((5, 0, 2, 3), (5, 0, 2, 3)),
+        ((2, 1, 0, 3, 1), (5, 0)),
         ((1,), ()),
         ((4, 5, 6), (4, 5, 6, 1, 1, 1)),
         ((), (1, 1, 1, 1))
