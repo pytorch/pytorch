@@ -13105,7 +13105,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,
+           supports_fwgrad_bwgrad=True,
            supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.elu',
