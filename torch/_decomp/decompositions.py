@@ -1250,8 +1250,8 @@ def stack(tensors: List[Tensor], dim: int = 0) -> Tensor:
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
-    wrapped_dims = utils.canonicalize_dims(ndim, dims)  # type: ignore[misc]
-    assert isinstance(wrapped_dims, list)
+    wrapped_dims = utils.canonicalize_dims(ndim, dims)
+    assert isinstance(wrapped_dims, tuple)
     for idx in range(ndim - 1, -1, -1):
         if idx in wrapped_dims:
             self = self.squeeze(idx)
