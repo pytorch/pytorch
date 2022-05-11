@@ -553,61 +553,6 @@ void ne_kernel(TensorIteratorBase& iter) {
   }
 }
 
-// void maximum_kernel(TensorIteratorBase& iter) {
-//   if (iter.dtype() == ScalarType::Bool) {
-//     cpu_kernel(iter,
-//       [](bool a, bool b) -> bool {
-//         return a || b;
-//       });
-//   } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-//     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
-//       cpu_kernel_vec(iter,
-//         [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
-//         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::maximum(a, b); });
-//     });
-//   } else {
-//     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "maximum_cpu", [&]() {
-//       cpu_kernel_vec(iter,
-//         [](scalar_t a, scalar_t b) -> scalar_t {
-//           if (a != a || b != b) {
-//             return std::numeric_limits<scalar_t>::quiet_NaN();
-//           } else {
-//             return std::max(a, b);
-//           }
-//         },
-//         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::maximum(a, b); });
-//     });
-//   }
-// }
-
-// void minimum_kernel(TensorIteratorBase& iter) {
-//   if (iter.dtype() == ScalarType::Bool) {
-//     cpu_kernel(iter,
-//       [](bool a, bool b) -> bool {
-//         return a && b;
-//       });
-//   } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-//     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
-//       cpu_kernel_vec(iter,
-//         [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
-//         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::minimum(a, b); });
-//     });
-//   } else {
-//     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "minimum_cpu", [&]() {
-//       cpu_kernel_vec(iter,
-//         [](scalar_t a, scalar_t b) -> scalar_t {
-//           if (a != a || b != b) {
-//             return std::numeric_limits<scalar_t>::quiet_NaN();
-//           } else {
-//             return std::min(a, b);
-//           }
-//         },
-//         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::minimum(a, b); });
-//     });
-//   }
-// }
-
-
 void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
   if (iter.dtype() == kBFloat16) {
     const float beta_val(beta);
