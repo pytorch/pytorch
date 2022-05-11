@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>

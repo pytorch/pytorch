@@ -1413,6 +1413,16 @@ class TestNN(NNTestCase):
                                     "expected torch.Tensor or Tensor-like object from checkpoint but received"):
             m.load_state_dict(state_dict)
 
+    def test_load_state_dict_type(self):
+        m = nn.Module()
+
+        with self.assertRaisesRegex(TypeError,
+                                    "Expected state_dict to be dict-like, got"):
+            m.load_state_dict("")
+        with self.assertRaisesRegex(TypeError,
+                                    "Expected state_dict to be dict-like, got"):
+            m.load_state_dict(2)
+
     def test_buffer_not_persistent_load(self):
         m = nn.Module()
         m.register_buffer('buf', torch.rand(5), persistent=False)
@@ -6169,6 +6179,9 @@ class TestNN(NNTestCase):
         self.assertTrue(state_dict._metadata['']['version'] >= 0)
         self.assertEqual(state_dict['weight'].data_ptr(), l.weight.data_ptr())
         self.assertEqual(state_dict['bias'].data_ptr(), l.bias.data_ptr())
+
+        # Reference https://github.com/pytorch/pytorch/pull/75507#issuecomment-1110291545
+        self.assertNotWarn(lambda: l.state_dict(destination=dict()), "Should not warn kwarg destination w/o _metadata")
 
     def test_load_state_dict(self):
         l = nn.Linear(5, 5)
@@ -11082,6 +11095,30 @@ class TestNN(NNTestCase):
         out_t = m(in_t)
         expected_out_t = torch.tensor([[[[2.5]]]])
         self.assertEqual(expected_out_t, out_t)
+
+    def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
+        def helper(size, scale_factor, mode, device):
+            inputf = torch.randn(size, device=device, dtype=torch.float, requires_grad=True)
+            input = inputf.to(dtype).detach().requires_grad_(True)
+            m = nn.Upsample(scale_factor=scale_factor, mode=mode)
+
+            outf = m(inputf)
+            out = m(input)
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqualIgnoreType(out, outf, atol=0.1, rtol=0.0)
+
+            out.sum().backward()
+            outf.sum().backward()
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
+
+        for device in ['cpu']:
+            helper([3, 20, 30], 2, 'nearest', device)
+            helper([3, 20, 11, 7], 2, 'nearest', device)
+            helper([3, 20, 11, 7, 3], 2, 'nearest', device)
+            helper([3, 20, 30], 2, 'linear', device)
+            helper([3, 20, 11, 7], 2, 'bilinear', device)
+            helper([3, 20, 11, 7, 3], 2, 'trilinear', device)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_interpolate_illegal_memory_access(self):
@@ -16193,6 +16230,48 @@ class TestNNDeviceType(NNTestCase):
             helper(4, 8, 9, 14, 5, 8, contig)
             helper(4, 8, 11, 11, 1, 1, contig)
 
+    @dtypes(torch.float, torch.double)
+    def test_pooling_max_nhwc(self, device, dtype):
+        def helper(n, c, h, w, kernel_size, stride, padding, dilation, contig, device):
+            output_height = math.floor((h + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1) / stride[0] + 1)
+            output_width = math.floor((w + 2 * padding[1] - dilation[1] * (kernel_size[1] - 1) - 1) / stride[1] + 1)
+
+            input = torch.randint(1, 10, (n, c, h, w), device=device, dtype=dtype)
+            input = input.contiguous(memory_format=torch.channels_last)
+            grad = torch.randint(1, 10, (n, c, output_height, output_width), device=device, dtype=dtype)
+            grad = grad.contiguous(memory_format=torch.channels_last)
+            if not contig:
+                input = input[:, ::2, :, :]
+                grad = grad[:, ::2, :, :]
+            input.requires_grad_(True)
+            pool = torch.nn.MaxPool2d(
+                kernel_size, stride, padding, dilation, return_indices=True, ceil_mode=False
+            )
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.MaxPool2d(
+                kernel_size, stride, padding, dilation, return_indices=True, ceil_mode=False
+            ).to(device)
+
+            out, ind = pool(input)
+            out.backward(grad)
+            ref_out, ref_ind = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ind.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_ind.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(ind, ref_ind)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        for contig in [True, False]:
+            helper(4, 8, 10, 10, (2, 2), (1, 1), (1, 1), (2, 2), contig, device)
+            helper(4, 8, 9, 14, (2, 2), (1, 1), (1, 1), (2, 2), contig, device)
+            helper(4, 8, 11, 11, (4, 4), (2, 2), (2, 2), (2, 2), contig, device)
+
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
         weight = embd.weight
@@ -20248,6 +20327,14 @@ class TestNNDeviceType(NNTestCase):
                 with cm:
                     _test(batch_first=batch_first, training=training, atol=atol, rtol=rtol)
 
+    @dtypes(torch.double)
+    @torch.no_grad()
+    def test_multihead_attn_fast_path_query_and_bias_have_different_dtypes(self, device, dtype):
+        mha = torch.nn.MultiheadAttention(3, 3, batch_first=True, dtype=dtype, device=device).eval()
+        mha.in_proj_bias = torch.nn.Parameter(mha.in_proj_bias.to(torch.half).to(device))
+        query = torch.randn(3, 3, 3, dtype=dtype, device=device)
+        mha(query, query, query)
+
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
     def test_transformerencoderlayer_gelu(self, device, dtype):
@@ -21325,6 +21412,62 @@ class TestStateDictHooks(TestCase):
             )
             m.load_state_dict(state_dict)
             self.assertEqual(2, hook_called)
+
+    def test_load_state_dict_post_hook(self):
+        hook_called = 0
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.foo = torch.nn.Parameter(torch.rand(10))
+
+            def my_post_load_hook(self, module, incompatible_keys):
+                assert module is self
+                nonlocal hook_called
+                incompatible_keys.missing_keys.append("foo")
+                incompatible_keys.unexpected_keys.append("bar")
+                hook_called += 1
+
+        nested = MyModule()
+        wrapped = nn.ModuleList([nested])
+        handle = nested.register_load_state_dict_post_hook(
+            nested.my_post_load_hook,
+        )
+        # Hook must be called even if it is wrapped
+        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
+        self.assertEqual(hook_called, 1)
+        # Ensure that the hook modified missing_keys and unexpected_keys
+        missing = ret.missing_keys
+        unexpected = ret.unexpected_keys
+        self.assertEqual(missing, ["foo"])
+        self.assertEqual(unexpected, ["bar"])
+        # When called with strict=True, the error raised should mention the
+        # missing and unexpected keys the hook added.
+        with self.assertRaisesRegex(RuntimeError, "foo.*\n.*bar"):
+            wrapped.load_state_dict(wrapped.state_dict(), strict=True)
+        self.assertEqual(hook_called, 2)
+        # Removing the hook via handle.remove() should cause it not to
+        # fire anymore.
+        handle.remove()
+        # Hook did not run so it should not have added any keys
+        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
+        self.assertEqual(ret.missing_keys, [])
+        self.assertEqual(ret.unexpected_keys, [])
+        # hook_called should not have been incremented
+        self.assertEqual(hook_called, 2)
+
+        def load_hook_clear_incompatible(module, incompatible_keys):
+            incompatible_keys.missing_keys.clear()
+            incompatible_keys.unexpected_keys.clear()
+
+        nested.register_load_state_dict_post_hook(load_hook_clear_incompatible)
+        state_dict = wrapped.state_dict()
+        state_dict["extra"] = torch.ones(1)
+        # load state_dict with strict=True should not throw.
+        ret = wrapped.load_state_dict(state_dict, strict=True)
+        # explicitly ensure that the post hook clearned out incompatible_keys
+        self.assertEqual([], ret.missing_keys)
+        self.assertEqual([], ret.unexpected_keys)
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())

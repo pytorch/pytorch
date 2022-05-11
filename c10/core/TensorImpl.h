@@ -87,7 +87,7 @@ inline int64_t size_to_dim_(int k, IntArrayRef dims) {
 
 // Product of all dims between k and l (not including dims[k] and dims[l])
 inline int64_t size_between_dim_(int k, int l, IntArrayRef dims) {
-  TORCH_CHECK((unsigned)l < dims.size());
+  TORCH_CHECK((unsigned)l < dims.size() && (unsigned)k < dims.size());
   int64_t r = 1;
   if (k < l) {
     for (int i = k + 1; i < l; ++i) {

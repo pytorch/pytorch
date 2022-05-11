@@ -17,6 +17,9 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.common_utils import (
+    run_tests,
+)
 
 class TestTensorOps(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
@@ -37,3 +40,6 @@ class TestTensorOps(ShardedTensorTestBase):
         self.assertTrue(type(copied_st) is type(st))
         self.assertEqual(copied_st.local_tensor(), st.local_tensor())
         self.assertFalse(copied_st is st)
+
+if __name__ == "__main__":
+    run_tests()

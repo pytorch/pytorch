@@ -8,7 +8,8 @@ template<typename T>
 class optional;
 template<typename T>
 class List;
-class ITensorListRef;
+template<typename T>
+class IListRef;
 class Stream;
 class Scalar;
 class SymInt;
@@ -25,10 +26,12 @@ class OptionalArrayRef;
 namespace at {
 
 class Tensor;
+class OptionalTensorRef;
 struct Dimname;
 struct Generator;
 using TensorList = c10::ArrayRef<Tensor>;
-using ITensorListRef = c10::ITensorListRef;
+using ITensorListRef = c10::IListRef<Tensor>;
+using IOptTensorListRef = c10::IListRef<OptionalTensorRef>;
 using DimnameList = c10::ArrayRef<Dimname>;
 using IntArrayRef = c10::ArrayRef<int64_t>;
 using OptionalIntArrayRef = c10::OptionalArrayRef<int64_t>;

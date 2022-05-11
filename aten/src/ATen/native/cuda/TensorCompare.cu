@@ -82,7 +82,7 @@ void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min) {
   launch_clamp_scalar(iter, min, min, at::native::detail::ClampLimits::Min);
 }
 
-void clamp_min_kernel_impl(TensorIterator& iter) {
+void clamp_min_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_min_cuda", [&] {
     if (iter.is_cpu_scalar(2)){
       Scalar min = iter.scalar_value<scalar_t>(2);
@@ -106,7 +106,7 @@ void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max) {
   launch_clamp_scalar(iter, max, max, at::native::detail::ClampLimits::Max);
 }
 
-void clamp_max_kernel_impl(TensorIterator& iter) {
+void clamp_max_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_max_cuda", [&] {
     if (iter.is_cpu_scalar(2)){
       Scalar max = iter.scalar_value<scalar_t>(2);
