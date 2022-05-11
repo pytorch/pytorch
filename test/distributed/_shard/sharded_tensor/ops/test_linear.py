@@ -12,7 +12,6 @@ from torch.distributed._shard.api import (
 )
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
-    named_params_with_sharded_tensor,
 )
 from torch.distributed._shard.sharded_tensor import (
     empty,
@@ -40,6 +39,9 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common 
     generate_chunk_sharding_specs_for_test,
     generate_local_weight_sharding_params_for_test,
 )
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
+from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -65,12 +67,33 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         # Shard the parameter.
         shard_parameter(sharded_linear, "weight", spec)
 
+        # Wrap with DDP enabled with ReplicatedTensor
+        with _ddp_replicated_tensor(True):
+            sharded_linear = DDP(sharded_linear)
+
         # Run sharded computation
         torch.manual_seed(self.rank)  # inputs different on each rank
         inp = torch.rand(*input_size).cuda(self.rank)
+
         reshard_spec = copy.deepcopy(spec)
         reshard_spec.dim = 0
         reshard_spec.placements.sort(key=lambda placement: placement.rank())
+
+        # Validate for torch.nn.functional.linear version.
+        local_output = torch.nn.functional.linear(
+            inp, local_linear.weight, local_linear.bias
+        )
+        sharded_output = torch.nn.functional.linear(
+            inp, sharded_linear.module.weight, ReplicatedTensor(sharded_linear.module.bias)
+        )
+        sharded_output = sharded_output.reshard(reshard_spec).local_tensor()
+        # When local tensor only has one dimension, we increase one more dimension
+        # for reshard. We need to squeeze the # of dimensions manually.
+        if inp.dim() == 1:
+            sharded_output = sharded_output.squeeze(reshard_spec.dim)
+        self.assertEqual(local_output, sharded_output)
+
+        # Validate nn.Module version.
         sharded_linear = _collect_local_shard(
             _reshard_output(sharded_linear, reshard_spec)
         )
@@ -82,29 +105,15 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         # Verify
         self.assertEqual(local_output, sharded_output)
 
-        # Validate for torch.nn.functional.linear version.
-        local_output = torch.nn.functional.linear(
-            inp, local_linear.weight, local_linear.bias
-        )
-        sharded_output = torch.nn.functional.linear(
-            inp, sharded_linear.weight, sharded_linear.bias
-        )
-        sharded_output = sharded_output.reshard(reshard_spec).local_tensor()
-        # When local tensor only has one dimension, we increase one more dimension
-        # for reshard. We need to squeeze the # of dimensions manually.
-        if inp.dim() == 1:
-            sharded_output = sharded_output.squeeze(reshard_spec.dim)
-        self.assertEqual(local_output, sharded_output)
-
         # Compute loss and run backward pass.
         local_output.sum().backward()
         sharded_output.sum().backward()
         local_grad = local_linear.weight.grad
 
         # Verify that both weight and bias in the sharded linear has non-None grad.
-        sharded_weight = sharded_linear.weight.local_tensor()
-        self.assertNotEqual(sharded_linear.bias.grad, None)
-        self.assertNotEqual(sharded_weight.grad, None)
+        sharded_weight = sharded_linear.module.weight.local_tensor()
+        self.assertIsNotNone(sharded_linear.module.bias.grad)
+        self.assertIsNotNone(sharded_weight.grad)
 
         # Shard the local linear's weight grad so that we can compare.
         dist.all_reduce(local_grad)
@@ -116,7 +125,9 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         dist.all_reduce(local_bias_grad)
 
         # Test backward gradient calculation.
-        self.assertEqual(sharded_linear.bias.grad, local_bias_grad)
+        # DDP averages grads whereas local is summing up grads for bias, so we
+        # need to adjust the comparison here.
+        self.assertEqual(sharded_linear.module.bias.grad, local_bias_grad / self.world_size)
         self.assertEqual(sharded_weight.grad, local_grad_narrowed)
 
         # Test optimizer.
@@ -125,22 +136,26 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         optim.step()
         self.assertNotEqual(previous, local_linear.weight)
         previous_sharded_weight = sharded_weight.clone()
-        previous_sharded_bias = sharded_linear.bias.clone()
+        previous_sharded_bias = sharded_linear.module.bias.clone()
+
+        # Use different learning rate (scale by world_size) for bias since it is replicated via DDP.
+        bias_optim = torch.optim.SGD([sharded_linear.module.bias], lr=0.1 * self.world_size)
         sharded_optim = ShardedOptimizer(
-            dict(named_params_with_sharded_tensor(sharded_linear)),
+            {'module.weight': sharded_linear.module.weight},
             torch.optim.SGD,
             lr=0.1,
         )
         sharded_optim.step()
-        sharded_weight = sharded_linear.weight.local_tensor()
+        bias_optim.step()
+        sharded_weight = sharded_linear.module.weight.local_tensor()
         local_weight_narrowed = local_linear.weight.narrow(
             sharded_dim, start_pos, chunk_size
         )
         self.assertEqual(sharded_weight.size(), local_weight_narrowed.size())
         self.assertNotEqual(previous_sharded_weight, sharded_weight)
         self.assertEqual(sharded_weight, local_weight_narrowed)
-        self.assertNotEqual(previous_sharded_bias, sharded_linear.bias)
-        self.assertEqual(sharded_linear.bias, local_linear.bias)
+        self.assertNotEqual(previous_sharded_bias, sharded_linear.module.bias)
+        self.assertEqual(sharded_linear.module.bias, local_linear.bias)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)

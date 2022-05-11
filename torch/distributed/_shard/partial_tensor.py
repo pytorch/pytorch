@@ -5,6 +5,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
 from torch.distributed import distributed_c10d
+from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed.nn.functional import (
     reduce_scatter,
@@ -232,6 +233,27 @@ def _transpose_impl(types, args=(), kwargs=None):
         input.process_group,
         input.reduce_op
     )
+
+@_custom_partial_tensor_op(torch.add)
+def partial_add(types, args=(), kwargs=None):
+    if isinstance(args[0], _PartialTensor) and isinstance(args[1], ReplicatedTensor):
+        world_size = dist.get_world_size(args[0].process_group)
+        with torch._C.DisableTorchFunction():
+            lhs = args[0].local_shard
+            rhs = args[1]
+            if lhs.dim() == 1 and rhs.dim() == 1:
+                if lhs.numel() % rhs.numel() != 0:
+                    raise RuntimeError(
+                        f"torch function '{func.__name__}', with args: {args} and "
+                        f"kwargs: {kwargs} not supported for PartialTensor!")
+                factor = lhs.numel() // rhs.numel()
+                rhs = rhs.reshape(1, -1).expand(factor, rhs.size(0)).reshape(lhs.size())
+            else:
+                rhs = rhs.expand(lhs.size())
+            return _PartialTensor(torch.add(lhs, rhs / world_size))
+    raise RuntimeError(
+        f"torch function '{func.__name__}', with args: {args} and "
+        f"kwargs: {kwargs} not supported for PartialTensor!")
 
 @_custom_partial_tensor_op(torch.Tensor.transpose)
 def partial_transpose(types, args=(), kwargs=None):

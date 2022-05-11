@@ -33,6 +33,8 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common 
     generate_local_weight_sharding_params_for_test,
 )
 from torch.testing._internal.distributed._shard.test_common import SimpleMegatronLM
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -65,6 +67,10 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         # Shard the parameter. First col-wise sharding and then row-wise
         _shard_parameter(sharded_megatron_lm, spec)
 
+        # Wrap with DDP.
+        with _ddp_replicated_tensor(True):
+            sharded_megatron_lm = DDP(sharded_megatron_lm)
+
         # Run sharded computation
         torch.manual_seed(self.rank)  # inputs different on each rank
         inp = torch.rand(*input_size).cuda(self.rank)
@@ -96,8 +102,8 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         (
             sharded_weight_fc1,
             sharded_weight_fc2,
-        ) = sharded_megatron_lm.get_weights()
-        bias_grad_fc1, bias_grad_fc2 = sharded_megatron_lm.get_bias_grads()
+        ) = sharded_megatron_lm.module.get_weights()
+        bias_grad_fc1, bias_grad_fc2 = sharded_megatron_lm.module.get_bias_grads()
         self.assertNotEqual(sharded_weight_fc1.grad, None)
         self.assertNotEqual(sharded_weight_fc2.grad, None)
         self.assertNotEqual(bias_grad_fc1, None)
@@ -131,28 +137,35 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         # Test backward gradient calculation.
         self.assertEqual(sharded_weight_fc1.grad, local_grad_narrowed_fc1)
         self.assertEqual(sharded_weight_fc2.grad, local_grad_narrowed_fc2)
-        self.assertEqual(bias_grad_fc1, local_bias_grad_fc1)
-        self.assertEqual(bias_grad_fc2, local_bias_grad_fc2)
+
+        # DDP averages gradients whereas local training sums up gradients.
+        self.assertEqual(bias_grad_fc1, local_bias_grad_fc1 / self.world_size)
+        self.assertEqual(bias_grad_fc2, local_bias_grad_fc2 / self.world_size)
 
         # Test optimizer.
-        bias_fc1, bias_fc2 = sharded_megatron_lm.get_biases()
+        bias_fc1, bias_fc2 = sharded_megatron_lm.module.get_biases()
         local_bias_fc1, local_bias_fc2 = local_megatron_lm.get_biases()
         self.assertEqual(bias_fc1, local_bias_fc1)
         self.assertEqual(bias_fc2, local_bias_fc2)
-        self.assertEqual(bias_fc1.grad, local_bias_fc1.grad)
-        self.assertEqual(bias_fc2.grad, local_bias_fc2.grad)
+        # DDP averages gradients whereas local training sums up gradients.
+        self.assertEqual(bias_fc1.grad, local_bias_fc1.grad / self.world_size)
+        self.assertEqual(bias_fc2.grad, local_bias_fc2.grad / self.world_size)
         previous_sharded_weight_fc1 = sharded_weight_fc1.clone()
         previous_sharded_weight_fc2 = sharded_weight_fc2.clone()
         previous_bias_fc1 = bias_fc1.clone()
         previous_bias_fc2 = bias_fc2.clone()
         optim = torch.optim.SGD(local_megatron_lm.parameters(), lr=0.1)
         optim.step()
+
+        # Need to adjust learning rate since DDP averages gradients.
+        bias_optim = torch.optim.SGD([bias_fc1, bias_fc2], lr=0.1 * self.world_size)
         sharded_optim = ShardedOptimizer(
-            dict(named_params_with_sharded_tensor(sharded_megatron_lm)),
+            {'module.fc1.weight': sharded_megatron_lm.module.fc1.weight, 'module.fc2.weight': sharded_megatron_lm.module.fc2.weight},
             torch.optim.SGD,
             lr=0.1,
         )
         sharded_optim.step()
+        bias_optim.step()
         local_weight_fc1_narrowed = local_weight_fc1.narrow(
             0, start_pos_fc1, chunk_size_fc1
         )

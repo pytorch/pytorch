@@ -2,12 +2,12 @@ from typing import List, cast
 
 import torch
 import torch.distributed as dist
-from torch.autograd import Function
 from torch.distributed.nn.functional import (
     all_gather,
     all_to_all_single,
 )
 from torch.distributed._shard.partial_tensor import _PartialTensor
+from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
@@ -17,10 +17,6 @@ from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
     get_chunk_sharding_params,
-)
-
-from ._common import (
-    _result_distribute_with_col_rearrange,
 )
 
 
@@ -142,8 +138,8 @@ def _validate_linear_op_param(args, kwargs):
     # Validate types
     if not isinstance(input, torch.Tensor) and not isinstance(input, ShardedTensor):
         raise TypeError("input needs to be either torch.Tensor or ShardedTensor")
-    if not isinstance(bias, torch.Tensor):
-        raise TypeError("bias needs to be torch.Tensor")
+    if not isinstance(bias, ReplicatedTensor):
+        raise TypeError("bias needs to be ReplicatedTensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) < 1:  # type: ignore[arg-type]
@@ -201,12 +197,9 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     (start_pos, chunk_size) = get_chunk_sharding_params(
         bias.size(0), world_size, weight._sharding_spec, rank
     )
-    local_bias = _BiasTensorNarrow.apply(
-        world_size, start_pos, chunk_size, weight, pg, bias
-    )
     results = []
     for i, inp in enumerate(gathered_inputs):
-        results.append(inp.matmul(local_shard_t) + local_bias)
+        results.append(inp.matmul(local_shard_t))
     # When the local result only has one dimension, we need to make sure
     # it does not shard by dim 0. So reshard can work properly.
     if results[0].dim() == 1:  # type: ignore[attr-defined]
@@ -224,7 +217,7 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
         new_sharding_spec,
         *st_size,  # type: ignore[arg-type]
         process_group=pg,
-    )
+    ) + bias
 
 
 def _handle_row_wise_sharding_tensor(
@@ -298,11 +291,11 @@ def _handle_row_wise_sharding_tensor(
     for r in range(world_size):
         inp = torch.narrow(gathered_input, -1, r * shard_size, shard_size)
         results.append(
-            inp.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
+            inp.matmul(local_shard_t)
         )
 
     # Return the partial local result.
-    return _PartialTensor(torch.cat(results), pg)
+    return torch.add(_PartialTensor(torch.cat(results), pg), bias)
 
 
 def _handle_row_wise_sharding_sharded_tensor(
@@ -334,51 +327,8 @@ def _handle_row_wise_sharding_sharded_tensor(
 
     for tensor in torch.tensor_split(local_shard, world_size):
         results.append(
-            tensor.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
+            tensor.matmul(local_shard_t)
         )
 
     # Return the partial local result.
-    return _PartialTensor(torch.cat(results), pg)
-
-
-class _BiasTensorNarrow(Function):
-    """
-    Since we now return the intermediate results in a col-wise sharding. We
-    need to narrow the bias term in the forward while doing backward, we need
-    to gather all gradients of narrowed bias across all ranks.
-    """
-
-    @staticmethod
-    def forward(ctx, world_size, start_pos, chunk_size, weight, pg, bias):
-        ctx.weight = weight
-        ctx.pg = pg
-        ctx.world_size = world_size
-        return torch.narrow(bias, 0, start_pos, chunk_size)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        results = []
-        for idx in range(ctx.world_size):
-            results.append(grad_output.clone())
-        return (None, None, None, None, None) + (
-            _result_distribute_with_col_rearrange(
-                results, grad_output, ctx.world_size, ctx.weight, ctx.pg
-            ),
-        )
-
-
-class _BiasTensorPartial(Function):
-    """
-    Since we now only return partial results in a row-wise sharding. We need to
-    divide the bias term by the world size in the forward while doing backward,
-    we need to skip this division op.
-    """
-
-    @staticmethod
-    def forward(ctx, world_size, bias):
-        ctx.world_size = world_size
-        return torch.div(bias, world_size)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return (None, grad_output)
+    return torch.add(_PartialTensor(torch.cat(results), pg), bias)
