@@ -20,6 +20,7 @@ on:
         required: true
         description: secret acess key for test stats upload
 
+
 env:
   IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
   IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
