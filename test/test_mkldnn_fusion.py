@@ -29,8 +29,15 @@ class TestMkldnnFusion(JitTestCase):
             self.assertGraphContainsExactly(graph, pat, 0)
 
     def _check_model(self, m, x):
-        old = torch._C._debug_get_fusion_group_inlining()
+        old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
+        
+        old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        
+        old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
+        
         m.eval()
         with torch.no_grad():
             script = torch.jit.script(m)
@@ -43,7 +50,10 @@ class TestMkldnnFusion(JitTestCase):
 
             graph = script.graph_for(*x)
             self.assertEqual(y, y_ref)
-        torch._C._debug_set_fusion_group_inlining(old)
+
+        torch._C._debug_set_fusion_group_inlining(old_fusion_inlining)
+        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
+        torch._C._jit_set_te_must_use_llvm_cpu(old_te_must_use_llvm_cpu)
         return graph
 
     def test_conv(self):
