@@ -301,16 +301,16 @@ Tensor norm_jvp(const Tensor& self_p, const Tensor& self_t, const optional<Scala
   return norm_jvp(self_p, self_t, p_, norm, {}, true);
 }
 
-Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim, const c10::optional<ScalarType> opt_dtype) {
+Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+  // No need to handle the dtype arg as it's handled via broadcasting in the function
   auto dim = opt_dim.value_or(IntArrayRef({}));
-  auto dtype = opt_dtype.value_or(self_p.scalar_type());
-  return norm_jvp(self_p.to(dtype), self_t.to(dtype), scalar_ord, norm, dim, keepdim).to(toRealValueType(dtype));
+  return norm_jvp(self_p, self_t, scalar_ord, norm, dim, keepdim);
 }
 
-Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim, const c10::optional<ScalarType> opt_dtype) {
+Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+  // No need to handle the dtype arg as it's handled via broadcasting in the function
   auto dim = opt_dim.value_or(IntArrayRef({}));
-  auto dtype = opt_dtype.value_or(self.scalar_type());
-  return norm_backward(grad, self.to(dtype), scalar_ord, norm, dim, keepdim);
+  return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
 }
 
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent) {

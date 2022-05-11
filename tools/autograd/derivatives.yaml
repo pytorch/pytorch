@@ -1171,8 +1171,8 @@
   result: norm_jvp(self_p, self_t, p, result, dim, keepdim)
 
 - name: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: linalg_vector_norm_backward(grad, self, ord, result, dim, keepdim, dtype)
-  result: linalg_vector_norm_jvp(self_p, self_t, ord, result, dim, keepdim, dtype)
+  self: linalg_vector_norm_backward(grad, self, ord, result, dim, keepdim)
+  result: linalg_vector_norm_jvp(self_p, self_t, ord, result, dim, keepdim)
 
 - name: _pdist_forward(Tensor self, float p=2) -> Tensor
   self: _pdist_backward(grad, self, p, result)
