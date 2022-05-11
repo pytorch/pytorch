@@ -14678,13 +14678,13 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                     dtypes=complex_types()),
                        # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.skip("Skipped!", 'TestSparseCSR', 'test_sparse_csr',
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr',
                                     dtypes=(torch.chalf,),),
                        # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.skip("Skipped!", 'TestSparseCSR', 'test_sparse_csr_unary_out',
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
                                     dtypes=(torch.chalf,),),
                        # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.skip("Skipped!", 'TestSparseCSR', 'test_sparse_csr_consistency',
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_consistency',
                                     dtypes=(torch.chalf,),),
                    )),
     UnaryUfuncInfo('isfinite',
