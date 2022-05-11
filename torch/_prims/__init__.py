@@ -1,5 +1,5 @@
 import torch
-from torch import Tensor
+from torch import Tensor, _TypedStorage
 
 import torch._prims.utils as utils
 from torch._prims.utils import (
@@ -94,6 +94,7 @@ __all__ = [
     #
     # View prims
     #
+    "as_strided",
     "broadcast_in_dim",
     "collapse_view",
     "expand_dims",
@@ -125,6 +126,7 @@ __all__ = [
     #
     "copy_to",
     "resize",
+    "_set",
     #
     # Reduction prims
     #
@@ -766,6 +768,41 @@ sub = _make_elementwise_binary_prim(
 #
 # View operations
 #
+# TODO: model view relationships
+# TODO: model storage
+def _as_strided_meta(
+    a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int
+) -> TensorLikeType:
+    assert len(size) == len(stride)
+    assert storage_offset >= 0
+    utils.validate_strides(stride)
+    utils.validate_shape(size)
+
+    # TODO: FIXME by modeling storage
+    if isinstance(a, torch.Tensor):
+        utils.check_in_bounds_for_storage(a.storage(), size, stride, storage_offset)
+
+    return TensorMeta(a, shape=size, strides=stride)
+
+
+def _as_strided_aten(
+    a: Tensor, size: ShapeType, stride: StrideType, storage_offset: int
+) -> Tensor:
+    return torch.as_strided(a, size, stride, storage_offset)
+
+
+_as_strided_doc = """
+    Creates a view of the tensor with the given shape (size), strides (stride) and
+    storage offset (storage_offset).
+"""
+
+as_strided = _make_prim(
+    name="as_strided",
+    meta=_as_strided_meta,
+    impl_aten=_as_strided_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_as_strided_doc,
+)
 
 
 def _broadcast_in_dim_meta(
@@ -877,17 +914,33 @@ def _collapse_view_helper(
         )
         raise ValueError(msg)
 
-    length = 1
-    stride = 1
-    for idx in range(start, end):
-        if idx != (end - 1):
-            if not (strides[idx] == strides[idx + 1] * shape[idx + 1]):
-                return None, None
+    if a.ndim == 0 or (end - 1 == start):
+        return shape, strides
+
+    length = shape[end - 1]
+    stride = strides[end - 1]
+    for idx in reversed(range(start, end - 1)):
+        if shape[idx] == 0 or shape[idx + 1] == 0:
+            length = 0
+            stride = 0
+            break
+
+        if shape[idx] == 1:
+            continue
+
         length = length * shape[idx]
-        stride = stride * strides[idx]
+
+        if shape[idx + 1] != 1 and not (
+            strides[idx] == strides[idx + 1] * shape[idx + 1]
+        ):
+            return None, None
 
     new_shape = shape[:start] + (length,) + shape[end:]
-    new_strides = strides[:start] + (stride,) + shape[end:]
+    new_strides = strides[:start] + (stride,) + strides[end:]
+
+    # NOTE: when the input has no elements it's restrided as if it were contiguous
+    if a.numel() == 0:
+        new_strides = utils.make_contiguous_strides_for(new_shape)
 
     return new_shape, new_strides
 
@@ -1635,6 +1688,93 @@ resize = _make_prim(
     impl_aten=_resize_aten,
     return_type=RETURN_TYPE.INPLACE,
     doc=_resize_doc,
+)
+
+# TODO: model storage, storage offset, and layout
+def _set_meta(
+    a: TensorLikeType,
+    source: Optional[Union[TensorLikeType, _TypedStorage]] = None,
+    storage_offset: Optional[int] = None,
+    size: Optional[ShapeType] = None,
+    stride: Optional[StrideType] = None,
+) -> TensorLikeType:
+    # handles a.set_() (refs.set(a) in primTorch)
+    if source is None:
+        assert storage_offset is None
+        assert size is None
+        assert stride is None
+
+        return TensorMeta(a, shape=(), strides=(1,))
+
+    if isinstance(source, TensorLike):
+        # storage_offset, size, and stride must not be set
+        assert storage_offset is None
+        assert size is None
+        assert stride is None
+
+        utils.check_same_dtype(a, source)
+        utils.check_same_device(a, source, allow_cpu_scalar_tensors=False)
+
+        return TensorMeta(source)
+
+    # source is a Storage object
+    assert isinstance(source, _TypedStorage)
+
+    assert source.device == a.device
+    assert source.dtype == a.dtype
+
+    shape = (source.size(),) if size is None else size
+    strides = (1,) if stride is None else stride
+    storage_offset = 0 if storage_offset is None else storage_offset
+
+    assert len(shape) == len(strides)
+    assert storage_offset >= 0
+    utils.validate_strides(strides)
+    utils.validate_shape(shape)
+
+    utils.check_in_bounds_for_storage(source, shape, strides, storage_offset)
+
+    return TensorMeta(a, shape=shape, strides=(1,))
+
+
+def _set_aten(
+    a: Tensor,
+    source: Optional[Union[Tensor, _TypedStorage]] = None,
+    storage_offset: int = 0,
+    size: Optional[ShapeType] = None,
+    stride: Optional[StrideType] = None,
+) -> Tensor:
+    if size is not None:
+        return a.set_(source, storage_offset, size, stride)  # type: ignore[arg-type]
+    return a.set_(source)  # type: ignore[arg-type]
+
+
+_set_doc = """
+    Modifies a tensor's storage offset, shape, and stride metadata.
+
+    If source is None then the storage_offset, size, and
+    stride arguments must also be None and then tensor
+    is modified to be an empty tensor with no dimensions and
+    strides of (1,).
+
+    If source is a tensor then the tensor will share its storage
+    and have the same shape and strides. The storage_offset, size,
+    and stride arguments must be None.
+
+    If source is a Storage then by default the tensor will use the storage
+    as a one dimensional vector with shape (n,), where n is the size of
+    the storage, and strides (1,). The storage_offset, size, and
+    stride arguments can be set to control this behavior.
+"""
+
+# TODO: model storage, storage offset on TensorMetas
+# TODO: name currently hidden to not interact with the builtin set name
+_set = _make_prim(
+    name="resize",
+    meta=_set_meta,
+    impl_aten=_set_aten,
+    return_type=RETURN_TYPE.INPLACE,
+    doc=_set_doc,
 )
 
 

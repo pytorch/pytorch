@@ -360,15 +360,18 @@ class TestCommon(TestCase):
                 exact_is_coalesced=True,
             )
 
-            # TODO: move Sequence case into utils.compare_significant_strides
             if isinstance(actual, torch.Tensor):
+                assert isinstance(expected, torch.Tensor)
                 prims.utils.compare_significant_strides(actual, expected)
+                if getattr(op, 'validate_view_consistency', True):
+                    self.assertEqual(actual._is_view(), expected._is_view())
             if isinstance(actual, Sequence):
+                assert isinstance(expected, Sequence)
                 for a, b in zip(actual, expected):
                     prims.utils.compare_significant_strides(a, b)
+                    if getattr(op, 'validate_view_consistency', True):
+                        self.assertEqual(a._is_view(), b._is_view())
 
-            # TODO: FIXME: enable view consistency testing
-            # self.assertEqual(actual._is_view(), expected._is_view())
 
     @skipMeta
     @onlyNativeDeviceTypes
