@@ -164,6 +164,36 @@ Tensor NestedTensor_gelu(const Tensor& self, c10::string_view approximate) {
       });
 }
 
+Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask) {
+    TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Expected mask to be of ScalarType Bool, but got ", mask.scalar_type(), " instead.");
+    TORCH_CHECK(mask.dim() == 2, "Padding mask should be 2D");
+    TORCH_CHECK(t.dim() == 3, "Input should be a 3D tensor, N * L * D");
+    auto N = t.size(0), L = t.size(1), D = t.size(2);
+    auto NN = mask.size(0), LL = mask.size(1);
+    TORCH_CHECK(N == NN && L == LL, "Mask size should match input size");
+
+    // N * L
+    Tensor sizes = mask;
+    Tensor tmp_pad = at::zeros({N, 1}, mask.options());
+    // Make sure padding is only added at the end of mask
+    Tensor nums = at::cat({sizes, tmp_pad}, 1).to(kInt).argmin(1);
+
+    // N, ([size1, size2, ... sizeN])
+    sizes = sizes.cumsum(1).select(1, L - 1);
+    nums = nums.to(sizes.options());
+
+    TORCH_CHECK(sizes.equal(nums), "Mask must be left-aligned without gaps");
+
+    sizes = sizes.reshape({N, 1});
+    // N, ([d1=D, d2=D, ... dN=D])
+    Tensor d = at::full_like(sizes, D);
+
+    // N * 2, ([[size1, D], [size2, D], ..., [sizeN, D]])
+    sizes = at::cat({sizes, d}, 1);
+
+    return at::_nested_from_padded(t, sizes, false);
+}
+
 Tensor nested_tensor(
     TensorList list,
     c10::optional<ScalarType> dtype,
