@@ -687,6 +687,6 @@ def _collect_total_grad_norm_local(model, norm_type):
     else:
         total_norm = 0.0
         for p in model.parameters():
-            local_norm = torch.linalg.norm(p.grad, norm_type, dtype=torch.float32)
+            local_norm = torch.linalg.vector_norm(p.grad, norm_type, dtype=torch.float32)
             total_norm += local_norm ** norm_type
         return total_norm ** (1.0 / norm_type)
