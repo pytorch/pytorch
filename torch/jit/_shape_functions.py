@@ -8,9 +8,6 @@ number = Union[int, float]
 # To re-generate, please run:
 # cd ~/pytorch && python
 # torchgen/shape_functions/gen_jit_shape_functions.py
-
-# For functions that return multiple values, there must be only one `return` statement
-# and it must be a tuple constructor.
 ####
 
 import torch
@@ -828,6 +825,7 @@ def permute(input: List[int], dims: List[int]):
         for j in range(i):
             assert seen_dims[i] != seen_dims[j]
     return newSizes
+
 
 def flatten(input: List[int], start_dim: int, end_dim: int):
     start_dim = maybe_wrap_dim(start_dim, len(input))
