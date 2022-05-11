@@ -1135,6 +1135,9 @@ class TestLinalg(TestCase):
             self.assertEqual(result_with_dtype, result_out_with_dtype, msg=msg)
 
         ord_vector = [0, 1, -1, 2, -2, 3, -3, 4.5, -4.5, inf, -inf, None]
+
+        # In these orders we are computing the 10-th power and 10-th root of numbers.
+        # We avoid them for half-precision types as it makes the tests above too badly conditioned
         if dtype != torch.float16 and dtype != torch.bfloat16:
             ord_vector.extend([0.1, -0.1])
         ord_matrix = ['fro', 'nuc', 1, -1, 2, -2, inf, -inf, None]
