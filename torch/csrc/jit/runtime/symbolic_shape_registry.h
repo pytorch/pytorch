@@ -24,9 +24,9 @@ shape.
 
 The shape graph should return a new, unaliased List[int] (or tuple of lists for
 multiple returns) and should not modify any input lists. This allows the shape
-graphs to be composed and executed. Additionally, when there are multiple tensors
-to return, there must be only one `return` statement, and it must have a tuple
-constructor.
+graphs to be composed and executed. Additionally, when there are multiple
+tensors to return, there must be only one `return` statement, and it must have a
+tuple constructor.
 
 The shape analysis (particularly for non-complete, or symbolic shapes) works by
 partially evaluating the JIT IR. It may be possible for a Graph to be registered

@@ -242,7 +242,11 @@ void registerSchema(
     const std::string& shape_compute_function_name,
     std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
     const CompilationUnit& module) {
-  GRAPH_DEBUG("Registering schema: ", *schema_string , " with shape compute func: ", shape_compute_function_name);
+  GRAPH_DEBUG(
+      "Registering schema: ",
+      *schema_string,
+      " with shape compute func: ",
+      shape_compute_function_name);
   if (reused_functions.count(shape_compute_function_name)) {
     GRAPH_DEBUG("Registering reused schema");
     auto graph = reused_functions[shape_compute_function_name];
