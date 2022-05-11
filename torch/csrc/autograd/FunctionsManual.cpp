@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
 
 
 #include <ATen/ATen.h>
@@ -5453,10 +5454,29 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_self = grad;
     grad_src = grad.gather(dim, index);
   } else if (reduce == "prod") {
-    grad_self = (grad * result) / self;
-    grad_self.masked_fill_(self == 0, 0);
-    grad_src = (grad * result).gather(dim, index) / src;
-    grad_src.masked_fill_(src == 0, 0);
+    // Explicitly compute exclusive prod for elements in self/src that are 0
+    Tensor masked_self = self.masked_fill(self == 0, 1);
+    Tensor masked_self_result = masked_self.scatter_reduce(dim, index, src, reduce, include_self);
+    grad_self = grad * masked_self_result / masked_self;
+    Tensor src_zero = src == 0;
+    Tensor src_num_zeros = zeros_like(self).scatter_add(dim, index, src_zero.to(self.dtype())).gather(dim, index);
+    Tensor src_single_zero = bitwise_and(src_zero, src_num_zeros == 1);
+    // For src positions with src_single_zero, grad * result.gather(dim,index) / src.masked_fill(src_zero, 1)
+    // would incorrectly propagate zeros as the gradient
+    Tensor masked_src = src.masked_fill(src_single_zero, 1);
+    Tensor masked_src_result = self.scatter_reduce(dim, index, masked_src, reduce, include_self);
+    Tensor grad_src1 = where(src_single_zero,
+                             (grad * masked_src_result).gather(dim, index),
+                             (grad * result).gather(dim, index) / src.masked_fill(src_zero, 1));
+    if ((src_num_zeros > 1).any().item<bool>()) {
+      auto node = std::make_shared<DelayedError>(
+        "scatter_reduce(): Double backward is unsupported for src when >1 zeros in src are scattered to the same position in self",
+        /* num inputs */ 1);
+      auto result = node->apply({ grad_src1 });
+      grad_src = result[0];
+    } else {
+      grad_src = grad_src1;
+    }
   } else if (reduce == "mean") {
     Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N = N.scatter_add(dim, index, ones_like(src));
@@ -5465,9 +5485,14 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     Tensor N_src = N.gather(dim, index);
     grad_src = grad.gather(dim, index) / N_src;
   } else if (reduce == "amax" || reduce == "amin") {
-    grad_self = (self == result) * grad;
+    // Evenly distribute gradient when there are multiple max/mins
     Tensor value = result.gather(dim, index);
-    grad_src = (src == value) * grad.gather(dim, index);
+    Tensor self_is_result = (self == result).to(self.scalar_type());
+    Tensor src_is_result = (src == value).to(self.scalar_type());
+    Tensor N_to_distribute = self_is_result.scatter_add(dim, index, src_is_result);
+    Tensor grad_distributed = grad / N_to_distribute;
+    grad_self = (self == result) * grad_distributed;
+    grad_src = (src == value) * grad_distributed.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
   }
