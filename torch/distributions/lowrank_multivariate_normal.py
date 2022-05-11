@@ -129,6 +129,10 @@ class LowRankMultivariateNormal(Distribution):
     def mean(self):
         return self.loc
 
+    @property
+    def mode(self):
+        return self.loc
+
     @lazy_property
     def variance(self):
         return (self._unbroadcasted_cov_factor.pow(2).sum(-1)
