@@ -249,7 +249,17 @@ class Module:
     the change."""
 
     training: bool
+    _parameters: Dict[str, Optional[Parameter]]
+    _buffers: Dict[str, Optional[Tensor]]
+    _non_persistent_buffers_set: Set[str]
+    _backward_hooks: Dict[int, Callable]
     _is_full_backward_hook: Optional[bool]
+    _forward_hooks: Dict[int, Callable]
+    _forward_pre_hooks: Dict[int, Callable]
+    _state_dict_hooks: Dict[int, Callable]
+    _load_state_dict_pre_hooks: Dict[int, Callable]
+    _load_state_dict_post_hooks: Dict[int, Callable]
+    _modules: Dict[str, Optional['Module']]
 
     def __init__(self) -> None:
         """
