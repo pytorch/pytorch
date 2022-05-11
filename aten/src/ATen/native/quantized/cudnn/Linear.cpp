@@ -98,10 +98,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   auto act_scale = input.q_scale();
   auto weight_scale = orig_weight.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
-  // We will employ broadcasting scalar multiplication in cudnn in the requant_op below. For this to work, cudNN requires
-  // the scalar to be a scalar tensor (i.e., all dimensions of size 1) with the same number of dimensions as the tensor we're multiplying to
-  at::SmallVector<int64_t, 3> requantize_multiplier_tensor_size(quantized_output.dim(), 1);
-  at::Tensor requantize_multiplier_tensor = at::full(requantize_multiplier_tensor_size, requantize_multiplier, at::device(at::kCUDA).dtype(at::kFloat));
+  at::Tensor requantize_multiplier_tensor = cudnn_utils::get_requant_multiplier_tensor(requantize_multiplier, quantized_output.dim());
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
   if (bias_.has_value()) {

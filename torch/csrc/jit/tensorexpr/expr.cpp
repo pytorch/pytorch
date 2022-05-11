@@ -477,6 +477,11 @@ bool Buf::is_contiguous(at::MemoryFormat memory_format) const {
       return false;
     dim_order = {1, 4, 3, 2, 0};
   } else {
+    if (dims_.empty()) {
+      // Scalar tensor
+      TORCH_CHECK(strides_.empty());
+      return true; // Align with the isContiguous logic in the kernel.cpp
+    }
     for (size_t i = 0; i < ndims; i++) {
       dim_order[i] = ndims - i - 1; // Reverse
     }

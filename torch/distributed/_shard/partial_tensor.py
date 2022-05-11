@@ -1,3 +1,6 @@
+import functools
+from typing import Callable, Dict
+
 import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
@@ -6,7 +9,36 @@ from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed.nn.functional import (
     reduce_scatter,
 )
+from torch.overrides import handle_torch_function
 
+# Custom sharded ops
+_PARTIAL_TENSOR_OPS: Dict[Callable, Callable] = {}
+def _register_partial_tensor_op(op, func):
+    from inspect import signature
+    if len(signature(func).parameters) != 3:
+        raise TypeError(
+            f'Partial tensor op function expects signature: '
+            f'(types, args, kwargs), but received '
+            f'signature: {signature(func)}')
+
+    global _PARTIAL_TENSOR_OPS
+    _PARTIAL_TENSOR_OPS[op] = func
+
+def _custom_partial_tensor_op(func):
+    """
+    Decorate for custom partial tensor op
+    Args:
+        func(Callable): Torch function for which we want to provide a PartialTensor
+            implementation (ex: torch.nn.functional.linear)
+    """
+    def decorator_sharded_func(wrapped_func):
+        _register_partial_tensor_op(func, wrapped_func)
+
+        @functools.wraps(wrapped_func)
+        def wrapper(*args, **kwargs):
+            return wrapped_func(*args, **kwargs)
+        return wrapper
+    return decorator_sharded_func
 
 class _PartialTensor(object):
     """
@@ -175,3 +207,61 @@ class _PartialTensor(object):
             sharded_tensor_size,
             process_group=self.process_group,
         )
+
+    def size(self):
+        return self.local_shard.size()
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if func in _PARTIAL_TENSOR_OPS:
+            return _PARTIAL_TENSOR_OPS[func](types, args, kwargs)
+
+        raise RuntimeError(
+            f"torch function '{func.__name__}', with args: {args} and "
+            f"kwargs: {kwargs} not supported for PartialTensor!")
+
+    def transpose(self, dim0, dim1):
+        return handle_torch_function(torch.Tensor.transpose, (self, dim0, dim1), self, dim0, dim1)
+
+def _transpose_impl(types, args=(), kwargs=None):
+    input = args[0]
+    dim0 = args[1]
+    dim1 = args[2]
+    return _PartialTensor(
+        torch.transpose(input.local_shard, dim0, dim1),
+        input.process_group,
+        input.reduce_op
+    )
+
+@_custom_partial_tensor_op(torch.Tensor.transpose)
+def partial_transpose(types, args=(), kwargs=None):
+    return _transpose_impl(types, args, kwargs)
+
+@_custom_partial_tensor_op(torch.transpose)
+def partial_torch_transpose(types, args=(), kwargs=None):
+    return _transpose_impl(types, args, kwargs)
+
+@_custom_partial_tensor_op(torch.cat)
+def partial_cat(types, args=(), kwargs=None):
+    input_list = args[0]
+    if len(input_list) == 0:
+        raise RuntimeError('Empty list of tensors to torch.cat!')
+
+    local_shards = []
+    for idx, input in enumerate(input_list):
+        if not isinstance(input, _PartialTensor):
+            raise RuntimeError('All inputs need to be an instance of _PartialTensor')
+        if idx == 0:
+            reduce_op = input.reduce_op
+        elif reduce_op != input.reduce_op:
+            raise RuntimeError('All _PartialTensor reduce_ops need to be the same, found: {reduce_op} and {input.reduce_op}')
+
+        local_shards.append(input.local_shard)
+
+    if kwargs is None:
+        dim = 0
+    else:
+        if 'out' in kwargs:
+            raise RuntimeError('"out" kwarg is not supported!')
+        dim = kwargs['dim'] if 'dim' in kwargs else 0
+    return _PartialTensor(torch.cat(local_shards, dim), input.process_group, input.reduce_op)

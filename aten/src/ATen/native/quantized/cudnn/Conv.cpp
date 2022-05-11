@@ -91,16 +91,12 @@ template <int kSpatialDim>
 template <bool kReluFused>
 void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& quantized_output, const at::Tensor& input, double output_scale) {
   at::Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-  // We will employ broadcasting scalar multiplication in cudnn in the requant_op below. For this to work, cudNN requires
-  // the scalar to be a scalar tensor (i.e., all dimensions of size 1) with the same number of dimensions as the tensor we're multiplying to
-  std::array<int64_t, kSpatialDim + 2> requantize_multiplier_tensor_size = kSpatialDim == 2 ?
-                                                                           std::array<int64_t, kSpatialDim + 2>{1, 1, 1, 1}
-                                                                           : std::array<int64_t, kSpatialDim + 2>{1, 1, 1};
-  at::Tensor requantize_multiplier_tensor = at::empty(requantize_multiplier_tensor_size, at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+
   auto act_scale = input.q_scale();
   auto weight_scale = maybe_padded_weight_.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
-  requantize_multiplier_tensor.fill_(requantize_multiplier);
+  at::Tensor requantize_multiplier_tensor = cudnn_utils::get_requant_multiplier_tensor(requantize_multiplier, kSpatialDim + 2);
+
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
   if (bias_.has_value()) {

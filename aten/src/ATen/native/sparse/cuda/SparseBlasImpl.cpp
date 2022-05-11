@@ -350,6 +350,15 @@ void block_sparse_triangular_solve_mat(
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
 
+        if (!unitriangular) {
+          int first_zero_diag_idx = -1;
+          cusparseStatus_t status = cusparseXbsrsm2_zeroPivot(handle, info.descriptor(), &first_zero_diag_idx);
+          if (status == CUSPARSE_STATUS_ZERO_PIVOT) {
+            X_->fill_(NAN);
+            return;
+          }
+        }
+
         at::cuda::sparse::bsrsm2_solve(
             handle,
             block_layout,
@@ -1285,12 +1294,15 @@ void sampled_addmm_out_sparse_csr(
   cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
   cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
+  c10::MaybeOwned<Tensor> A_ = prepare_dense_matrix_for_cusparse(A);
+  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_cusparse(B);
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       C.scalar_type(),
       "sampled_addmm_out_sparse_csr",
       [&] {
-        auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(A);
-        auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(B);
+        auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(*A_);
+        auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(*B_);
         auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C);
         auto beta_ = beta.to<scalar_t>();
         auto alpha_ = alpha.to<scalar_t>();

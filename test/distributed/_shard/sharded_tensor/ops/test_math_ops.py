@@ -129,7 +129,7 @@ class TestMathOps(ShardedTensorTestBase):
 
         st = sharded_tensor.rand(spec, 10, 10)
 
-        with self.assertRaisesRegex(TypeError, 'with ChunkShardingSpec supports'):
+        with self.assertRaisesRegex(RuntimeError, 'not supported'):
             torch.add(st, sharded_rhs)
 
 
@@ -148,7 +148,7 @@ class TestMathOps(ShardedTensorTestBase):
                 key=lambda x: x.shard_offsets[0],
             )
             self.assertTrue(torch.allclose(torch.bmm(st_lhs, st_rhs), st_expected))
-            # TODO: Add back test bases after we make ShardedTensor subclass of Tensor.
+            self.assertTrue(torch.allclose(st_lhs.bmm(st_rhs), st_expected))
 
 
     @with_comms(init_rpc=False)
