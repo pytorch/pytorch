@@ -248,7 +248,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self._test_numkeys_delkeys(self._create_store())
 
     def _create_client(self, index, addr, port, world_size):
-        client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
+        client_store = dist.TCPStore(host_name=addr, port=port, world_size=world_size, timeout=timedelta(seconds=10))
         self.assertEqual("value".encode(), client_store.get("key"))
         client_store.set(f"new_key{index}", f"new_value{index}")
         self.assertEqual(f"next_value{index}".encode(),
@@ -259,15 +259,18 @@ class TCPStoreTest(TestCase, StoreTestBase):
         server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
         server_store.set("key", "value")
         port = server_store.port
-        world_size = random.randint(5, 10) if world_size == -1 else world_size
-        for i in range(world_size):
-            self._create_client(i, addr, port, world_size)
+
+        if world_size and world_size > 0:
+            for i in range(world_size):
+                self._create_client(i, addr, port, world_size)
+        else:
+            self._create_client(0, addr, port, None)
 
     def test_multi_worker_with_fixed_world_size(self):
         self._multi_worker_helper(5)
 
     def test_multi_worker_with_nonfixed_world_size(self):
-        self._multi_worker_helper(-1)
+        self._multi_worker_helper(None)
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):

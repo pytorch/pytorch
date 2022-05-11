@@ -914,14 +914,14 @@ Example::
       .def(
           py::init([](const std::string& host,
                       uint16_t port,
-                      int worldSize,
+                      c10::optional<int> worldSize,
                       bool isServer,
                       std::chrono::milliseconds timeout,
                       bool waitWorkers,
                       bool multiTenant) {
             c10::optional<std::size_t> numWorkers = c10::nullopt;
-            if (worldSize > -1) {
-              numWorkers = static_cast<std::size_t>(worldSize);
+            if (worldSize && worldSize > -1) {
+              numWorkers = static_cast<c10::optional<std::size_t>>(*worldSize);
             }
 
             ::c10d::TCPStoreOptions opts{
@@ -931,7 +931,7 @@ Example::
           }),
           py::arg("host_name"),
           py::arg("port"),
-          py::arg("world_size") = -1,
+          py::arg("world_size") = py::none(),
           // using noconvert() requires this argument to be True or False
           // prevents accidental implicit conversion to bool
           py::arg("is_master").noconvert() = false,
