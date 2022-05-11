@@ -40,16 +40,9 @@ jobs:
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
       - name: Run lintrunner on all files
-        if: github.event_name == 'push'
-        run: lintrunner -vv --paths-cmd='git grep -Il .' --force-color
-
-      - name: Run lintrunner on PR files
-        if: github.event_name == 'pull_request'
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set +e
-          if ! lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}" ; then
+          if ! lintrunner --verbose --force-color --paths-cmd='git grep -Il .' ; then
               echo ""
               echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
               echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
@@ -60,13 +53,11 @@ jobs:
         if: always() && github.event_name == 'pull_request'
         # Don't show this as an error; the above step will have already failed.
         continue-on-error: true
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           # The easiest way to get annotations is to just run lintrunner again
           # in JSON mode and use jq to massage the output into GitHub Actions
           # workflow commands.
-          lintrunner --merge-base-with "${PR_BASE_SHA}" --output=json | \
+          lintrunner --paths-cmd='git grep -Il .' --output=json | \
             jq --raw-output '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))'
 
   quick-checks:
