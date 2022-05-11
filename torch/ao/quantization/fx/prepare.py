@@ -17,7 +17,10 @@ from ..observer import (
     ObserverBase,
 )
 from ..qconfig import QConfigAny, is_reuse_input_qconfig
-from ..quantization_config import PrepareQuantizationConfig
+from ..quantization_config import (
+    EqualizationConfig,
+    PrepareQuantizationConfig,
+)
 from ..qconfig_dict_utils import (
     get_flattened_qconfig_dict,
     convert_lists_to_ordered_dicts,
@@ -1351,7 +1354,7 @@ def prepare(
         is_qat: bool,
         node_name_to_scope: Dict[str, Tuple[str, type]],
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
-        equalization_quantization_config: Optional[PrepareQuantizationConfig] = None,
+        equalization_config: Optional[EqualizationConfig] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
         is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
@@ -1376,8 +1379,8 @@ def prepare(
     """
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
-    if equalization_quantization_config is None:
-        equalization_quantization_config = PrepareQuantizationConfig()
+    if equalization_config is None:
+        equalization_config = EqualizationConfig()
 
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,
@@ -1418,9 +1421,9 @@ def prepare(
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
     convert_lists_to_ordered_dicts(quantization_config)
-    convert_lists_to_ordered_dicts(equalization_quantization_config)
+    convert_lists_to_ordered_dicts(equalization_config)
     update_qconfig_for_fusion(model, quantization_config)
-    update_qconfig_for_fusion(model, equalization_quantization_config)
+    update_qconfig_for_fusion(model, equalization_config)
     flattened_qconfig_dict = get_flattened_qconfig_dict(quantization_config)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config_dict)
@@ -1441,7 +1444,7 @@ def prepare(
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
     equalization_qconfig_map = generate_qconfig_map(
-        model, modules, model.graph, equalization_quantization_config, node_name_to_scope)
+        model, modules, model.graph, equalization_config, node_name_to_scope)
     qconfig_map = generate_qconfig_map(model, modules, model.graph, quantization_config, node_name_to_scope)
 
     # match the patterns that will get quantized

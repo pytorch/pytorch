@@ -19,7 +19,7 @@ from .fx.qconfig_utils import (
 )
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
-from .quantization_config import ConvertQuantizationConfig, PrepareQuantizationConfig
+from .quantization_config import ConvertQuantizationConfig, EqualizationConfig, PrepareQuantizationConfig
 
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
@@ -181,13 +181,13 @@ def _prepare_fx(
     quantization_config: Union[PrepareQuantizationConfig, Dict[str, Any]],
     is_qat: bool,
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
-    equalization_quantization_config: Optional[Union[PrepareQuantizationConfig, Dict[str, Any]]] = None,
+    equalization_config: Optional[Union[EqualizationConfig, Dict[str, Any]]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
     is_standalone_module: bool = False,
 ) -> ObservedGraphModule:
     r""" Internal helper function for prepare_fx
     Args:
-      `model`, `quantization_config`, `prepare_custom_config_dict`, `equalization_quantization_config`:
+      `model`, `quantization_config`, `prepare_custom_config_dict`, `equalization_config`:
       see docs for :func:`~torch.ao.quantization.prepare_fx`
       `is_standalone_module`: a boolean flag indicates whether we are
       quantizing a standalone module or not, a standalone module
@@ -198,8 +198,8 @@ forward graph of the parent module,
     """
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
-    if equalization_quantization_config is None:
-        equalization_quantization_config = PrepareQuantizationConfig()
+    if equalization_config is None:
+        equalization_config = EqualizationConfig()
 
     check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict)
 
@@ -209,16 +209,16 @@ forward graph of the parent module,
             "in a future version. Please pass in a PrepareQuantizationConfig instead.")
         quantization_config = PrepareQuantizationConfig.from_dict(quantization_config)
 
-    if isinstance(equalization_quantization_config, Dict):
+    if isinstance(equalization_config, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to prepare for equalization is deprecated and will not "
-            "be supported in a future version. Please pass in a PrepareQuantizationConfig instead.")
-        equalization_quantization_config = PrepareQuantizationConfig.from_dict(equalization_quantization_config)
+            "be supported in a future version. Please pass in a EqualizationConfig instead.")
+        equalization_config = EqualizationConfig.from_dict(equalization_config)
 
     assert(isinstance(quantization_config, PrepareQuantizationConfig))
-    assert(isinstance(equalization_quantization_config, PrepareQuantizationConfig))
+    assert(isinstance(equalization_config, EqualizationConfig))
     quantization_config = copy.deepcopy(quantization_config)
-    equalization_quantization_config = copy.deepcopy(equalization_quantization_config)
+    equalization_config = copy.deepcopy(equalization_config)
 
     skipped_module_names = prepare_custom_config_dict.get(
         "non_traceable_module_name", []
@@ -265,7 +265,7 @@ forward graph of the parent module,
         is_qat,
         tracer.node_name_to_scope,
         prepare_custom_config_dict=prepare_custom_config_dict,
-        equalization_quantization_config=equalization_quantization_config,
+        equalization_config=equalization_config,
         backend_config_dict=backend_config_dict,
         is_standalone_module=is_standalone_module,
     )  # type: ignore[operator]
@@ -358,7 +358,7 @@ def prepare_fx(
     model: torch.nn.Module,
     quantization_config: Union[PrepareQuantizationConfig, Dict[str, Any]],
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
-    equalization_quantization_config: Optional[Union[PrepareQuantizationConfig, Dict[str, Any]]] = None,
+    equalization_config: Optional[Union[EqualizationConfig, Dict[str, Any]]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
 ) -> ObservedGraphModule:
     # TODO(andrew): update this comment
@@ -509,7 +509,7 @@ def prepare_fx(
         quantization_config,
         False,  # is_qat
         prepare_custom_config_dict,
-        equalization_quantization_config,
+        equalization_config,
         backend_config_dict,
     )
 

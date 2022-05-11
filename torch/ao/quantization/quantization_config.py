@@ -8,6 +8,7 @@ from .qconfig import QConfigAny
 
 __all__ = [
     "ConvertQuantizationConfig",
+    "EqualizationConfig",
     "PrepareQuantizationConfig",
     "QConfigModuleNameEntry",
     "QConfigModuleNameRegexEntry",
@@ -149,11 +150,19 @@ class QuantizationConfigBase:
         return conf
 
 
+class EqualizationConfig(QuantizationConfigBase):
+    """
+    TODO: write this
+    """
+    pass
+
+
 class PrepareQuantizationConfig(QuantizationConfigBase):
     """
     TODO: write this
     """
     pass
+
 
 class ConvertQuantizationConfig(QuantizationConfigBase):
     """
