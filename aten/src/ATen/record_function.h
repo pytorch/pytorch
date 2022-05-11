@@ -5,6 +5,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/variant.h>
 
 #include <array>
 #include <atomic>
@@ -310,10 +311,7 @@ struct TORCH_API RecordFunction {
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
 
-  const char* name() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called name() on inactive RecordFunction");
-    return state_->name_.c_str();
-  }
+  const char* name() const;
 
   int64_t seqNr() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called seqNr() on inactive RecordFunction");
@@ -343,15 +341,8 @@ struct TORCH_API RecordFunction {
     state_->outputs_ = outputs.vec();
   }
 
-  size_t num_inputs() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called num_inputs() on inactive RecordFunction");
-    return state_->op_input_size;
-  }
-
-  size_t num_outputs() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called num_outputs() on inactive RecordFunction");
-    return state_->op_output_size;
-  }
+  size_t num_inputs() const;
+  size_t num_outputs() const;
 
   // Retrieves the thread_id that this RecordFunction ran start callbacks with.
   // Useful for writing thread safe end callbacks that may be potentially
@@ -388,9 +379,10 @@ struct TORCH_API RecordFunction {
 
   // before functions initialize RecordFunction members and call
   // start callbacks
+  using schema_ref_t = std::reference_wrapper<const c10::FunctionSchema>;
   void before(const char* name, int64_t sequence_nr = -1);
   void before(std::string name, int64_t sequence_nr = -1);
-  void before(c10::OperatorHandle const& op, int64_t sequence_nr = -1);
+  void before(schema_ref_t schema, int64_t sequence_nr = -1);
 
   // Sets node ID for distributed profiling
   static void setDefaultNodeId(int64_t defaultNodeId);
@@ -415,10 +407,7 @@ struct TORCH_API RecordFunction {
     return state_->handle_;
   }
 
-  c10::optional<OperatorName> operator_name() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called operator_name() on inactive RecordFunction");
-    return state_->operator_name_;
-  }
+  c10::optional<OperatorName> operator_name() const;
 
   void setHandle(RecordFunctionHandle handle) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setHandle() on inactive RecordFunction");
@@ -478,14 +467,11 @@ struct TORCH_API RecordFunction {
     // Stores various ObserverContext objects with event metadata for callbacks.
     ObserverContextList ctx_;
 
-    std::string name_;
+    c10::variant<std::string, schema_ref_t> fn_;
+
     int64_t sequence_nr_ = -1;
     c10::ArrayRef<const IValue> inputs_;
     std::vector<c10::IValue> outputs_;
-
-    c10::optional<c10::OperatorName> operator_name_;
-    size_t op_input_size{0};
-    size_t op_output_size{0};
 
     // For backward functions - thread id of the the forward function
     uint64_t fwd_thread_id_ = 0;
