@@ -80,6 +80,9 @@ def set_printoptions(
         PRINT_OPTS.linewidth = linewidth
     PRINT_OPTS.sci_mode = sci_mode
 
+def tensor_totype(t):
+    dtype = torch.float if t.is_mps else torch.double
+    return t.to(dtype=dtype)
 
 class _Formatter(object):
     def __init__(self, tensor):
@@ -104,9 +107,9 @@ class _Formatter(object):
                 return
 
             # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
-            nonzero_finite_abs = nonzero_finite_vals.abs().double()
-            nonzero_finite_min = nonzero_finite_abs.min().double()
-            nonzero_finite_max = nonzero_finite_abs.max().double()
+            nonzero_finite_abs = tensor_totype(nonzero_finite_vals.abs())
+            nonzero_finite_min = tensor_totype(nonzero_finite_abs.min())
+            nonzero_finite_max = tensor_totype(nonzero_finite_abs.max())
 
             for value in nonzero_finite_vals:
                 if value != torch.ceil(value):
@@ -327,7 +330,8 @@ def _str_intern(inp, *, tensor_contents=None):
     # In other cases, we don't have a way to set them as default yet,
     # and we should always print out device for them.
     if self.device.type != torch._C._get_default_device()\
-            or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
+            or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index)\
+            or (self.device.type == 'mps'):
         suffixes.append('device=\'' + str(self.device) + '\'')
 
     # Tensor printing performs tensor operations like slice, indexing, etc to make it in a
