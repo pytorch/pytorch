@@ -1747,7 +1747,7 @@ Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Ten
 
   // for composite compliance, use out-of-place variant
   // of `masked_scatter`.
-  if (areAnyTensorSubclassLike({grad, input, mask})) {
+  if (areAnyTensorSubclassLike({grad, mask})) {
     return result.masked_scatter(mask, grad);
   }
   result.masked_scatter_(mask, grad);
