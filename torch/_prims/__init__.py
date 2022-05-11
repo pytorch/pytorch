@@ -23,8 +23,8 @@ from enum import Enum
 import operator
 import math
 
-prim = torch.library.Library('prims', 'DEF')
-prim_impl = torch.library.Library('prims', 'IMPL', 'CompositeExplicitAutograd')
+prim = torch.library.Library("prims", "DEF")
+prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
 
 # Experimental module containing prototype "primitive" operations.
 
@@ -164,7 +164,7 @@ def _make_prim(
     impl_aten: Callable,
     impl_nvfuser: Optional[Callable] = None,
     return_type: RETURN_TYPE,
-    doc: str
+    doc: str,
 ):
     """
     Creates a primitive operation.
@@ -180,7 +180,7 @@ def _make_prim(
         meta(*args, **kwargs)
         return impl_aten(*args, **kwargs)
 
-    name = schema.split('(')[0]
+    name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
     # TODO: register meta
 
@@ -257,7 +257,7 @@ def _make_elementwise_unary_prim(
         schema=f"{name}(Tensor self) -> Tensor",
         meta=partial(_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -272,7 +272,7 @@ def _make_elementwise_binary_prim(
         schema=f"{name}(Tensor self, Tensor other) -> Tensor",
         meta=partial(_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -1679,11 +1679,8 @@ _amin_doc = """
     specified in the dim argument
     """
 
-def _make_reduction_prim(
-    name: str,
-    impl_aten,
-    doc
-):
+
+def _make_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim."""
     return _make_prim(
         schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
@@ -1693,11 +1690,8 @@ def _make_reduction_prim(
         doc=doc,
     )
 
-def _make_bool_reduction_prim(
-    name: str,
-    impl_aten,
-    doc
-):
+
+def _make_bool_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim that reduces to bool."""
     return _make_prim(
         schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
