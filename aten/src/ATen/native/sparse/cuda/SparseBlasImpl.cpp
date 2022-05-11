@@ -459,7 +459,7 @@ void block_sparse_mm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.layout() == kSparseBsr);
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT(mat1.values().dim() == 3);
   // blocks are expected to be square
@@ -553,9 +553,6 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  if (mat1.values().dim() >= 3 && mat1.values().size(-1) > 1) {
-    return block_sparse_mm(mat1, mat2, beta, alpha, result);
-  }
 #if !AT_USE_CUSPARSE_GENERIC_API()
   addmm_out_legacy(mat1, mat2, beta, alpha, result);
 #else
@@ -820,6 +817,9 @@ void addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
+  if (mat1.layout() == kSparseBsr && mat2.layout() == kStrided && result.layout() == kStrided) {
+    return block_sparse_mm(mat1, mat2, beta, alpha, result);
+  }
   if (mat1.is_sparse_csr() && mat2.layout() == kStrided && result.layout() == kStrided) {
     return spmm(mat1, mat2, beta, alpha, result);
   }
