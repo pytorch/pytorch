@@ -1,12 +1,5 @@
 #include <c10/util/Exception.h>
-#include <c10/util/ArrayRef.h>
 #include <ATen/ATen.h>
-#include <ATen/cudnn/Handle.h>
-#include <ATen/native/quantized/cudnn/utils.h>
-#include <ATen/native/utils/ParamsHash.h>
-#include <ATen/NativeFunctions.h>
-#include <c10/cuda/CUDAFunctions.h>
-#include <torch/library.h>
 
 namespace at {
 namespace native {
