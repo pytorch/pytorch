@@ -387,12 +387,7 @@ class TestSparseCSR(TestCase):
     def test_copy_errors(self, device, dtype):
         for index_dtype in [torch.int32, torch.int64]:
             shape1 = (2, 3)
-            shape2 = (3, 2)
             a = self.genSparseCSRTensor(shape1, 0, dtype=dtype, device=device, index_dtype=index_dtype)
-            b = self.genSparseCSRTensor(shape2, 0, dtype=dtype, device=device, index_dtype=index_dtype)
-
-            with self.assertRaisesRegex(RuntimeError, "only same size tensors are supported."):
-                a.copy_(b)
 
             with self.assertRaisesRegex(RuntimeError, "copy between different layouts is not supported."):
                 a.copy_(torch.empty(a.shape, dtype=dtype, device=device))
@@ -1470,7 +1465,7 @@ class TestSparseCSR(TestCase):
             out = torch.sparse_csr_tensor(
                 *map(torch.clone, (actual.crow_indices(), actual.col_indices())),
                 torch.empty_like(actual.values()),
-                size=c.shape
+                size=actual.shape
             )
             torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
 
@@ -1479,12 +1474,18 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.to_dense(), out.to_dense())
             self.assertEqual(actual.to_dense(), expected)
 
+        mnk = itertools.product([2, 5], repeat=3)
+        batch_shapes = [(), (2,), (2, 3)] if self.device_type == 'cuda' else [(), ]
+        tf = [True, False]
         for index_dtype in [torch.int32, torch.int64]:
-            for (m, n, k), noncontiguous in zip(itertools.product([2, 5], repeat=3), [True, False]):
+            for (m, n, k), b, noncontiguous, bcast_c in itertools.product(mnk, batch_shapes, tf, tf):
+                if bcast_c and len(b) == 0:
+                    continue
                 nnz = random.randint(0, m * n)
-                c = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-                a = make_tensor((m, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
-                b = make_tensor((k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c_batch = () if bcast_c else b
+                c = self.genSparseCSRTensor((*c_batch, m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+                a = make_tensor((*b, m, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((*b, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_a, op_b in itertools.product([True, False], repeat=2):
                     run_test(c, a, b, op_a, op_b)
 
@@ -1559,21 +1560,21 @@ class TestSparseCSR(TestCase):
 
         # mat1 must be a matrix
         with self.assertRaisesRegex(RuntimeError, r"Expected mat1 to be a matrix"):
-            torch.sparse.sampled_addmm(a_sparse, a.unsqueeze(0), a)
+            torch.sparse.sampled_addmm(a_sparse, a[..., 0, :], a)
 
         # mat2 must be a matrix
         with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to be a matrix"):
-            torch.sparse.sampled_addmm(a_sparse, a, a.unsqueeze(0))
+            torch.sparse.sampled_addmm(a_sparse, a, a[..., 0, :])
 
         a = make_tensor((2, 2), dtype=dtype, device=device)
         b = make_tensor((3, 3), dtype=dtype, device=device)
         b_sparse = b.to_sparse_csr()
-        with self.assertRaisesRegex(RuntimeError, r"self dim 0 must match mat1 dim 0"):
+        with self.assertRaisesRegex(RuntimeError, r"self.shape\[-2\] must match mat1.shape\[-2\]"):
             torch.sparse.sampled_addmm(b_sparse, a, a)
 
         b = make_tensor((2, 3), dtype=dtype, device=device)
         b_sparse = b.to_sparse_csr()
-        with self.assertRaisesRegex(RuntimeError, r"self dim 1 must match mat2 dim 1"):
+        with self.assertRaisesRegex(RuntimeError, r"self.shape\[-1\] must match mat2.shape\[-1\]"):
             torch.sparse.sampled_addmm(b_sparse, a, a)
 
         a = make_tensor((2, 2), dtype=dtype, device=device)

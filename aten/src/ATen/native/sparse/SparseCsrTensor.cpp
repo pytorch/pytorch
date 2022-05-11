@@ -511,9 +511,6 @@ const Tensor& resize_sparse_csr_(
 
 Tensor& copy_sparse_csr_(Tensor& self, const Tensor& src, bool non_blocking) {
   TORCH_CHECK(
-      self.sizes() == src.sizes(),
-      "copy_sparse_csr_: only same size tensors are supported.");
-  TORCH_CHECK(
       self.is_sparse_csr() && src.is_sparse_csr(),
       "copy_sparse_csr_: copy between different layouts is not supported. Found self type = ",
       self.toString(),
