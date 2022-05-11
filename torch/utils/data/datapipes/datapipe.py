@@ -20,6 +20,8 @@ __all__ = [
     "DFIterDataPipe",
     "IterDataPipe",
     "MapDataPipe",
+    "TravelingIterDataPipe",
+    "TravelingMapDataPipe"
 ]
 
 T = TypeVar('T')

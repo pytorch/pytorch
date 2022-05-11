@@ -55,15 +55,15 @@ def SpawnThreadForDataPipeline(datapipe):
 
     try:
         new_datapipe = pickle.loads(pickle.dumps(datapipe))
-    except Exception as e:
+    except Exception as pe:
         if HAS_DILL:
             try:
                 new_datapipe = dill.loads(dill.dumps(datapipe))
-            except Exception as e:
-                Exception('Unable to dill DataPipe to make thread local copy', e)
+            except Exception as de:
+                Exception('Unable to dill DataPipe to make thread local copy', de)
 
         else:
-            raise Exception('Unable to pickle DataPipe to make thread local copy (consider installing `dill`)', e)
+            raise Exception('Unable to pickle DataPipe to make thread local copy (consider installing `dill`)', pe)
 
     process = threading.Thread(target=DataPipeToQueuesLoop, args=(
         new_datapipe, req_queue, res_queue), daemon=True)
