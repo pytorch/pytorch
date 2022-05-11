@@ -9,8 +9,6 @@ namespace lazy {
 
 class TORCH_API Expand : public TsNode {
  public:
-  static const OpKind class_op_kind;
-
   Expand(const Value& input, std::vector<int64_t> size, bool is_scalar_expand);
 
   std::string ToString() const override;
