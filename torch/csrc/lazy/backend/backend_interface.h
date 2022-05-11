@@ -77,7 +77,7 @@ class TORCH_API BackendImplInterface {
       const std::string& device, c10::ArrayRef<std::string> devices) const = 0;
 
   virtual std::vector<ComputationPtr> Compile(
-      std::vector<ComputationPtr> instances, bool force_ltc_data=true) const = 0;
+      std::vector<ComputationPtr> instances) const = 0;
 
   virtual std::vector<BackendDataPtr> ExecuteComputation(
       Computation& computation, c10::ArrayRef<BackendDataPtr> arguments,

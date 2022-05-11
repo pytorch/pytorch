@@ -128,7 +128,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       const torch::lazy::Shape& shape) const override;
 
   std::vector<torch::lazy::ComputationPtr> Compile(
-      std::vector<torch::lazy::ComputationPtr> instances, bool force_ltc_data=true) const override;
+      std::vector<torch::lazy::ComputationPtr> instances) const override;
 
   std::vector<torch::lazy::BackendDataPtr> ExecuteComputation(
       torch::lazy::Computation& computation,
@@ -181,14 +181,14 @@ torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
 }
 
 std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
-    std::vector<torch::lazy::ComputationPtr> instances, bool force_ltc_data) const {
-  if (!force_ltc_data) {
-    LOG(WARNING) << "Compile outside of mark step";
-  }
+    std::vector<torch::lazy::ComputationPtr> instances) const {
 
   for (const auto& instance : instances) {
-    C10_UNUSED auto ts_computation =
+    auto ts_computation =
         static_cast<torch::lazy::TSComputation*>(instance.get());
+    if (!ts_computation->in_mark_step) {
+      LOG(WARNING) << "Compile outside of mark step";
+    }
   }
   return instances;
 }
