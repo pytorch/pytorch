@@ -1,5 +1,4 @@
 from collections import OrderedDict
-import dataclasses
 import re
 from typing import Any, Dict, Callable, Union
 
