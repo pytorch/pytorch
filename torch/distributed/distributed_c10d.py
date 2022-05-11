@@ -1556,7 +1556,10 @@ def all_gather_multigpu(
 
 def _object_to_tensor(obj):
     f = io.BytesIO()
-    _pickler(f).dump(obj)
+    from pickle import HIGHEST_PROTOCOL
+    from multiprocessing.reduction import ForkingPickler
+    ForkingPickler(f, HIGHEST_PROTOCOL).dump(obj)
+    #_pickler(f, HIGHEST_PROTOCOL).dump(obj)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
     # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
     # Otherwise, it will casue 100X slowdown.
@@ -1568,7 +1571,8 @@ def _object_to_tensor(obj):
 
 def _tensor_to_object(tensor, tensor_size):
     buf = tensor.numpy().tobytes()[:tensor_size]
-    return _unpickler(io.BytesIO(buf)).load()
+    return pickle.loads(buf)
+    #return _unpickler(io.BytesIO(buf)).load()
 
 def _check_for_nccl_backend(group):
     pg = group or _get_default_group()
