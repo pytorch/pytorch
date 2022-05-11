@@ -183,7 +183,7 @@ class TestFSDPExecOrder(FSDPTest):
         warning_prefix = "Forward order differs"
         for warning in w:
             if str(warning.message).startswith(warning_prefix):
-                raise AssertionError("Warning was incorrectly issued")
+                raise AssertionError(f"Warning was incorrectly issued: {warning.message}")
         # If we still validate the forward execution order in eval mode, then
         # an `AssertionError` will be raised above for both sharding strategies
 

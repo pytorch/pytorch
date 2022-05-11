@@ -388,9 +388,8 @@ class _ExecOrderData():
         return self._param_to_unflat_param_names[param]
 
     def reset(self):
-        """Called in :meth:`_wait_for_post_backward` or in
-        :meth:`_post_backward_hook` when inside ``no_sync()`` to reset data for
-        the next iteration."""
+        """Called in :meth:`_wait_for_post_backward` to reset data for the next
+        iteration."""
         self.is_first_iter = False
         self.index = 0
         # `reset()` marks the end of an iteration, so transition if needed
@@ -2364,10 +2363,6 @@ class FullyShardedDataParallel(nn.Module):
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
         if not self._require_backward_grad_sync:
-            # Reset the execution order data structure here since the
-            # `_wait_for_post_backward()` callback is skipped
-            if self._is_root:
-                self._exec_order_data.reset()
             return
 
         # Wait for all work in the current stream to finish, then start the
@@ -2768,9 +2763,12 @@ class FullyShardedDataParallel(nn.Module):
         iteration sequence (for ``FULL_SHARD``) or the first iteration
         sequence's prefix (for ``SHARD_GRAD_OP``).
         """
-        # Only check all-gathers when rebuilding the full parameters in the
-        # forward pass and in train mode
-        if self.training_state != TrainingState_.FORWARD or not self.training:
+        # Only check when rebuilding the full parameters in the forward pass,
+        # and skip the check (1) when in eval mode since then there is not a
+        # safe point at which to reset the execution order data and (2) if
+        # world size is 1 since then there is no chance of desynchronization
+        if self.training_state != TrainingState_.FORWARD or \
+                not self.training or self.world_size == 1:
             return
         eod = self._exec_order_data
         param_index = eod.get_param_index(param)
