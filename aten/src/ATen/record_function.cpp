@@ -637,6 +637,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   state_->operator_name_.reset();
 
   runStartCallbacks();
+  invalidateInputs();
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
@@ -649,6 +650,7 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   state_->operator_name_.reset();
 
   runStartCallbacks();
+  invalidateInputs();
 }
 
 void RecordFunction::before(
@@ -664,6 +666,7 @@ void RecordFunction::before(
   state_->name_ = op.schema().name();
 
   runStartCallbacks();
+  invalidateInputs();
 }
 
 /* static */ void RecordFunction::setDefaultNodeId(int64_t newDefaultNodeId) {
@@ -692,4 +695,16 @@ bool RecordFunction::isAsync() const {
   return false;
 }
 
+void RecordFunction::_setStaticRuntimeOutVariant() {
+  if (isActive()) {
+    state_->is_static_runtime_out_variant_ = true;
+  }
+}
+
+bool RecordFunction::isStaticRuntimeOutVariant() const {
+  if (isActive()) {
+    return state_->is_static_runtime_out_variant_;
+  }
+  return false;
+}
 } // namespace at

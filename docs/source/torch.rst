@@ -604,6 +604,8 @@ Utilities
     is_deterministic_algorithms_warn_only_enabled
     set_deterministic_debug_mode
     get_deterministic_debug_mode
+    set_float32_matmul_precision
+    get_float32_matmul_precision
     set_warn_always
     is_warn_always_enabled
     vmap

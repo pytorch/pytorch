@@ -18,6 +18,7 @@ from torch.distributed.fsdp.wrap import (
     default_auto_wrap_policy,
     enable_wrap,
     wrap,
+    transformer_auto_wrap_policy,
 )
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
@@ -27,6 +28,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     FSDPInitMode,
     _maybe_cuda,
+    TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -36,6 +38,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
 )
+from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 
 class WrapMethod(Enum):
     FSDP_CTOR = auto()
@@ -275,6 +278,23 @@ class TestAutoWrap(TestCase):
         seq = TestFSDPWrap.NestedSequentialModel.get_model(cuda=True)
         model = FSDP(seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy)
         TestFSDPWrap.NestedSequentialModel.verify_model_all_wrapped(self, model)
+
+    def test_transformer_auto_wrap_policy(self):
+        model = TransformerWithSharedParams(group=self.process_group)
+        my_auto_wrap_policy = functools.partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer}
+        )
+        fsdp_model = FSDP(
+            model,
+            process_group=self.process_group,
+            auto_wrap_policy=my_auto_wrap_policy
+        )
+        self.assertTrue(isinstance(fsdp_model, FSDP))
+        for layer in fsdp_model.module.module.transformer.encoder.layers:
+            self.assertTrue(isinstance(layer, FSDP))
+        for layer in fsdp_model.module.module.transformer.decoder.layers:
+            self.assertTrue(isinstance(layer, FSDP))
 
     def test_auto_wrap_api(self):
         """

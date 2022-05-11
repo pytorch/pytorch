@@ -7,6 +7,8 @@ namespace lazy {
 
 class Normal : public torch::lazy::TsNode {
  public:
+  static const OpKind class_op_kind;
+
   Normal(const torch::lazy::Value& self, const double& mean, const double& std, std::vector<torch::lazy::Shape>&& shapes);
 
   std::string ToString() const override;

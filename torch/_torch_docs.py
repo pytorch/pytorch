@@ -4338,8 +4338,8 @@ Supports real-valued and complex-valued inputs.
     :func:`torch.solve` is deprecated in favor of :func:`torch.linalg.solve`
     and will be removed in a future PyTorch release.
     :func:`torch.linalg.solve` has its arguments reversed and does not return the
-    LU factorization of the input. To get the LU factorization see :func:`torch.lu`,
-    which may be used with :func:`torch.lu_solve` and :func:`torch.lu_unpack`.
+    LU factorization of the input. To get the LU factorization see :func:`torch.linalg.lu_factor`,
+    which may be used with :func:`torch.linalg.lu_solve`.
 
     ``X = torch.solve(B, A).solution`` should be replaced with
 
@@ -5754,63 +5754,48 @@ Example::
 add_docstr(torch.lu_unpack, r"""
 lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-Unpacks the data and pivots from a LU factorization of a tensor into tensors ``L`` and ``U`` and a permutation tensor ``P``
-such that ``LU_data, LU_pivots = (P @ L @ U).lu()``.
+Unpacks the LU decomposition returned by :func:`~linalg.lu_factor` into the `P, L, U` matrices.
 
-Returns a tuple of tensors as ``(the P tensor (permutation matrix), the L tensor, the U tensor)``.
+.. seealso::
 
-.. note:: ``P.dtype == LU_data.dtype`` and ``P.dtype`` is not an integer type so that matrix products with ``P``
-          are possible without casting it to a floating type.
+    :func:`~linalg.lu` returns the matrices from the LU decomposition. It is more efficient than
+    doing :func:`~linalg.lu_factor` and then :func:`~linalg.lu_unpack`.
 
 Args:
     LU_data (Tensor): the packed LU factorization data
     LU_pivots (Tensor): the packed LU factorization pivots
     unpack_data (bool): flag indicating if the data should be unpacked.
-                        If ``False``, then the returned ``L`` and ``U`` are ``None``.
+                        If ``False``, then the returned ``L`` and ``U`` are empty tensors.
                         Default: ``True``
     unpack_pivots (bool): flag indicating if the pivots should be unpacked into a permutation matrix ``P``.
-                          If ``False``, then the returned ``P`` is  ``None``.
+                          If ``False``, then the returned ``P`` is  an empty tensor.
                           Default: ``True``
-    out (tuple, optional): a tuple of three tensors to use for the outputs ``(P, L, U)``.
+
+Keyword args:
+    out (tuple, optional): output tuple of three tensors. Ignored if `None`.
+
+Returns:
+    A namedtuple ``(P, L, U)``
 
 Examples::
 
     >>> A = torch.randn(2, 3, 3)
-    >>> A_LU, pivots = A.lu()
-    >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-    >>>
-    >>> # can recover A from factorization
-    >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> P, L, U = torch.lu_unpack(LU, pivots)
+    >>> # We can recover A from the factorization
+    >>> A_ = P @ L @ U
+    >>> torch.allclose(A, A_)
+    True
 
     >>> # LU factorization of a rectangular matrix:
     >>> A = torch.randn(2, 3, 2)
-    >>> A_LU, pivots = A.lu()
-    >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-    >>> P
-    tensor([[[1., 0., 0.],
-             [0., 1., 0.],
-             [0., 0., 1.]],
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> P, L, U = torch.lu_unpack(LU, pivots)
+    >>> # P, L, U are the same as returned by linalg.lu
+    >>> P_, L_, U_ = torch.linalg.lu(A)
+    >>> torch.allclose(P, P_) and torch.allclose(L, L_) and torch.allclose(U, U_)
+    True
 
-            [[0., 0., 1.],
-             [0., 1., 0.],
-             [1., 0., 0.]]])
-    >>> A_L
-    tensor([[[ 1.0000,  0.0000],
-             [ 0.4763,  1.0000],
-             [ 0.3683,  0.1135]],
-
-            [[ 1.0000,  0.0000],
-             [ 0.2957,  1.0000],
-             [-0.9668, -0.3335]]])
-    >>> A_U
-    tensor([[[ 2.1962,  1.0881],
-             [ 0.0000, -0.8681]],
-
-            [[-1.0947,  0.3736],
-             [ 0.0000,  0.5718]]])
-    >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-    >>> torch.norm(A_ - A)
-    tensor(2.9802e-08)
 """.format(**common_args))
 
 add_docstr(torch.less, r"""
@@ -5824,16 +5809,26 @@ add_docstr(torch.lu_solve,
 lu_solve(b, LU_data, LU_pivots, *, out=None) -> Tensor
 
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
-LU factorization of A from :meth:`torch.lu`.
+LU factorization of A from :func:`~linalg.lu_factor`.
 
 This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
+
+.. warning::
+
+    :func:`torch.lu_solve` is deprecated in favor of :func:`torch.linalg.lu_solve`.
+    :func:`torch.lu_solve` will be removed in a future PyTorch release.
+    ``X = torch.lu_solve(B, LU, pivots)`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.lu_solve(LU, pivots, B)
 
 Arguments:
     b (Tensor): the RHS tensor of size :math:`(*, m, k)`, where :math:`*`
                 is zero or more batch dimensions.
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu` of size :math:`(*, m, m)`,
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`~linalg.lu_factor` of size :math:`(*, m, m)`,
                        where :math:`*` is zero or more batch dimensions.
-    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`torch.lu` of size :math:`(*, m)`,
+    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`~linalg.lu_factor` of size :math:`(*, m)`,
                            where :math:`*` is zero or more batch dimensions.
                            The batch dimensions of :attr:`LU_pivots` must be equal to the batch dimensions of
                            :attr:`LU_data`.
@@ -5845,9 +5840,9 @@ Example::
 
     >>> A = torch.randn(2, 3, 3)
     >>> b = torch.randn(2, 3, 1)
-    >>> A_LU = torch.lu(A)
-    >>> x = torch.lu_solve(b, *A_LU)
-    >>> torch.norm(torch.bmm(A, x) - b)
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> x = torch.lu_solve(b, LU, pivots)
+    >>> torch.dist(A @ x, b)
     tensor(1.00000e-07 *
            2.8312)
 """.format(**common_args))
@@ -9051,6 +9046,68 @@ Example::
             [-0.0881,  0.4370,  0.2275,  1.0284]])
 """.format(**common_args))
 
+add_docstr(torch.sparse_compressed_tensor,
+           r"""
+sparse_compressed_tensor(compressed_indices, plain_indices, values, size=None,
+                         *, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a :ref:`sparse tensor in Compressed Sparse format - CSR,
+CSC, BSR, or BSC - <sparse-csr-docs>` with specified values at the
+given :attr:`compressed_indices` and :attr:`plain_indices`. Sparse
+matrix multiplication operations in Compressed Sparse format are
+typically faster than that for sparse tensors in COO format. Make you
+have a look at :ref:`the note on the data type of the indices
+<sparse-csr-docs>`.
+
+Args:
+    compressed_indices (array_like): One-dimensional array of size
+        size[cdim] + 1 where cdim is 0 or 1 depending on the layout.
+        The last element is the number of non-zeros. This tensor
+        encodes the index in values and plain_indices depending on
+        where the given compressed dimension (row or column)
+        starts. Each successive number in the tensor subtracted by the
+        number before it denotes the number of elements in a given
+        compressed dimension.
+    plain_indices (array_like): Plain dimension (column or row)
+        co-ordinates of each element in values. Strictly one
+        dimensional tensor with the same length as values.
+    values (array_list): Initial values for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, scalar, and other types.  For block
+        sparse formats, the dimensionality of values must be two plus
+        the dimensionality of plain_indices.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the
+        sparse tensor. If not provided, the size will be inferred as
+        the minimum size big enough to hold all non-zero elements.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of
+        returned tensor.  Default: if None, infers data type from
+        :attr:`values`.
+    layout (:class:`torch.layout`, required): the desired layout of
+        returned tensor: :attr:`torch.sparse_csr`,
+        :attr:`torch.sparse_csc`, :attr:`torch.sparse_bsr`, or
+        :attr:`torch.sparse_bsc`.
+    device (:class:`torch.device`, optional): the desired device of
+        returned tensor.  Default: if None, uses the current device
+        for the default tensor type (see
+        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        the CPU for CPU tensor types and the current CUDA device for
+        CUDA tensor types.
+    {requires_grad}
+
+Example::
+    >>> compressed_indices = [0, 2, 4]
+    >>> plain_indices = [0, 1, 0, 1]
+    >>> values = [1, 2, 3, 4]
+    >>> torch.sparse_compressed_tensor(torch.tensor(compressed_indices, dtype=torch.int64),
+    ...                                torch.tensor(plain_indices, dtype=torch.int64),
+    ...                                torch.tensor(values), dtype=torch.double, layout=torch.sparse_csr)
+    tensor(crow_indices=tensor([0, 2, 4]),
+           col_indices=tensor([0, 1, 0, 1]),
+           values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+           dtype=torch.float64, layout=torch.sparse_csr)
+""".format(**factory_common_args))
+
 add_docstr(torch.sparse_csr_tensor,
            r"""
 sparse_csr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
@@ -9061,27 +9118,34 @@ in CSR format are typically faster than that for sparse tensors in COO format. M
 at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
 
 Args:
-    crow_indices (array_like): One-dimensional array of size size[0] + 1. The last element
-        is the number of non-zeros. This tensor encodes the index in values and col_indices
-        depending on where the given row starts. Each successive number in the tensor
-        subtracted by the number before it denotes the number of elements in a given row.
-    col_indices (array_like): Column co-ordinates of each element in values. Strictly one
-        dimensional tensor with the same length as values.
-    values (array_list): Initial values for the tensor. Can be a list, tuple, NumPy ``ndarray``, scalar,
-        and other types.
-    size (list, tuple, :class:`torch.Size`, optional): Size of the sparse tensor. If not provided, the
-        size will be inferred as the minimum size big enough to hold all non-zero elements.
+    crow_indices (array_like): One-dimensional array of size size[0] + 1.
+        The last element is the number of non-zeros. This tensor
+        encodes the index in values and col_indices depending on where
+        the given row starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of
+        elements in a given row.
+    col_indices (array_like): Column co-ordinates of each element in
+        values. Strictly one dimensional tensor with the same length
+        as values.
+    values (array_list): Initial values for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, scalar, and other types.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the
+        sparse tensor. If not provided, the size will be inferred as
+        the minimum size big enough to hold all non-zero elements.
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if None, infers data type from :attr:`values`.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
-        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
-        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    dtype (:class:`torch.dtype`, optional): the desired data type of
+        returned tensor.  Default: if None, infers data type from
+        :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of
+        returned tensor.  Default: if None, uses the current device
+        for the default tensor type (see
+        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        the CPU for CPU tensor types and the current CUDA device for
+        CUDA tensor types.
     {requires_grad}
 
-Example ::
+Example::
     >>> crow_indices = [0, 2, 4]
     >>> col_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -9092,6 +9156,173 @@ Example ::
            col_indices=tensor([0, 1, 0, 1]),
            values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
            dtype=torch.float64, layout=torch.sparse_csr)
+""".format(**factory_common_args))
+
+add_docstr(torch.sparse_csc_tensor,
+           r"""
+sparse_csc_tensor(ccol_indices, row_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a :ref:`sparse tensor in CSC (Compressed Sparse Column)
+<sparse-csr-docs>` with specified values at the given
+:attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
+multiplication operations in CSC format are typically faster than that
+for sparse tensors in COO format. Make you have a look at :ref:`the
+note on the data type of the indices <sparse-csr-docs>`.
+
+Args:
+    ccol_indices (array_like): One-dimensional array of size size[1] + 1.
+        The last element is the number of non-zeros. This tensor
+        encodes the index in values and row_indices depending on where
+        the given column starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of
+        elements in a given column.
+    row_indices (array_like): Row co-ordinates of each element in
+        values. Strictly one dimensional tensor with the same length
+        as values.
+    values (array_list): Initial values for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, scalar, and other types.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the
+        sparse tensor. If not provided, the size will be inferred as
+        the minimum size big enough to hold all non-zero elements.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of
+        returned tensor.  Default: if None, infers data type from
+        :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of
+        returned tensor.  Default: if None, uses the current device
+        for the default tensor type (see
+        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        the CPU for CPU tensor types and the current CUDA device for
+        CUDA tensor types.
+    {requires_grad}
+
+Example::
+    >>> ccol_indices = [0, 2, 4]
+    >>> row_indices = [0, 1, 0, 1]
+    >>> values = [1, 2, 3, 4]
+    >>> torch.sparse_csc_tensor(torch.tensor(ccol_indices, dtype=torch.int64),
+    ...                         torch.tensor(row_indices, dtype=torch.int64),
+    ...                         torch.tensor(values), dtype=torch.double)
+    tensor(ccol_indices=tensor([0, 2, 4]),
+           row_indices=tensor([0, 1, 0, 1]),
+           values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+           dtype=torch.float64, layout=torch.sparse_csc)
+""".format(**factory_common_args))
+
+add_docstr(torch.sparse_bsr_tensor,
+           r"""
+sparse_bsr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row))
+<sparse-csr-docs>` with specified 2-dimensional blocks at the given
+:attr:`crow_indices` and :attr:`col_indices`. Sparse matrix
+multiplication operations in BSR format are typically faster than that
+for sparse tensors in COO format. Make you have a look at :ref:`the
+note on the data type of the indices <sparse-csr-docs>`.
+
+Args:
+    crow_indices (array_like): One-dimensional array of size size[0] +
+        1. The last element is the number of non-zeros. This tensor
+        encodes the index in values and col_indices depending on where
+        the given row starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of
+        blocks in a given row.
+    col_indices (array_like): Column co-ordinates of each block in
+        values. Strictly one dimensional tensor with the same length
+        as values.
+    values (array_list): Initial values for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, scalar, and other types. The
+        dimensionality of values must be two plus the dimensionality
+        of col_indices.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the
+        sparse tensor. If not provided, the size will be inferred as
+        the minimum size big enough to hold all non-zero blocks.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of
+        returned tensor.  Default: if None, infers data type from
+        :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of
+        returned tensor.  Default: if None, uses the current device
+        for the default tensor type (see
+        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        the CPU for CPU tensor types and the current CUDA device for
+        CUDA tensor types.
+    {requires_grad}
+
+Example::
+    >>> crow_indices = [0, 1, 2]
+    >>> col_indices = [0, 1]
+    >>> values = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+    >>> torch.sparse_bsr_tensor(torch.tensor(crow_indices, dtype=torch.int64),
+    ...                         torch.tensor(col_indices, dtype=torch.int64),
+    ...                         torch.tensor(values), dtype=torch.double)
+    tensor(crow_indices=tensor([0, 1, 2]),
+           col_indices=tensor([0, 1]),
+           values=tensor([[[1., 2.],
+                           [3., 4.]],
+
+                          [[5., 6.],
+                           [7., 8.]]]), size=(2, 2), nnz=2, dtype=torch.float64,
+           layout=torch.sparse_bsr)
+""".format(**factory_common_args))
+
+add_docstr(torch.sparse_bsc_tensor,
+           r"""
+sparse_bsc_tensor(ccol_indices, row_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a :ref:`sparse tensor in BSC (Block Compressed Sparse
+Column)) <sparse-csr-docs>` with specified 2-dimensional blocks at the
+given :attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
+multiplication operations in BSC format are typically faster than that
+for sparse tensors in COO format. Make you have a look at :ref:`the
+note on the data type of the indices <sparse-csr-docs>`.
+
+Args:
+    ccol_indices (array_like): One-dimensional array of size size[1] +
+        1. The last element is the number of non-zeros. This tensor
+        encodes the index in values and row_indices depending on where
+        the given column starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of
+        elements in a given column.
+    row_indices (array_like): Row co-ordinates of each element in
+        values. Strictly one dimensional tensor with the same length
+        as values.
+    values (array_list): Initial blocks for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, and other types. The dimensionality
+        of values must be two plus the dimensionality of row_indices.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the
+        sparse tensor. If not provided, the size will be inferred as
+        the minimum size big enough to hold all non-zero blocks.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of
+        returned tensor.  Default: if None, infers data type from
+        :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of
+        returned tensor.  Default: if None, uses the current device
+        for the default tensor type (see
+        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        the CPU for CPU tensor types and the current CUDA device for
+        CUDA tensor types.
+    {requires_grad}
+
+Example::
+    >>> ccol_indices = [0, 1, 2]
+    >>> row_indices = [0, 1]
+    >>> values = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+    >>> torch.sparse_bsc_tensor(torch.tensor(ccol_indices, dtype=torch.int64),
+    ...                         torch.tensor(row_indices, dtype=torch.int64),
+    ...                         torch.tensor(values), dtype=torch.double)
+    tensor(ccol_indices=tensor([0, 1, 2]),
+           row_indices=tensor([0, 1]),
+           values=tensor([[[1., 2.],
+                           [3., 4.]],
+
+                          [[5., 6.],
+                           [7., 8.]]]), size=(2, 2), nnz=2, dtype=torch.float64,
+           layout=torch.sparse_bsc)
 """.format(**factory_common_args))
 
 add_docstr(torch.sparse_coo_tensor,
@@ -10859,12 +11090,6 @@ The operation is defined as:
 
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
-
-.. note::
-    Currently valid scalar and tensor combination are
-    1. Scalar of floating dtype and torch.double
-    2. Scalar of integral dtype and torch.long
-    3. Scalar of complex dtype and torch.complex128
 
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y

@@ -907,17 +907,6 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   }
 }
 
-Tensor stft(
-    const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-    const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
-    const bool normalized,
-    const optional<bool> onesidedOpt, const optional<bool> return_complexOpt) {
-  return at::stft(
-      self, n_fft, hop_lengthOpt, win_lengthOpt, window_opt,
-      /*center=*/false, /*mode=*/"constant", normalized, onesidedOpt,
-      return_complexOpt);
-}
-
 // Create complex tensor from the old style of real tensor with size=(..., 2)
 // This is to support istft in the transition to requiring complex input.
 // NOTE: This may return a view of the input tensor, or might clone if necessary
@@ -1109,15 +1098,6 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   return y;
 
   #undef REPR
-}
-
-Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-             const optional<int64_t> win_lengthOpt, const Tensor& window,
-             const bool center, const bool normalized, const optional<bool> onesidedOpt,
-             const optional<int64_t> lengthOpt) {
-  return at::native::istft(
-      self, n_fft, hop_lengthOpt, win_lengthOpt, window, center, normalized,
-      onesidedOpt, lengthOpt, /*return_complex=*/false);
 }
 
 void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {

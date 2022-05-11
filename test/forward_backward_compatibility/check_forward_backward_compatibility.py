@@ -81,7 +81,13 @@ ALLOW_LIST = [
     ("aten::linalg_svdvals_out", datetime.date(2022, 3, 31)),
     ("aten::linalg_svd", datetime.date(2022, 3, 31)),
     ("aten::linalg_svd_out", datetime.date(2022, 3, 31)),
+    ("aten::linalg_qr_out", datetime.date(2022, 5, 31)),
+    ("aten::linalg_qr", datetime.date(2022, 5, 31)),
     ("aten::_max_pool1d_cpu_forward", datetime.date(2022, 2, 8)),
+    ("aten::max_unpool2d_backward", datetime.date(2022, 5, 15)),
+    ("aten::max_unpool2d_backward.grad_input", datetime.date(2022, 5, 15)),
+    ("aten::max_unpool3d_backward", datetime.date(2022, 5, 15)),
+    ("aten::max_unpool3d_backward.grad_input", datetime.date(2022, 5, 15)),
     ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_bias", datetime.date(9999, 1, 1)),
@@ -112,6 +118,7 @@ ALLOW_LIST = [
     ("aten::grid_sampler_3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_transform_bias_rescale_qkv", datetime.date(9999, 1, 1)),
     ("aten::scatter_reduce.two", datetime.date(2022, 4, 15)),
+    ("aten::stft", datetime.date(2022, 6, 1)),
     ("aten::_s_where", datetime.date(2022, 9, 30)),
     ("quantized::conv2d_cudnn", datetime.date(2022, 3, 22)),
     ("quantized::conv2d_relu_cudnn", datetime.date(2022, 3, 22)),
@@ -120,6 +127,7 @@ ALLOW_LIST = [
     ("aten::_cat", datetime.date(2022, 5, 15)),
     ("aten::nansum", datetime.date(2022, 5, 15)),
     ("aten::zero", datetime.date(2022, 5, 15)),
+    ("aten::_validate_sparse_compressed_tensor_args", datetime.date(2022, 5, 15)),
 ]
 
 ALLOW_LIST_COMPILED = [

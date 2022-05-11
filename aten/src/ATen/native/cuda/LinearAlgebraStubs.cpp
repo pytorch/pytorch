@@ -116,14 +116,9 @@ void lazy_svd_kernel(const Tensor& A,
   svd_stub(DeviceType::CUDA, A, full_matrices, compute_uv, U, S, Vh, info);
 }
 
-void lazy_lu_solve_trans(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
+void lazy_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   getTorchLinalgLibrary();
-  lu_solve_trans_stub(DeviceType::CUDA, b, lu, pivots, trans);
-}
-
-void lazy_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  getTorchLinalgLibrary();
-  lu_solve_stub(DeviceType::CUDA, b, lu, pivots);
+  lu_solve_stub(DeviceType::CUDA, LU, pivots, B, trans);
 }
 
 void lazy_lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name)  {
@@ -164,7 +159,6 @@ REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &lazy_linalg_eigh_kernel);
 REGISTER_CUDA_DISPATCH(eig_stub, &lazy_eig_kernel);
 REGISTER_CUDA_DISPATCH(linalg_eig_stub, &lazy_linalg_eig_kernel);
 REGISTER_CUDA_DISPATCH(svd_stub, &lazy_svd_kernel)
-REGISTER_CUDA_DISPATCH(lu_solve_trans_stub, &lazy_lu_solve_trans);
 REGISTER_CUDA_DISPATCH(lu_solve_stub, &lazy_lu_solve);
 REGISTER_CUDA_DISPATCH(lstsq_stub, &lazy_lstsq_kernel);
 } // anonymous namespace
