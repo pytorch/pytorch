@@ -1212,7 +1212,7 @@ def _squeeze_multiple(self, dims):
 
 @register_decomposition(aten.logsumexp.default)
 @pw_cast_for_int_to_real
-def logsumexp(self: Tensor, dim: List[int], keepdim: bool=False) -> Tensor:
+def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
