@@ -11161,9 +11161,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_kthvalue,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            error_inputs_func=error_inputs_kthvalue),
     BinaryUfuncInfo('le',
                     aliases=('less_equal',),
@@ -11815,9 +11812,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            supports_forward_ad=True),
     OpInfo('max',
            variant_test_name='reduction_no_dim',
@@ -11833,9 +11827,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16),
@@ -11844,9 +11835,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -11945,9 +11933,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            supports_forward_ad=True),
     OpInfo('min',
            variant_test_name='reduction_no_dim',
@@ -11962,7 +11947,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            # See https://github.com/pytorch/pytorch/issues/66357
@@ -11976,7 +11960,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            # See https://github.com/pytorch/pytorch/issues/66357
            # Relies on copy_ to broadcast, but the forward AD path calls broadcast_to which
@@ -13528,9 +13511,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            sample_inputs_func=sample_inputs_topk),
     # Multiple variants for batch_norm to test with and without cuDNN disabled
     # See https://github.com/pytorch/pytorch/pull/63218#discussion_r688549391 for more details
@@ -13780,7 +13760,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Resized a non-empty tensor but did not warn about it
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            sample_inputs_func=sample_inputs_mode,),
     MvlGammaInfo(variant_test_name='mvlgamma_p_1',
@@ -15311,10 +15290,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sort,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           )),
+           supports_fwgrad_bwgrad=True),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
@@ -15904,9 +15880,6 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            sample_inputs_func=sample_inputs_msort),
     OpInfo('movedim',
            aliases=('moveaxis',),
