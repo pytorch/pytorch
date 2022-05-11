@@ -321,9 +321,9 @@ class _ExecOrderData():
         _all_flat_params (List[FlatParameter]): A :class:`list` of all
             flattened parameters contained in the FSDP module hierarchy with
             the list index implicitly giving a unique parameter index.
-        param_to_unflat_param_names (Dict[FlatParameter, List[str]]): A mapping
-            from flattened parameter to the comprising unflattened parameters'
-            names.
+        _param_to_unflat_param_names (Dict[FlatParameter, List[str]]): A
+            mapping from flattened parameter to the comprising unflattened
+            parameters' names.
         is_first_iter (bool): Whether executing in the first iteration or not.
         param_order (List[int]): Order that parameters participate in the
             forward pass; constructed on the first iteration and validated
