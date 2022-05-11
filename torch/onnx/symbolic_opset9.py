@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import math
 import warnings
 from functools import partial, wraps
@@ -1551,7 +1549,7 @@ def where(g, condition, self=None, other=None, _outputs=None):
     if condition.type().scalarType() != "Bool":
         condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx["Bool"])
     if self is None:
-        condition = torch.onnx.symbolic_opset9.nonzero(g, condition)
+        condition = nonzero(g, condition)
         return sym_help._unbind_helper(
             g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs
         )
@@ -2373,6 +2371,8 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
         sym_help._onnx_opset_unsupported("_unique2", 9, 11)
 
 
+# TODO(justinchuby): Clean up this function generation magic by defining the functions
+# explicitly.
 for k, v in sym_help.cast_pytorch_to_onnx.items():
     name = "_cast_{}".format(k)
     globals()[name] = parse_args("v", "i")(partial(sym_help._cast_func_template, v))

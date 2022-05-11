@@ -128,6 +128,10 @@ def _try_cast_integer_to_float(g, *args):
     if arg0_type is not None:
         old_type = arg0_type
         if old_type not in floating_scalar_types:
+            # TODO(justinchuby): Remove the type ignore hint once _cast_Float is
+            # properly defined.
+            # NOTE: _cast_Float is generated programmatically so we need to make the
+            # type checker happy with ignore[attr-defined].
             args = tuple(sym_opset9._cast_Float(g, arg, False) for arg in args)  # type: ignore[attr-defined]
         else:
             return (None,) + args
