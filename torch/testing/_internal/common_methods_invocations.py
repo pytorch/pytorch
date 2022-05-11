@@ -14605,11 +14605,9 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
-                   # TODO: add `torch.chalf` dtype support for angle.
-                   # Currently, we will get:
-                   # The supported dtypes for angle on device type cuda are incorrect!
-                   # The following dtypes did not work in backward but
-                   # are listed by the OpInfo: {torch.complex32}.
+                   # TODO: add `torch.chalf` backward dtype support.
+                   # AssertionError: The supported dtypes for angle on device type cuda are incorrect!
+                   # The following dtypes did not work in backward but are listed by the OpInfo: {torch.complex32}.
                    backward_dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                    backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool),
                    supports_forward_ad=True,
@@ -14620,6 +14618,15 @@ op_db: List[OpInfo] = [
                        # The complex formula might be wrong
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                     dtypes=complex_types()),
+                       # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.skip("Skipped!", 'TestSparseCSR', 'test_sparse_csr',
+                                    dtypes=(torch.chalf,),),
+                       # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.skip("Skipped!", 'TestSparseCSR', 'test_sparse_csr_unary_out',
+                                    dtypes=(torch.chalf,),),
+                       # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.skip("Skipped!", 'TestSparseCSR', 'test_sparse_csr_consistency',
+                                    dtypes=(torch.chalf,),),
                    )),
     UnaryUfuncInfo('isfinite',
                    ref=np.isfinite,
