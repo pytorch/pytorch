@@ -262,22 +262,6 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
-class DataChunk(list, Generic[T]):
-    def __init__(self, items):
-        super().__init__(items)
-        self.items = items
-
-    def as_str(self, indent=''):
-        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
-        return res
-
-    def __iter__(self) -> Iterator[T]:
-        for i in super().__iter__():
-            yield i
-
-    def raw_iterator(self) -> T:  # type: ignore[misc]
-        for i in self.items:
-            yield i
 
 class TravelingDataPipe:
     def __init__(self, datapipe):
@@ -287,7 +271,7 @@ class TravelingDataPipe:
         use_dill = False
         try:
             value = pickle.dumps(self._datapipe)
-        except:
+        except Exception:
             if HAS_DILL:
                 value = dill.dumps(self._datapipe)
                 use_dill = True
@@ -305,10 +289,11 @@ class TravelingDataPipe:
     def __len__(self):
         try:
             return len(self._datapipe)
-        except:
+        except Exception:
             raise TypeError(
                 "{} instance doesn't have valid length".format(type(self).__name__)
             )
+
 
 class TravelingIterDataPipe(TravelingDataPipe, IterDataPipe):
     def __iter__(self):
@@ -318,3 +303,21 @@ class TravelingIterDataPipe(TravelingDataPipe, IterDataPipe):
 class TravelingMapDataPipe(TravelingDataPipe, MapDataPipe):
     def __getitem__(self, idx):
         return self._datapipe[idx]
+
+
+class DataChunk(list, Generic[T]):
+    def __init__(self, items):
+        super().__init__(items)
+        self.items = items
+
+    def as_str(self, indent=''):
+        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
+        return res
+
+    def __iter__(self) -> Iterator[T]:
+        for i in super().__iter__():
+            yield i
+
+    def raw_iterator(self) -> T:  # type: ignore[misc]
+        for i in self.items:
+            yield i

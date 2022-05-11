@@ -18,7 +18,17 @@ import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
 
-from . import IterDataPipe, MapDataPipe, IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset, TravelingIterDataPipe, TravelingMapDataPipe
+from . import (
+    IterDataPipe,
+    MapDataPipe,
+    IterableDataset,
+    Sampler,
+    SequentialSampler,
+    RandomSampler,
+    BatchSampler,
+    Dataset,
+    TravelingIterDataPipe,
+    TravelingMapDataPipe)
 from . import _utils
 
 import torch.utils.data.graph_settings
