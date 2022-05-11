@@ -1006,16 +1006,6 @@ def _export(
     export_modules_as_functions=False,
 ):
 
-    if export_modules_as_functions and opset_version < 15:
-        raise ValueError(
-            "`export_modules_as_functions` is not supported for `opset_version` < 15."
-            "This is because `opset_version` < 15 implies IR version < 8, which means "
-            "no local function support. "
-        )
-    export_modules_as_functions = _setup_trace_module_map(
-        model, export_modules_as_functions
-    )
-
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
             "torch.nn.DataParallel is not supported by ONNX "
@@ -1032,6 +1022,17 @@ def _export(
 
         if opset_version is None:
             opset_version = _constants.onnx_default_opset
+
+        if export_modules_as_functions and opset_version < 15:
+            raise ValueError(
+                "`export_modules_as_functions` is not supported for `opset_version` < 15."
+                "This is because `opset_version` < 15 implies IR version < 8, which means "
+                "no local function support. "
+            )
+        export_modules_as_functions = _setup_trace_module_map(
+            model, export_modules_as_functions
+        )
+
         if not operator_export_type:
             if torch.onnx._CAFFE2_ATEN_FALLBACK:
                 operator_export_type = torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
