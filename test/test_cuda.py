@@ -3833,6 +3833,11 @@ torch.cuda.synchronize()
         self.assertEqual(matmul_expand_mem, matmul_mem)
         self.assertEqual(bmm_mem, matmul_mem)
 
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-only test")
+    def test_backward_pass_guard(self):
+        # The test exercises a ROCm-specific feature.
+        pass
+
 
 class TestCudaComm(TestCase):
     def _test_broadcast(self, input):
