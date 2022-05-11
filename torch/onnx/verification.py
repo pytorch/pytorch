@@ -18,7 +18,7 @@ import torch
 from torch import Tensor
 from torch.onnx.utils import unpack_quantized_tensor
 
-_ORT_PROVIDERS = ["CPUExecutionProvider"]
+_ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 
 def _flatten_tuples(elem):
@@ -39,12 +39,8 @@ def _to_numpy(elem):
             return elem.cpu().numpy()
     elif isinstance(elem, (list, tuple)):
         return [_to_numpy(inp) for inp in elem]
-    elif isinstance(elem, bool):
-        return np.array(elem, dtype=bool)
-    elif isinstance(elem, int):
-        return np.array(elem, dtype=int)
-    elif isinstance(elem, float):
-        return np.array(elem, dtype=float)
+    elif isinstance(elem, (bool, int, float)):
+        return np.array(elem)
     elif isinstance(elem, dict):
         flattened = []
         for k in elem:
@@ -103,12 +99,12 @@ def _convert_to_onnx(
     # suppress ort warnings.
     # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
     so.log_severity_level = 3
-    ort_sess = onnxruntime.InferenceSession(
+    ort_session = onnxruntime.InferenceSession(
         model_f if isinstance(model_f, str) else model_f.getvalue(),
         so,
         providers=ort_providers,
     )
-    return ort_sess
+    return ort_session
 
 
 def _inline_flatten_list(inputs, res_list):
@@ -126,7 +122,7 @@ def _unpack_to_numpy(values):
     return [_to_numpy(v) for v in value_unpacked]
 
 
-def _run_ort(ort_sess, inputs):
+def _run_ort(ort_session, inputs):
     kw_inputs = {}
     if inputs and isinstance(inputs[-1], dict):
         kw_inputs = inputs[-1]
@@ -136,14 +132,14 @@ def _run_ort(ort_sess, inputs):
     for input_name, input in kw_inputs.items():
         ort_inputs[input_name] = _to_numpy(input)
     inputs = _to_numpy(inputs)
-    ort_sess_inputs = ort_sess.get_inputs()
+    ort_session_inputs = ort_session.get_inputs()
     for i, input in enumerate(inputs):
-        if i == len(ort_sess_inputs) or ort_sess_inputs[i].name in ort_inputs:
+        if i == len(ort_session_inputs) or ort_session_inputs[i].name in ort_inputs:
             raise ValueError(
                 f"got too many positional inputs. inputs: {inputs}. kw_inputs: {kw_inputs}"
             )
-        ort_inputs[ort_sess_inputs[i].name] = input
-    ort_outs = ort_sess.run(None, ort_inputs)
+        ort_inputs[ort_session_inputs[i].name] = input
+    ort_outs = ort_session.run(None, ort_inputs)
     return _inline_flatten_list(ort_outs, [])
 
 
@@ -155,10 +151,8 @@ def _ort_compare_with_pytorch(ort_outs, output, rtol, atol):
     assert len(outputs) == len(ort_outs), "number of outputs differ"
 
     # compare onnxruntime and PyTorch results
-    [
+    for out, ort_out in zip(outputs, ort_outs):
         np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol)
-        for out, ort_out in zip(outputs, ort_outs)
-    ]
 
 
 def verify(
@@ -169,7 +163,7 @@ def verify(
     atol=1e-7,
     do_constant_folding=True,
     dynamic_axes=None,
-    test_with_inputs=None,
+    additional_test_inputs=None,
     input_names=None,
     output_names=None,
     fixed_batch_size=False,
@@ -218,7 +212,7 @@ def verify(
                 tmpdirname = stack.enter_context(tempfile.TemporaryDirectory())
                 model_f = os.path.join(tmpdirname, "model.onnx")
 
-            ort_sess = _convert_to_onnx(
+            ort_session = _convert_to_onnx(
                 model,
                 model_f,
                 input=input,
@@ -247,13 +241,13 @@ def verify(
             elif input_copy and input_copy[-1] == {}:
                 # Handle empty kwargs (normally removed by flatten).
                 input_copy = input_copy[:-1]
-            ort_outs = _run_ort(ort_sess, input_copy)
+            ort_outs = _run_ort(ort_session, input_copy)
             _ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
             # if additional test inputs are provided run the onnx
             # model with these inputs and check the outputs
-            if test_with_inputs is not None:
-                for test_input in test_with_inputs:
+            if additional_test_inputs is not None:
+                for test_input in additional_test_inputs:
                     if isinstance(test_input, Tensor):
                         test_input = (test_input,)
                     test_input_copy = copy.deepcopy(test_input)
@@ -267,5 +261,5 @@ def verify(
                         test_input = test_input_onnx
                     if flatten:
                         test_input, _ = torch.jit._flatten(test_input)
-                    ort_outs = _run_ort(ort_sess, test_input)
+                    ort_outs = _run_ort(ort_session, test_input)
                     _ort_compare_with_pytorch(ort_outs, output, rtol, atol)
