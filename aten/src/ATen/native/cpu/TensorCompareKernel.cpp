@@ -1,3 +1,5 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorCompare.h>
 
@@ -10,12 +12,19 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/WrapDimUtils.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/Loops.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/result_type.h>
+#endif
 
 namespace at { namespace native { namespace {
 
@@ -350,7 +359,7 @@ static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min
   });
 }
 
-static void clamp_max_kernel_impl(TensorIterator& iter) {
+static void clamp_max_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_max_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t max) -> scalar_t {
@@ -376,7 +385,7 @@ static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) 
   });
 }
 
-static void clamp_min_kernel_impl(TensorIterator& iter) {
+static void clamp_min_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_cpu", [&]() {
     cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t min) -> scalar_t {

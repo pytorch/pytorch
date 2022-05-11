@@ -1,13 +1,6 @@
 torch
 =====
-The torch package contains data structures for multi-dimensional
-tensors and defines mathematical operations over these tensors.
-Additionally, it provides many utilities for efficient serializing of
-Tensors and arbitrary types, and other useful utilities.
-
-It has a CUDA counterpart, that enables you to run your tensor computations
-on an NVIDIA GPU with compute capability >= 3.0
-
+.. automodule:: torch
 .. currentmodule:: torch
 
 Tensors
@@ -584,7 +577,6 @@ BLAS and LAPACK Operations
     outer
     pinverse
     qr
-    solve
     svd
     svd_lowrank
     pca_lowrank
@@ -611,7 +603,24 @@ Utilities
     is_deterministic_algorithms_warn_only_enabled
     set_deterministic_debug_mode
     get_deterministic_debug_mode
+    set_float32_matmul_precision
+    get_float32_matmul_precision
     set_warn_always
     is_warn_always_enabled
     vmap
     _assert
+
+
+.. Empty submodules added only for tracking.
+.. py:module:: torch.contrib
+.. py:module:: torch.utils.backcompat
+
+.. This submodule is split manually without a top level page.
+.. py:module:: torch.utils
+
+.. This module is only used internally for ROCm builds.
+.. py:module:: torch.utils.hipify
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.utils.model_dump

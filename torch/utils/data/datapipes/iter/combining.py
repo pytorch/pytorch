@@ -3,12 +3,17 @@ import warnings
 from collections import deque
 from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
 
-from torch.utils.data import IterDataPipe, functional_datapipe
-from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
+from torch.utils.data.datapipes.utils.common import _check_lambda_fn
 
-if DILL_AVAILABLE:
-    import dill
-    dill.extend(use_dill=False)
+__all__ = [
+    "ConcaterIterDataPipe",
+    "DemultiplexerIterDataPipe",
+    "ForkerIterDataPipe",
+    "MultiplexerIterDataPipe",
+    "ZipperIterDataPipe",
+]
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -157,6 +162,34 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.leading_ptr = 0
         self.end_ptr = None
 
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+
+        state = (
+            self.main_datapipe,
+            self.num_instances,
+            self.buffer_size,
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.main_datapipe,
+            self.num_instances,
+            self.buffer_size,
+        ) = state
+        self._datapipe_iterator = None
+        self.buffer = deque()
+        self.child_pointers = [0] * self.num_instances
+        self.slowest_ptr = 0
+        self.leading_ptr = 0
+        self.end_ptr = None
+
+    def __del__(self):
+        self.buffer.clear()
+
+
 class _ChildDataPipe(IterDataPipe):
     r"""
     Iterable Datapipe that is a child of a main DataPipe. The instance of this class
@@ -229,7 +262,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
 
-        check_lambda_fn(classifier_fn)
+        _check_lambda_fn(classifier_fn)
 
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
@@ -321,15 +354,11 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
 
-        if DILL_AVAILABLE:
-            dill_function = dill.dumps(self.classifier_fn)
-        else:
-            dill_function = self.classifier_fn
         state = (
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            dill_function,
+            self.classifier_fn,
             self.drop_none,
         )
         return state
@@ -339,18 +368,18 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            dill_function,
+            self.classifier_fn,
             self.drop_none,
         ) = state
-        if DILL_AVAILABLE:
-            self.classifier_fn = dill.loads(dill_function)  # type: ignore[assignment]
-        else:
-            self.classifier_fn = dill_function  # type: ignore[assignment]
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
         self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
+
+    def __del__(self):
+        for dq in self.child_buffers:
+            dq.clear()
 
 
 @functional_datapipe('mux')

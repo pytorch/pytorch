@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-echo "Running pre-commit flake8"
-python3 tools/linter/flake8_hook.py
-
 echo "Running pre-commit clang-tidy"
 git diff HEAD > pr.diff
 python3 -m tools.linter.clang_tidy --diff-file "pr.diff"

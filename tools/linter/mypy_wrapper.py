@@ -25,6 +25,7 @@ from pathlib import Path, PurePath, PurePosixPath
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import mypy.api
+
 # not part of the public API, but this is the easiest way to ensure that
 # we agree with what mypy actually does
 import mypy.config_parser
@@ -37,9 +38,11 @@ def read_config(config_path: Path) -> Set[str]:
     config = ConfigParser()
     config.read(config_path)
     # hopefully on Windows this gives posix paths
-    return set(mypy.config_parser.split_and_match_files(
-        config['mypy']['files'],
-    ))
+    return set(
+        mypy.config_parser.split_and_match_files(
+            config["mypy"]["files"],
+        )
+    )
 
 
 # see tools/test/test_mypy_wrapper.py for examples of many of the
@@ -50,7 +53,7 @@ def config_files() -> Dict[str, Set[str]]:
     """
     Return a dict from all our `mypy` ini filenames to their `files`.
     """
-    return {str(ini): read_config(ini) for ini in Path().glob('mypy*.ini')}
+    return {str(ini): read_config(ini) for ini in Path().glob("mypy*.ini")}
 
 
 def split_path(path: str) -> List[str]:
@@ -107,9 +110,7 @@ def lookup(trie: Trie, filename: str) -> Set[str]:
 
 
 def make_plan(
-    *,
-    configs: Dict[str, Set[str]],
-    files: List[str]
+    *, configs: Dict[str, Set[str]], files: List[str]
 ) -> Dict[str, List[str]]:
     """
     Return a dict from config names to the files to run them with.
@@ -142,18 +143,21 @@ def run(
     run at most once for each `mypy` config used by this repo.
     """
     repo_root = Path.cwd()
-    plan = make_plan(configs=config_files(), files=[
-        PurePath(f).relative_to(repo_root).as_posix() for f in files
-    ])
+    plan = make_plan(
+        configs=config_files(),
+        files=[PurePath(f).relative_to(repo_root).as_posix() for f in files],
+    )
     mypy_results = [
         mypy.api.run(
             # insert custom flags after args to avoid being overridden
             # by existing flags in args
-            args + [
+            args
+            + [
                 # don't special-case the last line
-                '--no-error-summary',
-                f'--config-file={config}',
-            ] + filtered
+                "--no-error-summary",
+                f"--config-file={config}",
+            ]
+            + filtered
         )
         # by construction, filtered must be nonempty
         for config, filtered in plan.items()
@@ -165,11 +169,11 @@ def run(
             [exit_code for _, _, exit_code in mypy_results],
             default=0,
         ),
-        list(dict.fromkeys(  # remove duplicates, retain order
-            item
-            for stdout, _, _ in mypy_results
-            for item in stdout.splitlines()
-        )),
+        list(
+            dict.fromkeys(  # remove duplicates, retain order
+                item for stdout, _, _ in mypy_results for item in stdout.splitlines()
+            )
+        ),
         [stderr for _, stderr, _ in mypy_results],
     )
 
@@ -212,9 +216,9 @@ def main(args: List[str]) -> None:
     for issue in mypy_issues:
         print(issue)
     for stderr in stderrs:
-        print(stderr, end='', file=sys.stderr)
+        print(stderr, end="", file=sys.stderr)
     sys.exit(exit_code)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main(sys.argv[1:])

@@ -1,3 +1,4 @@
+import sys
 import collections.abc
 import copy
 from dataclasses import dataclass
@@ -18,6 +19,11 @@ from torch.distributed.algorithms.join import (
     Joinable,
     JoinHook,
 )
+from torch.distributed.utils import (
+    _verify_param_shape_across_processes,
+    _sync_params_and_buffers
+)
+
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
@@ -31,6 +37,7 @@ from torch._utils import _get_device_index
 
 from ..modules import Module
 from ._functions import _get_stream
+from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
 from .scatter_gather import gather, is_namedtuple, scatter_kwargs
 
 
@@ -230,7 +237,6 @@ class _DDPJoinHook(JoinHook):
         """
         self.ddp._sync_final_model(is_last_joiner)
 
-
 class DistributedDataParallel(Module, Joinable):
     r"""Implements distributed data parallelism that is based on
     ``torch.distributed`` package at the module level.
@@ -407,11 +413,6 @@ class DistributedDataParallel(Module, Joinable):
         ``forkserver`` (Python 3 only) or ``spawn``. Unfortunately
         Gloo (that uses Infiniband) and NCCL2 are not fork safe, and you will
         likely experience deadlocks if you don't change this setting.
-
-    .. warning::
-        Forward and backward hooks defined on :attr:`module` and its submodules
-        won't be invoked anymore, unless the hooks are initialized in the
-        :meth:`forward` method.
 
     .. warning::
         You should never try to change your model's parameters after wrapping
@@ -610,6 +611,9 @@ class DistributedDataParallel(Module, Joinable):
         else:
             self.parameters_to_ignore = []
 
+        self._use_replicated_tensor_module = _ddp_with_replicated_tensor_enabled()
+        self._build_replicated_tensor_module()
+
         if check_reduction:
             # This argument is no longer used since the reducer
             # will ensure reduction completes even if some parameters
@@ -640,9 +644,15 @@ class DistributedDataParallel(Module, Joinable):
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # Verify model equivalence.
-        dist._verify_params_across_processes(self.process_group, parameters)
+        _verify_param_shape_across_processes(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
-        self._sync_params_and_buffers(authoritative_rank=0)
+        _sync_params_and_buffers(
+            module=self.module,
+            process_group=self.process_group,
+            broadcast_bucket_size=self.broadcast_bucket_size,
+            src=0,
+            params_and_buffers_to_ignore=self.parameters_to_ignore,
+        )
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
         # Builds reducer.
@@ -654,20 +664,13 @@ class DistributedDataParallel(Module, Joinable):
         if static_graph:
             self._set_static_graph()
 
-    def _sync_params_and_buffers(self, authoritative_rank=0):
-        module_states = []
-        for name, param in self.module.named_parameters():
-            if name not in self.parameters_to_ignore:
-                module_states.append(param.detach())
-
-        for name, buffer in self.module.named_buffers():
-            if name not in self.parameters_to_ignore:
-                module_states.append(buffer.detach())
-
-        if len(module_states) > 0:
-            self._distributed_broadcast_coalesced(
-                module_states, self.broadcast_bucket_size, authoritative_rank
-            )
+    def _build_replicated_tensor_module(self):
+        if self._use_replicated_tensor_module:
+            # Create a module with ReplicatedTensor without copying tensors. Avoid
+            # registering '_replicated_tensor_module' as a submodule by directly
+            # adding to self.__dict__.
+            from ._replicated_tensor_ddp_interop import _replicate_module
+            self.__dict__['_replicated_tensor_module'] = _replicate_module(self.module, self.process_group)
 
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
@@ -687,14 +690,32 @@ class DistributedDataParallel(Module, Joinable):
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
         self.num_iterations = 0
-        # The bucket size limit is specified in the constructor.
-        # Additionally, we allow for a single small bucket for parameters
-        # that are defined first, such that their gradients don't spill into
-        # a much larger bucket, adding unnecessary latency after gradient
-        # computation finishes. Experiments showed 1MB is a reasonable value.
+        # Notice, the parameters order is not in the order in which they are used,
+        # especially in models with control flow.
+        #
+        # Alongside parameters are not presented in the real execution order,
+        # if a certain model happens to also
+        #   1) have other collectives comm ops in its backward graph.
+        #   2) have unused parameter in subset ranks of the whole world.
+        # bucketing could insert ALL-REDUCE comm op too early on the rank with unused parameter,
+        # matching up with other collectives comm ops on other ranks unexpectedly.
+        #
+        # In order to handle this corner case, when the parameters are not in the real execution order,
+        # we don't do bucketing, thus only one ALL-REDUCE is inserted after all the gradients
+        # of the whole graph are computed.
+        #
+        # Notice, here we only disable bucketing for the first iteration.
+        # After the first iteration, it's OK to rebuild buckets,
+        # because "bucket rebuild" bucketizes parameters based on its real execution order in backward graph.
+
+        # Can remove this branching once #73732 is landed.
+        if static_graph is True or self.find_unused_parameters is False:
+            bucket_size_limits = [sys.maxsize]
+        else:
+            bucket_size_limits = [dist._DEFAULT_FIRST_BUCKET_BYTES, self.bucket_bytes_cap]
         bucket_indices, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
             parameters,
-            [dist._DEFAULT_FIRST_BUCKET_BYTES, self.bucket_bytes_cap],
+            bucket_size_limits,
             expect_sparse_gradient,
         )
 
@@ -707,6 +728,11 @@ class DistributedDataParallel(Module, Joinable):
             list(reversed(per_bucket_size_limits)),
             self.process_group,
             expect_sparse_gradient,
+            # The bucket size limit is specified in the constructor.
+            # Additionally, we allow for a single small bucket for parameters
+            # that are defined first, such that their gradients don't spill into
+            # a much larger bucket, adding unnecessary latency after gradient
+            # computation finishes. Experiments showed 1MB is a reasonable value.
             self.bucket_bytes_cap,
             self.find_unused_parameters,
             self.gradient_as_bucket_view,
@@ -746,12 +772,15 @@ class DistributedDataParallel(Module, Joinable):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
+        if self._use_replicated_tensor_module:
+            del attrs["_replicated_tensor_module"]
         return attrs
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
+        self._build_replicated_tensor_module()
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
@@ -834,7 +863,7 @@ class DistributedDataParallel(Module, Joinable):
         }
 
     def _build_debug_param_to_name_mapping(self, parameters):
-        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+        if dist.get_debug_level() == dist.DebugLevel.OFF:
             return {}
 
         param_to_param_index = {parameters[i]: i for i in range(len(parameters))}
@@ -928,6 +957,15 @@ class DistributedDataParallel(Module, Joinable):
         finally:
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
+    def _run_ddp_forward(self, *inputs, **kwargs):
+        module_to_run = self._replicated_tensor_module if self._use_replicated_tensor_module else self.module
+
+        if self.device_ids:
+            inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
+            return module_to_run(*inputs[0], **kwargs[0])
+        else:
+            return module_to_run(*inputs, **kwargs)
+
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
@@ -963,11 +1001,7 @@ class DistributedDataParallel(Module, Joinable):
                 # Notify joined ranks whether they should sync in backwards pass or not.
                 self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
-            if self.device_ids:
-                inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
-                output = self.module(*inputs[0], **kwargs[0])
-            else:
-                output = self.module(*inputs, **kwargs)
+            output = self._run_ddp_forward(*inputs, **kwargs)
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
@@ -1103,6 +1137,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def train(self, mode=True):
         super(DistributedDataParallel, self).train(mode)
+        if self._use_replicated_tensor_module:
+            self._replicated_tensor_module.train(mode)
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks
@@ -1134,7 +1170,13 @@ class DistributedDataParallel(Module, Joinable):
         self._authoritative_rank = self._find_common_rank(
             self._distributed_rank, is_last_joiner
         )
-        self._sync_params_and_buffers(authoritative_rank=self._authoritative_rank)
+        _sync_params_and_buffers(
+            module=self.module,
+            process_group=self.process_group,
+            broadcast_bucket_size=self.broadcast_bucket_size,
+            src=self._authoritative_rank,
+            params_and_buffers_to_ignore=self.parameters_to_ignore
+        )
 
     # Schedule comm ops to match those scheduled in the reducer's backward
     # pass.

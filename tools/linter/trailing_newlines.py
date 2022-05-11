@@ -4,11 +4,11 @@ import fileinput
 import os
 import sys
 
-NEWLINE, = b'\n'
+(NEWLINE,) = b"\n"
 
 
 def correct_trailing_newlines(filename: str) -> bool:
-    with open(filename, 'rb') as f:
+    with open(filename, "rb") as f:
         a = len(f.read(2))
         if a == 0:
             return True
@@ -33,5 +33,5 @@ def main() -> int:
     return exit_code
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())
