@@ -9,6 +9,25 @@ from ._common import (
     _register_sharded_op_on_local_shards,
 )
 
+@sharded_op_impl(torch.Tensor.__deepcopy__)
+def tensor_deepcopy(types, args=(), kwargs=None, pg=None):
+    # NOTE: we directly implement deepcopy magic method
+    # instead of using the default tensor.__deepcopy__
+    # and implement clone(). This is because the default
+    # tensor deepcopy copies every attribute, but the
+    # process_group in ShardedTensor cannot be deep copied.
+    self_st = args[0]
+    # Validate types
+    if not isinstance(self_st, ShardedTensor):
+        raise TypeError("input needs to be a ShardedTensor")
+
+    return ShardedTensor._init_from_local_shards_and_global_metadata(
+        local_shards=copy.deepcopy(self_st.local_shards()),
+        sharded_tensor_metadata=copy.deepcopy(self_st.metadata()),
+        process_group=self_st._process_group,
+        init_rrefs=self_st._init_rrefs
+    )
+
 
 def register_default_op(op):
     @sharded_op_impl(op)
