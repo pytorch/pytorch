@@ -36,7 +36,7 @@ def define_glog():
             'glog/src/signalhandler.cc',
             'glog/src/utilities.cc',
         ],
-        headers = [":glog_{}".format(header) for header in GLOG_CONFIG_HEADERS],
+        exported_headers = [":glog_{}".format(header) for header in GLOG_CONFIG_HEADERS],
         header_namespace = "glog",
         compiler_flags = [
             '-Wno-sign-compare',

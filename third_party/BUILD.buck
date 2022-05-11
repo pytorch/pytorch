@@ -1,10 +1,7 @@
 load("//third_party:glog.buck.bzl", "define_glog")
-load("//third_party:ruy.buck.bzl", "define_ruy")
 load("//third_party:xnnpack.buck.bzl", "define_xnnpack")
 
 define_glog()
-
-define_ruy()
 
 define_xnnpack()
 
@@ -200,4 +197,25 @@ prebuilt_python_library(
   binary_src = ":pyyaml-download",
   visibility = ["PUBLIC"],
   deps = [":pyyaml-download"],
+)
+
+cxx_library(
+    name = "ruy_lib",
+    srcs = glob(
+        ["ruy/**/*.cc"],
+        exclude = [
+            "ruy/ruy/test_*.cc",
+            "ruy/ruy/*_test.cc",
+            "ruy/example/*.cc",
+            "ruy/ruy/profiler/test.cc",
+            "ruy/ruy/benchmark.cc",
+        ],
+    ),
+    compiler_flags = ["-Os"],
+    preferred_linkage = "static",
+    public_include_directories = ["ruy"],
+    raw_headers = glob(["ruy/**/*.h"]),
+    visibility = [
+        "PUBLIC",
+    ],
 )

@@ -14,5 +14,5 @@ mv glog-0.4.0/ glog/
 
 # ruy
 curl -L -o /tmp/ruy-a09683b8da7164b9c5704f88aef2dc65aa583e5d.zip https://github.com/google/ruy/archive/a09683b8da7164b9c5704f88aef2dc65aa583e5d.zip
-tar -xf /tmp/ruy-a09683b8da7164b9c5704f88aef2dc65aa583e5d.zip
+unzip /tmp/ruy-a09683b8da7164b9c5704f88aef2dc65aa583e5d.zip
 mv ruy-a09683b8da7164b9c5704f88aef2dc65aa583e5d/ ruy/
