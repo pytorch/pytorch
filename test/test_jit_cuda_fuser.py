@@ -2384,12 +2384,7 @@ class TestCudaFuser(JitTestCase):
             return o
 
         t_jit = torch.jit.script(t)
-        jit_o = t_jit(x, y, (4, 1))
-        jit_o = t_jit(x, y, (4, 1))
-        o = t(x, y, (4, 1))
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertEqual(o, jit_o)
-        self.assertGraphContains(t_jit.graph_for(x, y, (4, 1)), FUSION_GUARD)
+        self._run_helper(t_jit, t, x, y, (4, 1))
 
         # update shape: old kernel should handle dynamic shape well without
         # recompilation
@@ -2397,10 +2392,17 @@ class TestCudaFuser(JitTestCase):
         y = torch.randn([2, 5, 8], dtype=dtype, device=device)
         # (TODO) check executed kernel, should extend autograd.profiler to fused
         # kernels
-        jit_o = t_jit(x, y, (5, 1))
-        o = t(x, y, (5, 1))
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertEqual(o, jit_o)
+        self._run_helper(t_jit, t, x, y, (5, 1))
+
+        with nvfuser_singleton_fusion(True):
+            x = torch.randn([2, 5, 8], dtype=dtype, device=device)
+
+            def t(x: torch.Tensor):
+                # no-op reduction
+                return x.sum_to_size((2, 5, 8))
+
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, x)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")

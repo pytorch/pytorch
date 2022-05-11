@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 
+#include <c10/util/BFloat16.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Half.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
@@ -199,6 +201,14 @@ Val* getMinimumValue(DataType v) {
     case (DataType::Float):
       return IrBuilder::create<Double>(-std::numeric_limits<float>::infinity());
       break;
+    case (DataType::Half):
+      return IrBuilder::create<Double>(
+          static_cast<double>(-std::numeric_limits<c10::Half>::infinity()));
+      break;
+    case DataType::BFloat16:
+      return IrBuilder::create<Double>(
+          static_cast<double>(-std::numeric_limits<c10::BFloat16>::infinity()));
+      break;
     case (DataType::Int):
       return IrBuilder::create<Int>(std::numeric_limits<int64_t>::lowest());
       break;
@@ -210,7 +220,7 @@ Val* getMinimumValue(DataType v) {
       break;
     default:
       TORCH_CHECK(
-          false, "Could not generate a max op for tensor with type: ", v);
+          false, "Could not generate a min op for tensor with type: ", v);
   }
   return nullptr;
 }
@@ -227,6 +237,14 @@ Val* getMaximumValue(DataType v) {
     case (DataType::Float):
       return IrBuilder::create<Double>(std::numeric_limits<float>::infinity());
       break;
+    case (DataType::Half):
+      return IrBuilder::create<Double>(
+          static_cast<double>(std::numeric_limits<c10::Half>::infinity()));
+      break;
+    case DataType::BFloat16:
+      return IrBuilder::create<Double>(
+          static_cast<double>(std::numeric_limits<c10::BFloat16>::infinity()));
+      break;
     case (DataType::Int):
       return IrBuilder::create<Int>(std::numeric_limits<int64_t>::max());
       break;
@@ -238,7 +256,7 @@ Val* getMaximumValue(DataType v) {
       break;
     default:
       TORCH_CHECK(
-          false, "Could not generate a min op for tensor with type: ", v);
+          false, "Could not generate a max op for tensor with type: ", v);
   }
   return nullptr;
 }

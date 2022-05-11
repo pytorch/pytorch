@@ -86,6 +86,25 @@ bool isInputNonSizeZeroTensor(const Node* node) {
   return true;
 }
 
+bool isScalarTypeCompatible(const Node* node, size_t offset) {
+  auto val = node->input(offset);
+  // return true if it's not specified
+  if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(NoneType::get()))) {
+    return true;
+  }
+  // return false if it's runtime value
+  if (val->node()->kind() != prim::Constant) {
+    return false;
+  }
+  auto dtype = toIValue(val)->toScalarType();
+
+  // we do NOT support half math type yet
+  if (dtype == at::ScalarType::Half || dtype == at::ScalarType::BFloat16) {
+    return false;
+  }
+  return true;
+}
+
 // Note [ Permutation Bookkeeping and Propagation in Parser ]
 //
 // The goal in supporting permutation propagation in parser is to:
@@ -780,11 +799,14 @@ class IrParser {
   static bool lookupInSymbolSet(const Node* node) {
     initRegistry();
 
+    std::lock_guard<std::mutex> lock(parser_mutex_);
     return parser_symbol_set_.count(node->kind()) != 0;
   }
 
   // return nullptr if entry does not exist
   static const RegistrationEntry* lookupInRegistry(const Node* node) {
+    std::lock_guard<std::mutex> lock(parser_mutex_);
+
     if (parser_skip_set_.count(node->kind()) != 0) {
       return nullptr;
     }
@@ -812,6 +834,9 @@ class IrParser {
   }
 
   static bool querySkipSymbolSet(c10::Symbol symbol, bool flip) {
+    initRegistry();
+
+    std::lock_guard<std::mutex> lock(parser_mutex_);
     // no need to init registry here (unlike `lookupInSymbolSet`, as
     // `parser_skip_set_` is not initialized via initialization
     bool ret = parser_skip_set_.count(symbol) != 0;
@@ -826,7 +851,10 @@ class IrParser {
   }
 
   static void initRegistry() {
-    std::call_once(once_flag_, []() { registerJitOperator(); });
+    std::call_once(once_flag_, []() {
+      std::lock_guard<std::mutex> lock(parser_mutex_);
+      registerJitOperator();
+    });
   }
 
   static bool canParseNode(const Node* node) {
@@ -2245,10 +2273,7 @@ class IrParser {
               if (node->inputs()[1]->node()->kind() != prim::Constant) {
                 return false;
               }
-              // TODO: support dynamic input by profiling it
-              if (!node->inputs()[2]->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get())) &&
-                  node->inputs()[2]->node()->kind() != prim::Constant) {
+              if (!isScalarTypeCompatible(node, 2)) {
                 return false;
               }
               return true;
@@ -2572,7 +2597,13 @@ class IrParser {
                   size_to.has_value(),
                   "aten::sum cannot be fused with dynamic axes");
               if (!size_to->empty()) {
-                auto out = sum_to(self->as<TensorView>(), size_to->vec());
+                auto input = self->as<TensorView>();
+                auto out = sum_to(input, size_to->vec());
+                // this copy is not necessary, but making copy avoids tricky
+                // computational graph where no-op could be challenging.
+                if (out == input) {
+                  out = set(input);
+                }
                 value_map.emplace(node->output()->unique(), out);
               } else {
                 // We are introducing alias here!
@@ -3286,6 +3317,7 @@ class IrParser {
 
   static std::unordered_set<Symbol> parser_symbol_set_;
   static std::unordered_set<Symbol> parser_skip_set_;
+  static std::mutex parser_mutex_;
 
   // parsing rule registry.
   static std::unordered_map<std::string, RegistrationEntry>
@@ -3300,6 +3332,7 @@ class IrParser {
 };
 std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
 std::unordered_set<Symbol> IrParser::parser_skip_set_; // NOLINT
+std::mutex IrParser::parser_mutex_;
 std::unordered_map<std::string, IrParser::RegistrationEntry>
     IrParser::jit_operator_registry_; // NOLINT
 std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
