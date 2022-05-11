@@ -28,6 +28,29 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     """
     return True
 
+
+def transformer_auto_wrap_policy(
+    module: nn.Module,
+    recurse: bool,
+    unwrapped_params: int,
+    transformer_layer_cls: Set[Type[nn.Module]],
+) -> bool:
+    """
+    A convenient auto wrap policy for transformer models. If the submodule is an instance of
+    transformer_layer_cls, the submodule will be wrapped as a FSDP unit. Otherwise, all the other
+    remainder submodules are wrapped by the outermost FSDP unit. Right now, FSDP requires submodules
+    that share weights to be wrapped in the same FSDP unit, this auto wrap policy can conviniently
+    wrap the shared embeddings into the same FSDP unit for transformer models. In the near future,
+    FSDP will support submodules that share weights to be wrapped in the separated FSDP units.
+    """
+    if recurse:
+        # always recurse
+        return True
+    else:
+        # if not recursing, decide whether we should wrap for the leaf node or reminder
+        return isinstance(module, tuple(transformer_layer_cls))
+
+
 def default_auto_wrap_policy(
     module: nn.Module,
     recurse: bool,

@@ -5,6 +5,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind Narrow::class_op_kind(at::aten::narrow);
+
 Narrow::Narrow(
     const Value& input,
     c10::ArrayRef<int64_t> base_indices,

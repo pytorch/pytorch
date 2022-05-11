@@ -7,6 +7,8 @@ namespace lazy {
 
 class TORCH_API Resize : public TsNode {
  public:
+  static const OpKind class_op_kind;
+
   Resize(const Value& input, std::vector<int64_t> size);
 
   std::string ToString() const override;

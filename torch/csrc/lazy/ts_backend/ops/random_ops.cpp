@@ -4,6 +4,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind Normal::class_op_kind(c10::Symbol::fromQualString("aten::normal_"));
+
 Normal::Normal(const torch::lazy::Value& self, const double& mean, const double& std, std::vector<torch::lazy::Shape>&& shapes)
     : torch::lazy::TsNode(torch::lazy::OpKind(c10::Symbol::fromQualString("aten::normal_")),
             {self}, std::move(shapes),

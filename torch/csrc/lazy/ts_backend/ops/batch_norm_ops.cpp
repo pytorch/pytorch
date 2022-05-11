@@ -4,6 +4,9 @@
 namespace torch {
 namespace lazy {
 
+const OpKind TSNativeBatchNormBackward::class_op_kind(at::aten::native_batch_norm_backward);
+const OpKind TSNativeBatchNormForward::class_op_kind(at::aten::native_batch_norm);
+
 TSNativeBatchNormBackward::TSNativeBatchNormBackward(
     const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
     const torch::lazy::Value& weight, const torch::lazy::Value& running_mean,

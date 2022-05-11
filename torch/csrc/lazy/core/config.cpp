@@ -13,6 +13,11 @@ C10_DEFINE_bool(
     "Handle special scalars 0 and 1 diffrently");
 
 C10_DEFINE_bool(
+    torch_lazy_reuse_ir,
+    false,
+    "Reuse IR nodes from previous tracing when possible");
+
+C10_DEFINE_bool(
     torch_lazy_use_thread_pool,
     false,
     "Use thread pool to schedule backend execution");

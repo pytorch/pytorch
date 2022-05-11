@@ -9,7 +9,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample, IS_LINUX
+    DeterministicGuard, first_sample
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -1243,9 +1243,8 @@ class TestSparse(TestCase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
-    # TODO: remove skipIf when https://github.com/pytorch/pytorch/pull/73428 lands
     @coalescedonoff
-    @unittest.skipIf(IS_WINDOWS or IS_LINUX, "See https://github.com/pytorch/pytorch/issues/73145")
+    @unittest.skip("See https://github.com/pytorch/pytorch/issues/73145")
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     def test_sparse_addmm(self, device, dtype, coalesced):
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
@@ -3565,6 +3564,7 @@ class TestSparseMaskedReductions(TestCase):
         """
 
         samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
+        op_name = op.name.replace('_masked.', '')
         for sample_input in samples:
             if sample_input.kwargs.get('dim') != 0:
                 continue
@@ -3573,6 +3573,12 @@ class TestSparseMaskedReductions(TestCase):
 
             t = sample_input.input
             mask = sample_input_kwargs.get('mask')
+            if mask is None and op_name in {'prod', 'amax', 'amin'}:
+                # FIXME: for now reductions with non-zero reduction identity and
+                # unspecified mask are not supported for sparse COO
+                # tensors, see torch._masked.prod implementation
+                # for details.
+                continue
             sparse_op_kwargs = dict(sample_input_kwargs)
             actual = op(t.to_sparse(), *sample_input.args, **sample_input_kwargs)
             self.assertEqual(actual.layout, torch.sparse_coo)

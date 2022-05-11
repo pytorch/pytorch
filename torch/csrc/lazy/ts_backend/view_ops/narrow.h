@@ -7,6 +7,8 @@ namespace lazy {
 
 class TORCH_API Narrow : public TsNode {
  public:
+  static const OpKind class_op_kind;
+
   Narrow(
       const Value& input,
       c10::ArrayRef<int64_t> base_indices,

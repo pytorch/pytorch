@@ -7,6 +7,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind Diagonal::class_op_kind(at::aten::diagonal);
+
 Diagonal::Diagonal(
     const Value& input,
     int64_t offset,

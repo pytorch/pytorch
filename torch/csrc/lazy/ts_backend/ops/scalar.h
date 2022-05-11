@@ -12,6 +12,8 @@ namespace lazy {
 // computation graph.
 class TORCH_API Scalar : public TsNode {
  public:
+  static const OpKind class_op_kind;
+
   Scalar(const at::Scalar& value, Shape shape);
   Scalar(const at::Scalar& value, c10::ScalarType type);
 

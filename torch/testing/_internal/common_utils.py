@@ -871,6 +871,10 @@ if IS_WINDOWS:
 
 # Dict of torch dtype -> NumPy dtype
 torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
+torch_to_numpy_dtype_dict.update({
+    torch.bfloat16: np.float32,
+    torch.complex32: np.complex64
+})
 
 def skipIfRocm(fn):
     @wraps(fn)
@@ -2017,37 +2021,60 @@ class TestCase(expecttest.TestCase):
         crow_indices.cumsum_(dim=0)
         return crow_indices.to(device=device)
 
-    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+    def genSparseCompressedTensor(self, size, nnz, *, layout, device, dtype, index_dtype, block_size=()):
         from operator import mul
         from functools import reduce
         sparse_dim = 2
         assert all(size[d] > 0 for d in range(len(size))) or nnz == 0, 'invalid arguments'
         assert len(size) >= sparse_dim
+        if block_size:
+            assert len(block_size) == 2
 
-        def random_sparse_csr(n_rows, n_cols, nnz):
-            crow_indices = self._make_crow_indices(n_rows, n_cols, nnz, device=device, dtype=index_dtype)
-            col_indices = torch.zeros(nnz, dtype=index_dtype, device=device)
-            for i in range(n_rows):
-                count = crow_indices[i + 1] - crow_indices[i]
-                col_indices[crow_indices[i]:crow_indices[i + 1]], _ = torch.sort(
-                    torch.randperm(n_cols, dtype=index_dtype, device=device)[:count])
+        def random_sparse_compressed(n_compressed_dims, n_plain_dims, nnz):
+            compressed_indices = self._make_crow_indices(n_compressed_dims, n_plain_dims, nnz, device=device, dtype=index_dtype)
+            plain_indices = torch.zeros(nnz, dtype=index_dtype, device=device)
+            for i in range(n_compressed_dims):
+                count = compressed_indices[i + 1] - compressed_indices[i]
+                plain_indices[compressed_indices[i]:compressed_indices[i + 1]], _ = torch.sort(
+                    torch.randperm(n_plain_dims, dtype=index_dtype, device=device)[:count])
             low = -1 if dtype != torch.uint8 else 0
             high = 1 if dtype != torch.uint8 else 2
-            values = make_tensor([nnz], device=device, dtype=dtype, low=low, high=high)
-            return values, crow_indices, col_indices
+            values = make_tensor((nnz,) + block_size, device=device, dtype=dtype, low=low, high=high)
+            return values, compressed_indices, plain_indices
 
         batch_shape = size[:-2]
         n_batch = reduce(mul, batch_shape, 1)
 
-        sparse_tensors = [random_sparse_csr(size[-2], size[-1], nnz) for _ in range(n_batch)]
+        if layout in {torch.sparse_csr, torch.sparse_bsr}:
+            n_compressed_dims, n_plain_dims = size[-2], size[-1]
+        else:
+            n_compressed_dims, n_plain_dims = size[-1], size[-2]
+        sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, nnz) for _ in range(n_batch)]
         sparse_tensors_it = map(list, zip(*sparse_tensors))
         values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
-        crow_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
-        col_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+        compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+        plain_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
 
-        return torch.sparse_csr_tensor(crow_indices,
-                                       col_indices,
-                                       values, size=size, dtype=dtype, device=device)
+        return torch.sparse_compressed_tensor(compressed_indices, plain_indices,
+                                              values, size=size, dtype=dtype, layout=layout, device=device)
+
+    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csr, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, block_size=())
+
+    def genSparseCSCTensor(self, size, nnz, *, device, dtype, index_dtype):
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csc, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, block_size=())
+
+    def genSparseBSRTensor(self, size, block_size, nnz, *, device, dtype, index_dtype):
+        assert len(block_size) == 2
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsr, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, block_size=block_size)
+
+    def genSparseBSCTensor(self, size, block_size, nnz, *, device, dtype, index_dtype):
+        assert len(block_size) == 2
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsc, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, block_size=block_size)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
@@ -3131,21 +3158,6 @@ def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.devi
             *byte_list)).value
 
     return torch.tensor(res, device=device, dtype=dtype)
-
-
-def has_breakpad():
-    # We always build with breakpad in CI
-    if IS_IN_CI:
-        return True
-
-    # If not on a special build, check that the library was actually linked in
-    try:
-        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
-        return True
-    except RuntimeError as e:
-        if "Minidump handler is uninintialized" in str(e):
-            return True
-        return False
 
 
 def sandcastle_skip_if(condition, reason):

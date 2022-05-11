@@ -6,6 +6,8 @@
 namespace torch {
 namespace lazy {
 
+const OpKind Permute::class_op_kind(at::aten::permute);
+
 Permute::Permute(const Value& input, std::vector<int64_t> dims)
     : TsNode(
           OpKind(at::aten::permute),

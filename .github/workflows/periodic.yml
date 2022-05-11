@@ -80,6 +80,9 @@ jobs:
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
         ]}
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   linux-xenial-cuda11_3-py3_7-gcc7-debug-build:
     name: linux-xenial-cuda11.3-py3.7-gcc7-debug
