@@ -140,6 +140,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
+  EliminateNoOpSlice(graph);
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
@@ -152,10 +153,11 @@ void OptimizeGraph(
         graph,
         fromQualString("fb::sigrid_transforms_torch_bind"),
         fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
+    // These fused ops only have out variants - we can't do the fusion when
+    // out variants are disabled.
     FuseSignLog1P(graph);
+    FuseClampNaNToNum(graph);
 
-    // TODO: we can avoid this guard by moving operations
-    // to exposed folders.
 #ifdef FBCODE_CAFFE2
     if (opts.use_copy_variants && !opts.enable_tensorexpr_fusion) {
       ReplaceWithCopy(graph);
@@ -176,6 +178,7 @@ void OptimizeGraph(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   AddIfThenElseOp(graph);
   UseSplitAndSqueeze(graph);
+  QuantizedLinearReluFusion(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -1201,8 +1204,10 @@ c10::IValue BlockRunner::run_impl_record_functions(
   if (!step_callbacks.empty()) {
     at::RecordFunction guard(std::move(step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
-    guard.needsInputs() ? guard.before("forward", &args)
-                        : guard.before("forward");
+    guard.needsInputs()
+        ? guard.before(
+              "forward", c10::ArrayRef<const IValue>(args.data(), args.size()))
+        : guard.before("forward");
 
     return run_impl(std::forward<IValueList>(args), kwargs);
   }
@@ -1839,12 +1844,21 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
-      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_OP);
   if (!step_callbacks.empty()) {
     at::RecordFunction guard(std::move(step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
-    guard.needsInputs() ? guard.before(get_op_name(), inputs_ivalue_vec())
-                        : guard.before(get_op_name());
+    if (guard.needsInputs()) {
+      const auto inputs = inputs_ivalue_vec();
+      guard.before(
+          get_op_name(),
+          c10::ArrayRef<const IValue>(inputs.data(), inputs.size()));
+    } else {
+      guard.before(get_op_name());
+    }
+    if (has_out_variant()) {
+      guard._setStaticRuntimeOutVariant();
+    }
 
     fn_->run(this);
   } else {

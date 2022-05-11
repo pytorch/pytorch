@@ -70,7 +70,7 @@ def _symbolic_argument_count(func):
             has_var = True
         elif name == "_outputs" or name == "g":
             continue
-        elif p.default != inspect._empty:   # type: ignore[attr-defined]
+        elif p.default != inspect._empty:  # type: ignore[attr-defined]
             optional_params.append(p)
         else:
             params.append(str(p))
