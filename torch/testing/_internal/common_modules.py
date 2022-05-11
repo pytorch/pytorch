@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
