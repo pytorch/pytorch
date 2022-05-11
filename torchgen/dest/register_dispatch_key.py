@@ -68,14 +68,17 @@ def gen_registration_headers(
 
     return headers
 
-def gen_empty_impl_names(backend_index: BackendIndex) -> Tuple[Optional[str], Optional[str]]:
+
+def gen_empty_impl_names(
+    backend_index: BackendIndex,
+) -> Tuple[Optional[str], Optional[str]]:
     empty_impl = None
     empty_strided_impl = None
 
     if backend_index.dispatch_key in (
-            DispatchKey.Meta,
-            DispatchKey.CPU,
-            DispatchKey.CUDA
+        DispatchKey.Meta,
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
     ):
         dispatch = str(backend_index.dispatch_key).lower()
         empty_impl = f"at::detail::empty_{dispatch}"
@@ -89,6 +92,7 @@ def gen_empty_impl_names(backend_index: BackendIndex) -> Tuple[Optional[str], Op
         empty_strided_impl = "at::empty_strided"
 
     return empty_impl, empty_strided_impl
+
 
 def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     if backend_index.dispatch_key == DispatchKey.Meta:
@@ -115,14 +119,21 @@ Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &o
 
 def gen_maybe_create_proxy_helper(backend_index: BackendIndex) -> List[str]:
     _, empty_strided_impl = gen_empty_impl_names(backend_index)
-    return [] if empty_strided_impl is None else [f"""
+    return (
+        []
+        if empty_strided_impl is None
+        else [
+            f"""
 c10::optional<Tensor> maybe_create_proxy(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
   if (out.strides() != strides) {{
     return {empty_strided_impl}(sizes, strides, options);
   }}
   return c10::nullopt;
 }}
-"""]
+"""
+        ]
+    )
+
 
 def gen_resize_out_helper(backend_index: BackendIndex) -> List[str]:
     return [
@@ -524,7 +535,7 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
     g: NativeFunctionsGroup
 
     def gen_class_set_output_functions(
-            self, k: SchemaKind, parent_class: str, generate_super: bool
+        self, k: SchemaKind, parent_class: str, generate_super: bool
     ) -> str:
         if generate_super:
             set_output_super = f"{parent_class}::set_output_raw_strided(output_idx, sizes, strides, options, names);"
@@ -555,8 +566,8 @@ void set_output_{name}(
 
     def gen_class_set_output_body(self, k: SchemaKind, maybe_create_proxy: bool) -> str:
         if self.backend_index.dispatch_key in [
-                DispatchKey.CUDA,
-                DispatchKey.CompositeExplicitAutograd
+            DispatchKey.CUDA,
+            DispatchKey.CompositeExplicitAutograd,
         ]:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
@@ -657,8 +668,7 @@ resize_out(out, sizes, strides, options);
             f"{textwrap.indent(class_ctor_str, indent)}",
             f"{textwrap.indent(self.gen_class_set_output_functions(k, parent_class, generate_super), indent)}",
             "    const Tensor& maybe_get_output(int64_t output_idx) override {",
-            f"      return {output_value};"
-            "    }",
+            f"      return {output_value};    }",
             f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
             f"{textwrap.indent(proxy_field, indent)}",
             f"{textwrap.indent(guard_field, indent)}",
@@ -819,16 +829,20 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 if k is SchemaKind.out:
                     expr = f"op.maybe_get_output({i})"
                 else:
-                    maybe_star = '*' if k is SchemaKind.functional else ''
+                    maybe_star = "*" if k is SchemaKind.functional else ""
                     expr = f"{maybe_star}op.outputs_[{i}]"
 
-                context.append(Expr(
-                    expr=expr,
-                    # TODO: Stop hardcoding that the output type is a Tensor.  Note
-                    # that for the codegen here this is fine because outputs_ is
-                    # hardcoded to be tensor already
-                    type=NamedCType(out_arg.nctype.name, MutRefCType(BaseCType(tensorT)))
-                ))
+                context.append(
+                    Expr(
+                        expr=expr,
+                        # TODO: Stop hardcoding that the output type is a Tensor.  Note
+                        # that for the codegen here this is fine because outputs_ is
+                        # hardcoded to be tensor already
+                        type=NamedCType(
+                            out_arg.nctype.name, MutRefCType(BaseCType(tensorT))
+                        ),
+                    )
+                )
 
             # With the expanded context, do the impl call (if not a meta
             # function)
@@ -868,7 +882,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             if k is SchemaKind.out or k is SchemaKind.inplace:
                 for i in range(len(f.func.returns)):
                     sig_body.append(
-                        f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(**op.proxy_outputs_[{i}]);")
+                        f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(**op.proxy_outputs_[{i}]);"
+                    )
 
             # Destructively return the final tensors
             # TODO: Do this in translate instead
