@@ -4,8 +4,10 @@
 
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/env.h>
 
 #include <algorithm>
+#include <cctype>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -139,7 +141,8 @@ void Context::setBenchmarkCuDNN(bool b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-  return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
+  static bool allow_tf32_cublas_override = c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true;
+  return allow_tf32_cublas_override || float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
@@ -222,12 +225,16 @@ bool Context::hasMKLDNN() {
 }
 
 bool Context::hasMPS() {
-#if defined(__APPLE__) and defined(TARGET_ON_MAC)
-  if (@available(macOS 12.3, *)) {
+#if defined(__APPLE__)
+#if __is_target_os(macOS)
+  if (__builtin_available(macOS 12.3, *)) {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::MPS);
   } else {
     return false;
   }
+#else
+  return false;
+#endif
 #else
   return false;
 #endif
