@@ -263,7 +263,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             for i in range(world_size):
                 self._create_client(i, addr, port, world_size)
         else:
-            self._create_client(0, addr, port, None)
+            self._create_client(1, addr, port, None)
 
     def test_multi_worker_with_fixed_world_size(self):
         self._multi_worker_helper(5)
