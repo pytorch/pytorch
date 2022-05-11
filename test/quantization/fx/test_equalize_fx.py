@@ -274,7 +274,7 @@ class TestEqualizeFx(QuantizationTestCase):
 
         for (M, node_occurrence) in tests:
             m = M().eval()
-            # TODO: if shape is important we need to define a example_inputs for each test
+            # TODO[quant-example-inputs]: if shape is important we need to define a example_inputs for each test
             # for now we do not need shape so this can be fixed later
             example_inputs = (torch.randn(1, 1, 1, 1),)
             prepared = prepare_fx(
@@ -781,7 +781,7 @@ class TestEqualizeFx(QuantizationTestCase):
 
         for (M, node_list) in tests:
             m = M().eval()
-            # TODO: if shape is important we need to define a example_inputs for each test
+            # TODO[quant-example-inputs]: if shape is important we need to define a example_inputs for each test
             # for now we do not need shape so this can be fixed later
             example_inputs = (torch.randn(1, 1, 1, 1),)
             prepared = prepare_fx(

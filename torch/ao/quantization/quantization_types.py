@@ -1,6 +1,6 @@
 # TODO: the name of this file is probably confusing, remove this file and move the type
 # definitions to somewhere else, e.g. to .utils
-from typing import Any, Tuple, Union, NewType
+from typing import Any, Tuple, Union
 from torch.fx import Node
 from .utils import Pattern  # noqa: F401
 
