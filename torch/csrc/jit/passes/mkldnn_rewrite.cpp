@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/passes/mkldnn_rewrite.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 
 namespace torch {
 namespace jit {
@@ -70,6 +71,11 @@ void insertPrePackedConvOpForNode(Node* n) {
   }
 
   if (!isContiguous(n->input(POS_WEIGHT))) {
+    return;
+  }
+
+  // Leave depthwise conv2d to NNC
+  if (tensorexpr::conv2dIsSupportedJit(n)) {
     return;
   }
 

@@ -273,6 +273,48 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
       groups->toInt());
 }
 
+bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
+#if AT_MKLDNN_ENABLED()
+  auto const& input = getTensorInfoJit(node->input(0));
+  auto const& weight = getTensorInfoJit(node->input(1));
+  auto const& bias = getTensorInfoJit(node->input(2));
+  auto const& stride = toIValue(node->input(3));
+  auto const& pad = toIValue(node->input(4));
+  auto const& dilation = toIValue(node->input(5));
+  auto const& groups = toIValue(node->input(6));
+
+  // Everything should be statically known.
+  if (!input || !weight || !bias || !stride || !pad || !dilation || !groups) {
+    GRAPH_DEBUG("some params aren't static");
+    return false;
+  }
+
+  // All inputs should be contiguous so no transposition is required.
+  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1)) ||
+      !isContiguous(node->input(2))) {
+    GRAPH_DEBUG("conv2dIsSupported: some inputs are not contiguous");
+    return false;
+  }
+
+  // Weights and bias should be Constant when using mkldnn backend
+  if (node->input(1)->node()->kind() != prim::Constant ||
+      node->input(2)->node()->kind() != prim::Constant) {
+    GRAPH_DEBUG("conv2dIsSupported: weight is not Constant");
+    return false;
+  }
+
+  return mkldnnPrepackedConvIsSupported(
+      *input,
+      *weight,
+      *bias,
+      _pair_int(*stride),
+      _pair_int(*pad),
+      _pair_int(*dilation),
+      groups->toInt());
+#endif
+  return false;
+}
+
 // The fuser currently only supports matmul of 2D x 2D matrices
 bool matmulIsSupported(const torch::jit::Node* node) {
   auto const& input0 = getTensorInfoJit(node->input(0));
