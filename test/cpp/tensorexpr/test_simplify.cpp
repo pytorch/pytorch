@@ -4829,11 +4829,13 @@ TEST(Simplify, CompareSelectLoopBounds) {
   BufHandle b("b", {N}, kFloat);
   VarHandle n("n", kInt);
   VarHandle m("m", kInt);
+  VarHandle var_N("var_N", kInt);
+  VarHandle var_M("var_M", kInt);
 
   auto test_case_fn = [](const VarHandle& n,
                          const BufHandle& b,
-                         const int& start,
-                         const int& stop,
+                         const ExprHandle& start,
+                         const ExprHandle& stop,
                          const int& cmp_val,
                          const CompareSelectOperation& cmp_op,
                          const std::string& check_string) {
@@ -4853,10 +4855,10 @@ TEST(Simplify, CompareSelectLoopBounds) {
   auto test_case_nest_loops_fn = [](const VarHandle& n,
                                     const VarHandle& m,
                                     const BufHandle& b,
-                                    const int& n_start,
-                                    const int& n_stop,
-                                    const int& m_start,
-                                    const int& m_stop,
+                                    const ExprHandle& n_start,
+                                    const ExprHandle& n_stop,
+                                    const ExprHandle& m_start,
+                                    const ExprHandle& m_stop,
                                     const CompareSelectOperation& cmp_op,
                                     const std::string& check_string) {
     StmtPtr s = For::make(
@@ -5156,6 +5158,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     }
   //   }
   test_case_nest_loops_fn(n, m, b, 10, 20, 30, 40, kNE, "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 20,
+      var_N + 30,
+      var_N + 40,
+      kNE,
+      "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 20,
+      var_M + 30,
+      var_M + 40,
+      kNE,
+      "b[n, m] = n!=m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(30, 40)) {
@@ -5170,6 +5192,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     }
   //   }
   test_case_nest_loops_fn(n, m, b, 30, 40, 10, 20, kNE, "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_N + 10,
+      var_N + 20,
+      kNE,
+      "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_M + 10,
+      var_M + 20,
+      kNE,
+      "b[n, m] = n!=m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(30, 40)) {
@@ -5185,6 +5227,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //   }
   test_case_nest_loops_fn(
       n, m, b, 30, 40, 10, 31, kNE, "b[n, m] = n!=m ? 0.f : 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_N + 10,
+      var_N + 31,
+      kNE,
+      "b[n, m] = n!=m ? 0.f : 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_M + 10,
+      var_M + 31,
+      kNE,
+      "b[n, m] = n!=m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(10, 31)) {
@@ -5200,6 +5262,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //   }
   test_case_nest_loops_fn(
       n, m, b, 10, 31, 30, 40, kNE, "b[n, m] = n!=m ? 0.f : 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 31,
+      var_N + 30,
+      var_N + 40,
+      kNE,
+      "b[n, m] = n!=m ? 0.f : 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 31,
+      var_M + 30,
+      var_M + 40,
+      kNE,
+      "b[n, m] = n!=m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(10, 20)) {
@@ -5214,6 +5296,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     }
   //   }
   test_case_nest_loops_fn(n, m, b, 10, 20, 30, 40, kLT, "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 20,
+      var_N + 30,
+      var_N + 40,
+      kLT,
+      "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 20,
+      var_M + 30,
+      var_M + 40,
+      kLT,
+      "b[n, m] = n<m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(30, 40)) {
@@ -5228,6 +5330,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     }
   //   }
   test_case_nest_loops_fn(n, m, b, 30, 40, 10, 31, kLT, "b[n, m] = 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_N + 10,
+      var_N + 31,
+      kLT,
+      "b[n, m] = 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_M + 10,
+      var_M + 31,
+      kLT,
+      "b[n, m] = n<m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(30, 40)) {
@@ -5242,6 +5364,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     }
   //   }
   test_case_nest_loops_fn(n, m, b, 30, 40, 10, 20, kGT, "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_N + 10,
+      var_N + 20,
+      kGT,
+      "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_M + 10,
+      var_M + 20,
+      kGT,
+      "b[n, m] = n>m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(10, 31)) {
@@ -5256,6 +5398,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     }
   //   }
   test_case_nest_loops_fn(n, m, b, 10, 31, 30, 40, kGT, "b[n, m] = 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 31,
+      var_N + 30,
+      var_N + 40,
+      kGT,
+      "b[n, m] = 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 31,
+      var_M + 30,
+      var_M + 40,
+      kGT,
+      "b[n, m] = n>m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(30, 40)) {
@@ -5270,6 +5432,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     }
   //   }
   test_case_nest_loops_fn(n, m, b, 30, 40, 10, 31, kGE, "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_N + 10,
+      var_N + 31,
+      kGE,
+      "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_M + 10,
+      var_M + 31,
+      kGE,
+      "b[n, m] = n>=m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(10, 20)) {
@@ -5284,6 +5466,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     }
   //   }
   test_case_nest_loops_fn(n, m, b, 10, 20, 30, 40, kGE, "b[n, m] = 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 20,
+      var_N + 30,
+      var_N + 40,
+      kGE,
+      "b[n, m] = 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 20,
+      var_M + 30,
+      var_M + 40,
+      kGE,
+      "b[n, m] = n>=m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(10, 31)) {
@@ -5298,6 +5500,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     }
   //   }
   test_case_nest_loops_fn(n, m, b, 10, 31, 30, 40, kLE, "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 31,
+      var_N + 30,
+      var_N + 40,
+      kLE,
+      "b[n, m] = 0.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 10,
+      var_N + 31,
+      var_M + 30,
+      var_M + 40,
+      kLE,
+      "b[n, m] = n<=m ? 0.f : 1.f;");
 
   // Before:
   //   for (const auto n : c10::irange(30, 40)) {
@@ -5312,6 +5534,26 @@ TEST(Simplify, CompareSelectLoopBounds) {
   //     }
   //   }
   test_case_nest_loops_fn(n, m, b, 30, 40, 10, 20, kLE, "b[n, m] = 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_N + 10,
+      var_N + 20,
+      kLE,
+      "b[n, m] = 1.f;");
+  test_case_nest_loops_fn(
+      n,
+      m,
+      b,
+      var_N + 30,
+      var_N + 40,
+      var_M + 10,
+      var_M + 20,
+      kLE,
+      "b[n, m] = n<=m ? 0.f : 1.f;");
 }
 
 TEST(Simplify, CompareSelectCondAlwaysInLoopBounds) {
