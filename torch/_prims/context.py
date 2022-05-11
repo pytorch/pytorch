@@ -5,6 +5,7 @@ from itertools import chain
 
 import torch
 from torch.fx.graph import Graph, Node
+import torch.overrides
 
 from torch._prims.utils import TensorMeta
 import torch._refs as refs
@@ -23,7 +24,7 @@ _torch_to_reference_map = {
 }
 
 
-class PrimContext(object):
+class PrimContext(torch.overrides.TorchFunctionMode):
     """
     The prototype prim tracing context.
 
@@ -32,12 +33,12 @@ class PrimContext(object):
     import torch._prims.utils as utils
     from torch._prims.context import PrimContext
     from torch._prims.executor import execute
+    from torch.overrides import push_torch_function_mode
 
     a = torch.randn((2, 2))
     b = torch.randn((2, 2))
 
-    ctx = PrimContext()
-    with ctx:
+    with push_torch_function_mode(PrimContext):
       meta_a = ctx.placeholder(utils.TensorMeta(a))
       meta_b = ctx.placeholder(utils.TensorMeta(b))
       result = torch.add(meta_a, meta_b)
@@ -64,13 +65,6 @@ class PrimContext(object):
         self._shape_name_counter = 0
         self._lowercase = tuple(string.ascii_lowercase)
         self._uppercase = tuple(string.ascii_uppercase)
-
-    def __enter__(self):
-        self.old_ctx = TensorMeta.ctx
-        TensorMeta.ctx = self
-
-    def __exit__(self, type, value, traceback):
-        TensorMeta.ctx = self.old_ctx
 
     @staticmethod
     def _create_name(idx, chars):
@@ -99,7 +93,7 @@ class PrimContext(object):
         if isinstance(a, TensorMeta):
             if a.node is not None:
                 raise ValueError("Attempting to reuse a TensorMeta in a new trace!")
-            a.name = name
+            a.tname = name
             a.node = node
 
         return a
@@ -111,12 +105,12 @@ class PrimContext(object):
         node = self.graph.output(tm)
         self._add_user(tm, node)
 
-    def handle_torch_function(
+    def __torch_function__(
         self,
         func: Callable,
         types: Sequence,
-        args: Sequence[Any],
-        kwargs: Dict,
+        args: Sequence[Any] = (),
+        kwargs: Dict = None,
     ):
         """
         Determines which function to call. The order of which
@@ -126,6 +120,9 @@ class PrimContext(object):
         - if func is a torch operation, its corresponding reference
         - func
         """
+
+        if kwargs is None:
+            kwargs = {}
 
         if hasattr(func, "meta"):
             # TODO: add check that all args/kwargs are 'registered' properly
@@ -141,7 +138,7 @@ class PrimContext(object):
             node = self.graph.create_node(
                 "call_function", func, name=output_name, args=args, kwargs=kwargs
             )
-            output.name = output_name
+            output.tname = output_name
             output.node = node
 
             # Marks uses
@@ -155,6 +152,7 @@ class PrimContext(object):
         # Remaps torch operations to their references
         if func in _torch_to_reference_map:
             fn = _torch_to_reference_map[func]
-            return fn(*args, **kwargs)  # type: ignore[operator]
+            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
+                return fn(*args, **kwargs)  # type: ignore[operator]
 
         return func(*args, **kwargs)
