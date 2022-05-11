@@ -15,6 +15,7 @@ from itertools import repeat, product
 from functools import reduce, partial
 from operator import mul
 from collections import OrderedDict
+from tempfile import NamedTemporaryFile
 
 import torch
 
@@ -21555,6 +21556,53 @@ class TestStateDictHooks(TestCase):
         self.assertEqual([], ret.missing_keys)
         self.assertEqual([], ret.unexpected_keys)
 
+    def test_load_state_dict_post_hook_backward_compatibility(self):
+        called = False
+        def my_post_load_hook(mod, _):
+            nonlocal called
+            called = True
+
+        m = nn.Linear(1, 1)
+        sd = deepcopy(m.state_dict())
+        self.assertTrue(hasattr(m, '_load_state_dict_post_hooks'))
+        # Simulate an older model that did not have this attr
+        delattr(m, '_load_state_dict_post_hooks')
+        with NamedTemporaryFile() as f:
+            torch.save(m, f.name)
+            m = torch.load(f.name)
+            m.load_state_dict(sd)
+            self.assertFalse(called)
+            # __setstate__ of nn.Module should set the attribute
+        self.assertTrue(hasattr(m, '_load_state_dict_post_hooks'))
+        # On loaded module, we can register hooks and they will be called
+        m.register_load_state_dict_post_hook(my_post_load_hook)
+        m.load_state_dict(sd)
+        self.assertTrue(called)
+
+        called = False
+
+        # Modules which do not dispatch into nn.Module __setstate__ don't run
+        # into errors when loading state_dict. nn.Softmax is an example of this,
+        # see https://github.com/pytorch/pytorch/issues/77280.
+        m = nn.Softmax(10)
+        sd = deepcopy(m.state_dict())
+        self.assertTrue(hasattr(m, '_load_state_dict_post_hooks'))
+        # Simulate an older model that did not have this attr
+        delattr(m, '_load_state_dict_post_hooks')
+        # Save and load, and ensure that load_state_dict works (without proper
+        # BC we would run into errors because this attribute would be expected).
+        # In particular, Softmax runs into the issue described here:
+        # https://github.com/pytorch/pytorch/issues/77280
+        with NamedTemporaryFile() as f:
+            torch.save(m, f.name)
+            m = torch.load(f.name)
+            m.load_state_dict(sd)
+            self.assertFalse(called)
+
+        # Ensure hooks can be registeed and called.
+        m.register_load_state_dict_post_hook(my_post_load_hook)
+        m.load_state_dict(sd)
+        self.assertTrue(called)
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)

@@ -1432,6 +1432,13 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
+        # Note that if some modules are loaded with torch.load()
+        # and thus don't have __init__ called, this attr may be undefined
+        # if the module overrides __setstate__, so define it here. An example of
+        # how this can happen is https://github.com/pytorch/pytorch/issues/77280
+        if not hasattr(self, '_load_state_dict_post_hooks'):
+            self._load_state_dict_post_hooks: Dict[int, Callable] = OrderedDict()
+
         handle = hooks.RemovableHandle(self._load_state_dict_post_hooks)
         self._load_state_dict_post_hooks[handle.id] = hook
         return handle
@@ -1578,14 +1585,15 @@ class Module:
                     load(child, prefix + name + '.')
 
             # Note that the hook can modify missing_keys and unexpected_keys.
-            incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
-            for hook in module._load_state_dict_post_hooks.values():
-                out = hook(module, incompatible_keys)
-                assert out is None, (
-                    "Hooks registered with ``register_load_state_dict_post_hook`` are not"
-                    "expected to return new values, if incompatible_keys need to be modified,"
-                    "it should be done inplace."
-                )
+            if hasattr(module, '_load_state_dict_post_hooks'):
+                incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
+                for hook in module._load_state_dict_post_hooks.values():
+                    out = hook(module, incompatible_keys)
+                    assert out is None, (
+                        "Hooks registered with ``register_load_state_dict_post_hook`` are not"
+                        "expected to return new values, if incompatible_keys need to be modified,"
+                        "it should be done inplace."
+                    )
 
         load(self)
         del load
