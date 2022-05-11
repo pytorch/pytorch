@@ -583,6 +583,7 @@ def classproperty(func):
         func = classmethod(func)
     return _ClassPropertyDescriptor(func)
 
+# Helper used to create a pretty representation for dataclasses
 def dataclass_repr(obj, indent=0, width=80) -> str:
     # built-in pprint module support dataclasses from python 3.10
     if sys.version_info >= (3, 10):
@@ -617,8 +618,8 @@ def _pformat(obj, indent, width, curr_indent=0) -> str:
         fields_str.append(f"{name}={str_repr}")
 
     indent_str = curr_indent * " "
-    fields_str = f",\n{indent_str}".join(fields_str)
-    return f"{class_name}({fields_str})"
+    body = f",\n{indent_str}".join(fields_str)
+    return f"{class_name}({body})"
 
 def _format_dict(attr, indent, width, curr_indent) -> str:
     curr_indent += (indent + 3)
