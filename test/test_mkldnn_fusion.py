@@ -6,10 +6,11 @@ from torch import nn
 import unittest
 
 from torch.testing._internal.common_utils import run_tests
-
 from torch.testing._internal.jit_utils import JitTestCase
 
 from test_tensorexpr import warmup_and_run_forward
+
+FUSION_GROUP = 'prim::TensorExprGroup'
 
 
 def get_eltwise_fn(name):
@@ -23,6 +24,10 @@ def get_eltwise_fn(name):
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnnFusion(JitTestCase):
+    def assertFused(self, graph, fused_patterns):
+        for pat in fused_patterns:
+            self.assertGraphContainsExactly(graph, pat, 0)
+
     def _check_model(self, m, x):
         old = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
@@ -59,7 +64,8 @@ class TestMkldnnFusion(JitTestCase):
             x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
             graph = self._check_model(m, x)
             if enabled:
-                self.assertAllFused(graph)
+                self.assertFused(graph, ['aten::conv2d'])
+                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
             else:
                 self.assertGraphContains(graph, kind='aten::conv2d')
 
@@ -84,7 +90,8 @@ class TestMkldnnFusion(JitTestCase):
                 x = torch.randn(1, 3, 224, 224)
 
                 graph = self._check_model(m, x)
-                self.assertAllFused(graph)
+                self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn_name])
+                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
 
 
 if __name__ == "__main__":
