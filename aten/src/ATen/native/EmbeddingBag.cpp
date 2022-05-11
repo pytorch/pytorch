@@ -1193,8 +1193,7 @@ void _embedding_bag_cpu_out(
     const bool /* sparse */,
     const c10::optional<at::Tensor>& per_sample_weights,
     const bool include_last_offset,
-    const c10::optional<int64_t>& padding_idx,
-    _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
+    const c10::optional<int64_t>& padding_idx) {
   at::native::check_arguments(
       weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
@@ -1233,8 +1232,7 @@ void _embedding_bag_cpu_out(
       mode,
       per_sample_weights,
       include_last_offset,
-      padding_idx.value_or(-1),
-      fbgemm_kernel_cache);
+      padding_idx.value_or(-1));
 }
 
 // Assumes all input tensors are contiguous.

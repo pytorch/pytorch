@@ -47,8 +47,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
     const Tensor &offsets, const int64_t mode = 0,
     const c10::optional<Tensor>& per_sample_weights = c10::nullopt,
     bool include_last_offset = false,
-    int64_t padding_idx = -1,
-    _EmbeddingBagKernelCache* fbgemm_kernel_cache = nullptr);
+    int64_t padding_idx = -1);
 
 void _embedding_bag_cpu_out(
     at::Tensor& output,
@@ -63,8 +62,6 @@ void _embedding_bag_cpu_out(
     const bool sparse,
     const c10::optional<at::Tensor>& per_sample_weights,
     const bool include_last_offset,
-    const c10::optional<int64_t>& padding_idx,
-    _EmbeddingBagKernelCache* fbgemm_kernel_cache = nullptr);
-
+    const c10::optional<int64_t>& padding_idx);
 } // native
 } // at
