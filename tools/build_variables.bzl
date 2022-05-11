@@ -410,6 +410,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
     "torch/csrc/lazy/core/thread_pool.cpp",
+    "torch/csrc/lazy/core/trie.cpp",
 ]
 
 # We can't build all of the ts backend under certain build configurations, e.g. mobile,
@@ -1061,7 +1062,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/detail/ORTHooksInterface.cpp",
     "aten/src/ATen/metal/Context.cpp",
     "aten/src/ATen/native/AutogradComposite.cpp",
-    "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
     "aten/src/ATen/native/DispatchStub.cpp",
     "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
@@ -1079,6 +1079,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/MkldnnTensorMath.cpp",
     "aten/src/ATen/native/mkldnn/Normalization.cpp",
     "aten/src/ATen/native/mkldnn/Pooling.cpp",
+    "aten/src/ATen/native/mkldnn/Prelu.cpp",
     "aten/src/ATen/native/mkldnn/Relu.cpp",
     "aten/src/ATen/native/mkldnn/SoftMax.cpp",
     "aten/src/ATen/native/mkldnn/TensorFactories.cpp",
@@ -1234,6 +1235,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/AveragePool2d.cpp",
     "aten/src/ATen/native/AveragePool3d.cpp",
     "aten/src/ATen/native/BatchLinearAlgebra.cpp",
+    "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
     "aten/src/ATen/native/Batching.cpp",
     "aten/src/ATen/native/BinaryOps.cpp",
     "aten/src/ATen/native/Blas.cpp",

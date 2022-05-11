@@ -1,5 +1,6 @@
-import torch._C as _C
 from typing import Dict, Optional
+
+import torch._C as _C
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
@@ -11,8 +12,9 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
 
+
 class ExportTypes:
-    r""""Specifies how the ONNX model is stored."""
+    r""" "Specifies how the ONNX model is stored."""
 
     PROTOBUF_FILE = "Saves model in the specified protobuf file."
     ZIP_ARCHIVE = "Saves model in the specified ZIP file (uncompressed)."
@@ -35,6 +37,7 @@ class SymbolicContext:
         cur_node (_C.Node): Current node being converted to ONNX domain.
         onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
     """
+
     def __init__(self, params_dict, env, cur_node, onnx_block):
         self.params_dict: Dict[str, _C.IValue] = params_dict
         self.env: Dict[_C.Value, _C.Value] = env
@@ -43,17 +46,31 @@ class SymbolicContext:
         # Current onnx block that converted nodes are being appended to.
         self.onnx_block: _C.Block = onnx_block
 
+
 def _export(*args, **kwargs):
     from torch.onnx import utils
+
     result = utils._export(*args, **kwargs)
     return result
 
 
-def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
-           input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
-           opset_version=None, do_constant_folding=True, dynamic_axes=None,
-           keep_initializers_as_inputs=None, custom_opsets=None,
-           export_modules_as_functions=False):
+def export(
+    model,
+    args,
+    f,
+    export_params=True,
+    verbose=False,
+    training=TrainingMode.EVAL,
+    input_names=None,
+    output_names=None,
+    operator_export_type=OperatorExportTypes.ONNX,
+    opset_version=None,
+    do_constant_folding=True,
+    dynamic_axes=None,
+    keep_initializers_as_inputs=None,
+    custom_opsets=None,
+    export_modules_as_functions=False,
+):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
     :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs
@@ -329,11 +346,24 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
     """
 
     from torch.onnx import utils
-    return utils.export(model, args, f, export_params, verbose, training,
-                        input_names, output_names, operator_export_type, opset_version,
-                        do_constant_folding, dynamic_axes,
-                        keep_initializers_as_inputs, custom_opsets,
-                        export_modules_as_functions)
+
+    return utils.export(
+        model,
+        args,
+        f,
+        export_params,
+        verbose,
+        training,
+        input_names,
+        output_names,
+        operator_export_type,
+        opset_version,
+        do_constant_folding,
+        dynamic_axes,
+        keep_initializers_as_inputs,
+        custom_opsets,
+        export_modules_as_functions,
+    )
 
 
 def export_to_pretty_string(*args, **kwargs) -> str:
@@ -354,10 +384,13 @@ def export_to_pretty_string(*args, **kwargs) -> str:
       A UTF-8 str containing a human-readable representation of the ONNX model.
     """
     from torch.onnx import utils
+
     return utils.export_to_pretty_string(*args, **kwargs)
+
 
 def _optimize_trace(graph, operator_export_type):
     from torch.onnx import utils
+
     return utils._optimize_graph(graph, operator_export_type)
 
 
@@ -373,16 +406,19 @@ def select_model_mode_for_export(model, mode):
     """
 
     from torch.onnx import utils
+
     return utils.select_model_mode_for_export(model, mode)
 
 
 def _run_symbolic_function(*args, **kwargs):
     from torch.onnx import utils
+
     return utils._run_symbolic_function(*args, **kwargs)
 
 
 def _run_symbolic_method(*args, **kwargs):
     from torch.onnx import utils
+
     return utils._run_symbolic_method(*args, **kwargs)
 
 
@@ -392,6 +428,7 @@ def is_in_onnx_export():
     """
 
     from torch.onnx import utils
+
     return utils.is_in_onnx_export()
 
 
@@ -409,6 +446,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
       opset_version (int): The ONNX opset version in which to register.
     """
     from torch.onnx import utils
+
     utils.register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version)
 
 
@@ -424,6 +462,7 @@ def unregister_custom_op_symbolic(symbolic_name, opset_version):
     """
 
     from torch.onnx import utils
+
     utils.unregister_custom_op_symbolic(symbolic_name, opset_version)
 
 
