@@ -147,7 +147,7 @@ template<typename scalar_t, template<typename T> class VarTransform>
 std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     const Tensor& input, const Tensor& running_mean, const Tensor& running_var,
     double momentum, double eps) {
-
+  std::cout << "in batch_norm_cpu_update_stats_template 0\n";
   using accscalar_t = at::acc_type<scalar_t, false>;
 
   int64_t n_input = input.size(1);
@@ -632,6 +632,28 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
     });
 }
 
+std::tuple<Tensor, Tensor> batch_norm_stats_cpu(
+    const Tensor& self,
+    double epsilon) {
+  std::cout << "in batch_norm_stats_cpu 1\n";
+  int64_t n_input = self.size(1);
+  auto running_mean = at::empty({n_input}, self.options());
+  auto running_var = at::empty({n_input}, self.options());
+  std::cout << "in batch_norm_stats_cpu 2\n";
+  return AT_DISPATCH_FLOATING_TYPES(
+      self.scalar_type(), "batch_norm_stats_cpu", [&] {
+        return batch_norm_cpu_update_stats_template<scalar_t, Var>(
+            self, running_mean, running_var, 0, epsilon);
+      });
+}
+
+// std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cpu(
+//     const Tensor& self, const Tensor& mean, const Tensor& invstd, const
+//     c10::optional<Tensor>& running_mean_opt /* optional */, const
+//     c10::optional<Tensor>& running_var_opt /* optional */, double momentum,
+//     double epsilon, const Tensor& counts) {
+// }
+
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -642,7 +664,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
-
+  std::cout << "train: " << train << "\n";
   return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm", [&] {
       if (!train) {
         auto save_mean = at::empty({0}, self.options());

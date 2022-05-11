@@ -1650,9 +1650,10 @@ class DistributedDataParallel(Module, Joinable):
         for layer in module.modules():
             if isinstance(layer, torch.nn.modules.SyncBatchNorm):
                 if self.device_type == "cpu":
-                    self._log_and_throw(
-                        ValueError, "SyncBatchNorm layers only work with GPU modules"
-                    )
+                    pass
+                    # self._log_and_throw(
+                    #     ValueError, "SyncBatchNorm layers only work with GPU modules"
+                    # )
 
     def _check_comm_hook(self, hook):
         if not callable(hook):
