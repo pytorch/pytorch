@@ -13,6 +13,7 @@ load(
     "USED_PT_BACKENDS",
     "build_aten_cpu",
     "gen_aten_files",
+    "gen_aten_libtorch_files",
     "get_aten_codegen_extra_params",
     "get_pt_compiler_flags",
     "get_pt_preprocessor_flags",
@@ -253,11 +254,13 @@ build_aten_cpu(
     ],
 )
 
+gen_aten_libtorch_files(name = "gen_aten_libtorch")
+
 
 GENERATED_AUTOGRAD_H = {
-    #"Functions.h": ":gen_aten_libtorch[autograd/generated/Functions.h]",
-    #"VariableType.h": ":gen_aten_libtorch[autograd/generated/VariableType.h]",
-    #"variable_factories.h": ":gen_aten_libtorch[autograd/generated/variable_factories.h]",
+    "Functions.h": ":gen_aten_libtorch[autograd/generated/Functions.h]",
+    "VariableType.h": ":gen_aten_libtorch[autograd/generated/VariableType.h]",
+    "variable_factories.h": ":gen_aten_libtorch[autograd/generated/variable_factories.h]",
 
     # Don't build python bindings on mobile.
     #"python_functions.h",
