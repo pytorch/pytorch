@@ -5155,7 +5155,7 @@ class TestQuantizedConv(TestCase):
            input_channels_per_group=st.integers(1, 32),
            # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
            output_channels_per_group=st.integers(1, 32),
-           groups=st.integers(1, 1), # currently padding only supports groups=1
+           groups=st.integers(1, 1),  # currently padding only supports groups=1
            length=st.integers(4, 16),
            kernel=st.integers(1, 7),
            stride=st.integers(1, 2),
@@ -5178,7 +5178,7 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    @unittest.skip("Local only - currently the qconv1d_cudnn op is bulid "
                    "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
                    "after it is built by default")
     def test_qconv1d_cudnn(
