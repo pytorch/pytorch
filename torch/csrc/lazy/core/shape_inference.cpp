@@ -558,6 +558,10 @@ std::vector<Shape> compute_shape_minimum(const at::Tensor & self, const at::Tens
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_maximum(const at::Tensor & self, const at::Tensor & other) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape__to_copy(const at::Tensor & self, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, bool non_blocking, c10::optional<at::MemoryFormat> memory_format) {
   if(dtype){
     return {Shape(*dtype, self.sizes().vec())};

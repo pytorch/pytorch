@@ -9,34 +9,34 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+// namespace at { namespace native {
 
-void maximum_kernel_cuda(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
-      return a || b;
-    });
-  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max_elementwise_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return ::max(a, b);
-      });
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "max_elementwise_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        if (a != a) {
-          return a;
-        } else if (b != b) {
-          return b;
-        } else {
-          return ::max(a, b);
-        }
-      });
-    });
-  }
-}
+// void maximum_kernel_cuda(TensorIteratorBase& iter) {
+//   if (iter.dtype() == ScalarType::Bool) {
+//     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
+//       return a || b;
+//     });
+//   } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+//     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max_elementwise_cuda", [&]() {
+//       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+//         return ::max(a, b);
+//       });
+//     });
+//   } else {
+//     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "max_elementwise_cuda", [&]() {
+//       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+//         if (a != a) {
+//           return a;
+//         } else if (b != b) {
+//           return b;
+//         } else {
+//           return ::max(a, b);
+//         }
+//       });
+//     });
+//   }
+// }
 
-REGISTER_DISPATCH(maximum_stub, &maximum_kernel_cuda);
+// REGISTER_DISPATCH(maximum_stub, &maximum_kernel_cuda);
 
-}} // namespace at::native
+// }} // namespace at::native

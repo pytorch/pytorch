@@ -22,6 +22,7 @@ TORCH_API std::vector<Shape> compute_shape_binary_cross_entropy_backward(const a
 TORCH_API std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim);
 TORCH_API std::vector<Shape> compute_shape_clamp_min(const at::Tensor & self, const at::Scalar & min);
 TORCH_API std::vector<Shape> compute_shape_minimum(const at::Tensor & self, const at::Tensor & other);
+TORCH_API std::vector<Shape> compute_shape_maximum(const at::Tensor & self, const at::Tensor & other);
 TORCH_API std::vector<Shape> compute_shape_constant_pad_nd(const at::Tensor & self, at::IntArrayRef pad, const at::Scalar & value);
 TORCH_API std::vector<Shape> compute_shape_convolution(const at::Tensor & input, const at::Tensor & weight, const c10::optional<at::Tensor> & bias, at::IntArrayRef stride, at::IntArrayRef padding, at::IntArrayRef dilation, bool transposed, at::IntArrayRef output_padding, int64_t groups);
 TORCH_API std::vector<Shape> compute_shape_convolution_backward(const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & weight, at::OptionalIntArrayRef bias_sizes, at::IntArrayRef stride, at::IntArrayRef padding, at::IntArrayRef dilation, bool transposed, at::IntArrayRef output_padding, int64_t groups, ::std::array<bool,3> output_mask);

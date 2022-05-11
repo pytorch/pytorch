@@ -17,6 +17,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/Loops.h>
 
@@ -360,15 +361,30 @@ static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min
 }
 
 static void clamp_max_kernel_impl(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_max_cpu", [&]() {
-    cpu_kernel_vec(iter,
-      [](scalar_t a, scalar_t max) -> scalar_t {
-        return std::min(a, max);
-      },
-      [](Vectorized<scalar_t> a, Vectorized<scalar_t> max) {
-        return vec::clamp_max(a, max);
+  if (iter.dtype() == ScalarType::Bool) {
+    cpu_kernel(iter,
+      [](bool a, bool b) -> bool {
+        return a && b;
       });
-  });
+  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
+        [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::minimum(a, b); });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "minimum_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          if (a != a || b != b) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+          } else {
+            return std::min(a, b);
+          }
+        },
+        [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::minimum(a, b); });
+    });
+  }
 }
 
 static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
@@ -386,15 +402,30 @@ static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) 
 }
 
 static void clamp_min_kernel_impl(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_cpu", [&]() {
-    cpu_kernel_vec(iter,
-        [](scalar_t a, scalar_t min) -> scalar_t {
-          return std::max(a, min);
+  if (iter.dtype() == ScalarType::Bool) {
+    cpu_kernel(iter,
+      [](bool a, bool b) -> bool {
+        return a || b;
+      });
+  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
+        [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::maximum(a, b); });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "maximum_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          if (a != a || b != b) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+          } else {
+            return std::max(a, b);
+          }
         },
-        [](Vectorized<scalar_t> a, Vectorized<scalar_t> min) {
-          return vec::clamp_min(a, min);
-        });
-  });
+        [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::maximum(a, b); });
+    });
+  }
 }
 
 static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
@@ -411,6 +442,33 @@ static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) 
   });
 }
 
+void fmax_kernel(TensorIteratorBase& iter) {
+  if (isFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmax_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::fmax(a, b);
+        });
+    });
+  } else {
+    clamp_min_kernel_impl(iter);
+  }
+}
+
+void fmin_kernel(TensorIteratorBase& iter) {
+  if (isFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmin_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::fmin(a, b);
+        });
+    });
+  } else {
+    clamp_max_kernel_impl(iter);
+  }
+}
+
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
@@ -426,6 +484,8 @@ REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_impl);
 REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
+REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
+REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
 REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu);
 
 }} // namespace at::native

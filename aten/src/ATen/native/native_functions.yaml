@@ -7768,16 +7768,15 @@
     CPU, CUDA: fmax_out
 
 - func: maximum(Tensor self, Tensor other) -> Tensor
-  structured_delegate: maximum.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  dispatch:
+    CompositeExplicitAutograd: maximum
 
 - func: maximum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  structured: True
-  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: maximum_out
+    CompositeExplicitAutograd: maximum_out
 
 # binary max, alias of maximum
 # NOTE: max is not an alias for maximum, since there is also unary max

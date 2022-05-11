@@ -10,6 +10,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/BinaryOps.h>
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/copysign.h>
@@ -552,85 +553,60 @@ void ne_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void maximum_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    cpu_kernel(iter,
-      [](bool a, bool b) -> bool {
-        return a || b;
-      });
-  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
-      cpu_kernel_vec(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
-        [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::maximum(a, b); });
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "maximum_cpu", [&]() {
-      cpu_kernel_vec(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          if (a != a || b != b) {
-            return std::numeric_limits<scalar_t>::quiet_NaN();
-          } else {
-            return std::max(a, b);
-          }
-        },
-        [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::maximum(a, b); });
-    });
-  }
-}
+// void maximum_kernel(TensorIteratorBase& iter) {
+//   if (iter.dtype() == ScalarType::Bool) {
+//     cpu_kernel(iter,
+//       [](bool a, bool b) -> bool {
+//         return a || b;
+//       });
+//   } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+//     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
+//       cpu_kernel_vec(iter,
+//         [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
+//         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::maximum(a, b); });
+//     });
+//   } else {
+//     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "maximum_cpu", [&]() {
+//       cpu_kernel_vec(iter,
+//         [](scalar_t a, scalar_t b) -> scalar_t {
+//           if (a != a || b != b) {
+//             return std::numeric_limits<scalar_t>::quiet_NaN();
+//           } else {
+//             return std::max(a, b);
+//           }
+//         },
+//         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::maximum(a, b); });
+//     });
+//   }
+// }
 
-void minimum_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    cpu_kernel(iter,
-      [](bool a, bool b) -> bool {
-        return a && b;
-      });
-  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
-      cpu_kernel_vec(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
-        [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::minimum(a, b); });
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "minimum_cpu", [&]() {
-      cpu_kernel_vec(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          if (a != a || b != b) {
-            return std::numeric_limits<scalar_t>::quiet_NaN();
-          } else {
-            return std::min(a, b);
-          }
-        },
-        [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::minimum(a, b); });
-    });
-  }
-}
+// void minimum_kernel(TensorIteratorBase& iter) {
+//   if (iter.dtype() == ScalarType::Bool) {
+//     cpu_kernel(iter,
+//       [](bool a, bool b) -> bool {
+//         return a && b;
+//       });
+//   } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+//     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
+//       cpu_kernel_vec(iter,
+//         [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
+//         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::minimum(a, b); });
+//     });
+//   } else {
+//     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "minimum_cpu", [&]() {
+//       cpu_kernel_vec(iter,
+//         [](scalar_t a, scalar_t b) -> scalar_t {
+//           if (a != a || b != b) {
+//             return std::numeric_limits<scalar_t>::quiet_NaN();
+//           } else {
+//             return std::min(a, b);
+//           }
+//         },
+//         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::minimum(a, b); });
+//     });
+//   }
+// }
 
-void fmax_kernel(TensorIteratorBase& iter) {
-  if (isFloatingType(iter.common_dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmax_cpu", [&]() {
-      cpu_kernel(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return std::fmax(a, b);
-        });
-    });
-  } else {
-    maximum_kernel(iter);
-  }
-}
-
-void fmin_kernel(TensorIteratorBase& iter) {
-  if (isFloatingType(iter.common_dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmin_cpu", [&]() {
-      cpu_kernel(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return std::fmin(a, b);
-        });
-    });
-  } else {
-    minimum_kernel(iter);
-  }
-}
 
 void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
   if (iter.dtype() == kBFloat16) {
@@ -1161,9 +1137,6 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel);
 REGISTER_DISPATCH(ge_stub, &ge_kernel);
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
-REGISTER_DISPATCH(maximum_stub, &maximum_kernel);
-REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
-REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 REGISTER_DISPATCH(huber_stub, &huber_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);

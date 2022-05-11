@@ -175,11 +175,6 @@ CREATE_BINARY_META_FUNC(igamma);
 CREATE_BINARY_META_FUNC(igammac);
 CREATE_BINARY_META_FUNC(nextafter);
 
-TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
-  build_borrowing_binary_op(maybe_get_output(), self, other);
-}
-
 TORCH_META_FUNC(fmax) (const Tensor& self, const Tensor& other) {
     TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
@@ -252,7 +247,7 @@ DEFINE_DISPATCH(ne_stub);
 DEFINE_DISPATCH(sigmoid_backward_stub);
 DEFINE_DISPATCH(logit_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
-DEFINE_DISPATCH(maximum_stub);
+//DEFINE_DISPATCH(maximum_stub);
 DEFINE_DISPATCH(fmax_stub);
 DEFINE_DISPATCH(fmin_stub);
 DEFINE_DISPATCH(fmod_stub);
@@ -327,7 +322,6 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& other, const Tensor
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_and_out, bitwise_and_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_or_out, bitwise_or_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_xor_out, bitwise_xor_stub);
-CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(fmax_out, fmax_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(fmin_out, fmin_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(fmod_out, fmod_stub);
@@ -1111,12 +1105,21 @@ Tensor& logical_xor_(Tensor& self, const Scalar& other) { return comparison_op_(
 
 // binary max, alias for maximum
 Tensor& max_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  return at::maximum_out(result, self, other);
+  return at::clamp_min_out(result, self, other);
 }
 
 Tensor max(const Tensor& self, const Tensor& other) {
-  return at::maximum(self, other);
+  return at::clamp_min(self, other);
 }
+
+Tensor& maximum_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::clamp_min_out(result, self, other);
+}
+
+Tensor maximum(const Tensor& self, const Tensor& other) {
+  return at::clamp_min(self, other);
+}
+
 
 Tensor& minimum_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::clamp_max_out(result, self, other);

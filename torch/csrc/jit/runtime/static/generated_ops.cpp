@@ -3155,12 +3155,12 @@ REGISTER_OPERATOR_FUNCTOR(
           const auto& self = p_node->Input(0).toTensor();
           const auto& other = p_node->Input(1).toTensor();
           if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = at::cpu::maximum(self, other);
+            p_node->Output(0) = at::cpu::clamp_min(self, other);
             return;
           }
           auto& out = p_node->Output(0).toTensor();
           fastResizeToZero(out);
-          at::cpu::maximum_out(out, self, other);
+          at::cpu::clamp_min_out(out, self, other);
         };
       }
       LogAndDumpSchema(n);
