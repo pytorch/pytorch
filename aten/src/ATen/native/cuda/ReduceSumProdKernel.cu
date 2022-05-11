@@ -19,10 +19,11 @@ struct sum_functor {
   }
 };
 
+// jiterated specialization for `complex<Half>`
 const char sum_name[] = "sum";
 template <>
 struct sum_functor<c10::complex<at::Half>> {
-  #if AT_USE_JITERATOR()
+#if AT_USE_JITERATOR()
   void operator()(TensorIterator& iter) {
     using scalar_t = c10::complex<at::Half>;
     std::string func = jiterator_stringify(
@@ -33,15 +34,16 @@ struct sum_functor<c10::complex<at::Half>> {
     jitted_gpu_reduce_kernel<sum_name, scalar_t, scalar_t>(
         iter, func, 0.);
   }
-  #else
+#else
   void operator()(TensorIterator& iter) {
     using scalar_t = c10::complex<at::Half>;
+    using acc_t = c10::complex<float>;
     gpu_reduce_kernel<scalar_t, scalar_t>(
-        iter, func_wrapper<scalar_t>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> acc_t {
+        iter, func_wrapper<scalar_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
           return a + b;
-        }));
+        }), acc_t{0.});
   }
-  #endif
+#endif
 };
 
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
@@ -52,7 +54,7 @@ struct nansum_functor {
   }
 };
 
-const char op_name[] = "prod";
+const char prod_name[] = "prod";
 
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct prod_functor {
@@ -63,7 +65,7 @@ struct prod_functor {
       return a * b;
     }
     );
-    jitted_gpu_reduce_kernel<op_name, scalar_t, out_t>(
+    jitted_gpu_reduce_kernel<prod_name, scalar_t, out_t>(
         iter, func, 1.);
   }
   #else
@@ -85,6 +87,29 @@ struct prod_functor<bool> {
           return a && b;
         }), 1);
   }
+};
+
+// jiterated specialization for `complex<Half>`
+template <>
+struct prod_functor<c10::complex<at::Half>> {
+#if AT_USE_JITERATOR()
+  void operator()(TensorIterator& iter) {
+    using scalar_t = c10::complex<at::Half>;
+    std::string func =
+        jiterator_stringify(arg_t combine(arg_t a, arg_t b) { return a * b; });
+    jitted_gpu_reduce_kernel<prod_name, scalar_t, scalar_t>(iter, func, 1.);
+  }
+#else
+  void operator()(TensorIterator& iter) {
+    using scalar_t = c10::complex<at::Half>;
+    using acc_t = c10::complex<float>;
+    gpu_reduce_kernel<scalar_t, scalar_t>(
+        iter,
+        func_wrapper<scalar_t>(
+            [] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t { return a * b; }),
+        acc_t{1.});
+  }
+#endif
 };
 
 // The function `reduce_dispatch` below dispatches to the kernel based
