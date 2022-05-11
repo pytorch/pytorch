@@ -4,7 +4,7 @@
 #include <c10/macros/Macros.h>
 #include "caffe2/core/storage.h"
 
-#include <ATen/core/SymIntArrayRef.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>

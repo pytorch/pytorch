@@ -1,4 +1,4 @@
-#include <ATen/core/SymbolicIntNode.h>
+#include <c10/core/SymbolicIntNode.h>
 
 namespace c10 {
 

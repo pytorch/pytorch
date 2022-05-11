@@ -1,4 +1,4 @@
-#include <ATen/core/SymIntArrayRef.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <iostream>
 
 namespace c10 {
