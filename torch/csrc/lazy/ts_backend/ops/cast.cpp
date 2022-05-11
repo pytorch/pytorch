@@ -15,9 +15,6 @@ Shape NodeOutputShape(const Value& input, c10::ScalarType type) {
 }
 
 } // namespace
-
-const OpKind Cast::class_op_kind(ltc_cast);
-
 Cast::Cast(
     const Value& input,
     at::ScalarType dtype,
