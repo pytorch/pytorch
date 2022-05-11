@@ -265,8 +265,8 @@ template <typename T>
 std::string toString(const T& nodes) {
   std::stringstream ss;
   for (Statement* stmt : nodes) {
-    if (ss.tellg() != 0) {
-      ss << " ";
+    if (ss.tellp() != 0) {
+      ss << ", ";
     }
     ss << stmt->toString();
   }
