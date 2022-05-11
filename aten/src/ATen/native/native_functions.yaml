@@ -1945,6 +1945,15 @@
     QuantizedCPU: quantized_resize_cpu_
     SparseCsrCPU, SparseCsrCUDA: resize_sparse_csr_
 
+# This is a utility function to enable users to resize out tensor while registering kernels for out variants.
+# Eventually, we can consider exposing `resize_output` as a public API to ship it with python op registration
+# to make it easy to register out variants for ops.
+- func: _resize_output_(Tensor(a!) self, int[] size, Device device) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
+  variants: function
+  dispatch:
+    Meta: _resize_output_
+
 - func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   category_override: factory
   variants: function
@@ -3790,12 +3799,14 @@
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
   dispatch:
+    MkldnnCPU: mkldnn_prelu
     CPU: prelu_cpu
     CUDA: prelu_cuda
 
 - func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   variants: function, method
   dispatch:
+    MkldnnCPU: mkldnn_prelu_backward
     CPU: prelu_backward_cpu
     CUDA: prelu_backward_cuda
 
@@ -4320,7 +4331,12 @@
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+# Overload without center & pad mode, needed for forward-compatibility
+- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+  variants: function, method
+  cpp_no_default_args: ['hop_length', 'win_length', 'window', 'normalized']
+
+- func: stft.center(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   variants: function, method
 
 - func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
@@ -4680,6 +4696,10 @@
   dispatch:
     CPU, NestedTensorCPU: transform_bias_rescale_qkv_cpu
     CUDA, NestedTensorCUDA: transform_bias_rescale_qkv_cuda
+
+- func: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
+  dispatch:
+    CPU, CUDA: NestedTensor_nested_tensor_from_mask
 
 - func: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   device_check: NoCheck # cpu_nested_shape_example will always be on CPU
@@ -5981,6 +6001,11 @@
     CUDA: set_storage_cuda_
     QuantizedCPU, QuantizedCUDA: set_storage_quantized_
 
+- func: set_.source_Tensor_storage_offset(Tensor(a!) self, Tensor source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
   device_check: NoCheck
@@ -7051,8 +7076,8 @@
     QuantizedCPU: index_select_quantized_cpu_
     CUDA: index_select_cuda
     QuantizedCUDA: index_select_quantized_cuda
-    SparseCPU: index_select_sparse
-    SparseCUDA: index_select_sparse
+    SparseCPU: index_select_sparse_cpu
+    SparseCUDA: index_select_sparse_cuda
 
 - func: index_select.dimname_out(Tensor self, Dimname dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -7272,21 +7297,6 @@
     CPU: _cholesky_solve_helper_cpu
     CUDA: _cholesky_solve_helper_cuda
 
-- func: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: solve
-
-- func: solve.solution(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!) solution, Tensor(b!) LU)
-  dispatch:
-    CompositeExplicitAutograd: solve_out
-
-- func: _solve_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: _solve_helper_cpu
-    CUDA: _solve_helper_cuda
-
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
@@ -7329,9 +7339,13 @@
   variants: function
 
 - func: lu_solve.out(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: lu_solve_out
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
+  dispatch:
+    CPU, CUDA: lu_solve
 
 # lu_unpack
 - func: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
@@ -9042,6 +9056,11 @@
   dispatch:
     CPU: glu_backward_cpu
     CUDA: glu_backward_cuda
+
+- func: glu_jvp(Tensor glu, Tensor x, Tensor dx, int dim) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU, CUDA: glu_jvp
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -10968,6 +10987,8 @@
   python_module: linalg
   variants: function
   structured_delegate: linalg_cross.out
+  dispatch:
+    ZeroTensor: linalg_cross_zerotensor
 
 - func: linalg_cross.out(Tensor self, Tensor other, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
@@ -11010,19 +11031,6 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_lu_out
-
-# linalg.lu_solve
-- func: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
-  python_module: linalg
-  structured_delegate: linalg_lu_solve.out
-  variants: function
-
-- func: linalg_lu_solve.out(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
-  variants: function
-  structured: True
-  dispatch:
-    CPU, CUDA: linalg_lu_solve_out
 
 # linalg.det
 - func: linalg_det(Tensor self) -> Tensor
