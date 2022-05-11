@@ -1,7 +1,7 @@
-#include <ATen/ATen.h>
-#include <ATen/CUDAFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -12,6 +12,21 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/CUDAFunctions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_masked_softmax_native.h>
+#include <ATen/ops/_log_softmax_cuda_dispatch.h>
+#include <ATen/ops/_log_softmax_backward_data_cuda_dispatch.h>
+#include <ATen/ops/_softmax_cuda_dispatch.h>
+#include <ATen/ops/_softmax_backward_data_cuda_dispatch.h>
+#include <ATen/ops/equal_native.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/softmax.h>
+#endif
 
 #include <thrust/binary_search.h>
 #include <thrust/device_ptr.h>

@@ -15,6 +15,7 @@
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/irange.h>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -208,7 +209,7 @@ c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
       return current_device_index;
     }
   }
-  for (int64_t device_index = 0; device_index < at::cuda::device_count(); device_index++) {
+  for (const auto device_index : c10::irange(at::cuda::device_count())) {
     if (device_index == current_device_index) continue;
     if (hasPrimaryContext(device_index)) {
       return device_index;
@@ -290,10 +291,22 @@ std::string CUDAHooks::showConfig() const {
   cudaRuntimeGetVersion(&runtimeVersion);
 
   auto printCudaStyleVersion = [&](int v) {
+#ifdef USE_ROCM
+    // HIP_VERSION value format was changed after ROCm v4.2 to include the patch number
+    if(v < 500) {
+      // If major=xx, minor=yy then format -> xxyy
+      oss << (v / 100) << "." << (v % 10);
+    }
+    else {
+      // If major=xx, minor=yy & patch=zzzzz then format -> xxyyzzzzz
+      oss << (v / 10000000) << "." << (v / 100000 % 100) << "." << (v % 100000);
+    }
+#else
     oss << (v / 1000) << "." << (v / 10 % 100);
     if (v % 10 != 0) {
       oss << "." << (v % 10);
     }
+#endif
   };
 
 #if !defined(USE_ROCM)

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
@@ -129,7 +130,7 @@ static auto getLayerForwardNormRuntime(
   Fusion& fusion = *fusion_ptr.get();
 
   const float kEps = 1e-5;
-  Double* eps_ptr = new Double(kEps);
+  Double* eps_ptr = IrBuilder::create<Double>(kEps);
 
   auto input = makeSymbolicTensor(shape.size());
   fusion.addInput(input);

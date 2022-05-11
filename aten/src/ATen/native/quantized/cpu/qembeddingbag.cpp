@@ -149,7 +149,7 @@ void fbgemm_spmdm_report_error_(
     int64_t N,
     const OffsetType* offsets,
     const IndexType* indices) {
-  for (int m = 0; m < output_size; ++m) {
+  for (const auto m : c10::irange(output_size)) {
     for (OffsetType i = offsets[m]; i < offsets[m + 1]; ++i) {
       TORCH_CHECK(i < index_size);
       IndexType idx = indices[i];
@@ -405,7 +405,7 @@ at::Tensor& embedding_bag_byte_impl(
 
   if (!pruned_weights || fallback_to_no_sparse) {
     auto kernel_i8 =
-        fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType>(
+        fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType, /*OutType=*/float, /*TRHEAD_LOCAL=*/true>(
             /*block_size=*/D,
             /*has_weight=*/per_sample_weights_.has_value(),
             /*normalize_by_lengths=*/false,

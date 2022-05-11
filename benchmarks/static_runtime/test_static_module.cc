@@ -106,7 +106,8 @@ TEST(StaticModule, ValueGroup) {
   torch::jit::StaticModule sm(input_graph);
   const Graph& graph = sm.graph();
   std::vector<const Node*> nodes(graph.nodes().begin(), graph.nodes().end());
-  const auto& value_group = sm.value_group();
+  auto* root_block = sm.root_block();
+  const auto& value_group = sm.block_info(root_block).value_group();
 
   std::vector<const Value*> expected_input_aliases{
       graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
@@ -138,9 +139,11 @@ TEST(StaticModule, IsOptimizableContainerType_NonOptimizableInputs) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(sm.is_optimizable_container_type(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -158,9 +161,11 @@ TEST(StaticModule, IsOptimizableContainerType_WrongType) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(sm.is_optimizable_container_type(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -175,12 +180,14 @@ TEST(StaticModule, IsOptimizableContainerType_CanUseOutVariant) {
     )JIT";
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
     if (n->kind() == c10::prim::ListConstruct) {
-      EXPECT_TRUE(sm.is_optimizable_container_type(n));
+      EXPECT_TRUE(block_info.node_is_optimizable_container_type(n));
     } else {
-      EXPECT_FALSE(sm.is_optimizable_container_type(n));
+      EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
     }
   }
 }
@@ -236,6 +243,14 @@ TEST(StaticRuntime, ReplaceWithCopy_replaces_reshape) {
         c = inp.reshape(shape)
         return (a, b, c)
   )JIT");
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, cond: bool, x):
+        if cond:
+            y = x.reshape(x.shape)
+        else:
+            y = x.clone()
+        return y.clone()
+  )JIT");
 }
 
 TEST(
@@ -282,7 +297,6 @@ TEST(
         return (d)
   )JIT");
   ExpectNotToReplaceWithCopy(reshape_inplace_script);
-  ExpectNotToReplaceWithCopy(reshape_inplace_script_1);
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
@@ -310,22 +324,34 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
             return a * a
   )JIT";
 
-  const auto is_script = R"JIT(
+  const auto is_script_tensors = R"JIT(
     def forward(self, a: Tensor, b: Tensor):
         return a is b
   )JIT";
 
-  const auto is_not_script = R"JIT(
+  const auto is_script_none = R"JIT(
+    def forward(self, a: Optional[Tensor]):
+        return a is None
+  )JIT";
+
+  const auto is_not_script_tensors = R"JIT(
     def forward(self, a: Tensor, b: Tensor):
         return a is not b
   )JIT";
 
+  const auto is_not_script_none = R"JIT(
+    def forward(self, a: Optional[Tensor]):
+        return a is not None
+  )JIT";
+
   EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(for_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(while_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(if_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(is_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(for_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(while_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(if_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_script_tensors));
+  EXPECT_TRUE(testCanEnableStaticRuntime(is_script_none));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script_tensors));
+  EXPECT_TRUE(testCanEnableStaticRuntime(is_not_script_none));
 }
 
 TEST(StaticRuntime, NestedOutput) {
@@ -413,7 +439,8 @@ TEST(StaticRuntime, LongModel) {
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
-  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+  EXPECT_TRUE(
+      torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 }
 
 TEST(StaticRuntime, TrivialModel) {
@@ -431,7 +458,8 @@ TEST(StaticRuntime, TrivialModel) {
   torch::jit::StaticModule smod(mod);
   at::Tensor output_2 = smod(input_tensors, {}).toTensor();
   smod.runtime().check_for_memory_leak();
-  EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+  EXPECT_TRUE(
+      torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 }
 
 TEST(StaticRuntime, DeepWide) {
@@ -456,7 +484,8 @@ TEST(StaticRuntime, DeepWide) {
       ASSERT_TRUE(outputs.size() > 0);
       at::Tensor output_2 = outputs[0].toTensor();
       smod.runtime().check_for_memory_leak();
-      EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+      EXPECT_TRUE(
+          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
     }
   }
 }
@@ -483,7 +512,8 @@ TEST(StaticRuntime, KWargsAPI_1) {
         smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
-        EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+        EXPECT_TRUE(
+            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -527,7 +557,8 @@ TEST(StaticRuntime, KWargsAPI_2) {
         smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
-        EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+        EXPECT_TRUE(
+            torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
 
         // check for output aliasing
         EXPECT_EQ(output_ivalue.use_count(), 1);
@@ -541,6 +572,24 @@ TEST(StaticRuntime, KWargsAPI_2) {
       EXPECT_EQ(wide.getIntrusivePtr().use_count(), 1);
     }
   }
+}
+
+TEST(StaticRuntime, KWargsAPI_Optional) {
+  const auto src = R"JIT(
+    def forward(self, x, y, z: Optional[Tensor] = None):
+        return x + y
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+  torch::jit::StaticModule smod(mod);
+  const auto kwargs = std::unordered_map<std::string, IValue>{
+      {"x", at::randn({1})}, {"y", at::randn({1})}};
+
+  auto expected = mod.forward({}, kwargs).toTensor();
+  auto actual = smod({}, kwargs).toTensor();
+
+  EXPECT_TRUE(expected.equal(actual));
 }
 
 TEST(StaticRuntime, CleanUpMemory) {
@@ -586,7 +635,8 @@ TEST(StaticRuntime, CleanUpMemory) {
             ASSERT_TRUE(outputs.size() > 0);
             auto output_2 = outputs[0].toTensor();
             runtime.check_for_memory_leak();
-            EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+            EXPECT_TRUE(torch::allclose(
+                output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
             if (manage_output_tensors) {
               runtime.deallocateOutputTensors();
               runtime.checkOutputTensorMemoryLeaks();
@@ -831,7 +881,8 @@ TEST(StaticRuntime, FusionPass) {
       }
       EXPECT_TRUE(hit);
       auto output_2 = getTensor(module.forward(inputs));
-      EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+      EXPECT_TRUE(
+          torch::allclose(output_1, output_2, /*rtol=*/1e-5, /*atol=*/1e-7));
     }
   }
 }
@@ -863,8 +914,9 @@ TEST(
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
-  pnode.set_values(values.data());
+  StaticNodeInfo static_node_info(
+      sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
+  ProcessedNode pnode(static_node_info, values.data());
   EXPECT_TRUE(pnode.verify_no_memory_overlap(/* force_check*/ true));
 
   pnode.Output(0) = values[0];
@@ -882,8 +934,9 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithImmutableInputsWithInplaceOps) {
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
-  pnode.set_values(values.data());
+  StaticNodeInfo static_node_info(
+      sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
+  ProcessedNode pnode(static_node_info, values.data());
 
   ASSERT_EQ(&pnode.Output(0), &values[1]);
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
@@ -909,9 +962,10 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         list_unpack_node,
         /*enable_out_variant=*/true,
         /*check_memory_overlap */ false);
-    ProcessedNode list_unpack_pnode(
+    StaticNodeInfo list_unpack_static_node_info(
         list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
-    list_unpack_pnode.set_values(values.data());
+    ProcessedNode list_unpack_pnode(
+        list_unpack_static_node_info, values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(
         list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
@@ -923,9 +977,10 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         list_unpack_node,
         /*enable_out_variant=*/true,
         /*check_memory_overlap */ false);
-    ProcessedNode list_unpack_pnode(
+    StaticNodeInfo list_unpack_static_node_info(
         list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
-    list_unpack_pnode.set_values(values.data());
+    ProcessedNode list_unpack_pnode(
+        list_unpack_static_node_info, values.data());
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
@@ -1050,7 +1105,8 @@ TEST(ManagedTensorRanges, NoAliases) {
   auto* z = vmap["z"];
 
   FastSet<const Value*> managed_tensors = {y, z};
-  ManagedTensorRanges ranges(graph, managed_tensors);
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1089,7 +1145,8 @@ TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
   auto* z2 = vmap["z2"];
 
   FastSet<const Value*> managed_tensors = {y, z1, z2};
-  ManagedTensorRanges ranges(graph, managed_tensors);
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1135,7 +1192,8 @@ TEST(ManagedTensorRanges, LifetimeOverlap) {
   auto* d = vmap["d"];
   auto* e = vmap["e"];
 
-  ManagedTensorRanges ranges(graph, {b, c, d, e});
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d, e});
   const std::vector<std::pair<Value*, Value*>> overlapping_values{
       {b, c}, {c, d}, {c, e}};
 
@@ -1169,7 +1227,8 @@ TEST(ManagedTensorRanges, OverlappingLifetimesContainers) {
   auto* c = vmap["c"];
   auto* d = vmap["d"];
 
-  ManagedTensorRanges ranges(graph, {b, c, d});
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, c));
   EXPECT_TRUE(ranges.lifetimesOverlap(b, d));
@@ -1189,7 +1248,8 @@ TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
   auto* b = vmap["b"];
   auto* output = vmap["output"];
 
-  ManagedTensorRanges ranges(graph, {b, output});
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, output});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, output));
 }
@@ -1275,7 +1335,9 @@ void testAssignStorageToManagedTensors(
   }
   ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
 
-  auto ranges = ManagedTensorRanges(graph, managed_tensor_values);
+  AliasDb alias_db(graph);
+  auto ranges =
+      ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
   auto groups = assignStorageToManagedTensors(
       graph->block()->nodes(), ranges, tensor_value_to_tensor);
 
@@ -1415,3 +1477,290 @@ TEST(StaticModule, NotEnoughArgs) {
   )JIT";
   testStaticModuleThrows(kwargs_src, {}, {});
 }
+
+TEST(CreateOwnedRefsForSpecialValues, TopLevel) {
+  const auto src = R"IR(
+    graph():
+        %c: int = prim::Constant[value=42]()
+        return (%c)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefsForSpecialValues(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(CreateOwnedRefsForSpecialValues, ValueFromOuterScope) {
+  const auto src = R"IR(
+    graph(%cond: bool, %1: int):
+        %c: int = aten::add(%1, %1)
+        %x: int = prim::If(%c)
+          block0():
+            -> (%c)
+          block1():
+            -> (%c)
+        return (%x)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefsForSpecialValues(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
+  const auto src = R"IR(
+    graph(%cond: bool):
+        %lst : int[] = prim::ListConstruct()
+        %1 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        prim::If(%cond)
+          block0():
+            aten::append(%lst, %1)
+            -> ()
+          block1():
+            aten::append(%lst, %2)
+            -> ()
+        return (%lst)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  ForceNonEmptyOutputs(*graph);
+
+  for (auto* node : graph->nodes()) {
+    if (node->blocks().empty()) {
+      continue;
+    }
+    EXPECT_EQ(node->outputs().size(), 1);
+    for (auto* sub_block : node->blocks()) {
+      EXPECT_EQ(sub_block->outputs().size(), 1);
+    }
+  }
+}
+
+TEST(EliminateExtraPermuteOps, FusesSumCorrectly) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=-1)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::permute"));
+  auto* sum = getNodeWithKind(graph, "aten::sum");
+  ASSERT_NE(sum, nullptr);
+  auto dim = toIValue(sum->input(1));
+  ASSERT_TRUE(dim.has_value() && dim->isIntList());
+  EXPECT_EQ(dim->toIntList(), c10::List<int64_t>{1});
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseSumWrongDim) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=1)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseSumNonConstantDim) {
+  const auto src = R"JIT(
+    def forward(self, x, dim: int):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=dim)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(EliminateExtraPermuteOps, FusesSoftmaxCorrectly) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        a = torch.permute(x, [0, 2, 1])
+        b = torch.softmax(a, 2)
+        c = torch.permute(b, [0, 2, 1])
+        return c.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+  graph->dump();
+
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::permute"));
+  auto* softmax = getNodeWithKind(graph, "aten::softmax");
+  ASSERT_NE(softmax, nullptr);
+  auto dim = toIValue(softmax->input(1));
+  ASSERT_TRUE(dim.has_value() && dim->isInt());
+  EXPECT_EQ(dim->toInt(), 1);
+
+  std::vector<IValue> args{at::randn({3, 4, 5})};
+  testStaticRuntime(src, args, /*args2=*/{}, /*use_allclose=*/true);
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseSoftmaxWrongPermuteDim) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        a = torch.permute(x, [0, 1, 2])
+        b = torch.softmax(a, 2)
+        c = torch.permute(b, [0, 1, 2])
+        return c.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseSoftmaxWrongSoftmaxDim) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        a = torch.permute(x, [0, 2, 1])
+        b = torch.softmax(a, 0)
+        c = torch.permute(b, [0, 2, 1])
+        return c.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(UseSplitAndSqueeze, Fusion) {
+  const auto src = R"IR(
+    graph(%x: Tensor):
+      %dim: int = prim::Constant[value=1]()
+      %split_size: int = prim::Constant[value=1]()
+      %split: Tensor[] = aten::split(%x, %split_size, %dim)
+      %a: Tensor, %b: Tensor = prim::ListUnpack(%split)
+      %c: Tensor = aten::squeeze(%a, %dim)
+      %d: Tensor = aten::squeeze(%b, %dim)
+      return (%c, %d)
+  )IR";
+  auto graph = getGraphFromIR(src);
+  UseSplitAndSqueeze(graph);
+  EXPECT_TRUE(
+      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze_copy"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::split"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::squeeze"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "prim::ListUnpack"));
+}
+
+TEST(EliminateNoOpSlice, IntegerStart) {
+  const auto src = R"JIT(
+    def forward(self, x: List[int]) -> List[int]:
+        return x[0:]
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::slice"));
+  EliminateNoOpSlice(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::slice"));
+}
+
+TEST(EliminateNoOpSlice, NoneStart) {
+  const auto src = R"JIT(
+    def forward(self, x: List[int]) -> List[int]:
+        return x[:]
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  EliminateNoOpSlice(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::slice"));
+}
+
+#ifdef FBCODE_CAFFE2
+// FuseClampNaNToNum pass is disabled externally to avoid MSVC errors in CI
+TEST(FuseClampNaNToNum, FusionHappens) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x, min=0.0, max=1.0)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  FuseClampNaNToNum(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::clamp"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::nan_to_num"));
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::clamp_nan_to_num"));
+  // Correctness of the op is exercised in StaticRuntime.clamp_nan_to_num
+}
+
+TEST(FuseClampNaNToNum, NoFusion) {
+  const auto src1 = R"JIT(
+    def forward(self, x, a: float, b: float):
+        y = torch.clamp(x, a, b)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+  const auto src2 = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x, min=0.0)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+  const auto src3 = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x, max=0.0)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+  const auto src4 = R"JIT(
+    def forward(self, x):
+        y = torch.clamp(x)
+        z = y.nan_to_num()
+        return z.clone()
+  )JIT";
+
+
+  auto checkScript = [](const char* src) {
+    torch::jit::Module mod("m");
+    mod.define(src);
+    auto graph = mod.get_method("forward").graph();
+    FuseClampNaNToNum(graph);
+    EXPECT_TRUE(hasNodeWithKind(graph, "aten::clamp"));
+    EXPECT_TRUE(hasNodeWithKind(graph, "aten::nan_to_num"));
+    EXPECT_FALSE(hasNodeWithKind(graph, "static_runtime::clamp_nan_to_num"));
+  };
+
+  checkScript(src1);
+  checkScript(src2);
+  checkScript(src3);
+  checkScript(src4);
+}
+#endif

@@ -60,8 +60,7 @@ class C10_EXPORT QTensor {
   void Resize(at::ArrayRef<int> dim_source) {
     if (dims_ != dim_source) {
       const auto source_size = c10::multiply_integers(dim_source);
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      if ((source_size * (precision_ + signed_)) > capacity_) {
+      if (static_cast<size_t>(source_size * (precision_ + signed_)) > capacity_) {
         data_ptr_.clear();
         capacity_ = 0;
       }
@@ -188,7 +187,7 @@ class C10_EXPORT QTensor {
    * Returns the i-th dimension of the qtensor in int.
    */
   inline int dim32(const int i) const {
-    DCHECK_LT(i, dims_.size()) << "Exceeding ndim limit " << dims_.size();
+    DCHECK_LT(i, static_cast<int>(dims_.size())) << "Exceeding ndim limit " << dims_.size();
     DCHECK_GE(i, 0) << "Cannot have negative index";
     CAFFE_ENFORCE_LT(dims_[i], std::numeric_limits<int>::max());
     return static_cast<int>(dims_[i]);

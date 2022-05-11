@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
 
 
 #include <ATen/ATen.h>
@@ -12,6 +13,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Activation.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/Utils.h>
@@ -188,7 +190,12 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
   return norm_backward(grad, self, p_, norm, {}, true);
 }
 
-Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+Tensor norm_backward(
+    Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+  // NB: We mask fill the NaNs in the output to be zero but still do float division
+  //     by zero, which ASAN complains about. One way to appease ASAN is to fill the problematic
+  //     values with something arbitrary before the division, but we decide not to due to
+  //     the perf hit. Instead we just silence ASAN where necessary
   size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -204,34 +211,102 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   } else if (p == 1.0) {
     return self.sgn() * grad;
   } else if (p == 2.0) {
-    self_scaled = self;
-    scale_v = grad / norm;
+    return self * (grad / norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
     const auto& self_and_norm_isnan = areAnyTensorSubclassLike({self, norm}) ?
       self_isnan.logical_and(norm_isnan) :
       self_isnan.logical_and_(norm_isnan);
-    Tensor is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
+    auto is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
     self_scaled = self.sgn() * is_eq_max;
-    Tensor nb_max = is_eq_max.count_nonzero(dim);
+    auto nb_max = is_eq_max.count_nonzero(dim);
     if (self.dim() != 0) {
       nb_max = unsqueeze_multiple(nb_max, dim, ndim);
     }
     scale_v = grad / nb_max;
+    return self_scaled * scale_v;
+  } else if (p < 1.0) {
+    self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self == 0, 0);
+    return self_scaled * grad * norm.pow(1 - p);
   } else if (p < 2.0) {
-    self_scaled = self.sgn() * self.abs().pow(p - 1);
+    self_scaled = self.sgn() * self.abs().pow_(p - 1);
     scale_v = grad / norm.pow(p - 1);
+    scale_v.masked_fill_(norm == 0, 0);
+    return self_scaled * scale_v;
   } else {
-    self_scaled = self * self.abs().pow(p - 2);
+    self_scaled = self * self.abs().pow_(p - 2);
     scale_v = grad / norm.pow(p - 1);
+    scale_v.masked_fill_(norm == 0, 0);
+    return self_scaled * scale_v;
   }
-  // handle case at 0 where we return a subgradient containing 0
-  scale_v.masked_fill_(norm == 0, 0);
-  return self_scaled * scale_v;
 }
 
-Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
+// See norm_backward above for a note on ignoring the sanitizer
+Tensor norm_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const optional<Scalar> & p_,
+  Tensor norm,
+  IntArrayRef dim,
+  bool keepdim
+) {
+  // NB: currently norm_jvp is also reused for dist's jvp (which haas two differentiable inputs)
+  //     but self_t still cannot be a ZT because that would require both self_t and other_t to be ZT
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor());
+  size_t ndim = self_p.dim();  // composite compliance?
+  double p = p_.value_or(2.0).toDouble();
+
+  if (p == 0.0) {
+    return at::zeros_like(norm);
+  } else if (p == 1.0) {
+    auto result = self_p.sgn();
+    result = areAnyTensorSubclassLike({self_t}) ? result.mul(self_t.conj()) : result.mul_(self_t.conj());
+    result = at::real(result);
+    return result.sum(dim, keepdim);
+  } else if (p == 2.0) {
+    auto result = self_p.mul(self_t.conj());
+    result = at::real(result);
+    result = result.sum(dim, keepdim);
+    return result.div_(norm).masked_fill_(norm == 0, 0);
+  } else if (std::isinf(p)) {
+    if (!keepdim && self_p.dim() != 0) {
+      norm = unsqueeze_multiple(norm, dim, ndim);
+    }
+    const auto self_isnan = self_p.isnan();
+    const auto norm_isnan = norm.isnan();
+    const auto& self_and_norm_isnan = areAnyTensorSubclassLike({norm}) ?
+      self_isnan.logical_and(norm_isnan) :
+      self_isnan.logical_and_(norm_isnan);
+    const auto is_eq_max = (self_p.abs() == norm).logical_or_(self_and_norm_isnan).type_as(norm);
+    auto nb_max = is_eq_max.count_nonzero(dim);
+    if (self_p.dim() != 0) {
+      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
+    }
+    return (at::real(self_p.sgn() * self_t.conj()) * is_eq_max / nb_max).sum(dim, keepdim);
+  } else if (p < 1.0) {
+    auto sumpow_t = (self_p.abs().pow_(p - 1).masked_fill_(self_p == 0, 0) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
+    return sumpow_t * norm.pow(1 - p);
+  } else if (p < 2.0) {
+    auto sumpow_t = (self_p.abs().pow_(p - 1) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
+    auto out = sumpow_t / norm.pow(p - 1);
+    return out.masked_fill_(norm == 0, 0);
+  } else {
+    auto sumpow_t = (self_p.abs().pow_(p - 2) * at::real(self_p * self_t.conj())).sum(dim, keepdim);
+    auto out = sumpow_t / norm.pow(p - 1);
+    return out.masked_fill_(norm == 0, 0);
+  }
+}
+
+Tensor norm_jvp(const Tensor& self_p, const Tensor& self_t, const optional<Scalar> & p_, Tensor norm) {
+  return norm_jvp(self_p, self_t, p_, norm, {}, true);
+}
+
+Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+  auto dim = opt_dim.value_or(IntArrayRef({}));
+  return norm_jvp(self_p, self_t, scalar_ord, norm, dim, keepdim);
+}
+
+Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
 }
@@ -513,6 +588,7 @@ Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tenso
 }
 
 Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
+  at::NoTF32Guard disable_tf32;
   Tensor grad_self = solve_backward_self(grad, self, A);
   if (self.ndimension() == 2 && A.ndimension() == 2) {
     return -at::mm(grad_self, solution.mH());
@@ -715,6 +791,22 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
   return ret;
 }
 
+at::Tensor clamp_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const Tensor& min_p, const Tensor& min_t,
+  const Tensor& max_p, const Tensor& max_t
+) {
+  if (min_p.defined() && max_p.defined()) {
+    return where(min_p > max_p, max_t, where(self_p < min_p, min_t, where(self_p > max_p, max_t, self_t)));
+  } else if (min_p.defined()) {
+    return where(self_p > min_p, self_t, min_t);
+  } else if (max_p.defined()) {
+    return where(self_p < max_p, self_t, max_t);
+  } else {
+    return self_t;
+  }
+}
+
 Tensor convolution_jvp(
     const Tensor& input_p, const Tensor& input_t,
     const Tensor& weight_p, const Tensor& weight_t,
@@ -762,7 +854,7 @@ Tensor convolution_backward_jvp_grad_bias(
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 4, but got: ",
+        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 5, but got: ",
         grad_out_t.dim());
   }
 }
@@ -795,39 +887,35 @@ at::IntArrayRef strides_or_error(const Tensor & input, c10::string_view const & 
       "Please either use a strided tensor or set requires_grad=False for '",
       input_name, "'");
     if (input.is_mkldnn()) return IntArrayRef({});
+    if (input.is_sparse_csr()) return IntArrayRef({});
     return input.strides();
   } else {
     return IntArrayRef({});
   }
 }
 
-Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, const Scalar & alpha) {
-  // if input was column-major, return grad as column-order for efficiency
-  if (mat1_strides[0] == 1 && mat1_strides[1] == mat1_sizes[0]) {
-    return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha.conj());
-  } else {
-    return maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
+Tensor mm_mat1_backward(const Tensor& grad, const Tensor& mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, c10::Layout mat1_layout, const Scalar& alpha) {
+  if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided && mat1_layout == c10::kStrided) {
+    // if input was column-major, return grad as column-order for efficiency
+    if (mat1_strides[0] == 1 && mat1_strides[1] == mat1_sizes[0]) {
+      return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha.conj());
+    }
   }
+
+  // General fallback, should work for any layout
+  return maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
 }
 
-Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef sizes, IntArrayRef strides, const Scalar & alpha) {
-  // if input was column-major, return grad as column-order for efficiency
-  if (strides[0] == 1 && strides[1] == sizes[0]) {
-    if (mat1.is_sparse()) {
-      // Since mm(dense, sparse) doesn't exist,
-      // pass a transposed output matrix to the underlying "addmm"
-      // function directly.
-      int64_t out_rows = mat1.size(1);
-      int64_t out_cols = grad.size(1);
-      Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
-      Tensor r = at::empty({out_cols, out_rows}, grad.options()).t();
-      at::addmm_out(r, t, mat1.t(), grad, alpha, 1);
-      return r;
+Tensor mm_mat2_backward(const Tensor& grad, const Tensor& mat1, IntArrayRef mat2_sizes, IntArrayRef mat2_strides, c10::Layout mat2_layout, const Scalar& alpha) {
+  if (grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided && mat2_layout == c10::kStrided) {
+    // if input was column-major, return grad as column-order for efficiency
+    if (mat2_strides[0] == 1 && mat2_strides[1] == mat2_sizes[0]) {
+      return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha.conj());
     }
-    return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha.conj());
-  } else {
-    return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
   }
+
+  // General fallback, should work for any layout
+  return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
 }
 
 Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {
@@ -907,7 +995,7 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p
         self, p, reduce_dims, /*keepdim=*/true);
   }
 
-  const auto real_acc_type = c10::toValueType(acc_type);
+  const auto real_acc_type = c10::toRealValueType(acc_type);
   auto grad_output = (self.conj() * grad);
   // vector_norm output is real, so grad_output must also be real
   if (real_acc_type != acc_type) {
@@ -1048,7 +1136,7 @@ static Tensor var_backward(const Tensor & grad, const Tensor & self, int64_t cor
   return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
 }
 
-Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> dim_opt,
+Tensor var_backward(Tensor grad, const Tensor& self, at::OptionalIntArrayRef dim_opt,
     c10::optional<int64_t> correction_opt, bool keepdim) {
   auto correction = correction_opt.value_or(1);
   if (self.dim() == 0 || !dim_opt.has_value()) {
@@ -1063,7 +1151,7 @@ Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> 
   return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
 }
 
-Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, c10::optional<IntArrayRef> dim_opt,
+Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, at::OptionalIntArrayRef dim_opt,
     c10::optional<int64_t> correction_opt, bool keepdim) {
   auto correction = correction_opt.value_or(1);
   if (self_p.dim() == 0 || !dim_opt.has_value()) {
@@ -1076,7 +1164,7 @@ Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result,
 
 Tensor std_backward(
     const Tensor& result, const Tensor& grad, const Tensor& self,
-    c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim) {
+    at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim) {
   auto grad_var = (grad / (result * 2)).masked_fill_(result == 0, 0);
   return var_backward(grad_var, self, dim, correction, keepdim);
 }
@@ -1091,7 +1179,7 @@ Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int64_t numel) {
 
 static Tensor mean_backward(
     const Tensor& grad, const IntArrayRef sizes, int64_t numel,
-    c10::optional<IntArrayRef> dim, bool keepdim) {
+    at::OptionalIntArrayRef dim, bool keepdim) {
   if (dim.has_value()) {
     return mean_backward(grad, sizes, *dim, keepdim);
   } else {
@@ -1101,7 +1189,7 @@ static Tensor mean_backward(
 
 Tensor var_std_mean_backward(
     const variable_list& grads, const Tensor& self, const Tensor& r1,
-    const Tensor& r2, c10::optional<IntArrayRef> dim,
+    const Tensor& r2, at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction, bool keepdim, bool is_std) {
   Tensor grad;
   if (grads[0].defined()) {
@@ -1131,57 +1219,86 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
   return mask_selected.view(sizes);
 }
 
-Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& L, bool upper) {
-  // Differentiation of the Cholesky decomposition, Iain Murray
-  // https://arxiv.org/abs/1602.07527
-  // equation 8
-  auto input_tangent_ = upper ? input_tangent.mH() : input_tangent;
-  auto L_ = upper ? L.mH() : L;
+Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
+  at::NoTF32Guard disable_tf32;
+  // Let A = LL^H
+  // dA = dLL^H + L(dL)^H
+  // L^{-1}dA(L^{-H}) = L^{-1}dL + (L^{-1}dL)^H
+  //               = sym(L^{-1}dL)
+  // where sym(X) = X + X^H
+  // A short computaiton gives that the inverse of sym is given by
+  // \pi(X) = X.tril() - 0.5*diag(X)
+  // so
+  // dL = L\pi(L^{-1}dA(L^{-H}))
 
-  auto L_inverse = at::linalg_solve_triangular(L_, at::eye(L.size(-1), L.options()), /*upper=*/false);
-  auto phi = at::matmul(at::matmul(L_inverse, input_tangent_), L_inverse.mH());
-  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
-  auto L_tangent = L_.matmul(phi);
-  return upper ? L_tangent.mH() : L_tangent;
+  // Precondition: dA is symmetric/Hermitian
+  auto L_ = upper ? L.mH() : L;
+  auto dL = at::linalg_solve_triangular(L_, dA, /*upper=*/false, /*left=*/true);
+  dL = at::linalg_solve_triangular(L_.mH(), dL, /*upper=*/true, /*left=*/false);
+  dL = dL.tril() - dL.diagonal(0, -2, -1).mul(0.5).diag_embed();
+  dL = L_.matmul(dL);
+  return upper ? dL.mH() : dL;
 }
 
-Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
-  // cf. Iain Murray (2016); arXiv 1602.07527
-  // This gradient is symmetric, and not triangular.
-  // Cholesky additionally assumes that the input is symmetric, which is a subspace of
-  // R^{n x n}, and hence the derivative is not well-defined for off-diagonal
-  // elements. We resolve this by taking the gradient of the functionally independent
-  // elements of the matrix (i.e., the lower triangular portion of the input) and then
-  // reflect it on the upper triangular portion, thereby symmetrizing the gradient of
-  // the cholesky operation. The motivation behind this choice is that symmetric gradient
-  // leads to stable gradient updates, and retains symmetry of the updated matrix if it
-  // were updated by a gradient based algorithm.
-  if (upper) {
-    L = L.mH();
-    grad = grad.mH();
-  }
-  auto L_inverse = at::linalg_solve_triangular(L, at::eye(L.size(-1), L.options()), /*upper=*/false);
-  auto phi = at::matmul(L.mH(), grad);
-  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
+Tensor cholesky_backward(const Tensor& gL, bool upper, const Tensor& L) {
+  at::NoTF32Guard disable_tf32;
+  // From cholesky_jvp we have that
+  // dL = L\pi(L^{-1}dA(L^-H))
+  //
+  // Let gL be the projection into the lower-triangular gradient wrt L. Taking adjoints we have
+  // gA = L^{-H}\pi^*((L^HgL).tril())L^{-1}
+  // where \pi^*(X) = 0.5 * (X + X^H - diag(X))
+  // The only non-standard point of this derivation is noting that the adjoint to multiplying
+  // on the left by a lower triangular matrix L is multiplying by L^H and then projecting back to
+  // the lower triangular matrices (hence the .tril() projection)
+  // Note that the gradient is symmetric and not triangular.
+  auto L_ = upper ? L.mH() : L;
+  auto gL_ = upper ? gL.mH() : gL;
 
-  auto grad_input = at::matmul(at::matmul(L_inverse.mH(), phi), L_inverse);
-  return grad_input.add(grad_input.mH()).mul_(0.5);  // Symmetrizing the gradient
+  // Nb. We don't need to compute gL_ = gL.tril() as
+  // tril(L^H gL) = tril(L^H (triu(gL, 1) + tril(gL)))
+  //              = tril(L^H tril(gL)) + tril(L^H triu(gL, 1))
+  //              = tril(L^H tril(gL))
+  // since tril(L^H triu(gL, 1)) = 0, as L^H triu(gL, 1) is upper triangular
+  auto gA = L_.mH().matmul(gL_).tril();
+  // Equivalent to 0.5 * (gA + gA^H - diag(gA))
+  gA = 0.5 * (gA + gA.tril(-1).mH());
+  gA = at::linalg_solve_triangular(L_.mH(), gA, /*upper=*/true, /*left=*/true);
+  gA = at::linalg_solve_triangular(L_, gA, /*upper=*/false, /*left=*/false);
+  return gA;
 }
 
 Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {
+  at::NoTF32Guard disable_tf32;
   Tensor grad_L;
   if (grad.defined()) {
-    Tensor common_term = grad + grad.mT();
+    Tensor common_term = grad + grad.mH();
     common_term = at::matmul(inverse, at::matmul(common_term, inverse));
     if (upper) {
       grad_L = -at::matmul(L, common_term);
     } else {
       grad_L = -at::matmul(common_term, L);
     }
-  } else {
-    grad_L = at::zeros({1}, L.options()).expand_as(L);
   }
+
   return grad_L;
+}
+
+// If X = (L L^H)^{-1} with L lower-triangular with a real positive diagonal,
+// then dX = K^H + K, where
+// K =  L^{-H} dL^{-1} [dL^{-1} = -L^{-1} dL L^{-1}]
+//   = -L^{-H} L^{-1} dL L^{-1} [L^{-H} L^{-1} = X]
+//   = -X dL L^{-1} [X = X^H = L^{-H} L^{-1} = L^{-1} L^{-H}]
+//   = -X dL X L^{H}.
+// If X = (U^H U)^{-1} with U upper-triangular with a real positive diagonal,
+// then K becomes
+// K = -X dU^H X U
+Tensor cholesky_inverse_jvp(const Tensor& F, const Tensor& dF, const Tensor& X, bool upper) {
+  at::NoTF32Guard disable_tf32;
+  const auto CF = upper ? F : F.mH();
+  const auto dCF = upper ? dF.mH() : dF;
+  const auto partial_dX = -X.matmul(dCF).matmul(X).matmul(CF);
+  return partial_dX + partial_dX.mH();
 }
 
 // The formula for forward AD is adapted from
@@ -1308,11 +1425,18 @@ Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
 
 Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {
   AT_ASSERT(indices.dim() >= dim);
-  auto size = indices.sizes().slice(0, indices.dim() - dim).vec();
-  size.push_back(-1);
-  auto indices_view = indices.view(size);
-  const auto memory_format = indices.suggest_memory_format();
-  return grad.contiguous(memory_format).view(size).gather(-1, indices_view).view(indices.sizes());
+  // handle non-empty inputs
+  if (indices.numel()) {
+    auto size = indices.sizes().slice(0, indices.dim() - dim).vec();
+    size.push_back(-1);
+    auto indices_view = indices.view(size);
+    const auto memory_format = indices.suggest_memory_format();
+    return grad.contiguous(memory_format).view(size).gather(-1, indices_view).view(indices.sizes());
+  }
+  // handle empty inputs
+  else {
+    return at::empty_like(indices, grad.options());
+  }
 }
 
 Tensor glu_double_backward(const Tensor & grad, const Tensor & grad_output, const Tensor & input, int64_t dim) {
@@ -1497,8 +1621,8 @@ Tensor binary_cross_entropy_with_logits_jvp(const Tensor& input_t, const Tensor&
   }
 
   if (weight.defined()) {
-    grad_input.mul_(weight);
-    grad_target.mul_(weight);
+    grad_input = grad_input.mul(weight);
+    grad_target = grad_target.mul(weight);
   }
   return apply_loss_reduction(grad_target + grad_input, reduction);
 }
@@ -2338,6 +2462,47 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
   }
 }
 
+Tensor gelu_double_backward(
+                const Tensor & ggI,
+                const Tensor & gO,
+                const Tensor & input,
+                c10::string_view approximate) {
+  //if (at::native::get_gelutype_enum(approximate) == at::native::GeluType::Tanh) {
+  if (approximate == "tanh") {
+    constexpr auto kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+    constexpr auto kKappa = 0.044715;
+
+    auto inner = kBeta * (input + kKappa * pow(input, 3));
+    auto tanh_inner = tanh(inner);
+    auto sech_inner = 1 / cosh(inner);
+
+    auto f = 0.5 * input;
+    auto g = 1 - tanh_inner * tanh_inner;
+    auto h = kBeta * (1 + 3 * kKappa * input * input);
+
+    auto f_prime_gh = 0.5 * g * h;
+
+    auto g_prime = (2 * sech_inner) * (-sech_inner * tanh_inner) * h;
+    auto g_prime_fh = f * h * g_prime;
+
+    auto h_prime = 6 * kKappa * input * kBeta;
+    auto h_prime_fg = f * g * h_prime;
+
+    // left_derivative = f_prime_gh
+    // right_derivative = f_prime_gh + g_prime_fh + h_prime_fg
+    // dgrad_dX = left_derivative + right_derivative
+    auto gI = ggI * gO * (2 * f_prime_gh + g_prime_fh + h_prime_fg);
+    return gI;
+  } else {
+    constexpr auto kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+    auto input_sq = input * input;
+    auto pdf = kBeta * at::exp(-0.5 * input_sq);
+    auto dgrad_dInput = 2 * pdf - input_sq * pdf;
+    auto gI = ggI * gO * dgrad_dInput;
+    return gI;
+  }
+}
+
 Tensor elu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
@@ -2367,106 +2532,316 @@ Tensor slice_backward_wrapper(
   return slice_backward(grad, input_sizes, dim, start_val, end_val, step);
 }
 
-// https://j-towns.github.io/papers/svd-derivative.pdf
-//
-// This makes no assumption on the signs of sigma.
-Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-          bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
-  TORCH_CHECK(compute_uv,
-           "svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
-           "and hence we cannot compute backward. Please use torch.svd(compute_uv=True)");
+std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
+                                                  const Tensor& U_,
+                                                  const Tensor& S,
+                                                  const Tensor& Vh_,
+                                                  const bool full_matrices) {
+  at::NoTF32Guard disable_tf32;
+  // See svd_backward for the derivation
+  // With sym(X) = X + X^H, we implement
+  // dU = U (sym(dX S) / E + i Im(diag(dX)) / (2S))
+  // if m > n
+  //   dU = [dU for m == n] + (I_m - UU^H) dA V S^{-1}
+  // dS = Re(diag(dP))
+  // dV = V (sym(S dX) / E - i Im(diag(dX)) / (2S))
+  // if m < n
+  //   dV = [dV for m == n] + (I_n - VV^H) (dA)^H U S^{-1}
+  // dVh = dV^H
+  // with dP = U^H dA V
+  //      dX = dP - dS
+  //      E_{jk} = S_k^2 - S_j^2 if j != k
+  //               1             otherwise
 
-  auto m = self.size(-2);
-  auto n = self.size(-1);
-  auto k = sigma.size(-1);
-  auto gsigma = grads[1];
+  // Checks compute_uv=true
+  TORCH_INTERNAL_ASSERT(U_.dim() >= 2 && Vh_.dim() >= 2);
 
-  auto u = raw_u;
-  auto v = raw_v;
-  auto gu = grads[0];
-  auto gv = grads[2];
+  const auto is_complex = dA.is_complex();
+  const auto m = dA.size(-2);
+  const auto n = dA.size(-1);
+  const auto k = S.size(-1);
 
-  if (!some) {
-    // We ignore the free subspace here because possible base vectors cancel
-    // each other, e.g., both -v and +v are valid base for a dimension.
-    // Don't assume behavior of any particular implementation of svd.
-    u = raw_u.narrow(-1, 0, k);
-    v = raw_v.narrow(-1, 0, k);
-    if (gu.defined()) {
-      gu = gu.narrow(-1, 0, k);
+  const auto U = full_matrices ? U_.narrow(-1, 0, k) : U_;
+  const auto Vh = full_matrices ? Vh_.narrow(-2, 0, k) : Vh_;
+  const auto V = Vh.mH();
+
+  // dP = U^H dA V
+  auto dP = m >= n ? at::matmul(U.mH(), at::matmul(dA, V))
+                   : at::matmul(at::matmul(U.mH(), dA), V);
+
+  auto dS = is_complex ? at::real(dP.diagonal(0, -2, -1))
+                       : dP.diagonal(0, -2, -1);
+
+  // dX = dP - dS
+  dP = dP - dS.diag_embed();
+
+  auto E = [&S]{
+    const auto S2 = S * S;
+    auto ret = S2.unsqueeze(-2) - S2.unsqueeze(-1);
+    // Any number a != 0 would, as we are just going to use it to compute 0 / a later on
+    ret.diagonal(0, -2, -1).fill_(1);
+    return ret;
+  }();
+
+  const auto sym = [](const Tensor& X) { return X + X.mH(); };
+
+  // diag(dP) / (2S)
+  auto diagdP2S = is_complex ? dP.diagonal(0, -2, -1).div(2. * S)
+                             : Tensor{};
+
+  // dU = U (sym(dP S) / E) + i Im(diag(dP)) / (2S)
+  auto dU = [&] {
+    auto dUaux = sym(dP * S.unsqueeze(-2)) / E;
+    if (is_complex) {
+      dUaux = dUaux + diagdP2S.diag_embed();
     }
-    if (gv.defined()) {
-      gv = gv.narrow(-1, 0, k);
+    return at::matmul(U, dUaux);
+  }();
+  if (m > n) {
+    // dU += (I_m - UU^H) dA V S^{-1}
+    const auto dAVSinv = at::matmul(dA, V / S.unsqueeze(-2)) ;
+    dU = dU + dAVSinv - at::matmul(U, at::matmul(U.mH(), dAVSinv));
+
+    // To "fix" the full_matrices case (the full_matrices case should not be differentiable...)
+    if (full_matrices) {
+      auto shape = dU.sizes().vec();
+      shape.end()[-1] = m - n;
+      dU = at::cat({dU, dU.new_zeros(shape)}, /*dim=*/-1);
     }
   }
-  auto vh = v.mH();
 
-  Tensor sigma_term;
-  if (gsigma.defined()) {
-    gsigma = gsigma.to(self.dtype());
-    // computes u @ diag(gsigma) @ vh
-    sigma_term = at::matmul(u * gsigma.unsqueeze(-2), vh);
+  // dVh = -sym(S dP) / E + i Im(diag(dP)) / (2S)
+  // Perf: We negate the S as it's the smallest tensor in the equation
+  auto dVh = [&] {
+    auto dVhaux = sym(dP * (-S).unsqueeze(-1)) / E;
+    if (is_complex) {
+      dVhaux = dVhaux + diagdP2S.diag_embed();
+    }
+    return at::matmul(dVhaux, Vh);
+  }();
+  if (m < n) {
+    // dVh += S^{-1} U^H dA (I_n - VV^H)
+    const auto UHdASinv = at::matmul(U.mH() / S.unsqueeze(-1), dA) ;
+    dVh = dVh + UHdASinv - at::matmul(at::matmul(UHdASinv, V), Vh);
+
+    // To "fix" the full_matrices case (the full_matrices case should not be differentiable...)
+    if (full_matrices) {
+      auto shape = dVh.sizes().vec();
+      shape.end()[-2] = n - m;
+      dVh = at::cat({dVh, dVh.new_zeros(shape)}, /*dim=*/-2);
+    }
+  }
+
+  return std::make_tuple(std::move(dU), std::move(dS), std::move(dVh));
+}
+
+Tensor svd_backward(const Tensor& gU,
+                    const Tensor& gS,
+                    const Tensor& gVh,
+                    const Tensor& U,
+                    const Tensor& S,
+                    const Tensor& Vh) {
+  at::NoTF32Guard disable_tf32;
+  // Throughout both the real and complex case we assume A has distinct singular values.
+  // Furthermore, if A is rectangular or complex, we assume it's full-rank.
+  //
+  //
+  // The real case (A \in R)
+  // See e.g. https://j-towns.github.io/papers/svd-derivative.pdf
+  //
+  // Denote by skew(X) = X - X^T, and by A o B the coordinatewise product, then
+  // if m == n
+  //   gA = U [(skew(U^T gU) / E)S + S(skew(V^T gV) / E) + I o gS ]V^T
+  // where E_{jk} = S_k^2 - S_j^2 if j != k and 1 otherwise
+  //
+  // if m > n
+  //   gA = [term in m == n] + (I_m - UU^T)gU S^{-1} V^T
+  // if m < n
+  //   gA = [term in m == n] + U S^{-1} (gV)^T (I_n - VV^T)
+  //
+  //
+  // The complex case (A \in C)
+  // This one is trickier because the svd is not locally unique.
+  // Denote L = diag(e^{i\theta_k}), then we have that if A = USV^H, then (UL, S, VL) is
+  // another valid SVD decomposition of A as
+  // A = ULS(VL)^H = ULSL^{-1}V^H = USV^H,
+  // since L, S and L^{-1} commute, since they are all diagonal.
+  //
+  // Assume wlog that n >= k in what follows, as otherwise we could reason about A^H.
+  // Denote by St_k(C^n) = {A \in C^{n,k} | A^H A = I_k} the complex Stiefel manifold.
+  // What this invariance means is that the svd decomposition is not a map
+  // svd: C^{n x k} -> St_k(C^n) x R^n x St_k(C^k)
+  // (where St_k(C^k) is simply the unitary group U(k)) but a map
+  // svd: C^{n x k} -> M x R^n
+  // where M is the manifold given by quotienting St_k(C^n) x U(n) by the action (U, V) -> (UL, VL)
+  // with L as above.
+  // Note that M is a manifold, because the action is free and proper (as U(1)^k \iso (S^1)^k is compact).
+  // For this reason, pi : St_k(C^n) x U(n) -> M forms a principal bundle.
+  //
+  // To think about M, consider the case case k = 1. The, we have the bundle
+  // pi : St_1(C^n) x U(1) -> M
+  // now, St_1(C^n) are just vectors of norm 1 in C^n. That's exactly the sphere of dimension 2n-1 in C^n \iso R^{2n}
+  // S^{2n-1} = { z \in C^n | z^H z = 1}.
+  // Then, in this case, we're quotienting out U(1) completely, so we get that
+  // pi : S^{2n-1} x U(1) -> CP(n-1)
+  // where CP(n-1) is the complex projective space of dimension n-1.
+  // In other words, M is just the complex projective space, and pi is (pretty similar to)
+  // the usual principal bundle from S^{2n-1} to CP(n-1).
+  // The case k > 1 is the same, but requiring a linear inependence condition between the
+  // vectors from the different S^{2n-1} or CP(n-1).
+  //
+  // Note that this is a U(1)^k-bundle. In plain words, this means that the fibres of this bundle,
+  // i.e. pi^{-1}(x) for x \in M are isomorphic to U(1) x ... x U(1).
+  // This is obvious as, if pi(U,V) = x,
+  // pi^{-1}(x) = {(U diag(e^{i\theta}), V diag(e^{i\theta})) | \theta \in R^k}
+  //            = {(U diag(z), V diag(z)) | z \in U(1)^k}
+  // since U(1) = {z \in C | |z| = 1}.
+  //
+  // The big issue here is that M with its induced metric is not locally isometric to St_k(C^n) x U(k).
+  // [The why is rather technical, but you can see that the horizontal distribution is not involutive,
+  // and hence integrable due to Frobenius' theorem]
+  // What this means in plain words is that, no matter how we choose to return the U and V from the
+  // SVD, we won't be able to simply differentiate wrt. U and V and call it a day.
+  // An example of a case where we can do this is when performing an eigendecomposition on a real
+  // matrix that happens to have real eigendecomposition. In this case, even though you can rescale
+  // the eigenvectors by any real number, you can choose them of norm 1 and call it a day.
+  // In the eigenvector case, we are using that you can isometrically embed S^{n-1} into R^n.
+  // In the svd case, we need to work with the "quotient manifold" M explicitly, which is
+  // slightly more technically challenging.
+  //
+  // Since the columns of U and V are not uniquely defined, but are representatives of certain
+  // classes of equivalence which represent elements M, the user may not depend on the particular
+  // representative that we return from the SVD. In particular, if the loss function depends on U
+  // or V, it must be invariant under the transformation (U, V) -> (UL, VL) with
+  // L = diag(e^{i\theta})), for every \theta \in R^k.
+  // In more geometrical terms, this means that the loss function should be constant on the fibres,
+  // or, in other words, the gradient along the fibres should be zero.
+  // We may see this by checking that the gradients as element in the tangent space
+  // T_{(U, V)}(St(n,k) x U(k)) are normal to the fibres. Differentiating the map
+  // (U, V) -> (UL, VL), we see that the space tangent to the fibres is given by
+  // Vert_{(U, V)}(St(n,k) x U(k)) = { i[U, V]diag(\theta) | \theta in R^k}
+  // where [U, V] denotes the vertical concatenation of U and V to form an (n+k, k) matrix.
+  // Then, solving
+  // <i[U,V]diag(\theta), [S, T]> = 0 for two matrices S, T \in T_{(U, V)}(St(n,k) x U(k))
+  // where <A, B> = Re tr(A^H B) is the canonical (real) inner product in C^{n x k}
+  // we get that the function is invariant under action of U(1)^k iff
+  // Im(diag(U^H gU + V^H gV)) = 0
+  //
+  // Using this in the derviaton for the forward AD, one sees that, with the notation from those notes
+  // Using this and writing sym(X) = X + X^H, we get that the forward AD for SVD in the complex
+  // case is given by
+  // dU = U (sym(dX S) / E + i Im(diag(dX)) / (2S))
+  // if m > n
+  //   dU = [dU for m == n] + (I_m - UU^H) dA V S^{-1}
+  // dS = Re(diag(dP))
+  // dV = V (sym(S dX) / E - i Im(diag(dX)) / (2S))
+  // if m < n
+  //   dV = [dV for m == n] + (I_n - VV^H) (dA)^H U S^{-1}
+  // dVh = dV^H
+  // with dP = U^H dA V
+  //      dX = dP - dS
+  //      E_{jk} = S_k^2 - S_j^2 if j != k
+  //               1             otherwise
+  //
+  // Similarly, writing skew(X) = X - X^H
+  // the adjoint wrt. the canonical metric is given by
+  // if m == n
+  //   gA = U [((skew(U^H gU) / E) S + i Im(diag(U^H gU)) / S + S ((skew(V^H gV) / E)) + I o gS] V^H
+  // if m > n
+  //   gA = [term in m == n] + (I_m - UU^H)gU S^{-1} V^H
+  // if m < n
+  //   gA = [term in m == n] + U S^{-1} (gV)^H (I_n - VV^H)
+  // where we have used that Im(diag(U^H gU)) = - Im(diag(V^h gV)) to group the diagonal imaginary terms into one
+  // that just depends on U^H gU.
+
+  // Checks compute_uv=true
+  TORCH_INTERNAL_ASSERT(U.dim() >= 2 && Vh.dim() >= 2);
+
+  // Trivial case
+  if (!gS.defined() && !gU.defined() && !gVh.defined()) {
+    return {};
+  }
+
+  const auto m = U.size(-2);
+  const auto n = Vh.size(-1);
+
+  // Optimisation for svdvals: gA = U @ diag(gS) @ Vh
+  if (!gU.defined() && !gVh.defined()) {
+    return m >= n ? at::matmul(U, gS.unsqueeze(-1) * Vh)
+                  : at::matmul(U * gS.unsqueeze(-2), Vh);
+  }
+  // At this point, at least one of gU, gVh is defined
+
+  const bool is_complex = U.is_complex();
+  const auto skew = [](const Tensor& A) { return A - A.mH(); };
+  const auto UhgU = gU.defined() ? skew(at::matmul(U.mH(), gU)) : Tensor{};
+  const auto VhgV = gVh.defined() ? skew(at::matmul(Vh, gVh.mH())) : Tensor{};
+
+  // Check for the invariance of the loss function, i.e.
+  // Im(diag(U^H gU)) + Im(diag(V^H gV)) = 0
+  if (is_complex) {
+    const auto imdiag_UhgU = gU.defined() ? at::imag(UhgU.diagonal(0, -2, -1))
+                                          : at::zeros_like(S);
+    const auto imdiag_VhgV = gVh.defined() ? at::imag(VhgV.diagonal(0, -2, -1))
+                                           : at::zeros_like(S);
+    // Rather lax atol and rtol, as we don't want false positives
+    TORCH_CHECK(at::allclose(imdiag_UhgU, -imdiag_VhgV, /*rtol=*/1e-2, /*atol=*/1e-2),
+                "svd_backward: The singular vectors in the complex case are specified up to multiplication "
+                "by e^{i phi}. The specified loss function depends on this phase term, making "
+                "it ill-defined.");
+  }
+
+  // gA = ((U^H gU) / E) S +  S (((V^H gV) / E) + I o (gS + diag(U^H gU) / (2 * S))
+  Tensor gA = [&] {
+    // ret holds everything but the diagonal of gA
+    auto ret = [&] {
+      const auto E = [&S]{
+        const auto S2 = S * S;
+        auto ret = S2.unsqueeze(-2) - S2.unsqueeze(-1);
+        // Any number a != 0 would, as we are just going to use it to compute 0 / a later on
+        ret.diagonal(0, -2, -1).fill_(1);
+        return ret;
+      }();
+
+      if (gU.defined()) {
+        if (gVh.defined()) {
+          return (UhgU * S.unsqueeze(-2) + S.unsqueeze(-1) * VhgV) / E;
+        } else {
+          return (UhgU / E) * S.unsqueeze(-2);
+        }
+      } else { // gVh.defined();
+        return S.unsqueeze(-1) * (VhgV / E);
+      }
+    }();
+    // Fill the diagonal
+    if (gS.defined()) {
+      ret = ret + gS.diag_embed();
+    }
+    if (is_complex && gU.defined() && gVh.defined()) {
+      ret = ret + (UhgU.diagonal(0, -2, -1) / (2. * S)).diag_embed();
+    }
+    return ret;
+  }();
+
+  if (m > n && gU.defined()) {
+    // gA = [UgA + (I_m - UU^H)gU S^{-1}]V^H
+    gA  = at::matmul(U, gA);
+    const auto gUSinv = gU / S.unsqueeze(-2);
+    gA = gA + gUSinv - at::matmul(U, at::matmul(U.mH(), gUSinv));
+    gA = at::matmul(gA, Vh);
+  } else if (m < n && gVh.defined()) {
+    //   gA = U[gA V^H + S^{-1} (gV)^H (I_n - VV^H)]
+    gA = at::matmul(gA, Vh);
+    const auto SinvgVh = gVh / S.unsqueeze(-1);
+    gA = gA + SinvgVh - at::matmul(at::matmul(SinvgVh, Vh.mH()), Vh);
+    gA = at::matmul(U, gA);
   } else {
-    sigma_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  // in case that there are no gu and gv, we can avoid the series of kernel
-  // calls below
-  if (!gv.defined() && !gu.defined()) {
-    return sigma_term;
+    // gA = U gA V^H
+    gA = m >= n ? at::matmul(U, at::matmul(gA, Vh))
+                : at::matmul(at::matmul(U, gA), Vh);
   }
 
-  auto uh = u.mH();
-  auto sigma_inv = sigma.pow(-1);
-  auto sigma_sq = sigma.pow(2);
-  auto F = sigma_sq.unsqueeze(-2) - sigma_sq.unsqueeze(-1);
-  // The following two lines invert values of F, and fills the diagonal with 0s.
-  // Notice that F currently has 0s on diagonal. So we fill diagonal with +inf
-  // first to prevent nan from appearing in backward of this function.
-  F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
-  F = F.pow(-1);
-
-  Tensor u_term, v_term;
-
-  if (gu.defined()) {
-    auto guh = gu.mH();
-    u_term = at::matmul(u, F.mul(at::matmul(uh, gu) - at::matmul(guh, u)) * sigma.unsqueeze(-2));
-    if (m > k) {
-      // projection operator onto subspace orthogonal to span(U) defined as I - UU^H
-      auto proj_on_ortho_u = -at::matmul(u, uh);
-      proj_on_ortho_u.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1);
-      u_term = u_term + proj_on_ortho_u.matmul(gu * sigma_inv.unsqueeze(-2));
-    }
-    u_term = at::matmul(u_term, vh);
-  } else {
-    u_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-
-  if (gv.defined()) {
-    auto gvh = gv.mH();
-    v_term = sigma.unsqueeze(-1) * at::matmul(F.mul(at::matmul(vh, gv) - at::matmul(gvh, v)), vh);
-    if (n > k) {
-      // projection operator onto subspace orthogonal to span(V) defined as I - VV^H
-      auto proj_on_v_ortho = -at::matmul(v, vh);
-      proj_on_v_ortho.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1);
-      v_term = v_term + sigma_inv.unsqueeze(-1) * at::matmul(gvh, proj_on_v_ortho);
-    }
-    v_term = at::matmul(u, v_term);
-  } else {
-    v_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-
-  // for complex-valued input there is an additional term
-  // https://giggleliu.github.io/2019/04/02/einsumbp.html
-  // https://arxiv.org/abs/1909.02659
-  if (self.is_complex() && gu.defined()) {
-    Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1);
-    at::real(L).zero_();
-    at::imag(L).mul_(sigma_inv);
-    Tensor imag_term = at::matmul(u * L.unsqueeze(-2), vh);
-    return u_term + sigma_term + v_term + imag_term;
-  }
-
-  return u_term + sigma_term + v_term;
+  return gA;
 }
 
 // The implementation follows:
@@ -2476,6 +2851,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 // See the details below.
 Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool is_eigvec_tensor_nonempty, const Tensor& eigenvalues, const Tensor& eigenvectors) {
+  at::NoTF32Guard disable_tf32;
   TORCH_CHECK(is_eigvec_tensor_nonempty,
            "eig_backward: torch.eig(eigenvalues=False) is not differentiable. ",
            "Please use torch.linalg.eigvals");
@@ -2615,14 +2991,15 @@ Tensor linalg_eig_backward(const Tensor& gL,
                            const Tensor& V,
                            const bool is_hermitian,
                            const bool symeig_eigenvectors) {
+  at::NoTF32Guard disable_tf32;
   // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
   // For A = VLV^{-1}, denoting the gradients gA, gV and gL, we have
   // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V^H
   // Where:
-  //   - E_ij = L_i - L_j if i != j
+  //   - E_{ij} = L_j - L_i if i != j
+  //              1         otherwise
   //   - diag_embed takes a vector into a diagonal matrix
   //   - diag zeroes out elements outside of the diagonal
-  //   - The division by E is done just outside of the diagonal. In the diagonal it is set to zero
 
   // Note: the term '-V^HV diag(real(V^H gV))' comes from the fact that the eigenvalue
   // decomposition is returned with eigenvectors normalized to have norm one.
@@ -2697,6 +3074,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
                                           const Tensor& L,
                                           const Tensor& V,
                                           const bool is_hermitian) {
+  at::NoTF32Guard disable_tf32;
   // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
   // see also https://arxiv.org/pdf/1701.00392.pdf Eqs. (4.60) and (4.63)
   // Note that neither of the formulas in these pdfs are correct, as they do not assume that
@@ -2706,15 +3084,10 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
   // where
   // dP = V^{-1} dA V
   // dX = V ((dP - diag(dP)) / E)
-  // E_{ij} = L_i - L_j if i != j
+  // E_{ij} = L_j - L_i if i != j
   //          1         otherwise
 
-  // Note: The Hermitian case is a simplification of this formula using that V^{-1} = V^H and that L is real
-  if (is_hermitian) {
-    TORCH_CHECK(at::allclose(dA, dA.mH(), /*rtol=*/1e-2, /*atol=*/1e-2),
-                "linalg_eig_jvp: The tangent part of the matrix A should also be ", (dA.is_complex() ? "Hermitian" : "symmetric."));
-  }
-
+  // Precondition: if is_hermitian == true, then dA is Hermitian
   const auto to_complex = [](const Tensor& A){ return A.to(c10::toComplexType(A.scalar_type())); };
 
   const auto dP = is_hermitian ? at::matmul(at::matmul(V.mH(), dA), V)
@@ -2744,6 +3117,7 @@ Tensor linalg_lstsq_jvp(
   const Tensor& dA,
   const Tensor& dB
 ) {
+  at::NoTF32Guard disable_tf32;
   auto pinvA = at::linalg_pinv(A);
   auto dpinvA = pinv_jvp(A, pinvA, dA);
   auto dX = dpinvA.matmul(B) + pinvA.matmul(dB);
@@ -2758,6 +3132,7 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
   const c10::optional<c10::string_view> driver,
   const std::array<bool, 2>& grad_input_mask
 ) {
+  at::NoTF32Guard disable_tf32;
   Tensor A_grad, B_grad;
   if (!grad.defined()) {
     return std::make_tuple(A_grad, B_grad);
@@ -2789,168 +3164,179 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
 std::tuple<Tensor, Tensor> linalg_qr_jvp(
   const Tensor& dA,
   const Tensor& Q,
-  const Tensor& R
+  const Tensor& R,
+  const c10::string_view mode
 ) {
-  auto m = dA.size(-2);
-  auto n = dA.size(-1);
-  auto k = std::min(m, n);
+  // dA = dQR + QdR
+  //
+  // Case m >= n
+  // We can put dQ in terms of dR
+  // dQ = dAR^{-1} - QdRR^{-1}
+  // Then we have
+  // Q^H dA R^{-1} = Q^HdQ + dRR^{-1}
+  // where Q^HdQ is skew Hermitian and dRR^{-1} is upper triangular
+  // Define sym(X) = X + X^H
+  // sym(dRR^{-1}) = sym(Q^H dA R^{-1})
+  // and define syminv(X) = triu(X) - 0.5 * diag(X) the inverse of
+  // sym : Triu(k, diag \in \mathbb{R}) -> Her(k) to give
+  // dR = syminv(sym(Q^H dA R^{-1}))R
+  //
+  // Case m < n
+  // Put dR as a function of dQ
+  // dR = Q^H dA - Q^H dQ R
+  // Let X_1 be the main m x m submatrix of a matrix X \in C^{m x n}
+  // Q^H A_1 R_1^{-1} = Q^H dQ + dR_1 R_1^{-1}
+  // Define trilIm(X) = X.tril(-1) + i * Im diag(X)
+  // trilIm(Q^H dQ) = trilIm(Q^H A_1 R_1^{-1})
+  // and define trilIminv(X) = X - X^H - i*Im diag(X). This is the inverse of
+  // trilIm : Skew_C(m) -> Tril(m, imaginary diag)
+  // Note that it is just the inverse when the inputs are skew-Hermitian, not necessarily
+  // when the inputs are arbitrary matrices. We then get
+  // dQ = Q trilImInv(trilIm(Q^H A_1 R_1^{-1}))
+  at::NoTF32Guard disable_tf32;
 
-  auto dA1 = dA.narrow(-1, 0, k);
-  auto R1 = R.narrow(-1, 0, k);
-
-  // dB1 = Q^H dA1 R1^{-1}
-  auto dB1 = at::linalg_solve_triangular(R1, Q.mH().matmul(dA1), /*upper=*/true, /*left=*/false);
-
-  // dC1 = (dB1 + dB1^H).triu(-1) + (dB1 + dB1^H) * 0.5 I
-  auto dC1 = (dB1 + dB1.mH()).triu();
-  dC1.diagonal(0, -2, -1).mul_(0.5);
-
-  auto dR1 = dC1.matmul(R1);
-
-  // dQ = (dA1 - Q dR1) R1^{-1}
-  auto dQ = at::linalg_solve_triangular(R1, dA1 - Q.matmul(dR1), /*upper=*/true, /*left=*/false);
-
-  Tensor dR;
-  if (m >= n) {
-    dR = dR1;
-  }
-  else {
-    auto dA2 = dA.narrow(-1, k, n - k);
-    auto R2 = R.narrow(-1, k, n - k);
-    auto dR2 = Q.mH().matmul(dA2 - dQ.matmul(R2));
-    dR = at::cat({dR1, dR2}, -1);
-  }
-
-  return std::make_tuple(dQ, dR);
-}
-
-Tensor linalg_qr_jvp_Q(
-  const Tensor& dA,
-  const Tensor& Q,
-  const Tensor& R
-) {
-  return std::get<0>(linalg_qr_jvp(dA, Q, R));
-}
-
-Tensor linalg_qr_jvp_R(
-  const Tensor& dA,
-  const Tensor& Q,
-  const Tensor& R
-) {
-  return std::get<1>(linalg_qr_jvp(dA, Q, R));
-}
-
-Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                          c10::string_view mode, const Tensor& q, const Tensor& r){
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
-  TORCH_CHECK(compute_q, "The derivative of qr is not implemented when mode='r'. "
-                         "Please use torch.linalg.qr(..., mode='reduced')");
 
-  auto square_deep_case_backward = [](const Tensor& grad_Q,
-                                      const Tensor& grad_R,
-                                      const Tensor& A,
-                                      const Tensor& Q,
-                                      const Tensor& R) -> Tensor {
-    // For square and deep (tall) case we refer:
-    // Matthias Seeger, Asmus Hetzel, Zhenwen Dai, Eric Meissner, Neil D. Lawrence (2018). Auto-Differentiating Linear Algebra.
-    // https://arxiv.org/abs/1710.08717 Section 4.3 LQ Decomposition (Note that LQ decomposition is the transpose of QR decomposition)
-    // Hai-Jun Liao, Jin-Guo Liu, Lei Wang, Tao Xiang (2019). Differentiable Programming Tensor Networks.
-    // https://arxiv.org/abs/1903.09650 Section 3. QR factorization
-    // For derivations of complex-valued input case, see https://giggleliu.github.io/2019/04/02/einsumbp.html
+  TORCH_CHECK(compute_q, "The derivative of linalg.qr depends on Q, which is not computed when "
+                         "mode='r'. Please use linalg.qr(A, mode='reduced') if you are "
+                         "going to differentiate through linalg.qr.");
+  auto m = dA.size(-2);
+  auto n = dA.size(-1);
 
-    // Compute R grad_R^H
-    Tensor R_term;
-    if (grad_R.defined()) {
-      R_term = at::matmul(R, grad_R.mH());
-    } else {
-      // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
-      R_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-
-    // Compute grad_Q^H Q
-    Tensor Q_term;
-    if (grad_Q.defined()) {
-      Q_term = at::matmul(grad_Q.mH(), Q);
-    } else {
-      // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
-      Q_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-
-    Tensor M = R_term - Q_term;
-
-    // Compute M = (tril(M) + tril(M).mH()) * 0.5 Identity
-    Tensor M_tril = at::tril(M);
-    M = M_tril + M_tril.mH();
-    M.diagonal(0, -2, -1).mul_(0.5);
-
-    Tensor rhs_term;
-    if (grad_Q.defined()) {
-      rhs_term = grad_Q + at::matmul(Q, M);
-    } else {
-      rhs_term = at::matmul(Q, M);
-    }
-
-    // Compute rhs_term @ R^{-H}
-    Tensor grad_A = at::linalg_solve_triangular(
-        R.transpose(-2, -1).conj(),
-        rhs_term,
-        /*upper=*/false,
-        /*left=*/false,
-        /*unitriangular=*/false);
-
-    return grad_A;
-  };
-
-  auto m = self.size(-2);
-  auto n = self.size(-1);
-
-  TORCH_CHECK(
-      ((m <= n && (!reduced)) || reduced),
-      "The derivative of qr is not implemented when mode='complete' and nrows > ncols.");
-
-  auto grad_Q = grads[0];
-  auto grad_R = grads[1];
-
- if (m >= n) {
-    return square_deep_case_backward(grad_Q, grad_R, self, q, r);
+  TORCH_CHECK(reduced || m <= n, "The QR decomposition is not differentiable when "
+                                 "mode='complete' and nrows > ncols.");
+  if (m >= n) {
+    const auto sym = [](const Tensor& X) { return X + X.mH(); };
+    const auto syminv = [](const Tensor& X) {
+      auto ret = X.triu();
+      ret.diagonal(0, -2, -1).mul_(0.5);
+      return ret;
+    };
+    auto dARinv = at::linalg_solve_triangular(R, dA, /*upper=*/true, /*left=*/false);
+    auto dR = syminv(sym(Q.mH().matmul(dARinv)));
+    auto dQ = dARinv - Q.matmul(dR);
+    dR = dR.matmul(R);
+    return std::make_tuple(std::move(dQ), std::move(dR));
   } else {
-    // For wide (m < n) input matrices A,  partition A = [X|Y] and R = [U|V]
-    // X and U are square full rank matrices. We will partition grads,
-    // grad_R = [grad_U | grad_V] and grad_A = [grad_X | grad_Y].
-    // To obtain grad_X we reuse the gradient formula from the square case.
-    // Formulae: grad_X = square_case_grad(grad_Q_prime, grad_U, Q, U),
-    // where grad_Q_prime = grad_Q + Y @ grad_V^H
-    // and grad_Y = Q @ grad_V.
-    // Then concatenate grads to get grad_A = [grad_X | grad_Y].
+    const auto trilim = [](const Tensor& X) {
+      if (X.is_complex()) {
+        auto ret = X.tril();
+        at::real(ret.diagonal(0, -2, -1)).zero_();
+        return ret;
+      } else {
+        return X.tril(-1);
+      }
+    };
+    const auto triliminv = [](const Tensor& X) {
+      if (X.is_complex()) {
+        auto ret = X - X.mH();
+        ret.diagonal(0, -2, -1).mul_(0.5);
+        return ret;
+      } else {
+        return X - X.mT() ;
+      }
+    };
 
-    auto Y = self.narrow(-1, m, n - m);
-    auto U = r.narrow(-1, 0, m);
-    Tensor grad_Y, grad_X, grad_V, grad_Q_prime;
+    auto QHdA = Q.mH().matmul(dA);
+    auto QHdA1Rinv = at::linalg_solve_triangular(R.narrow(-1, 0, m), QHdA.narrow(-1, 0, m), /*upper=*/true, /*left=*/false);
+    auto dQ = triliminv(trilim(QHdA1Rinv));
+    auto dR = QHdA - dQ.matmul(R);
+    dQ = Q.matmul(dQ);
+    return std::make_tuple(std::move(dQ), std::move(dR));
+  }
+}
 
-    if (grad_R.defined()) {
-      grad_V = grad_R.narrow(-1, m, n - m);
-      // reuse grad_R to store grad_U
-      grad_R = grad_R.narrow(-1, 0, m);
-      // grad_Q_prime starts with the value of Y @ grad_V^H
-      grad_Q_prime = at::matmul(Y, grad_V.mH());
+Tensor linalg_qr_backward(const Tensor& gQ, const Tensor& gR,
+                          const Tensor& Q, const Tensor& R,
+                          const c10::string_view mode) {
+  // Nb. We won't be too formal below, as writing this proof formaly is a pain
+  // We'll link here a formal writing of all this at some point in the future
+  //
+  // Case m >= n
+  // dQ = dAR^{-1} - Qsyminv(sym(Q^H dA R^{-1}))
+  // dR = syminv(sym(Q^H dA R^{-1}))R
+  //
+  // With the notation from the JVP formla, the only two computations that we need are
+  // syminv*(R) = 0.5 * (R.triu() + R.triu()^H - Re diag(R))
+  // sym*(X) = 2 * X
+  // Using these, after a few simplifications we get that
+  // gA = (gQ + syminvadj(triu(gR R^H - Q^H gQ)))R^{-H}
+  //
+  // Case m < n
+  // dR = Q^H dA - Q^H dQ R
+  // dQ = Q trilImInv(trilIm(Q^H A_1 R_1^{-1}))
+  //
+  // In this case trilIm*(X) = X (it's the trivial embedding)
+  // while trilImInv*(X) = tril(Y) - 0.5 * diag(Y)
+  // with Y = X - X^H
+  //
+  // We also have that if X \in C^{m, n} an dpi(X) = X_1,
+  // projects X into its leading m x m submatrix,
+  // pi*(X) = cat(X, 0_{m,n-m}, dim=-1)
+  //
+  // Using this, we get that
+  // gA = QgR + pi*(Q trilImInv*(Q^H gQ - gR R^H)R_1^{-H})
+  at::NoTF32Guard disable_tf32;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  bool compute_q, reduced;
+  std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
+
+  TORCH_CHECK(compute_q, "The derivative of linalg.qr depends on Q, which is not computed when "
+                         "mode='r'. Please use linalg.qr(A, mode='reduced') if you are "
+                         "going to differentiate through linalg.qr.");
+
+  auto m = Q.size(-2);
+  auto n = R.size(-1);
+
+  TORCH_CHECK(reduced || m <= n, "The QR decomposition is not differentiable when "
+                                 "mode='complete' and nrows > ncols.");
+
+  if (!gQ.defined() && !gR.defined()) {
+    return {};
+  }
+
+  Tensor gA;
+  if (gQ.defined()) {
+    if (gR.defined()) {
+      gA = gR.matmul(R.mH()) - Q.mH().matmul(gQ);
     } else {
-      // when grad_R is not defined then grad_V and grad_Q_prime
-      // get initialized with zeros
-      grad_V = at::zeros_like(Y, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      grad_Q_prime = at::zeros_like(q, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      gA = -Q.mH().matmul(gQ);
     }
-
-    if (grad_Q.defined()) {
-      // add the grad_Q term into grad_Q_prime when defined o/w is 0
-      grad_Q_prime = grad_Q_prime + grad_Q;
+  } else {
+      gA = gR.matmul(R.mH());
+  }
+  if (m >= n) {
+    const auto syminvadj = [](const Tensor& X) {
+      auto ret = X + X.mH();
+      at::real(ret.diagonal(0, -2, -1)).mul_(0.5);
+      return ret;
+    };
+    gA = Q.matmul(syminvadj(gA.triu()));
+    if (gQ.defined()) {
+      gA = gA + gQ;
     }
-    // Calculate grad_X using the helper. Grad_R contains the grad_U value
-    grad_X = square_deep_case_backward(grad_Q_prime, grad_R, self, q, U);
-    grad_Y = at::matmul(q, grad_V);
-    // Concatenate grad_X and grad_Y to get grad_A.
-    return at::cat({grad_X, grad_Y}, -1);
+    gA = at::linalg_solve_triangular(R.mH(), gA, /*upper*/false, /*left*/false);
+    return gA;
+  } else {
+    auto trilImInvAdjSkew = [](const Tensor& X) {
+      auto ret = (X - X.mH()).tril();
+      if (X.is_complex()) {
+        at::imag(ret.diagonal(0, -2, -1)).mul_(0.5);
+      }
+      return ret;
+    };
+    gA = Q.matmul(trilImInvAdjSkew(-gA));
+    gA = at::linalg_solve_triangular(R.narrow(-1, 0, m).mH(), gA, /*upper*/false, /*left*/false);
+    auto shape = R.sizes().vec();
+    shape.end()[-1] = n - m;
+    gA = at::cat({gA, gA.new_zeros(shape)}, /*dim=*/-1);
+    if (gR.defined()) {
+      gA = gA + Q.matmul(gR);
+    }
+    return gA;
   }
 }
 
@@ -3027,17 +3413,11 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
 
     auto vh_det_grad = grad * (u_det * s_prod).conj();
     auto vh_grad = det_backward_nonsingular(vh_det_grad, vh, vh_det);
-    auto v = vh.mH();
-    auto v_grad = vh_grad.mH();
 
-    // svd_backward is written for a function
-    // svd: self -> (U, S, V), which is different
-    // from torch.linalg.svd which is a map self -> (U, S, Vh), where
-    // Vh = V.mH()
-    return svd_backward({u_grad, s_grad, v_grad}, self, true, true, u, s, v);
+    return svd_backward(u_grad, s_grad, vh_grad, u, s, vh);
   };
 
-  auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(self.scalar_type()));
   auto singular_det_cutoff = eps * at::linalg_matrix_norm(self);
 
   if (self.dim() == 2) {
@@ -3122,10 +3502,9 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
     Tensor u, sigma, vh;
     std::tie(u, sigma, vh) = at::linalg_svd(self, false);
-    Tensor v = vh.mH();
     // logdet = \sum log(sigma)
     auto gsigma = grad.unsqueeze(-1).div(sigma);
-    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
+    return svd_backward({}, gsigma, {}, u, sigma, vh);
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
@@ -3183,7 +3562,7 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
     auto gsigma = grad_logabsdet.unsqueeze(-1).div(sigma);
-    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
+    return svd_backward({}, gsigma, {}, u, sigma, vh);
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
@@ -3239,6 +3618,7 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor & b, const Tensor & a, const Tensor & x,
     const bool upper, const bool transpose, const bool unitriangular,
     std::array<bool, 2> output_mask) {
+  at::NoTF32Guard disable_tf32;
   Tensor grad_b, grad_a;
   if (grad_x.defined() || grad_m.defined()) {
     if (grad_x.defined()) {
@@ -3288,6 +3668,7 @@ Tensor linalg_solve_triangular_forward_AD(
     const bool upper,
     const bool left,
     const bool unitriangular) {
+  at::NoTF32Guard disable_tf32;
   // The forward AD formula (for left = true) is A^{-1}(B_t - A_tX)
   // For the derivation see:
   // [Note: Forward / Backward AD solve_triangular]
@@ -3305,6 +3686,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     const bool left,
     const bool unitriangular,
     std::array<bool, 2> output_mask) {
+  at::NoTF32Guard disable_tf32;
   const bool A_requires_grad = output_mask[0];
   const bool B_requires_grad = output_mask[1];
   // [Note: Forward / Backward AD solve_triangular]
@@ -3355,6 +3737,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x, const Tensor& self,
     const Tensor& input2, const Tensor& result, const bool upper) {
+  at::NoTF32Guard disable_tf32;
   Tensor grad_self, grad_input2;
   if (grad_x.defined()) {
     grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
@@ -3378,6 +3761,7 @@ Tensor cholesky_solve_jvp(
   const Tensor& dB,
   const bool upper
 ) {
+  at::NoTF32Guard disable_tf32;
   auto dK = upper ? dU.mH().matmul(U)
                   : dU.matmul(U.mH());
   auto dA = dK + dK.mH();
@@ -3448,7 +3832,7 @@ Tensor fft_r2c_backward(const Tensor& grad, IntArrayRef dim, int64_t normalizati
   new_grad_shape[last_dim] = last_dim_size;
 
   const auto zero_length = last_dim_size - grad.size(dim.back());
-  auto complex_full_grad = zero_length > 0 ? at::zeros(new_grad_shape, grad.options()) : grad;
+  auto complex_full_grad = zero_length > 0 ? grad.new_zeros(new_grad_shape) : grad;
   if (zero_length > 0) {
     complex_full_grad.slice(last_dim, 0, half_sizes[last_dim]).copy_(grad);
   }
@@ -3900,7 +4284,10 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
 }
 
 Tensor index_backward(Tensor zeros_like_self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& grad) {
-  return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
+  return (areAnyTensorSubclassLike({zeros_like_self, grad}) ||
+          areAnyOptionalTensorSubclassLike(indices))
+      ? zeros_like_self.index_put(indices, grad, true)
+      : at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 
 Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, const Tensor& raw_grad, bool zero_infinity) {
@@ -4301,6 +4688,7 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& LU_data,
   const Tensor& LU_pivots,
   const std::array<bool, 2>& grad_input_mask) {
+  at::NoTF32Guard disable_tf32;
   const bool B_requires_grad = grad_input_mask[0];
   const bool LU_data_requires_grad = grad_input_mask[1];
   if (!grad.defined() || (!B_requires_grad && !LU_data_requires_grad)) {
@@ -4368,6 +4756,7 @@ Tensor lu_solve_jvp(
   const Tensor& dB,
   const Tensor& LU_pivots
 ) {
+  at::NoTF32Guard disable_tf32;
   Tensor L, U, dL, dU;
   std::tie(std::ignore, L, U) = at::lu_unpack(LU_data, LU_pivots, /*unpack_data=*/true, /*unpack_pivots=*/false);
   dL = dLU_data.tril(-1);
@@ -4392,35 +4781,50 @@ Tensor lu_solve_jvp(
 }
 
 Tensor lu_unpack_backward(
-  const variable_list& grads,
-  const Tensor& LU_data,
-  bool unpack_data
+  const Tensor& L_grad,
+  const Tensor& U_grad,
+  const int64_t m,
+  const int64_t n
 ) {
-  auto L_grad = grads[1];
-  auto U_grad = grads[2];
+  if (!L_grad.defined() && !U_grad.defined()) {
+    return {};
+  }
+  const auto k = std::min(m, n);
 
-  auto m = LU_data.size(-2);
-  auto n = LU_data.size(-1);
-  auto k = std::min(m, n);
+  // Getters for the principal and complementary part of the matrices
+  const auto get_L1 = [m, k](const Tensor& L) { return m == k ? L.tril(-1) : L.narrow(-2, 0, k).tril(-1); };
+  const auto get_L2 = [m, k](const Tensor& L) { return L.narrow(-2, k, m - k); };
+  const auto get_U1 = [n, k](const Tensor& U) { return n == k ? U.triu() : U.narrow(-1, 0, k).triu(); };
+  const auto get_U2 = [n, k](const Tensor& U) { return U.narrow(-1, k, n - k); };
 
-  TORCH_CHECK(unpack_data, "lu_unpack_backward: cannot compute gradients unless unpack_data=True");
-
-  auto res = at::zeros(LU_data.sizes(), LU_data.options());
-
-  Tensor L_grad_contrib;
   if (L_grad.defined()) {
-    L_grad_contrib = L_grad.tril();
-    L_grad_contrib.diagonal(0, -2, -1).fill_(0);
-    res.narrow(-2, 0, m).narrow(-1, 0, k).add_(L_grad_contrib);
+    if (U_grad.defined()) {
+      if (m == n) {
+        return L_grad.tril(-1) + U_grad.triu();
+      } else {
+        auto A1_grad = get_L1(L_grad) + get_U1(U_grad);
+        auto A2_grad = m > n ? get_L2(L_grad) : get_U2(U_grad);
+        const auto dim = m > n ? -2 : -1;
+        return at::cat({std::move(A1_grad), std::move(A2_grad)}, /*dim=*/dim);
+      }
+    } else {
+      if (m >= n) {
+        return L_grad.tril(-1);
+      } else {
+        auto size = L_grad.sizes().vec();
+        size.end()[-1] = n - m;
+        return at::cat({L_grad.tril(-1), at::zeros(size, L_grad.options())}, /*dim=*/-1);
+      }
+    }
+  } else {
+    if (n >= m) {
+      return U_grad.triu();
+    } else {
+      auto size = U_grad.sizes().vec();
+      size.end()[-2] = m - n;
+      return at::cat({U_grad.triu(), at::zeros(size, U_grad.options())}, /*dim=*/-2);
+    }
   }
-
-  Tensor U_grad_contrib;
-  if (U_grad.defined()) {
-    U_grad_contrib = U_grad.triu();
-    res.narrow(-2, 0, k).narrow(-1, 0, n).add_(U_grad_contrib);
-  }
-
-  return res;
 }
 
 Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
@@ -4435,7 +4839,7 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
@@ -4458,7 +4862,7 @@ Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
     out_fw_grad = at::stack(fw_grads, dim);
   }
@@ -4595,6 +4999,9 @@ Tensor batch_norm_jvp(
     TORCH_INTERNAL_ASSERT(
         running_mean.has_value() && running_var.has_value(),
         "Expect running_mean and running_var to have value when train=false");
+    TORCH_CHECK(
+        !running_mean.value()._fw_grad(/*level=*/0).defined() && !running_var.value()._fw_grad(/*level=*/0).defined(),
+        "batch_norm is not differentiable wrt running_mean and running_var, they cannot have forward grad defined");
     mean_p = running_mean.value().view(view_size);
     invstd_p = (1 / at::sqrt(running_var.value() + at::Scalar(eps))).view(view_size);
     result_t = input_t * invstd_p;
@@ -4607,21 +5014,6 @@ Tensor batch_norm_jvp(
       weight_p.defined() ? weight_p.view(view_size) : weight_p,
       weight_t.defined() ? weight_t.view(view_size) : weight_t,
       bias_t.defined() ? bias_t.view(view_size) : bias_t);
-}
-
-Tensor batch_norm_jvp_saved_var(
-    const Tensor& input_p, const Tensor& input_t,
-    const Tensor& weight_p, const Tensor& weight_t,
-    const Tensor& bias_p, const Tensor& bias_t,
-    const c10::optional<Tensor>& running_mean,
-    const c10::optional<Tensor>& running_var,
-    const Tensor& saved_mean, const Tensor& saved_var,
-    bool train,
-    double eps) {
-  auto saved_invstd = (1 / at::sqrt(saved_var + at::Scalar(eps)));
-  return batch_norm_jvp(
-      input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var,
-      saved_mean, saved_invstd, train, eps);
 }
 
 Tensor layer_norm_jvp(
@@ -4696,7 +5088,6 @@ Tensor group_norm_jvp(
 Tensor group_norm_mean_jvp(
     const Tensor& input_t, const Tensor& mean_p, int64_t groups) {
   int64_t N = input_t.size(0);
-  int64_t C = input_t.size(1);
   std::array<int64_t, 3> view_shape = {1, N * groups, N ? -1 : 1};
   auto input_t_reshaped = input_t.view(view_shape);
   return input_t_reshaped.mean({2}, false).view_as(mean_p);
@@ -4707,7 +5098,6 @@ Tensor group_norm_invstd_jvp(
     const Tensor& mean_p, const Tensor& invstd_p,
     int64_t groups) {
   int64_t N = input_p.size(0);
-  int64_t C = input_p.size(1);
 
   std::vector<int64_t> view_shape = {1, N * groups, N ? -1 : 1};
 
@@ -4732,8 +5122,8 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
   return out_fw_grad;
 }
 
-// Let X in \C^{m \times n}, then its pivoted LU decomposition is
-// X = P L U, where P is a permutation matrix.
+// Let A in \C^{m \times n}, then its pivoted LU decomposition is
+// A = P L U, where P is a permutation matrix.
 //
 // Useful notation:
 // Let o denote the elementwise, or Hadamard, product.
@@ -4745,159 +5135,193 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
 //
 // Below we derive the backward algorithm for the case when m <= n.
 // The case m > n could be obtained using the same idea.
-// Since we assume m <= n, the LU decomposition of X could be written as
-// X = (X1 | X2) = P L (U1 | U2) where X1, U1 in \C^{m \times m}, X2, U2 in \C^{m, n - m}
+// Since we assume m <= n, the LU decomposition of A could be written as
+// A = (A1 | A2) = P L (U1 | U2) where A1, U1 in \C^{m \times m}, A2, U2 in \C^{m, n - m}
 //
 // Forward AD:
 //
-// dX = P dL U + P L dU => [left-multiply P^T]
-// (P^T dX1 | P^T dX2) = (dL U1 + L dU1 | dL U2 + L dU2) (*)
+// dA = P dL U + P L dU => [left-multiply P^T]
+// (P^T dA1 | P^T dA2) = (dL U1 + L dU1 | dL U2 + L dU2) (*)
 // From (*):
-// P^T dX1 = dL U1 + L dU1 => [left-multiply by L^{-1}, right-multiply by U1^{-1}]
-// L^{-1} P^T dX1 U1^{-1} = L^{-1} dL + dU1 U1^{-1} (**).
+// P^T dA1 = dL U1 + L dU1 => [left-multiply by L^{-1}, right-multiply by U1^{-1}]
+// L^{-1} P^T dA1 U1^{-1} = L^{-1} dL + dU1 U1^{-1} (**).
 // Note, L is lower-triangular, and so is its inverse, hence L^{-1} dL is lower-triangular.
 // Also, since the diagonal of L (all ones) is never exposed explicity (packed representation),
 // the diagonal of dL is zero, and hence diag(L^{-1} dL) = 0.
 // Assuming that U1 is full-rank, similarly, dU1 U1^{-1} is upper-triangular.
 // Combining these observations we conclude:
 //
-// L^{-1} dL = (L^{-1} P^T dX1 U1^{-1}) o 1_L,
-// dU1 U1^{-1} = (L^{-1} P^T dX1 U1^{-1}) o 1_U.
+// L^{-1} dL = (L^{-1} P^T dA1 U1^{-1}) o 1_L,
+// dU1 U1^{-1} = (L^{-1} P^T dA1 U1^{-1}) o 1_U.
 //
 // Hence,
-// dL = L [(L^{-1} P^T dX1 U1^{-1}) o 1_L],
-// dU1 = [(L^{-1} P^T dX1 U1^{-1}) o 1_U] U1.
+// dL = L [(L^{-1} P^T dA1 U1^{-1}) o 1_L],
+// dU1 = [(L^{-1} P^T dA1 U1^{-1}) o 1_U] U1.
 // As for dU2, from (*) it follows
-// P^T dX2 = dL U2 + L dU2 =>
-// dU2 = L^{-1} (P^T dX2 - dL U2).
+// P^T dA2 = dL U2 + L dU2 =>
+// dU2 = L^{-1} (P^T dA2 - dL U2).
 //
 // Backward AD:
 //
 // The following equality comes very handy:
 // Tr(A (B o C)) = Tr((A o B^T) C) (!)
+// or in other words, given that X -> B o X is a pointwise operation
+// its Jacobian is diagonal, so its differential is self-adjoint
+// <A, B o C> = <A o B, C>
 //
-// Tr(X_grad^H dX) = Tr(L_grad^H dL) + Tr(U_grad^H dU), then
+// Tr(A_grad^H dA) = Tr(L_grad^H dL) + Tr(U_grad^H dU), then
 //
-// Tr(L_grad^H dL) = Tr(L_grad^H L [(L^{-1} P^T dX1 U1^{-1}) o 1_L] = [using (!)]
-//                 = Tr((L_grad^H L o 1_L^T) L^{-1} P^T dX1 U1^{-1}) = [using the cyclic property of Tr]
-//                 = Tr(U1^{-1} (L_grad^H L o 1_L^T) L^{-1} P^T dX1)
+// Tr(L_grad^H dL) = Tr(L_grad^H L [(L^{-1} P^T dA1 U1^{-1}) o 1_L] = [using (!)]
+//                 = Tr((L_grad^H L o 1_L^T) L^{-1} P^T dA1 U1^{-1}) = [using the cyclic property of Tr]
+//                 = Tr(U1^{-1} (L_grad^H L o 1_L^T) L^{-1} P^T dA1)
 //
 // Similar, using (!) and the cyclic property of the trace operator:
 // Tr(U_grad^H dU) = Tr(U1_grad^H dU1) + Tr(U2_grad^H dU2)
-//                 = Tr(U1^{-1} (U1 U1_grad^H o 1_U^T) L^{-1} P^T dX1)
-//                 + Tr(U2_grad^H L^{-1} P^T dX2)
-//                 - Tr(U1^{-1} (U2 U2_grad^H o 1_L^T) L^{-1} P^T dX1)
+//                 = Tr(U1^{-1} (U1 U1_grad^H o 1_U^T) L^{-1} P^T dA1)
+//                   + Tr(U2_grad^H L^{-1} P^T dA2)
+//                   - Tr(U1^{-1} (U2 U2_grad^H o 1_L^T) L^{-1} P^T dA1)
 //
-// By combining the matrices to the left from dX1 and dX2 and then applying conjugate transposition,
+// By combining the matrices to the left from dA1 and dA2 and then applying conjugate transposition,
 // we finally arrive at:
 //
-// X1_grad = P L^{-H} [L^H L_grad o 1_L + U1_grad U1^H o 1_U - U2_grad U2^H o 1_L] U1^{-H},
-// X2_grad = P L^{-H} U2_grad
-Tensor plu_backward_base(
-  const variable_list& grads,
-  const Tensor& self,
+// A1_grad = P L^{-H} [L^H L_grad o 1_L + U1_grad U1^H o 1_U - U2_grad U2^H o 1_L] U1^{-H},
+// A2_grad = P L^{-H} U2_grad
+Tensor linalg_lu_backward(
+  const Tensor& L_grad,
+  const Tensor& U_grad,
   const Tensor& P,
   const Tensor& L,
-  const Tensor& U) {
-  auto L_grad = grads[0];
-  auto U_grad = grads[1];
+  const Tensor& U,
+  const bool pivot) {
+  at::NoTF32Guard disable_tf32;
+  // Return early if there's nothing to do
+  if (!L_grad.defined() && !U_grad.defined()) {
+    return {};
+  }
 
-  auto m = self.size(-2);
-  auto n = self.size(-1);
+  // L.shape == (..., m, k)
+  // U.shape == (..., k, n)
+  auto m = L.size(-2);
+  auto n = U.size(-1);
   auto k = std::min(m, n);
 
-  auto L_principal = L.narrow(-2, 0, k).narrow(-1, 0, k);
-  auto L_principal_H = L_principal.mH();
-  auto L_grad_principal = L_grad.narrow(-2, 0, k).narrow(-1, 0, k);
-  auto U_principal = U.narrow(-2, 0, k).narrow(-1, 0, k);
-  auto U_principal_H = U_principal.mH();
-  auto U_grad_principal = U_grad.narrow(-2, 0, k).narrow(-1, 0, k);
+  if (m == n) {
+    // A_grad = P L^{-H} [L^H L_grad o 1_L + U_grad U^H o 1_U] U^{-H},
+    auto A_grad = L_grad.defined() ? L.mH().matmul(L_grad).tril(-1) : Tensor{};
+    if (U_grad.defined()) {
+      A_grad = A_grad.defined() ? A_grad + U_grad.matmul(U.mH()).triu()
+                                :          U_grad.matmul(U.mH()).triu();
+    }
+    A_grad = at::linalg_solve_triangular(U.mH(), A_grad,
+                                         /*upper=*/false,
+                                         /*left=*/false);
+    A_grad = at::linalg_solve_triangular(L.mH(), A_grad,
+                                         /*upper=*/true,
+                                         /*left=*/true,
+                                         /*unitriangular=*/true);
 
-  auto phi_L = L_principal_H.matmul(L_grad_principal).tril(-1);
-  auto phi_U = U_grad_principal.matmul(U_principal_H).triu();
+    return pivot ? P.matmul(std::move(A_grad)) : A_grad;
+  } else if (m < n) {
+    // Wide case
+    // A1_grad = P L^{-H} [U1_grad + (L^H L_grad o 1_L - U_grad U^H o 1_U) U1^{-H}) U^{-H}]
+    // A2_grad = P L^{-H}  U2_grad
+    const auto get_U1 = [n, k] (const Tensor& U) { return n == k ? U : U.narrow(-1, 0, k); };
+    const auto get_U2 = [n, k] (const Tensor& U) { return U.narrow(-1, k, n - k); };
 
-  auto phi = phi_L + phi_U;
+    auto A_grad = L_grad.defined() ? L.mH().matmul(L_grad) : Tensor{};
+    if (U_grad.defined()) {
+      A_grad = A_grad.defined() ? A_grad - U_grad.triu().matmul(U.mH())
+                                :        - U_grad.triu().matmul(U.mH());
+    }
+    A_grad = at::linalg_solve_triangular(get_U1(U).mH(), A_grad.tril(-1),
+                                         /*upper=*/false,
+                                         /*left=*/false);
 
-  Tensor self_grad;
-  if (m <= n) {
-    auto U_complement = U.narrow(-2, 0, k).narrow(-1, k, n - k);
-    auto U_grad_complement = U_grad.narrow(-2, 0, k).narrow(-1, k, n - k);
+    if (U_grad.defined()) {
+      A_grad = at::cat({A_grad + get_U1(U_grad).triu(), get_U2(U_grad)}, /*dim=*/-1);
+    }
 
-    auto phi_complement = U_grad_complement.matmul(U_complement.mH()).tril(-1);
+    A_grad = at::linalg_solve_triangular(L.mH(), A_grad,
+                                         /*upper=*/true,
+                                         /*left=*/true,
+                                         /*unitriangular=*/true);
 
-    // recall the result for X1_grad and X2_grad from above.
-    // It can be rewritten as
-    // (X1_grad | X2_grad) = P L^{-H} psi, where
-    // psi = (psi1 | psi2)
-    //     = ([L^H L_grad o 1_L + U1_grad U1^H o 1_U - U2_grad U2^H o 1_L] U1^{-H} | U2_grad),
-    // so it is filled in parts.
+    if (!U_grad.defined()) {
+      A_grad = at::cat({A_grad, at::zeros_like(get_U2(U))}, /*dim=*/-1);
+    }
+    if (pivot) {
+      A_grad = P.matmul(A_grad);
+    }
+    return A_grad;
+  } else {
+    // Tall case
+    // A1_grad = P [L1_grad + L^{-H} (U_grad U^H o 1_U - L^H L_grad o 1_L)]U^{-H}
+    // A2_grad = P  L2_grad U^{-H}
 
-    // solve for psi1 to avoid the inversion of U1^H
-    auto psi_principal = at::linalg_solve_triangular(U_principal_H, phi - phi_complement,
-                                                     /*upper=*/false,
-                                                     /*left=*/false,
-                                                     /*unitriangular=*/false);
-    auto psi = at::cat({psi_principal, U_grad_complement}, /*dim=*/-1);
+    const auto get_L1 = [m, k] (const Tensor& L) { return m == k ? L : L.narrow(-2, 0, k); };
+    const auto get_L2 = [m, k] (const Tensor& L) { return L.narrow(-2, k, m - k); };
 
-    self_grad = P.matmul(at::linalg_solve_triangular(L_principal_H, psi,
-                                                     /*upper=*/true,
-                                                     /*left=*/true,
-                                                     /*unitriangular=*/true));
+    auto A_grad = U_grad.defined() ? U_grad.matmul(U.mH()) : Tensor{};
+    if (L_grad.defined()) {
+      A_grad = A_grad.defined() ? A_grad - L.mH().matmul(L_grad.tril(-1))
+                                :        - L.mH().matmul(L_grad.tril(-1));
+    }
+    A_grad = at::linalg_solve_triangular(get_L1(L).mH(), A_grad.triu(),
+                                         /*upper=*/true,
+                                         /*left=*/true,
+                                         /*unitriangular=*/true);
+
+    if (L_grad.defined()) {
+      A_grad = at::cat({A_grad + get_L1(L_grad).tril(-1), get_L2(L_grad)}, /*dim=*/-2);
+    }
+
+    A_grad = at::linalg_solve_triangular(U.mH(), A_grad,
+                                         /*upper=*/false,
+                                         /*left=*/false);
+
+    if (!L_grad.defined()) {
+      A_grad = at::cat({A_grad, at::zeros_like(get_L2(L))}, /*dim=*/-2);
+    }
+    if (pivot) {
+      A_grad = P.matmul(A_grad);
+    }
+    return A_grad;
   }
-  else {
-    // variables psi and phi carry the same meaning as in the case (m <= n),
-    // albeit they are differently defined.
-    auto L_complement = L.narrow(-2, k, m - k).narrow(-1, 0, k);
-    auto L_grad_complement = L_grad.narrow(-2, k, m - k).narrow(-1, 0, k);
-
-    auto phi_complement = L_complement.mH().matmul(L_grad_complement).triu();
-
-
-    auto psi_principal = at::linalg_solve_triangular(L_principal_H, phi - phi_complement,
-                                                     /*upper=*/true,
-                                                     /*left=*/true,
-                                                     /*unitriangular=*/true);
-    auto psi = at::cat({psi_principal, L_grad_complement}, -2);
-
-    self_grad = at::linalg_solve_triangular(U_principal_H, P.matmul(psi),
-                                            /*upper=*/false,
-                                            /*left=*/false,
-                                            /*unitriangular=*/false);
-  }
-
-  return self_grad;
 }
 
 Tensor lu_factor_ex_backward(
   const Tensor& grad,
-  const Tensor& self,
   const Tensor& LU,
-  const Tensor& pivs) {
+  const Tensor& pivs,
+  const bool pivot) {
   Tensor P, L, U;
-  std::tie(P, L, U) = at::lu_unpack(LU, pivs);
-  // Note that packed LU could be represented as
-  // LU = L + U - I, hence
-  // L_grad = LU_grad,
-  // U_grad = LU_grad.
-  return plu_backward_base({/*L_grad=*/grad, /*U_grad=*/grad}, self, P, L, U);
+  std::tie(P, L, U) = at::lu_unpack(LU, pivs, /*unpack_data=*/true, /*unpack_pivots*/pivot);
+
+  // L.shape == (..., m, k)
+  // U.shape == (..., k, n)
+  const auto m = LU.size(-2);
+  const auto n = LU.size(-1);
+  const auto k = std::min(m, n);
+  const auto L_grad = grad.narrow(-1, 0, k);
+  const auto U_grad = grad.narrow(-2, 0, k);
+  return linalg_lu_backward(/*L_grad=*/L_grad, /*U_grad=*/U_grad, P, L, U, pivot);
 }
 
-Tensor lu_factor_ex_jvp(
+// This function is based on the forward AD derivations outlined
+// in the description to the linalg_lu_backward function.
+std::tuple<Tensor, Tensor> linalg_lu_jvp(
   const Tensor& dA,
-  const Tensor& LU,
-  const Tensor& pivs
-) {
-  // This function is based on the forward AD derivations outlined
-  // in the description to the plu_backward_base function.
+  const Tensor& P,
+  const Tensor& L,
+  const Tensor& U,
+  const bool pivot) {
+  at::NoTF32Guard disable_tf32;
 
-  Tensor P, L, U;
-  std::tie(P, L, U) = at::lu_unpack(LU, pivs);
-
-  auto m = LU.size(-2);
-  auto n = LU.size(-1);
+  auto m = dA.size(-2);
+  auto n = dA.size(-1);
   auto k = std::min(m, n);
 
-  auto PdA = P.mT().matmul(dA);
+  auto PdA = pivot ? P.mT().matmul(dA) : dA;
 
   // similar to the backward implementation, we also consider block structures such as:
   // for a matrix A of size m x n we decompose it as
@@ -4907,40 +5331,79 @@ Tensor lu_factor_ex_jvp(
   auto L1 = L.narrow(-2, 0, k).narrow(-1, 0, k);
   auto U1 = U.narrow(-2, 0, k).narrow(-1, 0, k);
 
-  // dK = L1^{-1} PdA1
+  // We form using two triangular_solve the matrix, the second one in place
+  // dK = L1^{-1} PdA1 U2^{-1}
   auto dK = at::linalg_solve_triangular(L1, PdA1, /*upper=*/false, /*left=*/true, /*unitriangular*/true);
-  // dK <- dK U1^{-1}
+
+  // TODO We should be able to do this in-place. At the moment it raises:
+  //  RuntimeError: linalg_solve_triangular(): functions with out=...
+  //  arguments don't support automatic differentiation, but one of the arguments requires grad.
+
+  //  at::linalg_solve_triangular_out(dK, U1, dK, /*upper=*/true, /*left=*/false);
   dK = at::linalg_solve_triangular(U1, dK, /*upper=*/true, /*left=*/false);
 
   auto dL1 = L1.matmul(dK.tril(-1));
   auto dU1 = dK.triu().matmul(U1);
 
-  // since LU = L + U - I, we have that dLU = dL + dU
-  // if LU is of size m x n, we always have
-  // dLU1 = dL1 + dU1, where the block indexing follows the rules
-  // outlined above.
   if (m == n) {
-    return dL1 + dU1;
+    return std::make_tuple(std::move(dL1), std::move(dU1));
+  } else if (m < n) {
+    // we only need to update dU2 defined as
+    // dU2 := L1^{-1} PdA2 - dK.tril(-1) U2)
+    const auto PdA2 = PdA.narrow(-1, k, n - k);
+    const auto U2 = U.narrow(-1, k, n - k);
+    auto dU2 = at::linalg_solve_triangular(L1, PdA2, /*upper=*/false, /*left=*/true, /*unitriangular*/true) - dK.tril(-1).matmul(U2);
+    return std::make_tuple(std::move(dL1), at::cat({dU1, dU2}, /*dim=*/-1));
+  } else {
+    // we only need to update dL2 defined as
+    // dL2 := PdA2 U^{-1} - L2 dK.triu()
+    const auto PdA2 = PdA.narrow(-2, k, m - k);
+    const auto L2 = L.narrow(-2, k, m - k);
+    auto dL2 = at::linalg_solve_triangular(U1, PdA2, /*upper=*/true, /*left=*/false) - L2.matmul(dK.triu());
+    return std::make_tuple(at::cat({dL1, dL2}, /*dim=*/-2), std::move(dU1));
   }
-  else {
-    auto dLU1 = dL1 + dU1;
+}
 
-    if (m < n) {
-      // we only need to update dLU2 defined as
-      // dLU2 := L1^{-1} PdA2 - dK.tril(-1) U2
-      auto PdA2 = PdA.narrow(-1, k, n - k);
-      auto U2 = U.narrow(-1, k, n - k);
-      auto dLU2 = at::linalg_solve_triangular(L1, PdA2, /*upper=*/false, /*left=*/true, /*unitriangular*/true) - dK.tril(-1).matmul(U2);
-      return at::cat({dLU1, dLU2}, /*dim=*/-1);
-    }
-    else {
-      // we only need to update dLU2 defined as
-      // dLU2 := PdA2 U1^{-1} - L2 dK.triu()
-      auto PdA2 = PdA.narrow(-2, k, m - k);
-      auto L2 = L.narrow(-2, k, m - k);
-      auto dLU2 = at::linalg_solve_triangular(U1, PdA2, /*upper=*/true, /*left=*/false) - L2.matmul(dK.triu());
-      return at::cat({dLU1, dLU2}, /*dim=*/-2);
-    }
+Tensor lu_factor_ex_jvp(
+  const Tensor& dA,
+  const Tensor& LU,
+  const Tensor& pivs,
+  const bool pivot
+) {
+  Tensor dL, dU;
+  {
+    Tensor P, L, U;
+    std::tie(P, L, U) = at::lu_unpack(LU, pivs, /*unpack_data=*/true, /*unpack_pivots=*/pivot);
+    std::tie(dL, dU) = linalg_lu_jvp(dA, P, L, U, pivot);
+  }
+
+  auto m = dA.size(-2);
+  auto n = dA.size(-1);
+  if (m >= n) {
+    dL.narrow(-2, 0, n).add_(dU);
+    return dL;
+  } else {
+    dU.narrow(-1, 0, m).add_(dL);
+    return dU;
+  }
+}
+
+Tensor logsumexp_jvp(const Tensor& self_p, const Tensor& self_t, IntArrayRef dim, bool keepdim) {
+  // NB: for simplicitly, we recompute some values that can be reused from forward
+  auto self_p_exp = (self_p - at::amax(self_p, dim, true)).exp();  // Use the exp-normalize trick
+  auto sumexp_p = self_p_exp.sum(dim, keepdim);
+
+  // NB: it's OK for logsumexp_jvp to be reused for formulas like softmax/log_softmax
+  //     that only have one differentiable input, because that means self_t are never zerotensors
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
+  if (areAnyTensorSubclassLike({self_p, self_t})) {
+    auto result = (self_p_exp * self_t).sum(dim, keepdim);
+    result /= sumexp_p;
+    return result;
+  } else {
+    self_p_exp *= self_t;
+    auto sumexp_t = self_p_exp.sum(dim, keepdim);
+    return sumexp_t /= sumexp_p;
   }
 }
 
@@ -4967,6 +5430,143 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   std::tuple<Tensor, Tensor> result = std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
   return result;
 }
+
+std::tuple<Tensor, Tensor> scatter_reduce_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  int dim,
+  const Tensor& index,
+  const Tensor& src,
+  c10::string_view reduce,
+  bool include_self,
+  const Tensor& result) {
+  Tensor grad_self, grad_src;
+
+  // FIXME: complex gradients not handled correctly
+  // For now this is ok as scatter_reduce isn't added to the whitelist
+  // in tools/autograd/gen_variable_type.py
+
+  if (!grad.defined()) {
+    return std::make_tuple(grad_self, grad_src);
+  }
+
+  if (reduce == "sum") {
+    grad_self = grad;
+    grad_src = grad.gather(dim, index);
+  } else if (reduce == "prod") {
+    // Explicitly compute exclusive prod for elements in self/src that are 0
+    Tensor masked_self = self.masked_fill(self == 0, 1);
+    Tensor masked_self_result = masked_self.scatter_reduce(dim, index, src, reduce, include_self);
+    grad_self = grad * masked_self_result / masked_self;
+    Tensor src_zero = src == 0;
+    Tensor src_num_zeros = zeros_like(self).scatter_add(dim, index, src_zero.to(self.dtype())).gather(dim, index);
+    Tensor src_single_zero = bitwise_and(src_zero, src_num_zeros == 1);
+    // For src positions with src_single_zero, grad * result.gather(dim,index) / src.masked_fill(src_zero, 1)
+    // would incorrectly propagate zeros as the gradient
+    Tensor masked_src = src.masked_fill(src_single_zero, 1);
+    Tensor masked_src_result = self.scatter_reduce(dim, index, masked_src, reduce, include_self);
+    Tensor grad_src1 = where(src_single_zero,
+                             (grad * masked_src_result).gather(dim, index),
+                             (grad * result).gather(dim, index) / src.masked_fill(src_zero, 1));
+    if ((src_num_zeros > 1).any().item<bool>()) {
+      auto node = std::make_shared<DelayedError>(
+        "scatter_reduce(): Double backward is unsupported for src when >1 zeros in src are scattered to the same position in self",
+        /* num inputs */ 1);
+      auto result = node->apply({ grad_src1 });
+      grad_src = result[0];
+    } else {
+      grad_src = grad_src1;
+    }
+  } else if (reduce == "mean") {
+    Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
+    N = N.scatter_add(dim, index, ones_like(src));
+    N.masked_fill_(N == 0, 1);
+    grad_self = grad / N;
+    Tensor N_src = N.gather(dim, index);
+    grad_src = grad.gather(dim, index) / N_src;
+  } else if (reduce == "amax" || reduce == "amin") {
+    // Evenly distribute gradient when there are multiple max/mins
+    Tensor value = result.gather(dim, index);
+    Tensor self_is_result = (self == result).to(self.scalar_type());
+    Tensor src_is_result = (src == value).to(self.scalar_type());
+    Tensor N_to_distribute = self_is_result.scatter_add(dim, index, src_is_result);
+    Tensor grad_distributed = grad / N_to_distribute;
+    grad_self = (self == result) * grad_distributed;
+    grad_src = (src == value) * grad_distributed.gather(dim, index);
+  } else {
+    AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+  }
+
+  if (!include_self) {
+    grad_self = grad_self.scatter(dim, index, 0);
+  }
+
+  return std::make_tuple(grad_self, grad_src);
+
+}
+
+Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_options) {
+  // Handle R->C copies without raising a warning
+  const auto self_type = self_options.dtype().toScalarType();
+  auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grad_);
+  if (!c10::isComplexType(self_type) && grad->is_complex()) {
+    grad = c10::MaybeOwned<at::Tensor>::owned(at::real(grad_));
+  }
+
+  return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
+}
+
+std::tuple<Tensor, Tensor> _index_reduce_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  int dim,
+  const Tensor& index,
+  const Tensor& source,
+  c10::string_view reduce,
+  bool include_self,
+  const Tensor& result) {
+  Tensor grad_self, grad_src;
+
+  // FIXME: index_add's backward formula has a special case for source.dim == 0
+  // but this case seems to throw the error "IndexError: dimension specified as 0 but tensor has no dimensions"
+  // look into whether this case is reachable and should be covered here
+
+  if (!grad.defined()) {
+    return std::make_tuple(grad_self, grad_src);
+  }
+
+  if (reduce == "prod") {
+    grad_self = (grad * result) / self;
+    grad_self.masked_fill_(self == 0, 0);
+    grad_src = (grad * result).index_select(dim, index) / source;
+    grad_src.masked_fill_(source == 0, 0);
+  } else if (reduce == "mean") {
+    Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
+    N = N.index_add(dim, index, ones_like(source));
+    N.masked_fill_(N == 0, 1);
+    grad_self = grad / N;
+    Tensor N_src = N.index_select(dim, index);
+    grad_src = grad.index_select(dim, index) / N_src;
+  } else if (reduce == "amax" || reduce == "amin") {
+    Tensor value = result.index_select(dim, index);
+    Tensor self_is_result = (self == result).to(self.scalar_type());
+    Tensor source_is_result = (source == value).to(self.scalar_type());
+    Tensor N_to_distribute = self_is_result.index_add(dim, index, source_is_result);
+    Tensor grad_distributed = grad / N_to_distribute;
+    grad_self = self_is_result * grad_distributed;
+    grad_src = source_is_result * grad_distributed.index_select(dim, index);
+  } else {
+    AT_ERROR("Expected 'reduce' to be one of 'prod', 'amax', 'amin' or 'mean' but got ", reduce, ".");
+  }
+
+  if (!include_self) {
+    grad_self = grad_self.index_fill(dim, index, 0);
+  }
+
+  return std::make_tuple(grad_self, grad_src);
+
+}
+
 
 } // namespace details
 } // namespace generated

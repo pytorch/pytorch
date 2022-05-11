@@ -196,7 +196,7 @@ UnmappableReductionDomains::UnmappableReductionDomains() {
 
 namespace {
 
-//! Find all domains that a given domain is depeendent on
+//! Find all domains that a given domain is dependent on
 class FindInputDomains : BackwardVisitor {
  private:
   FindInputDomains(TensorView* tv, const IterDomain* id)
@@ -282,6 +282,12 @@ void UnmappableReductionDomains::handleReductionOutput(TensorView* out_tv) {
 void UnmappableReductionDomains::handle(ReductionOp* op) {
   // Builds a map from reduction domains to consumer domains.
   TensorView* out_tv = op->out()->as<TensorView>();
+  handleReductionOutput(out_tv);
+}
+
+void UnmappableReductionDomains::handle(MmaOp* mma) {
+  // Builds a map from reduction domains to consumer domains.
+  TensorView* out_tv = mma->out()->as<TensorView>();
   handleReductionOutput(out_tv);
 }
 
@@ -661,6 +667,58 @@ void ComputeAtRootDomainMapBuilder::setMapped(
   root_map_.eq_set_.join(producer, consumer);
 }
 
+void ComputeAtRootDomainMapBuilder::setInvalid(
+    const DomainKey& key1,
+    const DomainKey& key2) {
+  invalid_mappings_.emplace_back(key1, key2);
+}
+
+bool ComputeAtRootDomainMapBuilder::isInvalid(
+    const std::vector<DomainKey>& domains) const {
+  // First, collect all invalid mappings for each of the keys in domains
+  DomainKeyMap<DomainKeySet> invalid_key_map;
+  for (const auto& key : domains) {
+    DomainKeySet invalid_keys;
+    for (const auto& invalid_pair : invalid_mappings_) {
+      if (root_map_.canMap(key, invalid_pair.first)) {
+        invalid_keys.insert(invalid_pair.second);
+      } else if (root_map_.canMap(key, invalid_pair.second)) {
+        invalid_keys.insert(invalid_pair.first);
+      }
+    }
+    invalid_key_map.emplace(key, invalid_keys);
+  }
+
+  // Next, check if any pair is invalid to map.
+  const auto num_keys = domains.size();
+  for (const auto i : c10::irange(num_keys)) {
+    const auto& key_i = domains[i];
+    // If no invalid keys found for key_i, it can be skipped.
+    const auto invalid_key_map_it = invalid_key_map.find(key_i);
+    if (invalid_key_map_it == invalid_key_map.end()) {
+      continue;
+    }
+
+    // Set of keys that are invalid to be mapped with key_i.
+    const DomainKeySet& invalid_keys_for_i = invalid_key_map_it->second;
+
+    // If any other key in domains is identified mappable with any of
+    // the keys in this set, the mapping with key_i is invalid.
+    for (const auto j : c10::irange(i + 1, num_keys)) {
+      const auto& key_j = domains[j];
+      if (std::any_of(
+              invalid_keys_for_i.begin(),
+              invalid_keys_for_i.end(),
+              [&](const auto& invalid_key_for_i) {
+                return root_map_.canMap(key_j, invalid_key_for_i);
+              })) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void ComputeAtRootDomainMapBuilder::setMaybeMapped(
     const TensorDomain* producer_td,
     const IterDomain* producer_id,
@@ -853,9 +911,11 @@ bool ComputeAtRootDomainMapBuilder::mapAllConsumers(
   // All entries in key_set must be equivalent with each other.
   TORCH_INTERNAL_ASSERT(consumer_set.size() > 0);
   bool consistent = safeToMap(consumer_set);
-  if (consistent) {
-    for (const auto pending_consumer : consumer_set) {
+  for (const auto pending_consumer : consumer_set) {
+    if (consistent) {
       setMapped(producer_key, pending_consumer);
+    } else {
+      setInvalid(producer_key, pending_consumer);
     }
   }
   // This entry should never be used again, so remove it.
@@ -929,6 +989,10 @@ bool ComputeAtRootDomainMapBuilder::safeToMap(const DomainKeySet& domains) {
   if (incompatible_domains_.isReductionOutputMapped(
           unique_domains, root_map_) &&
       !map_through_reduction_) {
+    return false;
+  }
+  // Make sure mapping these domains won't cause any invalid mapping
+  if (isInvalid(unique_domains)) {
     return false;
   }
   return true;

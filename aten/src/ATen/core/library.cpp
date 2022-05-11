@@ -7,7 +7,7 @@ namespace torch {
 namespace {
   // TODO: Consider representing debug info as a struct instead so you
   // don't have to allocate strings all the time
-  std::string debugString(const char* file, uint32_t line) {
+  std::string debugString(const std::string& file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
@@ -15,7 +15,7 @@ namespace {
 #endif
   }
 
-  std::string debugString(std::string debug, const char* file, uint32_t line) {
+  std::string debugString(std::string debug, const std::string& file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
@@ -235,6 +235,9 @@ Library& Library::_fallback(CppFunction&& f) & {
   // Note if dispatch_key is DispatchKey::Undefined, it'll be ignored here since Undefined
   // isn't a runtime key, you shouldn't register anything to it at all.
   for (auto k : c10::getRuntimeDispatchKeySet(*dispatch_key)) {
+    // mobile doesn't use all dispatch keys, so skip any fallback registrations for the unused keys.
+    auto idx = getDispatchTableIndexForDispatchKey(k);
+    if (idx < 0) continue;
     registrars_.emplace_back(
       c10::Dispatcher::singleton().registerFallback(
         k,

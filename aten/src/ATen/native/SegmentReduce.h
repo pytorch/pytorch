@@ -1,10 +1,12 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/core/Scalar.h>
 #include <c10/util/Optional.h>
 
 namespace at {
+class Tensor;
+
 namespace native {
 
 enum SegmentReductionType { MAX, MEAN, MIN, SUM };

@@ -3,8 +3,8 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
-#include <ATen/ATen.h>
-#include <ATen/core/DimVector.h>
+#include <c10/util/strides.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -14,24 +14,17 @@
 #include <cstring>
 #include <cctype>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 namespace at { namespace native {
-
-// Used as an interface between the different BLAS-like libraries
-enum class TransposeType {
-  NoTranspose,
-  Transpose,
-  ConjTranspose,
-};
-
-// Transforms TransposeType into the BLAS / LAPACK format
-static char to_blas(TransposeType trans) {
-  switch (trans) {
-    case TransposeType::Transpose: return 'T';
-    case TransposeType::NoTranspose: return 'N';
-    case TransposeType::ConjTranspose: return 'C';
-  }
-  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
-}
 
 static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
   if (tensor.is_conj()) {
@@ -41,44 +34,21 @@ static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor)
   }
 }
 
-template<class Vec>
-static inline Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
-  static_assert(std::is_same<IntArrayRef::value_type, typename Vec::value_type>::value,
-                "Incompatible integral type of sizes and strides");
-  // f_contig chooses between the strides of a batch of Fortran (F-contiguous) and C-contiguous matrices
-  using Int = IntArrayRef::value_type;
-  constexpr auto one = Int{1};
-  const auto n = sizes.size();
-  if (n == 0) {
-    return Vec{};
-  } else if (n == 1) {
-    // Use initializer-list to initialize the vector
-    return Vec{one};
-  }
-  // Now we have a matrix or batch of matrices
-  auto strides = Vec(n);
-  const auto last_idx = n - 1;
-  const auto snd_last_idx = n - 2;
-  // We'll fill the first two strides afterwards, otherwise the first step
-  // in the for loop is wrong
-  strides[snd_last_idx] = std::max<int64_t>(sizes[last_idx], one);
-  for (int i = snd_last_idx - 1; i >= 0; --i) {
-    strides[i] = strides[i + 1] * std::max(sizes[i + 1], one);
-  }
-  strides[last_idx] = f_contig ? std::max(sizes[snd_last_idx], one) : one;
-  if (f_contig) {
-    // We filled the wrong stride before so we correct it
-    strides[snd_last_idx] = one;
+static inline DimVector batched_matrix_contiguous_strides(
+    const IntArrayRef sizes,
+    const bool f_contig = false) {
+  // f_contig chooses between the strides of a batch of Fortran (F-contiguous)
+  // and C-contiguous matrices
+  auto strides = c10::contiguous_strides(sizes);
+  auto dim = strides.size();
+
+  if (f_contig && dim >= 2) {
+    // Fix the strides of the last two dimensions, so that we return
+    // C-contiguous batches of F-contiguous matrices.
+    strides[dim - 1] = std::max(sizes[dim - 2], static_cast<int64_t>(1));
+    strides[dim - 2] = 1;
   }
   return strides;
-}
-
-static inline DimVector contiguous_strides(const IntArrayRef sizes, const bool f_contig=false) {
-  return contiguous_strides_template<DimVector>(sizes, f_contig);
-}
-
-static inline std::vector<int64_t> contiguous_strides_vec(const IntArrayRef sizes, const bool f_contig=false) {
-  return contiguous_strides_template<std::vector<int64_t>>(sizes, f_contig);
 }
 
 /*
@@ -122,13 +92,13 @@ static inline c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const T
  *  broadcasted shape.
  */
 static inline Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows = -1,
-    c10::optional<IntArrayRef> desired_batch_sizes = c10::nullopt) {
+    at::OptionalIntArrayRef desired_batch_sizes = c10::nullopt) {
   nrows = (nrows == -1) ? src.size(-2) : nrows;
   auto copy_sizes = desired_batch_sizes.has_value()
     ? desired_batch_sizes.value().vec()
     : IntArrayRef(src.sizes().data(), src.dim() - 2).vec();
   copy_sizes.insert(copy_sizes.end(), {nrows, src.size(-1)});
-  const auto copy_strides = contiguous_strides(copy_sizes, /*f-contig*/true);
+  const auto copy_strides = batched_matrix_contiguous_strides(copy_sizes, /*f-contig*/true);
   auto copy = at::empty_strided(copy_sizes, copy_strides, src.options());
   copy.narrow(-2, 0, src.size(-2)).copy_(src);
   return copy;
@@ -204,7 +174,7 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
   auto a_broadcasts_over_b = (a_batch_sizes != b_batch_sizes);
   Tensor a_buffer, a_was_accessed, a_buffer_3d;
   std::function<void(int64_t)> check_if_copy_needed_for_a
-    = [](int64_t a_curr_linear_batch_idx){};
+    = [](int64_t /*a_curr_linear_batch_idx*/){};
   if (a_broadcasts_over_b) {
     a_buffer = at::empty_strided(a.sizes(), a.strides(), a.options())
       .copy_(a);
@@ -247,7 +217,6 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
   };
   iter.serial_for_each(loop, {0, batchCount(b)});
 }
-
 
 // Returns the epsilon value for floating types except half
 static inline double _get_epsilon(const ScalarType& sc_type) {
@@ -306,6 +275,16 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
     batch_string = ": (Batch element " + std::to_string(batch_id) + ")";
   }
   if (info < 0) {
+    // Reference LAPACK 3.10+ changed `info` behavior for inputs with non-finite values
+    // Previously, it would return `info` > 0, but now it returns `info` = -4
+    // OpenBLAS 0.3.15+ uses the Reference LAPACK 3.10+.
+    // MKL 2022.0+ uses the Reference LAPACK 3.10+.
+    // Older version of MKL and OpenBLAS follow the old behavior (return `info` > 0).
+    // Here we check for the case where `info` is -4 and raise an error
+    if (name.find("svd") != name.npos) {
+      TORCH_CHECK_LINALG(info != -4, name, batch_string,
+          ": The algorithm failed to converge because the input matrix contained non-finite values.");
+    }
     TORCH_INTERNAL_ASSERT(false, name, batch_string,
         ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
   } else if (info > 0) {
@@ -346,7 +325,7 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
  * successful (info = 0) or not, and report in case of the latter.
  */
 static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10::string_view name) {
-  for (size_t i = 0; i < infos.size(); i++) {
+  for (const auto i : c10::irange(infos.size())) {
     auto info = infos[i];
     singleCheckErrors(info, name, i);
   }
@@ -358,7 +337,7 @@ static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10
 static inline void batchCheckErrors(const Tensor& infos, const c10::string_view name) {
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
-  for (int64_t i = 0; i < infos.numel(); i++) {
+  for (const auto i : c10::irange(infos.numel())) {
     auto info = infos_data[i];
     singleCheckErrors(info, name, i);
   }
@@ -449,14 +428,14 @@ static inline std::tuple<bool, bool> _parse_qr_mode(c10::string_view mode) {
 }
 
 // Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
-static inline std::tuple<std::vector<int64_t>,
-                         std::vector<int64_t>,
-                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool reduced) {
+static inline std::tuple<DimVector, DimVector, int64_t> _compute_geometry_for_Q(
+    const Tensor& input,
+    bool reduced) {
   int64_t m = input.size(-2), n = input.size(-1);
   int64_t n_columns_q;
 
   // We need to compute the required size of Q based on the `reduced` option
-  auto q_sizes = input.sizes().vec();
+  DimVector q_sizes(input.sizes());
   if (!reduced && m > n) {
     q_sizes[input.dim() - 1] = m;
     n_columns_q = m;
@@ -464,58 +443,17 @@ static inline std::tuple<std::vector<int64_t>,
     q_sizes[input.dim() - 1] = n;
     n_columns_q = std::min(m, n);
   }
-  auto q_strides = contiguous_strides_vec(q_sizes, /*f-contig*/true);
+  auto q_strides = batched_matrix_contiguous_strides(q_sizes, /*f-contig*/true);
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
-// Function to generate empty tensors of required size, strides and dtype for the SVD operation
-static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv,
-    const bool svd_use_cusolver=false) {
-
-  // U, S, VT are initialized as empty tensors.
-  // For CPU LAPACK and GPU MAGMA backend, the tensors are initialized on CPU.
-  // For GPU cuSOLVER backend, the tensors are initialized on GPU.
-  const auto usvt_device = svd_use_cusolver ? at::kCUDA : at::kCPU;
-
-  auto sizes = input.sizes().vec();
-  int64_t m = input.size(-2), n = input.size(-1);
-
-  sizes[input.dim() - 1] = some ? std::min(m, n) : m;
-  const auto u_strides = contiguous_strides(sizes, /*f-contig*/true);
-
-  // cuSOLVER's gesvdjBatched fails with illegal memory access and
-  // cuSOLVER's gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
-  // if matrices for U and VT are not allocated
-  // even though the result of computation is not used we need to allocate this memory
-
-  Tensor U_empty = (compute_uv || svd_use_cusolver)
-      ? at::empty_strided(sizes, u_strides, input.options().device(usvt_device))
-      : at::empty({0}, input.options().device(usvt_device));
-
-  // VT should be a column-major or a batch of column-major matrices
-  sizes[input.dim() - 2] = some ? std::min(m, n) : n;
-  sizes[input.dim() - 1] = n;
-  const auto vt_strides = contiguous_strides(sizes, /*f-contig*/!svd_use_cusolver);
-  Tensor VT_empty = (compute_uv || svd_use_cusolver)
-      ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
-      : at::empty({0}, input.options().device(usvt_device));
-
-  // U and VT might not get filled in this case
-  if (!some && compute_uv && input.numel() == 0) {
-    U_empty.zero_();
-    VT_empty.zero_();
-    // make U and VT an identity matrix, because they should be orthogonal
-    U_empty.diagonal(0, -2, -1).fill_(1);
-    VT_empty.diagonal(0, -2, -1).fill_(1);
-  }
-
-  sizes.pop_back();
-  sizes[input.dim() - 2] = std::min(m, n);
-  ScalarType dtype = toValueType(input.scalar_type());
-  Tensor S_empty = at::empty(sizes, input.options().dtype(dtype).device(usvt_device));
-
-  return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
+static inline bool svd_uses_cusolver(const Tensor& A) {
+  // if cusolver is available, it is used unconditionally
+  return A.is_cuda()
+         && at::globalContext().hasCuSOLVER()
+         && at::globalContext().linalgPreferredBackend() != at::LinalgBackend::Magma;
 }
+
 
 // Function used instead of .to so that the original strides are retained
 // .to doesn't retain strides and make the output tensor contiguous
@@ -646,24 +584,75 @@ static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor&
   return vector_case;
 }
 
+/*
+  Computes linear indices for a tensor with original_shape to access its elements like it was a materialized broadcast tensor.
+*/
+static inline Tensor get_linear_indices(int64_t numel, IntArrayRef original_shape, IntArrayRef broadcast_shape) {
+  TensorOptions options = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+  return at::arange(numel, options).view(original_shape).broadcast_to(broadcast_shape).contiguous();
+}
+
+class BroadcastLinearIndices {
+ private:
+  Tensor linear_indices_;
+  bool is_broadcasting_;
+
+ public:
+  BroadcastLinearIndices(
+      int64_t numel,
+      IntArrayRef original_shape,
+      IntArrayRef broadcast_shape) {
+    // The assumption is that the broadcast_shape is a materialized broadcast
+    // shape of the original_shape. We need to compute the linear indices
+    // compatible with the original_shape to access the elements in the original
+    // tensor corresponding to the broadcast tensor.
+    is_broadcasting_ = !original_shape.equals(broadcast_shape);
+    if (is_broadcasting_) {
+      linear_indices_ =
+          get_linear_indices(numel, original_shape, broadcast_shape);
+    }
+  }
+  int64_t operator()(int64_t broadcast_linear_index) {
+    return is_broadcasting_
+        ? linear_indices_.data_ptr<int64_t>()[broadcast_linear_index]
+        : broadcast_linear_index;
+  }
+};
+
 static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
   auto leading_dimension = input_strides[ndim - 1];
   auto rows = input_sizes[ndim - 2];
-  return (input_strides[ndim - 2] == 1) && (leading_dimension >= std::max<int64_t>(1, rows));
+  bool batch_stride_compatible = true;
+  if (ndim == 3) {
+    auto cols = input_sizes[ndim - 1];
+    batch_stride_compatible =
+        input_strides[ndim - 3] >= leading_dimension * cols;
+  }
+  return (input_strides[ndim - 2] == 1) &&
+      (leading_dimension >= std::max<int64_t>(1, rows)) &&
+      batch_stride_compatible;
 }
 
 static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
   auto leading_dimension = input_strides[ndim - 2];
   auto cols = input_sizes[ndim - 1];
-  return (input_strides[ndim - 1] == 1) && (leading_dimension >= std::max<int64_t>(1, cols));
+  bool batch_stride_compatible = true;
+  if (ndim == 3) {
+    auto rows = input_sizes[ndim - 2];
+    batch_stride_compatible =
+        input_strides[ndim - 3] >= leading_dimension * rows;
+  }
+  return (input_strides[ndim - 1] == 1) &&
+      (leading_dimension >= std::max<int64_t>(1, cols)) &&
+      batch_stride_compatible;
 }
 
 }}  // namespace at::native

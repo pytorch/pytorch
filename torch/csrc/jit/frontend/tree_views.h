@@ -907,7 +907,7 @@ struct Const : public Expr {
     try {
       // NOLINTNEXTLINE(modernize-use-nullptr)
       return c10::stoll(subtree(0)->stringValue(), /*__idx=*/0, /*base=*/0);
-    } catch (const std::out_of_range& e) {
+    } catch (const std::out_of_range&) {
       throw ErrorReport(range()) << "Integral constant out of range "
                                     "(must fit in a signed 64 bit integer)";
     }

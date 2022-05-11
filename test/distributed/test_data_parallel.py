@@ -383,7 +383,7 @@ class TestDataParallel(TestCase):
                 self.assertEqual(out.get_device(), dev_id[0])
                 self.assertEqual(out, expected_out)
                 for expected, param in zip(expected_grads, l.parameters()):
-                    self.assertEqual(param.grad, expected)
+                    self.assertEqual(param.grad.coalesce(), expected.coalesce())
 
         # Check for None device_ids
         l = l.cuda()
@@ -741,32 +741,43 @@ class TestDataParallel(TestCase):
     @sandcastle_skip_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parameter_list_dict_replica(self):
         class MyMod(torch.nn.Module):
-            def __init__(self, data):
+            def __init__(self, data, check_fn):
                 super(MyMod, self).__init__()
                 self.data = data
+                self.check_fn = check_fn
 
             def forward(self, inp):
+                self.check_fn(self)
                 return inp
 
         p1 = torch.nn.Parameter(torch.rand(10))
         p2 = torch.nn.Parameter(torch.rand(10))
-        module = MyMod(torch.nn.ParameterList([p1, p2])).cuda()
+        key0 = 0
+        key1 = 1
+
+        def check_fn(self_):
+            self.assertEqual(p1, self_.data[key0])
+            self.assertEqual(p2, self_.data[key1])
+            self.assertTrue(self_.data[key0].requires_grad)
+            self.assertTrue(self_.data[key1].requires_grad)
+            self.assertIsNotNone(self_.data[key0].grad_fn)
+            self.assertIsNotNone(self_.data[key1].grad_fn)
+
+        module = MyMod(torch.nn.ParameterList([p1, p2]), check_fn).cuda()
         model = dp.DataParallel(module)
         input = torch.randn((8, 8), device="cuda")
 
-        with self.assertWarnsRegex(
-                UserWarning,
-                r"nn\.ParameterList is being used with DataParallel but this"):
-            model(input)
+        # Runs the check_fn
+        model(input)
 
-        module = MyMod(torch.nn.ParameterDict({"0": p1, "1": p2})).cuda()
+        key0 = "0"
+        key1 = "1"
+        module = MyMod(torch.nn.ParameterDict({"0": p1, "1": p2}), check_fn).cuda()
         model = dp.DataParallel(module)
         input = torch.randn((8, 8), device="cuda")
 
-        with self.assertWarnsRegex(
-                UserWarning,
-                r"nn\.ParameterDict is being used with DataParallel but this"):
-            model(input)
+        # Runs the check_fn
+        model(input)
 
 
 class TestDataParallelDeviceType(TestCase):

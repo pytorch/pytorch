@@ -1,6 +1,7 @@
 import torch
 from collections import defaultdict
-from typing import Callable, Any, Dict, Tuple, Set, Optional
+from typing import Callable, Any, Dict, Tuple, Set, Optional, List
+from torch.ao.quantization import QConfig
 from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
 from torch.ao.quantization.quantize import (
     is_activation_post_process,
@@ -11,9 +12,12 @@ from torch.fx import (
 from torch.fx.graph import (
     Graph,
 )
+from torch.nn.intrinsic import _FusedModule
 
-from ..utils import _parent_name
-from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
+from ..utils import (
+    _parent_name,
+    get_qconfig_dtypes,
+)
 from ..qconfig_dict_utils import (
     get_object_type_qconfig,
     maybe_adjust_qconfig_for_module_type_or_name,
@@ -56,23 +60,29 @@ def update_qconfig_for_fusion(
 
     for node in model.graph.nodes:
         if node.op == 'call_module' and node.target in modules:
-            module_type = type(modules[str(node.target)])
-            if module_type not in list(DEFAULT_OP_LIST_TO_FUSER_METHOD.values()):
+            maybe_fused_module = modules[str(node.target)]
+            if not isinstance(maybe_fused_module, _FusedModule):
                 continue
 
-            for ops, fuser in DEFAULT_OP_LIST_TO_FUSER_METHOD.items():
-                if module_type == fuser:
-                    fused_qconfig = object_type_dict.get(ops[0], None)
+            ops = list(maybe_fused_module._modules.values())
+            fused_qconfig = object_type_dict.get(type(ops[0]), None)
 
-                    # Raise an error if the modules in the fused module have
-                    # different qconfigs specified in the qconfig_dict
-                    for op in ops:
-                        if not qconfig_equals(object_type_dict.get(op, None), fused_qconfig):
-                            raise LookupError("During fusion, we need to specify the same " +
-                                              f"qconfigs for both modules in {module_type}.")
+            # Raise an error if the modules in the fused module have
+            # different qconfigs specified in the qconfig_dict
+            # TODO: currently it only works for modules,
+            # need to make this work for torch.nn.functional.relu
+            # TODO: currently it only works for object_type configurations,
+            # ideally it should work for different types of configurations,
+            # maybe we want to redesign this part
+            for op in ops[1:]:
+                if not qconfig_equals(object_type_dict.get(type(op), None), fused_qconfig):
+                    raise LookupError(
+                        "During fusion, we need to specify the same " +
+                        f"qconfigs for all module types in {type(maybe_fused_module)} " +
+                        f"offending type: {type(op)}")
 
-                    if fused_qconfig is not None:
-                        object_type_dict[module_type] = fused_qconfig
+            if fused_qconfig is not None:
+                object_type_dict[type(maybe_fused_module)] = fused_qconfig
 
     return qconfig_dict
 
@@ -207,10 +217,6 @@ def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Option
                                                "float_to_observed_custom_module_class",
                                                "non_traceable_module_name",
                                                "non_traceable_module_class",
-                                               "additional_fuser_method_mapping",
-                                               "additional_qat__module_mapping",
-                                               "additional_fusion_pattern",
-                                               "additional_quant_pattern",
                                                "input_quantized_idxs",
                                                "output_quantized_idxs",
                                                "preserved_attributes"}
@@ -228,8 +234,7 @@ def check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Option
     if not convert_custom_config_dict:
         return
 
-    convert_custom_config_dict_allowed_keys = {"additional_object_mapping",
-                                               "observed_to_quantized_custom_module_class",
+    convert_custom_config_dict_allowed_keys = {"observed_to_quantized_custom_module_class",
                                                "preserved_attributes"}
     check_is_valid_config_dict(convert_custom_config_dict,
                                convert_custom_config_dict_allowed_keys, "convert_custom_config_dict")
@@ -244,8 +249,7 @@ def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Optional[Dic
     if not fuse_custom_config_dict:
         return
 
-    fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
-                                            "preserved_attributes"}
+    fuse_custom_config_dict_allowed_keys = {"preserved_attributes"}
     check_is_valid_config_dict(fuse_custom_config_dict, fuse_custom_config_dict_allowed_keys, "fuse_custom_config_dict")
 
 
@@ -277,6 +281,34 @@ def compare_prepare_convert_qconfig_dict(prepare_qconfig_dict: Dict[str, Dict[An
                     Updated qconfig {} to {} for key {} {}".format(prepare_qconfig_dict[k], convert_qconfig_dict[k], k, name)
         else:
             assert "Unsupported key in convert_qconfig_dict {}".format(k)
+
+
+def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[Dict[str, Any]]):
+    for dtype_config in dtype_configs:
+        is_dynamic = dtype_config.get("is_dynamic", False)
+        input_dtype = dtype_config.get("input_dtype", torch.float)
+        weight_dtype = dtype_config.get("weight_dtype", torch.float)
+        bias_dtype = dtype_config.get("bias_dtype", torch.float)
+        output_dtype = dtype_config.get("output_dtype", torch.float)
+        qconfig_activation_dtype, qconfig_weight_dtype, qconfig_compute_dtype = \
+            get_qconfig_dtypes(qconfig)
+        qconfig_bias_dtype = torch.float16 \
+            if qconfig_activation_dtype == torch.float16 and \
+            qconfig_weight_dtype == torch.float16 \
+            else torch.float
+
+        if is_dynamic:
+            is_match = input_dtype == qconfig_compute_dtype and \
+                output_dtype == torch.float and \
+                weight_dtype == qconfig_weight_dtype
+        else:
+            is_match = input_dtype == qconfig_activation_dtype and \
+                output_dtype == qconfig_activation_dtype and \
+                weight_dtype == qconfig_weight_dtype and \
+                bias_dtype == qconfig_bias_dtype
+        if is_match:
+            return True
+    return False
 
 # TODO: rename this file to config_utils
 def get_standalone_module_configs(

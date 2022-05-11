@@ -8,6 +8,7 @@
 #include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 
 #include <thrust/tuple.h>
 
@@ -112,6 +113,15 @@ struct LoadWithCast {
     for (int i = 0; i < N; i++) {
       this->dtypes[i] = dtypes[i];
       element_sizes[i] = c10::elementSize(dtypes[i]);
+    }
+  }
+
+  LoadWithCast(const TensorIteratorBase& iter) {
+    assert(iter.ninputs() == N);
+    #pragma unroll
+    for (auto i = 0; i < N; ++i) {
+      this->dtypes[i] = iter.dtype(i + 1);
+      element_sizes[i] = c10::elementSize(iter.dtype(i + 1));
     }
   }
 

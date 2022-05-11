@@ -165,18 +165,18 @@ public:
     impl.hip_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
-  static FnPtr DEFAULT;
+  static TORCH_API FnPtr DEFAULT;
 #ifdef HAVE_AVX512_CPU_DEFINITION
-  static FnPtr AVX512;
+  static TORCH_API FnPtr AVX512;
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
-  static FnPtr AVX2;
+  static TORCH_API FnPtr AVX2;
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
-  static FnPtr VSX;
+  static TORCH_API FnPtr VSX;
 #endif
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
-  static FnPtr ZVECTOR;
+  static TORCH_API FnPtr ZVECTOR;
 #endif
 private:
   DispatchStubImpl impl;
@@ -215,7 +215,7 @@ struct RegisterHIPDispatch {
 #define DEFINE_DISPATCH(name) struct name name
 
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
-  template <> name::FnPtr DispatchStub<name::FnPtr, struct name>::arch = fn;
+  template <> name::FnPtr TORCH_API DispatchStub<name::FnPtr, struct name>::arch = fn;
 
 #ifdef HAVE_AVX512_CPU_DEFINITION
 #define REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX512, fn)

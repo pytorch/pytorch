@@ -47,6 +47,7 @@ TEST_SKIPS = {
         72, "Skipped because distributed backend is not available."
     ),
     "small_worldsize": TestSkip(73, "Skipped due to small world size."),
+    "odd_worldsize": TestSkip(87, "Skipped due to odd world size."),
     "no_cuda": TestSkip(74, "CUDA is not available."),
     "multi-gpu-1": TestSkip(75, "Need at least 1 CUDA device"),
     "multi-gpu-2": TestSkip(77, "Need at least 2 CUDA devices"),
@@ -69,8 +70,6 @@ class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
     skip_collective["allgather_coalesced"] = {"nccl", "mpi"}
-    skip_collective["gather"] = {"nccl"}
-    skip_collective["scatter"] = {"nccl"}
     skip_collective["reduce"] = set()
     skip_collective["sendrecv anysource"] = {"nccl"}
     skip_collective["cpu barrier"] = {"nccl"}
@@ -85,8 +84,8 @@ class DistTestCases:
 
 
 def skip_if_no_gpu(func):
-    """Nccl multigpu tests require at least 2 GPUS. Skip if this is not met"""
-
+    """Skips if the world size exceeds the number of GPUs, ensuring that if the
+    test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not torch.cuda.is_available():
@@ -110,6 +109,15 @@ def skip_if_small_worldsize(func):
 
     return wrapper
 
+def skip_if_odd_worldsize(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) % 2 == 1:
+            sys.exit(TEST_SKIPS["odd_worldsize"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
 
 def require_n_gpus_for_nccl_backend(n, backend):
     def decorator(func):
@@ -226,6 +234,7 @@ def with_dist_debug_levels(levels):
             old_level = os.environ.get("TORCH_DISTRIBUTED_DEBUG", None)
             for level in levels:
                 os.environ["TORCH_DISTRIBUTED_DEBUG"] = level
+                c10d.set_debug_level_from_env()
                 ret = func(*args, **kwargs)
                 c10d.barrier()
                 if old_level is not None:
@@ -326,6 +335,9 @@ else:
     TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
+# https://github.com/pytorch/pytorch/issues/75665
+if TEST_WITH_ROCM:
+    TIMEOUT_OVERRIDE["test_join_kwargs"] = 200
 
 def create_device(interface=None):
     if sys.platform == "win32" or interface is None:
@@ -574,6 +586,10 @@ class MultiProcessTestCase(TestCase):
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+        # Enable DDP + ReplicatedTensor
+        from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
+        _set_ddp_with_replicated_tensor(True)
+
         self = cls(test_name)
 
         self.rank = rank

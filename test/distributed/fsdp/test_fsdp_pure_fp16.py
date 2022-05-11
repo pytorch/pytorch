@@ -4,14 +4,14 @@ import sys
 
 import torch
 from torch import distributed as dist
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP, CPUOffload
-from torch.nn import Linear, Module
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, CPUOffload
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
     get_full_params,
+    DeterministicModel,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -33,21 +33,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class Model(Module):
-    def __init__(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
-        super().__init__()
-        # keep everything deterministic for model initialization
-        torch.manual_seed(0)
-        self.inner = Linear(2, 2).cuda()
-        if wrap_fsdp:
-            self.inner = FSDP(self.inner, cpu_offload=cpu_offload)
-        self.outer = Linear(2, 2).cuda()
-
-    def forward(self, x):
-        y = self.inner(x)
-        return self.outer(y)
-
-
 # Test pure fp16 training, also testing the case when the parameter's data type is
 # changed after FSDP wrapping and before training loop starts.
 # Only run one step for comparision, as usually grad scaler is needed to avoid NaN value
@@ -57,7 +42,7 @@ class TestPureFP16(FSDPTest):
         # keep everything deterministic for input data
         torch.manual_seed(0)
 
-        model = Model(wrap_fsdp, cpu_offload)
+        model = DeterministicModel(wrap_fsdp, cpu_offload)
         if wrap_fsdp:
             model = FSDP(model, cpu_offload=cpu_offload)
         else:
@@ -74,7 +59,9 @@ class TestPureFP16(FSDPTest):
             optim.zero_grad()
 
         if wrap_fsdp:
-            get_full_params(model)
+            full_params = get_full_params(model)
+            torch.cuda.synchronize()
+            return full_params
 
         return list(model.parameters())
 

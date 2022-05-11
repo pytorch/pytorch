@@ -20,43 +20,6 @@ C10_DEFINE_int64(
 
 namespace c10 {
 
-namespace impl {
-
-static std::string noop_name_fn(const PyInterpreter*) {
-  return "<unloaded interpreter>";
-}
-
-static void noop_decref_fn(const PyInterpreter*, PyObject*, bool) {
-  // no-op
-}
-
-static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
-    const PyInterpreter*,
-    const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to detach (shallow_copy_and_detach) Tensor with nontrivial PyObject after corresponding interpreter died");
-}
-
-static void noop_dispatch_fn(
-    const PyInterpreter*,
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
-
-void PyInterpreter::disarm() noexcept {
-  name_fn_ = &noop_name_fn;
-  decref_fn_ = &noop_decref_fn;
-  detach_fn_ = &noop_detach_fn;
-  dispatch_fn_ = &noop_dispatch_fn;
-}
-
-} // namespace impl
-
 const char* const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "is not allowed on a Tensor created from .data or .detach().\n"
     "If your intent is to change the metadata of a Tensor (such as sizes / strides / storage / storage_offset)\n"
@@ -104,6 +67,9 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
+// some compiler does not generate the destructor correctly
+TensorImpl::~TensorImpl() = default;
+
 TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
@@ -117,11 +83,11 @@ TensorImpl::TensorImpl(
 
 // [Note: Python key removal]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// In most constructors for TensorImpl, you will see Python key is removed from
-// the passed in DispatchKeySet.  Why?
+// In most constructors for TensorImpl, you will see Python and
+// PythonTLSSnapshot keys are removed from the passed in DispatchKeySet.  Why?
 //
-// INVARIANT: Python dispatch key is set iff PyObject for the Tensor has a
-// nontrivial __torch_dispatch__ implementation.
+// INVARIANT: Python and PythonTLSSnapshot dispatch keys are set iff PyObject
+// for the Tensor has a nontrivial __torch_dispatch__ implementation.
 //
 // When a fresh TensorImpl is created, there is *no* PyObject (this only gets
 // initialized lazily at the first point in time the Tensor passes into Python).
@@ -129,8 +95,8 @@ TensorImpl::TensorImpl(
 //
 // In practice, what will happen shortly afterwards is that the TensorImpl
 // will get its PyObject initialized by Tensor._make_subclass; at this point
-// the Python dispatch key will be set and all is well.  The point is to delay
-// the dispatch key setting until that point.
+// the Python and PythonTLSSnapshot dispatch keys will be set and all is well.
+// The point is to delay the dispatch key setting until that point.
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
@@ -145,8 +111,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set.remove(
-          DispatchKey::Python)) { // See [Note: Python key removal]
+      key_set_(key_set - c10::python_ks) { // See [Note: Python key removal]
   init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
@@ -187,12 +152,12 @@ TensorImpl::TensorImpl(
 
   // TODO: be more explicit about the full key set at call sites so we
   // don't have to keep recomputing it here
-  DispatchKey k = key_set.highestPriorityBackendTypeId();
+  auto k = key_set.highestBackendKey();
 
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
-  key_set =
-      key_set.remove(DispatchKey::Python); // See [Note: Python key removal]
+  // See [Note: Python key removal]
+  key_set = key_set - c10::python_ks;
 
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
@@ -214,16 +179,6 @@ TensorImpl::TensorImpl(
 
   // we would also like to check that non-cpu devices have an index, but some
   // Caffe2 operators create Storages with default devices.
-}
-
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-IntArrayRef TensorImpl::sizes() const {
-  return sizes_and_strides_.sizes_arrayref();
-}
-#endif
-
-IntArrayRef TensorImpl::strides() const {
-  return sizes_and_strides_.strides_arrayref();
 }
 
 void TensorImpl::HandleResize() {
@@ -368,11 +323,11 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  if (owns_pyobj_) {
+  if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
     pyobj_interpreter_.load(std::memory_order_acquire)
-        ->decref(pyobj_, /*is_tensor*/ true);
+        ->decref(_unchecked_untagged_pyobj(), /*is_tensor*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
     // to the PyObject (if there are references to the PyObject,
@@ -381,22 +336,6 @@ void TensorImpl::release_resources() {
     // be used again (modulo weak reference races)
     pyobj_ = nullptr; // for safety
   }
-}
-
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-int64_t TensorImpl::dim() const {
-  return sizes_and_strides_.size();
-}
-#endif
-
-int64_t TensorImpl::size(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return sizes_and_strides_.size_at_unchecked(d);
-}
-
-int64_t TensorImpl::stride(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return sizes_and_strides_.stride_at_unchecked(d);
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
@@ -410,28 +349,32 @@ void TensorImpl::throw_storage_access_error() const {
       false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
-bool TensorImpl::is_contiguous_nondefault_policy_impl(
-    at::MemoryFormat memory_format) const {
-  if (has_contiguity_ ==
-      static_cast<uint8_t>(HasContiguityPolicy::ContiguityNotSupported)) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "Tensors of type ",
-        tensorimpl_type_name(),
-        " do not have is_contiguous");
-  } else {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        has_contiguity_ ==
-        static_cast<uint8_t>(HasContiguityPolicy::CustomBehavior));
-    return is_contiguous_custom(memory_format);
-  }
+bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have is_contiguous");
 }
 
-bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  TORCH_INTERNAL_ASSERT(
+IntArrayRef TensorImpl::sizes_custom() const {
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
+}
+IntArrayRef TensorImpl::strides_custom() const {
+  TORCH_CHECK(
       false,
-      "TensorImpl::is_contiguous_custom should never be called; did you "
-      "set_has_contiguity_policy and forget to override is_contiguous_custom?");
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have strides");
+}
+int64_t TensorImpl::dim_custom() const {
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
+}
+int64_t TensorImpl::numel_custom() const {
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -550,9 +493,13 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python);
+  // Copying tensor metadata doesn't change the PyObject (maybe
+  // it should), which means that we have to preserve whatever the
+  // original Python keyset was (as it's associated with the PyObject
+  // being a tensor subclass or not)
+  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
+      (dest_impl->key_set_ & c10::python_ks);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
-  dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =
       src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_3d_contiguous_ =
@@ -564,6 +511,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
   if (src_impl->named_tensor_meta_ != nullptr) {
@@ -598,21 +546,178 @@ void TensorImpl::copy_tensor_metadata(
   }
 }
 
-TorchDispatchTypeObject::TorchDispatchTypeObject(
-    PyObject* type_object,
-    c10::impl::PyInterpreter* pyinterpreter)
-    : data_(type_object), pyinterpreter_(pyinterpreter) {}
+// Legacy Caffe2 operations
 
-TorchDispatchTypeObject::~TorchDispatchTypeObject() {
-  pyinterpreter_->decref(data_, /*is_tensor*/ false);
+void TensorImpl::Extend(int64_t num, float growthPct) {
+  TORCH_CHECK(sizes_and_strides_.size() >= 1u);
+  TORCH_CHECK(num >= 0, "`num` must be non-negative for Extend");
+  TORCH_CHECK(
+      is_contiguous_,
+      "Right now Extend is only supported for contiguous Tensor.");
+  using SizesVector = SmallVector<int64_t, 5>;
+  SizesVector newDims(
+      sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+  newDims[0] += num;
+  if (!storage_.data()) {
+    Resize(newDims);
+    return;
+  }
+  const auto newNumel = c10::multiply_integers(newDims.begin(), newDims.end());
+  if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
+    sizes_and_strides_.set_sizes(newDims);
+    numel_ = newNumel;
+    return;
+  }
+  SizesVector newCapacity(
+      sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+  newCapacity[0] = std::max(
+      newDims[0],
+      static_cast<int64_t>(std::ceil(
+          sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
+  auto oldData = std::move(storage_.data_ptr());
+  auto oldSize = numel_;
+  Resize(newCapacity);
+  auto* newData = raw_mutable_data(data_type_);
+  if (data_type_.copy()) {
+    TORCH_CHECK(
+        device_type() == DeviceType::CPU, "non-POD types work only on CPU");
+    data_type_.copy()(oldData.get(), newData, oldSize);
+  } else {
+    // The following copy uses the current (thread local) stream for copying
+    // and also takes the GPU id from the device() field passed in.
+    //
+    // TODO: Potentially more enforcements are necessary to avoid accidental
+    // switch to sync copy if the currently set device is wrong.
+    //
+    // Specifically, we might need to switch to a different context device
+    // here explicitly to avoid relying on user synchronizing things
+    // properly.
+    CopyBytes(
+        oldSize * itemsize(),
+        oldData.get(),
+        device(),
+        newData,
+        device(),
+        true); // non-blocking
+  }
+  reserved_ = true;
+  sizes_and_strides_.set_sizes(newDims);
+  numel_ = newNumel;
 }
 
-c10::impl::PyInterpreter* TorchDispatchTypeObject::pyinterpreter() const {
-  return pyinterpreter_;
+void TensorImpl::ReserveSpace(int64_t outer_dim) {
+  TORCH_CHECK(
+      is_contiguous_,
+      "Right now ReserveSpace is only supported for contiguous Tensor.");
+  TORCH_CHECK(storage_.unique(), "Can't call ReserveSpace on shared storage.");
+  // TODO: eliminate newCapacity.
+  SmallVector<int64_t, 5> newCapacity(
+      sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+  newCapacity[0] = outer_dim;
+  auto newNumel = c10::multiply_integers(newCapacity);
+  if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
+    return;
+  }
+  // Old data is discarded
+  storage_.data_ptr().clear();
+  auto oldSize = numel_;
+  SmallVector<int64_t, 5> oldDims(
+      sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+  Resize(newCapacity);
+  // Allocate new memory but don't copy over the data
+  raw_mutable_data(data_type_);
+  sizes_and_strides_.set_sizes(oldDims);
+  numel_ = oldSize;
+  reserved_ = true;
 }
 
-PyObject* TorchDispatchTypeObject::ptr() const {
-  return data_;
+void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
+  TORCH_CHECK(
+      is_contiguous_,
+      "Right now Reshape is only supported for contiguous Tensor.");
+  int64_t new_size = 1;
+  for (auto d : dims) {
+    TORCH_CHECK(d >= 0);
+    new_size *= d;
+  }
+  TORCH_CHECK(
+      new_size == numel_,
+      "New size and old size are not equal. You cannot use Reshape, "
+      "but should use Resize."
+      // TODO(jiayq): remove the following warning after pending diffs
+      // stabilize.
+      " The old caffe2 mixes Reshape and Resize but this behavior has "
+      "been changed. If you find this error, most likely you will need "
+      "to change corresponding code from Reshape to Resize.");
+  sizes_and_strides_.set_sizes(dims);
+  empty_tensor_restride(MemoryFormat::Contiguous);
+}
+
+void TensorImpl::FreeMemory() {
+  // We'll detach from the old Storage and create a new one
+  storage_ = Storage::create_legacy(storage_.device());
+  storage_offset_ = 0;
+}
+
+void TensorImpl::ShareData(const TensorImpl& src) {
+  // Right now, we are assuming the device_type are the same, since it is
+  // inherently the same in the non-templatized code. We should probably add
+  // an assert here which might affect perf a little bit.
+  TORCH_CHECK(
+      src.numel_ == numel_,
+      "Size mismatch - did you call reshape before sharing the data?");
+  // It is possible that the source tensor hasn't called mutable_data() yet,
+  // in which case ShareData() doesn't make much sense since we don't really
+  // know what to share yet.
+  // TODO: Add the assert after all uninitialized states are eliminated
+  // TORCH_CHECK(src.dtype_initialized(),
+  //            "Source tensor don't have a data type (did you call
+  //            mutable_data<T> on the tensor?)");
+  if (!src.dtype_initialized()) {
+    C10_LOG_EVERY_MS(WARNING, 1000)
+        << "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)";
+  }
+  TORCH_CHECK(
+      src.storage_initialized(),
+      "Source tensor has no content and has size > 0");
+  // Finally, do sharing.
+  /* Since we create new Storage whenever we need to change data_type/nbytes
+   * this still keeps the original semantics
+   */
+  storage_ = src.storage();
+  data_type_ = src.dtype();
+  device_opt_ = src.device_opt();
+  storage_offset_ = src.storage_offset();
+}
+
+void TensorImpl::ShareExternalPointer(
+    DataPtr&& data_ptr,
+    const caffe2::TypeMeta data_type,
+    size_t size_bytes) {
+  TORCH_CHECK(
+      data_type != ScalarType::Undefined,
+      "To share with a raw external pointer you need to pass in an "
+      "initialized data_type(TypeMeta).");
+  if (!size_bytes) {
+    size_bytes = numel_ * data_type.itemsize();
+  }
+  if (storage_.unique()) {
+    storage_.UniqueStorageShareExternalPointer(std::move(data_ptr), size_bytes);
+    data_type_ = data_type;
+    device_opt_ = storage_.device();
+    storage_offset_ = 0;
+  } else {
+    // Create a new Storage
+    storage_ = Storage(
+        Storage::use_byte_size_t(),
+        size_bytes,
+        std::move(data_ptr),
+        /*allocator=*/nullptr,
+        /*resizable=*/false);
+    data_type_ = data_type;
+    device_opt_ = storage_.device();
+    storage_offset_ = 0;
+  }
 }
 
 namespace impl {

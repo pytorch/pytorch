@@ -52,7 +52,7 @@ You will need to make sure that the entry is SORTED according to the version bum
 fbcode/caffe2/torch/csrc/jit/mobile/upgrader_mobile.cpp
 
 ```
-python pytorch/tools/codegen/operator_versions/gen_mobile_upgraders.py
+python pytorch/torchgen/operator_versions/gen_mobile_upgraders.py
 ```
 
 4. Generate the test to cover upgrader.
@@ -64,7 +64,7 @@ is working as expected. In `test/jit/fixtures_srcs/generate_models.py`, add the 
 it's corresponding changed operator like following
 ```
 ALL_MODULES = {
-    TestVersionedDivTensorExampleV4(): "aten::div.Tensor",
+    TestVersionedDivTensorExampleV7(): "aten::div.Tensor",
 }
 ```
 This module should includes the changed operator. If the operator isn't covered in the model,
@@ -89,7 +89,13 @@ key: test module
 value: changed operator
 """
 ALL_MODULES = {
-    TestVersionedDivTensorExampleV4(): "aten::div.Tensor",
+    TestVersionedDivTensorExampleV7(): "aten::div.Tensor",
+    TestVersionedLinspaceV7(): "aten::linspace",
+    TestVersionedLinspaceOutV7(): "aten::linspace.out",
+    TestVersionedLogspaceV8(): "aten::logspace",
+    TestVersionedLogspaceOutV8(): "aten::logspace.out",
+    TestVersionedGeluV9(): "aten::gelu",
+    TestVersionedGeluOutV9(): "aten::gelu.out",
 }
 
 """
@@ -133,8 +139,12 @@ def get_output_model_version(script_module: torch.nn.Module) -> int:
     torch.jit.save(script_module, buffer)
     buffer.seek(0)
     zipped_model = zipfile.ZipFile(buffer)
-    version = int(zipped_model.read('archive/version').decode("utf-8"))
-    return version
+    try:
+        version = int(zipped_model.read('archive/version').decode("utf-8"))
+        return version
+    except KeyError:
+        version = int(zipped_model.read('archive/.data/version').decode("utf-8"))
+        return version
 
 """
 Loop through all test modules. If the corresponding model doesn't exist in
@@ -155,29 +165,37 @@ likely this script is running with the commit to make the change.
 def generate_models(model_directory_path: Path):
     all_models = get_all_models(model_directory_path)
     for a_module, expect_operator in ALL_MODULES.items():
-        print(a_module, expect_operator)
-        script_module = torch.jit.script(a_module)
-        model_version = get_output_model_version(script_module)
-
-        # For example: TestVersionedDivTensorExampleV4
+        # For example: TestVersionedDivTensorExampleV7
         torch_module_name = type(a_module).__name__
+
+        if not isinstance(a_module, torch.nn.Module):
+            logger.error(
+                f"The module {torch_module_name} "
+                f"is not a torch.nn.module instance. "
+                f"Please ensure it's a subclass of torch.nn.module in fixtures_src.py"
+                f"and it's registered as an instance in ALL_MODULES in generated_models.py")
+
 
         # The corresponding model name is: test_versioned_div_tensor_example_v4
         model_name = ''.join([
             '_' + char.lower() if char.isupper() else char for char in torch_module_name
         ]).lstrip('_')
 
+        # Some models may not compile anymore, so skip the ones
+        # that already has pt file for them.
         logger.info(f"Processing {torch_module_name}")
         if model_exist(model_name, all_models):
             logger.info(f"Model {model_name} already exists, skipping")
             continue
 
-        actual_model_version = "v" + str(model_version)
-        expect_model_version = model_name.split("_")[-1]
-        if actual_model_version != expect_model_version:
+        script_module = torch.jit.script(a_module)
+        actual_model_version = get_output_model_version(script_module)
+
+        current_operator_version = torch._C._get_max_operator_version()
+        if actual_model_version >= current_operator_version + 1:
             logger.error(
                 f"Actual model version {actual_model_version} "
-                f"doesn't match the expect model version {expect_model_version}. "
+                f"is equal or larger than {current_operator_version} + 1. "
                 f"Please run the script before the commit to change operator.")
             continue
 

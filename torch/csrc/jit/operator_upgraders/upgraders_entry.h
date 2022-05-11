@@ -10,11 +10,10 @@
 namespace torch {
 namespace jit {
 
-using ByteCodeEntry = std::tuple<std::string, IValue>;
-
 TORCH_API void populate_upgraders_graph_map();
 
-TORCH_API std::vector<ByteCodeEntry> generate_bytecode_list();
+TORCH_API std::unordered_map<std::string, std::shared_ptr<Graph>>
+generate_upgraders_graph();
 
 std::shared_ptr<Graph> create_upgrader_graph(
     const std::string& upgrader_name,

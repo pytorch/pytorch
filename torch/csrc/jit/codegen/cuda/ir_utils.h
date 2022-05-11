@@ -12,6 +12,11 @@ namespace fuser {
 namespace cuda {
 namespace ir_utils {
 
+// Replace values in fusion using ValReplacementMutator
+void replaceValue(
+    Fusion*,
+    const std::unordered_map<Val*, Val*>& replacement_map);
+
 template <typename FilterType, typename Iterator>
 class FilterIterator {
  public:
@@ -111,6 +116,9 @@ auto filterByType(InputIt first, InputIt last) {
 }
 
 template <typename FilterType, typename ContainerType>
+auto filterByType(const ContainerType&& inputs) = delete;
+
+template <typename FilterType, typename ContainerType>
 auto filterByType(const ContainerType& inputs) {
   return filterByType<FilterType>(inputs.cbegin(), inputs.cend());
 }
@@ -175,11 +183,9 @@ TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(
 // returns all tensor views in fusion that are used between outputs and inputs.
 TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
 
-// Returns the history of expressions applied to the domains of td
-TORCH_CUDA_CU_API std::vector<Expr*> historyOf(TensorDomain* td);
-
-// Returns the history of expressions applied to the domains of tv
-TORCH_CUDA_CU_API std::vector<Expr*> historyOf(TensorView* tv);
+TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(
+    Fusion* fusion,
+    bool ignore_trivial = true);
 
 } // namespace ir_utils
 } // namespace cuda
