@@ -6,6 +6,17 @@ from typing import Any, Callable, Dict, List, Type, TypeVar, Union
 from .qconfig import QConfigAny
 
 
+__all__ = [
+    "ConvertQuantizationConfig",
+    "PrepareQuantizationConfig",
+    "QConfigModuleNameEntry",
+    "QConfigModuleNameRegexEntry",
+    "QConfigModuleNameObjectTypeOrderEntry",
+    "QConfigObjectTypeEntry",
+    "QuantizationConfigBase",
+]
+
+
 # TODO: replace all usages with these constants
 GLOBAL_DICT_KEY = ""
 OBJECT_TYPE_DICT_KEY = "object_type"
