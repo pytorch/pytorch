@@ -50,14 +50,17 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _unflatten_optim_state,
 )
-from ._utils import _apply_to_modules, _apply_to_tensors, _replace_by_prefix
+from ._utils import (
+    _apply_to_modules, _apply_to_tensors, _replace_by_prefix,
+    _override_batchnorm_mixed_precision, _contains_batchnorm
+)
 from .flatten_params_wrapper import (
     FLAT_PARAM,
     FPW_MODULE,
     FlatParameter,
     FlattenParamsWrapper,
 )
-from .wrap import _recursive_wrap
+from .wrap import _recursive_wrap, _wrap_batchnorm_individually, _or_policy
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
@@ -496,6 +499,14 @@ class FullyShardedDataParallel(nn.Module):
             that only floating point data is cast to the reduced precision. This allows
             users potential memory saving and training speedup while trading off
             accuracy during model training. If ``None``, no mixed precision is applied.
+            Note that if ``mixed_precision`` is enabled for FSDP model that
+            contains ``BatchNorm`` with ``auto_wrap_policy``, FSDP will take
+            care to disable mixed precision for ``BatchNorm`` units by wrapping
+            them separately in their own FSDP unit with ``mixed_precision=None``.
+            This is done because several ``BatchNorm`` kernels do not implement
+            reduced type support at the moment. If individually wrapping the model,
+            users must take care to set ``mixed_precision=None`` for
+            ``BatchNorm`` units.
             (Default: ``None``)
         ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
             own parameters and child modules' parameters and buffers are
@@ -580,9 +591,25 @@ class FullyShardedDataParallel(nn.Module):
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
                 err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
             )
+            if mixed_precision is not None and _contains_batchnorm(module):
+                _override_batchnorm_mixed_precision(module)
+                policy_to_use = functools.partial(
+                    _or_policy,
+                    policies=[_wrap_batchnorm_individually, auto_wrap_policy]
+                )
+                warnings.warn(
+                    "Mixed precision was specified for FSDP module with"
+                    " batchnorm submodules wrapped via ``auto_wrap_policy``."
+                    " BatchNorm units will be wrapped as a separate FSDP unit,"
+                    " with mixed_precision disabled (i.e. set to ``None``)"
+                    " as several BatchNorm kernels would raise errors when"
+                    " operating on reduced precision inputs."
+                )
+            else:
+                policy_to_use = auto_wrap_policy
             _recursive_wrap(
                 module,
-                auto_wrap_policy=auto_wrap_policy,
+                auto_wrap_policy=policy_to_use,
                 wrapper_cls=FullyShardedDataParallel,
                 ignored_modules=ignored_modules,
                 ignored_params=ignored_params,
@@ -1514,16 +1541,16 @@ class FullyShardedDataParallel(nn.Module):
         # Use default config a state_dict config is not set.
         if state_dict_config is None:
             state_dict_config = _state_dict_type_to_config[state_dict_type]()
-        for module in FullyShardedDataParallel.fsdp_modules(module):
+        for submodule in FullyShardedDataParallel.fsdp_modules(module):
             if prev_state_dict_type is None:
-                prev_state_dict_type = module._state_dict_type
+                prev_state_dict_type = submodule._state_dict_type
             if prev_state_dict_config is None:
-                prev_state_dict_config = module._state_dict_config
-            if prev_state_dict_type != module._state_dict_type:
+                prev_state_dict_config = submodule._state_dict_config
+            if prev_state_dict_type != submodule._state_dict_type:
                 raise RuntimeError(
                     "All FSDP module should the same state_dict_type."
                 )
-            if type(prev_state_dict_config) != type(module._state_dict_config):
+            if type(prev_state_dict_config) != type(submodule._state_dict_config):
                 raise RuntimeError(
                     "All FSDP modules should have the same type of state_dict_config."
                 )
@@ -1533,16 +1560,16 @@ class FullyShardedDataParallel(nn.Module):
                 raise RuntimeError(
                     f"Expected state_dict_config of type {expected_state_dict_config_type} but got {type(state_dict_config)}"
                 )
-            module._state_dict_type = state_dict_type
-            module._state_dict_config = state_dict_config
+            submodule._state_dict_type = state_dict_type
+            submodule._state_dict_config = state_dict_config
         try:
             yield
         finally:
             assert prev_state_dict_type is not None  # Avoid mypy warning
             assert prev_state_dict_config is not None  # Avoid mypy warning
-            for module in FullyShardedDataParallel.fsdp_modules(module):
-                module._state_dict_type = prev_state_dict_type
-                module._state_dict_config = prev_state_dict_config
+            for submodule in FullyShardedDataParallel.fsdp_modules(module):
+                submodule._state_dict_type = prev_state_dict_type
+                submodule._state_dict_config = prev_state_dict_config
 
     def _full_post_state_dict_hook(
         self,
@@ -1609,9 +1636,8 @@ class FullyShardedDataParallel(nn.Module):
         # nn.Module.state_dict() will detach the parameter. Therefore, we need
         # to get flat_param from the FlattenParamsWrapper to get the metadata.
         flat_param = getattr(self.module, FLAT_PARAM, None)
-        assert (
-            flat_param is not None
-        ), "flat_param cannot be None when doing local_state_dict."
+        if flat_param is None:
+            return state_dict
 
         # Construct a ShardedTensor from the flat_param.
         full_numel = flat_param.full_numel
@@ -1740,8 +1766,12 @@ class FullyShardedDataParallel(nn.Module):
                 return {}
 
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
-            assert getattr(self.module, FLAT_PARAM, None) is not None
-            assert isinstance(self.module.flat_param, FlatParameter)
+            if self.module.flat_param is not None:
+                if not self.module.flat_param._is_sharded:
+                    raise RuntimeError(
+                        "local_state_dict/sharded_state_dict can only be called "
+                        "when parameters are flatten and sharded."
+                    )
             return super().state_dict(*args, **kwargs)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
             raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
@@ -1776,6 +1806,11 @@ class FullyShardedDataParallel(nn.Module):
         """
         _replace_by_prefix(state_dict, prefix, f"{prefix}{FSDP_WRAPPED_MODULE}.")
         key = f"{prefix}{FSDP_WRAPPED_MODULE}.{FLAT_PARAM}"
+        if key not in state_dict:
+            assert getattr(self.module, FLAT_PARAM, None) is None, (
+                "No flat parameter in state_dict but self.module.flat_param is not None"
+            )
+            return
         load_tensor = state_dict[key]
         assert isinstance(
             load_tensor, ShardedTensor

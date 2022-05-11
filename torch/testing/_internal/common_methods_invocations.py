@@ -209,6 +209,8 @@ class SampleInput(object):
             if isinstance(t, torch.Tensor):
                 if t.dtype is torch.bfloat16:
                     return t.detach().cpu().to(torch.float32).numpy()
+                if t.dtype is torch.chalf:
+                    return t.detach().cpu().to(torch.cfloat).numpy()
                 return t.detach().cpu().numpy()
             elif isinstance(t, torch.dtype):
                 return torch_to_numpy_dtype_dict[t]
@@ -9592,12 +9594,18 @@ op_db: List[OpInfo] = [
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
                     ref=lambda input, other, *, alpha=1: np.add(input, other) if alpha == 1 \
                     else np.add(input, np.multiply(alpha, other)),
-                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
+                                                     torch.float16, torch.chalf),
                     assert_autodiffed=True,
                     sample_inputs_func=sample_inputs_add_sub,
                     supports_fwgrad_bwgrad=True,
                     supports_forward_ad=True,
                     supports_two_python_scalars=True,
+                    decorators=(
+                        DecorateInfo(
+                            toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
+                            'TestBinaryUfuncs', 'test_reference_numerics'),
+                    ),
                     skips=(
                         # boolean alpha not handled properly
                         DecorateInfo(unittest.expectedFailure,
@@ -9629,7 +9637,7 @@ op_db: List[OpInfo] = [
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
                     ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
                     aliases=('subtract',),
-                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.chalf),
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
@@ -9639,6 +9647,15 @@ op_db: List[OpInfo] = [
                         DecorateInfo(
                             toleranceOverride({torch.float16: tol(atol=1e-2, rtol=0)}),
                             'TestBinaryUfuncs', 'test_reference_numerics'),
+                        DecorateInfo(
+                            toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
+                            'TestCommon', 'test_complex_half_reference_testing', device_type='cpu'),
+                        DecorateInfo(
+                            toleranceOverride({torch.chalf: tol(atol=5e-3, rtol=0)}),
+                            'TestDecomp', 'test_comprehensive', device_type='cpu'),
+                        DecorateInfo(
+                            toleranceOverride({torch.chalf: tol(atol=5e-3, rtol=0)}),
+                            'TestDecomp', 'test_quick', device_type='cpu'),
                     ),
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"),
@@ -10038,11 +10055,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,
-           sample_inputs_func=sample_inputs_combinations,
-           skips=(
-               # Not composite compliant: performing in-place operation masked_scatter_.default
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           )),
+           sample_inputs_func=sample_inputs_combinations),
     OpInfo('cartesian_prod',
            op=torch.cartesian_prod,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -10245,7 +10258,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            ),
     OpInfo('resolve_neg',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_view_as_real,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -11753,9 +11766,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_masked_select,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            error_inputs_func=error_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
@@ -13106,8 +13116,6 @@ op_db: List[OpInfo] = [
            supports_expanded_weight=True,
            skips=(
                # Problem, needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -13139,7 +13147,8 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_forward_ad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=False,
            supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.elu',
@@ -13820,13 +13829,29 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
-                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                    error_inputs_func=error_inputs_neg,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
                    supports_sparse_csr=True,
-                   assert_autodiffed=True,),
+                   assert_autodiffed=True,
+                   skips=(
+                       # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_consistency',
+                                    dtypes=(torch.chalf,),),
+                       # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
+                                    dtypes=(torch.chalf,),),
+                       # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
+                                    dtypes=(torch.chalf,),),
+                       # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseCSR',
+                                    'test_zero_to_zero_correspondence_unary',
+                                    dtypes=(torch.chalf,),)
+
+                   )),
     OpInfo('dist',
            op=torch.dist,
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -15207,9 +15232,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_gather,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            ),
     OpInfo('index_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -15991,9 +16013,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_take_along_dim,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     ShapeFuncInfo('tile',
                   ref=np.tile,
@@ -18118,6 +18137,18 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
+        skips=(
+            # On CPU
+            # RuntimeError: unsupported Storage type: torch.complex32
+            # https://github.com/pytorch/pytorch/issues/73502
+            # On CUDA
+            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,)),
+            # Same reason as `test_python_reference_consistency`
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                         dtypes=(torch.chalf,)),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.reciprocal",
@@ -18335,6 +18366,7 @@ python_ref_db = [
                     {
                         torch.bfloat16: tol(atol=1, rtol=0),
                         torch.float16: tol(atol=1e-2, rtol=0),
+                        torch.chalf: tol(atol=1e-2, rtol=0),
                     }
                 ),
                 "TestCommon",
@@ -18374,11 +18406,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.cat",
         torch_opinfo_name="cat",
-        skips=(
-            # torch function issue:
-            # ValueError: Callable cat has no meta function!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
-        )
     ),
     PythonRefInfo(
         "_refs.chunk",
@@ -18404,8 +18431,6 @@ python_ref_db = [
         "_refs.stack",
         torch_opinfo_name="stack",
         skips=(
-            # ValueError: Callable cat has no meta function!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
             # https://github.com/pytorch/pytorch/issues/77046
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
