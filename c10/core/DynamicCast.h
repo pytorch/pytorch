@@ -1,9 +1,9 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/TypeCast.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Load.h>
+#include <c10/util/TypeCast.h>
 
 namespace c10 {
 
@@ -116,4 +116,4 @@ AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
 #undef DEFINE_UNCASTABLE
 #undef ERROR_UNSUPPORTED_CAST
 
-}  // namespace c10
+} // namespace c10
