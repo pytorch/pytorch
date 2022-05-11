@@ -35,7 +35,7 @@ class ReplicatedTensor(torch.Tensor):
     """
     _process_group: distributed_c10d.ProcessGroup
 
-    __slots__ = ["process_group"]
+    __slots__ = ["_process_group"]
 
     def __new__(cls, data=None, process_group=None):
         if data is None:
