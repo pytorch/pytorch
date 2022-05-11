@@ -800,7 +800,7 @@ class TORCH_API Library final {
   Kind kind_;
   c10::optional<std::string> ns_;
   c10::optional<c10::DispatchKey> dispatch_key_;
-  std::string file_;
+  const char* file_;
   uint32_t line_;
 
   std::vector<c10::RegistrationHandleRAII> registrars_;
