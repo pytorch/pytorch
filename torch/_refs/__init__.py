@@ -242,7 +242,7 @@ def _make_elementwise_unary_reference(
         return prim(a)
 
     if aten_op is infer_aten_op:
-        aten_op = getattr(torch.ops.aten, prim.__name__)
+        aten_op = getattr(torch.ops.aten, prim.__name__.split('.')[0])
     if aten_op is not None:
         register_decomposition(aten_op)(_ref)
 
@@ -403,7 +403,7 @@ def _make_elementwise_binary_reference(
         _ref = out_wrapper(_ref)
 
     if aten_op is infer_aten_op:
-        aten_op = getattr(torch.ops.aten, prim.__name__)
+        aten_op = getattr(torch.ops.aten, prim.__name__.split('.')[0])
     if aten_op is not None:
         register_decomposition(aten_op)(_ref)
 

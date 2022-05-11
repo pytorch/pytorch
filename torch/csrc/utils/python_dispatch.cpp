@@ -64,6 +64,7 @@ public:
     py::gil_scoped_acquire g;
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto obj = py::reinterpret_steal<py::object>(PyObject_Call(func_.ptr(getPyInterpreter()), args_kwargs.first.ptr(), args_kwargs.second.ptr()));
+    if (obj == nullptr) { throw python_error(); }
     pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
   }
 };
