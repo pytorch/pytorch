@@ -130,7 +130,7 @@ __all__ = [
     #
     "copy_to",
     "resize",
-    "_set",
+    # "_set",  # Commented out, see note below
     #
     # Reduction prims
     #
@@ -807,7 +807,7 @@ _as_strided_doc = """
 """
 
 as_strided = _make_prim(
-    name="as_strided",
+    schema="as_strided(Tensor(a!) a, int[] size, int[] stride, int storage_offset) -> Tensor(a!)",
     meta=_as_strided_meta,
     impl_aten=_as_strided_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1700,92 +1700,96 @@ resize = _make_prim(
     doc=_resize_doc,
 )
 
+# NOTE: the set prim is currently commented out because it is unused and would
+# require multiple schema strings
+
 # TODO: model storage, storage offset, and layout
-def _set_meta(
-    a: TensorLikeType,
-    source: Optional[Union[TensorLikeType, _TypedStorage]] = None,
-    storage_offset: Optional[int] = None,
-    size: Optional[ShapeType] = None,
-    stride: Optional[StrideType] = None,
-) -> TensorLikeType:
-    # handles a.set_() (refs.set(a) in primTorch)
-    if source is None:
-        assert storage_offset is None
-        assert size is None
-        assert stride is None
+# def _set_meta(
+#     a: TensorLikeType,
+#     source: Optional[Union[TensorLikeType, _TypedStorage]] = None,
+#     storage_offset: Optional[int] = None,
+#     size: Optional[ShapeType] = None,
+#     stride: Optional[StrideType] = None,
+# ) -> TensorLikeType:
+#     # handles a.set_() (refs.set(a) in primTorch)
+#     if source is None:
+#         assert storage_offset is None
+#         assert size is None
+#         assert stride is None
 
-        return TensorMeta(a, shape=(), strides=(1,))
+#         return TensorMeta(a, shape=(), strides=(1,))
 
-    if isinstance(source, TensorLike):
-        # storage_offset, size, and stride must not be set
-        assert storage_offset is None
-        assert size is None
-        assert stride is None
+#     if isinstance(source, TensorLike):
+#         # storage_offset, size, and stride must not be set
+#         assert storage_offset is None
+#         assert size is None
+#         assert stride is None
 
-        utils.check_same_dtype(a, source)
-        utils.check_same_device(a, source, allow_cpu_scalar_tensors=False)
+#         utils.check_same_dtype(a, source)
+#         utils.check_same_device(a, source, allow_cpu_scalar_tensors=False)
 
-        return TensorMeta(source)
+#         return TensorMeta(source)
 
-    # source is a Storage object
-    assert isinstance(source, _TypedStorage)
+#     # source is a Storage object
+#     assert isinstance(source, _TypedStorage)
 
-    assert source.device == a.device
-    assert source.dtype == a.dtype
+#     assert source.device == a.device
+#     assert source.dtype == a.dtype
 
-    shape = (source.size(),) if size is None else size
-    strides = (1,) if stride is None else stride
-    storage_offset = 0 if storage_offset is None else storage_offset
+#     shape = (source.size(),) if size is None else size
+#     strides = (1,) if stride is None else stride
+#     storage_offset = 0 if storage_offset is None else storage_offset
 
-    assert len(shape) == len(strides)
-    assert storage_offset >= 0
-    utils.validate_strides(strides)
-    utils.validate_shape(shape)
+#     assert len(shape) == len(strides)
+#     assert storage_offset >= 0
+#     utils.validate_strides(strides)
+#     utils.validate_shape(shape)
 
-    utils.check_in_bounds_for_storage(source, shape, strides, storage_offset)
+#     utils.check_in_bounds_for_storage(source, shape, strides, storage_offset)
 
-    return TensorMeta(a, shape=shape, strides=(1,))
-
-
-def _set_aten(
-    a: Tensor,
-    source: Optional[Union[Tensor, _TypedStorage]] = None,
-    storage_offset: int = 0,
-    size: Optional[ShapeType] = None,
-    stride: Optional[StrideType] = None,
-) -> Tensor:
-    if size is not None:
-        return a.set_(source, storage_offset, size, stride)  # type: ignore[arg-type]
-    return a.set_(source)  # type: ignore[arg-type]
+#     return TensorMeta(a, shape=shape, strides=(1,))
 
 
-_set_doc = """
-    Modifies a tensor's storage offset, shape, and stride metadata.
+# def _set_aten(
+#     a: Tensor,
+#     source: Optional[Union[Tensor, _TypedStorage]] = None,
+#     storage_offset: int = 0,
+#     size: Optional[ShapeType] = None,
+#     stride: Optional[StrideType] = None,
+# ) -> Tensor:
+#     if size is not None:
+#         return a.set_(source, storage_offset, size, stride)  # type: ignore[arg-type]
+#     return a.set_(source)  # type: ignore[arg-type]
 
-    If source is None then the storage_offset, size, and
-    stride arguments must also be None and then tensor
-    is modified to be an empty tensor with no dimensions and
-    strides of (1,).
 
-    If source is a tensor then the tensor will share its storage
-    and have the same shape and strides. The storage_offset, size,
-    and stride arguments must be None.
+# _set_doc = """
+#     Modifies a tensor's storage offset, shape, and stride metadata.
 
-    If source is a Storage then by default the tensor will use the storage
-    as a one dimensional vector with shape (n,), where n is the size of
-    the storage, and strides (1,). The storage_offset, size, and
-    stride arguments can be set to control this behavior.
-"""
+#     If source is None then the storage_offset, size, and
+#     stride arguments must also be None and then tensor
+#     is modified to be an empty tensor with no dimensions and
+#     strides of (1,).
 
-# TODO: model storage, storage offset on TensorMetas
-# TODO: name currently hidden to not interact with the builtin set name
-_set = _make_prim(
-    name="resize",
-    meta=_set_meta,
-    impl_aten=_set_aten,
-    return_type=RETURN_TYPE.INPLACE,
-    doc=_set_doc,
-)
+#     If source is a tensor then the tensor will share its storage
+#     and have the same shape and strides. The storage_offset, size,
+#     and stride arguments must be None.
+
+#     If source is a Storage then by default the tensor will use the storage
+#     as a one dimensional vector with shape (n,), where n is the size of
+#     the storage, and strides (1,). The storage_offset, size, and
+#     stride arguments can be set to control this behavior.
+# """
+
+# # TODO: model storage, storage offset on TensorMetas
+# # TODO: name currently hidden to not interact with the builtin set name
+# _set = _make_prim(
+#     schema="set(Tensor(a!), ) -> Tensor(a!)",
+#     name="resize",
+#     meta=_set_meta,
+#     impl_aten=_set_aten,
+#     return_type=RETURN_TYPE.INPLACE,
+#     doc=_set_doc,
+# )
 
 
 def _reduction_meta(inp, dims, *, output_dtype=None):
