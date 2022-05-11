@@ -455,6 +455,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor)",
       c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::clamp_nan_to_num(Tensor input, Scalar? min, Scalar? max, float? nan, float? posinf, float? posinf) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -1323,6 +1326,46 @@ void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph);
+}
+
+void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {
+#ifdef FBCODE_CAFFE2
+  std::string pattern = R"IR(
+    graph(%input, %clamp_min: Scalar?, %clamp_max: Scalar?, %nan, %posinf, %neginf):
+        %x : Tensor = aten::clamp(%input, %clamp_min, %clamp_max)
+        %y : Tensor = aten::nan_to_num(%x, %nan, %posinf, %neginf)
+        return (%y))IR";
+
+  std::string fused_pattern = R"IR(
+    graph(%input, %clamp_min: Scalar?, %clamp_max: Scalar?, %nan, %posinf, %neginf):
+        %x : Tensor = static_runtime::clamp_nan_to_num(%input, %clamp_min, %clamp_max, %nan, %posinf, %neginf)
+        return (%x))IR";
+
+  auto isConstantAndNotNone = [](Value* value) {
+    auto ival_opt = toIValue(value);
+    if (!ival_opt.has_value()) {
+      return false;
+    }
+    auto scalar_opt = ival_opt->toOptional<at::Scalar>();
+    return scalar_opt.has_value();
+  };
+
+  auto clampValuesAreConstant =
+      [&isConstantAndNotNone](
+          const Match& match,
+          const std::unordered_map<std::string, Value*>& vmap) {
+        // Get the nodes in the real graph from the nodes in the template
+        // pattern graph
+        const auto& node_map = match.nodes_map;
+        auto* clamp_node = node_map.at(vmap.at("x")->node());
+        return isConstantAndNotNone(clamp_node->input(1)) &&
+            isConstantAndNotNone(clamp_node->input(2));
+      };
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph, clampValuesAreConstant);
+#endif
 }
 
 } // namespace jit
