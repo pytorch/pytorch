@@ -6026,6 +6026,9 @@
     CUDA: set_cuda_
     Meta: set_meta_
 
+- func: lift(Tensor self) -> Tensor
+  variants: method
+
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
   device_check: NoCheck
