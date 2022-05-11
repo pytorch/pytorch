@@ -469,7 +469,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   ufunc_inner_loop:
-    Generic: add (AllAndComplex, BFloat16, Half)
+    Generic: add (AllAndComplex, BFloat16, Half, ComplexHalf)
     ScalarOnly: add (Bool)
   dispatch:
     SparseCPU: add_out_sparse_cpu
