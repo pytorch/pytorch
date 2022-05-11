@@ -18,6 +18,6 @@ def normalize_object_types(quantization_config: QuantizationConfigBase) -> None:
     within the framework.
     """
     for qconfig_entry in quantization_config.object_type_qconfigs:
-        replacement_type = TYPE_TO_REPLACEMENT_TYPE.get(qconfig_entry.object_type, None)
+        replacement_type = TYPE_TO_REPLACEMENT_TYPE.get(qconfig_entry.object_type, None)  # type: ignore[arg-type]
         if replacement_type is not None:
-            qconfig_entry.object_type = replacement_type
+            qconfig_entry.object_type = replacement_type  # type: ignore[assignment]
