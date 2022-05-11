@@ -780,7 +780,6 @@ TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
-
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -881,6 +880,15 @@ def skipIfRocm(fn):
     def wrapper(*args, **kwargs):
         if TEST_WITH_ROCM:
             raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfMps(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if torch.backends.mps.is_available():
+            raise unittest.SkipTest("test doesn't currently work with MPS")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -2087,8 +2095,9 @@ class TestCase(expecttest.TestCase):
         i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
         i = i.to(torch.long)
         if is_uncoalesced:
-            v = torch.cat([v, torch.randn_like(v)], 0)
-            i = torch.cat([i, i], 1)
+            i1 = i[:, :(nnz // 2), ...]
+            i2 = i[:, :((nnz + 1) // 2), ...]
+            i = torch.cat([i1, i2], 1)
         x = torch.sparse_coo_tensor(i, v, torch.Size(size), dtype=dtype, device=device)
 
         if not is_uncoalesced:
@@ -2183,6 +2192,15 @@ class TestCase(expecttest.TestCase):
     ):
         # Hide this function from `pytest`'s traceback
         __tracebackhide__ = True
+
+        # TODO: the Tensor compare uses bunch of operations which is currently not
+        # supported by MPS. We will remove this move to CPU after all the
+        # support is added. https://github.com/pytorch/pytorch/issues/77144
+        if isinstance(x, torch.Tensor) and (x.is_mps):
+            x = x.to('cpu')
+
+        if isinstance(y, torch.Tensor) and (y.is_mps):
+            y = y.to('cpu')
 
         # numpy's dtypes are a superset of what PyTorch supports. In case we encounter an unsupported dtype, we fall
         # back to an elementwise comparison. Note that this has to happen here and not for example in

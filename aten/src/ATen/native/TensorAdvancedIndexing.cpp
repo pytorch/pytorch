@@ -63,6 +63,7 @@
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
@@ -1391,7 +1392,14 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
+  auto result = grad.new_zeros(self.sizes());
+  // for composite compliance, use out-of-place variant of
+  // `scatter_add` if index tensor is a Tensor Subclass.
+  if (isTensorSubclassLike(index)) {
+    return result.scatter_add(dim, index, grad);
+  }
+  result.scatter_add_(dim, index, grad);
+  return result;
 }
 
 static void scatter_reduce_exclude_self_helper(
@@ -1411,10 +1419,12 @@ static void scatter_reduce_exclude_self_helper(
         init_val = (scalar_t)1;
         break;
       case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
-        init_val = std::numeric_limits<scalar_t>::lowest();
+        init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
+                   : std::numeric_limits<scalar_t>::lowest();
         break;
       case SCATTER_GATHER_OP::REDUCE_MINIMUM:
-        init_val = std::numeric_limits<scalar_t>::max();
+        init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
+                   : std::numeric_limits<scalar_t>::max();
         break;
       case SCATTER_GATHER_OP::REDUCE_MEAN:
         init_val = (scalar_t)0;
@@ -1741,7 +1751,14 @@ Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Ten
   // implicitly handles broadcasting).
   auto result = at::zeros_like(
       input.expand(at::infer_size(input.sizes(), mask.sizes())), at::MemoryFormat::Preserve);
-  return result.masked_scatter_(mask, grad);
+
+  // for composite compliance, use out-of-place variant
+  // of `masked_scatter`.
+  if (areAnyTensorSubclassLike({grad, mask})) {
+    return result.masked_scatter(mask, grad);
+  }
+  result.masked_scatter_(mask, grad);
+  return result;
 }
 
 namespace {
