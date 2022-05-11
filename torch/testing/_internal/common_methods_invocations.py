@@ -1670,6 +1670,28 @@ def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
+def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # input shape, output shape, output stride, output storage offset
+    test_cases = [
+        ((1,), (1,), (1,), 0),
+        ((3, 3), (2, 2), (1, 2), 0),
+        ((3, 3), (2, 2), (1, 2), 1),
+        ((16,), (2, 2, 2, 2), (1, 1, 1, 1), 0),
+        ((16,), (2, 1, 1, 2), (1, 7, 7, 1), 0),
+    ]
+
+    samples = []
+
+    for input_shape, output_shape, stride, storage_offset in test_cases:
+        input_t = make_arg(input_shape)
+        input_src = make_arg(output_shape)
+        kwargs = dict(storage_offset=storage_offset)
+        samples.append(SampleInput(input_t, args=(input_src, output_shape, stride), kwargs=kwargs))
+
+    return samples
+
 def sample_inputs_combinations(op_info, device, dtype, requires_grad, **kwargs):
     inputs = (
         (0,),
@@ -12128,6 +12150,10 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestCompositeCompliance',
                                      'test_operator'),
+                        # MISSING 'aten::isnan'
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestMeta', 'test_meta',
+                                     dtypes=floating_types_and(torch.half, torch.bfloat16)),
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -12237,6 +12263,23 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # AssertionError: False is not true : Scalars failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),)),
+    OpInfo('as_strided_scatter',
+           op=lambda x, src, size, stride, storage_offset=0:
+               torch.as_strided_scatter(x, src, size, stride, storage_offset=storage_offset),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
+           sample_inputs_func=sample_inputs_as_strided_scatter,
+           skips=(
+               # noncontiguous tests would pass for int64 and fail with other dtypes or some reason.
+               # given that as_strided() opinfo tests already fail on noncontiguous tests, I'm skipping these
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),)),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.bfloat16),
@@ -12672,7 +12715,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
-           dtypes=floating_types_and(torch.uint8),
+           dtypes=floating_types_and(torch.uint8, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
            sample_inputs_func=partial(sample_inputs_interpolate, 'nearest'),
            skips=(
@@ -12688,7 +12731,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_interpolate, 'linear'),
            skips=(
@@ -12704,7 +12747,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_autograd=True,
            supports_forward_ad=True,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'bilinear'),
@@ -12721,7 +12764,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_interpolate, 'bicubic'),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -12738,7 +12781,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'trilinear'),
@@ -12770,7 +12813,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'bilinear'),
@@ -12795,7 +12838,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types_and(torch.uint8),
+           dtypes=floating_types_and(torch.uint8, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'nearest'),
@@ -16101,7 +16144,13 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_logsumexp),
+           sample_inputs_func=sample_inputs_logsumexp,
+           skips=(
+               # RuntimeError: "abs_cpu" not implemented for 'Bool'
+               # RuntimeError: value cannot be converted to type int without overflow
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
+                            dtypes=integral_types_and(torch.bool)),
+           )),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -18368,9 +18417,6 @@ python_ref_db = [
             # torch function issue:
             # ValueError: Callable cat has no meta function!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
-            # eager torch.cat incorrectly throws an error for a chalf x double x half type promotion case
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
         )
     ),
     PythonRefInfo(

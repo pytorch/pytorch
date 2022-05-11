@@ -3269,6 +3269,47 @@ Examples::
             [0., 0., 0.]])
 """.format(**common_args))
 
+add_docstr(torch.as_strided_scatter,
+           r"""
+as_strided_scatter(input, src, size, stride, storage_offset=0) -> Tensor
+
+Embeds the values of the :attr:`src` tensor into :attr:`input` along
+the elements corresponding to the result of calling
+input.as_strided(size, stride, storage_offset).
+
+This function returns a tensor with fresh storage; it does not
+return a view.
+
+Args:
+    {input}
+    size (tuple or ints): the shape of the output tensor
+    stride (tuple or ints): the stride of the output tensor
+    storage_offset (int, optional): the offset in the underlying storage of the output tensor
+
+.. note::
+
+    :attr:`src` must be of the proper size in order to be embedded
+    into :attr:`input`. Specifically, it should have the same shape as
+    `torch.as_strided(input, size, stride, storage_offset)`
+
+Example::
+
+    >>> a = torch.arange(4).reshape(2, 2) + 1
+    >>> a
+    tensor([[1, 2],
+            [3, 4]])
+    >>> b = torch.zeros(3, 3)
+    >>> b
+    tensor([[0., 0., 0.],
+            [0., 0., 0.],
+            [0., 0., 0.]])
+    >>> torch.as_strided_scatter(b, a, (2, 2), (1, 2))
+    tensor([[1., 3., 2.],
+            [4., 0., 0.],
+            [0., 0., 0.]])
+
+""".format(**common_args))
+
 add_docstr(torch.diff, r"""
 diff(input, n=1, dim=-1, prepend=None, append=None) -> Tensor
 
