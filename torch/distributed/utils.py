@@ -2,14 +2,13 @@ import collections
 
 import torch
 import torch.distributed as dist
+from torch.nn.parallel._functions import _get_stream
+from torch.nn.parallel.scatter_gather import is_namedtuple  # type: ignore[attr-defined]
 
 def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     r"""
     Recursively moves input to the target_gpu.
     """
-    # Define within to avoid ciruclar import
-    from ._functions import _get_stream  # type: ignore[import]
-    from .scatter_gather import is_namedtuple  # type: ignore[import]
 
     def to_map(obj):
         if isinstance(obj, torch.Tensor):
