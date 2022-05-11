@@ -7,11 +7,21 @@
 namespace c10d {
 namespace {
 
-c10::intrusive_ptr<ProcessGroup::Work> broadcast(const c10::intrusive_ptr<ProcessGroup>& process_group,
-    at::TensorList tensors, int64_t root_rank, int64_t root_tensor, int64_t timeout) {
+c10::intrusive_ptr<ProcessGroup::Work> broadcast(at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group, int64_t root_rank, int64_t root_tensor, int64_t timeout) {
   auto tensor_vec = tensors.vec();
   return process_group->broadcast_impl(tensor_vec,
       BroadcastOptions {root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+}
+
+// Added specifically for LazyTensor.
+at::Tensor broadcast_(const at::Tensor& tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group, int64_t root_rank, int64_t root_tensor, int64_t timeout) {
+  std::vector<at::Tensor> tensors{tensor};
+  auto work = process_group->broadcast_impl(tensors,
+      BroadcastOptions {root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+  work->wait();
+  return tensor;
 }
 
 TORCH_LIBRARY(c10d, m) {
@@ -24,6 +34,7 @@ TORCH_LIBRARY(c10d, m) {
   // It's important to register the op to the CompositeExplicitAutograd key to enable
   // __torch_dispatch__.
   m.def("broadcast", dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast));
+  m.def("broadcast_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast_));
 }
 
 }  // namespace
@@ -168,10 +179,6 @@ void ProcessGroup::Work::abort() {
   TORCH_CHECK(false, "ProcessGroup::Work::abort not implemented.");
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> ProcessGroup::Work::getFuture() {
-  TORCH_CHECK(false, "ProcessGroup::Work::getFuture not implemented.")
-}
-
 void ProcessGroup::Work::finish(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
@@ -211,12 +218,12 @@ void ProcessGroup::init() {
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::broadcast(
     std::vector<at::Tensor>& tensors, const BroadcastOptions& opts) {
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast", "")
-      .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
-          const c10::intrusive_ptr<::c10d::ProcessGroup>&, at::TensorList, int64_t, int64_t, int64_t)>();
+      .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(at::TensorList,
+          const c10::intrusive_ptr<::c10d::ProcessGroup>&, int64_t, int64_t, int64_t)>();
   // It's awakward to unbox the opts here and box them again in the custom C++ op.
   // But it's also complicated to make opts as a CustomClassHolder. Leave it as it is now.
-  return op.call(c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-      tensors, opts.rootRank, opts.rootTensor, opts.timeout.count());
+  return op.call(tensors, c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this), opts.rootRank,
+      opts.rootTensor, opts.timeout.count());
 }
 
 } // namespace c10d

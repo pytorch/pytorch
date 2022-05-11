@@ -131,9 +131,6 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     // execution on the GPUs
     bool finishedGPUExecution();
 
-    // Get a Future object that will be marked as completed internally.
-    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
-
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
 
@@ -211,9 +208,6 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     // Store a reference to NCCL collective's outputs, used by result and to
     // give a more descriptive message when representing the Work as a string.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
-
-    // The future returned by getFuture.
-    c10::intrusive_ptr<at::ivalue::Future> future_;
 
     friend class ProcessGroupNCCL;
   };

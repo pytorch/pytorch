@@ -442,11 +442,6 @@ std::vector<at::Tensor> ProcessGroupGloo::AsyncWork::result() {
                                     : outputTensors_.at(0);
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::AsyncWork::
-    getFuture() {
-  return future_;
-}
-
 namespace {
 c10::intrusive_ptr<c10::ivalue::Future> createFutureAsOutput(
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
@@ -508,8 +503,7 @@ ProcessGroupGloo::AsyncWork::AsyncWork(
     // replace default profiler implementation with async version that reports
     // correct timestamps for work that is asynchronously executed.
     : ProcessGroup::Work(-1, OpType::UNKNOWN, nullptr, inputTensors),
-      outputTensors_(std::move(outputTensors)),
-      future_(createFutureAsOutput(outputTensors)) {
+      outputTensors_(std::move(outputTensors)) {
   if (profilingTitle != nullptr) {
     recordAsyncWorkProfilingInfo(profilingTitle, inputTensors);
   }

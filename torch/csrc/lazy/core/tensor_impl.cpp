@@ -51,6 +51,14 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
     return c10::Stream(c10::Stream::DEFAULT, g_device);
   }
 
+  void record(
+      void** /*event*/,
+      const c10::Stream& /*stream*/,
+      const c10::DeviceIndex /*device_index*/,
+      const c10::EventFlag /*flag*/) const noexcept override {
+    // TODO: Not sure what to do here but is required by Future.
+  }
+
   c10::DeviceIndex deviceCount() const noexcept override {
     // This will get called when autograd initializes its device pool
     // regardless whether we have a backend registered aforehand.

@@ -88,13 +88,9 @@ class TORCH_API ProcessGroupMPI : public ProcessGroup {
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
         : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
-          outputTensors_(std::move(outputTensors)),
-          future_(c10::make_intrusive<at::ivalue::Future>(
-              c10::ListType::create(c10::TensorType::get()))) {}
+          outputTensors_(std::move(outputTensors)) {}
 
     std::vector<at::Tensor> result() override;
-
-    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
    protected:
     friend class ProcessGroupMPI;
@@ -104,7 +100,6 @@ class TORCH_API ProcessGroupMPI : public ProcessGroup {
     void finishWorkMPIError(std::exception_ptr eptr);
 
     std::vector<at::Tensor> outputTensors_;
-    c10::intrusive_ptr<at::ivalue::Future> future_;
   };
 
   class AsyncWork : public ProcessGroup::Work {

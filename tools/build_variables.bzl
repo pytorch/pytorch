@@ -561,6 +561,9 @@ libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/rpc/torchscript_functions.cpp",
     "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/distributed/rpc/utils.cpp",
+    # TORCH_LIBRARY and TORCH_LIBRARY_IMPL need to be in the same
+    # compilation unit?
+    "torch/csrc/lazy/ts_backend/ops/c10d.cpp",
 ]
 
 libtorch_distributed_sources = libtorch_distributed_base_sources + libtorch_distributed_extra_sources

@@ -126,7 +126,9 @@ c10::optional<Value*> tryInsertConstant(
   } else if (val.isObject()) {
     const auto& ref = val.toObjectRef();
     // see: [Constant Object Weak CompilationUnit Reference]
-    if (!ref.type()->is_module() && ref.is_weak_compilation_ref()) {
+    // For some unknown reasons, all custom class types are strong compilation refs...
+    // TODO: Figure out why and how to fix this.
+    if (!ref.type()->is_module() /*&& ref.is_weak_compilation_ref()*/) {
       n->ival_(attr::value, val);
       n->output()->setType(val.type());
     } else {

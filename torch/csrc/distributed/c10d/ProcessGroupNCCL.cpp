@@ -1366,11 +1366,6 @@ std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
   return *outputs_;
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
-    getFuture() {
-  return future_;
-}
-
 void ProcessGroupNCCL::workEnqueue(
     c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work) {
   if (!terminateProcessGroup_.load()) {

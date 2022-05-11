@@ -83,8 +83,6 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
 
     std::vector<at::Tensor> result() override;
 
-    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
-
    protected:
     friend class ProcessGroupGloo;
 
@@ -96,7 +94,6 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
         const c10::optional<std::vector<at::Tensor>>& inputTensors);
 
     const std::vector<std::vector<at::Tensor>> outputTensors_;
-    c10::intrusive_ptr<at::ivalue::Future> future_;
     std::function<void()> recordFunctionBeforeCallback_;
   };
 

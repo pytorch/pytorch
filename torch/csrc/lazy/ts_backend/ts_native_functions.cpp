@@ -42,31 +42,6 @@ c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const c10::optional<c10::
   return torch::lazy::atenDeviceToBackendDevice(*device);
 }
 
-c10::intrusive_ptr<c10d::ProcessGroup::Work> broadcast_lazy(const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
-    at::TensorList tensors, int64_t root_rank, int64_t root_tensor, int64_t timeout) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-
-  TORCH_CHECK(tensors.size() == 1lu, "Only one tensor input is supported for c10d::broadcast.")
-
-  auto& tensor = tensors[0];
-  auto input = GetLtcTensor(tensor);
-  auto node = MakeNode<Broadcast>(process_group, input->GetIrValue(), src,
-      {Shape(tensor.scalar_type(), tensor.sizes().vec())});
-  auto result = CreateAtenFromLtcTensor(LazyTensor::Create(std::move(node), input->GetDevice()));
-
-  // For profilingTitle, there is no programatic way to query such value. They are hard-coded for each
-  // backend. Since c10d::ProcessGroup::Work will eventually go away, let's leave it as it is now.
-  auto work = c10::make_intrusive<c10d::ProcessGroup::Work>(process_group->getRank(), c10d::OpType::BROADCAST,
-      /*profilingTitle=*/nullptr, tensors.vec());
-  // TODO: No way to set Future...
-  work->set
-  return
-}
-
-TORCH_LIBRARY_IMPL(c10d, c10::kLazy, m) {
-    m.impl("broadcast", broadcast_lazy);
-}
-
 }  // namespace
 
 at::Tensor LazyNativeFunctions::alias(const at::Tensor& self) {

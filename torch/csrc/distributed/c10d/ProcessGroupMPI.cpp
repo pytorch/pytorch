@@ -102,10 +102,6 @@ std::vector<at::Tensor> ProcessGroupMPI::WorkMPI::result() {
   return outputTensors_;
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupMPI::WorkMPI::getFuture() {
-  return future_;
-}
-
 void ProcessGroupMPI::WorkMPI::finishWorkMPIError(std::exception_ptr eptr) {
   future_->setError(eptr);
   finish(eptr);

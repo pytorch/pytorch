@@ -144,16 +144,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     virtual void abort();
 
     // Returns a Future object that will be associated with the completion of
-    // work. Only NCCL backend is currently supported.
-    virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
+    // work.
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() const { return future_; }
+    void setFuture(c10::intrusive_ptr<c10::ivalue::Future>&& future) { future_ = std::move(future); }
 
     OpType retrieveOpType();
 
-   protected:
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
     void finish(std::exception_ptr exception = nullptr);
 
+   protected:
     // Similar to finish, but throws an exception if one is already set or
     // provided by the user.
     void finishAndThrow(std::exception_ptr exception);
@@ -172,6 +173,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     // When profiling, the callback to record end of operation event. This
     // callback needs to be called when collective operation is complete.
     std::function<void()> recordFunctionEndCallback_;
+
+    c10::intrusive_ptr<at::ivalue::Future> future_;
   };
 
   // ProcessGroup Options is a base struct that defines the basic options
