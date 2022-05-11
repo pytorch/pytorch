@@ -5,7 +5,7 @@ import io
 import itertools
 import os
 import sys
-import unittest
+import unittest.mock
 from typing import Callable, Iterable, Optional, Tuple, Union
 
 import onnx
@@ -13,6 +13,7 @@ from test_pytorch_common import TestCase
 
 import torch
 from torch.onnx import OperatorExportTypes, symbolic_registry
+from torch.onnx._globals import _FLAGS
 from torch.onnx.symbolic_helper import _onnx_unsupported
 from torch.testing._internal.common_utils import custom_op, skipIfCaffe2
 
@@ -29,9 +30,9 @@ def export_to_onnx(
             Union[contextlib.AbstractContextManager, contextlib.ContextDecorator],
         ]
     ] = None,
-    mocks: Optional[Iterable[unittest.mock.patch]] = None,
+    mocks: Optional[Iterable] = None,
     operator_export_type: OperatorExportTypes = OperatorExportTypes.ONNX,
-    opset_version: int = torch.onnx.symbolic_helper._export_onnx_opset_version,
+    opset_version: int = _FLAGS.export_onnx_opset_version,
 ) -> onnx.ModelProto:
     """Exports `model(input)` to ONNX and returns it.
 

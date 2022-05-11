@@ -156,7 +156,7 @@ def get_registered_op(opname: str, domain: str, version: int) -> SymbolicFunctio
 class UnsupportedOperatorError(RuntimeError):
     def __init__(self, domain: str, opname: str, version: int):
         supported_version = get_op_supported_version(opname, domain, version)
-        if domain in ["", "aten", "prim", "quantized"]:
+        if domain in {"", "aten", "prim", "quantized"}:
             msg = f"Exporting the operator {domain}::{opname} to ONNX opset version {version} is not supported. "
             if supported_version is not None:
                 msg += (
