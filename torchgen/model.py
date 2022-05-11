@@ -52,6 +52,7 @@ class DispatchKey(Enum):
     Dense = auto()
     FPGA = auto()
     ORT = auto()
+    MPS = auto()
     Vulkan = auto()
     Metal = auto()
     MKLDNN = auto()
@@ -109,6 +110,7 @@ class DispatchKey(Enum):
     AutogradXLA = auto()
     AutogradLazy = auto()
     AutogradIPU = auto()
+    AutogradMPS = auto()
     AutogradXPU = auto()
     AutogradPrivateUse1 = auto()
     AutogradPrivateUse2 = auto()
@@ -139,7 +141,8 @@ class DispatchKey(Enum):
         raise AssertionError(f"unknown dispatch key {value}")
 
 
-STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
+STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU}
+UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Set of supported dispatch keys
 dispatch_keys = [
@@ -148,6 +151,7 @@ dispatch_keys = [
     DispatchKey.SparseCsrCPU,
     DispatchKey.MkldnnCPU,
     DispatchKey.CUDA,
+    DispatchKey.MPS,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -192,7 +196,7 @@ def is_structured_dispatch_key(dk: DispatchKey) -> bool:
 
 def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
     # For now, ufunc dispatch keys coincide with structured keys
-    return dk in STRUCTURED_DISPATCH_KEYS
+    return dk in UFUNC_DISPATCH_KEYS
 
 
 # This is oddly named ScalarType and not DType for symmetry with C++
@@ -410,7 +414,10 @@ class NativeFunction:
     # We parse both the NativeFunction + backend-specific information about it, which it stored in a corresponding BackendIndex.
     @staticmethod
     def from_yaml(
-        ei: Dict[str, object], loc: "Location", valid_tags: Set[str]
+        ei: Dict[str, object],
+        loc: "Location",
+        valid_tags: Set[str],
+        ignore_keys: Optional[Set[DispatchKey]] = None,
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
@@ -528,6 +535,8 @@ class NativeFunction:
                 assert isinstance(ks, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
+                    if ignore_keys and dispatch_key in ignore_keys:
+                        continue
                     assert dispatch_key in dispatch_keys, (
                         f"Dispatch key {dispatch_key} of kernel {v} "
                         "is not a supported dispatch key."
@@ -594,7 +603,7 @@ class NativeFunction:
         # Program the BackendIndex for the implicit dispatch entry from ufunc
         if ufunc_inner_loop:
             assert structured, "ufunc must be structured"
-            for dispatch_key in STRUCTURED_DISPATCH_KEYS:
+            for dispatch_key in UFUNC_DISPATCH_KEYS:
                 assert (
                     dispatch_key not in dispatch
                 ), f"ufunc should not have explicit dispatch entry for {dispatch_key}"
@@ -1952,7 +1961,7 @@ class NativeFunctionsViewGroup:
             assert not gets_generated_view_copy(self.view), (
                 f"{str(self.view.func.name)} appears to be a new operator that aliases its inputs."
                 " The codegen expects you to add a corresponding operator to native_functions.yaml:"
-                " {str(get_view_copy_name(self.view)}."
+                f" {get_view_copy_name(self.view):!s}."
                 " See Note [view_copy NativeFunctions] for details."
             )
         else:

@@ -1174,6 +1174,61 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
       /*requires_grad=*/true);
 }
 
+void _embedding_bag_cpu_out(
+    at::Tensor& output,
+    at::Tensor& offset2bag,
+    at::Tensor& bag_size,
+    at::Tensor* p_max_indices,
+    const at::Tensor& weight,
+    const at::Tensor& indices,
+    const at::Tensor& offsets,
+    const bool /* scale_grad_by_freq */,
+    const int64_t mode,
+    const bool /* sparse */,
+    const c10::optional<at::Tensor>& per_sample_weights,
+    const bool include_last_offset,
+    const c10::optional<int64_t>& padding_idx) {
+  at::native::check_arguments(
+      weight, indices, offsets, mode, per_sample_weights, include_last_offset);
+
+  at::native::make_offset2bag_out(
+      offset2bag,
+      output,
+      weight,
+      indices,
+      offsets,
+      mode,
+      per_sample_weights,
+      padding_idx.value_or(-1));
+
+  at::native::make_bag_size_out(
+      bag_size, offsets, indices, mode, include_last_offset, false);
+
+  if (p_max_indices) {
+    at::native::make_max_indices_out(
+        *p_max_indices,
+        weight,
+        indices,
+        offsets,
+        bag_size,
+        mode,
+        include_last_offset);
+  }
+
+  at::native::_embedding_bag_cpu_impl_out(
+      output,
+      offset2bag,
+      bag_size,
+      p_max_indices,
+      weight,
+      indices,
+      offsets,
+      mode,
+      per_sample_weights,
+      include_last_offset,
+      padding_idx.value_or(-1));
+}
+
 // Assumes all input tensors are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
