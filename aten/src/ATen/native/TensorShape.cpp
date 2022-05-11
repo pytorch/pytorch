@@ -201,6 +201,11 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   return result;
 }
 
+Tensor& set_(Tensor& result, const Tensor& storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  TORCH_CHECK(storage.is_contiguous(), "passed in tensor to be used as storage must be contiguous");
+  return result.set_(storage.storage(), storage_offset + storage.storage_offset(), size, stride);
+}
+
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
     return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
