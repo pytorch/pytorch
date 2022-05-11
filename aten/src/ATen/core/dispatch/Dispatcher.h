@@ -13,6 +13,7 @@
 #include <list>
 
 #include <ATen/core/grad_mode.h>
+#include <ATen/core/enum_tags.h>
 
 #if C10_MOBILE
 #define C10_DISPATCHER_INLINE_UNLESS_MOBILE inline
@@ -181,7 +182,7 @@ public:
    * If a schema with the same operator name and overload name already exists,
    * this function will check that both schemas are exactly identical.
    */
-  RegistrationHandleRAII registerDef(FunctionSchema schema, std::string debug);
+  RegistrationHandleRAII registerDef(FunctionSchema schema, std::string debug, const c10::optional<std::unordered_set<Tags>>& tags = c10::nullopt);
 
   /**
    * Register a kernel to the dispatch table for an operator.

@@ -24,6 +24,7 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , kernels_()
 , cpp_signature_()
 , is_observed_(ObservedOperators::isObserved(name_))
+, tags_()
 {
   // Pick up any backend fallbacks that were registered prior to this
   // OperatorEntry being created
@@ -57,7 +58,7 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
   return kernel;
 }
 
-void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug) {
+void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug, const c10::optional<std::unordered_set<Tags>>& tags) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   for (const auto& kernel : kernels_) {
     for (const auto &j : kernel.second) {
@@ -69,6 +70,7 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug)
   // NB: don't register schema until after we've checked everything!
   dispatchKeyExtractor_.registerSchema(schema);
   schema_ = AnnotatedSchema(std::move(schema), std::move(debug));
+  tags_ = tags;
 }
 
 void OperatorEntry::deregisterSchema() {

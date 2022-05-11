@@ -13,6 +13,7 @@
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
+#include <ATen/core/enum_tags.h>
 
 #include <list>
 #include <array>
@@ -98,7 +99,7 @@ public:
   // attempt to register a schema when one is already present or vice
   // versa that is an error.  (Refcounting for the registrations is
   // handled in the OperatorHandle in Dispatcher)
-  void registerSchema(FunctionSchema&&, std::string&& debug);
+  void registerSchema(FunctionSchema&&, std::string&& debug, const c10::optional<std::unordered_set<Tags>>& tags = c10::nullopt);
   void deregisterSchema();
 
   const OperatorName& operator_name() const {
@@ -210,7 +211,7 @@ private:
 
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
-
+  c10::optional<std::unordered_set<Tags>> tags_;
   std::array<KernelFunction, c10::num_runtime_entries> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 
