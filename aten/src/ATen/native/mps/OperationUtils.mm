@@ -118,13 +118,13 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
     case ScalarType::Bool:
       return MPSDataTypeBool;
     default:
-      TORCH_CHECK_TYPE(scalar_type == ScalarType::Double, "Unsupported data type ", scalar_type, " on MPS backend");
-      return MPSDataTypeFloat32;
+      TORCH_CHECK_TYPE(false, "Unsupported data type '", scalar_type, "' on MPS backend");
   }
 }
 
 MPSDataType getMPSScalarType(ScalarType scalar_type) {
   switch (scalar_type) {
+    // Intentional fall-through as we can support Scalars with Double type
     case ScalarType::Double:
     case ScalarType::Float:
       return MPSDataTypeFloat32;
@@ -141,7 +141,7 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
     case ScalarType::Bool:
       return MPSDataTypeBool;
     default:
-      TORCH_CHECK_TYPE(false, "Unsupported data type '", scalar_type, "' on MPS backend");
+      TORCH_INTERNAL_ASSERT(false, "Unsupported data type '", scalar_type, "' on MPS backend");
   }
 }
 

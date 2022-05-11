@@ -22,7 +22,7 @@
 
 // this implementation is based on CUDACachingAllocator.
 // It utilizes Metal Heaps to improve the performance with buffer allocation.
-
+// TODO: Unify the logic with CUDACachingAllocator and remove redundant code.
 namespace at {
 namespace mps {
 
