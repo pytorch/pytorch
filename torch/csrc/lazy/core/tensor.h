@@ -6,15 +6,15 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/lazy_view.h>
 #include <torch/csrc/lazy/core/util.h>
-#include <c10/core/SymbolicIntNode.h>
+#include <c10/core/SymIntNode.h>
 
 
 namespace torch {
 namespace lazy {
 
-class TORCH_API SymbolicIntNode: public c10::SymbolicIntNode {
+class TORCH_API SymIntNode: public c10::SymIntNode {
 public:
-  SymbolicIntNode(NodePtr ptr): node_(std::move(ptr)) {};
+  SymIntNode(NodePtr ptr): node_(std::move(ptr)) {};
   NodePtr node_;
 };
 

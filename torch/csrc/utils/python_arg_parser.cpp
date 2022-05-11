@@ -577,12 +577,12 @@ static bool is_int_or_symint(PyObject* obj) {
       return true;
   }
 
-  // TODO: test if it's the Python binding for SymbolicIntNode
+  // TODO: test if it's the Python binding for SymIntNode
   return false;
 }
 
 static bool is_int_or_symint_list(PyObject* obj, int broadcast_size) {
-  // TODO: add a check for SymbolicIntNode
+  // TODO: add a check for SymIntNode
   return is_int_list_(obj, broadcast_size);
 }
 

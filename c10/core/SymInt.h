@@ -5,7 +5,7 @@
 
 namespace c10 {
 
-class SymbolicIntNode;
+class SymIntNode;
 
 // `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
 // represent concrete dimension values.
@@ -23,11 +23,11 @@ class SymbolicIntNode;
 // functions.
 //
 // SymInt will be extenteded to represent a union structure Union[int64_t,
-// SymbolicIntNode*] which will be implemented as a single packed int64_t field
+// SymIntNode*] which will be implemented as a single packed int64_t field
 // named data_.
 //
 // data_ can be either a plain int64_t or (1 << 63 | `index`). `index` points to
-// SymbolicIntNode* that will be responsible for constructing an IR node for
+// SymIntNode* that will be responsible for constructing an IR node for
 // a traced operation to represent it in LTC or Fx graphs.
 class C10_API SymInt {
  public:
@@ -53,8 +53,8 @@ class C10_API SymInt {
     return data_ + sci.data_;
   }
 
-  std::shared_ptr<SymbolicIntNode> toSymbolicIntNode();
-  static c10::SymInt toSymInt(std::shared_ptr<SymbolicIntNode> sin);
+  std::shared_ptr<SymIntNode> toSymIntNode();
+  static c10::SymInt toSymInt(std::shared_ptr<SymIntNode> sin);
 
   // This is needed for interoperability with IValue
   int64_t data() const {

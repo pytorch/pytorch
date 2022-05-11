@@ -8,11 +8,10 @@
 
 namespace c10 {
 
-class C10_API SymbolicIntNode
-    : public std::enable_shared_from_this<SymbolicIntNode> {
+class C10_API SymIntNode : public std::enable_shared_from_this<SymIntNode> {
  public:
   c10::SymInt toSymInt();
-  virtual ~SymbolicIntNode(){};
+  virtual ~SymIntNode(){};
   virtual std::ostream& operator<<(std::ostream& os) {
     return os;
   };
@@ -20,11 +19,11 @@ class C10_API SymbolicIntNode
 
 class C10_API SymIntTable {
  public:
-  int64_t addNode(std::shared_ptr<SymbolicIntNode> sin);
-  std::shared_ptr<SymbolicIntNode> getNode(size_t index);
+  int64_t addNode(std::shared_ptr<SymIntNode> sin);
+  std::shared_ptr<SymIntNode> getNode(size_t index);
 
  private:
-  std::vector<std::shared_ptr<SymbolicIntNode>> nodes_;
+  std::vector<std::shared_ptr<SymIntNode>> nodes_;
   std::mutex mutex_;
 };
 
