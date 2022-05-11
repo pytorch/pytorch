@@ -3621,13 +3621,6 @@ Example::
 
 """)
 
-add_docstr_all('solve',
-               r"""
-solve(A) -> Tensor, Tensor
-
-See :func:`torch.solve`
-""")
-
 add_docstr_all('sort',
                r"""
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
@@ -4752,21 +4745,16 @@ See :func:`torch.dsplit`
 """)
 
 add_docstr_all('stft',
-               "stft(n_fft, hop_length=None, win_length=None, window=None, center=True, "
-               "pad_mode='reflect', normalized=False, onesided=None, return_complex=None) -> Tensor"
                r"""
+stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
 
 See :func:`torch.stft`
-
-.. warning::
-   This function changed signature at version 0.4.1. Calling with
-   the previous signature may cause error or return incorrect result.
 """)
 
 add_docstr_all('istft',
-               "istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, "
-               "normalized=False, onesided=None, length=None, return_complex=False) -> Tensor"
                r"""
+istft(n_fft, hop_length=None, win_length=None, window=None,
+ center=True, normalized=False, onesided=True, length=None) -> Tensor
 
 See :func:`torch.istft`
 """)
