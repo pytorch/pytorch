@@ -4697,6 +4697,10 @@
     CPU, NestedTensorCPU: transform_bias_rescale_qkv_cpu
     CUDA, NestedTensorCUDA: transform_bias_rescale_qkv_cuda
 
+- func: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
+  dispatch:
+    CPU, CUDA: NestedTensor_nested_tensor_from_mask
+
 - func: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   device_check: NoCheck # cpu_nested_shape_example will always be on CPU
   dispatch:
@@ -9052,6 +9056,11 @@
   dispatch:
     CPU: glu_backward_cpu
     CUDA: glu_backward_cuda
+
+- func: glu_jvp(Tensor glu, Tensor x, Tensor dx, int dim) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU, CUDA: glu_jvp
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True

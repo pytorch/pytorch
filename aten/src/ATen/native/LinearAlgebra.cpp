@@ -1653,8 +1653,8 @@ The behavior depends on the dimensionality of the Tensors as follows:
 - If the arguments are 2D - 1D or 1D - 2D, the matrix-vector product is returned.
 - If both arguments are 2D, the matrix-matrix product is returned.
 - If one of the arguments is ND with N >= 3 and the other is 1D or 2D, and some
-  conditions on the strides apply (see should_fold) we fold the first N-2 dimensions
-  of the ND argument into a matrix and return mm or mv
+  conditions on the strides apply (see should_fold) we fold the first N-1 dimensions
+  of the ND argument to form a matrix, call mm or mv, reshape it back to ND and return it
 - Otherwise, we return bmm, after broadcasting and folding the batched dimensions if
   there's more than one
 */
