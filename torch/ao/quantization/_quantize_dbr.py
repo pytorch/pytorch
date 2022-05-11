@@ -6,8 +6,9 @@ from ._dbr.qconfig_dict_utils import normalize_object_types
 
 from .qconfig_dict_utils import (
     get_flattened_qconfig_dict,
-    convert_dict_to_ordered_dict,
+    convert_lists_to_ordered_dicts,
 )
+from torch.ao.quantization.quantization_config import PrepareQuantizationConfig
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_dynamic_quant_module_mappings,
@@ -40,15 +41,17 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
 
-    for qconfig_dict_option in ('module_name_regex', 'module_name_object_type_order'):
-        if qconfig_dict_option in qconfig_dict:
-            assert len(qconfig_dict[qconfig_dict_option]) == 0, \
-                f'{qconfig_dict_option} option of qconfig_dict is not ' + \
-                'implemented yet in define-by-run quantization'
+    # TODO: change signature to use PrepareQuantizationConfig instead of qconfig_dict
+    quantization_config = PrepareQuantizationConfig.from_dict(qconfig_dict)
 
-    normalize_object_types(qconfig_dict)
-    convert_dict_to_ordered_dict(qconfig_dict)
-    flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
+    assert len(quantization_config.module_name_regex_qconfigs) == 0, \
+        'quantization_config.set_module_name_regex is not supported yet in define-by-run quantization'
+    assert len(quantization_config.module_name_object_type_order_qconfigs) == 0, \
+        'quantization_config.set_module_name_object_type_order is not supported yet in define-by-run quantization'
+
+    normalize_object_types(quantization_config)
+    convert_lists_to_ordered_dicts(quantization_config)
+    flattened_qconfig_dict = get_flattened_qconfig_dict(quantization_config)
     torch.quantization.propagate_qconfig_(model, flattened_qconfig_dict)
 
     # if parts of the model are non traceable, delete qconfig from
@@ -67,7 +70,7 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
         # automatically fuse modules
         old_class = model.__class__
         model = add_auto_observation(
-            model, qconfig_dict, example_inputs,
+            model, quantization_config, example_inputs,
             prepare_custom_config_dict=prepare_custom_config_dict)
         module_fusion_fqns = get_module_fusion_fqns(model)
         if len(module_fusion_fqns):
@@ -119,13 +122,13 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
             child.qconfig = None  # type: ignore[assignment]
         elif isinstance(child, torch.nn.LSTM):
             # TODO: fix LSTM handling in eager mode static quant and remove this
-            qconfig_dict['object_type'][torch.nn.LSTM] = None
+            quantization_config._object_type_qconfig_dict[torch.nn.LSTM] = None
 
     # TODO(future PR): do the QAT module swap
 
     assert not inplace
     model = add_auto_observation(
-        model, qconfig_dict, example_inputs,
+        model, quantization_config, example_inputs,
         prepare_custom_config_dict=prepare_custom_config_dict)
     return model
 

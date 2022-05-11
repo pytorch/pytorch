@@ -24,6 +24,10 @@ from torch.quantization import (
     is_activation_post_process,
 )
 
+from ..quantization_config import (
+    PrepareQuantizationConfig,
+)
+
 from ..qconfig_dict_utils import (
     maybe_adjust_qconfig_for_module_type_or_name,
 )
@@ -718,7 +722,7 @@ def get_input_args_quant_dequant_info(
     return quant_infos, dequant_infos, any_arg_quant_or_dequant_needed
 
 def get_cur_qconfig(
-    qconfig_dict: Dict[str, Any],
+    quantization_config: PrepareQuantizationConfig,
     cur_fqn: str,
     cur_op_type: Callable,
 ) -> Optional[QConfigAny]:
@@ -727,10 +731,10 @@ def get_cur_qconfig(
     # (module_name_regex, module_name_object_type_order not implemented yet)
 
     # global
-    global_qconfig = qconfig_dict['']
+    global_qconfig = quantization_config.global_qconfig
 
     qconfig = maybe_adjust_qconfig_for_module_type_or_name(
-        qconfig_dict, cur_op_type, cur_fqn, global_qconfig)
+        quantization_config, cur_op_type, cur_fqn, global_qconfig)
 
     return qconfig
 

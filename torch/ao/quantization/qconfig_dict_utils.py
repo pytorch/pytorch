@@ -1,6 +1,6 @@
 from collections import OrderedDict
 import re
-from typing import Any, Dict, Callable, Union
+from typing import Dict, Callable, Union
 
 from .utils import (
     get_combined_dict,
@@ -52,7 +52,7 @@ def maybe_adjust_qconfig_for_module_type_or_name(quantization_config, module_typ
     return module_name_qconfig
 
 
-def get_flattened_qconfig_dict(quantization_config: QuantizationConfigBase):
+def get_flattened_qconfig_dict(quantization_config: QuantizationConfigBase) -> Dict[Union[Callable, str], QConfigAny]:
     """ flatten the global, object_type and module_name qconfig
     to the same qconfig_dict so that it can be used by
     propagate_qconfig_ function.
@@ -97,9 +97,8 @@ def convert_lists_to_ordered_dicts(quantization_config: QuantizationConfigBase):
 
 
 def update_qconfig_for_qat(
-    quantization_config: QuantizationConfigBase,
-    additional_qat_module_mapping: Dict[Callable, Callable]
-) -> Any:
+        quantization_config: QuantizationConfigBase,
+        additional_qat_module_mapping: Dict[Callable, Callable]):
     """
     Update the qconfig_dict to account for module swaps during QAT.
     During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
