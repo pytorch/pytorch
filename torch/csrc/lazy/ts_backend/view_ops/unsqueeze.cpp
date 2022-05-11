@@ -7,7 +7,7 @@ namespace lazy {
 
 Unsqueeze::Unsqueeze(const torch::lazy::Value& input, int dim)
     : torch::lazy::TsNode(
-          torch::lazy::OpKind(at::aten::unsqueeze),
+          ClassOpKind(),
           {input},
           /*num_outputs=*/1,
           torch::lazy::MHash(dim)),
