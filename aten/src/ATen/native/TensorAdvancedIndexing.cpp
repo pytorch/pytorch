@@ -1392,7 +1392,14 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
+  auto result = grad.new_zeros(self.sizes());
+  // for composite compliance, use out-of-place variant of
+  // `scatter_add` if index tensor is a Tensor Subclass.
+  if (isTensorSubclassLike(index)) {
+    return result.scatter_add(dim, index, grad);
+  }
+  result.scatter_add_(dim, index, grad);
+  return result;
 }
 
 static void scatter_reduce_exclude_self_helper(
