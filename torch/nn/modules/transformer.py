@@ -170,6 +170,7 @@ class TransformerEncoder(Module):
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
         num_layers: the number of sub-encoder-layers in the encoder (required).
         norm: the layer normalization component (optional).
+        return_all_layers: a bool decide if result of each layers are returned (optional).
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -179,11 +180,12 @@ class TransformerEncoder(Module):
     """
     __constants__ = ['norm']
 
-    def __init__(self, encoder_layer, num_layers, norm=None):
+    def __init__(self, encoder_layer, num_layers, norm=None, return_all_layers=False):
         super(TransformerEncoder, self).__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
+        self.return_all_layers = return_all_layers
 
     def forward(self, src: Tensor, mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
@@ -198,6 +200,10 @@ class TransformerEncoder(Module):
         """
         output = src
         convert_to_nested = False
+
+        output_layers = []
+        if self.return_all_layers:
+            output_layers.append(output)
         if hasattr(self.layers[0], "is_fastpath"):
             if self.layers[0].is_fastpath() and src.dim() == 3:
                 if src_key_padding_mask is not None and not output.is_nested:
@@ -207,9 +213,17 @@ class TransformerEncoder(Module):
 
         for mod in self.layers:
             output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
+            if self.return_all_layers:
+                if convert_to_nested:
+                    output_layers.append(output.to_padded_tensor())
+                else:
+                    output_layers.append(output)
+
+        if self.return_all_layers:
+            return torch.cat(output_layers, 0)
 
         if convert_to_nested:
-            output = output.to_padded_tensor(0.)
+            output = output.to_padded_tensor()
 
         if self.norm is not None:
             output = self.norm(output)
