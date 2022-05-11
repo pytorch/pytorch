@@ -12493,6 +12493,10 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing'
                ),
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
+                   'TestDecomp', 'test_comprehensive',
+               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
@@ -12521,8 +12525,12 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
+                   'TestCommon', 'test_complex_half_reference_testing',
+               ),
+               DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
-                   'TestCommon', 'test_complex_half_reference_testing'
+                   'TestDecomp', 'test_comprehensive',
                ),
            ),
            skips=(
