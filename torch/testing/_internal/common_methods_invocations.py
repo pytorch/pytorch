@@ -7799,14 +7799,12 @@ def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
         ((), (1,)),
     )
 
-    for case in cases:
-        shape, args = case
-        inp = make_arg(shape, requires_grad=requires_grad)
-        yield(SampleInput(inp, args=(args, )))
+    for shape, args in cases:
+        yield SampleInput(make_arg(shape), args=(args,))
 
         if kwargs.get("transpose_samples", False) and len(shape) >= 2:
-            transposed = inp.clone().transpose(0, 1).detach().requires_grad_(requires_grad)
-            yield(SampleInput(transposed, args=(args,)))
+            transposed = make_arg(shape).transpose(0, 1).detach().requires_grad_(requires_grad)
+            yield SampleInput(transposed, args=(args,))
 
 def reference_inputs_view_reshape(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_view_reshape(op, device, dtype, requires_grad, **kwargs)
