@@ -334,15 +334,9 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         for inp, graph_in in zip(given_ins, graph_ins):
             graph_in.setType(graph_in.type().with_sizes(inp.size()))
 
-        torch._C._jit_pass_propagate_shapes_on_graph(g)
-        if not isinstance(expected_res, tuple):
-            raise NotImplementedError("TODO: implement single output case")
-
-        tuple_construct_node = next(g.outputs()).node()
-        for exp, graph_out in zip(expected_res, list(tuple_construct_node.inputs())):
-            expected_size = list(exp.size())
-            symbolic_size = graph_out.type().symbolic_sizes()
-            self.assertEqual(symbolic_size, expected_size)
+        out_sizes = [out.size() for out in expected_res]
+        print("out_sizes", out_sizes)
+        self.checkShapeAnalysis(out_sizes, g, assert_propagation=True)
 
     def test_convolution_backward(self):
         # No opinfos for ops that are not part of the Python API
@@ -353,11 +347,20 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         weight = torch.randn((8, 4, 3, 3), dtype=torch.float32, device="cpu", requires_grad=True)
         out_grad = torch.randn((16, 8, 8, 8), dtype=torch.float32, device="cpu")
 
+
         @torch.jit.script
         def conv_bwd(input, weight, grad):
-            return torch.ops.aten.convolution_backward(grad, input, weight, [8,], [1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
+            bias_sizes = [8, ]
+            return torch.ops.aten.convolution_backward(grad, input, weight, bias_sizes, [1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
 
         self.assert_shape_equal_scripted(conv_bwd, (input, weight, out_grad))
+
+        @torch.jit.script
+        def conv_bwd_2(input, weight, grad):
+            bias_sizes = None
+            return torch.ops.aten.convolution_backward(grad, input, weight, bias_sizes, [1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
+        self.assert_shape_equal_scripted(conv_bwd_2, (input, weight, out_grad))
+
 
     def test_returning_input_symbolic_shapes(self):
         mm = torch.jit.freeze(torch.jit.script(nn.Conv2d(16, 33, 3, stride=2).eval()))

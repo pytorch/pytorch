@@ -1717,25 +1717,16 @@ def transpose(self: List[int],
 + std::string(R"=====(def conv_backwards(grad_output: List[int],
     input: List[int],
     weight: List[int],
-    biases: Optional[List[int]]) -> Tuple[List[int], List[int], Optional[List[int]]]:
-  if torch.__is__(biases, None):
-    bias_result : Optional[List[int]] = None
-  else:
-    biases0 = unchecked_cast(List[int], biases)
-    bias_result0 = annotate(List[int], [])
-    for _0 in range(torch.len(biases0)):
-      elem = biases0[_0]
-      _1 = torch.append(bias_result0, elem)
-    bias_result = bias_result0
+    biases: Optional[List[int]]) -> Tuple[List[int], List[int], List[int]]:
   out = annotate(List[int], [])
-  for _2 in range(torch.len(input)):
-    elem0 = input[_2]
-    _3 = torch.append(out, elem0)
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    _1 = torch.append(out, elem)
   out0 = annotate(List[int], [])
-  for _4 in range(torch.len(weight)):
-    elem1 = weight[_4]
-    _5 = torch.append(out0, elem1)
-  return (out, out0, bias_result)
+  for _2 in range(torch.len(weight)):
+    elem0 = weight[_2]
+    _3 = torch.append(out0, elem0)
+  return (out, out0, [grad_output[1]])
 
 )=====")
 + std::string(R"=====(def flatten(input: List[int],

@@ -725,13 +725,8 @@ def conv2d(
     return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
 
 def conv_backwards(grad_output: List[int], input:List[int], weight:List[int], biases:Optional[List[int]]):
-    if biases is None:
-        bias_result = None
-    else:
-        biases_2: List[int] = biases
-        bias_result = _copy(biases_2)
-
-    return _copy(input), _copy(weight), bias_result
+    # Bias gradient is always generated regardess of if biases is supplied
+    return _copy(input), _copy(weight), [grad_output[1]]
 
 def batch_norm(
     input: List[int],
