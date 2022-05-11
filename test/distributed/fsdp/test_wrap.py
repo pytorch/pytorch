@@ -204,6 +204,19 @@ class TestFSDPWrap(FSDPTest):
         ]:
             self.assertTrue(isinstance(bn, FSDP))
 
+        # if we just wrapped BN container, individual batchnorms are not
+        # wrapped.
+        mod = MyModule()
+        fsdp = FSDP(mod, auto_wrap_policy=wrap_bn_container)
+        self.assertTrue(isinstance(mod.bn_container, FSDP))
+        for bn in [
+            fsdp.bn_container.bn1,
+            fsdp.bn_container.bn2,
+            fsdp.bn_container.bn3,
+            fsdp.bn_container.sync_bn
+        ]:
+            self.assertFalse(isinstance(bn, FSDP))
+
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",

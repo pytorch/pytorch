@@ -108,6 +108,12 @@ class TestGitHubPR(TestCase):
         self.assertTrue("@" in author)
         self.assertTrue(pr.get_diff_revision() is None)
 
+        # PR with multiple contributors, but creator id is not among authors
+        pr = GitHubPR("pytorch", "pytorch", 75095)
+        self.assertEqual(pr.get_pr_creator_login(), "mruberry")
+        author = pr.get_author()
+        self.assertTrue(author is not None)
+
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_large_diff(self, mocked_gql: Any) -> None:
         "Tests that PR with 100+ files can be fetched"

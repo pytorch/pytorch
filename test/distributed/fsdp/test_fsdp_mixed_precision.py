@@ -17,7 +17,7 @@ from torch.distributed.fsdp import (
     BackwardPrefetch,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import default_auto_wrap_policy
+from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -538,7 +538,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         )
         fsdp = FSDP(
             resnet_model,
-            auto_wrap_policy=default_auto_wrap_policy,
+            auto_wrap_policy=size_based_auto_wrap_policy,
             mixed_precision=mp_config
         )
         # Batchnorm units should be wrapped individually. Validate this by
