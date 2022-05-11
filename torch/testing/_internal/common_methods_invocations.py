@@ -9625,10 +9625,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
-                    skips=(
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                                     'test_non_standard_bool_values', device_type='cpu'),
-                    )),
+                    ),
     BinaryUfuncInfo('sub',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
                     ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
@@ -9787,8 +9784,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                             dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', dtypes=(torch.bool,)),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                            'test_non_standard_bool_values', device_type='cpu'),
            ),
            sample_inputs_func=sample_inputs_addr,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -10013,18 +10008,12 @@ op_db: List[OpInfo] = [
                         # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
                                      'test_type_promotion', device_type='cuda'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                                     'test_non_standard_bool_values', device_type='cpu'),
                     )),
     UnaryUfuncInfo('bitwise_not',
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
                    supports_autograd=False,
-                   skips=(
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                                    'test_non_standard_bool_values', device_type='cpu'),
-
-                   )),
+                   ),
     BinaryUfuncInfo('bitwise_left_shift',
                     op=torch.bitwise_left_shift,
                     dtypes=all_types(),
@@ -10467,10 +10456,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diff,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                            'test_non_standard_bool_values', device_type='cpu'),
-           )),
+           ),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='no_rounding_mode',
@@ -10597,7 +10583,8 @@ op_db: List[OpInfo] = [
                     skips=(
                         # https://github.com/pytorch/pytorch/issues/76805
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                                     'test_non_standard_bool_values', device_type='cuda'),
                     )),
     BinaryUfuncInfo('fmax',
                     op=torch.fmax,
@@ -10618,8 +10605,6 @@ op_db: List[OpInfo] = [
                     skips=(
                         # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                                     'test_non_standard_bool_values', device_type='cpu'),
                     )),
     BinaryUfuncInfo('fmod',
                     ref=np.fmod,
@@ -11110,9 +11095,9 @@ op_db: List[OpInfo] = [
                     always_returns_bool=True,
                     supports_autograd=False,
                     skips=(
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
-                    )
-                    ),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                                     'test_non_standard_bool_values', device_type='cuda'),
+                    )),
     OpInfo('geqrf',
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_qr_geqrf,
@@ -11130,8 +11115,8 @@ op_db: List[OpInfo] = [
                     always_returns_bool=True,
                     supports_autograd=False,
                     skips=(
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
-
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                                     'test_non_standard_bool_values', device_type='cuda'),
                     )),
     UnaryUfuncInfo('imag',
                    ref=np.imag,
@@ -11199,7 +11184,8 @@ op_db: List[OpInfo] = [
                     always_returns_bool=True,
                     supports_autograd=False,
                     skips=(
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                                     'test_non_standard_bool_values', device_type='cuda'),
                     )),
     OpInfo('linalg.det',
            op=torch.linalg.det,
@@ -11693,8 +11679,6 @@ op_db: List[OpInfo] = [
                                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                                    'test_non_standard_bool_values', device_type='cpu'),
                    )),
     BinaryUfuncInfo('lt',
                     aliases=('less',),
@@ -11702,9 +11686,9 @@ op_db: List[OpInfo] = [
                     always_returns_bool=True,
                     supports_autograd=False,
                     skips=(
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
-                    )
-                    ),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                                     'test_non_standard_bool_values', device_type='cuda'),
+                    )),
     OpInfo('linalg.lu_factor',
            aten_name='linalg_lu_factor',
            op=torch.linalg.lu_factor,
@@ -11988,10 +11972,11 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
-           ),
-           supports_forward_ad=True),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                            'test_non_standard_bool_values'),
+           )),
     OpInfo('min',
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -12074,8 +12059,6 @@ op_db: List[OpInfo] = [
                          'TestBinaryUfuncs',
                          'test_type_promotion',
                          device_type='cuda'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                         'test_non_standard_bool_values', device_type='cpu'),
         )),
     BinaryUfuncInfo(
         'minimum',
@@ -12090,8 +12073,6 @@ op_db: List[OpInfo] = [
                          'TestBinaryUfuncs',
                          'test_type_promotion',
                          device_type='cuda'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                         'test_non_standard_bool_values', device_type='cpu'),
         ),
     ),
     BinaryUfuncInfo('logical_and',
@@ -12100,10 +12081,7 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     supports_rhs_python_scalar=False,
-                    skips=(
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                                     'test_non_standard_bool_values', device_type='cpu'),
-                    )),
+                    ),
     BinaryUfuncInfo('logical_or',
                     ref=np.logical_or,
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -12116,11 +12094,7 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     supports_rhs_python_scalar=False,
-                    skips=(
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                                     'test_non_standard_bool_values', device_type='cpu'),
-
-                    )),
+                    ),
     BinaryUfuncInfo('bitwise_or',
                     ref=np.bitwise_or,
                     dtypes=integral_types_and(torch.bool),
@@ -12142,7 +12116,8 @@ op_db: List[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
                                      device_type='cuda'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                                     'test_non_standard_bool_values', device_type='cuda'),
                     )),
     BinaryUfuncInfo('heaviside',
                     ref=lambda a, b: (
@@ -12206,7 +12181,7 @@ op_db: List[OpInfo] = [
                                      'TestMeta', 'test_meta',
                                      dtypes=floating_types_and(torch.half, torch.bfloat16)),
                         DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                                     'test_non_standard_bool_values'),
+                                     'test_non_standard_bool_values', device_type='cuda'),
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -13889,7 +13864,8 @@ op_db: List[OpInfo] = [
                     skips=(
                         # https://github.com/pytorch/pytorch/issues/76805
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                                     'test_non_standard_bool_values', device_type='cuda'),
                     )),
     OpInfo('narrow',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -13924,10 +13900,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_outer,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                            'test_non_standard_bool_values', device_type='cpu'),
-           )),
+           ),
     OpInfo('ormqr',
            op=torch.ormqr,
            dtypes=floating_and_complex_types(),
@@ -14309,8 +14282,6 @@ op_db: List[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                                     'test_non_standard_bool_values', device_type='cpu'),
 
                     ),
                     assert_autodiffed=True,
@@ -14325,8 +14296,6 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                                     'test_non_standard_bool_values', device_type='cpu'),
                     )),
     BinaryUfuncInfo('__ror__',
                     op=torch.Tensor.__ror__,
@@ -14345,7 +14314,8 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                                     'test_non_standard_bool_values', device_type='cuda'),
                     )),
     OpInfo('__rmatmul__',
            op=torch.Tensor.__rmatmul__,
@@ -16298,10 +16268,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_kron,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                            'test_non_standard_bool_values', device_type='cpu'),
-           )),
+           ),
     OpInfo('inner',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16]
@@ -17053,8 +17020,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                         'test_non_standard_bool_values', device_type='cpu'),
         ),
     ),
     ReductionOpInfo(
@@ -17744,10 +17709,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_cosine_embedding_loss,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                         'test_non_standard_bool_values', device_type='cpu'),
-        )
     ),
     OpInfo(
         "nn.functional.nll_loss",
