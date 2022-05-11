@@ -626,12 +626,12 @@ def _format_dict(attr, indent, width, curr_indent) -> str:
     dict_repr = []
     for k, v in attr.items():
         k_repr = repr(k)
-        v_str = _pformat(v, indent, width, curr_indent + len(k_repr)) if is_dataclass(v) else v
+        v_str = _pformat(v, indent, width, curr_indent + len(k_repr)) if is_dataclass(v) else repr(v)
         dict_repr.append(f"{k_repr}: {v_str}")
 
     return _format(dict_repr, indent, width, curr_indent, "{", "}")
 
-def _format_list(attr, indent, width, curr_indent):
+def _format_list(attr, indent, width, curr_indent) -> str:
     curr_indent += (indent + 1)
     list_repr = [_pformat(l, indent, width, curr_indent) if is_dataclass(l) else repr(l) for l in attr]
     start, end = ("[", "]") if isinstance(attr, list) else ("(", ")")
