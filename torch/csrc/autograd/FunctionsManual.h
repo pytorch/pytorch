@@ -103,7 +103,7 @@ at::Tensor clamp_jvp(
 at::IntArrayRef strides_or_error(const Tensor & input, c10::string_view const & input_name);
 at::Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, c10::Layout mat1_layout, const Scalar & alpha);
 at::Tensor mm_mat2_backward(const at::Tensor & grad, const at::Tensor & mat1, at::IntArrayRef sizes, at::IntArrayRef strides, c10::Layout layout, const at::Scalar & alpha);
-at::Tensor _sparse_addmm_sparse_backward(const at::Tensor& grad, const at::Tensor& sparse_, const at::Tensor& dense, const at::Scalar& alpha);
+at::Tensor mm_mat1_sparse_backward(const at::Tensor& grad, const at::Tensor& mat1, const at::Tensor& mat2, const at::Scalar& alpha);
 at::Tensor sparse_sparse_matmul_backward(const at::Tensor& grad, const at::Tensor& mat1, const at::Tensor& mat2,int64_t grad_order);
 at::Tensor renorm_backward(const at::Tensor & grad, const at::Tensor & self, const at::Scalar& p, int64_t dim, const at::Scalar& maxnorm);
 at::Tensor repeat_backward(at::Tensor grad, at::IntArrayRef repeats, at::IntArrayRef input_shape);
@@ -242,23 +242,9 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, std::array<bool, 3> grad_mask);
-std::tuple<Tensor, Tensor> linalg_qr_jvp(
-  const Tensor& dA,
-  const Tensor& Q,
-  const Tensor& R
-);
-Tensor linalg_qr_jvp_Q(
-  const Tensor& dA,
-  const Tensor& Q,
-  const Tensor& R
-);
-Tensor linalg_qr_jvp_R(
-  const Tensor& dA,
-  const Tensor& Q,
-  const Tensor& R
-);
-Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                          c10::string_view mode, const Tensor& Q, const Tensor& R);
+std::tuple<Tensor, Tensor> linalg_qr_jvp(const Tensor& dA, const Tensor& Q, const Tensor& R,
+                                         const c10::string_view mode);
+Tensor linalg_qr_backward(const Tensor& gQ, const Tensor& gR, const Tensor& Q, const Tensor& R, const c10::string_view mode);
 Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, const Tensor& lambda, const Tensor& v);
 Tensor linalg_matrix_exp_differential(const Tensor& self, const Tensor& grad, bool adjoint);
@@ -372,9 +358,10 @@ Tensor lu_solve_jvp(
   const Tensor& LU_pivots
 );
 Tensor lu_unpack_backward(
-  const variable_list& grads,
-  const Tensor& LU_data,
-  bool unpack_data
+  const Tensor& L_grad,
+  const Tensor& U_grad,
+  const int64_t m,
+  const int64_t n
 );
 
 Tensor _det_lu_based_helper_backward(
@@ -394,23 +381,32 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
   const std::array<bool, 2>& grad_input_mask
 );
 
-Tensor lu_backward_base(
-  const variable_list& grads,
-  const Tensor& self,
+Tensor linalg_lu_backward(
+  const Tensor& L_grad,
+  const Tensor& U_grad,
   const Tensor& P,
   const Tensor& L,
-  const Tensor& U
-);
+  const Tensor& U,
+  const bool pivot);
+
+std::tuple<Tensor, Tensor> linalg_lu_jvp(
+  const Tensor& dA,
+  const Tensor& P,
+  const Tensor& L,
+  const Tensor& U,
+  const bool pivot);
+
 Tensor lu_factor_ex_backward(
   const Tensor& grad,
-  const Tensor& self,
   const Tensor& LU,
-  const Tensor& pivs
+  const Tensor& pivs,
+  const bool pivot
 );
 Tensor lu_factor_ex_jvp(
   const Tensor& dX,
   const Tensor& LU,
-  const Tensor& pivs
+  const Tensor& pivs,
+  const bool pivot
 );
 
 Tensor batch_norm_jvp(
