@@ -7,7 +7,9 @@ namespace lazy {
 
 class TORCH_API Select : public TsNode {
  public:
-  static const OpKind class_op_kind;
+  static OpKind ClassOpKind() {
+    return OpKind(at::aten::select);
+  }
 
   Select(
       const Value& input,
