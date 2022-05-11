@@ -231,7 +231,7 @@ Tensor& addmv_out_sparse_csr_cuda(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat.layout() == kSparseCsr || mat.layout() == kSparseBsr);
 
   TORCH_CHECK(mat.dim() == 2, "addmv: Expected mat to be 2-D");
   TORCH_CHECK(vec.dim() == 1, "addmv: Expected vec to be 1-D");

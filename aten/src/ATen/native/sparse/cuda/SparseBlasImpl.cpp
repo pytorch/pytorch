@@ -395,7 +395,7 @@ void block_sparse_mv(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat.layout() == kSparseBsr);
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat.values().dim() == 3);
   // blocks are expected to be square
@@ -850,7 +850,7 @@ void addmv_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  if (mat.values().dim() == 3 && mat.values().size(-1) > 1) {
+  if (mat.layout() == kSparseBsr) {
     return block_sparse_mv(mat, vec, beta, alpha, result);
   }
 #if !AT_USE_CUSPARSE_GENERIC_API()
