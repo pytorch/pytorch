@@ -8,7 +8,7 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 from functools import partial
-from typing import Any, List, Tuple, Optional, Dict, Union
+from typing import Any, List, Tuple, Optional, Dict
 
 import torch
 import torch.nn as nn
@@ -114,12 +114,9 @@ class ObserverBase(ABC, nn.Module):
     with_callable_args = classmethod(_with_callable_args)
 
 
-class _ObserverBase(ObserverBase):
-    r"""Internal common base for all qint/quint8 observers.
-
-    This base is for commonly used parameters used internally.
-    Users should use `~torch.ao.quantization.observer.ObserverBase` as a base class
-    for custom observers.
+class UniformQuantizationObserverBase(ObserverBase):
+    r"""Common base for all observers using uniform quantization to calculate
+    scale and zero_point.
 
     Args:
         dtype: Quantized data type.
@@ -173,7 +170,7 @@ class _ObserverBase(ObserverBase):
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        super(_ObserverBase, self).__init__(dtype=dtype)
+        super().__init__(dtype=dtype)
         self.qscheme = qscheme
         if reduce_range:
             warnings.warn(
@@ -334,7 +331,13 @@ class _ObserverBase(ObserverBase):
         raise NotImplementedError("Cannot reset min/max values in the given observer.")
 
 
-class MinMaxObserver(_ObserverBase):
+# Originally, this class was called `_ObserverBase`.  Keeping the old name around
+# for backwards compatibility.
+# TODO(after v1.13): delete this
+_ObserverBase = UniformQuantizationObserverBase
+
+
+class MinMaxObserver(UniformQuantizationObserverBase):
     r"""Observer module for computing the quantization parameters based on the
     running min and max values.
 
@@ -551,7 +554,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         return x_orig
 
 
-class PerChannelMinMaxObserver(_ObserverBase):
+class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
     r"""Observer module for computing the quantization parameters based on the
     running per channel min and max values.
 
@@ -653,7 +656,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     def _load_from_state_dict(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]],
+        state_dict: Dict[str, Any],
         prefix: str,
         local_metadata: Dict[str, torch.Tensor],
         strict: bool,
@@ -709,7 +712,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     def _load_from_state_dict_script(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]],
+        state_dict: Dict[str, Any],
         prefix: str,
         local_metadata: Dict[str, torch.Tensor],
         strict: bool,
@@ -814,7 +817,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         return x_orig
 
 
-class HistogramObserver(_ObserverBase):
+class HistogramObserver(UniformQuantizationObserverBase):
     r"""
     The module records the running histogram of tensor values along with
     min/max values. ``calculate_qparams`` will calculate scale and zero_point.
@@ -1266,7 +1269,7 @@ class PlaceholderObserver(ObserverBase):
         )
 
 
-class RecordingObserver(_ObserverBase):
+class RecordingObserver(ObserverBase):
     r"""
     The module is mainly for debug and records the tensor values during runtime.
 
@@ -1277,8 +1280,8 @@ class RecordingObserver(_ObserverBase):
     """
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
-    def __init__(self, **kwargs):
-        super(RecordingObserver, self).__init__(**kwargs)
+    def __init__(self, dtype=torch.quint8, **kwargs):
+        super(RecordingObserver, self).__init__(dtype=dtype, **kwargs)  # type: ignore[call-arg]
         self.tensor_val = []
 
     def forward(self, x):
@@ -1492,10 +1495,14 @@ Default observer for a floating point zero-point and 4 bit activations.
 
 # TODO(future PR): remove these defaults and enforce activation functions
 # to explicitly specify their output range
-default_symmetric_fixed_qparams_observer = FixedQParamsObserver.with_args(
+default_fixed_qparams_range_neg1to1_observer = FixedQParamsObserver.with_args(
     scale=2.0 / 256.0, zero_point=128, dtype=torch.quint8, quant_min=0, quant_max=255)
-default_affine_fixed_qparams_observer = FixedQParamsObserver.with_args(
+default_fixed_qparams_range_0to1_observer = FixedQParamsObserver.with_args(
     scale=1.0 / 256.0, zero_point=0, dtype=torch.quint8, quant_min=0, quant_max=255)
+# TODO: the following 2 variables are kept for backwards compatibility; remove after a few releases
+default_symmetric_fixed_qparams_observer = default_fixed_qparams_range_neg1to1_observer
+default_affine_fixed_qparams_observer = default_fixed_qparams_range_0to1_observer
+
 """
 Default observers for fixed qparams operations.
 """
