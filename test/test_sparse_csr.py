@@ -387,12 +387,7 @@ class TestSparseCSR(TestCase):
     def test_copy_errors(self, device, dtype):
         for index_dtype in [torch.int32, torch.int64]:
             shape1 = (2, 3)
-            shape2 = (3, 2)
             a = self.genSparseCSRTensor(shape1, 0, dtype=dtype, device=device, index_dtype=index_dtype)
-            b = self.genSparseCSRTensor(shape2, 0, dtype=dtype, device=device, index_dtype=index_dtype)
-
-            with self.assertRaisesRegex(RuntimeError, "only same size tensors are supported."):
-                a.copy_(b)
 
             with self.assertRaisesRegex(RuntimeError, "copy between different layouts is not supported."):
                 a.copy_(torch.empty(a.shape, dtype=dtype, device=device))

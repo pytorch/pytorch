@@ -112,6 +112,11 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cpu(
     const Scalar& alpha,
     Tensor& result) {
   at::native::sparse::sparse_sampled_addmm_check_inputs(self, mat1, mat2, beta, alpha, result);
+  // Allow only same types as for the CUDA path
+  auto t = self.scalar_type();
+  TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float ||
+    t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
+    "sparse_sampled_addmm: Expected self to be a floating-point or complex tensor, but got ", t);
   if (&result != &self) {
     // We allow self to be a single matrix when mat1 and mat2 are batched
     auto result_sizes = DimVector(mat1.sizes().slice(0, mat1.dim() - 2));
