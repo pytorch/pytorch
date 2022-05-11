@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
+    TEST_WITH_UBSAN,
     IS_WINDOWS,
     IS_FBCODE,
     first_sample,
