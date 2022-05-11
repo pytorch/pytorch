@@ -95,7 +95,7 @@ struct InnerSumCastLoadPolicy {
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
     auto ptr = reinterpret_cast<const scalar_t*>(data + stride * index);
     return load_reduce_vec<acc_t>(ptr, [](acc_t a, scalar_t b) {
-      return a + b;
+      return a + static_cast<acc_t>(b);
     }, acc_t(0));
   }
 };
@@ -617,8 +617,8 @@ void sum_kernel_impl(TensorIterator &iter) {
     return;
   }
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-      ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "sum_cpu", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(
+      kComplexHalf, kBFloat16, kHalf, iter.dtype(), "sum_cpu", [&] {
     cascade_sum</*ignore_nan=*/false, scalar_t>(iter);
   });
 }
