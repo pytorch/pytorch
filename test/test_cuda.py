@@ -574,10 +574,13 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
-    @unittest.skipIf('TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and
-                        int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE']) == True,
-                     'skipping allow_tf32 test as TORCH_ALLOW_TF32_CUBLAS_OVERRIDE is set')
     def test_cublas_allow_tf32_get_set(self):
+        skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
+            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE']) == True
+        if skip_tf32_cublas:
+            self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+            return
+
         orig = torch.backends.cuda.matmul.allow_tf32
         self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
         torch.backends.cuda.matmul.allow_tf32 = not orig
