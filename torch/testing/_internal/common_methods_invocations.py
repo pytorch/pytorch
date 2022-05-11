@@ -175,7 +175,8 @@ class SampleInput(object):
     def transform(self, f):
         def tt(t):
             def _tt(t):
-                return f(t)
+                with torch.no_grad():
+                    return f(t)
 
             if isinstance(t, torch.Tensor):
                 return _tt(t)
