@@ -21,7 +21,7 @@ from ..qconfig import (
     QConfigAny,
     qconfig_equals
 )
-from ..quantization_config import ConvertQuantizationConfig
+from ..quantization_config import ConvertQuantizationConfig, PrepareQuantizationConfig
 from ..qconfig_dict_utils import (
     convert_lists_to_ordered_dicts,
     update_qconfig_for_qat,
@@ -562,7 +562,7 @@ def convert(
     # TODO refactor this code once we update the prepare logic to have additional information on
     # which graph nodes have been observed and share that with convert to decide which observers to ignore.
     if quantization_config:
-        prepare_quantization_config: PrepareQuantizationConfig = model._quantization_config # type: ignore[assignment]
+        prepare_quantization_config: PrepareQuantizationConfig = model._quantization_config  # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
 
         convert_lists_to_ordered_dicts(quantization_config)
@@ -577,8 +577,9 @@ def convert(
         for k, v in qconfig_map.items():
             assert k in convert_qconfig_map, 'Expected key {} in convert qconfig_map'.format(k)
             if convert_qconfig_map[k] is not None:
-                assert qconfig_equals(v, convert_qconfig_map[k]), 'Expected k {} to have the same value in prepare quantization_config \
-                and convert quantization_config, but {} was updated to {}.'.format(k, v, convert_qconfig_map[k])
+                assert qconfig_equals(v, convert_qconfig_map[k]), \
+                    "Expected k {} to have the same value in prepare and convert QuantizationConfigs, " \
+                    "but {} was updated to {}".format(k, v, convert_qconfig_map[k])
         qconfig_map = convert_qconfig_map
 
     custom_module_classes = get_custom_module_class_keys(

@@ -94,7 +94,6 @@ from .backend_config_utils import (
     get_pattern_to_quantize_handlers,
 )
 
-import copy
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
 from collections import defaultdict
 
@@ -1441,7 +1440,8 @@ def prepare(
     modules = dict(model.named_modules(remove_duplicate=False))
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
-    equalization_qconfig_map = generate_qconfig_map(model, modules, model.graph, equalization_quantization_config, node_name_to_scope)
+    equalization_qconfig_map = generate_qconfig_map(
+        model, modules, model.graph, equalization_quantization_config, node_name_to_scope)
     qconfig_map = generate_qconfig_map(model, modules, model.graph, quantization_config, node_name_to_scope)
 
     # match the patterns that will get quantized

@@ -18,15 +18,11 @@ def get_object_type_qconfig(
         quantization_config: QuantizationConfigBase,
         object_type: Union[Callable, str],
         fallback_qconfig: QConfigAny) -> QConfigAny:
-    # object_type can be
-    # 1. module type (call_module)
-    # 2. function (call_function)
-    # 3. string (call_method)
-    return quantization_config.object_type_qconfigs.get(object_type, fallback_qconfig)
+    return quantization_config._object_type_qconfig_dict.get(object_type, fallback_qconfig)
 
 
 def get_module_name_regex_qconfig(quantization_config, module_name, fallback_qconfig):
-    for regex_pattern, qconfig in quantization_config.module_name_regex_qconfigs.items():
+    for regex_pattern, qconfig in quantization_config._module_name_regex_qconfig_dict.items():
         if re.match(regex_pattern, module_name):
             # first match wins
             return qconfig
@@ -37,8 +33,8 @@ def get_module_name_qconfig(quantization_config, module_name, fallback_qconfig):
     if module_name == '':
         # module name qconfig not found
         return fallback_qconfig
-    if module_name in quantization_config.module_name_qconfigs:
-        return quantization_config.module_name_qconfigs[module_name]
+    if module_name in quantization_config._module_name_qconfig_dict:
+        return quantization_config._module_name_qconfig_dict[module_name]
     else:
         parent, _ = _parent_name(module_name)
         return get_module_name_qconfig(quantization_config, parent, fallback_qconfig)
@@ -81,25 +77,26 @@ def get_flattened_qconfig_dict(quantization_config: QuantizationConfigBase):
       "conv": qconfig
     }
     """
-    flattened = {"": quantization_config.global_qconfig}
-    for obj, qconfig in quantization_config.object_type_qconfigs.items():
+    flattened: Dict[Union[Callable, str], QConfigAny] = {"": quantization_config.global_qconfig}
+    for obj, qconfig in quantization_config._object_type_qconfig_dict.items():
         flattened[obj] = qconfig
-    for obj, qconfig in quantization_config.module_name_qconfigs.items():
+    for obj, qconfig in quantization_config._module_name_qconfig_dict.items():
         flattened[obj] = qconfig
     return flattened
 
 
-def convert_lists_to_ordered_dicts(quantization_config: QuantizationConfigBase) -> Dict[str, Dict[Any, Any]]:
+def convert_lists_to_ordered_dicts(quantization_config: QuantizationConfigBase):
     """
     Convert lists in a QuantizationConfigBase to OrderedDicts.
     """
     def to_tuple_list(dataclass_list):
         return [dataclasses.astuple(d) for d in dataclass_list]
-
-    quantization_config.object_type_qconfigs = OrderedDict(to_tuple_list(quantization_config.object_type_qconfigs))
-    quantization_config.module_name_regex_qconfigs = OrderedDict(to_tuple_list(quantization_config.module_name_regex_qconfigs))
-    quantization_config.module_name_qconfigs = OrderedDict(to_tuple_list(quantization_config.module_name_qconfigs))
-    return quantization_config
+    quantization_config._object_type_qconfig_dict = \
+        OrderedDict(to_tuple_list(quantization_config.object_type_qconfigs))
+    quantization_config._module_name_qconfig_dict = \
+        OrderedDict(to_tuple_list(quantization_config.module_name_qconfigs))
+    quantization_config._module_name_regex_qconfig_dict = \
+        OrderedDict(to_tuple_list(quantization_config.module_name_regex_qconfigs))
 
 
 def update_qconfig_for_qat(
@@ -112,7 +109,7 @@ def update_qconfig_for_qat(
     """
     all_qat_mappings = get_combined_dict(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
-    object_type_dict = quantization_config.object_type_qconfigs
+    object_type_dict = quantization_config._object_type_qconfig_dict
     new_object_type_dict = object_type_dict.copy()
     for k, v in new_object_type_dict.items():
         if k in all_qat_mappings:

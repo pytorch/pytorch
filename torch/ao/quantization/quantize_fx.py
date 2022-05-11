@@ -19,7 +19,7 @@ from .fx.qconfig_utils import (
 )
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
-from .quantization_config import PrepareQuantizationConfig, ConvertQuantizationConfig
+from .quantization_config import ConvertQuantizationConfig, PrepareQuantizationConfig
 
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:

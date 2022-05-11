@@ -1,9 +1,8 @@
 from __future__ import annotations
+from collections import OrderedDict
 from dataclasses import astuple, dataclass
-import pprint
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Type, TypeVar, Union
 
-import torch
 from .qconfig import QConfigAny
 
 
@@ -17,7 +16,11 @@ MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY = "module_name_object_type_order"
 
 @dataclass
 class QConfigObjectTypeEntry:
-    object_type: Callable
+    # object_type can be
+    # 1. module type (call_module)
+    # 2. function (call_function)
+    # 3. string (call_method)
+    object_type: Union[Callable, str]
     qconfig: QConfigAny
 
 
@@ -41,6 +44,9 @@ class QConfigModuleNameObjectTypeOrderEntry:
     qconfig: QConfigAny
 
 
+_T = TypeVar("_T", bound="QuantizationConfigBase")
+
+
 class QuantizationConfigBase:
     """
     TODO: write this
@@ -54,28 +60,33 @@ class QuantizationConfigBase:
         self.module_name_qconfigs: List[QConfigModuleNameEntry] = []
         self.module_name_object_type_order_qconfigs: List[QConfigModuleNameObjectTypeOrderEntry] = []
 
-    def set_global(self, global_qconfig: QConfigAny) -> QuantizationConfigBase:
+        # For mypy warnings
+        self._object_type_qconfig_dict: OrderedDict[Union[Callable, str], QConfigAny] = OrderedDict()
+        self._module_name_regex_qconfig_dict: OrderedDict[str, QConfigAny] = OrderedDict()
+        self._module_name_qconfig_dict: OrderedDict[str, QConfigAny] = OrderedDict()
+
+    def set_global(self: _T, global_qconfig: QConfigAny) -> _T:
         """
         TODO: write this
         """
         self.global_qconfig = global_qconfig
         return self
 
-    def set_object_type(self, object_type: Callable, qconfig: QConfigAny) -> QuantizationConfigBase:
+    def set_object_type(self: _T, object_type: Callable, qconfig: QConfigAny) -> _T:
         """
         TODO: write this
         """
         self.object_type_qconfigs.append(QConfigObjectTypeEntry(object_type, qconfig))
         return self
 
-    def set_module_name_regex(self, module_name_regex: str, qconfig: QConfigAny) -> QuantizationConfigBase:
+    def set_module_name_regex(self: _T, module_name_regex: str, qconfig: QConfigAny) -> _T:
         """
         TODO: write this
         """
         self.module_name_regex_qconfigs.append(QConfigModuleNameRegexEntry(module_name_regex, qconfig))
         return self
 
-    def set_module_name(self, module_name: str, qconfig: QConfigAny) -> QuantizationConfigBase:
+    def set_module_name(self: _T, module_name: str, qconfig: QConfigAny) -> _T:
         """
         TODO: write this
         """
@@ -83,12 +94,11 @@ class QuantizationConfigBase:
         return self
 
     def set_module_name_object_type_order(
-            self,
+            self: _T,
             module_name: str,
             object_type: Callable,
             index: int,
-            qconfig: QConfigAny,
-        ) -> QuantizationConfigBase:
+            qconfig: QConfigAny) -> _T:
         """
         TODO: write this
         """
@@ -111,7 +121,7 @@ class QuantizationConfigBase:
         }
 
     @classmethod
-    def from_dict(cls, qconfig_dict: Dict[str, Any]) -> QuantizationConfigBase:
+    def from_dict(cls: Type[_T], qconfig_dict: Dict[str, Any]) -> _T:
         """
         TODO: write this
         """
@@ -140,4 +150,3 @@ class ConvertQuantizationConfig(QuantizationConfigBase):
     TODO: write this
     """
     pass
-

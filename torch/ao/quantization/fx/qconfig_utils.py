@@ -1,5 +1,5 @@
 import torch
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import dataclasses
 from typing import Callable, Any, Dict, Tuple, Set, Optional, List
 from torch.ao.quantization import QConfig
@@ -57,8 +57,8 @@ def update_qconfig_for_fusion(model: GraphModule, quantization_config: Quantizat
     Update the QuantizationConfigBase to account for fused modules such as LinearReLU.
     This assumes the QuantizationConfigBase's attributes have already been converted to OrderedDicts.
     """
-    object_type_dict = quantization_config.object_type_qconfigs
-    if object_type_dict is None:
+    object_type_dict = quantization_config._object_type_qconfig_dict
+    if len(object_type_dict) == 0:
         return quantization_config
 
     modules = dict(model.named_modules())
@@ -253,15 +253,15 @@ def compare_prepare_convert_quantization_configs(
     """
     assert qconfig_equals(prepare_quantization_config.global_qconfig, convert_quantization_config.global_qconfig), \
         "Expected global qconfigs to be the same in the prepare and convert quantization configs"
-    prepare_dicts = [
-        prepare_quantization_config.object_type_qconfigs,
-        prepare_quantization_config.module_name_qconfigs,
-        prepare_quantization_config.module_name_regex_qconfigs,
+    prepare_dicts: List[OrderedDict] = [
+        prepare_quantization_config._object_type_qconfig_dict,
+        prepare_quantization_config._module_name_qconfig_dict,
+        prepare_quantization_config._module_name_regex_qconfig_dict,
     ]
-    convert_dicts = [
-        convert_quantization_config.object_type_qconfigs,
-        convert_quantization_config.module_name_qconfigs,
-        convert_quantization_config.module_name_regex_qconfigs,
+    convert_dicts: List[OrderedDict] = [
+        convert_quantization_config._object_type_qconfig_dict,
+        convert_quantization_config._module_name_qconfig_dict,
+        convert_quantization_config._module_name_regex_qconfig_dict,
     ]
     dict_names = [OBJECT_TYPE_DICT_KEY, MODULE_NAME_DICT_KEY, MODULE_NAME_REGEX_DICT_KEY]
     for i in range(len(prepare_dicts)):
@@ -271,7 +271,7 @@ def compare_prepare_convert_quantization_configs(
             assert convert_dicts[i][name] is None \
                 or qconfig_equals(prepare_dicts[i][name], convert_dicts[i][name]), \
                 "Expected ConvertQuantizationConfig to have the same qconfig as prepare for key {} {}; \
-                prepare qconfig: {}; convert qconfig {}".format(k, name, prepare_dicts[i][name], convert_dicts[i][name])
+                prepare: {}; convert: {}".format(dict_names[i], name, prepare_dicts[i][name], convert_dicts[i][name])
 
 def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[Dict[str, Any]]):
     for dtype_config in dtype_configs:
