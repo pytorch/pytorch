@@ -1206,9 +1206,10 @@ def stack(tensors: List[Tensor], dim: int = 0) -> Tensor:
 
 
 def _squeeze_multiple(self, dims):
-    ndims = self.dim()
-    for idx in range(ndims - 1, -1, -1):
-        if idx in dims:
+    ndim = self.dim()
+    wrapped_dims = utils.canonicalize_dims(ndim, dims)
+    for idx in range(ndim - 1, -1, -1):
+        if idx in wrapped_dims:
             self = self.squeeze(idx)
     return self
 
