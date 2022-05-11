@@ -594,17 +594,13 @@ PyObject *THPModule_setBenchmarkLimitCuDNN(PyObject *_unused, PyObject *arg)
           "but got %s", THPUtils_typename(arg));
   auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
 #if defined(USE_ROCM)
-  if (benchmark_limit != 0 && benchmark_limit != 10) {
-    TORCH_WARN_ONCE("cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
-  }
+  TORCH_WARN_ONCE("cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
 #endif
 #if AT_CUDNN_ENABLED()
 #if HAS_CUDNN_V8()
   at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
 #else
-  if (benchmark_limit != 0 && benchmark_limit != 10) {
-    TORCH_WARN_ONCE("cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
-  }
+  TORCH_WARN_ONCE("cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
 #endif
 #endif
   Py_RETURN_NONE;
