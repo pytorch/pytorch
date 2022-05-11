@@ -3,7 +3,7 @@ from typing import Set
 import traceback
 import torch
 
-__all__ = ['Library']
+__all__ = ['Library', 'impl']
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -72,3 +72,10 @@ class Library:
         for key in self._op_impls:
             _impls.remove(key)
         del self.m
+
+# decorator to register python functions for library ops
+# Note: this decorator API should remain consistent with `Library.impl` API
+def impl(lib, name, dispatch_key=''):
+    def wrap(f):
+        lib.impl(name, f, dispatch_key)
+    return wrap
