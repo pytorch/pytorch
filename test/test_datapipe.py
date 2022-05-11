@@ -2082,6 +2082,23 @@ class TestGraph(TestCase):
         expected: Dict[Any, Any] = {iter_dp: {source_map_dp: {}}}
         self.assertEqual(expected, graph)
 
+def unbatch(x):
+    return x[0]
+
+class TestSerialization(TestCase):
+    @skipIfNoDill
+    def test_spawn_lambdas_iter(self):
+        idp = dp.iter.IterableWrapper(range(3)).map(lambda x: x + 1)
+        dl = DataLoader(idp, num_workers=2, shuffle=True, multiprocessing_context='spawn', collate_fn = unbatch, batch_size = 1)
+        result = list(dl)
+        self.assertEquals([1, 1, 2, 2, 3, 3], sorted(result))
+
+    @skipIfNoDill
+    def test_spawn_lambdas_map(self):
+        mdp = dp.map.SequenceWrapper(range(6)).map(lambda x: x + 1)
+        dl = DataLoader(mdp, num_workers=2, shuffle=True, multiprocessing_context='spawn', collate_fn = unbatch, batch_size = 1)
+        result = list(dl)
+        self.assertEquals([1, 2, 3, 4, 5, 6], sorted(result))
 
 class TestCircularSerialization(TestCase):
     class CustomIterDataPipe(IterDataPipe):
