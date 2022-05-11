@@ -211,6 +211,9 @@ Tensor& layer_norm_out(
   auto gamma = weight.expect_contiguous();
   auto beta = bias.expect_contiguous();
 
+  Tensor mean = at::empty({M}, X->options());
+  Tensor rstd = at::empty({M}, X->options());
+
   TORCH_CHECK(canCast(
       typeMetaToScalarType(input.dtype()),
       typeMetaToScalarType(output.dtype())));
@@ -232,8 +235,8 @@ Tensor& layer_norm_out(
         N,
         eps,
         &Y,
-        /*mean=*/nullptr,
-        /*rstd=*/nullptr);
+        &mean,
+        &rstd);
     resize_output(output, Y.sizes());
     output.copy_(std::move(Y));
   } else {
@@ -247,8 +250,8 @@ Tensor& layer_norm_out(
         N,
         eps,
         &output,
-        /*mean=*/nullptr,
-        /*rstd=*/nullptr);
+        &mean,
+        &rstd);
   }
 
   return output;
