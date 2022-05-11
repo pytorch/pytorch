@@ -29,8 +29,8 @@ __global__ void remove_padding_transform0213_2(
     const int batch_size) {
   const int batch_id = blockIdx.x;
   const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * gridDim.x;
-  const int grainsize = 16 * gridDim.x;
+  const int tid = threadIdx.x + grid_id * blockDim.x;
+  const int grainsize = 16 * blockDim.x;
   const int offset = offsets[batch_id];
   const int* sizes_i = output_sizes + batch_id * output_dim;
   const int numel_i = sizes_i[0] * sizes_i[1];
@@ -70,8 +70,8 @@ __global__ void remove_padding_2(
     const int batch_size) {
   const int batch_id = blockIdx.x;
   const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * gridDim.x;
-  const int grainsize = 16 * gridDim.x;
+  const int tid = threadIdx.x + grid_id * blockDim.x;
+  const int grainsize = 16 * blockDim.x;
   const int offset = offsets[batch_id];
   const int* sizes_i = output_sizes + batch_id * output_dim;
   const int numel_i = sizes_i[0] * sizes_i[1];
@@ -103,8 +103,8 @@ __global__ void remove_padding(
     const int batch_size) {
   const int batch_id = blockIdx.x;
   const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * gridDim.x;
-  const int grainsize = 16 * gridDim.x;
+  const int tid = threadIdx.x + grid_id * blockDim.x;
+  const int grainsize = 16 * blockDim.x;
   const int offset = offsets[batch_id];
   const int* sizes_i = output_sizes + batch_id * output_dim;
   const int numel_i = sizes_i[0] * sizes_i[1] * sizes_i[2];
@@ -239,8 +239,8 @@ __global__ void add_padding_1(
     const int batch_size) {
   const int batch_id = blockIdx.x;
   const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * gridDim.x;
-  const int grainsize = 16 * gridDim.x;
+  const int tid = threadIdx.x + grid_id * blockDim.x;
+  const int grainsize = 16 * blockDim.x;
   const int* sizes_i = input_sizes + batch_id * input_dim;
   const int batch_output_offset = batch_id * output_sizes_1;
   for (int ii = 0; ii < (output_sizes_1 / grainsize); ii++) {
@@ -278,8 +278,8 @@ __global__ void add_padding_2(
     const int batch_size) {
   const int batch_id = blockIdx.x;
   const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * gridDim.x;
-  const int grainsize = 16 * gridDim.x;
+  const int tid = threadIdx.x + grid_id * blockDim.x;
+  const int grainsize = 16 * blockDim.x;
   const int* sizes_i = input_sizes + batch_id * input_dim;
   const int output_offset = batch_id * output_sizes_1 * output_sizes_2;
   const int output_numel = output_sizes_1 * output_sizes_2;
@@ -323,8 +323,8 @@ __global__ void add_padding_3(
     const int batch_size) {
   const int batch_id = blockIdx.x;
   const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * gridDim.x;
-  const int grainsize = 16 * gridDim.x;
+  const int tid = threadIdx.x + grid_id * blockDim.x;
+  const int grainsize = 16 * blockDim.x;
   const int* sizes_i = input_sizes + batch_id * input_dim;
   const int output_offset =
       batch_id * output_sizes_1 * output_sizes_2 * output_sizes_3;
