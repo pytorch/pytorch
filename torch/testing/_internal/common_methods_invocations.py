@@ -9704,10 +9704,7 @@ op_db: List[OpInfo] = [
                    'TestCommon', 'test_reference_testing')],
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=SM53OrLater),
-               # FIXME: bfloat16 backward support likely depends on CUDA11+
-               #   and SM53+
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                # addbmm does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # https://github.com/pytorch/pytorch/issues/55907
@@ -9758,10 +9755,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=SM53OrLater),
-               # FIXME: bfloat16 backward support likely depends on CUDA11+
-               #   and SM53+
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
@@ -10040,11 +10034,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,
-           sample_inputs_func=sample_inputs_combinations,
-           skips=(
-               # Not composite compliant: performing in-place operation masked_scatter_.default
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           )),
+           sample_inputs_func=sample_inputs_combinations),
     OpInfo('cartesian_prod',
            op=torch.cartesian_prod,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -11755,9 +11745,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_masked_select,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            error_inputs_func=error_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
@@ -11794,7 +11781,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_matmul,
            decorators=[
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                # ROCm intermittently fails the test with standard atol/rtol
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
                             'TestCommon', 'test_noncontiguous_samples',
@@ -13110,8 +13097,6 @@ op_db: List[OpInfo] = [
            supports_expanded_weight=True,
            skips=(
                # Problem, needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            decorators=(
@@ -13126,8 +13111,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16,
                                            *[torch.bfloat16] if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
            skips=(
-               # FIXME: bfloat16 backward support likely depends on CUDA11+ and SM53+
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='cuda'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
            ),
            supports_forward_ad=False,
@@ -14273,7 +14256,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            decorators=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestMathBits', 'test_conj_view'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
@@ -15206,9 +15189,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_gather,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            ),
     OpInfo('index_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -15990,9 +15970,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_take_along_dim,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     ShapeFuncInfo('tile',
                   ref=np.tile,
