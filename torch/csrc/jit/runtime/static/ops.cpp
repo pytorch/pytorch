@@ -92,11 +92,11 @@ void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
 at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
-    at::IntArrayRef proposed_shape,
+    const at::DimVector& proposed_shape,
     bool infer_size) {
-  auto shape = infer_size
-      ? at::infer_size(proposed_shape, self.numel())
-      : std::vector<int64_t>(proposed_shape.begin(), proposed_shape.end());
+  const auto& shape = infer_size
+      ? at::infer_size_dv(proposed_shape, self.numel())
+      : proposed_shape;
   at::native::resize_(out, shape, c10::nullopt);
 
   auto self_contig = self.expect_contiguous();
@@ -126,11 +126,11 @@ at::Tensor& flatten_copy_out(
       "flatten() has invalid args: start_dim cannot come after end_dim");
 
   if (self.dim() == 0) {
-    return reshape_copy_out(out, self, {1}, false);
+    return reshape_copy_out(out, self, at::DimVector{1}, false);
   }
 
   if (start_dim == end_dim) {
-    auto shape = self.sizes().vec();
+    auto shape = at::DimVector{self.sizes()};
     return reshape_copy_out(out, self, shape, false);
   }
 
@@ -147,7 +147,7 @@ at::Tensor& flatten_copy_out(
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int64_t>());
 
-  std::vector<int64_t> shape;
+  at::DimVector shape;
   shape.reserve(self.dim() - end_dim + start_dim);
   for (const auto i : c10::irange(start_dim)) {
     shape.push_back(self.sizes()[i]);
@@ -604,6 +604,65 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
   };
 });
 
+#ifdef FBCODE_CAFFE2
+// Disable externally to avoid MSVC errors in open-source CI
+
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::clamp_nan_to_num,
+    static_runtime_clamp_nan_to_num,
+    [](Node* n) -> SROperator {
+      auto clamp_min_ival_opt = toIValue(n->input(1));
+      auto clamp_max_ival_opt = toIValue(n->input(2));
+      TORCH_CHECK(
+          clamp_min_ival_opt.has_value() && clamp_max_ival_opt.has_value());
+
+      auto clamp_min_opt = clamp_min_ival_opt->toOptional<at::Scalar>();
+      auto clamp_max_opt = clamp_max_ival_opt->toOptional<at::Scalar>();
+      TORCH_CHECK(clamp_min_opt.has_value() && clamp_max_opt.has_value());
+
+      return [te = createClampNanToNum(),
+              clamp_min = clamp_min_opt->to<float>(),
+              clamp_max =
+                  clamp_max_opt->to<float>()](ProcessedNode* p_node) mutable {
+        const auto& in0_t = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = create_empty_from(in0_t);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        auto in3_s = p_node->Input(3).toOptional<double>();
+
+        if (!te || !te->checkInput<float>(in0_t)) {
+          at::cpu::nan_to_num_out(
+              out_t,
+              at::cpu::clamp(in0_t, clamp_min, clamp_max),
+              in3_s,
+              c10::nullopt,
+              c10::nullopt);
+          return;
+        }
+        at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+
+        auto output_size = in0_t.numel();
+
+        // This might be UB if in3_s is absurdly large, but most implementations
+        // just turn it into `inf` in that case. The PyTorch core nan_to_num
+        // kernel just static_cast()s the limits to the destination type, so
+        // we'll ignore overflow issues here as well.
+        auto nan = in3_s.has_value() ? static_cast<float>(*in3_s) : 0.f;
+
+        te->call(
+            {out_t.data_ptr(),
+             in0_t.data_ptr(),
+             &clamp_min,
+             &clamp_max,
+             &nan,
+             &output_size});
+      };
+    });
+
+#endif
+
 REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor"))) {
@@ -623,9 +682,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       auto output_size = in0_t.numel();
       auto min = in1_s.has_value() ? in1_s->toFloat()
-                                   : std::numeric_limits<float>::lowest();
+                                   : -std::numeric_limits<float>::infinity();
       auto max = in2_s.has_value() ? in2_s->toFloat()
-                                   : std::numeric_limits<float>::max();
+                                   : std::numeric_limits<float>::infinity();
       te->call({out_t.data_ptr(), in0_t.data_ptr(), &min, &max, &output_size});
     };
   }
@@ -1911,12 +1970,12 @@ REGISTER_OPERATOR_FUNCTOR(
         const auto& in0_t = p_node->Input(0).toTensor();
         const auto in1_s = p_node->Input(1).toScalar();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::native::clamp_min(in0_t, in1_s);
+          p_node->Output(0) = at::cpu::clamp_min(in0_t, in1_s);
           return;
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        at::native::clamp_min_out(in0_t, in1_s, out_t);
+        at::cpu::clamp_min_out(out_t, in0_t, in1_s);
       };
     });
 

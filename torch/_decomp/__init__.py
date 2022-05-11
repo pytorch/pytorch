@@ -34,13 +34,17 @@ def register_decomposition(aten_op, registry=None):
             registry = decomposition_table
 
         def add_op_to_table(aten_op):
-            # Converts aten.foo to aten.foo.default
-            # Done so I can be lazy and not write default on all of these ops
-            if not isinstance(aten_op, torch._ops.OpOverload):
-                op_overload = aten_op.default
+            overloads = []
+            if isinstance(aten_op, torch._ops.OpOverload):
+                overloads.append(aten_op)
             else:
-                op_overload = aten_op
-            registry[op_overload] = f
+                assert isinstance(aten_op, torch._ops.OpOverloadPacket)
+                for ol in aten_op.overloads():
+                    overloads.append(getattr(aten_op, ol))
+            for op_overload in overloads:
+                if op_overload in registry:
+                    raise RuntimeError(f"duplicate registrations for {op_overload}")
+                registry[op_overload] = f
 
         # To handle allowing multiple aten_ops at once
         tree_map(add_op_to_table, aten_op)
@@ -77,3 +81,4 @@ def get_decompositions(
 
 # populate the table
 import torch._decomp.decompositions
+import torch._refs
