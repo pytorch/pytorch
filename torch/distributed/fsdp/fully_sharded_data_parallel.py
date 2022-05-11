@@ -462,13 +462,17 @@ class FullyShardedDataParallel(nn.Module):
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
             the returned FSDP root instance.
-            ``default_auto_wrap_policy`` written in ``torch.distributed.fsdp.wrap`` is
+            ``size_based_auto_wrap_policy`` written in ``torch.distributed.fsdp.wrap`` is
             an example of ``auto_wrap_policy`` callable, this policy wraps layers
-            with parameter sizes larger than 100M. Users can supply the customized
+            with the number of parameters larger than 100M. ``transformer_auto_wrap_policy``
+            written in ``torch.distributed.fsdp.wrap`` is an example of ``auto_wrap_policy``
+            callable for tranformer-like model architectures. Users can supply the customized
             ``auto_wrap_policy`` callable that should accept following arguments:
             ``module: nn.Module``, ``recurse: bool``, ``unwrapped_params: int``,
             extra customized arguments could be added to the customized
-            ``auto_wrap_policy`` callable as well.
+            ``auto_wrap_policy`` callable as well. It is a good practice to print out
+            the sharded model and check whether the sharded model is what
+            the application wants and then adjust accordingly.
 
             Example::
 
@@ -527,12 +531,12 @@ class FullyShardedDataParallel(nn.Module):
                 >>> module = MyModule(device="meta")
                 >>> def my_init_fn(module):
                 >>>     # responsible for initializing a module, such as with reset_parameters
-                >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=default_auto_wrap_policy)
+                >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=size_based_auto_wrap_policy)
                 >>> print(next(fsdp_model.parameters()).device) # current CUDA device
                 >>> # With torchdistX
                 >>> module = deferred_init.deferred_init(MyModule, device="cuda")
                 >>> # Will initialize via deferred_init.materialize_module().
-                >>> fsdp_model = FSDP(module, auto_wrap_policy=default_auto_wrap_policy)
+                >>> fsdp_model = FSDP(module, auto_wrap_policy=size_based_auto_wrap_policy)
 
     """
 
