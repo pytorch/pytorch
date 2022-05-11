@@ -10,3 +10,4 @@ self-hosted-runner:
     - windows.8xlarge.nvidia.gpu
     - bm-runner
     - linux.rocm.gpu
+    - macos-12
