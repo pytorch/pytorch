@@ -65,7 +65,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
         // don't register a library
         registrars_.emplace_back(
           c10::Dispatcher::singleton().registerLibrary(
-            *ns_, debugString(file_, line_)
+            *ns_, debugString(file_.c_str(), line_)
           )
         );
         // fallthrough
@@ -128,7 +128,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
   registrars_.emplace_back(
     c10::Dispatcher::singleton().registerDef(
       std::move(schema),
-      debugString(file_, line_)
+      debugString(file_.c_str(), line_)
     )
   );
   return *this;
@@ -166,7 +166,7 @@ Library& Library::_def(c10::either<c10::OperatorName, c10::FunctionSchema>&& nam
       // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(f.cpp_signature_),
       std::move(f.schema_),
-      debugString(std::move(f.debug_), file_, line_)
+      debugString(std::move(f.debug_), file_.c_str(), line_)
     )
   );
   return *this;
@@ -212,7 +212,7 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
       // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(f.cpp_signature_),
       std::move(f.schema_),
-      debugString(std::move(f.debug_), file_, line_)
+      debugString(std::move(f.debug_), file_.c_str(), line_)
     )
   );
   return *this;
@@ -242,7 +242,7 @@ Library& Library::_fallback(CppFunction&& f) & {
       c10::Dispatcher::singleton().registerFallback(
         k,
         std::move(f.func_),
-        debugString(std::move(f.debug_), file_, line_)
+        debugString(std::move(f.debug_), file_.c_str(), line_)
       )
     );
   }
