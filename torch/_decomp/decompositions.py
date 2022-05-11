@@ -660,9 +660,9 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train:
         bool_mask = torch.rand_like(input) < p
         res = bool_mask * input * float(1.0 / p)
-        return [res, bool_mask]
+        return (res, bool_mask)
     else:
-        return [input, torch.ones_like(input)]
+        return (input, torch.ones_like(input, dtype=torch.bool))
 
 
 # TODO: Correct the type promotion semantics
@@ -1005,7 +1005,7 @@ def clamp_max(self: Tensor, max: float):
 def _fused_dropout_decomposition(input, p, generator=None):
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
-    return [res, mask]
+    return (res, mask)
 
 
 # TODO: these logical decomps are buggy for complex inputs
@@ -1205,9 +1205,9 @@ def stack(tensors: List[Tensor], dim: int = 0) -> Tensor:
         return torch.cat(get_stack_inputs(tensors, wrapped_dim), dim)
 
 
-def _squeeze_multiple(self, dims):
+def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
-    wrapped_dims = utils.canonicalize_dims(ndim, dims)
+    wrapped_dims: List[int] = utils.canonicalize_dims(ndim, dims)
     for idx in range(ndim - 1, -1, -1):
         if idx in wrapped_dims:
             self = self.squeeze(idx)
