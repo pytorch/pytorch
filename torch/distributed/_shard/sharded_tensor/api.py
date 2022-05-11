@@ -1020,6 +1020,9 @@ class ShardedTensor(object):
     def __getitem__(self, key):
         return handle_torch_function(torch.Tensor.__getitem__, (self, key), self, key)
 
+    def __deepcopy__(self, memo):
+        return handle_torch_function(torch.Tensor.__deepcopy__, (self, memo), self, memo)
+
     @dataclass
     class ProcessGroupState:
         """
