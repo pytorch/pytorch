@@ -89,14 +89,12 @@ def convert_lists_to_ordered_dicts(quantization_config: QuantizationConfigBase):
     """
     Convert lists in a QuantizationConfigBase to OrderedDicts.
     """
-    def to_tuple_list(dataclass_list):
-        return [dataclasses.astuple(d) for d in dataclass_list]
-    quantization_config._object_type_qconfig_dict = \
-        OrderedDict(to_tuple_list(quantization_config.object_type_qconfigs))
-    quantization_config._module_name_qconfig_dict = \
-        OrderedDict(to_tuple_list(quantization_config.module_name_qconfigs))
-    quantization_config._module_name_regex_qconfig_dict = \
-        OrderedDict(to_tuple_list(quantization_config.module_name_regex_qconfigs))
+    quantization_config._object_type_qconfig_dict = OrderedDict(
+        [(e.object_type, e.qconfig) for e in quantization_config.object_type_qconfigs])
+    quantization_config._module_name_qconfig_dict = OrderedDict(
+        [(e.module_name, e.qconfig) for e in quantization_config.module_name_qconfigs])
+    quantization_config._module_name_regex_qconfig_dict = OrderedDict(
+        [(e.module_name_regex, e.qconfig) for e in quantization_config.module_name_regex_qconfigs])
 
 
 def update_qconfig_for_qat(
