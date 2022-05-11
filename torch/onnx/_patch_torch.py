@@ -1,4 +1,4 @@
-"""Side effects that patch the PyTorch Graph for manipulating it."""
+"""Importing this patches torch._C classes to add ONNX conveniences."""
 import numbers
 import re
 from typing import Iterable, Tuple, Union

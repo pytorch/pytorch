@@ -1298,7 +1298,7 @@ def args_have_same_dtype(args):
     return has_same_dtype
 
 
-# TODO(justinchuby): Deprecate the setters for flags
+# TODO(justinchuby): Delete these setters, users should set the vars directly.
 def _set_opset_version(opset_version: int):
     _FLAGS.export_onnx_opset_version = opset_version
 
