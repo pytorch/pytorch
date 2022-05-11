@@ -1,18 +1,8 @@
-GLOG_SRCS = [
-    'src/demangle.cc',
-    'src/vlog_is_on.cc',
-    'src/symbolize.cc',
-    'src/raw_logging.cc',
-    'src/logging.cc',
-    'src/signalhandler.cc',
-    'src/utilities.cc',
-]
-
 GLOG_CONFIG_HEADERS = [
-    'vlog_is_on',
-    'stl_logging',
-    'raw_logging',
-    'logging',
+    'vlog_is_on.h',
+    'stl_logging.h',
+    'raw_logging.h',
+    'logging.h',
 ]
 
 GLOG_SED_COMMAND = " ".join([
@@ -37,8 +27,17 @@ def define_glog():
 
     native.cxx_library(
         name = "glog",
-        srcs = [":glog_srcs[{}]".format(src) for src in GLOG_SRCS],
-        # headers = [":glog_srcs[config.h]"],
+        srcs = [
+            'glog/src/demangle.cc',
+            'glog/src/vlog_is_on.cc',
+            'glog/src/symbolize.cc',
+            'glog/src/raw_logging.cc',
+            'glog/src/logging.cc',
+            'glog/src/signalhandler.cc',
+            'glog/src/utilities.cc',
+        ],
+        headers = [":glog_{}".format(header) for header in GLOG_CONFIG_HEADERS],
+        header_namespace = "glog",
         compiler_flags = [
             '-Wno-sign-compare',
             '-Wno-unused-function',
@@ -68,44 +67,33 @@ def define_glog():
             # For logging.cc.
             '-DHAVE_PREAD',
             '-DHAVE___ATTRIBUTE__',
-            '-I$(location :glog_headers)/../',
         ],
-        deps = [":glog_http_archive"],
+        deps = [":glog_config"],
         soname = "libglog.$(ext)",
         visibility = ["PUBLIC"],
     )
 
-    native.genrule(
-        name = "glog_srcs",
-        outs = {src: [src] for src in GLOG_SRCS},
-        cmd = " && ".join([
-            "rsync -a $(location :glog_http_archive)/ $OUT",
-            "awk '{ gsub(/^#cmakedefine/, \"//cmakedefine\"); print; }' $(location :glog_http_archive)/src/config.h.cmake.in > $OUT/src/config.h",
-            "awk '{ gsub(/^#cmakedefine/, \"//cmakedefine\"); print; }' $(location :glog_http_archive)/src/config.h.cmake.in > $OUT/src/base/config.h",
-        ]),
-        # reuqired for internal buck but not oss buck
-        # default_outs = ["."],
+    native.cxx_library(
+        name = "glog_config",
+        header_namespace = "",
+        exported_headers = {
+            "config.h": ":glog_config.h",
+            "glog/log_severity.h" : "glog/src/glog/log_severity.h",
+        }
     )
 
     native.genrule(
-        name = "glog_headers",
-        out = "glog",
-        cmd = " && ".join([
-            "rsync -a $(location :glog_http_archive)/src/glog/log_severity.h $OUT/",
-        ] + [
-            "{} $(location :glog_http_archive)/src/glog/{}.h.in > $OUT/{}.h".format(GLOG_SED_COMMAND, f, f) for f in GLOG_CONFIG_HEADERS
-            ],
-        ),
-        # reuqired for internal buck but not oss buck
-        # default_outs = ["."],
+        name = "glog_config.h",
+        srcs = ['glog/src/config.h.cmake.in'],
+        out = "config.h",
+        cmd = "awk '{ gsub(/^#cmakedefine/, \"//cmakedefine\"); print; }' $SRCS > $OUT",
     )
 
-    native.http_archive(
-        name = "glog_http_archive",
-        strip_prefix = "glog-0.4.0",
-        sha256 = "f28359aeba12f30d73d9e4711ef356dc842886968112162bc73002645139c39c",
-        urls = [
-            "https://github.com/google/glog/archive/v0.4.0.tar.gz",
-        ],
-        out = "",
-    )
+    [
+        native.genrule(
+            name = "glog_{}".format(header),
+            out = header,
+            srcs = ['glog/src/glog/{}.in'.format(header)],
+            cmd = "{} $SRCS > $OUT".format(GLOG_SED_COMMAND),
+        ) for header in GLOG_CONFIG_HEADERS
+    ]

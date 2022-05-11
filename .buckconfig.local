@@ -13,6 +13,3 @@ name = BUILD.buck
 
 [project]
   default_flavors_mode=all
-
-[build]
-  threads = 1
