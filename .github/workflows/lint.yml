@@ -11,7 +11,7 @@ on:
 
 jobs:
   lintrunner:
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.16x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
