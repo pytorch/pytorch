@@ -11,7 +11,7 @@ import json
 import os
 from hashlib import sha256
 
-from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, GitHubPR, MergeRule
+from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, GitHubPR, MergeRule, MandatoryChecksMissingError
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import cast, Any, List, Optional
 from unittest import TestCase, main, mock
@@ -170,7 +170,7 @@ class TestGitHubPR(TestCase):
         """
         pr = GitHubPR("pytorch", "pytorch", 76118)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.assertRaisesRegex(RuntimeError, ".*has not been run.*", lambda: find_matching_merge_rule(pr, repo))
+        self.assertRaisesRegex(MandatoryChecksMissingError, ".*are not yet run.*", lambda: find_matching_merge_rule(pr, repo))
 
 
 if __name__ == "__main__":

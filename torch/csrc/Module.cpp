@@ -393,6 +393,27 @@ PyObject *THPModule_allowTF32CuDNN(PyObject *_unused, PyObject *noargs)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setFloat32MatmulPrecision(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(THPUtils_checkString(arg), "set_float32_matmul_precision expects a str, "
+          "but got %s", THPUtils_typename(arg));
+  std::string s = THPUtils_unpackString(arg);
+  at::globalContext().setFloat32MatmulPrecision(s);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_float32MatmulPrecision(PyObject *_unused, PyObject *noargs)
+{
+  std::string s = "highest";
+  auto p = at::globalContext().float32MatmulPrecision();
+  if (p == at::Float32MatmulPrecision::HIGH) {
+    s = "high";
+  } else if (p == at::Float32MatmulPrecision::MEDIUM) {
+    s = "medium";
+  }
+  return THPUtils_packString(s);
+}
+
 PyObject *THPModule_setUserEnabledCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_enabled_cudnn expects a bool, "
@@ -686,6 +707,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_warnAlways", THPModule_setWarnAlways, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
+  {"_get_float32_matmul_precision", THPModule_float32MatmulPrecision, METH_NOARGS,     nullptr},
+  {"_set_float32_matmul_precision", THPModule_setFloat32MatmulPrecision, METH_O,  nullptr},
   {"_get_cublas_allow_fp16_reduced_precision_reduction", THPModule_allowFP16ReductionCuBLAS, METH_NOARGS, nullptr},
   {"_set_cublas_allow_fp16_reduced_precision_reduction", THPModule_setAllowFP16ReductionCuBLAS, METH_O, nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},

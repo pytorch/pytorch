@@ -18,7 +18,7 @@ from .fx.qconfig_utils import (
 )
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
-
+from .quantization_types import ExampleInputs
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
     if not isinstance(model, GraphModule):
@@ -178,7 +178,7 @@ def _prepare_fx(
     model: torch.nn.Module,
     qconfig_dict: Any,
     is_qat: bool,
-    example_inputs: Tuple[Any],
+    example_inputs: ExampleInputs,
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
@@ -264,7 +264,7 @@ def _prepare_standalone_module_fx(
     model: torch.nn.Module,
     qconfig_dict: Any,
     is_qat: bool,
-    example_inputs: Tuple[Any],
+    example_inputs: ExampleInputs,
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
 ) -> GraphModule:
@@ -344,7 +344,7 @@ def fuse_fx(
 def prepare_fx(
     model: torch.nn.Module,
     qconfig_dict: Any,
-    example_inputs: Tuple[Any],
+    example_inputs: ExampleInputs,
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
@@ -507,7 +507,7 @@ def prepare_fx(
 def prepare_qat_fx(
     model: torch.nn.Module,
     qconfig_dict: Any,
-    example_inputs: Tuple[Any],
+    example_inputs: ExampleInputs,
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
 ) -> ObservedGraphModule:

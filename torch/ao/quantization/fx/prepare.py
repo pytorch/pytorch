@@ -34,7 +34,8 @@ from .quantization_patterns import (
 
 from torch.ao.quantization.quantization_types import (
     Pattern,
-    NodePattern
+    NodePattern,
+    ExampleInputs,
 )
 
 from ._equalize import (
@@ -1353,7 +1354,7 @@ def prepare(
         qconfig_dict: Any,
         is_qat: bool,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        example_inputs: Tuple[Any],
+        example_inputs: ExampleInputs,
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
         equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
