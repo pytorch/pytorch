@@ -9,15 +9,20 @@ on:
       - release/*
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash -e -l {0}
+
 jobs:
   lintrunner:
     runs-on: linux.2xlarge
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
         with:
+          auto-update-conda: true
           python-version: 3.8
-          architecture: x64
+          activate-environment: build
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
