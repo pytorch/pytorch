@@ -1249,8 +1249,13 @@ class {test_classname}(torch.nn.Module):
                 self.register_buffer("attr2", torch.randn(2))
                 self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
 
+                # Test modules with numeric names are valid
+                self.add_module("0", torch.nn.ReLU())
+
+
             def forward(self, x):
-                return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
+                relu = self.get_submodule("0")
+                return relu(self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x)))
 
         mod = symbolic_trace(Test())
         module_name = "Foo"
