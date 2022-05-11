@@ -12,7 +12,7 @@ from torch._C import OptionalType
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx.flags import _FLAGS
+from torch.onnx._globals import _FLAGS
 
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!

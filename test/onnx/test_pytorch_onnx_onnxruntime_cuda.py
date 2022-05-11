@@ -15,7 +15,7 @@ from test_pytorch_onnx_onnxruntime import TestONNXRuntime
 
 import torch
 from torch.cuda.amp import autocast
-from torch.onnx.flags import _FLAGS
+from torch.onnx._globals import _FLAGS
 
 
 class TestONNXRuntime_cuda(unittest.TestCase):

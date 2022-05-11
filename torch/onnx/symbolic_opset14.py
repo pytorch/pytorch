@@ -4,7 +4,7 @@
 # This file exports ONNX ops for opset 14
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.flags import _FLAGS
+from torch.onnx._globals import _FLAGS
 from torch.onnx.symbolic_helper import parse_args
 
 # Note [ONNX operators that are added/updated in opset 14]

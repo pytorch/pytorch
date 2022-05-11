@@ -25,7 +25,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
     symbolic_registry,
 )
-from torch.onnx.flags import _FLAGS
+from torch.onnx._globals import _FLAGS
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False

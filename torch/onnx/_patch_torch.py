@@ -4,7 +4,7 @@ import re
 from typing import Iterable, Tuple, Union
 
 import torch
-from torch.onnx.flags import _FLAGS
+from torch.onnx._globals import _FLAGS
 
 
 def _graph_op(

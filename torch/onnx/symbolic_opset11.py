@@ -8,7 +8,7 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.utils
 from torch.nn.modules.utils import _pair, _single, _triple
-from torch.onnx.flags import _FLAGS
+from torch.onnx._globals import _FLAGS
 from torch.onnx.symbolic_helper import (
     ScalarType,
     _is_tensor_list,

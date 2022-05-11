@@ -242,7 +242,7 @@ void NodeToONNX(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     std::unordered_map<Value*, Value*>& env) {
   py::object onnx = py::module::import("torch.onnx");
-  py::object onnx_flags = py::module::import("torch.onnx.flags");
+  py::object onnx_globals = py::module::import("torch.onnx._globals");
   py::object onnx_registry = py::module::import("torch.onnx.symbolic_registry");
 
   // Setup all the lambda helper functions.
@@ -274,7 +274,7 @@ void NodeToONNX(
     // For const node, it does not need params_dict info, so set it to {}.
     const ParamMap empty_params_dict = {};
     auto opset_version = py::cast<int>(
-        onnx_flags.attr("_FLAGS").attr("export_onnx_opset_version"));
+        onnx_globals.attr("_FLAGS").attr("export_onnx_opset_version"));
     for (const auto i : c10::irange(num_old_outputs)) {
       auto old = old_outputs[i];
       if (outputs[i]) {
@@ -436,7 +436,7 @@ void NodeToONNX(
     }
 
     py::object opset_version =
-        onnx_flags.attr("_FLAGS").attr("export_onnx_opset_version");
+        onnx_globals.attr("_FLAGS").attr("export_onnx_opset_version");
     py::object is_registered_op = onnx_registry.attr("is_registered_op")(
         "PythonOp", "prim", opset_version);
     if (!py::hasattr(pyobj, "symbolic") &&
