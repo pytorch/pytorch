@@ -7,6 +7,7 @@ import contextlib
 import ctypes
 import gc
 import io
+import os
 import pickle
 import queue
 import sys
@@ -573,6 +574,9 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
+    @unittest.skipIf('TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and
+                        int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE']) == True,
+                     'skipping allow_tf32 test as TORCH_ALLOW_TF32_CUBLAS_OVERRIDE is set')
     def test_cublas_allow_tf32_get_set(self):
         orig = torch.backends.cuda.matmul.allow_tf32
         self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
@@ -582,14 +586,20 @@ class TestCuda(TestCase):
 
     def test_float32_matmul_precision_get_set(self):
         self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
-        self.assertFalse(torch.backends.cuda.matmul.allow_tf32, False)
+        skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
+            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE']) == True
+        print(skip_tf32_cublas) 
+        if not skip_tf32_cublas:
+            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
         for p in ('medium', 'high'):
             torch.set_float32_matmul_precision(p)
             self.assertEqual(torch.get_float32_matmul_precision(), p)
-            self.assertTrue(torch.backends.cuda.matmul.allow_tf32, True)
+            if not skip_tf32_cublas:
+                self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
         torch.set_float32_matmul_precision('highest')
         self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
-        self.assertFalse(torch.backends.cuda.matmul.allow_tf32, False)
+        if not skip_tf32_cublas:
+            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
 
     def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
         orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
