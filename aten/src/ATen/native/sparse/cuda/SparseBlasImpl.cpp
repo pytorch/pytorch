@@ -143,7 +143,7 @@ void block_sparse_triangular_solve_vec(
       "PyTorch with ROCm 4.5.0+. ",
       "Please use PyTorch built with newer ROCm version.");
 #else
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseBsr);
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
   // blocks are expected to be square
@@ -222,6 +222,15 @@ void block_sparse_triangular_solve_vec(
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
 
+        if (!unitriangular) {
+          int first_zero_diag_idx = -1;
+          cusparseStatus_t status = cusparseXbsrsv2_zeroPivot(handle, info.descriptor(), &first_zero_diag_idx);
+          if (status == CUSPARSE_STATUS_ZERO_PIVOT) {
+            X_->fill_(NAN);
+            return;
+          }
+        }
+
         at::cuda::sparse::bsrsv2_solve(
             handle,
             block_layout,
@@ -262,7 +271,7 @@ void block_sparse_triangular_solve_mat(
       "PyTorch with ROCm 4.5.0+. ",
       "Please use PyTorch built with newer ROCm version.");
 #else
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseBsr);
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
   // blocks are expected to be square
@@ -1127,7 +1136,7 @@ void triangular_solve_out_sparse_csr(
     X.fill_(NAN);
     return;
   }
-  if (A.values().dim() == 3 && A.values().size(-1) > 1) {
+  if (A.layout() == kSparseBsr) {
     if (B.size(-1) == 1) {
       return block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular);
     } else {
