@@ -361,19 +361,19 @@ static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min
 }
 
 static void clamp_max_kernel_impl(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
+  if (iter.common_dtype() == ScalarType::Bool) {
     cpu_kernel(iter,
       [](bool a, bool b) -> bool {
         return a && b;
       });
-  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
+  } else if (isIntegralType(iter.common_dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "minimum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::minimum(a, b); });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "minimum_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "minimum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
           if (a != a || b != b) {
@@ -402,19 +402,19 @@ static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) 
 }
 
 static void clamp_min_kernel_impl(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
+  if (iter.common_dtype() == ScalarType::Bool) {
     cpu_kernel(iter,
       [](bool a, bool b) -> bool {
         return a || b;
       });
-  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
+  } else if (isIntegralType(iter.common_dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "maximum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return at::vec::maximum(a, b); });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "maximum_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "maximum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
           if (a != a || b != b) {
