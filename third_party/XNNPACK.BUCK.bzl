@@ -1,12 +1,11 @@
-# THIS FILE IS GENERATED
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 
-def define_xnnpack_targets():
+def define_xnnpack():
 
     native.cxx_library(
         name = "XNNPACK",
         srcs = ['XNNPACK/src/allocator.c', 'XNNPACK/src/init.c', 'XNNPACK/src/memory-planner.c', 'XNNPACK/src/operator-delete.c', 'XNNPACK/src/runtime.c', 'XNNPACK/src/subgraph.c', 'XNNPACK/src/tensor.c', 'XNNPACK/src/datatype-strings.c', 'XNNPACK/src/operator-strings.c', 'XNNPACK/src/subgraph-strings.c'],
-        deps = [':operators', ':subgraph', ':tables', ':ukernels_scalar', '//third_party:cpuinfo', '//third_party:pthreadpool', ':arm_lib', ':x86_and_x86_64_lib'],
+        deps = [':operators', ':subgraph', ':tables', ':ukernels_scalar', '//third_party:cpuinfo', '//third_party:pthreadpool', '//third_party:pthreadpool_header', ':arm_lib', ':x86_and_x86_64_lib'],
         exported_deps = [],
         compiler_flags = ['-w'],
         preferred_linkage = "static",

@@ -1,6 +1,6 @@
 """Provides utility macros for working with globs."""
 
-load(":paths.bzl", "paths")
+load("@bazel_skylib//lib:paths.bzl", "paths")
 
 def subdir_glob(glob_specs, exclude = None, prefix = ""):
     """Returns a dict of sub-directory relative paths to full paths.

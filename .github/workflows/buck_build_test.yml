@@ -63,13 +63,11 @@ jobs:
           wget https://github.com/facebook/buck/releases/download/v2021.01.12.01/buck.2021.01.12.01_all.deb
           sudo apt install ./buck.2021.01.12.01_all.deb
 
-      - name: Code Generation
-        run: |
-          cd third_party
-          python generate-xnnpack-wrappers.py
-          cd ..
-
-      - name: Build Buck target
+      - name: Download bazel-skyli and Generate wrappers
         run: |
           echo -e "" > .buckconfig
-          buck build --config-file oss.buckconfig c10:c10 third_party: aten/src/ATen/native/quantized/cpu/qnnpack: --keep-going
+          sh scripts/buck_setup.sh
+      - name: Build Buck target
+        run: |
+
+          buck build //... --keep-going

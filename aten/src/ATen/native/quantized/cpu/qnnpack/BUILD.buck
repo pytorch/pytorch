@@ -5,7 +5,7 @@ cxx_library(
     srcs = ['src/add.c', 'src/average-pooling.c', 'src/channel-shuffle.c', 'src/clamp.c', 'src/conv-prepack.cc', 'src/conv-run.cc', 'src/convolution.c', 'src/deconv-run.cc', 'src/deconvolution.c', 'src/fc-dynamic-run.cc', 'src/fc-prepack.cc', 'src/fc-run.cc', 'src/fully-connected.c', 'src/fully-connected-sparse.c', 'src/global-average-pooling.c', 'src/hardsigmoid.c', 'src/hardswish.c', 'src/indirection.c', 'src/init.c', 'src/leaky-relu.c', 'src/max-pooling.c', 'src/operator-delete.c', 'src/operator-run.c', 'src/pack_block_sparse.cc', 'src/sigmoid.c', 'src/softargmax.c', 'src/tanh.c'],
     deps = [':qnnp_interface', ':ukernels_asm', ':ukernels_neon', ':ukernels_psimd', ':ukernels_scalar', ':ukernels_sse2', ':ukernels_sse41', ':ukernels_ssse3', '//third_party:cpuinfo', '//third_party:FP16', '//third_party:FXdiv'],
     exported_deps = ['//third_party:cpuinfo'],
-    compiler_flags = ['-O2', '-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION'],
+    compiler_flags = ['-O2', '-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION', '-Wno-deprecated-declarations'],
     preferred_linkage = "static",
     exported_headers = subdir_glob([("src", "qnnpack/*.h"),("include", "*.h"),]),
     header_namespace = "",

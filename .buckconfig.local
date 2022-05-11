@@ -2,8 +2,7 @@
 name = BUILD.buck
 
 [repositories]
-  pytorch = .
-  # bazel_skylib = third_party/bazel-skylib
+  bazel_skylib = third_party/bazel-skylib/
 
 [download]
   in_build = true
@@ -14,3 +13,6 @@ name = BUILD.buck
 
 [project]
   default_flavors_mode=all
+
+[build]
+  threads = 8
