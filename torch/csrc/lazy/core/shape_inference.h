@@ -11,6 +11,8 @@
 namespace torch{
 namespace lazy {
 
+TORCH_API std::vector<Shape> compute_shape_mul(const at::Tensor & self, const at::Tensor & other);
+
 TORCH_API std::vector<Shape> compute_shape__adaptive_avg_pool2d(const at::Tensor & self, at::IntArrayRef output_size);
 TORCH_API std::vector<Shape> compute_shape__adaptive_avg_pool2d_backward(const at::Tensor & grad_output, const at::Tensor & self);
 TORCH_API std::vector<Shape> compute_shape_abs(const at::Tensor & self);

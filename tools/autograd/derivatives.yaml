@@ -1090,11 +1090,6 @@
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
-- name: mul.Tensor(Tensor self, Tensor other) -> Tensor
-  self: mul_tensor_backward(grad, other, self.scalar_type())
-  other: mul_tensor_backward(grad, self, other.scalar_type())
-  result: other_t * self_p + self_t * other_p
-
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
   self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
   result: self_t * other

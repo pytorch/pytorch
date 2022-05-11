@@ -73,12 +73,23 @@
 
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/tensor.h>
+#include <ATen/NativeFunctions.h>
 
 ${Functions_includes}
 
 namespace at {
 
 ${Functions_declarations}
+
+// aten::mul.Tensor(Tensor self, Tensor other) -> Tensor
+TORCH_API inline at::Tensor mul(const at::Tensor & self, const at::Tensor & other) {
+    return at::native::mul(self, other);
+}
+
+// aten::mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+TORCH_API inline at::Tensor & mul_out(at::Tensor & out, const at::Tensor & self, const at::Tensor & other) {
+    return at::native::mul_out(self, other, out);
+}
 
 // Special C++ only overloads for std()-like functions (See gh-40287)
 // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef

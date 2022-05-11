@@ -1,7 +1,19 @@
 #include <c10/core/Scalar.h>
 #include <ATen/core/TensorBody.h>
 
+#include <ATen/NativeFunctions.h>
+
 namespace at {
+
+  // aten::mul.Tensor(Tensor self, Tensor other) -> Tensor
+at::Tensor Tensor::mul(const at::Tensor & other) const {
+    return at::native::mul(const_cast<Tensor&>(*this), other);
+}
+
+// aten::mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+at::Tensor & Tensor::mul_(const at::Tensor & other) const {
+    return at::native::mul_(const_cast<Tensor&>(*this), other);
+}
 
 #define DEFINE_CAST(T, name)                                         \
    template <>                                                       \

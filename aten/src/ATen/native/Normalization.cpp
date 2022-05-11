@@ -702,7 +702,7 @@ TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
       .build();
 
   renorm_scale_factor_stub(iter.device_type(), iter, maxnorm.toDouble());
-  at::mul_outf(self, factor, const_cast<Tensor&>(out));
+  at::native::mul_out(self, factor, const_cast<Tensor&>(out));
 }
 
 }} // at::native

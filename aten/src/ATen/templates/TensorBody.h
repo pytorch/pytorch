@@ -505,6 +505,13 @@ class TORCH_API Tensor: public TensorBase {
   // of other ATen methods?  Define it in native_functions.yaml.
 
   //example
+
+    // aten::mul.Tensor(Tensor self, Tensor other) -> Tensor
+  at::Tensor mul(const at::Tensor & other) const;
+
+  // aten::mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  at::Tensor & mul_(const at::Tensor & other) const;
+
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
 

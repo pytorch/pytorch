@@ -13,6 +13,9 @@ namespace at {
 
 namespace meta {
 
+struct TORCH_API structured_mul_Tensor : public TensorIteratorBase {
+    void meta(const at::Tensor & self, const at::Tensor & other);
+};
 ${NativeMetaFunctions_declarations}
 
 } // namespace meta

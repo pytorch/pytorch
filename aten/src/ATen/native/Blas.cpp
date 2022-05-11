@@ -48,7 +48,7 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
     if (betaval == 0.0) {
       result.zero_();
     } else {
-      at::cpu::mul_out(
+      at::mul_out(
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<Tensor&>(result),
           self,

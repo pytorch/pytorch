@@ -11,8 +11,189 @@
 #include <ATen/RedispatchFunctions.h>
 #include <torch/library.h>
 
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
+
 namespace at {
 namespace native {
+
+Tensor create_out(
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    const TensorOptions& options) {
+  if (strides.empty()) {
+    return at::detail::empty_cpu(sizes, options);
+  } else {
+    return at::detail::empty_strided_cpu(sizes, strides, options);
+  }
+}
+void resize_out(
+    const Tensor& out,
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    const TensorOptions& options) {
+  TORCH_CHECK(
+      options.dtype() == out.dtype(),
+      "Expected out tensor to have dtype ",
+      options.dtype(),
+      ", but got ",
+      out.dtype(),
+      " instead");
+  TORCH_CHECK(
+      options.device() == out.device(),
+      "Expected out tensor to have device ",
+      options.device(),
+      ", but got ",
+      out.device(),
+      " instead");
+  const bool resized = at::native::resize_output(out, sizes);
+  // Only restride if a resize occurred; otherwise we ignore the (advisory)
+  // strides from the meta function and directly use the output tensor's
+  // preexisting strides
+  if (resized) {
+    if (!strides.empty()) {
+      TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+      at::native::as_strided_(out, sizes, strides);
+    } else if (options.memory_format_opt().has_value()) {
+      out.unsafeGetTensorImpl()->empty_tensor_restride(
+          *options.memory_format_opt());
+    }
+  }
+}
+
+void check_inplace(
+    const Tensor& self,
+    IntArrayRef sizes,
+    const TensorOptions& options) {
+  // These checks are needed on those operators that:
+  //   1) don't use 'TensorIterator' (e.g. 'addmm' and 'baddbmm')
+  //   2) have particular typing rules (e.g. 'cumsum' and 'cumprod')
+  // For other operators (e.g. 'add'), 'TensorIterator' already checks
+  // these things separately.
+  TORCH_CHECK(
+      options.dtype() == self.dtype(),
+      "Bad in-place call: ",
+      "input tensor dtype ",
+      self.dtype(),
+      " and output tensor dtype ",
+      options.dtype(),
+      " should match");
+  TORCH_CHECK(
+      options.device() == self.device(),
+      "Bad in-place call: ",
+      "input tensor device ",
+      self.device(),
+      " and output tensor device ",
+      options.device(),
+      " should match");
+  TORCH_CHECK(
+      sizes == self.sizes(),
+      "Bad in-place call: ",
+      "input tensor size ",
+      self.sizes(),
+      " and output tensor size ",
+      sizes,
+      " should match");
+}
+struct structured_mul_out_functional final
+    : public at::native::structured_mul_out {
+  void set_output(
+      int64_t output_idx,
+      IntArrayRef sizes,
+      IntArrayRef strides,
+      TensorOptions options,
+      DimnameList names) override {
+    outputs_[output_idx] = create_out(sizes, strides, options);
+    if (!names.empty()) {
+      namedinference::propagate_names(*outputs_[output_idx], names);
+    }
+    // super must happen after, so that downstream can use maybe_get_output
+    // to retrieve the output
+    at::native::structured_mul_out::set_output(
+        output_idx, sizes, strides, options, names);
+  }
+
+  const Tensor& maybe_get_output(int64_t output_idx) override {
+    return *outputs_[output_idx];
+  }
+  std::array<c10::ExclusivelyOwned<Tensor>, 1> outputs_;
+};
+
+Tensor mul(const at::Tensor& self, const at::Tensor& other) {
+  structured_mul_out_functional op;
+  op.meta(self, other);
+  op.impl(self, other, *op.outputs_[0]);
+  return std::move(op.outputs_[0]).take();
+}
+
+struct structured_mul_out_out final : public at::native::structured_mul_out {
+  structured_mul_out_out(Tensor& out0) : outputs_{std::ref(out0)} {}
+
+  void set_output(
+      int64_t output_idx,
+      IntArrayRef sizes,
+      IntArrayRef strides,
+      TensorOptions options,
+      DimnameList names) override {
+    const auto& out = outputs_[output_idx].get();
+    resize_out(out, sizes, strides, options);
+    if (!names.empty()) {
+      namedinference::propagate_names(outputs_[output_idx], names);
+    }
+    // super must happen after, so that downstream can use maybe_get_output
+    // to retrieve the output
+    at::native::structured_mul_out::set_output(
+        output_idx, sizes, strides, options, names);
+  }
+
+  const Tensor& maybe_get_output(int64_t output_idx) override {
+    return outputs_[output_idx];
+  }
+  std::array<std::reference_wrapper<Tensor>, 1> outputs_;
+};
+
+Tensor& mul_out(
+    const at::Tensor& self,
+    const at::Tensor& other,
+    at::Tensor& out) {
+  structured_mul_out_out op(out);
+  op.meta(self, other);
+  op.impl(self, other, op.outputs_[0]);
+  return out;
+}
+struct structured_mul_out_inplace final
+    : public at::native::structured_mul_out {
+  structured_mul_out_inplace(Tensor& self) : outputs_{std::ref(self)} {}
+
+  void set_output(
+      int64_t output_idx,
+      IntArrayRef sizes,
+      IntArrayRef strides,
+      TensorOptions options,
+      DimnameList names) override {
+    const auto& out = outputs_[output_idx].get();
+    check_inplace(out, sizes, options);
+    if (!names.empty()) {
+      namedinference::propagate_names(outputs_[output_idx], names);
+    }
+    // super must happen after, so that downstream can use maybe_get_output
+    // to retrieve the output
+    at::native::structured_mul_out::set_output(
+        output_idx, sizes, strides, options, names);
+  }
+
+  const Tensor& maybe_get_output(int64_t output_idx) override {
+    return outputs_[output_idx];
+  }
+  std::array<std::reference_wrapper<Tensor>, 1> outputs_;
+};
+
+Tensor& mul_(at::Tensor& self, const at::Tensor& other) {
+  structured_mul_out_inplace op(self);
+  op.meta(self, other);
+  op.impl(self, other, op.outputs_[0]);
+  return self;
+}
 
 // These are still needed because we don't have C++ conversions from number
 // types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
@@ -618,6 +799,7 @@ Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
 }
 
+
 Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
   self.values().mul_(other);
   return self;
@@ -631,13 +813,13 @@ Device correct_out_device(const Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
-  auto out_device = correct_out_device(self, other);
-  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
-  auto device_ = Device(DeviceType::Meta);
-  auto meta_out = at::redispatch::mul(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
-  return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
-}
+// Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
+//   auto out_device = correct_out_device(self, other);
+//   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+//   auto device_ = Device(DeviceType::Meta);
+//   auto meta_out = at::redispatch::mul(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+//   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+// }
 
 Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   TORCH_INTERNAL_ASSERT(self._is_zerotensor() || other._is_zerotensor());

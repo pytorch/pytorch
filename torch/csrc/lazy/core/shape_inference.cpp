@@ -595,6 +595,9 @@ std::vector<Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t di
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_mul(const at::Tensor & self, const at::Tensor & other){
+  return {Shape(self.scalar_type(),self.sizes().vec())};
+}
 // Restore unused-parameters warnings
 #pragma GCC diagnostic pop
 
