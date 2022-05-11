@@ -46,7 +46,6 @@ class QConfigModuleNameObjectTypeOrderEntry:
 
 _T = TypeVar("_T", bound="QuantizationConfigBase")
 
-
 class QuantizationConfigBase:
     """
     TODO: write this
