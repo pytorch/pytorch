@@ -954,6 +954,7 @@ class TestCommon(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
     @ops(op_db, allowed_dtypes=(torch.bool,))
+    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
