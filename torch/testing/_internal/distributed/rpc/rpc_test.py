@@ -4724,6 +4724,71 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_my_parameter_server(self):
         self._my_parameter_server(False)
 
+    @staticmethod
+    def _meta_tensor_method(tensors, device_types, sizes, numels, dtypes, strides, return_rrefs):
+        tensors = [t.to_here() if isinstance(t, torch._C._distributed_rpc.PyRRef) else t for t in tensors]
+        for tensor, device_type, size, numel, dtype, stride in zip(tensors, device_types, sizes, numels, dtypes,
+                                                                   strides):
+            assert tensor.device.type == device_type, f"{tensor.device.type} vs {device_type}"
+            assert tensor.size() == size, f"{tensor.size} vs {size}"
+            assert tensor.numel() == numel, f"{tensor.numel()} vs {numel}"
+            assert tensor.dtype == dtype, f"{tensor.dtype} vs {dtype}"
+            assert tensor.stride() == stride, f"{tensor.stride()} vs {stride}"
+        return [RRef(t) if return_rrefs else t for t in tensors]
+
+    def _test_meta_tensor(self, to, tensors, device_types, sizes, numels, dtypes, strides, return_rrefs):
+        returned_tensors = rpc.rpc_sync(to, RpcTest._meta_tensor_method,
+                                        args=(tensors, device_types, sizes, numels, dtypes, strides, return_rrefs))
+        returned_tensors = [t.to_here() if isinstance(t, torch._C._distributed_rpc.PyRRef) else t for t in
+                            returned_tensors]
+        for tensor, device_type, size, numel, dtype, stride in zip(returned_tensors, device_types, sizes, numels,
+                                                                   dtypes, strides):
+            assert isinstance(tensor, torch.Tensor), f"{type(tensor)}"
+            self.assertEqual(tensor.device.type, device_type)
+            self.assertEqual(tensor.size(), size)
+            self.assertEqual(tensor.numel(), numel)
+            self.assertEqual(tensor.dtype, dtype)
+            self.assertEqual(tensor.stride(), stride)
+
+    @dist_init
+    def test_meta_one_tensor(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        for return_rrefs in [False, True]:
+            self._test_meta_tensor(dst_rank,
+                                   [torch.ones(42, device='meta')], ['meta'],
+                                   [torch.Size((42,))], [42],
+                                   [torch.float], [(1,)],
+                                   return_rrefs=return_rrefs)
+
+    @dist_init
+    def test_meta_one_tensor_rref(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        for return_rrefs in [False, True]:
+            self._test_meta_tensor(dst_rank,
+                                   [RRef(torch.ones(6, 7, device='meta', dtype=torch.int))], ['meta'],
+                                   [torch.Size((6, 7))], [42],
+                                   [torch.int], [(7, 1)],
+                                   return_rrefs=return_rrefs)
+
+    @dist_init
+    def test_meta_multiple_tensors(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        for return_rrefs in [False, True]:
+            self._test_meta_tensor(dst_rank,
+                                   [torch.empty(42, device='meta'),
+                                    torch.empty(6, 7, device='cpu', dtype=torch.bool),
+                                    RRef(torch.empty(2, 21, device='meta', dtype=torch.int)),
+                                    RRef(torch.empty(3, 14, device='cpu', dtype=torch.long))],
+                                   ['meta', 'cpu', 'meta', 'cpu'],
+                                   [torch.Size((42,)), torch.Size((6, 7)), torch.Size((2, 21)), torch.Size((3, 14))],
+                                   [42, 42, 42, 42],
+                                   [torch.float, torch.bool, torch.int, torch.long],
+                                   [(1,), (7, 1), (21, 1), (14, 1)],
+                                   return_rrefs=return_rrefs)
+
 
 class CudaRpcTest(RpcAgentTestFixture):
 
