@@ -11,17 +11,18 @@ on:
 
 jobs:
   lintrunner:
-    runs-on: linux.2xlarge
-    # NOTE: I'm curious if we'll get rate limited by this
-    container:
-      image: python:3.8
-
+    runs-on: linux.20_04.16x
     steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
-          no-sudo: true
 
       - name: Install lintrunner
         run: pip install lintrunner==0.8.*
