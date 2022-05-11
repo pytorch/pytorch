@@ -228,6 +228,7 @@ def validate_idx(rank: int, idx: int):
 
     assert idx >= 0 and idx < rank or idx == 0
 
+
 def validate_dimension_indices(rank: int, indices: DimsSequenceType):
     for idx in indices:
         validate_idx(rank, idx)
