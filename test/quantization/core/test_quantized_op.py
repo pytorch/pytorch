@@ -31,7 +31,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_onednn,
 )
 from torch.ao.quantization import PerChannelMinMaxObserver
-from torch.testing._internal.common_cuda import TEST_CUDNN
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
 import torch.backends.xnnpack
 
 from typing import Optional
@@ -447,24 +447,27 @@ class TestQuantizedOps(TestCase):
         memory_formats = (torch.channels_last, torch.contiguous_format)
         approximation = ['none', 'tanh']
         test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
+        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
         for shape, dtype, memory_format, approximate in test_cases:
             if memory_format == torch.channels_last and len(shape) != 4:
                 continue
+
             X, scale, zero_point, torch_type = \
                 torch.randn(*shape), 0.1, 0, dtype
             X = X.to(memory_format=memory_format)
+            for device in devices:
+                X = X.to(device="cuda")
+                qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                            dtype=torch_type)
+                dqX = qX.dequantize()
 
-            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                           dtype=torch_type)
-            dqX = qX.dequantize()
-
-            op = torch.nn.functional.gelu
-            dqY = op(dqX, approximate=approximate)
-            qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
-                                           dtype=torch_type)
-            qY_hat = op(qX)
-            self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                             msg="F.gelu failed ({} vs {})".format(qY, qY_hat))
+                op = torch.nn.functional.gelu
+                dqY = op(dqX, approximate=approximate)
+                qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                            dtype=torch_type)
+                qY_hat = op(qX)
+                self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                                msg="F.gelu failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM

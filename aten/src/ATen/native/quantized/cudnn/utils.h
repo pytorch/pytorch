@@ -274,6 +274,12 @@ cudnn_frontend::PointWiseDesc_v8 getPointWiseReluDescriptor(cudnnDataType_t data
     .build();
 }
 
+cudnn_frontend::PointWiseDesc_v8 getPointWiseGeluDescriptor(cudnnDataType_t dataType) {
+  return cudnn_frontend::PointWiseDescBuilder()
+    .setMode(cudnnPointwiseMode_t::CUDNN_POINTWISE_GELU_FWD)
+    .setMathPrecision(dataType)
+    .build();
+}
 
 void filterEngineConfigs(
   cudnn_frontend::EngineConfigList &from,
