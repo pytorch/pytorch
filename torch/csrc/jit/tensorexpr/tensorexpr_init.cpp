@@ -707,8 +707,14 @@ void initTensorExprBindings(PyObject* module) {
         }
         if (NNCLoweringFunction lowering =
                 getStandardLoweringFor(op.toQualString())) {
+          std::vector<ExprHandle> outputStrides =
+              c10::fmap<ExprHandle>(make_channels_last_strides(outputShape));
           return lowering(
-              argInputs, outputShape, outputType.scalar_type(), at::kCPU);
+              argInputs,
+              outputShape,
+              outputStrides,
+              outputType.scalar_type(),
+              at::kCPU);
         }
         std::string msg = std::string("Unhandled node kind (in te.lower): ") +
             op.toQualString();

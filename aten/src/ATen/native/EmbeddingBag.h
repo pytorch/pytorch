@@ -45,5 +45,20 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
     const c10::optional<Tensor>& per_sample_weights = c10::nullopt,
     bool include_last_offset = false,
     int64_t padding_idx = -1);
+
+void _embedding_bag_cpu_out(
+    at::Tensor& output,
+    at::Tensor& offset2bag,
+    at::Tensor& bag_size,
+    at::Tensor* p_max_indices,
+    const at::Tensor& weight,
+    const at::Tensor& indices,
+    const at::Tensor& offsets,
+    const bool scale_grad_by_freq,
+    const int64_t mode,
+    const bool sparse,
+    const c10::optional<at::Tensor>& per_sample_weights,
+    const bool include_last_offset,
+    const c10::optional<int64_t>& padding_idx);
 } // native
 } // at

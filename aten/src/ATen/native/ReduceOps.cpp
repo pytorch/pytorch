@@ -14,6 +14,7 @@
 #include <ATen/native/TensorDimApply.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/core/grad_mode.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/SmallBuffer.h>
@@ -1973,12 +1974,21 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
 // backward function for those operators; it propagates the grad to the
 // specific value locations referred to at `indices`.
 Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
+  auto inplace_scatter_if_not_tensor_subclass =
+      [&](const Tensor& grad_out, const Tensor& indices_) {
+        auto grad_in = at::zeros(sizes, grad_out.options());
+        if (areAnyTensorSubclassLike({grad, indices})) {
+          return grad_in.scatter(dim, indices_, grad_out);
+        }
+        return grad_in.scatter_(dim, indices_, grad_out);
+      };
+
   if (!keepdim && sizes.size() > 0) {
     auto grad_ = grad.unsqueeze(dim);
     auto indices_ = indices.unsqueeze(dim);
-    return at::zeros(sizes, grad_.options()).scatter_(dim, indices_, grad_);
+    return inplace_scatter_if_not_tensor_subclass(grad_, indices_);
   }
-  return at::zeros(sizes, grad.options()).scatter_(dim, indices, grad);
+  return inplace_scatter_if_not_tensor_subclass(grad, indices);
 }
 
 Tensor sum_csr(const Tensor &self, c10::optional<ScalarType> dtype) {
