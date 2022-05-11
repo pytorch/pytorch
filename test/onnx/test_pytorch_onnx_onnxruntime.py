@@ -217,7 +217,7 @@ class _TestONNXRuntime:
         do_constant_folding=True,
         batch_size=2,
         dynamic_axes=None,
-        test_with_inputs=None,
+        additional_test_inputs=None,
         input_names=None,
         output_names=None,
         fixed_batch_size=False,
@@ -236,7 +236,7 @@ class _TestONNXRuntime:
                 atol=atol,
                 do_constant_folding=do_constant_folding,
                 dynamic_axes=dynamic_axes,
-                test_with_inputs=test_with_inputs,
+                additional_test_inputs=additional_test_inputs,
                 input_names=input_names,
                 output_names=output_names,
                 fixed_batch_size=fixed_batch_size,
@@ -542,7 +542,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             (images,),
-            test_with_inputs=[(images,), (test_images,), (dummy_image,)],
+            additional_test_inputs=[(images,), (test_images,), (dummy_image,)],
             input_names=["images_tensors"],
             output_names=["outputs"],
             dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]},
@@ -552,7 +552,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             (dummy_image,),
-            test_with_inputs=[(dummy_image,), (images,)],
+            additional_test_inputs=[(dummy_image,), (images,)],
             input_names=["images_tensors"],
             output_names=["outputs"],
             dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]},
@@ -620,7 +620,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             (images,),
-            test_with_inputs=[(images,), (test_images,), (dummy_image,)],
+            additional_test_inputs=[(images,), (test_images,), (dummy_image,)],
             input_names=["images_tensors"],
             output_names=["boxes", "labels", "scores", "masks"],
             dynamic_axes={
@@ -636,7 +636,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             (dummy_image,),
-            test_with_inputs=[(dummy_image,), (images,)],
+            additional_test_inputs=[(dummy_image,), (images,)],
             input_names=["images_tensors"],
             output_names=["boxes", "labels", "scores", "masks"],
             dynamic_axes={
@@ -694,7 +694,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             (images,),
-            test_with_inputs=[(images,), (test_images,), (dummy_images,)],
+            additional_test_inputs=[(images,), (test_images,), (dummy_images,)],
             input_names=["images_tensors"],
             output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
             dynamic_axes={"images_tensors": [0, 1, 2]},
@@ -704,7 +704,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             (dummy_images,),
-            test_with_inputs=[(dummy_images,), (test_images,)],
+            additional_test_inputs=[(dummy_images,), (test_images,)],
             input_names=["images_tensors"],
             output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
             dynamic_axes={"images_tensors": [0, 1, 2]},
@@ -721,7 +721,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             (dummy_input,),
-            test_with_inputs=[(dummy_input,), (test_inputs,)],
+            additional_test_inputs=[(dummy_input,), (test_inputs,)],
             input_names=["input_images"],
             output_names=["outputs"],
             dynamic_axes={
@@ -1286,7 +1286,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             x,
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1, 2]},
         )
@@ -1599,7 +1599,7 @@ class _TestONNXRuntime:
             x,
             input_names=["x"],
             dynamic_axes={"x": [0, 2]},
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
         )
 
     def squeeze_model_tests(self, d, x1, x2):
@@ -1621,7 +1621,7 @@ class _TestONNXRuntime:
                 x1,
                 input_names=["input"],
                 dynamic_axes={"input": {0: "0", 1: "1", 2: "2"}},
-                test_with_inputs=x2,
+                additional_test_inputs=x2,
             )
         else:
             self.run_test(Squeeze(d), x1)
@@ -1667,8 +1667,8 @@ class _TestONNXRuntime:
         d1 = torch.tensor([1])
         d3 = torch.tensor([3])
         d4 = torch.tensor([4])
-        self.run_test(Squeeze(), (d1, d4), test_with_inputs=[(d3, d4)])
-        self.run_test(Squeeze(), (d3, d4), test_with_inputs=[(d1, d3)])
+        self.run_test(Squeeze(), (d1, d4), additional_test_inputs=[(d3, d4)])
+        self.run_test(Squeeze(), (d3, d4), additional_test_inputs=[(d1, d3)])
 
     def test_squeeze(self):
         class Squeeze(torch.nn.Module):
@@ -1721,7 +1721,11 @@ class _TestONNXRuntime:
         x = torch.randn(20, 16, 50, requires_grad=True)
         y = torch.randn(32, 16, 50, requires_grad=True)
         self.run_test(
-            model, x, input_names=["x"], dynamic_axes={"x": [0]}, test_with_inputs=[y]
+            model,
+            x,
+            input_names=["x"],
+            dynamic_axes={"x": [0]},
+            additional_test_inputs=[y],
         )
 
     def test_maxpool_2d(self):
@@ -1789,7 +1793,7 @@ class _TestONNXRuntime:
             x,
             input_names=["x"],
             dynamic_axes={"x": [0, 1]},
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -2198,7 +2202,7 @@ class _TestONNXRuntime:
         self.run_test(
             DynamicSliceExportMod(),
             x,
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
             input_names=["input_1"],
             output_names=["output_1"],
             dynamic_axes={"input_1": [0, 1, 2], "output_1": [0, 1, 2]},
@@ -2266,7 +2270,7 @@ class _TestONNXRuntime:
         self.run_test(
             ArangeModel(),
             x,
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
             input_names=["input_1"],
             output_names=["output_1", "output_2", "output_3"],
             dynamic_axes={"input_1": [0], "output_1": [0]},
@@ -2274,7 +2278,7 @@ class _TestONNXRuntime:
         self.run_test(
             torch.jit.script(ArangeModel()),
             x,
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
             input_names=["input_1"],
             output_names=["output_1", "output_2", "output_3"],
             dynamic_axes={"input_1": [0], "output_1": [0]},
@@ -2752,7 +2756,7 @@ class _TestONNXRuntime:
             x,
             input_names=["x"],
             dynamic_axes={"x": {0: "seq_length", 1: "batch_size"}},
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
         )
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -4243,7 +4247,7 @@ class _TestONNXRuntime:
             (x,),
             input_names=["x"],
             dynamic_axes={"x": [0, 1]},
-            test_with_inputs=[x2],
+            additional_test_inputs=[x2],
         )
 
         class Model(torch.nn.Module):
@@ -4258,7 +4262,7 @@ class _TestONNXRuntime:
             (x,),
             input_names=["x"],
             dynamic_axes={"x": [0, 1, 2]},
-            test_with_inputs=[x2],
+            additional_test_inputs=[x2],
         )
 
     def test_multinomial(self):
@@ -4530,7 +4534,7 @@ class _TestONNXRuntime:
         # verify with different input of same batch size
         input2 = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
         self.run_test(
-            LSTMModel(), input, fixed_batch_size=True, test_with_inputs=[input2]
+            LSTMModel(), input, fixed_batch_size=True, additional_test_inputs=[input2]
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -4558,7 +4562,7 @@ class _TestONNXRuntime:
             input,
             input_names=["input.1"],
             dynamic_axes={"input.1": {0: "seq", 1: "batch"}},
-            test_with_inputs=[input2],
+            additional_test_inputs=[input2],
         )
 
     def test_lstm_constant_folding(self):
@@ -5223,7 +5227,7 @@ class _TestONNXRuntime:
         self.run_test(
             SingleDynamicModel(),
             x,
-            test_with_inputs=[another_x],
+            additional_test_inputs=[another_x],
             input_names=["input_1"],
             dynamic_axes={"input_1": {1: "w"}},
         )
@@ -5238,7 +5242,7 @@ class _TestONNXRuntime:
         self.run_test(
             NegDynamicModel(),
             x,
-            test_with_inputs=[another_x],
+            additional_test_inputs=[another_x],
             input_names=["input_1"],
             dynamic_axes={"input_1": {1: "w"}},
         )
@@ -5253,7 +5257,7 @@ class _TestONNXRuntime:
         self.run_test(
             SingleDynamicModelFloat(),
             x,
-            test_with_inputs=[another_x],
+            additional_test_inputs=[another_x],
             input_names=["input_1"],
             dynamic_axes={"input_1": {0: "h"}},
         )
@@ -5269,7 +5273,7 @@ class _TestONNXRuntime:
         self.run_test(
             DynamicRepeatsModel(),
             (x, repeats),
-            test_with_inputs=[(another_x, another_repeats)],
+            additional_test_inputs=[(another_x, another_repeats)],
             input_names=["input_1", "repeats_1"],
             dynamic_axes={"input_1": {1: "w"}, "repeats_1": {0: "r"}},
         )
@@ -5284,7 +5288,7 @@ class _TestONNXRuntime:
         self.run_test(
             DynamicRepeatsModel2(),
             (x, repeats),
-            test_with_inputs=[(x, another_repeats)],
+            additional_test_inputs=[(x, another_repeats)],
             input_names=["input_1", "repeats_1"],
             dynamic_axes={"repeats_1": {0: "r"}},
         )
@@ -5301,7 +5305,7 @@ class _TestONNXRuntime:
         self.run_test(
             DynamicRepeatsModel(),
             (x, repeats),
-            test_with_inputs=[(x, another_repeats)],
+            additional_test_inputs=[(x, another_repeats)],
             input_names=["input_1", "repeats_1"],
             dynamic_axes={"repeats_1": {0: "r"}},
         )
@@ -5316,7 +5320,7 @@ class _TestONNXRuntime:
         self.run_test(
             DynamicRepeatsModel2(),
             (x, repeats),
-            test_with_inputs=[(x, another_repeats)],
+            additional_test_inputs=[(x, another_repeats)],
             input_names=["input_1", "repeats_1"],
             dynamic_axes={"repeats_1": {0: "r"}},
         )
@@ -5355,7 +5359,7 @@ class _TestONNXRuntime:
         self.run_test(
             ViewModel(),
             x,
-            test_with_inputs=[another_x],
+            additional_test_inputs=[another_x],
             input_names=["input_1"],
             dynamic_axes={
                 "input_1": [
@@ -5483,7 +5487,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             x,
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
             input_names=["input"],
             output_names=["output"],
             dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
@@ -5565,7 +5569,7 @@ class _TestONNXRuntime:
             x,
             input_names=["input"],
             dynamic_axes={"input": {0: "seq"}},
-            test_with_inputs=(torch.randn(5, 5),),
+            additional_test_inputs=(torch.randn(5, 5),),
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -5731,7 +5735,7 @@ class _TestONNXRuntime:
             self.run_test(
                 model,
                 x,
-                test_with_inputs=[y],
+                additional_test_inputs=[y],
                 input_names=["x"],
                 dynamic_axes={"x": {0: "batch_size", 1: "dims"}},
             )
@@ -5739,7 +5743,7 @@ class _TestONNXRuntime:
             self.run_test(
                 model_neg_dim,
                 x,
-                test_with_inputs=[y],
+                additional_test_inputs=[y],
                 input_names=["x"],
                 dynamic_axes={"x": {0: "batch_size", 1: "dims"}},
             )
@@ -5765,7 +5769,7 @@ class _TestONNXRuntime:
             self.run_test(
                 model,
                 x,
-                test_with_inputs=[y],
+                additional_test_inputs=[y],
                 input_names=["x"],
                 dynamic_axes={"x": {0: "batch_size", 1: "dims"}},
             )
@@ -5773,7 +5777,7 @@ class _TestONNXRuntime:
             self.run_test(
                 model_neg_dim,
                 x,
-                test_with_inputs=[y],
+                additional_test_inputs=[y],
                 input_names=["x"],
                 dynamic_axes={"x": {0: "batch_size", 1: "dims"}},
             )
@@ -6145,7 +6149,7 @@ class _TestONNXRuntime:
         self.run_test(
             TensorFactory(),
             x,
-            test_with_inputs=[another_x],
+            additional_test_inputs=[another_x],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1, 2]},
         )
@@ -6162,7 +6166,7 @@ class _TestONNXRuntime:
         self.run_test(
             DiagonalModel(),
             x,
-            test_with_inputs=[another_x],
+            additional_test_inputs=[another_x],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
@@ -6177,7 +6181,7 @@ class _TestONNXRuntime:
         self.run_test(
             DiagonalModelNegOffset(),
             x,
-            test_with_inputs=[another_x],
+            additional_test_inputs=[another_x],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
@@ -6192,7 +6196,7 @@ class _TestONNXRuntime:
         self.run_test(
             DiagonalModelPosOffset(),
             x,
-            test_with_inputs=[another_x],
+            additional_test_inputs=[another_x],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
@@ -6207,7 +6211,7 @@ class _TestONNXRuntime:
         self.run_test(
             DiagonalModelWithDims(),
             x,
-            test_with_inputs=[another_x],
+            additional_test_inputs=[another_x],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
@@ -6222,7 +6226,7 @@ class _TestONNXRuntime:
         self.run_test(
             DiagonalModelOffsetOverrun(),
             x,
-            test_with_inputs=[another_x],
+            additional_test_inputs=[another_x],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
@@ -6713,7 +6717,7 @@ class _TestONNXRuntime:
             x,
             input_names=["x"],
             dynamic_axes={"x": [0, 1, 2, 3]},
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -6730,7 +6734,7 @@ class _TestONNXRuntime:
             x,
             input_names=["x"],
             dynamic_axes={"x": [0, 1, 2, 3]},
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -6858,7 +6862,7 @@ class _TestONNXRuntime:
             x,
             dynamic_axes={"x": [0, 1]},
             input_names=["x"],
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
         )
 
     def test_unfold_infer_shape(self):
@@ -6942,7 +6946,7 @@ class _TestONNXRuntime:
             x,
             input_names=["x"],
             dynamic_axes={"x": [1, 2]},
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
         )
 
     def test_prelu_scalar(self):
@@ -6965,7 +6969,7 @@ class _TestONNXRuntime:
             x,
             input_names=["x"],
             dynamic_axes={"x": [1, 2]},
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
         )
 
     def test_silu(self):
@@ -7258,7 +7262,7 @@ class _TestONNXRuntime:
             (embedding_matrix, x, w),
             input_names=["embed", "x", "w"],
             dynamic_axes={"x": [0], "w": [0]},
-            test_with_inputs=[(embedding_matrix, x2, w2)],
+            additional_test_inputs=[(embedding_matrix, x2, w2)],
         )
 
     @skipScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
@@ -7299,7 +7303,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             (embedding_matrix, x, w, offsets),
-            test_with_inputs=[(embedding_matrix2, x2, w2, offsets2)],
+            additional_test_inputs=[(embedding_matrix2, x2, w2, offsets2)],
             input_names=["embedding_matrix", "x", "offsets", "w"],
             dynamic_axes={
                 "embedding_matrix": [0, 1],
@@ -7325,7 +7329,7 @@ class _TestONNXRuntime:
         self.run_test(
             model,
             (embedding_matrix, x, w),
-            test_with_inputs=[(embedding_matrix2, x2, w2)],
+            additional_test_inputs=[(embedding_matrix2, x2, w2)],
             input_names=["embedding_matrix", "x", "w"],
             dynamic_axes={"embedding_matrix": [0, 1], "x": [0, 1], "w": [0, 1]},
         )
@@ -7393,7 +7397,7 @@ class _TestONNXRuntime:
             (x,),
             input_names=["x"],
             dynamic_axes={"x": [0, 1, 2]},
-            test_with_inputs=[(x2,)],
+            additional_test_inputs=[(x2,)],
         )
 
     def test_numel_empty(self):
@@ -7409,7 +7413,7 @@ class _TestONNXRuntime:
             (x,),
             input_names=["x"],
             dynamic_axes={"x": [0]},
-            test_with_inputs=[(x2,)],
+            additional_test_inputs=[(x2,)],
         )
 
     def test_dtype(self):
@@ -7725,7 +7729,7 @@ class _TestONNXRuntime:
         self.run_test(
             UninitializedModel(),
             x,
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1]},
         )
@@ -7806,7 +7810,7 @@ class _TestONNXRuntime:
         self.run_test(
             torch.jit.script(UninitializedModel()),
             x,
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1]},
         )
@@ -10212,7 +10216,7 @@ class _TestONNXRuntime:
             (boxes, size),
             input_names=["boxes", "size"],
             dynamic_axes={"size": [0, 1]},
-            test_with_inputs=[(boxes, size), (boxes, size_2)],
+            additional_test_inputs=[(boxes, size), (boxes, size_2)],
         )
 
     @skipIfUnsupportedMaxOpsetVersion(15)  # TODO: Opset 16 RoiAlign result mismatch
@@ -10272,7 +10276,7 @@ class _TestONNXRuntime:
             (input,),
             input_names=["input1"],
             dynamic_axes={"input1": [0, 1, 2]},
-            test_with_inputs=[(input,), (input_test,)],
+            additional_test_inputs=[(input,), (input_test,)],
         )
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -10289,7 +10293,9 @@ class _TestONNXRuntime:
         input = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
         input_test = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
         self.run_test(
-            TransformModule(), (input,), test_with_inputs=[(input,), (input_test,)]
+            TransformModule(),
+            (input,),
+            additional_test_inputs=[(input,), (input_test,)],
         )
 
     def get_features(self, images):
@@ -10340,7 +10346,7 @@ class _TestONNXRuntime:
                 "input5": [0, 1, 2, 3],
                 "input6": [0, 1, 2, 3],
             },
-            test_with_inputs=[(images, features), (images2, test_features)],
+            additional_test_inputs=[(images, features), (images2, test_features)],
             dict_check=False,
         )
 
@@ -10375,7 +10381,7 @@ class _TestONNXRuntime:
                 i,
                 [boxes],
             ),
-            test_with_inputs=[
+            additional_test_inputs=[
                 (
                     i,
                     [boxes],
@@ -10435,7 +10441,7 @@ class _TestONNXRuntime:
                 "input5": [0, 1, 2, 3],
                 "input6": [0, 1, 2, 3],
             },
-            test_with_inputs=[(images, features), (images2, test_features)],
+            additional_test_inputs=[(images, features), (images2, test_features)],
             dict_check=False,
         )
 
@@ -10456,7 +10462,7 @@ class _TestONNXRuntime:
             remained_onnx_input_idx=[1],
             input_names=["x", "y"],
             dynamic_axes={"x": [0, 1], "y": [0, 1]},
-            test_with_inputs=[(y, y2)],
+            additional_test_inputs=[(y, y2)],
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -10863,14 +10869,14 @@ class _TestONNXRuntime:
             (random_data, empty_tensor),
             input_names=["data", "state"],
             dynamic_axes={"data": [0, 1, 2], "state": [0, 1, 2, 3, 4]},
-            test_with_inputs=[(random_data, random_state)],
+            additional_test_inputs=[(random_data, random_state)],
         )
         self.run_test(
             model,
             (random_data, empty_tensor),
             input_names=["data", "state"],
             dynamic_axes={"state": [0, 1, 2, 3, 4]},
-            test_with_inputs=[(random_data, random_state)],
+            additional_test_inputs=[(random_data, random_state)],
             remained_onnx_input_idx=[1],
         )
         self.run_test(model, (random_data, empty_tensor), remained_onnx_input_idx=[])
@@ -11291,7 +11297,7 @@ class _TestONNXRuntime:
             x,
             input_names=["x"],
             dynamic_axes={"x": [0, 1, 2, 3]},
-            test_with_inputs=[(x,), (y,)],
+            additional_test_inputs=[(x,), (y,)],
         )
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -11315,7 +11321,7 @@ class _TestONNXRuntime:
             x,
             input_names=["x"],
             dynamic_axes={"x": [0, 1]},
-            test_with_inputs=[(x,), (y,)],
+            additional_test_inputs=[(x,), (y,)],
         )
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -11606,7 +11612,7 @@ class _TestONNXRuntime:
         self.run_test(
             M(),
             (x, y),
-            test_with_inputs=[(new_x, new_y)],
+            additional_test_inputs=[(new_x, new_y)],
             input_names=["input_x", "input_y"],
             dynamic_axes={"input_x": [0, 1, 2, 3], "input_y": [0, 1, 2, 3]},
         )
@@ -11769,7 +11775,7 @@ class _TestONNXRuntime:
         self.run_test(
             M(1, index, updates),
             (x,),
-            test_with_inputs=[y],
+            additional_test_inputs=[y],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1]},
         )
