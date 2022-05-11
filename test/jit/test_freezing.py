@@ -1762,6 +1762,31 @@ class TestFrozenOptimizations(JitTestCase):
             test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
                              add_tensor=torch.tensor([2]).to(torch.int), expect_success=True)
 
+    def test_conv_mul_add_bn(self):
+        class Conv_Mul_Add_Bn(nn.Module):
+
+            def __init__(self, in_channels, out_channels, **kwargs):
+                super(Conv_Mul_Add_Bn, self).__init__()
+                self.conv = nn.Conv2d(in_channels, out_channels, **kwargs)
+                self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+                self.tensor1 = torch.tensor(2.2)
+                self.tensor2 = torch.tensor(2)
+
+            def forward(self, x):
+                return self.bn(torch.add(torch.mul(self.conv(x), self.tensor1), self.tensor2))
+
+        input = torch.randn(8, 3, 64, 64)
+        model = Conv_Mul_Add_Bn(3, 32, kernel_size=3, stride=1).eval()
+
+        with torch.no_grad():
+            result = model(input)
+            traced_model = torch.jit.trace(model, input).eval()
+            traced_model = torch.jit.freeze(traced_model)
+            tresult = traced_model(input)
+            self.assertEqual(result, tresult)
+            FileCheck().check("conv").check_not("aten::batch_norm").run(traced_model.graph)
+            FileCheck().check("conv").check_not("aten::add").run(traced_model.graph)
+
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat(self):
         out_dimms = [[5, 10], [1, 5]]
