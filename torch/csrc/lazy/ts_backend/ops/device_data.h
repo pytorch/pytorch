@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/lazy/backend/backend_data.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch {
@@ -8,11 +9,16 @@ namespace lazy {
 
 class TORCH_API DeviceData : public TsNode {
  public:
-  static const OpKind class_op_kind;
+  static OpKind ClassOpKind() {
+    return ltc_device_data;
+  }
 
   explicit DeviceData(std::shared_ptr<BackendData> data);
 
-  bool Equal(std::shared_ptr<BackendData> data) const {
+  // A DeviceData node can be reused if the shape matches,
+  // but we will substitute the actual data_ pointer under
+  // the hood.
+  bool CanBeReused(std::shared_ptr<BackendData> data) const {
     return data_->shape() == data->shape();
   }
 

@@ -8,11 +8,9 @@
 namespace torch {
 namespace lazy {
 
-const OpKind DeviceData::class_op_kind(ltc_device_data);
-
 DeviceData::DeviceData(std::shared_ptr<BackendData> data)
     : TsNode(
-          ltc_device_data,
+          ClassOpKind(),
           data->shape(),
           /*num_outputs=*/1,
           /*hash_seed=*/static_cast<uint32_t>(101)),

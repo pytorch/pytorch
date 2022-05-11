@@ -13,13 +13,15 @@ namespace lazy {
 
 class TrieCacheNode : public Node {
  public:
-  static const OpKind class_op_kind;
+  static OpKind ClassOpKind() {
+    return OpKind();
+  }
 
   explicit TrieCacheNode(size_t id)
-      : Node(class_op_kind, /* num_outputs */ 1), id_(id), hash_(Hash(id_)) {}
+      : Node(ClassOpKind(), /* num_outputs */ 1), id_(id), hash_(Hash(id_)) {}
   ~TrieCacheNode() override = default;
 
-  bool Equal(size_t id) const {
+  bool CanBeReused(size_t id) const {
     return (id_ == id);
   }
 
@@ -37,8 +39,6 @@ class TrieCacheNode : public Node {
   size_t id_;
   hash_t hash_;
 };
-
-const OpKind TrieCacheNode::class_op_kind = OpKind();
 
 TEST(TrieCacheTest, TestSinglePath) {
   FLAGS_torch_lazy_reuse_ir = true;

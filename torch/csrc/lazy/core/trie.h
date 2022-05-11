@@ -61,7 +61,7 @@ NodePtr LookupNodeFromTrieCache(Args&&... args) {
   for (auto it = successors.begin(); it != successors.end(); it++) {
     NodePtr ir_node = (*it)->ir_node;
     const T* concrete_node = NodeCast<T>(ir_node.get());
-    if (concrete_node && concrete_node->Equal(std::forward<Args>(args)...)) {
+    if (concrete_node && concrete_node->CanBeReused(std::forward<Args>(args)...)) {
       TORCH_LAZY_COUNTER("IrNodeReused::" + std::string(typeid(T).name()), 1);
       (*it)->hit_counter++;
       TrieCache::Get()->SetCurrent(it);
