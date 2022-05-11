@@ -225,10 +225,10 @@ void sparse_sampled_addmm_check_inputs(
   IntArrayRef self_sizes = self.sizes();
   TORCH_CHECK(
       self_sizes[self.dim() - 2] == mat1_sizes[mat1.dim() - 2],
-      "sampled_addmm: self dim -2 must match mat1 dim -2");
+      "sampled_addmm: self.shape[-2] must match mat1.shape[-2]");
   TORCH_CHECK(
       self_sizes[self.dim() - 1] == mat2_sizes[mat2.dim() - 1],
-      "sampled_addmm: self dim -1 must match mat2 dim -1");
+      "sampled_addmm: self.shape[-1] must match mat2.shape[-1]");
 }
 
 } // namespace sparse

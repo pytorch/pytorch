@@ -1565,21 +1565,21 @@ class TestSparseCSR(TestCase):
 
         # mat1 must be a matrix
         with self.assertRaisesRegex(RuntimeError, r"Expected mat1 to be a matrix"):
-            torch.sparse.sampled_addmm(a_sparse, a.unsqueeze(0), a)
+            torch.sparse.sampled_addmm(a_sparse, a[..., 0, :], a)
 
         # mat2 must be a matrix
         with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to be a matrix"):
-            torch.sparse.sampled_addmm(a_sparse, a, a.unsqueeze(0))
+            torch.sparse.sampled_addmm(a_sparse, a, a[..., 0, :])
 
         a = make_tensor((2, 2), dtype=dtype, device=device)
         b = make_tensor((3, 3), dtype=dtype, device=device)
         b_sparse = b.to_sparse_csr()
-        with self.assertRaisesRegex(RuntimeError, r"self dim 0 must match mat1 dim 0"):
+        with self.assertRaisesRegex(RuntimeError, r"self.shape\[-2\] must match mat1.shape\[-2\]"):
             torch.sparse.sampled_addmm(b_sparse, a, a)
 
         b = make_tensor((2, 3), dtype=dtype, device=device)
         b_sparse = b.to_sparse_csr()
-        with self.assertRaisesRegex(RuntimeError, r"self dim 1 must match mat2 dim 1"):
+        with self.assertRaisesRegex(RuntimeError, r"self.shape\[-1\] must match mat2.shape\[-1\]"):
             torch.sparse.sampled_addmm(b_sparse, a, a)
 
         a = make_tensor((2, 2), dtype=dtype, device=device)
