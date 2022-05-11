@@ -9,6 +9,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorIndexing.h>
+#include <ATen/native/TypeProperties.h>
 
 namespace at {
 namespace meta {
@@ -29,15 +30,50 @@ const OptionalScalarRef max) {
   if (!min && !max) {
     TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
   }
+  //Manual type promotion, since scalars have to participate in it
+  ScalarType result_type = self.scalar_type();
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  //Floating is the highest supported
+  if (!isFloatingType(result_type)) {
+    at::native::ResultTypeState state = {};
+    state = at::native::update_result_type_state(self, state);
 
-  build_borrowing_unary_op(maybe_get_output(), self);
+    if (min) {
+      state = at::native::update_result_type_state(min.get(), state);
+    }
+    if (max) {
+      state = at::native::update_result_type_state(max.get(), state);
+    }
+    result_type = at::native::result_type(state);
+    //disallow type promoting inplace op
+    TORCH_CHECK((result_type == self.scalar_type()) ||
+       (!(maybe_get_output().defined()) || !(maybe_get_output().is_same(self))),
+       "result type ", result_type, " can't be cast to the desired output type ",
+       self.dtype());
+  }
+  build_unary_op(maybe_get_output(), self.to(result_type));
 }
 
 TORCH_META_FUNC(clamp_max) (
   const Tensor& self,
   const Scalar& max
 ) {
-  build_borrowing_unary_op(maybe_get_output(), self);
+  //we could wrap max into tensor and send to tensor overload,
+  //but relu is implemented via clamp_min, so for perf an uniformity reasons
+  //do a faster but correct thing
+  ScalarType result_type = self.scalar_type();
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  //Floating is the highest supported
+  if (!isFloatingType(result_type)) {
+    auto result_type = at::native::result_type(self, max);
+    TORCH_CHECK((result_type == self.scalar_type()) ||
+       (!(maybe_get_output().defined()) || !(maybe_get_output().is_same(self))),
+       "result type ", result_type, " can't be cast to the desired output type ",
+       self.dtype());
+    build_unary_op(maybe_get_output(), self.to(result_type));
+  } else {
+    build_borrowing_unary_op(maybe_get_output(), self);
+  }
 }
 
 TORCH_META_FUNC2(clamp_max, Tensor) (
@@ -52,7 +88,19 @@ TORCH_META_FUNC(clamp_min) (
   const Tensor& self,
   const Scalar& min
 ) {
-  build_borrowing_unary_op(maybe_get_output(), self);
+  ScalarType result_type = self.scalar_type();
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  //Floating is the highest supported
+  if (!isFloatingType(result_type)) {
+    auto result_type = at::native::result_type(self, min);
+    TORCH_CHECK((result_type == self.scalar_type() ||
+       !(maybe_get_output().defined()) || !(maybe_get_output().is_same(self))),
+       "result type ", result_type, " can't be cast to the desired output type ",
+       self.dtype());
+    build_unary_op(maybe_get_output(), self.to(result_type));
+  } else {
+    build_borrowing_unary_op(maybe_get_output(), self);
+  }
 }
 
 TORCH_META_FUNC2(clamp_min, Tensor) (
@@ -521,7 +569,18 @@ Tensor& clamp_out(const Tensor& self, const c10::optional<Tensor>& min,
 }
 
 Tensor clamp(const Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
-  Tensor result = at::empty({0}, self.options());
+  //manual type promotion to send to `out`
+  //won't be needed once clamp is ported to structured
+  at::native::ResultTypeState state = {};
+  state = at::native::update_result_type_state(self, state);
+  if (min) {
+    state = at::native::update_result_type_state(*min, state);
+  }
+  if (max) {
+    state = at::native::update_result_type_state(*max, state);
+  }
+  auto result_type = at::native::result_type(state);
+  Tensor result = at::empty({0}, self.options().dtype(result_type));
   return at::clamp_outf(self, min, max, result);
 }
 

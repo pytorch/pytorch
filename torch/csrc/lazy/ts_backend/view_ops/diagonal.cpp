@@ -7,15 +7,13 @@
 namespace torch {
 namespace lazy {
 
-const OpKind Diagonal::class_op_kind(at::aten::diagonal);
-
 Diagonal::Diagonal(
     const Value& input,
     int64_t offset,
     int64_t dim1,
     int64_t dim2)
     : TsNode(
-          OpKind(at::aten::diagonal),
+          ClassOpKind(),
           {input},
           [&]() {
             return MakeDiagonalShape(input.shape(), offset, dim1, dim2);
