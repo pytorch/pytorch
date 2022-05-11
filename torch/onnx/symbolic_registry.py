@@ -25,7 +25,7 @@ _registry: Dict[
 _symbolic_versions: Dict[Union[int, str], Any] = {}
 
 
-def import_symbolic_opsets():
+def _import_symbolic_opsets():
     for opset_version in itertools.chain(
         _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
     ):
@@ -79,7 +79,7 @@ def register_ops_in_version(domain: str, version: int):
 
 def get_ops_in_version(version: int):
     if not _symbolic_versions:
-        import_symbolic_opsets()
+        _import_symbolic_opsets()
     members = inspect.getmembers(_symbolic_versions[version])
     domain_opname_ops = []
     for obj in members:

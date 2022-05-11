@@ -1,4 +1,4 @@
-"""Side effects that patches the PyTorch graph."""
+"""Side effects that patch the PyTorch Graph for manipulating it."""
 import numbers
 import re
 from typing import Iterable, Tuple, Union
