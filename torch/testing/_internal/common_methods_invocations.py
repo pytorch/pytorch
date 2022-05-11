@@ -1836,7 +1836,7 @@ def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **k
 def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases = (
+    cases = [
         ((S, S), (2,), '2'),
         ((S, S), (0,), '0'),
         ((S, S), (0.5,), '0_5'),
@@ -1846,7 +1846,13 @@ def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S), (-2,), 'neg_2'),
         ((S, S), (-0.5,), 'neg_0_5'),
         ((S, S), (-1.5,), 'neg_1_5'),
-    )
+    ]
+
+    # FIXME gradgrad and noncotiguous_samples fail on inf and -inf norms on CPU because of vectorization
+    # For how to fix this, see the implementation of `linalg_vector_norm`.
+    if torch.device(device).type == "cuda":
+        cases += [((S, S), (inf,), 'inf'),
+                  ((S, S), (-inf,), 'neg_inf')]
 
     cases_nonzero_input = (
         ((S, S, S), (1.5,), '1_5_default'),
@@ -1856,13 +1862,13 @@ def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), (1.5, -1, True), 'keepdim_1_5_neg_dim'),
     )
 
-    cases_negdim_base = (
-        ((S, S), (-2, 1,), 'neg_2_2_dim'),
-        ((S, S), (-1, 1,), 'neg_1_2_dim'),
-        ((S, S), (0, 1,), '0_2_dim'),
-        ((S, S), (1, 1,), '1_2_dim'),
-        ((S, S), (2, 1,), '2_2_dim'),
-        ((S, S), (3, 1,), '3_2_dim'),
+    cases_posdim = (
+        ((S, S), (-2, 1,), 'neg_2_dim'),
+        ((S, S), (-1, 1,), 'neg_1_dim'),
+        ((S, S), (0, 1,), '0_dim'),
+        ((S, S), (1, 1,), '1_dim'),
+        ((S, S), (2, 1,), '2_dim'),
+        ((S, S), (3, 1,), '3_dim'),
         ((S, S, S), (2, 1), '2_dim'),
         ((S, S, S), (3, 1), '3_dim'),
         ((S, S, S), (2, 1, True), 'keepdim_2_dim'),
@@ -1873,15 +1879,10 @@ def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
         ((), (3, 0, True), 'keepdim_3_dim_scalar'),
     )
 
-    cases_negdim = []
-    for case in cases_negdim_base:
-        cases_negdim.append(case)
-        shape, args, name = case
-        new_args = copy.deepcopy(list(args))
-        new_args[1] *= -1
-        cases_negdim.append((shape, tuple(new_args), name.replace("_dim", "_neg_dim")))
+    cases_negdim = ((shape, args[:1] + (-args[1],) + args[2:], name.replace("_dim", "_neg_dim"))
+                    for shape, args, name in cases_posdim)
 
-    for shape, args, name in itertools.chain(cases, cases_negdim):
+    for shape, args, name in itertools.chain(cases, cases_posdim, cases_negdim):
         yield SampleInput(make_arg(shape), args=args, name=name)
 
     for shape, args, name in cases_nonzero_input:
@@ -1928,63 +1929,19 @@ def sample_inputs_norm_inf(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kwargs):
-    size_1D = (S,)
-    size_2D = (2, 2)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    test_cases = [
-        # input size, ord, dim args
-        (size_1D, 2, None),
-        (size_1D, 2, (0,)),
-        (size_1D, 0, None),
-        (size_1D, 0, (0,)),
-        (size_1D, 0.9, None),
-        (size_1D, 0.9, (0,)),
-        (size_1D, 1, None),
-        (size_1D, 1, (0,)),
-        (size_1D, -2.1, None),
-        (size_1D, -2.1, (0,)),
-        (size_1D, inf, None),
-        (size_1D, inf, (0,)),
-        (size_1D, -inf, None),
-        (size_1D, -inf, (0,)),
+    sizes = ((S,), (2, 2))
+    dims = (None, 0, -1)
+    ords = (inf, 2, 1, 0, 0.9, -2.1, -inf)
 
-        (size_2D, 2, None),
-        (size_2D, 2, (0,)),
-        (size_2D, 2, (-1, 0)),
-        (size_2D, 0, None),
-        (size_2D, 0, (0,)),
-        (size_2D, 0, (-1, 0)),
-        (size_2D, 0.9, None),
-        (size_2D, 0.9, (0,)),
-        (size_2D, 0.9, (-1, 0)),
-        (size_2D, 1, None),
-        (size_2D, 1, (0,)),
-        (size_2D, 1, (-1, 0)),
-        (size_2D, -2.1, None),
-        (size_2D, -2.1, (0,)),
-        (size_2D, -2.1, (-1, 0)),
-        (size_2D, inf, None),
-        (size_2D, inf, (0,)),
-        (size_2D, inf, (-1, 0)),
-        (size_2D, -inf, None),
-        (size_2D, -inf, (0,)),
-        (size_2D, -inf, (-1, 0)),
-    ]
-    inputs = []
+    for size, ord_, keepdim in product(sizes, ords, (True, False)):
+        for dim in dims:
+            yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=dim))
 
-    for test_size, ord, dim in test_cases:
-        for keepdim in [False, True]:
-            inputs.append(SampleInput(
-                make_tensor(
-                    test_size, dtype=dtype, device=device,
-                    low=None, high=None,
-                    requires_grad=requires_grad),
-                args=(ord,),
-                kwargs=dict(
-                    keepdim=keepdim,
-                    dim=dim)))
-
-    return inputs
+        # Test several dims
+        if len(size) == 2:
+            yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=(-1, 0)))
 
 # The following functions and classes are for testing elementwise binary operators.
 
