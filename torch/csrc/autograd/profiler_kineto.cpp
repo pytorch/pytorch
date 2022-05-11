@@ -261,6 +261,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
       cpu_trace_.addCPUActivity(
           e.name(),
+          e.record_function_scope(),
           e.kineto_info_,
           e.correlation_id(),
           start_us,
@@ -626,7 +627,11 @@ std::unique_ptr<at::ObserverContext> onFunctionEnter(const at::RecordFunction& f
     return nullptr;
   }
   auto corr_id = next_correlation_id();
-  torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
+  } else {
+    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+  }
   return state_ptr->record_queue_.getSubqueue()->begin_op(fn, corr_id);
 }
 
@@ -654,7 +659,11 @@ void onFunctionExit(const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) 
     }
   }
 
-  torch::profiler::impl::kineto::popCorrelationId();
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::popUserCorrelationId();
+  } else {
+    torch::profiler::impl::kineto::popCorrelationId();
+  }
 }
 
 template <bool use_global_callback = false>

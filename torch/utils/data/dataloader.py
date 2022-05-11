@@ -554,7 +554,8 @@ class _BaseDataLoaderIter(object):
     def __next__(self) -> Any:
         with torch.autograd.profiler.record_function(self._profile_name):
             if self._sampler_iter is None:
-                self._reset()
+                # TODO(https://github.com/pytorch/pytorch/issues/76750)
+                self._reset()  # type: ignore[call-arg]
             data = self._next_data()
             self._num_yielded += 1
             if self._dataset_kind == _DatasetKind.Iterable and \

@@ -23,6 +23,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   storage_ = functional_storage;
   storage_access_should_throw_ = false;
   key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize) | value_.key_set();
+  // All of the keys corresponding to functorch transforms should not be copied over.
+  // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
+  // to participate in the functorch transforms.
+  key_set_ = key_set_ - c10::functorch_transforms_ks;
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
