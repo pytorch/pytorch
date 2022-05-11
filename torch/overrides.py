@@ -259,6 +259,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.new_ones,
         Tensor.new_full,
         Tensor._make_subclass,
+        Tensor.solve,
         Tensor.stride,
         Tensor.unflatten,
         Tensor.to_sparse_coo,
@@ -656,7 +657,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.lu: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor_ex: lambda input, pivot=True, check_errors=False, out=None: -1,
-        torch.linalg.lu_solve: lambda LU, pivots, B, left=True, adjoint=False, out=None: -1,
         torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
@@ -957,7 +957,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.smm: lambda input, mat2: -1,
         torch.spmm: lambda input, mat2: -1,
         torch.softmax: lambda input, dim, dtype=None: -1,
-        torch.solve: lambda input, A, out=None: -1,
         torch.linalg.solve: lambda input, other, out=None: -1,
         torch.sort: lambda input, dim=-1, descending=False, *, stable=False, out=None: -1,
         torch.split: lambda tensor, split_size_or_sections, dim=0: -1,
