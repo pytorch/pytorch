@@ -113,17 +113,17 @@ def _stft_reference(x, hop_length, window):
     return X
 
 
-def skip_helper(device, dtype):
+def skip_helper_for_fft(device, dtype):
     device_type = torch.device(device).type
     if dtype not in (torch.half, torch.complex32):
         return
 
     if device_type == 'cpu':
-        raise unittest.SkipTest("half and complex32 not supported on CPU")
+        raise unittest.SkipTest("half and complex32 are not supported on CPU")
     if TEST_WITH_ROCM:
-        raise unittest.SkipTest("half and complex32 not supported on ROCM")
+        raise unittest.SkipTest("half and complex32 are not supported on ROCM")
     if not SM53OrLater:
-        raise unittest.SkipTest("half and complex32 is only supported on CUDA device with SM>53")
+        raise unittest.SkipTest("half and complex32 are only supported on CUDA device with SM>53")
 
 
 # Tests of functions related to Fourier analysis in the torch.fft namespace
@@ -179,7 +179,7 @@ class TestFFT(TestCase):
     })
     @dtypes(torch.half, torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
     def test_fft_round_trip(self, device, dtype):
-        skip_helper(device, dtype)
+        skip_helper_for_fft(device, dtype)
         # Test that round trip through ifft(fft(x)) is the identity
         if dtype not in (torch.half, torch.complex32):
             test_args = list(product(
@@ -270,7 +270,7 @@ class TestFFT(TestCase):
     @dtypes(torch.int8, torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_fft_type_promotion(self, device, dtype):
-        skip_helper(device, dtype)
+        skip_helper_for_fft(device, dtype)
 
         if dtype.is_complex or dtype.is_floating_point:
             t = torch.randn(64, device=device, dtype=dtype)
@@ -392,7 +392,7 @@ class TestFFT(TestCase):
     @dtypes(torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_fftn_round_trip(self, device, dtype):
-        skip_helper(device, dtype)
+        skip_helper_for_fft(device, dtype)
 
         norm_modes = (None, "forward", "backward", "ortho")
 
@@ -467,7 +467,7 @@ class TestFFT(TestCase):
     })
     @dtypes(torch.half, torch.float, torch.double)
     def test_hfftn(self, device, dtype):
-        skip_helper(device, dtype)
+        skip_helper_for_fft(device, dtype)
 
         # input_ndim, dim
         transform_desc = [
@@ -506,7 +506,7 @@ class TestFFT(TestCase):
     })
     @dtypes(torch.half, torch.float, torch.double)
     def test_ihfftn(self, device, dtype):
-        skip_helper(device, dtype)
+        skip_helper_for_fft(device, dtype)
 
         # input_ndim, dim
         transform_desc = [
