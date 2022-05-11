@@ -302,6 +302,7 @@ class AutocastCPUTestLists(object):
             ("bmm", (torch.randn((n, n, n), device=dev, dtype=torch.float32),
                      torch.randn((n, n, n), device=dev, dtype=torch.float32))),
             ("mm", mat0_fp32 + mat1_fp32),
+            ("matmul", mat0_fp32 + mat1_fp32),
             ("baddbmm", (torch.randn((n, n, n), device=dev, dtype=torch.float32),
                          torch.randn((n, n, n), device=dev, dtype=torch.float32),
                          torch.randn((n, n, n), device=dev, dtype=torch.float32))),
@@ -316,20 +317,15 @@ class AutocastCPUTestLists(object):
             ("batch_norm", dummy_bf16[2], {"weight": None, "bias": None, "running_mean": torch.rand((n), dtype=torch.float32),
                                            "running_var": torch.rand((n), dtype=torch.float32), "training": False,
                                            "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
-            ("dropout", dummy_bf16[2], {"p": 0.1, "train": False}),
-            ("binary_cross_entropy_with_logits", mat0_bf16 + (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
             ("instance_norm", dummy_bf16[1], {"weight": None, "bias": None, "running_mean": None,
                                               "running_var": None, "use_input_stats": True,
                                               "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
         ]
         self.nn_bf16 = [
-            ("linear", mat0_fp32 + mat1_fp32),
+            ("linear", mat0_fp32 + mat1_fp32, {}),
         ]
         self.nn_fp32 = [
-            ("avg_pool2d", dummy_bf16[2], {"kernel_size": (3, 2), "stride": (1, 1)}),
             ("avg_pool3d", dummy_bf16[3], {"kernel_size": (3, 3, 3), "stride": (1, 1, 1)}),
-            ("gelu", dummy_bf16[3], {"approximate": 'none'}),
-            ("gelu", dummy_bf16[3], {"approximate": 'tanh'}),
             ("upsample_nearest1d", dummy_bf16[2], {"output_size": (n)}),
             ("upsample_nearest2d", dummy_bf16[3], {"output_size": (n, n)}),
             ("upsample_nearest3d", dummy_bf16[4], {"output_size": (n, n, n)}),
@@ -339,7 +335,6 @@ class AutocastCPUTestLists(object):
             ("binary_cross_entropy", (torch.rand((n, n), device=dev, dtype=torch.bfloat16),) +
                                      (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
             ("reflection_pad1d", dummy_bf16[2], {"padding": (3, 3)}),
-            ("smooth_l1_loss", mat0_bf16 + mat1_bf16),
         ]
         self.torch_need_autocast_promote = [
             ("cat", (pointwise0_bf16 + pointwise1_fp32,)),
