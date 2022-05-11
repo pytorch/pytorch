@@ -113,7 +113,7 @@ std::vector<c10::Device> getDevicesOfTensors(
   size_t deviceCount = 0;
   std::vector<bool> indexBitset;
   for (const torch::Tensor& tensor : tensors) {
-    if (!tensor.is_cpu()) {
+    if (!tensor.is_cpu() && !tensor.is_meta()) {
       c10::Device device = tensor.device();
       if (!impl.has_value()) {
         impl.emplace(device.type());
@@ -646,7 +646,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
 
     for (const auto& tensor : responseMessage->tensors()) {
       const auto device = tensor.device();
-      if (!device.is_cpu()) {
+      if (!device.is_cpu() && !device.is_meta()) {
         GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
         if (std::find(devices_.begin(), devices_.end(), device) ==
             devices_.end()) {
@@ -1078,7 +1078,7 @@ void TensorPipeAgent::leaveGroup() {
 }
 
 // TODO: Remove join()
-void TensorPipeAgent::join(bool shutdown) {
+void TensorPipeAgent::join(bool shutdown, float /* unused */) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
   if (!isStaticGroup_) {
     leaveGroup();
@@ -1423,7 +1423,7 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   if (iter == deviceMaps.end()) {
     for (const auto& t : message.tensors()) {
       TORCH_CHECK(
-          t.device().is_cpu(),
+          t.device().is_cpu() || t.device().is_meta(),
           errStr,
           ", but found tensor on device: ",
           t.device());
