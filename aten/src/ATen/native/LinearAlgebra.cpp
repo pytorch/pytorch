@@ -2591,13 +2591,11 @@ Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayR
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//                         Frobenius Norm (deprecated)                          //
+//                              Frobenius Norm                                //
+//             Just used in linalg.norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor frobenius_norm(const Tensor& self) {
-  TORCH_WARN_ONCE(
-    "torch.frobenius_norm is deprecated in favor of torch.linalg.matrix_norm(X) ",
-    "and will be removed in a future PyTorch release.\n");
   return at::norm(self);
 }
 
@@ -2613,9 +2611,6 @@ Tensor &frobenius_norm_out(const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
     Tensor& result) {
-  TORCH_WARN_ONCE(
-    "torch.frobenius_norm is deprecated in favor of torch.linalg.matrix_norm(X) ",
-    "and will be removed in a future PyTorch release.\n");
   TORCH_CHECK(
       dim.size() <= 2,
       "Expected at most 2 dimensions, but got ",
@@ -2643,7 +2638,8 @@ Tensor &frobenius_norm_out(const Tensor& self,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//                         Nuclear Norm (deprecated)                          //
+//                                Nuclear Norm                                //
+//             Just used in linalg.norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
@@ -2668,9 +2664,6 @@ Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
 }
 
 Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  TORCH_WARN_ONCE(
-    "torch.nuclear_norm is deprecated in favor of torch.linalg.matrix_norm(X, ord=\"nuc\") ",
-    "and will be removed in a future PyTorch release.\n");
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
   auto dim_ = dim.vec();
   maybe_wrap_dims(dim_, self.dim());

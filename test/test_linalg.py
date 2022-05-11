@@ -1552,10 +1552,10 @@ class TestLinalg(TestCase):
                 self.assertEqual(res.shape, expected.shape, msg=msg)
                 self.assertEqual(res, expected, msg=msg, exact_dtype=False)
 
-                res_out = torch.tensor([]).to(device)
+                res_out = torch.tensor([], device=device, dtype=res.dtype)
                 torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
-                self.assertEqual(res_out.cpu(), expected, msg=msg, exact_dtype=False)
+                self.assertEqual(res_out, expected, msg=msg)
 
             # matrix norm
             x = torch.randn(25, 25, device=device, dtype=dtype)
@@ -1567,10 +1567,10 @@ class TestLinalg(TestCase):
                 self.assertEqual(res.shape, expected.shape, msg=msg)
                 self.assertEqual(res, expected, msg=msg, exact_dtype=False)
 
-                res_out = torch.tensor([]).to(device)
+                res_out = torch.tensor([], device=device, dtype=res.dtype)
                 torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
-                self.assertEqual(res_out.cpu(), expected, msg=msg, exact_dtype=False)
+                self.assertEqual(res_out, expected, msg=msg)
 
     # Test that linal.vector_norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
