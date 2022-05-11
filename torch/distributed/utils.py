@@ -3,7 +3,9 @@ import collections
 import torch
 import torch.distributed as dist
 from torch.nn.parallel._functions import _get_stream
-from torch.nn.parallel.scatter_gather import is_namedtuple  # type: ignore[attr-defined]
+from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
+    is_namedtuple as _is_namedtuple
+)
 
 def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     r"""
@@ -31,7 +33,7 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
                     # main stream is complete
                     output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
-        if is_namedtuple(obj):
+        if _is_namedtuple(obj):
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]
         if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(to_map, obj)))

@@ -10,7 +10,7 @@ Narrow::Narrow(
     c10::ArrayRef<int64_t> base_indices,
     c10::ArrayRef<int64_t> sizes)
     : TsNode(
-          OpKind(at::aten::narrow),
+          ClassOpKind(),
           {input},
           /*num_outputs=*/1,
           MHash(base_indices, sizes)),
