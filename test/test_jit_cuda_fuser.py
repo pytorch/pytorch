@@ -2621,7 +2621,6 @@ class TestCudaFuser(JitTestCase):
         out_feature = 8
         # Changing the input dims to be 3-D to avoid eager mode bias fusion
         # The bias fusion causes some precision issues with TF-32
-        x = torch.randn(2, 4, in_feature, dtype=torch.float32, device='cuda')
         weight = torch.randn(out_feature, in_feature, dtype=torch.float32, device='cuda')
         bias = torch.randn(out_feature, dtype=torch.float32, device='cuda')
 
@@ -2630,24 +2629,27 @@ class TestCudaFuser(JitTestCase):
             o = torch.relu(o)
             return o
 
-        # bias set to true.
-        t_jit = torch.jit.script(t)
-        jit_o = t_jit(x, weight, bias)
-        jit_o = t_jit(x, weight, bias)
-        o = t(x, weight, bias)
-        self.assertEqual(o, jit_o)
-        # since the output value is not used at all, the fusion operator should
-        # have been optimized away
-        self.assertGraphContainsExactly(t_jit.graph_for(x, weight, bias), FUSION_GUARD, 1)
+        # disabling cache so new inputs would generate new graph
+        t.__disable_jit_function_caching__ = True
+
+        sizes = [in_feature, ]
+        for i in range(4):
+            # increase input rank in each iteration
+            sizes.insert(0, i + 2)
+            x = torch.randn(*sizes, dtype=torch.float32, device='cuda')
+            t_jit = torch.jit.script(t)
+            # fusion only happens for input rank >= 4
+            has_fusion = 0 if len(sizes) < 4 else 1
+            self._run_helper(t_jit, t, x, weight, bias, check_stride=True, num_fusion=has_fusion)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_linear_symbolic_shapes(self):
         def fn(x: int):
-            y = torch.zeros((x, x + 2)).cuda()
+            y = torch.zeros((3, 4, x, x + 2)).cuda()
             for i in range(2):
-                inp = torch.rand((x, x + i)).cuda()
+                inp = torch.rand((3, 4, x, x + i)).cuda()
                 weight = torch.rand((x + 2, x + i)).cuda()
                 bias = torch.rand((x, x + 2)).cuda()
                 y += torch.sin(torch.nn.functional.linear(inp, weight, bias))

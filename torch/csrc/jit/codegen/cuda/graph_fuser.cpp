@@ -2045,7 +2045,7 @@ void decomposeLinearOps(Block* block) {
     for (Block* b : n->blocks()) {
       decomposeLinearOps(b);
     }
-    // only decompose `linear` layer with bias.
+    // only decompose `linear` layer with bias
     if (n->kind() == aten::linear &&
         !n->input(2)->type()->isSubtypeOf(
             static_cast<c10::TypePtr>(NoneType::get()))) {
@@ -2060,6 +2060,11 @@ void decomposeLinearOps(Block* block) {
     auto matmul = graph->insertNode(
         graph->create(aten::matmul, {n->input(0), weight_t->output()}, 1));
     auto input_tensor_type = n->input(0)->type()->cast<c10::TensorType>();
+    if (!input_tensor_type) {
+      TORCH_WARN_ONCE(
+          "linear input 0 is required to be tensor for linear decompose");
+      continue;
+    }
     auto mat0_size = input_tensor_type->sizes().concrete_sizes();
     auto mat1_size =
         n->input(1)->type()->cast<c10::TensorType>()->sizes().concrete_sizes();
@@ -2072,6 +2077,13 @@ void decomposeLinearOps(Block* block) {
           "concrete shape for linear input & weight are required to decompose into matmul + bias");
       continue;
     }
+
+    // only decompose for input with nDims >= 4. since lower rank linear eager
+    // is already fused
+    if (mat0_size->size() < 4) {
+      continue;
+    }
+
     auto out_size = mat0_size.value();
     TORCH_INTERNAL_ASSERT(
         mat1_size->size() == 2 || mat1_size->size() == 1,
