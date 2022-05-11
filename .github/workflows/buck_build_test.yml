@@ -67,7 +67,19 @@ jobs:
         run: |
           echo -e "" > .buckconfig
           sh scripts/buck_setup.sh
-      - name: Build Buck target
-        run: |
 
-          buck build //... --keep-going
+      - name: Build C10
+        run: |
+          buck build c10/... --keep-going
+
+      - name: Build third party libraries
+        run: |
+          buck build third_party/... --keep-going
+
+      - name: Build QNNPACK
+        run: |
+          buck build aten/src/ATen/native/quantized/cpu/qnnpack/... --keep-going
+
+      - name: Build tools
+        run: |
+          buck build tools/... --keep-going

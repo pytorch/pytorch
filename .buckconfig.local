@@ -15,4 +15,4 @@ name = BUILD.buck
   default_flavors_mode=all
 
 [build]
-  threads = 8
+  threads = 1
