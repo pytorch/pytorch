@@ -50,14 +50,17 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _unflatten_optim_state,
 )
-from ._utils import _apply_to_modules, _apply_to_tensors, _replace_by_prefix
+from ._utils import (
+    _apply_to_modules, _apply_to_tensors, _replace_by_prefix,
+    _override_batchnorm_mixed_precision, _contains_batchnorm
+)
 from .flatten_params_wrapper import (
     FLAT_PARAM,
     FPW_MODULE,
     FlatParameter,
     FlattenParamsWrapper,
 )
-from .wrap import _recursive_wrap
+from .wrap import _recursive_wrap, _wrap_batchnorm_individually, _or_policy
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
@@ -496,6 +499,14 @@ class FullyShardedDataParallel(nn.Module):
             that only floating point data is cast to the reduced precision. This allows
             users potential memory saving and training speedup while trading off
             accuracy during model training. If ``None``, no mixed precision is applied.
+            Note that if ``mixed_precision`` is enabled for FSDP model that
+            contains ``BatchNorm`` with ``auto_wrap_policy``, FSDP will take
+            care to disable mixed precision for ``BatchNorm`` units by wrapping
+            them separately in their own FSDP unit with ``mixed_precision=None``.
+            This is done because several ``BatchNorm`` kernels do not implement
+            reduced type support at the moment. If individually wrapping the model,
+            users must take care to set ``mixed_precision=None`` for
+            ``BatchNorm`` units.
             (Default: ``None``)
         ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
             own parameters and child modules' parameters and buffers are
@@ -580,9 +591,25 @@ class FullyShardedDataParallel(nn.Module):
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
                 err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
             )
+            if mixed_precision is not None and _contains_batchnorm(module):
+                _override_batchnorm_mixed_precision(module)
+                policy_to_use = functools.partial(
+                    _or_policy,
+                    policies=[_wrap_batchnorm_individually, auto_wrap_policy]
+                )
+                warnings.warn(
+                    "Mixed precision was specified for FSDP module with"
+                    " batchnorm submodules wrapped via ``auto_wrap_policy``."
+                    " BatchNorm units will be wrapped as a separate FSDP unit,"
+                    " with mixed_precision disabled (i.e. set to ``None``)"
+                    " as several BatchNorm kernels would raise errors when"
+                    " operating on reduced precision inputs."
+                )
+            else:
+                policy_to_use = auto_wrap_policy
             _recursive_wrap(
                 module,
-                auto_wrap_policy=auto_wrap_policy,
+                auto_wrap_policy=policy_to_use,
                 wrapper_cls=FullyShardedDataParallel,
                 ignored_modules=ignored_modules,
                 ignored_params=ignored_params,
@@ -3515,10 +3542,10 @@ def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Ten
         local_norm = torch.tensor(max(par.grad.detach().abs().max() for par in parameters))
     else:
         # Compute the norm in full precision no matter what
-        local_norm = torch.linalg.norm(
+        local_norm = torch.linalg.vector_norm(
             torch.stack(
                 [
-                    torch.linalg.norm(par.grad.detach(), p, dtype=torch.float32)
+                    torch.linalg.vector_norm(par.grad.detach(), p, dtype=torch.float32)
                     for par in parameters
                 ]
             ),

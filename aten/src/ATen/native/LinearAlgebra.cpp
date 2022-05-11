@@ -2472,7 +2472,11 @@ Tensor& linalg_matrix_norm_out(
     bool keepdim,
     optional<ScalarType> opt_dtype,
     Tensor& result) {
+  checkSameDevice("linalg.matrix_norm", A, result);
   auto out = at::linalg_matrix_norm(A, ord, dim, keepdim, opt_dtype);
+  TORCH_CHECK(out.scalar_type() == result.scalar_type(),
+              "linalg.matrix_norm expected out tensor dtype ", out.scalar_type(),
+              " but got: ", result.scalar_type());
   at::native::resize_output(result, out.sizes());
   result.copy_(out);
   return result;
@@ -2514,7 +2518,11 @@ Tensor& linalg_matrix_norm_out(
     bool keepdim,
     optional<ScalarType> opt_dtype,
     Tensor& result) {
+  checkSameDevice("linalg.matrix_norm", A, result);
   auto out = at::linalg_matrix_norm(A, ord, dim, keepdim, opt_dtype);
+  TORCH_CHECK(out.scalar_type() == result.scalar_type(),
+              "linalg.matrix_norm expected out tensor dtype ", out.scalar_type(),
+              " but got: ", result.scalar_type());
   at::native::resize_output(result, out.sizes());
   result.copy_(out);
   return result;
@@ -2547,7 +2555,11 @@ Tensor linalg_norm(const Tensor& X, const optional<Scalar>& opt_ord, OptionalInt
 }
 
 Tensor& linalg_norm_out(const Tensor& X, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+  checkSameDevice("linalg.norm", X, result);
   auto out = at::linalg_norm(X, opt_ord, opt_dim, keepdim, opt_dtype);
+  TORCH_CHECK(out.scalar_type() == result.scalar_type(),
+              "linalg.norm expected out tensor dtype ", out.scalar_type(),
+              " but got: ", result.scalar_type());
   at::native::resize_output(result, out.sizes());
   result.copy_(out);
   return result;
@@ -2568,7 +2580,11 @@ Tensor linalg_norm(const Tensor& X, c10::string_view ord, OptionalIntArrayRef op
 }
 
 Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+  checkSameDevice("linalg.norm", X, result);
   auto out = at::linalg_norm(X, ord, opt_dim, keepdim, opt_dtype);
+  TORCH_CHECK(out.scalar_type() == result.scalar_type(),
+              "linalg.norm expected out tensor dtype ", out.scalar_type(),
+              " but got: ", result.scalar_type());
   at::native::resize_output(result, out.sizes());
   result.copy_(out);
   return result;
