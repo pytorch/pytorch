@@ -342,7 +342,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_reference_consistency(self, device, dtype, op):
-        for sample in op.torch_opinfo.reference_inputs(device, dtype, requires_grad=False):
+        for sample in op.reference_inputs(device, dtype, requires_grad=False):
             actual = op(sample.input, *sample.args, **sample.kwargs)
             expected = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
@@ -1114,7 +1114,7 @@ class TestMathBits(TestCase):
 
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
-    @ops(op_db, allowed_dtypes=(torch.cfloat,))
+    @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
             self.skipTest("Operation doesn't support conjugated inputs.")
@@ -1136,7 +1136,7 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
-    @ops(op_db, allowed_dtypes=(torch.double,))
+    @ops(ops_and_refs, allowed_dtypes=(torch.double,))
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
@@ -1155,7 +1155,7 @@ class TestMathBits(TestCase):
             lambda x: True,
         )
 
-    @ops(op_db, allowed_dtypes=(torch.cdouble,))
+    @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
