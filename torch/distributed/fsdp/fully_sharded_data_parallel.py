@@ -2779,40 +2779,52 @@ class FullyShardedDataParallel(nn.Module):
                 return
             # However, we may issue multiple warnings on the first deviating
             # iteration to help debugging, where either:
-            # 1. This iteration sees more all-gathers than the first iteration
-            msg_prefix = all_gather_seq = None  # non-`None` means we warn
+            # 1. This iteration sees an extra `_rebuild_full_params()` in
+            # `forward()` compared to the first iteration
+            msg_prefix = curr_param_order = None  # non-`None` means we warn
             if eod.index >= len(eod.param_order):
-                msg_prefix = "Expected no more all-gathers but got an all-gather for "
-                all_gather_seq = eod.param_order + [param_index]
+                msg_prefix = "Expected to not rebuild any more parameters " \
+                    "in `forward()` for this module but trying to rebuild " \
+                    "parameters for "
+                curr_param_order = eod.param_order + [param_index]
             else:
                 expected_param_index = eod.param_order[eod.index]
-                # 2. This iteration sees the same number of all-gathers (so
-                # far) but the current parameter to all-gather differs
+                # 2. This iteration sees the same number of
+                # `_rebuild_full_params()` (so far) but the current parameter
+                # differs
                 if param_index != expected_param_index:
                     expected_param_names = eod.get_unflat_param_names(expected_param_index)
                     assert len(expected_param_names) > 0, \
-                        "The expected parameter to all-gather should always be valid"
-                    msg_prefix = "Expected an all-gather for the FSDP module " \
-                        f"wrapping {expected_param_names} but got an all-gather for "
-                    all_gather_seq = eod.param_order[:eod.index - 1] + [param_index]
+                        "Expected parameter should always be valid"
+                    msg_prefix = "Expected to rebuild parameters in " \
+                        f"`forward()` for {expected_param_names} but " \
+                        "instead trying to rebuild parameters for "
+                    curr_param_order = eod.param_order[:eod.index - 1] + [param_index]
             to_issue_warning = msg_prefix is not None
             if to_issue_warning:
-                assert all_gather_seq is not None
+                assert curr_param_order is not None
                 param_names = eod.get_unflat_param_names(param_index)
                 is_added_param = len(param_names) == 0
                 if is_added_param:
                     msg_suffix = "a newly-added parameter since construction time"
                 else:
-                    msg_suffix = f"the FSDP module wrapping {param_names}"
+                    msg_suffix = f"{param_names}"
                 sub_msg = msg_prefix + msg_suffix
+                first_iter_param_names = [
+                    eod.get_unflat_param_names(index) for index in eod.param_order
+                ]
+                curr_iter_param_names = [
+                    eod.get_unflat_param_names(index) for index in curr_param_order
+                ]
+                print(first_iter_param_names, type(first_iter_param_names))
+                print(curr_iter_param_names, type(curr_iter_param_names))
                 warnings.warn(
                     "Forward order differs from that of the first iteration "
                     f"on rank {self.rank} -- collectives are unchecked and may "
                     "give incorrect results or hang\n" + sub_msg + "\n" +
-                    f"First iteration's all-gather sequence: {eod.param_order}"
-                    "\nThis iteration's all-gather sequence (so far): "
-                    f"{all_gather_seq}\nwhere indices follow the root FSDP "
-                    "module's `.parameters()` order"
+                    f"First iteration's forward order: {first_iter_param_names}"
+                    "\nThis iteration's forward order (so far): "
+                    f"{curr_iter_param_names}"
                 )
                 eod.warn_status = _ExecOrderWarnStatus.WARNING
             eod.index += 1
@@ -2833,10 +2845,9 @@ class FullyShardedDataParallel(nn.Module):
                     r2_param_names = eod.get_unflat_param_names(i2)
                     raise RuntimeError(
                         f"Forward order differs across ranks: rank {r1} is "
-                        "running `forward()` with the flattened parameter "
-                        f"wrapping {r1_param_names} while rank {r2} is running "
-                        "`forward()` with the flattened parameter wrapping "
-                        f"{r2_param_names}"
+                        "rebuilding full parameters in `forward()` for "
+                        f"{r1_param_names} while rank {r2} is rebuilding full "
+                        f"parameters in `forward()` for {r2_param_names}"
                     )
             eod.param_order.append(param_index)
 
