@@ -9,8 +9,6 @@ namespace lazy {
 
 class TORCH_API Cast : public TsNode {
  public:
-  static const OpKind class_op_kind;
-
   Cast(
       const Value& input,
       at::ScalarType dtype,

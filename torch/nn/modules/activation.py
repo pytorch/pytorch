@@ -1062,7 +1062,15 @@ class MultiheadAttention(Module):
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
         elif query is not key or key is not value:
+            # When lifting this restriction, don't forget to either
+            # enforce that the dtypes all match or test cases where
+            # they don't!
             why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
+        elif query.dtype != self.in_proj_bias.dtype:
+            why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
+        elif query.dtype != self.in_proj_weight.dtype:
+            # this case will fail anyway, but at least they'll get a useful error message.
+            why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
         elif self.training:
             why_not_fast_path = "training is enabled"
         elif not self.batch_first:
