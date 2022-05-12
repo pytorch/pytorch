@@ -312,12 +312,12 @@ class TestStorageBase:
         return fut
 
 
-class TestStorageWriter(TestStorageBase, StorageWriter):
+class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def __init__(
         self,
         fail_conf
     ):
-        super(TestStorageWriter, self).__init__(fail_conf)
+        super(FaultyStorageWriter, self).__init__(fail_conf)
 
     def prepare(self) -> None:
         self._fail_rank("fail_prepare")
@@ -336,13 +336,13 @@ class TestStorageWriter(TestStorageBase, StorageWriter):
     def prepare_storage(self, storage_writes: List[Union[TensorWriteRequest, BytesWriteRequest]]) -> None:
         self._fail_rank("fail_prepare_storage")
 
-class TestStorageReader(TestStorageBase, StorageReader):
+class FaultyStorageReader(TestStorageBase, StorageReader):
     def __init__(
         self,
         metadata,
         fail_conf
     ):
-        super(TestStorageReader, self).__init__(fail_conf)
+        super(FaultyStorageReader, self).__init__(fail_conf)
         self.metadata = metadata
 
     def read_bytes(self, requests: List[BytesReadRequest]) -> Future[None]:
@@ -385,18 +385,19 @@ class TestDistributedFailure(ShardedTensorTestBase):
             'bytes': [1, 2, 3, 4]
         }
 
-        save_state_dict(state_dict, TestStorageWriter({}))
+        save_state_dict(state_dict, FaultyStorageWriter({}))
 
 
     def _test_dist_failure(self, callback, kwargs):
         bad_ranks = list(kwargs.values())[0] if len(kwargs) > 0 else []
-        try:
+
+        # Empty bad_ranks means it must work
+        if len(bad_ranks) == 0:
             callback()
-            if len(bad_ranks) > 0:
-                self.fail(msg="Expected CheckpointException to be raised")
-        except CheckpointException as e:
-            if len(bad_ranks) == 0:
-                self.fail(msg="No CheckpointException should have being raised")
+        else:
+            with self.assertRaises(CheckpointException) as cm:
+                callback()
+            e = cm.exception
             for rank, ex in e.failures.items():
                 self.assertTrue(rank in bad_ranks, msg=f"{rank} did not fail")
                 if not kwargs.get("ignore_exception_type", False):
@@ -411,7 +412,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         def _save():
             save_state_dict(
                 state_dict,
-                storage_writer=TestStorageWriter(kwargs),
+                storage_writer=FaultyStorageWriter(kwargs),
                 coordinator_rank=coordinator,
             )
         self._test_dist_failure(_save, kwargs)
@@ -421,7 +422,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
             metadata, _, _ = _prepare(state_dict)
             load_state_dict(
                 state_dict,
-                storage_reader=TestStorageReader(metadata, kwargs),
+                storage_reader=FaultyStorageReader(metadata, kwargs),
                 coordinator_rank=coordinator,
             )
 
