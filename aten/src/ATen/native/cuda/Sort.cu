@@ -1,4 +1,4 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/core/Array.h>
@@ -10,14 +10,8 @@
 #include <ATen/native/cuda/SortUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/arange.h>
-#endif
-
 #include <limits>
+#include <c10/core/DeviceArray.h>
 
 namespace at { namespace native {
 
@@ -238,6 +232,7 @@ __global__ void sort_postprocess_kernel(const scalar_t *in, scalar_t *out, int64
 }
 
 
+C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
 __global__ void fill_index_and_segment_kernel(
     int2 *data, int numel, at::cuda::detail::IntDivider<uint32_t> nsort_divider) {
   CUDA_KERNEL_LOOP(idx, numel) {
@@ -248,6 +243,7 @@ __global__ void fill_index_and_segment_kernel(
   }
 }
 
+C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
 __global__ void fill_reverse_indices_kernel(
     int64_t *data, int numel, at::cuda::detail::IntDivider<uint32_t> nsort_divider) {
   CUDA_KERNEL_LOOP(idx, numel) {
@@ -255,55 +251,68 @@ __global__ void fill_reverse_indices_kernel(
   }
 }
 
+template<typename scalar_t>
+inline void segmented_sort_large_segments(
+    const int64_t nsegments, const int64_t nsort, const int64_t n, const bool descending,
+    const scalar_t * self_ptr, scalar_t * values_ptr, int64_t * indices_ptr
+  ) {
+  using namespace at::cuda::detail;
+  auto allocator = at::cuda::getCUDADeviceAllocator();
+  auto stream = at::cuda::getCurrentCUDAStream();
+  dim3 block = CUDA_NUM_THREADS;
+  dim3 grid = GET_BLOCKS(nsort);
+  c10::DeviceArray<int64_t> indices(*allocator, nsort);
+  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
+  fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
+      indices.get(), nsort, nsort_divider);
+  const int64_t *initial_indices = indices.get();
+
+  for (auto i: c10::irange(nsegments)){
+    at::cuda::cub::radix_sort_pairs<scalar_t, int64_t>(
+        self_ptr, values_ptr, initial_indices, indices_ptr,
+        nsort, descending);
+    indices_ptr += nsort;
+    self_ptr += nsort;
+    values_ptr += nsort;
+  }
+}
 
 template<typename scalar_t>
 inline void segmented_sort_pairs_by_full_sort(
   const int64_t nsegments, const int64_t nsort, const int64_t n, const bool descending,
-  const scalar_t * self_ptr, scalar_t * values_ptr, int64_t * indices_ptr
+  const scalar_t *const self_ptr, scalar_t *const values_ptr, int64_t *const indices_ptr
 ) {
-  if (nsegments == 1 || nsort > 1000000) { //rough heuristics where even a single sort occupies GPU
-    for (auto i: c10::irange(nsegments)){
-      auto indices = at::arange(nsort, TensorOptions().device(at::kCUDA).dtype(at::kLong));
-      at::cuda::cub::radix_sort_pairs<scalar_t, int64_t>(
-      self_ptr, values_ptr, indices.data_ptr<int64_t>(), indices_ptr,
-      nsort, descending);
-      indices_ptr += n;
-      self_ptr += n;
-      values_ptr += n;
-    }
-  } else {
-    int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
+  int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
 
-    const auto numel = nsort * nsegments;
-    auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
-    auto indices_and_segment = cuda_allocator->allocate(numel * sizeof(int2));
-    auto i_s_ptr = static_cast<int2 *>(indices_and_segment.get());
+  const auto numel = nsort * nsegments;
+  auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
+  auto indices_and_segment = cuda_allocator->allocate(numel * sizeof(int2));
+  auto i_s_ptr = static_cast<int2 *>(indices_and_segment.get());
 
-    using namespace at::cuda::detail;
-    dim3 block = CUDA_NUM_THREADS;
-    dim3 grid = GET_BLOCKS(numel);
-    auto stream = c10::cuda::getCurrentCUDAStream();
-    at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
-    fill_index_and_segment_kernel<<<grid, block, 0, stream>>>(
-        i_s_ptr, numel, nsort_divider);
+  using namespace at::cuda::detail;
+  dim3 block = CUDA_NUM_THREADS;
+  dim3 grid = GET_BLOCKS(numel);
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
+  fill_index_and_segment_kernel<<<grid, block, 0, stream>>>(
+      i_s_ptr, numel, nsort_divider);
 
-    auto indices_and_segment2 = cuda_allocator->allocate(nsegments * nsort * sizeof(int2));
-    auto i_s_ptr2 = static_cast<int2 *>(indices_and_segment2.get());
+  auto indices_and_segment2 = cuda_allocator->allocate(nsegments * nsort * sizeof(int2));
+  auto i_s_ptr2 = static_cast<int2 *>(indices_and_segment2.get());
 
-    at::cuda::cub::radix_sort_pairs<scalar_t, int2>(
-      self_ptr, nullptr, i_s_ptr, i_s_ptr2,
-      n, descending);
+  at::cuda::cub::radix_sort_pairs<scalar_t, int2>(
+    self_ptr, nullptr, i_s_ptr, i_s_ptr2,
+    n, descending);
 
-    TORCH_INTERNAL_ASSERT(segment_bits <= 32);
+  TORCH_INTERNAL_ASSERT(segment_bits <= 32);
 
-    // sort on lower 32bits, i.e. segment index
-    at::cuda::cub::radix_sort_keys<int64_t>(
-      reinterpret_cast<int64_t *>(i_s_ptr2), reinterpret_cast<int64_t *>(i_s_ptr),
-      n, false, 0, segment_bits);
+  // sort on lower 32bits, i.e. segment index
+  at::cuda::cub::radix_sort_keys<int64_t>(
+    reinterpret_cast<int64_t *>(i_s_ptr2), reinterpret_cast<int64_t *>(i_s_ptr),
+    n, false, 0, segment_bits);
 
-    sort_postprocess_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
-      self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort);
-    }
+  sort_postprocess_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
+    self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort);
 }
 
 template<typename scalar_t>
@@ -359,7 +368,11 @@ void launch_stable_sort_kernel(
         int64_t n = std::min(remaining, nbatch);
         int64_t nsegments = n / nsort;
 
-        if (nsegments < 128) {
+        if (nsegments == 1 || nsort >= 1000000) { //rough heuristics where even a single sort occupies GPU
+          segmented_sort_large_segments(
+              nsegments, nsort, n, descending,
+              self_ptr, values_ptr, indices_ptr);
+        } else if (nsegments < 128) {
           segmented_sort_pairs_by_full_sort(nsegments, nsort, n, descending,
             self_ptr, values_ptr, indices_ptr);
         } else {
