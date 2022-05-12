@@ -1407,6 +1407,7 @@ at::Tensor _convolution(
     case ConvBackend::SlowTranspose2d:
     case ConvBackend::SlowTranspose3d:
       input = input.contiguous(backend_memory_format);
+      weight = weight.contiguous(backend_memory_format);
       if (params.groups == 1) {
         output = _convolution_nogroup_backend(input, weight, bias, backend, params);
       } else {
@@ -1905,6 +1906,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     case ConvBackend::SlowTranspose3d:
     {
       input = input.contiguous(backend_memory_format);
+      weight = weight.contiguous(backend_memory_format);
       if (params.groups == 1) {
         std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
           _convolution_backward_nogroup_backend(
