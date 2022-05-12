@@ -207,8 +207,8 @@ class GenLazyIR(ABC):
             f"""\
 class {schema.node_name} : public {self.node_base} {{
  public:
-  static OpKind ClassOpKind() {{
-    return OpKind({aten_symbol(schema)});
+  static torch::lazy::OpKind ClassOpKind() {{
+    return torch::lazy::OpKind({aten_symbol(schema)});
   }}
 
   {schema.node_name}({node_ctor_args}, std::vector<torch::lazy::Shape>&& shapes)
