@@ -96,6 +96,9 @@ Value* createConditionalConstant(Node* profile_ivalue) {
     // str
     val = IValue(static_cast<std::string>(
         profile_ivalue->s(Symbol::attr("profiled_str"))));
+  } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_ival"))) {
+    // ival
+    val = IValue(profile_ivalue->ival(Symbol::attr("profiled_ival")));
   } else {
     GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
     TORCH_WARN(
@@ -1632,6 +1635,16 @@ void guardFusionGroup(
             versioning_if,
             view,
             profiled_ival);
+      } else if (fusion->input(offset)->node()->hasAttribute(
+                     Symbol::attr("profiled_ival"))) {
+        ivalue_check =
+            fusion->owningGraph()
+                ->create(
+                    c10::Symbol::fromQualString("prim::CudaFusionIvalGuard"),
+                    {profiled_ival, const_o},
+                    1)
+                ->insertBefore(versioning_if)
+                ->output();
       } else {
         ivalue_check = fusion->owningGraph()
                            ->create(aten::eq, {profiled_ival, const_o}, 1)
@@ -2085,12 +2098,12 @@ void decomposeLinearOps(Block* block) {
 // Replace 'operation' with 'operation_copy' to guard alias operations.
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping(
-      // TODO: revert disabled aten::view
-      {// {aten::view, prim::view_copy},
-       // {aten::reshape, prim::reshape_copy},
-       {aten::squeeze, prim::squeeze_copy},
-       {aten::unsqueeze, prim::unsqueeze_copy}});
+  static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping;
+  // TODO: revert disabled aten::view
+  // ({{aten::view, prim::view_copy},
+  //  {aten::reshape, prim::reshape_copy},
+  //  {aten::squeeze, prim::squeeze_copy},
+  //  {aten::unsqueeze, prim::unsqueeze_copy}});
 
   std::vector<Node*> maybe_safe_alias_nodes;
   for (Node* n : block->nodes()) {
@@ -2134,12 +2147,12 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
 // e.g., Any non-fused alias operation including within the prim::FallbackGraph
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
-      // TODO: revert disabled aten::view
-      {// {prim::view_copy, aten::view},
-       // {prim::reshape_copy, aten::reshape},
-       {prim::squeeze_copy, aten::squeeze},
-       {prim::unsqueeze_copy, aten::unsqueeze}});
+  static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping;
+  // TODO: revert disabled aten::view
+  // ({{prim::view_copy, aten::view},
+  //  {prim::reshape_copy, aten::reshape},
+  //  {prim::squeeze_copy, aten::squeeze},
+  //  {prim::unsqueeze_copy, aten::unsqueeze}});
 
   std::vector<Node*> alias_copy_ops;
   for (Node* n : block->nodes()) {

@@ -19,8 +19,8 @@ cp torch/_utils_internal.py tools/shared
 python -m torchgen.gen
 
 python tools/setup_helpers/generate_code.py                 \
-  --native-functions-path aten/src/ATen/native/native_functions.yaml
-
+  --native-functions-path aten/src/ATen/native/native_functions.yaml \
+  --tags-path aten/src/ATen/native/tags.yaml
 popd
 
 # Run doxygen and log all output.

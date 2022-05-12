@@ -6,6 +6,7 @@
 #pragma once
 
 #include <c10/core/MemoryFormat.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
@@ -185,9 +186,9 @@ class TORCH_API Var : public ExprNode<Var> {
   std::string name_hint_;
 };
 
-std::vector<ExprPtr> make_contiguous_strides(
+TORCH_API std::vector<ExprPtr> make_contiguous_strides(
     const std::vector<ExprHandle>& dims);
-std::vector<ExprPtr> make_channels_last_strides(
+TORCH_API std::vector<ExprPtr> make_channels_last_strides(
     const std::vector<ExprHandle>& dims);
 
 class TORCH_API Buf : public ExprNode<Buf> {
@@ -323,7 +324,6 @@ class TORCH_API Buf : public ExprNode<Buf> {
   bool is_cont_with(int cur_dim, int adjacent_dim) const;
   bool is_stride_one(int cur_dim) const;
 
- private:
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
   std::vector<ExprPtr> strides_;

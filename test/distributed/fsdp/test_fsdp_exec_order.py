@@ -148,11 +148,7 @@ class TestFSDPExecOrder(FSDPTest):
         with context:  # warning for forward pass all-gather
             output = fsdp_model(*inp)
         loss = fsdp_model.module.get_loss(inp, output).to(self.device)
-        # Expect a warning for the pre-backward pass all-gather for `FULL_SHARD`
-        if sharding_strategy != ShardingStrategy.FULL_SHARD:
-            context = suppress()
-        with context:
-            fsdp_model.module.run_backward(loss)
+        fsdp_model.module.run_backward(loss)
         # Run an additional iteration to check that there are no more warnings
         inp = fsdp_model.module.get_input(self.device)
         output = fsdp_model(*inp)
