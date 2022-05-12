@@ -61,7 +61,7 @@ jobs:
 
   quick-checks:
     name: quick-checks
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -104,7 +104,7 @@ jobs:
 
   workflow-checks:
     name: workflow-checks
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -148,7 +148,7 @@ jobs:
 
   toc:
     name: toc
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
     env:
       NPM_CONFIG_PREFIX: ~/.npm-global
@@ -190,7 +190,7 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -223,7 +223,7 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     strategy:
       matrix:
         with_torch: [with_torch, without_torch]
