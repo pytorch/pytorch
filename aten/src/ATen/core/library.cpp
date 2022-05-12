@@ -7,7 +7,7 @@ namespace torch {
 namespace {
   // TODO: Consider representing debug info as a struct instead so you
   // don't have to allocate strings all the time
-  std::string debugString(const std::string& file, uint32_t line) {
+  std::string debugString(const char* file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
@@ -15,7 +15,7 @@ namespace {
 #endif
   }
 
-  std::string debugString(std::string debug, const std::string& file, uint32_t line) {
+  std::string debugString(std::string debug, const char* file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
@@ -52,11 +52,12 @@ CppFunction::~CppFunction() = default;
 
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
-Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)
+Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, std::unique_ptr<std::string> owned_file, uint32_t line)
   : kind_(kind)
   , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
   , dispatch_key_((!k.has_value() || *k == c10::DispatchKey::CatchAll) ? c10::nullopt : k)
   , file_(file)
+  , owned_file_(std::move(owned_file))
   , line_(line)
   {
     switch (kind_) {

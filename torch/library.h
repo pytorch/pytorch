@@ -549,6 +549,7 @@ class TORCH_API Library final {
       std::string ns,
       c10::optional<c10::DispatchKey> k,
       const char* file,
+      std::unique_ptr<std::string> owned_file,
       uint32_t line);
 
   Library(const Library&) = delete;
@@ -800,7 +801,8 @@ class TORCH_API Library final {
   Kind kind_;
   c10::optional<std::string> ns_;
   c10::optional<c10::DispatchKey> dispatch_key_;
-  std::string file_;
+  const char* file_;
+  std::unique_ptr<std::string> owned_file_;
   uint32_t line_;
 
   std::vector<c10::RegistrationHandleRAII> registrars_;
@@ -834,7 +836,7 @@ class TorchLibraryInit final {
       c10::optional<c10::DispatchKey> k,
       const char* file,
       uint32_t line)
-      : lib_(kind, ns, k, file, line) {
+      : lib_(kind, ns, k, file, nullptr, line) {
     fn(lib_);
   }
 };
@@ -985,14 +987,14 @@ class TorchLibraryInit final {
 
 /// \private
 #define MAKE_TORCH_LIBRARY(ns) \
-  torch::Library(torch::Library::DEF, #ns, c10::nullopt, __FILE__, __LINE__)
+  torch::Library(torch::Library::DEF, #ns, c10::nullopt, __FILE__, nullptr, __LINE__)
 /// \private
 #define MAKE_TORCH_LIBRARY_IMPL(ns, k)         \
   torch::Library(                              \
       torch::Library::IMPL,                    \
       #ns,                                     \
       c10::make_optional(c10::DispatchKey::k), \
-      __FILE__,                                \
+      __FILE__, nullptr,                       \
       __LINE__)
 
 // Make the custom class API visible, so it is available from
