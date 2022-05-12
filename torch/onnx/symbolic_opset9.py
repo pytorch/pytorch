@@ -2610,7 +2610,7 @@ def slice(g, self, *args):
             or ((not is_end_none) and (not is_end_onnx_const))
             or dim.node().kind() != "onnx::Constant"
         ):
-            if _FLAGS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+            if _FLAGS.operator_export_type == torch._C._onnx.OperatorExportTypes.ONNX:
                 raise RuntimeError(
                     "Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice "
                     "is a deprecated experimental op. Please use statically allocated "

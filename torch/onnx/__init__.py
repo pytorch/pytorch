@@ -5,7 +5,6 @@ import torch._C as _C
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
 TrainingMode = _C._onnx.TrainingMode
-_CAFFE2_ATEN_FALLBACK = _C._onnx._CAFFE2_ATEN_FALLBACK
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
@@ -492,8 +491,8 @@ def set_log_stream(stream_name="stdout"):
     Set output stream for ONNX logging.
 
     Args:
-      stream_name (str, default "stdout"): Only ``stdout`` and ``stderr`` are supported
-        as `stream_name`.
+        stream_name (str, default "stdout"): Only ``stdout`` and ``stderr`` are supported
+            as `stream_name`.
     """
     _C._jit_set_onnx_log_output_stream(stream_name)
 
@@ -503,7 +502,50 @@ def log(*args):
     A simple logging facility for ONNX exporter.
 
     Args:
-      args: Arguments are converted to string, concatenated together with a newline
-        character appended to the end, and flushed to output stream.
+        args: Arguments are converted to string, concatenated together with a newline
+            character appended to the end, and flushed to output stream.
     """
     _C._jit_onnx_log(*args)
+
+
+__all__ = [
+    # Modules
+    "symbolic_helper",
+    "symbolic_registry",
+    # All opsets
+    "symbolic_opset7",
+    "symbolic_opset8",
+    "symbolic_opset9",
+    "symbolic_opset10",
+    "symbolic_opset11",
+    "symbolic_opset12",
+    "symbolic_opset13",
+    "symbolic_opset14",
+    "symbolic_opset15",
+    "symbolic_opset16",
+    # Enums
+    "ExportTypes",
+    "OperatorExportTypes",
+    "TensorProtoDataType",
+    "TrainingMode",
+    # Constants
+    "ONNX_ARCHIVE_MODEL_PROTO_NAME",
+    "producer_name",
+    "producer_version",
+    # Exceptions
+    "CheckerError",
+    # Classes
+    "SymbolicContext",
+    # Public functions
+    "disable_log",
+    "enable_log",
+    "export_to_pretty_string",
+    "export",
+    "is_in_onnx_export",
+    "is_onnx_log_enabled",
+    "log",
+    "register_custom_op_symbolic",
+    "select_model_mode_for_export",
+    "set_log_stream",
+    "unregister_custom_op_symbolic",
+]

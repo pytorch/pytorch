@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-import torch.onnx
+import torch._C
 from torch.onnx import _constants
 
 
@@ -11,7 +11,7 @@ class _InternalFlags:
 
     def __init__(self):
         self._export_onnx_opset_version = _constants.onnx_default_opset
-        self.operator_export_type: Optional[torch.onnx.OperatorExportTypes] = None
+        self.operator_export_type: Optional[torch._C._onnx.OperatorExportTypes] = None
         self.training_mode = None
         self.onnx_shape_inference: bool = False
 

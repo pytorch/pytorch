@@ -134,8 +134,8 @@ def _scalar(x):
 
 def _is_caffe2_aten_fallback():
     return (
-        _FLAGS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        and torch.onnx._CAFFE2_ATEN_FALLBACK
+        _FLAGS.operator_export_type == torch._C._onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+        and torch._C._onnx._CAFFE2_ATEN_FALLBACK
     )
 
 

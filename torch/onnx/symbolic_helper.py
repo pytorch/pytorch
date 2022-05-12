@@ -6,7 +6,6 @@ from sys import maxsize as maxsize
 from typing import Set
 
 import torch
-import torch.onnx
 from torch._C import OptionalType
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
@@ -380,8 +379,8 @@ def _is_scalar_list(x):
 
 def is_caffe2_aten_fallback():
     return (
-        _FLAGS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        and torch.onnx._CAFFE2_ATEN_FALLBACK
+        _FLAGS.operator_export_type == torch._C._onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+        and torch._C._onnx._CAFFE2_ATEN_FALLBACK
     )
 
 
@@ -426,11 +425,11 @@ def _get_dim_for_cross(input, dim):
 
 def _unimplemented(op, msg):
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
-    if torch.onnx._CAFFE2_ATEN_FALLBACK:
+    if torch._C._onnx._CAFFE2_ATEN_FALLBACK:
         warnings.warn(
             "ONNX export failed on " + op + " because " + msg + " not supported"
         )
-    elif _FLAGS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+    elif _FLAGS.operator_export_type == torch._C._onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}")
 
 
@@ -1324,19 +1323,19 @@ def _set_onnx_shape_inference(onnx_shape_inference: bool):
 # TODO: remove these once we support Type's in the JIT IR and we can once again
 # use the unified toType operator
 cast_pytorch_to_onnx = {
-    "Byte": torch.onnx.TensorProtoDataType.UINT8,
-    "Char": torch.onnx.TensorProtoDataType.INT8,
-    "Double": torch.onnx.TensorProtoDataType.DOUBLE,
-    "Float": torch.onnx.TensorProtoDataType.FLOAT,
-    "Half": torch.onnx.TensorProtoDataType.FLOAT16,
-    "Int": torch.onnx.TensorProtoDataType.INT32,
-    "Long": torch.onnx.TensorProtoDataType.INT64,
-    "Short": torch.onnx.TensorProtoDataType.INT16,
-    "Bool": torch.onnx.TensorProtoDataType.BOOL,
-    "ComplexFloat": torch.onnx.TensorProtoDataType.COMPLEX64,
-    "ComplexDouble": torch.onnx.TensorProtoDataType.COMPLEX128,
-    "BFloat16": torch.onnx.TensorProtoDataType.BFLOAT16,
-    "Undefined": torch.onnx.TensorProtoDataType.UNDEFINED,
+    "Byte": torch._C._onnx.TensorProtoDataType.UINT8,
+    "Char": torch._C._onnx.TensorProtoDataType.INT8,
+    "Double": torch._C._onnx.TensorProtoDataType.DOUBLE,
+    "Float": torch._C._onnx.TensorProtoDataType.FLOAT,
+    "Half": torch._C._onnx.TensorProtoDataType.FLOAT16,
+    "Int": torch._C._onnx.TensorProtoDataType.INT32,
+    "Long": torch._C._onnx.TensorProtoDataType.INT64,
+    "Short": torch._C._onnx.TensorProtoDataType.INT16,
+    "Bool": torch._C._onnx.TensorProtoDataType.BOOL,
+    "ComplexFloat": torch._C._onnx.TensorProtoDataType.COMPLEX64,
+    "ComplexDouble": torch._C._onnx.TensorProtoDataType.COMPLEX128,
+    "BFloat16": torch._C._onnx.TensorProtoDataType.BFLOAT16,
+    "Undefined": torch._C._onnx.TensorProtoDataType.UNDEFINED,
 }
 
 scalar_name_to_pytorch = {
