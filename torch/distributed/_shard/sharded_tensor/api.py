@@ -6,10 +6,13 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Union
+    Tuple,
+    Union,
+    cast,
 )
 import copy
 import weakref
+import math
 
 import threading
 import torch
@@ -21,6 +24,7 @@ from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata,
 )
+
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
 from .reshard import reshuffle_local_shard, reshard_local_shard
@@ -32,6 +36,8 @@ from .utils import (
     build_global_metadata
 )
 from torch.overrides import handle_torch_function
+from torch.distributed.remote_device import _remote_device
+
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -253,6 +259,15 @@ class ShardedTensor(object):
         # Barrier for all RPCs to finish on all ranks.
         rpc.api._all_gather(None)
 
+    def _get_preferred_device(self) -> torch.device:
+        """
+        Return the prefered device to be used when creating tensors for collectives.
+        This method takes into account the associated process group
+        """
+        if dist.get_backend(self._process_group) == dist.Backend.NCCL:
+            return torch.device(torch.cuda.current_device())
+        return torch.device("cpu")
+
     def gather(
         self,
         dst: int = 0,
@@ -273,6 +288,9 @@ class ShardedTensor(object):
                 Must to be provided ONLY on ``dst`` rank.
                 Default: ``None``
         """
+        def shard_size(shard_md):
+            return math.prod(shard_md.shard_sizes)
+
         rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size
         _validate_output_tensor_for_gather(rank, dst, full_size, out)
@@ -280,39 +298,66 @@ class ShardedTensor(object):
         local_shards = self.local_shards()
 
         world_size = dist.get_world_size(self._process_group)
+        rank_sizes = [0 for _ in range(world_size)]
+        max_rank_size = 0
+        shard_placement: Dict[int, Tuple[int, int]] = dict()
+        local_shards_offset = []
+        # collect sizes
+        for shard_idx, shard_md in enumerate(self.metadata().shards_metadata):
+            shard_rank = cast(_remote_device, shard_md.placement).rank()
+            assert shard_rank is not None
+            shard_placement[shard_idx] = (shard_rank, rank_sizes[shard_rank])
+            if shard_rank == rank:
+                local_shards_offset.append((shard_md, rank_sizes[shard_rank],))
 
-        gathered_shards: List[Optional[List[Shard]]] = [None] * world_size if rank == dst else []
-        # TODO: see how we could use dist.gather() instead of dist.gather_object
-        # as the latter one involves pickling on CPU, see more context
-        # https://github.com/pytorch/pytorch/issues/73935
-        dist.gather_object(
-            obj=local_shards,
-            object_gather_list=gathered_shards,
+            rank_sizes[shard_rank] += shard_size(shard_md)
+            max_rank_size = max(max_rank_size, rank_sizes[shard_rank])
+
+        gather_list: Optional[List[torch.Tensor]]
+        if rank == dst:
+            assert out is not None
+            gather_list = [torch.empty((max_rank_size,), device=out.device) for _ in range(world_size)]
+        else:
+            gather_list = None
+
+        with torch.no_grad():
+            data = torch.empty(max_rank_size, device=self._get_preferred_device())
+            for shard in local_shards:
+                for placement in local_shards_offset:
+                    if placement[0] == shard.metadata:
+                        src = shard.tensor.flatten()
+                        data[placement[1]: placement[1] + src.numel()].copy_(src)
+                        break
+
+        dist.gather(
+            tensor=data,
+            gather_list=gather_list,
             dst=dst,
             group=self._process_group,
         )
-        if rank == dst:
-            if out is None:
-                raise ValueError("`out` Tensor must be provided on dst rank!")
-            dims = len(full_size)
-            for shards in gathered_shards:
-                if shards is None:
-                    raise RuntimeError(
-                        'Gathered shards cannot be None on dst rank {dst}'
-                    )
-                for shard in shards:
-                    metadata = shard.metadata
-                    tensor = shard.tensor
+        if rank != dst:
+            return
+        # In _validate_output_tensor_for_gather, we raise if out == None and rank == dst
+        out = cast(torch.Tensor, out)
+        assert gather_list is not None
 
-                    out_narrow_view = out
-                    for dim in range(dims):
-                        out_narrow_view = out_narrow_view.narrow(
-                            dim,
-                            metadata.shard_offsets[dim],
-                            metadata.shard_sizes[dim],
-                        )
+        full_size = self.metadata().size
+        dims = len(full_size)
+        for shard_idx, shard_md in enumerate(self.metadata().shards_metadata):
+            rank, rank_offset = shard_placement[shard_idx]
+            tensor = gather_list[rank]
+            tensor = tensor[rank_offset : rank_offset + shard_size(shard_md)]
+            tensor = tensor.view(shard_md.shard_sizes)
 
-                    out_narrow_view.copy_(tensor)
+            out_narrow_view = out
+            for dim in range(dims):
+                out_narrow_view = out_narrow_view.narrow(
+                    dim,
+                    shard_md.shard_offsets[dim],
+                    shard_md.shard_sizes[dim],
+                )
+
+            out_narrow_view.copy_(tensor)
 
     def cpu(
         self,
