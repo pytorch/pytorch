@@ -493,7 +493,8 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
 // - allow_tensor_metadata_change_
 // The idea is that if we have a "wrapper tensor" (like in functionalization),
 // all of the above are properties that the wrapper will want to customize,
-// while everything else should be mirrored between the wrapper and the inner tensor.
+// while everything else should be mirrored between the wrapper and the inner
+// tensor.
 void TensorImpl::copy_generic_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl) {
