@@ -506,6 +506,7 @@ def pt_operator_registry(
         srcs = code_gen_srcs,
         linker_flags = [
             "-Wl,--no-as-needed",
+            "-ldl",
         ],
         link_whole = True,
         soname = "libtorch-code-gen.$(ext)",

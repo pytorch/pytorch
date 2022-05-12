@@ -474,6 +474,7 @@ cxx_library(
     link_whole = True,
     linker_flags = [
         "-Wl,--no-as-needed",
+        "-ldl",
     ],
     visibility = ["PUBLIC"],
     exported_deps = [
@@ -498,6 +499,7 @@ cxx_library(
     link_whole = True,
     linker_flags = [
         "-Wl,--no-as-needed",
+        "-ldl",
     ],
     visibility = ["PUBLIC"],
     deps = [
