@@ -276,7 +276,6 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         return result_to_yield
 
     def __iter__(self):
-        self.reset()
         for x in self.datapipe:
             key = self.group_key_fn(x)
 
@@ -326,7 +325,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.drop_remaining,
             self.wrapper_class,
         ) = state
-        self.reset()
+        self.curr_buffer_size = 0
+        self.buffer_elements = defaultdict(list)
 
     def __del__(self):
         self.buffer_elements.clear()
