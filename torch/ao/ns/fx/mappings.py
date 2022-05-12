@@ -16,6 +16,7 @@ import torch.nn.qat.dynamic as nnqatd
 from torch.ao.quantization.backend_config import get_native_backend_config_dict
 import torch.ao.quantization.fx._lower_to_native_backend as \
     _lower_to_native_backend
+import torch.ao.quantization.quantization_mappings as quantization_mappings
 
 from .ns_types import NSNodeTargetType
 
@@ -200,27 +201,22 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # F.elu
         set([
             F.elu,
-            toq.elu,
         ]),
         # F.hardswish
         set([
             F.hardswish,
-            toq.hardswish,
         ]),
         # F.instance_norm
         set([
             F.instance_norm,
-            toq.instance_norm,
         ]),
         # F.layer_norm
         set([
             F.layer_norm,
-            toq.layer_norm,
         ]),
         # F.leaky_relu
         set([
             F.leaky_relu,
-            toq.leaky_relu,
         ]),
         # F.silu
         set([
@@ -316,7 +312,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # F.dropout
         set([
             F.dropout,
-            toq.dropout,
         ]),
         # matmul
         set([
@@ -395,6 +390,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     for source_to_target in (
         _lower_to_native_backend.QBIN_OP_MAPPING,
         _lower_to_native_backend.QBIN_RELU_OP_MAPPING,
+        quantization_mappings.DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS,
     ):
         for source, target in source_to_target.items():
             new_connections.append((source, target))
