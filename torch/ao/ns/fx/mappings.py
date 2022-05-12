@@ -49,8 +49,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # linear modules
         set([
             nn.Linear,
-            nnqatd.Linear,
-            nn.modules.linear.NonDynamicallyQuantizableLinear,
         ]),
         # linear functionals
         set([
@@ -327,7 +325,11 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     # backend_config_dict
     backend_config_dict = get_native_backend_config_dict()
 
-    new_connections = []
+    new_connections = [
+        # technical debt edge case
+        (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear),
+    ]
+
     for config in backend_config_dict['configs']:
 
         if 'pattern' not in config:
@@ -394,6 +396,17 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     ):
         for source, target in source_to_target.items():
             new_connections.append((source, target))
+
+    #
+    # Add other swaps, ideally in the future this could be removed
+    # after the lowering code stops using these.
+    #
+    for source_to_target in (
+        quantization_mappings.DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS,
+    ):
+        for source, target in source_to_target.items():
+            new_connections.append((source, target))
+
 
     # add the new connections from backend_config_dict
     for item1, item2 in new_connections:
