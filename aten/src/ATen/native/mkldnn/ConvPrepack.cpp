@@ -102,13 +102,14 @@ void _mkldnn_convolution_out(
     IntArrayRef output_sizes,
     int64_t groups,
     const ideep::attr_t& attr = ideep::attr_t()) {
+  ideep::tensor y_blocked;
   if (b.has_value()) {
-    ideep::convolution_forward::compute<true>(
+    ideep::convolution_forward::compute(
         x,
         w,
         b.value(),
         {output_sizes.cbegin(), output_sizes.cend()},
-        y,
+        y_blocked,
         {stride.begin(), stride.end()},
         {dilation.begin(), dilation.end()},
         {padding.begin(), padding.end()},
@@ -119,11 +120,11 @@ void _mkldnn_convolution_out(
         ideep::scale_t(),
         attr);
   } else {
-    ideep::convolution_forward::compute<true>(
+    ideep::convolution_forward::compute(
         x,
         w,
         {output_sizes.cbegin(), output_sizes.cend()},
-        y,
+        y_blocked,
         {stride.begin(), stride.end()},
         {dilation.begin(), dilation.end()},
         {padding.begin(), padding.end()},
@@ -134,6 +135,7 @@ void _mkldnn_convolution_out(
         ideep::scale_t(),
         attr);
   }
+  y.feed_from(y_blocked);
 }
 
 void mkldnn_convolution_out(
