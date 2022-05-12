@@ -873,7 +873,7 @@ class TestOperators(TestCase):
         xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('lu_unpack'),
-        xfail('glu'),
+        xfail('nn.functional.glu'),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
