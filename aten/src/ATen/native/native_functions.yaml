@@ -2688,12 +2688,14 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
-  dispatch:
-    CompositeImplicitAutograd: linear
-    MPS: mps_linear
 
 - func: linear.out(Tensor input, Tensor weight, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+
+- func: mps_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
+  dispatch:
+    MPS: mps_linear
 
 - func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
