@@ -12,12 +12,21 @@ get_decompositions = torch._decomp.get_decompositions
 # Decompositions have been ported to torch._decomp inside of PyTorch core. The only decompositions here are temporary or hacks. Please submit your contributions to PyTorch core!
 
 
-@register_decomposition(aten.trace.default)
+def maybe_register_decomposition(op):
+    def decorator(f):
+        try:
+            return register_decomposition(op)(f)
+        except Exception:
+            return f
+    return decorator
+
+
+@maybe_register_decomposition(aten.trace.default)
 def trace(self: Tensor) -> Tensor:
     return torch.sum(torch.diag(self))
 
 
-@register_decomposition(aten.log_sigmoid_forward)
+@maybe_register_decomposition(aten.log_sigmoid_forward.default)
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
