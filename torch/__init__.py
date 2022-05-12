@@ -838,6 +838,7 @@ from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
 import torch.backends.cuda
+import torch.backends.mps
 import torch.backends.cudnn
 import torch.backends.mkl
 import torch.backends.mkldnn
@@ -900,6 +901,9 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 # information.
 from . import _masked
 
+# Import removed ops with error message about removal
+from ._linalg_utils import solve
+
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
@@ -918,4 +922,6 @@ def _register_device_module(device_type, module):
 
 # expose return_types
 from . import return_types
-from . import library
+if sys.executable != 'torch_deploy':
+    from . import library
+    from . import _meta_registrations

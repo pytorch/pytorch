@@ -5,7 +5,6 @@ from torch.distributed._shard.sharded_tensor import (
     sharded_op_impl
 )
 from torch.distributed._shard.replicated_tensor import ReplicatedTensor
-
 from torch.distributed._shard._utils import narrow_tensor
 
 def binary_math_op_impl(op, types, args=(), kwargs=None, pg=None):
