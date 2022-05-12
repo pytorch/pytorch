@@ -517,7 +517,8 @@ ge = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 gt = _make_elementwise_binary_reference(
-    prims.gt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    prims.gt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 igamma = _make_elementwise_binary_reference(
@@ -619,7 +620,8 @@ logical_or = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
-    prims.lt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    prims.lt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 # TODO: add docstring
