@@ -21,8 +21,8 @@ __all__ = [
     "DFIterDataPipe",
     "IterDataPipe",
     "MapDataPipe",
-    "TravelingIterDataPipe",
-    "TravelingMapDataPipe"
+    "_IterDataPipeSerializationWrapper",
+    "_MapDataPipeSerializationWrapper"
 ]
 
 T = TypeVar('T')
@@ -264,7 +264,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         return str(self.__class__.__qualname__)
 
 
-class TravelingDataPipe:
+class _DataPipeSerializationWrapper:
     def __init__(self, datapipe):
         self._datapipe = datapipe
 
@@ -296,12 +296,12 @@ class TravelingDataPipe:
             )
 
 
-class TravelingIterDataPipe(TravelingDataPipe, IterDataPipe):
+class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
     def __iter__(self):
         yield from self._datapipe
 
 
-class TravelingMapDataPipe(TravelingDataPipe, MapDataPipe):
+class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):
     def __getitem__(self, idx):
         return self._datapipe[idx]
 

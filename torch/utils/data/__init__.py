@@ -22,8 +22,8 @@ from torch.utils.data.datapipes.datapipe import (
     IterDataPipe,
     MapDataPipe,
     DataChunk,
-    TravelingIterDataPipe,
-    TravelingMapDataPipe,
+    _IterDataPipeSerializationWrapper,
+    _MapDataPipeSerializationWrapper,
 )
 from torch.utils.data.dataloader import (
     DataLoader,
