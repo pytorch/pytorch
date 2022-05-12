@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic.quantized.dynamic as nniqd
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 
@@ -1946,7 +1946,7 @@ class ResNetBase(torch.nn.Module):
         self.relu1 = nn.ReLU()
         self.relu2 = nn.ReLU()
         self.downsample = torch.nn.Identity()
-        self.myop = nn.quantized.FloatFunctional()
+        self.myop = nnq.FloatFunctional()
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = torch.nn.Linear(inplanes, 1)
 
@@ -1980,8 +1980,8 @@ class ModelMultipleOps(torch.nn.Module):
         self.relu1 = nn.ReLU()
         self.relu2 = nn.ReLU()
         self.downsample = torch.nn.Identity()
-        self.skip_add = nn.quantized.FloatFunctional()
-        self.cat = nn.quantized.FloatFunctional()
+        self.skip_add = nnq.FloatFunctional()
+        self.cat = nnq.FloatFunctional()
         self.avgpool = nn.AdaptiveAvgPool2d((4, 4))
         self.fc = nn.Linear(12, 6)
 
@@ -2014,8 +2014,8 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         self.bn1 = norm_layer(inplanes)
         self.relu1 = nn.ReLU()
         self.relu2 = nn.ReLU()
-        self.skip_add = nn.quantized.FloatFunctional()
-        self.cat = nn.quantized.FloatFunctional()
+        self.skip_add = nnq.FloatFunctional()
+        self.cat = nnq.FloatFunctional()
         self.maxpool = nn.MaxPool2d((4, 4))
         self.fc = nn.Linear(12, 6)
 

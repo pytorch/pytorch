@@ -3,7 +3,7 @@
 # Torch
 import torch
 import torch.nn.functional as F
-import torch.nn.quantized.functional as qF
+import torch.ao.nn.quantized.functional as qF
 
 # Standard library
 import numpy as np

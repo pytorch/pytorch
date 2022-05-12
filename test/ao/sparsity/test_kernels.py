@@ -13,6 +13,7 @@ import torch
 import torch.ao.quantization as tq
 
 from torch import nn
+import torch.ao.nn.quantized as qnn
 from torch.ao.nn.sparse import quantized as ao_nn_sq
 from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
 
@@ -181,7 +182,7 @@ class TestQuantizedSparseLayers(TestCase):
                 tq.convert(qmodel, inplace=True)
 
                 assert isinstance(sqmodel.linear, ao_nn_sq.Linear), "Convert failed"
-                assert isinstance(qmodel.linear, nn.quantized.Linear), "Mapping failed"
+                assert isinstance(qmodel.linear, qnn.Linear), "Mapping failed"
 
                 # Make sure numerics are right
                 Y_ref = qmodel(X_q)
@@ -208,7 +209,7 @@ class TestQuantizedSparseLayers(TestCase):
                 tq.convert(qmodel, mapping=tq.get_default_dynamic_quant_module_mappings(), inplace=True)
 
                 assert isinstance(sqmodel.linear, ao_nn_sq.dynamic.Linear), "Convert failed"
-                assert isinstance(qmodel.linear, nn.quantized.dynamic.Linear), "Mapping failed"
+                assert isinstance(qmodel.linear, qnn.dynamic.Linear), "Mapping failed"
 
                 # Make sure numerics are right
                 Y_ref = qmodel(X_fp32)
@@ -280,7 +281,7 @@ class TestQuantizedSparseLayers(TestCase):
                 tq.convert(qmodel, inplace=True)
 
                 assert isinstance(sqmodel.linear, ao_nn_sq.Linear), "Convert failed"
-                assert isinstance(qmodel.linear, nn.quantized.Linear), "Mapping failed"
+                assert isinstance(qmodel.linear, qnn.Linear), "Mapping failed"
 
                 scripted_sqmodel = torch.jit.script(sqmodel)
                 scripted_sqmodel.eval()
@@ -315,7 +316,7 @@ class TestQuantizedSparseLayers(TestCase):
                 tq.convert(dqmodel, mapping=tq.get_default_dynamic_quant_module_mappings(), inplace=True)
 
                 assert isinstance(sdqmodel.linear, ao_nn_sq.dynamic.Linear), "Convert failed"
-                assert isinstance(dqmodel.linear, nn.quantized.dynamic.Linear), "Mapping failed"
+                assert isinstance(dqmodel.linear, qnn.dynamic.Linear), "Mapping failed"
 
                 scripted_sdqmodel = torch.jit.script(sdqmodel)
                 scripted_sdqmodel.eval()

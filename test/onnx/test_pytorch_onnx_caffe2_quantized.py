@@ -4,7 +4,7 @@ import numpy as np
 import unittest
 import torch.onnx
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 import io
 
 import onnx
@@ -174,7 +174,7 @@ class TestQuantizedOps(unittest.TestCase):
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
-                res = torch.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode="nearest")
+                res = torch.ao.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode="nearest")
                 return self.dequant(res)
 
         x = np.random.rand(1, 2, 3, 4).astype("float32")

@@ -4,9 +4,9 @@ import os
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-import torch.nn.quantized as nnq
-import torch.nn.quantized._reference as nnqr
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
@@ -3273,7 +3273,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_conv_lowering(self):
         convs = {1: nn.Conv1d, 2: nn.Conv2d, 3: nn.Conv3d}
-        qconvs = {1: nn.quantized.Conv1d, 2: nn.quantized.Conv2d, 3: nn.quantized.Conv3d}
+        qconvs = {1: nnq.Conv1d, 2: nnq.Conv2d, 3: nnq.Conv3d}
 
         class M(torch.nn.Module):
             def __init__(self, dim):
@@ -4243,7 +4243,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def __init__(self, scalar):
                 super().__init__()
                 self.scalar = scalar
-                self.add_func = torch.nn.quantized.FloatFunctional()
+                self.add_func = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 return self.add_func.add_scalar(x, self.scalar)
@@ -5285,7 +5285,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m = prepare_fx_function(m, qconfig_dict)
             node_occurrence = {
                 ns.call_module(expected_act_post_process): 7,
-                ns.call_module(torch.nn.quantized.FloatFunctional): 0
+                ns.call_module(torch.ao.nn.quantized.FloatFunctional): 0
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
             m(data)
@@ -6028,7 +6028,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             convert_custom_config_dict = {
                 "additional_object_mapping": {
                     "static": {
-                        torch.nn.qat.EmbeddingBag: nn.quantized.EmbeddingBag,
+                        torch.nn.qat.EmbeddingBag: nnq.EmbeddingBag,
                     }
                 }
             }
@@ -6038,7 +6038,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.
-                self.assertTrue(type(model.emb), nn.quantized.EmbeddingBag)
+                self.assertTrue(type(model.emb), nnq.EmbeddingBag)
                 # Also test that Linear has been quantized.
                 self.assertTrue(type(model.linear), nnq.Linear)
 
@@ -6076,7 +6076,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             convert_custom_config_dict = {
                 "additional_object_mapping": {
                     "static": {
-                        torch.nn.qat.Embedding: nn.quantized.Embedding,
+                        torch.nn.qat.Embedding: nnq.Embedding,
                     }
                 }
             }
@@ -6086,7 +6086,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
             def checkQuantized(model):
                 # Make sure EmbeddingBag is now a quantized EmbeddingBag.
-                self.assertTrue(type(model.emb), nn.quantized.Embedding)
+                self.assertTrue(type(model.emb), nnq.Embedding)
                 # Also test that Linear has been quantized.
                 self.assertTrue(type(model.linear), nnq.Linear)
 

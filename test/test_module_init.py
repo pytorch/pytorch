@@ -184,53 +184,53 @@ def build_constructor_arg_db():
         torch.nn.quantizable.LSTM: ((5, 6), {}),
         torch.nn.quantizable.LSTMCell: ((5, 6), {}),
         torch.nn.quantizable.MultiheadAttention: ((10, 2), {}),
-        torch.nn.quantized.BatchNorm2d: ((2,), {}),
-        torch.nn.quantized.BatchNorm3d: ((2,), {}),
-        torch.nn.quantized.Dropout: ((), {}),
-        torch.nn.quantized.Conv1d: ((3, 3, 3), {}),
-        torch.nn.quantized.Conv2d: ((3, 3, 3), {}),
-        torch.nn.quantized.Conv3d: ((3, 3, 3), {}),
-        torch.nn.quantized.ConvTranspose1d: ((3, 3, 3), {}),
-        torch.nn.quantized.ConvTranspose2d: ((3, 3, 3), {}),
-        torch.nn.quantized.ConvTranspose3d: ((16, 33, (3, 3, 5)), {
+        torch.ao.nn.quantized.BatchNorm2d: ((2,), {}),
+        torch.ao.nn.quantized.BatchNorm3d: ((2,), {}),
+        torch.ao.nn.quantized.Dropout: ((), {}),
+        torch.ao.nn.quantized.Conv1d: ((3, 3, 3), {}),
+        torch.ao.nn.quantized.Conv2d: ((3, 3, 3), {}),
+        torch.ao.nn.quantized.Conv3d: ((3, 3, 3), {}),
+        torch.ao.nn.quantized.ConvTranspose1d: ((3, 3, 3), {}),
+        torch.ao.nn.quantized.ConvTranspose2d: ((3, 3, 3), {}),
+        torch.ao.nn.quantized.ConvTranspose3d: ((16, 33, (3, 3, 5)), {
             'stride': (2, 1, 1),
             'padding': (4, 2, 2),
             'output_padding': (2, 2, 2),
             'dilation': (1, 1, 1),
         }),
-        torch.nn.quantized.DeQuantize: ((), {}),
-        torch.nn.quantized.ELU: ((0.01, 0), {}),
-        torch.nn.quantized.Embedding: ((10, 3), {
+        torch.ao.nn.quantized.DeQuantize: ((), {}),
+        torch.ao.nn.quantized.ELU: ((0.01, 0), {}),
+        torch.ao.nn.quantized.Embedding: ((10, 3), {
             'factory_kwargs': {},
         }),
-        torch.nn.quantized.EmbeddingBag: ((10, 3), {
+        torch.ao.nn.quantized.EmbeddingBag: ((10, 3), {
             'factory_kwargs': {},
         }),
-        torch.nn.quantized.GroupNorm: ((2, 3, torch.nn.Parameter(torch.tensor(2.)),
+        torch.ao.nn.quantized.GroupNorm: ((2, 3, torch.nn.Parameter(torch.tensor(2.)),
                                         torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
-        torch.nn.quantized.Hardswish: ((0.1, 0,), {}),
-        torch.nn.quantized.InstanceNorm1d: ((2, torch.nn.Parameter(torch.tensor(2.)),
+        torch.ao.nn.quantized.Hardswish: ((0.1, 0,), {}),
+        torch.ao.nn.quantized.InstanceNorm1d: ((2, torch.nn.Parameter(torch.tensor(2.)),
                                              torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
-        torch.nn.quantized.InstanceNorm2d: ((2, torch.nn.Parameter(torch.tensor(2.)),
+        torch.ao.nn.quantized.InstanceNorm2d: ((2, torch.nn.Parameter(torch.tensor(2.)),
                                              torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
-        torch.nn.quantized.InstanceNorm3d: ((2, torch.nn.Parameter(torch.tensor(2.)),
+        torch.ao.nn.quantized.InstanceNorm3d: ((2, torch.nn.Parameter(torch.tensor(2.)),
                                              torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
-        torch.nn.quantized.LayerNorm: ((2, torch.nn.Parameter(torch.tensor(2.)),
+        torch.ao.nn.quantized.LayerNorm: ((2, torch.nn.Parameter(torch.tensor(2.)),
                                         torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
-        torch.nn.quantized.LeakyReLU: ((0.01, 0), {}),
-        torch.nn.quantized.Linear: ((5, 2), {
+        torch.ao.nn.quantized.LeakyReLU: ((0.01, 0), {}),
+        torch.ao.nn.quantized.Linear: ((5, 2), {
             'factory_kwargs': {},
         }),
-        torch.nn.quantized.MaxPool2d: ((3,), {}),
-        torch.nn.quantized.Quantize: ((0.1, 0), {
+        torch.ao.nn.quantized.MaxPool2d: ((3,), {}),
+        torch.ao.nn.quantized.Quantize: ((0.1, 0), {
             'dtype': torch.int16,
             'factory_kwargs': {},
         }),
-        torch.nn.quantized.ReLU6: ((), {}),
-        torch.nn.quantized.Sigmoid: ((0.1, 0), {}),
-        torch.nn.quantized.FloatFunctional: ((), {}),
-        torch.nn.quantized.FXFloatFunctional: ((), {}),
-        torch.nn.quantized.QFunctional: ((), {}),
+        torch.ao.nn.quantized.ReLU6: ((), {}),
+        torch.ao.nn.quantized.Sigmoid: ((0.1, 0), {}),
+        torch.ao.nn.quantized.FloatFunctional: ((), {}),
+        torch.ao.nn.quantized.FXFloatFunctional: ((), {}),
+        torch.ao.nn.quantized.QFunctional: ((), {}),
     }
 
 
@@ -351,21 +351,21 @@ def generate_test_func(test_cls, module_cls, constructor_arg_db,
 def generate_tests(test_cls, constructor_arg_db):
     # test all modules underneath these namespaces...
     NAMESPACES = [
+        torch.ao.nn.quantized,
         torch.nn,
         torch.nn.qat,
         torch.nn.quantizable,
-        torch.nn.quantized,
+        torch.ao.nn.quantized,
     ]
     # ...except these
     MODULES_TO_SKIP = {
         torch.nn.Module,
         torch.nn.Container,  # deprecated
         torch.nn.NLLLoss2d,  # deprecated
-        torch.nn.quantized._ConvNd,  # base class in __all__ for some reason
         # TODO: Remove these 2 from this list once the ASan issue is fixed.
         # See https://github.com/pytorch/pytorch/issues/55396
-        torch.nn.quantized.Embedding,
-        torch.nn.quantized.EmbeddingBag,
+        torch.ao.nn.quantized.Embedding,
+        torch.ao.nn.quantized.EmbeddingBag,
     }
     # no need to support kwargs for these modules even though
     # they have parameters / buffers because they are passed in
@@ -405,13 +405,13 @@ def generate_tests(test_cls, constructor_arg_db):
     }
     # these modules requires FBGEMM backend to instantiate
     MODULES_THAT_REQUIRE_FBGEMM = {
-        torch.nn.quantized.Conv1d,
-        torch.nn.quantized.Conv2d,
-        torch.nn.quantized.Conv3d,
-        torch.nn.quantized.ConvTranspose1d,
-        torch.nn.quantized.ConvTranspose2d,
-        torch.nn.quantized.ConvTranspose3d,
-        torch.nn.quantized.Linear,
+        torch.ao.nn.quantized.Conv1d,
+        torch.ao.nn.quantized.Conv2d,
+        torch.ao.nn.quantized.Conv3d,
+        torch.ao.nn.quantized.ConvTranspose1d,
+        torch.ao.nn.quantized.ConvTranspose2d,
+        torch.ao.nn.quantized.ConvTranspose3d,
+        torch.ao.nn.quantized.Linear,
     }
 
     for namespace in NAMESPACES:

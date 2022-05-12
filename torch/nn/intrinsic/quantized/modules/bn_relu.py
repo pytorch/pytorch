@@ -2,7 +2,7 @@
 import torch
 import torch.nn.intrinsic
 import torch.nn.intrinsic.qat
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 
 
 class BNReLU2d(nnq.BatchNorm2d):

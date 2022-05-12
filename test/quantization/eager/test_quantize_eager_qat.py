@@ -7,8 +7,8 @@ import torch.backends.mkldnn
 from torch.nn import Conv2d, BatchNorm2d, ReLU, init
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 import torch.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
@@ -517,7 +517,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.ff = torch.nn.quantized.FloatFunctional()
+                self.ff = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -538,7 +538,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.ff = torch.nn.quantized.FloatFunctional()
+                self.ff = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 x = self.quant(x)

@@ -35,14 +35,14 @@ def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
     """
     modules_to_swap = []
     for name, module in model.named_children():
-        if isinstance(module, torch.nn.quantized.FloatFunctional):
+        if isinstance(module, torch.ao.nn.quantized.FloatFunctional):
             modules_to_swap.append(name)
         else:
             _swap_ff_with_fxff(module)
 
     for name in modules_to_swap:
         del model._modules[name]
-        model._modules[name] = torch.nn.quantized.FXFloatFunctional()
+        model._modules[name] = torch.ao.nn.quantized.FXFloatFunctional()
 
 
 def _fuse_fx(
@@ -136,7 +136,7 @@ class QuantizationTracer(Tracer):
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
         return (
             (
-                m.__module__.startswith("torch.nn")
+                (m.__module__.startswith("torch.nn") or m.__module__.startswith("torch.ao.nn"))
                 and not isinstance(m, torch.nn.Sequential)
             )
             or module_qualified_name in self.skipped_module_names
