@@ -1450,9 +1450,8 @@
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
   result: auto_linear
 
-# rdar://85629434 - Changed 2 to 2.0 temporarily
 - name: sqrt(Tensor self) -> Tensor
-  self: grad / (2.0 * result.conj())
+  self: grad / (2 * result.conj())
   result: auto_element_wise
 
 - name: squeeze(Tensor(a) self) -> Tensor(a)
@@ -2491,11 +2490,6 @@
 
 - name: mps_convolution_transpose(Tensor self, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups) -> Tensor
   self, weight: "grad.defined() ? mps_convolution_transpose_backward(self, grad, weight, padding, output_padding, stride, dilation, groups, grad_input_mask) : std::tuple<Tensor, Tensor>()"
-  #self, weight: "grad.defined() ? cudnn_convolution_transpose_backward(self, grad, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, grad_input_mask) : std::tuple<Tensor, Tensor>()"
-
-
-#- name: cudnn_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32, bool[2] output_mask) -> (Tensor, Tensor)
-  #grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], Tensor(), grad_output, weight, self, stride, padding, dilation, true, output_padding, groups, benchmark, deterministic, true, allow_tf32, grad_input_mask)
 
 - name: cudnn_convolution(Tensor self, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
   self, weight: "_cudnn_convolution_backward(self, grad, weight, padding, std::vector<int64_t>(padding.size(), 0), stride, dilation, false, groups, {grad_input_mask[0], grad_input_mask[1]})"

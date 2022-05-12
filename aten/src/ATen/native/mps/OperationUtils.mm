@@ -319,8 +319,6 @@ id<MTLBuffer> gatherViewTensor(const at::Tensor& src, id<MTLBuffer> sourceBuffer
 #endif
         return resultBuffer;
       }
-    } else {
-      TORCH_WARN("We have a non-contiguous tensor in copy_from_mps with no cached graph with key ", key);
     }
   }
   return nil;
