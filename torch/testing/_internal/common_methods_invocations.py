@@ -17889,12 +17889,14 @@ op_db: List[OpInfo] = [
         'special.scaled_modified_bessel_i0',
         dtypes=all_types_and(torch.bool),
         ref=scipy.special.i0e if TEST_SCIPY else _NOTHING,
+        sample_inputs_func=sample_inputs_i0_i1,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
         'special.scaled_modified_bessel_i1',
         dtypes=all_types_and(torch.bool),
         ref=scipy.special.i1e if TEST_SCIPY else _NOTHING,
+        sample_inputs_func=sample_inputs_i0_i1,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
