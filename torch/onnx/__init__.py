@@ -1,6 +1,21 @@
 from typing import Dict
 
 import torch._C as _C
+from torch.onnx import (
+    symbolic_helper,
+    symbolic_opset7,
+    symbolic_opset8,
+    symbolic_opset9,
+    symbolic_opset10,
+    symbolic_opset11,
+    symbolic_opset12,
+    symbolic_opset13,
+    symbolic_opset14,
+    symbolic_opset15,
+    symbolic_opset16,
+)
+
+from torch.onnx import symbolic_registry  # isort:skip
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
@@ -13,7 +28,7 @@ producer_version = _C._onnx.PRODUCER_VERSION
 
 
 class ExportTypes:
-    r""" "Specifies how the ONNX model is stored."""
+    r"""Specifies how the ONNX model is stored."""
 
     PROTOBUF_FILE = "Saves model in the specified protobuf file."
     ZIP_ARCHIVE = "Saves model in the specified ZIP file (uncompressed)."

@@ -79,6 +79,8 @@ def register_ops_in_version(domain: str, version: int):
 
 
 def get_ops_in_version(version: int):
+    if not _symbolic_versions:
+        _import_symbolic_opsets()
     members = inspect.getmembers(_symbolic_versions[version])
     domain_opname_ops = []
     for obj in members:
@@ -171,6 +173,3 @@ class UnsupportedOperatorError(RuntimeError):
                 "it with the right domain and version."
             )
         super().__init__(msg)
-
-
-_import_symbolic_opsets()
