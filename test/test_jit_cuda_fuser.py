@@ -165,14 +165,6 @@ class TestCudaFuser(JitTestCase):
         if TEST_BF16:
             self.support_tensor_dtypes.append(torch.bfloat16)
 
-        self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
-        self.old_guard = torch._C._jit_set_nvfuser_guard_mode(False)
-        torch._C._debug_set_autodiff_subgraph_inlining(False)
-        self.old_value = torch._C._jit_set_autocast_mode(True)
-
         if(RUN_NVFUSER):
             self.cuda_fuser_options = CudaFuserTestOptions()
 
@@ -4694,6 +4686,8 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
         super(TestCudaFuserOpInfoParent, self).setUp()
         if RUN_NVFUSER:
             self.cuda_fuser_options = CudaFuserTestOptions()
+            # enables guard mode since tracing could change graph to violate guard.
+            torch._C._jit_set_nvfuser_guard_mode(True)
         self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
 
     def tearDown(self):
