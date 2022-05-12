@@ -469,7 +469,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   ufunc_inner_loop:
-    Generic: add (AllAndComplex, BFloat16, Half)
+    Generic: add (AllAndComplex, BFloat16, Half, ComplexHalf)
     ScalarOnly: add (Bool)
   dispatch:
     SparseCPU: add_out_sparse_cpu
@@ -729,6 +729,7 @@
   variants: function, method
   dispatch:
     ZeroTensor, CPU, CUDA, Meta: as_strided_tensorimpl
+    MPS: as_strided_tensorimpl_mps
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_check: NoCheck
   device_guard: False
@@ -1179,8 +1180,7 @@
 
 - func: clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: clamp
+  structured_delegate: clamp.Tensor_out
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1192,8 +1192,7 @@
 
 - func: clamp_.Tensor(Tensor(a!) self, Tensor? min=None, Tensor? max=None) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: clamp_
+  structured_delegate: clamp.Tensor_out
 
 - func: clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1205,8 +1204,10 @@
 
 - func: clamp.Tensor_out(Tensor self, Tensor? min=None, Tensor? max=None, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_out
+    CPU, CUDA: clamp_Tensor_out
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1391,12 +1392,14 @@
     SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
-  dispatch: {}
+  dispatch:
+    MPS: _copy_from_mps
 
 # We need this to be able to properly copy from a CPU to an XLA tensor with different sizes.
 # See https://github.com/pytorch/xla/issues/2881
 - func: _copy_from_and_resize(Tensor self, Tensor dst) -> Tensor
-  dispatch: {}
+  dispatch:
+    MPS: _copy_from_and_resize_mps
 
 - func: cos(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1893,6 +1896,7 @@
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
+    MPS: empty_mps
     Meta: empty_meta
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA: empty_sparse
@@ -1942,6 +1946,7 @@
   dispatch:
     CPU, Meta: resize_
     CUDA: resize_cuda_
+    MPS: resize_mps_
     QuantizedCPU: quantized_resize_cpu_
     SparseCsrCPU, SparseCsrCUDA: resize_sparse_csr_
 
@@ -1977,6 +1982,7 @@
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
+    MPS: empty_strided_mps
     Meta: empty_strided_meta
     QuantizedCPU, QuantizedCUDA: empty_strided_unknown_quantized
 
@@ -5254,7 +5260,7 @@
 
 # Functionally the same as addmm, but we give it a different derivative formula
 # that doesn't propagate gradients to non-present entries on sparse.
-- func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: _sparse_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   python_module: sparse
   dispatch:
     CompositeExplicitAutograd: _sparse_addmm
