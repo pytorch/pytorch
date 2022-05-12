@@ -600,3 +600,13 @@ cxx_binary(
         "//c10:c10",
     ],
 )
+
+cxx_binary(
+    name = 'dl',
+    srcs = [
+        'dl.c',
+    ],
+    linker_flags = [
+        "-ldl",
+    ],
+)

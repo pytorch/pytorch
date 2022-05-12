@@ -68,6 +68,10 @@ jobs:
           echo -e "" > .buckconfig
           sh scripts/buck_setup.sh
 
+      - name: Build dl
+        run: |
+          buck run :dl
+
       - name: Build glog
         run: |
           buck build third_party:glog
