@@ -7,7 +7,6 @@ import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
-    named_params_with_sharded_tensor,
 )
 from torch.distributed._shard.api import (
     shard_parameter,
@@ -160,7 +159,10 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         # Need to adjust learning rate since DDP averages gradients.
         bias_optim = torch.optim.SGD([bias_fc1, bias_fc2], lr=0.1 * self.world_size)
         sharded_optim = ShardedOptimizer(
-            {'module.fc1.weight': sharded_megatron_lm.module.fc1.weight, 'module.fc2.weight': sharded_megatron_lm.module.fc2.weight},
+            {
+                'module.fc1.weight': sharded_megatron_lm.module.fc1.weight,
+                'module.fc2.weight': sharded_megatron_lm.module.fc2.weight
+            },
             torch.optim.SGD,
             lr=0.1,
         )

@@ -244,15 +244,15 @@ def partial_add(types, args=(), kwargs=None):
             if lhs.dim() == 1 and rhs.dim() == 1:
                 if lhs.numel() % rhs.numel() != 0:
                     raise RuntimeError(
-                        f"torch function '{func.__name__}', with args: {args} and "
+                        f"torch function 'torch.add', with args: {args} and "
                         f"kwargs: {kwargs} not supported for PartialTensor!")
                 factor = lhs.numel() // rhs.numel()
-                rhs = rhs.reshape(1, -1).expand(factor, rhs.size(0)).reshape(lhs.size())
+                rhs = rhs.reshape(1, -1).expand(factor, rhs.size(0)).reshape(lhs.size())  # type: ignore[assignment]
             else:
-                rhs = rhs.expand(lhs.size())
+                rhs = rhs.expand(lhs.size())  # type: ignore[assignment]
             return _PartialTensor(torch.add(lhs, rhs / world_size))
     raise RuntimeError(
-        f"torch function '{func.__name__}', with args: {args} and "
+        f"torch function 'torch.add', with args: {args} and "
         f"kwargs: {kwargs} not supported for PartialTensor!")
 
 @_custom_partial_tensor_op(torch.Tensor.transpose)

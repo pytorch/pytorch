@@ -295,7 +295,7 @@ def _handle_row_wise_sharding_tensor(
         )
 
     # Return the partial local result.
-    return torch.add(_PartialTensor(torch.cat(results), pg), bias)
+    return torch.add(_PartialTensor(torch.cat(results), pg), bias)  # type: ignore[call-overload]
 
 
 def _handle_row_wise_sharding_sharded_tensor(
@@ -331,4 +331,4 @@ def _handle_row_wise_sharding_sharded_tensor(
         )
 
     # Return the partial local result.
-    return torch.add(_PartialTensor(torch.cat(results), pg), bias)
+    return torch.add(_PartialTensor(torch.cat(results), pg), bias)  # type: ignore[call-overload]
