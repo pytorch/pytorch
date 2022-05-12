@@ -372,7 +372,7 @@ cxx_library(
     visibility = ["PUBLIC"],
     deps = [
         ":aten_cpu",
-        # ":generated-autograd-headers",
+        ":generated-autograd-headers",
         ":torch_headers",
         "//third_party:glog",
         "//c10:c10",
@@ -501,7 +501,7 @@ cxx_library(
     ],
     visibility = ["PUBLIC"],
     deps = [
-        #":generated-autograd-headers",
+        ":generated-autograd-headers",
         ":torch_mobile_observer",
         ":torch_mobile_headers",
     ],

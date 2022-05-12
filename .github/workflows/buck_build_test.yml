@@ -104,14 +104,6 @@ jobs:
         run: |
           buck build :torch_mobile_core
 
-      - name: Run code generation
-        run: |
-          buck run //tools/setup_helpers:generate_code_bin
-
-      - name: Build pt_ops_full
-        run: |
-          buck build :pt_ops_full
-
       - name: Build torch_mobile_all_ops
         run: |
           buck build :torch_mobile_all_ops
