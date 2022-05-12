@@ -729,7 +729,6 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
   param_t* mean_data = mean.data_ptr<param_t>();
   param_t* var_sum_data = var_sum.data_ptr<param_t>();
 
-  using Vec = Vectorized<float>;
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
       float sum_val = float(0);
