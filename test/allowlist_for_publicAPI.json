@@ -259,6 +259,7 @@
     "Argument",
     "Callable",
     "Dict",
+    "EqualizationConfig",
     "Graph",
     "GraphModule",
     "List",
