@@ -9,6 +9,7 @@
 
 #include <ATen/ATen.h>
 #include <torch/library.h>
+#include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/native/quantized/cudnn/utils.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/quantized/Quantizer.h>
@@ -34,6 +35,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
   // TODO: need to check out to implement groups for conv operator in Conv.cpp
   TORCH_CHECK(groups == 1, "Quantized cudnn conv2d is currenty limited to groups = 1; received groups =", groups);
   TORCH_CHECK(weight.qscheme() == c10::kPerTensorAffine, "Unsupported qscheme: ", toString(weight.qscheme()));
+  TORCH_CHECK(
+      kSpatialDim == 2,  // 1D is packed as 2d, hence we don't need other checks
+      "cuDNN packing only supports 2D convolution.");
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ",
@@ -158,7 +162,49 @@ class QConvPackWeightInt8Cudnn final {
   }
 };
 
+class QConv1dPackWeightInt8Cudnn final {
+ public:
+  static c10::intrusive_ptr<ConvPackedParamsBase<2>> run_conv(
+      Tensor weight,
+      c10::optional<Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups) {
+    const torch::List<int64_t> output_padding({0});
+    return _run(weight, bias, stride, padding, output_padding, dilation, groups,
+                /*transpose=*/false);
+  }
+
+ private:
+  static c10::intrusive_ptr<ConvPackedParamsBase<2>> _run(
+      Tensor weight,
+      c10::optional<Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> output_padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      bool transpose) {
+    if (weight.dim() == 3) {
+      // we currently use conv2d kernel for conv1d by making the input and weight tensors
+      // 4D rather than 3D. we add a dummy width dimension of size 1
+      // out channels, in channels / groups, L -> out channels, in channels / groups, 1, L
+      weight = weight.unsqueeze(-2);
+    }
+    stride = quant_utils::MakeArgForConv1d(stride, 1);
+    padding = quant_utils::MakeArgForConv1d(padding, 0);
+    output_padding = quant_utils::MakeArgForConv1d(output_padding, 0);
+    dilation = quant_utils::MakeArgForConv1d(dilation, 1);
+
+    return PackedConvWeightCudnn<2>::prepack(
+        weight, bias, stride, padding, output_padding, dilation, groups,
+        transpose);
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_prepack"), TORCH_FN(QConv1dPackWeightInt8Cudnn::run_conv));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_prepack"), TORCH_FN(QConvPackWeightInt8Cudnn<2>::run_conv));
 }
 
