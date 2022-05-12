@@ -17,15 +17,12 @@ from .mappings import (
 )
 
 from ..qconfig import QConfigAny
+from ..qconfig_mapping import QConfigMapping
 
 from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
     is_activation_post_process,
-)
-
-from ..quantization_config import (
-    PrepareQuantizationConfig,
 )
 
 from ..qconfig_dict_utils import (
@@ -722,7 +719,7 @@ def get_input_args_quant_dequant_info(
     return quant_infos, dequant_infos, any_arg_quant_or_dequant_needed
 
 def get_cur_qconfig(
-    quantization_config: PrepareQuantizationConfig,
+    qconfig_mapping: QConfigMapping,
     cur_fqn: str,
     cur_op_type: Callable,
 ) -> Optional[QConfigAny]:
@@ -731,10 +728,10 @@ def get_cur_qconfig(
     # (module_name_regex, module_name_object_type_order not implemented yet)
 
     # global
-    global_qconfig = quantization_config.global_qconfig
+    global_qconfig = qconfig_mapping.global_qconfig
 
     qconfig = maybe_adjust_qconfig_for_module_type_or_name(
-        quantization_config, cur_op_type, cur_fqn, global_qconfig)
+        qconfig_mapping, cur_op_type, cur_fqn, global_qconfig)
 
     return qconfig
 

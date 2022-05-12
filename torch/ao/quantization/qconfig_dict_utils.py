@@ -10,49 +10,49 @@ from .quantization_mappings import (
     get_default_qat_module_mappings,
 )
 from .qconfig import QConfigAny
-from .quantization_config import QuantizationConfigBase
+from .qconfig_mapping import QConfigMapping
 
 
 def get_object_type_qconfig(
-        quantization_config: QuantizationConfigBase,
+        qconfig_mapping: QConfigMapping,
         object_type: Union[Callable, str],
         fallback_qconfig: QConfigAny) -> QConfigAny:
-    return quantization_config._object_type_qconfig_dict.get(object_type, fallback_qconfig)
+    return qconfig_mapping._object_type_qconfig_dict.get(object_type, fallback_qconfig)
 
 
-def get_module_name_regex_qconfig(quantization_config, module_name, fallback_qconfig):
-    for regex_pattern, qconfig in quantization_config._module_name_regex_qconfig_dict.items():
+def get_module_name_regex_qconfig(qconfig_mapping, module_name, fallback_qconfig):
+    for regex_pattern, qconfig in qconfig_mapping._module_name_regex_qconfig_dict.items():
         if re.match(regex_pattern, module_name):
             # first match wins
             return qconfig
     return fallback_qconfig
 
 
-def get_module_name_qconfig(quantization_config, module_name, fallback_qconfig):
+def get_module_name_qconfig(qconfig_mapping, module_name, fallback_qconfig):
     if module_name == '':
         # module name qconfig not found
         return fallback_qconfig
-    if module_name in quantization_config._module_name_qconfig_dict:
-        return quantization_config._module_name_qconfig_dict[module_name]
+    if module_name in qconfig_mapping._module_name_qconfig_dict:
+        return qconfig_mapping._module_name_qconfig_dict[module_name]
     else:
         parent, _ = _parent_name(module_name)
-        return get_module_name_qconfig(quantization_config, parent, fallback_qconfig)
+        return get_module_name_qconfig(qconfig_mapping, parent, fallback_qconfig)
 
 
-def maybe_adjust_qconfig_for_module_type_or_name(quantization_config, module_type, module_name, global_qconfig):
+def maybe_adjust_qconfig_for_module_type_or_name(qconfig_mapping, module_type, module_name, global_qconfig):
     # get qconfig for module_name,
     # fallback to module_name_regex_qconfig, module_type_qconfig,
     # global_qconfig if necessary
     module_type_qconfig = get_object_type_qconfig(
-        quantization_config, module_type, global_qconfig)
+        qconfig_mapping, module_type, global_qconfig)
     module_name_regex_qconfig = get_module_name_regex_qconfig(
-        quantization_config, module_name, module_type_qconfig)
+        qconfig_mapping, module_name, module_type_qconfig)
     module_name_qconfig = get_module_name_qconfig(
-        quantization_config, module_name, module_name_regex_qconfig)
+        qconfig_mapping, module_name, module_name_regex_qconfig)
     return module_name_qconfig
 
 
-def get_flattened_qconfig_dict(quantization_config: QuantizationConfigBase) -> Dict[Union[Callable, str], QConfigAny]:
+def get_flattened_qconfig_dict(qconfig_mapping: QConfigMapping) -> Dict[Union[Callable, str], QConfigAny]:
     """ flatten the global, object_type and module_name qconfig
     to the same qconfig_dict so that it can be used by
     propagate_qconfig_ function.
@@ -76,28 +76,28 @@ def get_flattened_qconfig_dict(quantization_config: QuantizationConfigBase) -> D
       "conv": qconfig
     }
     """
-    flattened: Dict[Union[Callable, str], QConfigAny] = {"": quantization_config.global_qconfig}
-    for obj, qconfig in quantization_config._object_type_qconfig_dict.items():
+    flattened: Dict[Union[Callable, str], QConfigAny] = {"": qconfig_mapping.global_qconfig}
+    for obj, qconfig in qconfig_mapping._object_type_qconfig_dict.items():
         flattened[obj] = qconfig
-    for obj, qconfig in quantization_config._module_name_qconfig_dict.items():
+    for obj, qconfig in qconfig_mapping._module_name_qconfig_dict.items():
         flattened[obj] = qconfig
     return flattened
 
 
-def convert_lists_to_ordered_dicts(quantization_config: QuantizationConfigBase):
+def convert_lists_to_ordered_dicts(qconfig_mapping: QConfigMapping):
     """
-    Convert lists in a QuantizationConfigBase to OrderedDicts.
+    Convert lists in a QConfigMapping to OrderedDicts.
     """
-    quantization_config._object_type_qconfig_dict = OrderedDict(
-        [(e.object_type, e.qconfig) for e in quantization_config.object_type_qconfigs])
-    quantization_config._module_name_qconfig_dict = OrderedDict(
-        [(e.module_name, e.qconfig) for e in quantization_config.module_name_qconfigs])
-    quantization_config._module_name_regex_qconfig_dict = OrderedDict(
-        [(e.module_name_regex, e.qconfig) for e in quantization_config.module_name_regex_qconfigs])
+    qconfig_mapping._object_type_qconfig_dict = OrderedDict(
+        [(e.object_type, e.qconfig) for e in qconfig_mapping.object_type_qconfigs])
+    qconfig_mapping._module_name_qconfig_dict = OrderedDict(
+        [(e.module_name, e.qconfig) for e in qconfig_mapping.module_name_qconfigs])
+    qconfig_mapping._module_name_regex_qconfig_dict = OrderedDict(
+        [(e.module_name_regex, e.qconfig) for e in qconfig_mapping.module_name_regex_qconfigs])
 
 
 def update_qconfig_for_qat(
-        quantization_config: QuantizationConfigBase,
+        qconfig_mapping: QConfigMapping,
         additional_qat_module_mapping: Dict[Callable, Callable]):
     """
     Update the qconfig_dict to account for module swaps during QAT.
@@ -105,7 +105,7 @@ def update_qconfig_for_qat(
     """
     all_qat_mappings = get_combined_dict(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
-    object_type_dict = quantization_config._object_type_qconfig_dict
+    object_type_dict = qconfig_mapping._object_type_qconfig_dict
     new_object_type_dict = object_type_dict.copy()
     for k, v in new_object_type_dict.items():
         if k in all_qat_mappings:

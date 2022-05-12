@@ -25,7 +25,7 @@ from .model_utils import (
 )
 from . import auto_trace_rewriter
 from torch.ao.quantization import is_activation_post_process
-from torch.ao.quantization.quantization_config import PrepareQuantizationConfig
+from torch.ao.quantization.qconfig_mapping import QConfigMapping
 
 logger = logging.getLogger('auto_trace')
 logging.basicConfig(level=logging.DEBUG)
@@ -39,7 +39,7 @@ enable_logging = False
 
 def add_auto_observation(
     model : torch.nn.Module,
-    quantization_config: PrepareQuantizationConfig,
+    qconfig_mapping: QConfigMapping,
     example_inputs: Tuple[Any],
     input_dtypes: Any = (torch.float,),  # must be same structure as model inputs
     prepare_custom_config_dict: Dict[str, Any] = None,
@@ -372,11 +372,11 @@ def add_auto_observation(
                             # for the top level module only, specify input
                             # and output dtypes
                             auto_quant_state = AutoQuantizationState(
-                                quantization_config, fqn,
+                                qconfig_mapping, fqn,
                                 input_dtypes, output_dtypes)
                         else:
                             auto_quant_state = AutoQuantizationState(
-                                quantization_config, fqn)
+                                qconfig_mapping, fqn)
 
                         # The code below registers the auto_quant_state object
                         # of the child in the module hierarchy of the parent,

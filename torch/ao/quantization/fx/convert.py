@@ -21,14 +21,14 @@ from ..qconfig import (
     QConfigAny,
     qconfig_equals
 )
-from ..quantization_config import ConvertQuantizationConfig, PrepareQuantizationConfig
+from ..qconfig_mapping import QConfigMapping
 from ..qconfig_dict_utils import (
     convert_lists_to_ordered_dicts,
     update_qconfig_for_qat,
 )
 from .qconfig_utils import (
     generate_qconfig_map,
-    compare_prepare_convert_quantization_configs,
+    compare_prepare_convert_qconfig_mappings,
     update_qconfig_for_fusion,
     is_qconfig_supported_by_dtype_configs,
 )
@@ -514,7 +514,7 @@ def convert(
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True,
-        quantization_config: ConvertQuantizationConfig = None,
+        qconfig_mapping: QConfigMapping = None,
         backend_config_dict: Optional[Dict[str, Any]] = None) -> torch.nn.Module:
     """
     We will convert an observed model (a module with observer calls) to a reference
@@ -561,24 +561,24 @@ def convert(
 
     # TODO refactor this code once we update the prepare logic to have additional information on
     # which graph nodes have been observed and share that with convert to decide which observers to ignore.
-    if quantization_config:
-        prepare_quantization_config: PrepareQuantizationConfig = model._quantization_config  # type: ignore[assignment]
+    if qconfig_mapping:
+        prepare_qconfig_mapping: QConfigMapping = model._qconfig_mapping  # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
 
-        convert_lists_to_ordered_dicts(quantization_config)
+        convert_lists_to_ordered_dicts(qconfig_mapping)
         if model._is_qat:
-            update_qconfig_for_qat(quantization_config, {})
-        update_qconfig_for_fusion(model, quantization_config)
+            update_qconfig_for_qat(qconfig_mapping, {})
+        update_qconfig_for_fusion(model, qconfig_mapping)
 
-        compare_prepare_convert_quantization_configs(prepare_quantization_config, quantization_config)  # type: ignore[arg-type]
-        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, quantization_config, node_name_to_scope)
+        compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
+        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, qconfig_mapping, node_name_to_scope)
         # check the convert_qconfig_map generated and ensure that all the values either match what was set in prepare qconfig_map
         # or are set to None in the convert_qconfig_map.
         for k, v in qconfig_map.items():
             assert k in convert_qconfig_map, 'Expected key {} in convert qconfig_map'.format(k)
             if convert_qconfig_map[k] is not None:
                 assert qconfig_equals(v, convert_qconfig_map[k]), \
-                    "Expected k {} to have the same value in prepare and convert QuantizationConfigs, " \
+                    "Expected k {} to have the same value in prepare and convert QConfigMappings, " \
                     "but {} was updated to {}".format(k, v, convert_qconfig_map[k])
         qconfig_map = convert_qconfig_map
 
