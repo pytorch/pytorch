@@ -80,17 +80,13 @@ jobs:
         run: |
           buck build third_party:cpuinfo
 
-      - name: Build XNNPACK
-        run: |
-          buck build third_party:XNNPACK
-
       - name: Build pthreadpool
         run: |
           buck build third_party:pthreadpool
 
-      - name: Build all third party libraries
+      - name: Build XNNPACK
         run: |
-          buck build third_party/... --keep-going
+          buck build third_party:XNNPACK
 
       - name: Build QNNPACK
         run: |
@@ -107,6 +103,10 @@ jobs:
       - name: Build torch_mobile_core
         run: |
           buck build :torch_mobile_core
+
+      - name: Run code generation
+        run: |
+          buck run //tools/setup_helpers:generate_code_bin
 
       - name: Build pt_ops_full
         run: |

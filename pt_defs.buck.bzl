@@ -650,7 +650,7 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = []):
         name = name,
         outs = get_generate_code_bin_outs(),
         default_outs = ["."],
-        bash = "mkdir -p tools && " +
+        cmd = "mkdir -p tools && " +
                "$(exe //tools/setup_helpers:generate_code_bin) " + " ".join(
             # Mobile build only needs libtorch - skip python bindings for now, except
             # for ovrsource, which needs Python bindings.
