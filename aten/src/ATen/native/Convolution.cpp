@@ -216,6 +216,7 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
 auto ConvParams::use_mps( const at::Tensor& input, const at::Tensor& weight) const -> bool {
   // These checks need to be expanded. Currently we have very limited set of
   // checks for MPS.
+#ifdef USE_MPS
   if (needs_64bit_indexing_no_split(input, weight)) {
     return false;
   }
@@ -223,6 +224,9 @@ auto ConvParams::use_mps( const at::Tensor& input, const at::Tensor& weight) con
     return false;
   }
   return true;
+#else
+  return false;
+#endif
 }
 
 auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const -> bool {

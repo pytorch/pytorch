@@ -177,7 +177,6 @@ class MPSReluTest(TestCase):
 
     def testNumbersGPU(self):
         # Check for the GPU to be available
-        # TODO: Add support for mps.is_available()
         if not torch.backends.mps.is_available():
             self.skipTest("No GPU available")
         for t in [np.float16, np.float32]:
@@ -379,10 +378,6 @@ class TestMPS(TestCase):
         torch.testing.assert_allclose(cpu_x.grad, mps_x.grad.to('cpu'))
 
     def testNumbersGPU(self):
-        # Check for the GPU to be available
-        # TODO: Add support for mps.is_available()
-        # if not torch.mps.is_available():
-            # self.skipTest("No GPU available")
         for t in [np.float32]:
             self._testLeakyRelu(
                 np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
@@ -946,8 +941,6 @@ class TestMPS(TestCase):
         for shape in [(2,3,2,2), (2,3,2,2,2), (2,3,2)]:
             for test_module in [False, True]:
                 for track_running_stats in [True, False]:
-                    # TODO: Right now, doesn't pass for channels last input
-                    # for channels_last in [False, True]:
                     for channels_last in [False]:
                         if(channels_last and len(shape) != 4):
                             continue
@@ -1284,63 +1277,6 @@ class TestMPS(TestCase):
         mps_x.transpose_(0, 1)
         self.assertEqual(cpu_x, mps_x.to('cpu'))
 
-    def test_transpose_2D(self):
-        values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
-        cpu_x = torch.tensor(values, device='cpu')
-        mps_x = torch.tensor(values, device='mps')
-
-        cpu_transpose = torch.transpose(cpu_x, 0, 1)
-        mps_transpose = torch.transpose(mps_x, 0, 1).to('cpu')
-        self.assertEqual(cpu_transpose, mps_transpose)
-
-    def test_transpose_3D(self):
-        values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
-        cpu_x = torch.tensor(values, device='cpu')
-        mps_x = torch.tensor(values, device='mps')
-
-        cpu_transpose1 = torch.transpose(cpu_x, 0, 1)
-        mps_transpose1 = torch.transpose(mps_x, 0, 1).to('cpu')
-        self.assertEqual(cpu_transpose1, mps_transpose1)
-
-        cpu_transpose2 = torch.transpose(cpu_x, 0, 2)
-        mps_transpose2 = torch.transpose(mps_x, 0, 2).to('cpu')
-        self.assertEqual(cpu_transpose2, mps_transpose2)
-
-        cpu_transpose3 = torch.transpose(cpu_x, 1, 2)
-        mps_transpose3 = torch.transpose(mps_x, 1, 2).to('cpu')
-        self.assertEqual(cpu_transpose3, mps_transpose3)
-
-
-    def test_transpose_4D(self):
-        values = [[[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]],
-                    [[[13.0, 14.0, 15.0], [16.0, 17.0, 18.0]], [[19.0, 20.0, 21.0], [22.0, 23.0, 24.0]]]]
-        cpu_x = torch.tensor(values, device='cpu')
-        mps_x = torch.tensor(values, device='mps')
-
-        cpu_transpose1 = torch.transpose(cpu_x, 0, 1)
-        mps_transpose1 = torch.transpose(mps_x, 0, 1).to('cpu')
-        self.assertEqual(cpu_transpose1, mps_transpose1)
-
-        cpu_transpose2 = torch.transpose(cpu_x, 0, 2)
-        mps_transpose2 = torch.transpose(mps_x, 0, 2).to('cpu')
-        self.assertEqual(cpu_transpose2, mps_transpose2)
-
-        cpu_transpose3 = torch.transpose(cpu_x, 0, 3)
-        mps_transpose3 = torch.transpose(mps_x, 0, 3).to('cpu')
-        self.assertEqual(cpu_transpose3, mps_transpose3)
-
-        cpu_transpose4 = torch.transpose(cpu_x, 3, 1)
-        mps_transpose4 = torch.transpose(mps_x, 3, 1).to('cpu')
-        self.assertEqual(cpu_transpose4, mps_transpose4)
-
-        cpu_transpose5 = torch.transpose(cpu_x, 3, 2)
-        mps_transpose5 = torch.transpose(mps_x, 3, 2).to('cpu')
-        self.assertEqual(cpu_transpose5, mps_transpose5)
-
-        cpu_transpose6 = torch.transpose(cpu_x, 1, 2)
-        mps_transpose6 = torch.transpose(mps_x, 1, 2).to('cpu')
-        self.assertEqual(cpu_transpose6, mps_transpose6)
-
     def test_slice(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
         cpu_x = torch.tensor(values, device='cpu')
@@ -1351,7 +1287,6 @@ class TestMPS(TestCase):
         print (mps_slice1)
         self.assertEqual(cpu_slice1, mps_slice1)
 
-        #Fails as the memory layout on mps and cpu seem to differ by a transpose here?
         cpu_slice2 = cpu_x[:, :1]
         mps_slice2 = mps_x[:, :1]
         print (cpu_slice2)
@@ -1534,16 +1469,15 @@ class TestNLLLoss(TestCase):
         output_mps.sum().backward()
         self.assertEqual(input.grad, input_mps.grad.to('cpu'))
 
-    # @TODO: 0 dim tensor seg faults in MPS
     def test_nll_loss_empty_tensor_reduction_none(self, device='cpu'):
         self._nll_loss_helper([1, 3], "none", torch.empty([0], device=device))
         self._nll_loss_helper([3, 5, 7], "none", torch.empty([5, 7], device=device))
         self._nll_loss_helper([2, 3, 1, 7], "none", torch.empty([2, 1, 7], device=device))
         self._nll_loss_helper([2, 3, 5, 1], "none", torch.empty([2, 5, 1], device=device))
         self._nll_loss_helper([2, 3, 5, 7, 1], "none", torch.empty([2, 5, 7, 1], device=device))
-#        self._nll_loss_helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device))
-#        self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device))
-#        self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device))
+        self._nll_loss_helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device))
+        self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device))
+        self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device))
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_empty_tensor_reduction_mean(self, device='cpu'):
@@ -1614,8 +1548,6 @@ class TestNLLLoss(TestCase):
 
             self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
             self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
-
-            # @TODO: Add check for uint8 type
 
     # Mean Squared Error
     def test_mse_loss(self):
@@ -2792,12 +2724,12 @@ class TestNLLLoss(TestCase):
             cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-            # clamp_min_t_result = torch.clamp_min(x, min=min_t)
-            # clamp_min_t_result_cpu = torch.clamp_min(cpu_x, min=cpu_min_t)
+            clamp_min_t_result = torch.clamp_min(x, min=min_t)
+            clamp_min_t_result_cpu = torch.clamp_min(cpu_x, min=cpu_min_t)
 
-            # self.assertEqual(clamp_min_t_result, clamp_min_t_result_cpu)
+            self.assertEqual(clamp_min_t_result, clamp_min_t_result_cpu)
 
-        # helper(2, 8, 4, 5)
+        helper(2, 8, 4, 5)
 
 
     # Test stride functionality. This basic example passes on MPS.
@@ -2805,62 +2737,49 @@ class TestNLLLoss(TestCase):
         def helper(n, c):
             cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
-            # x = DispatchWrapperClass(x)
             strided_cpu = torch.as_strided(cpu_x, (2,2), (1,2))
             strided_mps = torch.as_strided(x, (2,2), (1,2))
-
-            # print(cpu_x)
-            # print(strided_cpu)
-
-            # print(x.to('cpu'))
-            # print(strided_mps.to('cpu'))
 
             self.assertEqual(strided_mps, strided_cpu)
 
         helper(3, 3)
 
-    # TODO: expand FAILS for MPS - wrong result!
-    # def test_expand(self):
-        # def helper(n, c):
-            # cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
-            # # cpu_x = DispatchWrapperClass(cpu_x)
-            # x = torch.randn(n, c, device='mps', dtype=torch.float, requires_grad=True)
+    def test_expand(self):
+        def helper(n, c):
+            cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
+            x = torch.randn(n, c, device='mps', dtype=torch.float, requires_grad=True)
 
-            # strided_cpu = torch.as_strided(cpu_x, (3,4), (1,0))
-            # strided_mps = torch.as_strided(x, (3,4), (1,0))
+            strided_cpu = torch.as_strided(cpu_x, (3,4), (1,0))
+            strided_mps = torch.as_strided(x, (3,4), (1,0))
 
-            # print(cpu_x)
-            # print(strided_cpu)
+            print(cpu_x)
+            print(strided_cpu)
 
-            # print(x.to('cpu'))
-            # print(strided_mps.to('cpu'))
+            print(x.to('cpu'))
+            print(strided_mps.to('cpu'))
 
-            # print(strided_mps.size())
-            # print(strided_mps.stride())
+            print(strided_mps.size())
+            print(strided_mps.stride())
 
-            # self.assertEqual(strided_mps, strided_cpu)
+            self.assertEqual(strided_mps, strided_cpu)
 
-        # helper(3, 1)
+        helper(3, 1)
 
-    # TODO: select FAILS for MPS - wrong result!
     def test_select(self):
         def helper(n, c):
             cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-            # Making the slice x[:, 0] - FAILS
-            # strided_cpu = torch.as_strided(cpu_x, (3,1), (3,1))
-            # strided_mps = torch.as_strided(x, (3,1), (3,1))
+            strided_cpu = torch.as_strided(cpu_x, (3,1), (3,1))
+            strided_mps = torch.as_strided(x, (3,1), (3,1))
+            self.assertEqual(strided_mps, strided_cpu)
 
-            # Making the slice x[0, :] - PASSES
             strided_cpu = torch.as_strided(cpu_x, (1,3), (3,1))
             strided_mps = torch.as_strided(x, (1,3), (3,1))
+            self.assertEqual(strided_mps, strided_cpu)
 
-            # Making the slice x[:, 1] - FAILS when trying to copy MPS result to CPU
-            # strided_cpu = torch.as_strided(cpu_x, (3,1), (3,1), storage_offset=1)
-            # strided_mps = torch.as_strided(x, (3,1), (3,1), storage_offset=1)
-
-
+            strided_cpu = torch.as_strided(cpu_x, (3,1), (3,1), storage_offset=1)
+            strided_mps = torch.as_strided(x, (3,1), (3,1), storage_offset=1)
             print(cpu_x)
             print(strided_cpu)
 
@@ -2871,22 +2790,21 @@ class TestNLLLoss(TestCase):
 
         helper(3, 3)
 
-    # # TODO: expand FAILS for MPS - wrong result!
-    # def test_sum_backward(self):
-        # def helper(n, c, h, w):
-            # cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=True)
-            # x = cpu_x.detach().clone().to('mps').requires_grad_()
+    def test_sum_backward(self):
+        def helper(n, c, h, w):
+            cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-            # all_sum = torch.sum(x)
-            # all_sum_cpu = torch.sum(cpu_x)
+            all_sum = torch.sum(x)
+            all_sum_cpu = torch.sum(cpu_x)
 
-            # all_sum.backward()
-            # all_sum_cpu.backward()
+            all_sum.backward()
+            all_sum_cpu.backward()
 
-            # self.assertEqual(all_sum, all_sum_cpu)
-            # self.assertEqual(x.grad, cpu_x.grad)
+            self.assertEqual(all_sum, all_sum_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
 
-        # helper(2, 8, 4, 5)
+        helper(2, 8, 4, 5)
 
 
     def test_topk(self):
@@ -4163,22 +4081,6 @@ class TestNNMPS(NNTestCase):
         # self.assertEqual(expect, actual)
 
 class TestConstantPadNd(TestCase):
-    # TODO: this test is currently failing with results being transposed
-    # def test_constant_pad_nd(self):
-        # a = torch.tensor([[1, 2], [3, 4]], device='mps')
-        # res = torch.constant_pad_nd(a, [1, 2, 1, 0], 9)
-        # expected = torch.tensor([
-            # [9, 9, 9, 9, 9],
-            # [9, 1, 2, 9, 9],
-            # [9, 3, 4, 9, 9]
-        # ])
-        # res_cpu = res.to('cpu')
-        # print ("Result from mps:")
-        # print (res_cpu)
-        # print ("Expected result")
-        # print (expected)
-        # self.assertEqual(res.to('cpu'), expected)
-
     def test_preserves_memory_format(self):
         nchw_tensor = torch.rand((1, 2, 5, 3))
         nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
@@ -4200,8 +4102,6 @@ class TestLinalgMPS(TestCase):
             res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
         f(t, m, v, alpha=alpha, beta=beta, out=res2)
         res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
-        # TODO: The mul with Scalar is Double. Add support for multiplying with
-        # doubles
         if beta != 0:
             res3 += (torch.mul(t, beta)).to(numpy_dtype).cpu().numpy()
         res3 = torch.from_numpy(res3).to(dtype)
