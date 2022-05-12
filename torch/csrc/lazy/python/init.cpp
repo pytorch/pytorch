@@ -10,10 +10,10 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
-#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/core/config.h>
 #if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
+#include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #endif // FBCODE_CAFFE2 || OVRSOURCE
 #include <string>
 #include <vector>
@@ -169,6 +169,11 @@ void initLazyBindings(PyObject* module){
         torch::lazy::getLTCForceFallback() = newval;
     }
   );
+  lazy.def(
+    "_set_reuse_ir", [](bool val) {
+        FLAGS_torch_lazy_reuse_ir = val;
+    }
+  );
 
   lazy_ts_backend.def(
     "_init",
@@ -199,11 +204,11 @@ void initLazyBindings(PyObject* module){
           std::unordered_set<BackendData::Handle> data_handles_;
           for (auto nodeptr : post_order) {
             if (nodeptr->op() == *torch::lazy::ltc_device_data) {
-              const auto* device_data_node = torch::lazy::NodeCast<torch::lazy::DeviceData>(nodeptr, *torch::lazy::ltc_device_data);
+              const auto backend_data = getBackend()->GetComputationDataFromNode(nodeptr);
 
-              auto infoptr = device_data_node->data()->info();
+              auto infoptr = backend_data->info();
               auto deviceDataInfoPtr = (torch::lazy::LazyGraphExecutor::DeviceDataInfo*) infoptr;
-              auto* tsDataPtr = (torch::lazy::TSData*) device_data_node->data().get();
+              auto* tsDataPtr = (torch::lazy::TSData*) backend_data.get();
 
               // dedup DeviceData by handle
               auto handle = tsDataPtr->GetHandle();

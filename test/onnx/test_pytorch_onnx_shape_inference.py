@@ -1,12 +1,17 @@
 # Owner(s): ["module: onnx"]
 
 import unittest
-import torch
+
 import numpy as np
-from torch.onnx.symbolic_helper import (_set_onnx_shape_inference,
-                                        _onnx_main_opset,
-                                        _set_opset_version)
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
+
+import torch
+from torch.onnx.symbolic_helper import (
+    _onnx_main_opset,
+    _set_onnx_shape_inference,
+    _set_opset_version,
+)
+
 
 def expect_tensor(scalar_type, shape=None):
     def verify(actual_type):
@@ -15,7 +20,9 @@ def expect_tensor(scalar_type, shape=None):
         #     np.testing.assert_equal(actual_type.sizes(), shape)
         if shape is not None:
             np.testing.assert_equal(actual_type.varyingSizes(), shape)
+
     return verify
+
 
 class TestONNXShapeInference(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -54,17 +61,23 @@ class TestONNXShapeInference(unittest.TestCase):
         constant = self.insert_tensor_constant(g, torch.ones(1, 2, 3, 4))
         shape = g.op("Shape", constant)
         constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
-        self.run_test(g, constant_of_shape.node(), expect_tensor("Float", shape=(1, 2, 3, 4)))
+        self.run_test(
+            g, constant_of_shape.node(), expect_tensor("Float", shape=(1, 2, 3, 4))
+        )
 
     def test_constant_of_shape_static(self):
         # Test ConstantOfShape with input of prim::ListConstruct of static tensor
         rank = 4
         g = self.create_empty_graph()
-        constants = [self.insert_tensor_constant(g, torch.tensor(i + 1)) for i in range(rank)]
+        constants = [
+            self.insert_tensor_constant(g, torch.tensor(i + 1)) for i in range(rank)
+        ]
         shape = g.op("prim::ListConstruct", *constants)
         shape.setType(torch._C.ListType.ofInts())
         constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
-        self.run_test(g, constant_of_shape.node(), expect_tensor("Float", shape=(1, 2, 3, 4)))
+        self.run_test(
+            g, constant_of_shape.node(), expect_tensor("Float", shape=(1, 2, 3, 4))
+        )
 
     def test_constant_of_shape_dynamic(self):
         # Test ConstantOfShape with input of prim::ListConstruct of dynamic tensor
@@ -74,21 +87,31 @@ class TestONNXShapeInference(unittest.TestCase):
         shape = g.op("prim::ListConstruct", *inputs)
         shape.setType(torch._C.ListType.ofInts())
         constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
-        self.run_test(g, constant_of_shape.node(), expect_tensor("Float", shape=(None, None, None, None)))
+        self.run_test(
+            g,
+            constant_of_shape.node(),
+            expect_tensor("Float", shape=(None, None, None, None)),
+        )
 
     def test_gather_dynamic_index(self):
         g = self.create_empty_graph()
         input = g.addInput()
-        input.setType(input.type().with_dtype(torch.float).with_sizes([None, 3, 16, 16]))
+        input.setType(
+            input.type().with_dtype(torch.float).with_sizes([None, 3, 16, 16])
+        )
         indices = g.addInput()
         indices.setType(indices.type().with_dtype(torch.int64).with_sizes([None]))
         output = g.op("Gather", input, indices, axis_i=1)
-        self.run_test(g, output.node(), expect_tensor("Float", shape=([None, None, 16, 16])))
+        self.run_test(
+            g, output.node(), expect_tensor("Float", shape=([None, None, 16, 16]))
+        )
 
     def test_gather_scalar_index(self):
         g = self.create_empty_graph()
         input = g.addInput()
-        input.setType(input.type().with_dtype(torch.float).with_sizes([None, 3, 16, 16]))
+        input.setType(
+            input.type().with_dtype(torch.float).with_sizes([None, 3, 16, 16])
+        )
         indices = self.insert_tensor_constant(g, torch.tensor(1))
         output = g.op("Gather", input, indices, axis_i=1)
         self.run_test(g, output.node(), expect_tensor("Float", shape=([None, 16, 16])))
@@ -178,5 +201,6 @@ class TestONNXShapeInference(unittest.TestCase):
         expand = g.op("Expand", constant, shape)
         self.run_test(g, expand.node(), expect_tensor("Float", shape=(None, None)))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
