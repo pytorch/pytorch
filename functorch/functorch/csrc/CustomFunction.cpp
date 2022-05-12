@@ -22,7 +22,7 @@ public:
   // py::object destructor.  This is because this object may outlive
   // libtorch_python, so we want to disarm the deallocation if that happens.
   // PyInterpreter does this correctly, pybind11 does not.
-  ~PythonKernelHolder() {
+  ~PythonKernelHolder() override {
     getPyInterpreter()->decref(func_, /*is_tensor*/false);
   }
 
@@ -201,7 +201,7 @@ variable_list GenericPythonBackward::apply(variable_list&& grads) {
   return grad_inputs;
 }
 
-typedef TensorList (*custom_python_function_t)(TensorList);
+using custom_python_function_t = TensorList (*)(TensorList);
 
 using torch::autograd::compute_requires_grad;
 using torch::autograd::collect_next_edges;
@@ -216,14 +216,12 @@ void customFunctionBoxed(const c10::OperatorHandle& op, torch::jit::Stack* stack
 
   std::string schema_name = op.schema().name();
   std::string vjp_fn_name = schema_name + "_vjp";
-  auto vjp_fn = c10::Dispatcher::singleton()
-    .findSchemaOrThrow(vjp_fn_name.c_str(), "");
 
   std::shared_ptr<GenericPythonBackward> grad_fn;
   if (_any_requires_grad) {
     grad_fn = std::shared_ptr<GenericPythonBackward>(new GenericPythonBackward(), deleteNode);
     grad_fn->set_next_edges(collect_next_edges(tensors));
-    grad_fn->backward_fn_ = std::move(vjp_fn);
+    grad_fn->backward_fn_ = c10::Dispatcher::singleton().findSchemaOrThrow(vjp_fn_name.c_str(), "");
     grad_fn->num_inputs_ = tensors_.size();
   }
 
@@ -246,7 +244,7 @@ void customFunctionBoxed(const c10::OperatorHandle& op, torch::jit::Stack* stack
       if (!is_input) {
         set_history(tensor, grad_fn);
       }
-      grad_fn->saved_tensors_.push_back(torch::autograd::SavedVariable(tensor, !is_input));
+      grad_fn->saved_tensors_.emplace_back(tensor, !is_input);
     }
   }
   torch::jit::push(stack, result);
