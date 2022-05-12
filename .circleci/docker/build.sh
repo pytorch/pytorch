@@ -99,13 +99,13 @@ case "$image" in
     ;;
   pytorch-linux-xenial-py3.7-gcc7.2)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.16.9  # Required for precompiled header support
+    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
   pytorch-linux-xenial-py3.7-gcc7)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
+    CMAKE_VERSION=3.16.9  # Required for precompiled header support
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
