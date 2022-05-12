@@ -211,5 +211,134 @@ TORCH_IMPL_FUNC(clamp_max_out_mps)
     mps::clamp_scalar_out_mps(input_t, at::OptionalScalarRef(), max, output_t, __func__);
 }
 
+Tensor& where_self_out_mps(const Tensor& condition,
+                           const Tensor& self,
+                           const Tensor& other,
+                           Tensor& out) {
+  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
+
+  if (condition.scalar_type() == ScalarType::Byte) {
+  TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
+  } else {
+  TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
+  }
+  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
+
+  using namespace mps;
+  MPSStream* stream = getCurrentMPSStream();
+
+  // Empty output
+  if(out.numel() == 0)
+    return out;
+
+  // Derive from MPSCachedGraph
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* conditionTensor_ = nil;
+    MPSGraphTensor* selfTensor_ = nil;
+    MPSGraphTensor* otherTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  @autoreleasepool {
+
+    MPSShape* input_shape = getMPSShape(self);
+
+    string key = "where_self_out_mps:" + getTensorsStringKey({cond_bool, self, other});
+
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+
+    if(!cachedGraph) {
+        MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+
+            CachedGraph *newCachedGraph = nil;
+
+            @autoreleasepool {
+                MPSGraph* mpsGraph = make_mps_graph();
+                newCachedGraph = new CachedGraph(mpsGraph);
+
+                MPSGraphTensor* conditionTensor = mpsGraphRankedPlaceHolder(mpsGraph, cond_bool);
+                MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+                MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, other);
+
+                MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:conditionTensor
+                                                               truePredicateTensor:selfTensor
+                                                              falsePredicateTensor:otherTensor
+                                                                              name:nil];
+
+                newCachedGraph->conditionTensor_ = conditionTensor;
+                newCachedGraph->selfTensor_ = selfTensor;
+                newCachedGraph->otherTensor_ = otherTensor;
+                newCachedGraph->outputTensor_ = outputTensor;
+            }
+            return newCachedGraph;
+        });
+        cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    }
+
+    Placeholder conditionPlaceholder = Placeholder(cachedGraph->conditionTensor_, cond_bool);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
+    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      conditionPlaceholder.getMPSGraphTensor() : conditionPlaceholder.getMPSGraphTensorData(),
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+      otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData()
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+    };
+
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+
+  }
+
+  return out;
+}
+
+Tensor where_mps(const Tensor& condition,
+                 const Tensor& self,
+                 const Tensor& other) {
+
+  auto cond_shape = condition.sizes();
+  auto self_shape = self.sizes();
+  auto other_shape = other.sizes();
+
+  bool cond_zero_shape = (condition.dim() == 0);
+  bool self_zero_shape = (self.dim() == 0);
+  bool other_zero_shape = (other.dim() == 0);
+
+  auto max_dim = std::max(condition.dim(), std::max(self.dim(), other.dim()));
+
+  auto sum_dims = condition.dim() + self.dim() + other.dim();
+
+  TORCH_CHECK(max_dim == 0 || !(sum_dims % max_dim), "All inputs of where should have same/compatible number of dims")
+
+  int64_t out_arr[max_dim];
+
+  // Broadcasted output shape
+  for(int i = 0; i < max_dim; i++) {
+
+    int64_t cond_num = cond_zero_shape ? 0 : condition.size(i);
+    int64_t self_num = self_zero_shape ? 0 : self.size(i);
+    int64_t other_num = other_zero_shape ? 0 : other.size(i);
+
+    out_arr[i] = std::max(cond_num, std::max(self_num, other_num));
+  }
+
+  Tensor ret = empty_mps(IntArrayRef(out_arr, max_dim),
+                         self.scalar_type(),
+                         c10::nullopt,
+                         kMPS,
+                         c10::nullopt,
+                         self.suggest_memory_format());
+  return where_self_out_mps(condition, self, other, ret);
+
+}
+
 } // namespace native
 } // namespace at

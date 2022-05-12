@@ -5031,11 +5031,13 @@
   variants: function, method
   dispatch:
     CPU, CUDA: where
+    MPS: where_mps
 
 - func: where.self_out(Tensor condition, Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: where_self_out
+    MPS: where_self_out_mps
 
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
   variants: function

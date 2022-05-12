@@ -3797,6 +3797,41 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 3, 5), 0.1)
         helper((2, 8, 3, 5), 0.2)
 
+    # Test where
+    def test_where(self):
+        def helper(shape, x_shape, y_shape, cond_dtype=torch.bool, x_dtype=torch.float):
+
+            cpu_cond = torch.randint(2, shape, device='cpu', dtype=cond_dtype, requires_grad=False)
+            cond = cpu_cond.detach().clone().to('mps')
+
+            cpu_x = torch.randn(x_shape, device='cpu', dtype=x_dtype, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            cpu_y = torch.randn(y_shape, device='cpu', dtype=x_dtype, requires_grad=True)
+            y = cpu_y.detach().clone().to('mps').requires_grad_()
+
+            cpu_out = torch.where(cpu_cond, cpu_x, cpu_y)
+            out = torch.where(cond, x, y)
+
+            cpu_grad = torch.randn(cpu_out.shape)
+            grad = cpu_grad.to('mps')
+
+            cpu_out.backward(gradient=cpu_grad)
+            out.backward(gradient=grad)
+
+            self.assertEqual(out, cpu_out)
+            self.assertEqual(x.grad, cpu_x.grad)
+            self.assertEqual(y.grad, cpu_y.grad)
+
+        for shape in ([(0, 3), [], (2,3), (9,)]):
+            helper(shape, shape, shape)
+
+        helper((2,3,1), (2,3,4), (2,1,4))
+        helper((2,1,1), (2,3,4), (1,3,4))
+        helper((1,1,1), (1,1,4), (2,3,1))
+        helper([], (1,1,4), (2,3,1))
+        helper([], (2,3,4), [])
+
     # Test normal
     def test_normal(self):
         def helper(shape, mean=0.0, std=1.0):
