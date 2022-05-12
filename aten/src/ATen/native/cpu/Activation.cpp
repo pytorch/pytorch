@@ -942,7 +942,25 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
 }
 
 void glu_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_cpu", [&] {
+  if (iter.dtype() == kBFloat16) {
+    const float float_one_val(1);
+    const Vectorized<float> float_one_vec(float_one_val);
+    cpu_kernel_vec(
+      iter,
+      [float_one_val](BFloat16 a, BFloat16 b) -> BFloat16 {
+        return float(a) * (float_one_val / (float_one_val + std::exp(- float(b))));
+      },
+      [float_one_vec](Vectorized<BFloat16> a, Vectorized<BFloat16> b) -> Vectorized<BFloat16> {
+        Vectorized<float> a0, a1, b0, b1;
+        std::tie(a0, a1) = convert_bfloat16_float(a);
+        std::tie(b0, b1) = convert_bfloat16_float(b);
+        a0 = a0 * (float_one_vec / (float_one_vec + b0.neg().exp()));
+        a1 = a1 * (float_one_vec / (float_one_vec + b1.neg().exp()));
+        return convert_float_bfloat16(a0, a1);
+      }
+    );
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_cpu", [&] {
     using Vec = Vectorized<scalar_t>;
     const scalar_t one_val(1);
     const Vec one_vec(one_val);
@@ -956,6 +974,7 @@ void glu_kernel(TensorIteratorBase& iter) {
       }
     );
   });
+  }
 }
 
 void glu_jvp_kernel(TensorIteratorBase& iter) {
@@ -978,20 +997,40 @@ void glu_jvp_kernel(TensorIteratorBase& iter) {
 }
 
 void glu_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_backward_cpu", [&] {
-    using Vec = Vectorized<scalar_t>;
-    const scalar_t one_val(1);
-    const Vec one_vec(one_val);
+  if (iter.dtype() == kBFloat16) {
+    const float float_one_val(1);
+    const Vectorized<float> float_one_vec(float_one_val);
     cpu_kernel_vec(
       iter,
-      [one_val](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
-        return (one_val - a) * a * b * c;
+      [float_one_val](BFloat16 a, BFloat16 b, BFloat16 c) -> BFloat16 {
+        return  (float_one_val - float(a)) * float(a) * float(b) * float(c);
       },
-      [one_vec](Vec a, Vec b, Vec c) -> Vec {
-        return (one_vec - a) * a * b * c;
+      [float_one_vec](Vectorized<BFloat16> a, Vectorized<BFloat16> b, Vectorized<BFloat16> c) -> Vectorized<BFloat16> {
+        Vectorized<float> a0, a1, b0, b1, c0, c1;
+        std::tie(a0, a1) = convert_bfloat16_float(a);
+        std::tie(b0, b1) = convert_bfloat16_float(b);
+        std::tie(c0, c1) = convert_bfloat16_float(c);
+        a0 = (float_one_vec - a0) * a0 * b0 * c0;
+        a1 = (float_one_vec - a1) * a1 * b1 * c1;
+        return convert_float_bfloat16(a0, a1);
       }
     );
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_backward_cpu", [&] {
+      using Vec = Vectorized<scalar_t>;
+      const scalar_t one_val(1);
+      const Vec one_vec(one_val);
+      cpu_kernel_vec(
+        iter,
+        [one_val](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+          return (one_val - a) * a * b * c;
+        },
+        [one_vec](Vec a, Vec b, Vec c) -> Vec {
+          return (one_vec - a) * a * b * c;
+        }
+      );
+    });
+  }
 }
 
 void silu_kernel(TensorIteratorBase& iter) {
