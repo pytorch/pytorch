@@ -1318,6 +1318,10 @@ class TestSparseCSR(TestCase):
             res_sparse_dense = fn(y, x.to_dense())
             expected = fn(y.to_dense(), x.to_dense()).to_sparse_csr()
             self.assertEqual(res_sparse_sparse, expected)
+            # TODO: While result of mul(dense, csr) is csr, it is not fully compressed.
+            # That means it may contain materialized zeros, since the dense argument
+            # is converted according to the sparsity pattern of csr. In the future
+            # we might require the result to be fully compressed.
             self.assertEqual(res_dense_sparse.to_dense(), expected.to_dense())
             self.assertEqual(res_sparse_dense.to_dense(), expected.to_dense())
 
