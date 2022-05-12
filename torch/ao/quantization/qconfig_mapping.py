@@ -145,9 +145,6 @@ class QConfigMapping:
         """
         Set the QConfig for modules matching a combination of the given module name, object type,
         and the index at which the module appears.
-
-        If the QConfig for an existing (module name, object type, index) combination was already set,
-        the new QConfig will override the old one.
         """
         self.module_name_object_type_order_qconfigs.append(
             QConfigModuleNameObjectTypeOrderEntry(module_name, object_type, index, qconfig))
