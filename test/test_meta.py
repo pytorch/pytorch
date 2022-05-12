@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_methods_invocations import op_db
+from torch._decomp import decomposition_table
 
 import functools
 import re
@@ -331,7 +332,6 @@ meta_exclude_set = {
     torch.nn.functional.adaptive_avg_pool2d,  # MISSING aten::_adaptive_avg_pool2d
     torch.nn.functional.adaptive_avg_pool3d,  # MISSING aten::_adaptive_avg_pool3d
     torch.nn.functional.batch_norm,  # MISSING aten::native_batch_norm
-    torch.nn.functional.binary_cross_entropy,  # MISSING aten::binary_cross_entropy
     torch.nn.functional.channel_shuffle,  # MISSING aten::channel_shuffle
     torch.nn.functional.cross_entropy,  # MISSING aten::_local_scalar_dense
     torch.nn.functional.cross_entropy,  # MISSING aten::nll_loss2d_forward
@@ -341,8 +341,6 @@ meta_exclude_set = {
     torch.nn.functional.gaussian_nll_loss,  # MISSING aten::_local_scalar_dense
     torch.nn.functional.grid_sample,  # MISSING aten::grid_sampler_2d
     torch.nn.functional.group_norm,  # MISSING aten::native_batch_norm
-    torch.nn.functional.hardswish,  # MISSING aten::hardswish
-    torch.nn.functional.hardtanh,  # MISSING aten::hardtanh
     torch.nn.functional.instance_norm,  # MISSING aten::native_batch_norm
     torch.nn.functional.layer_norm,  # MISSING aten::native_batch_norm
     torch.nn.functional.logsigmoid,  # MISSING aten::log_sigmoid_forward
@@ -360,7 +358,6 @@ meta_exclude_set = {
     torch.nn.functional.pdist,  # MISSING aten::_pdist_forward
     torch.nn.functional.prelu,  # MISSING aten::prelu
     torch.nn.functional.relu,  # MISSING aten::relu
-    torch.nn.functional.relu6,  # MISSING aten::hardtanh
     torch.nn.functional.rrelu,  # MISSING aten::rrelu_with_noise
     torch.nn.functional.unfold,  # MISSING aten::im2col
     torch.nonzero,  # MISSING aten::nonzero
@@ -379,7 +376,6 @@ meta_exclude_set = {
     torch.rnn_relu,  # MISSING aten::relu
     torch.rnn_relu_cell,  # MISSING aten::relu
     torch.roll,  # MISSING aten::roll
-    torch.rsub,  # MISSING aten::rsub.Tensor
     torch.searchsorted,  # MISSING aten::searchsorted.Tensor
     torch.slogdet,  # MISSING aten::linalg_slogdet
     torch.solve,  # MISSING aten::_solve_helper
@@ -387,13 +383,11 @@ meta_exclude_set = {
     torch.special.logsumexp,  # MISSING aten::abs.out
     torch.special.multigammaln,  # MISSING aten::_local_scalar_dense
     torch.square,  # MISSING aten::square.out
-    torch.std,  # MISSING aten::std.correction
     torch.std_mean,  # MISSING aten::std_mean.correction
     torch.symeig,  # MISSING aten::_symeig_helper
     torch.take,  # MISSING aten::take
     torch.threshold,  # MISSING aten::_local_scalar_dense
     torch.trace,  # MISSING aten::trace
-    torch.var,  # MISSING aten::var.correction
     torch.var_mean,  # MISSING aten::var_mean.correction
     torch.vdot,  # MISSING aten::vdot
     torch.nanquantile,  # MISSING aten::logical_not.out
@@ -432,6 +426,12 @@ suspicious_exclude_set = {
     torch.zeros_like,
 }
 
+# These operators happen very frequently, so if you're crossref
+# testing consider skipping them
+frequent_set = {
+    torch.Tensor.__rsub__,
+}
+
 # These also are known to not work, but they fail in a more special way
 # than the regular "Meta not implemented for aten op" way
 meta_exclude_set |= {
@@ -449,7 +449,6 @@ meta_exclude_set |= {
     # work with meta we intentionally don't test them to speed
     # up the test suite
     torch.Tensor.__getitem__,
-    torch.Tensor.__rsub__,
     torch.Tensor.__setitem__,
     torch.Tensor.add,
     torch.Tensor.add_,
@@ -825,6 +824,19 @@ class TestMeta(TestCase):
                 self.fail('expected failure, but succeeded')
         else:
             do_test()
+
+class TestMetaGeneric(TestCase):
+    def test_decomps_used_for_meta(self):
+        for op in decomposition_table:
+            name = op._schema.name
+            if op._schema.overload_name:
+                name += "." + op._schema.overload_name
+            if name in ["aten::detach"]:
+                continue
+            r = torch._C._dispatch_has_kernel_for_dispatch_key(name, 'Meta')
+            if not r:
+                print(name)
+            # self.assertTrue(r, f'{name} has a decomposition but no meta kernel')
 
 instantiate_device_type_tests(TestMeta, globals())
 

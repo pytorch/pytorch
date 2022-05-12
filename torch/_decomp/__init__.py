@@ -1,7 +1,7 @@
 import torch
 import torch._ops
 import torch.library
-from typing import Callable, Union, Dict, Sequence
+from typing import Callable, Union, Dict, Sequence, List
 from torch.utils._pytree import tree_map
 from collections import defaultdict
 
@@ -15,7 +15,7 @@ decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
 
-def register_decomposition(aten_op, registry=None, *, register_meta: bool = False):
+def register_decomposition(aten_op, registry=None, *, register_meta: Union[bool, List[str]] = False):
     """
     A decorator to register a function as a decomposition to the Python
     decomposition table.  Use it like this::
@@ -53,7 +53,8 @@ def register_decomposition(aten_op, registry=None, *, register_meta: bool = Fals
                 if op_overload in registry:
                     raise RuntimeError(f"duplicate registrations for {op_overload}")
                 registry[op_overload] = f
-                if register_meta:
+                is_b = isinstance(register_meta, bool)
+                if (not is_b and op_overload._overloadname in register_meta) or (is_b and register_meta):
                     meta_lib.impl(op_overload, f)
 
         # To handle allowing multiple aten_ops at once

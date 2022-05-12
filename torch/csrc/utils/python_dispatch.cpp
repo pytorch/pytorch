@@ -202,6 +202,15 @@ void initDispatchBindings(PyObject* module) {
     c10::Dispatcher::singleton().checkInvariants();
   });
 
+  m.def("_dispatch_has_kernel_for_dispatch_key", [](const char* name, std::string dispatch) -> bool {
+    auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+    if (!op) {
+      return "";
+    } else {
+      return op->hasKernelForDispatchKey(c10::parseDispatchKey(dispatch));
+    }
+  });
+
   m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {
     auto danglingImpls =  c10::Dispatcher::singleton().findDanglingImpls();
 

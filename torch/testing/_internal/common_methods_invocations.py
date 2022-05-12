@@ -11665,6 +11665,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           skips=(skipCPUIfNoLapack,),
            sample_inputs_func=sample_inputs_lu_unpack),
     OpInfo('lu',
            op=torch.lu,
@@ -14460,7 +14461,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
-           decorators=[skipCUDAIfNoMagma],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -14705,6 +14706,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_solve_triangular,
            supports_fwgrad_bwgrad=True,
+           skips=(skipCPUIfNoLapack,),
            # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
            supports_forward_ad=True),
     OpInfo('linalg.matrix_rank',

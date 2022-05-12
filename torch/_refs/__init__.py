@@ -453,6 +453,7 @@ atan2 = _make_elementwise_binary_reference(
 bitwise_and = _make_elementwise_binary_reference(
     prims.bitwise_and,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    register_meta=["Scalar", "Scalar_out"],
 )
 
 # TODO: add docstring
@@ -460,11 +461,13 @@ bitwise_left_shift = _make_elementwise_binary_reference(
     prims.shift_left,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_left_shift,  # prim/aten name mismatch
+    register_meta=["Tensor_Scalar", "Tensor_Scalar_out", "Scalar_Tensor"],
 )
 
 # TODO: add docstring
 bitwise_or = _make_elementwise_binary_reference(
-    prims.bitwise_or, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.bitwise_or, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    register_meta=["Scalar_out", "Scalar"],
 )
 
 # TODO: add docstring
@@ -472,11 +475,13 @@ bitwise_right_shift = _make_elementwise_binary_reference(
     prims.shift_right_arithmetic,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_right_shift,  # prim/aten name mismatch
+    register_meta=["Tensor_Scalar", "Tensor_Scalar_out", "Scalar_Tensor"],
 )
 
 # TODO: add docstring
 bitwise_xor = _make_elementwise_binary_reference(
-    prims.bitwise_xor, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.bitwise_xor, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    register_meta=["Scalar_out", "Scalar"],
 )
 
 # TODO: add docstring
@@ -640,6 +645,7 @@ minimum = _make_elementwise_binary_reference(
 mul = _make_elementwise_binary_reference(
     prims.mul,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    register_meta=["Scalar"],
 )
 
 # TODO: add docstring
@@ -660,7 +666,7 @@ pow = _make_elementwise_binary_reference(
 # TODO: add docstring
 # TODO: consider refactoring this with add impl
 # sub has its own implementation because it has an alpha argument
-@register_decomposition(torch.ops.aten.sub)
+@register_decomposition(torch.ops.aten.sub, register_meta=["Scalar"])
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
