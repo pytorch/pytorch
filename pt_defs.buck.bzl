@@ -405,7 +405,7 @@ def build_aten_cpu(name, srcs, deps = []):
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_aten_preprocessor_flags(),
         link_whole = True,
-        exported_linker_flags = ["-pthread", "-ldl"],
+        linker_flags = ["-Wl,--no-as-needed", "-ldl"]
         visibility = ["PUBLIC"],
         deps = [
             "//third_party:cpuinfo",
