@@ -35,7 +35,6 @@ from .quantization_patterns import (
 from torch.ao.quantization.quantization_types import (
     Pattern,
     NodePattern,
-    ExampleInputs,
 )
 
 from ._equalize import (
@@ -240,8 +239,8 @@ def prepare_get_standalone_module_configs(
     """
     standalone_module_name = str(node.target)
     standalone_module_type = type(modules[standalone_module_name])  # type: ignore[index]
-    sm_qconfig_dict, sm_example_inputs, sm_prepare_config_dict, \
-        sm_backend_config_dict = get_standalone_module_configs(
+    sm_qconfig_dict, sm_example_inputs, sm_prepare_config_dict, sm_backend_config_dict = \
+        get_standalone_module_configs(
             standalone_module_name,
             standalone_module_type,
             prepare_custom_config_dict)
@@ -1354,7 +1353,7 @@ def prepare(
         qconfig_dict: Any,
         is_qat: bool,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        example_inputs: ExampleInputs,
+        example_inputs: Tuple[Any, ...],
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
         equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
