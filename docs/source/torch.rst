@@ -578,7 +578,6 @@ BLAS and LAPACK Operations
     outer
     pinverse
     qr
-    solve
     svd
     svd_lowrank
     pca_lowrank

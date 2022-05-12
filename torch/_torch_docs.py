@@ -1377,12 +1377,13 @@ add_docstr(torch.bitwise_left_shift,
 bitwise_left_shift(input, other, *, out=None) -> Tensor
 
 Computes the left arithmetic shift of :attr:`input` by :attr:`other` bits.
-The result will have the same dtype as :attr:`input`.
+The result will have the same dtype as :attr:`input`. The input tensor must
+be of integral types.
 
 The operation applied is:
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i \times 2 ^ {{\text{{other}}_i}}
+    \text{{out}}_i = \text{{input}}_i << \text{{other}}_i
 
 Args:
     input (Tensor or Scalar): the first input tensor
@@ -1402,12 +1403,13 @@ add_docstr(torch.bitwise_right_shift,
 bitwise_right_shift(input, other, *, out=None) -> Tensor
 
 Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
-The result will have the same dtype as :attr:`input`.
+The result will have the same dtype as :attr:`input`. The input tensor must
+be of integral types.
 
 The operation applied is:
 
 .. math::
-    \text{{out}}_i = \text{{input}}_i / 2 ^ {{\text{{other}}_i}}
+    \text{{out}}_i = \text{{input}}_i >> \text{{other}}_i
 
 Args:
     input (Tensor or Scalar): the first input tensor
@@ -4323,77 +4325,6 @@ Alias of :func:`torch.outer`.
     Use :func:`torch.outer` instead.
 """)
 
-add_docstr(torch.solve,
-           r"""
-torch.solve(input, A, *, out=None) -> (Tensor, Tensor)
-
-This function returns the solution to the system of linear
-equations represented by :math:`AX = B` and the LU factorization of
-A, in order as a namedtuple `solution, LU`.
-
-`LU` contains `L` and `U` factors for LU factorization of `A`.
-
-`torch.solve(B, A)` can take in 2D inputs `B, A` or inputs that are
-batches of 2D matrices. If the inputs are batches, then returns
-batched outputs `solution, LU`.
-
-Supports real-valued and complex-valued inputs.
-
-.. warning::
-
-    :func:`torch.solve` is deprecated in favor of :func:`torch.linalg.solve`
-    and will be removed in a future PyTorch release.
-    :func:`torch.linalg.solve` has its arguments reversed and does not return the
-    LU factorization of the input. To get the LU factorization see :func:`torch.linalg.lu_factor`,
-    which may be used with :func:`torch.linalg.lu_solve`.
-
-    ``X = torch.solve(B, A).solution`` should be replaced with
-
-    .. code:: python
-
-        X = torch.linalg.solve(A, B)
-
-.. note::
-
-    Irrespective of the original strides, the returned matrices
-    `solution` and `LU` will be transposed, i.e. with strides like
-    `B.contiguous().mT.stride()` and
-    `A.contiguous().mT.stride()` respectively.
-
-Args:
-    input (Tensor): input matrix :math:`B` of size :math:`(*, m, k)` , where :math:`*`
-                is zero or more batch dimensions.
-    A (Tensor): input square matrix of size :math:`(*, m, m)`, where
-                :math:`*` is zero or more batch dimensions.
-
-Keyword args:
-    out ((Tensor, Tensor), optional): optional output tuple.
-
-Example::
-
-    >>> A = torch.tensor([[6.80, -2.11,  5.66,  5.97,  8.23],
-    ...                   [-6.05, -3.30,  5.36, -4.44,  1.08],
-    ...                   [-0.45,  2.58, -2.70,  0.27,  9.04],
-    ...                   [8.32,  2.71,  4.35,  -7.17,  2.14],
-    ...                   [-9.67, -5.14, -7.26,  6.08, -6.87]]).t()
-    >>> B = torch.tensor([[4.02,  6.19, -8.22, -7.57, -3.03],
-    ...                   [-1.56,  4.00, -8.67,  1.75,  2.86],
-    ...                   [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
-    >>> X, LU = torch.solve(B, A)
-    >>> torch.dist(B, torch.mm(A, X))
-    tensor(1.00000e-06 *
-           7.0977)
-
-    >>> # Batched solver example
-    >>> A = torch.randn(2, 3, 1, 4, 4)
-    >>> B = torch.randn(2, 3, 1, 4, 6)
-    >>> X, LU = torch.solve(B, A)
-    >>> torch.dist(B, A.matmul(X))
-    tensor(1.00000e-06 *
-       3.6386)
-
-""")
-
 add_docstr(torch.get_default_dtype,
            r"""
 get_default_dtype() -> torch.dtype
@@ -5760,48 +5691,63 @@ Example::
 add_docstr(torch.lu_unpack, r"""
 lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-Unpacks the LU decomposition returned by :func:`~linalg.lu_factor` into the `P, L, U` matrices.
+Unpacks the data and pivots from a LU factorization of a tensor into tensors ``L`` and ``U`` and a permutation tensor ``P``
+such that ``LU_data, LU_pivots = (P @ L @ U).lu()``.
 
-.. seealso::
+Returns a tuple of tensors as ``(the P tensor (permutation matrix), the L tensor, the U tensor)``.
 
-    :func:`~linalg.lu` returns the matrices from the LU decomposition. It is more efficient than
-    doing :func:`~linalg.lu_factor` and then :func:`~linalg.lu_unpack`.
+.. note:: ``P.dtype == LU_data.dtype`` and ``P.dtype`` is not an integer type so that matrix products with ``P``
+          are possible without casting it to a floating type.
 
 Args:
     LU_data (Tensor): the packed LU factorization data
     LU_pivots (Tensor): the packed LU factorization pivots
     unpack_data (bool): flag indicating if the data should be unpacked.
-                        If ``False``, then the returned ``L`` and ``U`` are empty tensors.
+                        If ``False``, then the returned ``L`` and ``U`` are ``None``.
                         Default: ``True``
     unpack_pivots (bool): flag indicating if the pivots should be unpacked into a permutation matrix ``P``.
-                          If ``False``, then the returned ``P`` is  an empty tensor.
+                          If ``False``, then the returned ``P`` is  ``None``.
                           Default: ``True``
-
-Keyword args:
-    out (tuple, optional): output tuple of three tensors. Ignored if `None`.
-
-Returns:
-    A namedtuple ``(P, L, U)``
+    out (tuple, optional): a tuple of three tensors to use for the outputs ``(P, L, U)``.
 
 Examples::
 
     >>> A = torch.randn(2, 3, 3)
-    >>> LU, pivots = torch.linalg.lu_factor(A)
-    >>> P, L, U = torch.lu_unpack(LU, pivots)
-    >>> # We can recover A from the factorization
-    >>> A_ = P @ L @ U
-    >>> torch.allclose(A, A_)
-    True
+    >>> A_LU, pivots = A.lu()
+    >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
+    >>>
+    >>> # can recover A from factorization
+    >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
 
     >>> # LU factorization of a rectangular matrix:
     >>> A = torch.randn(2, 3, 2)
-    >>> LU, pivots = torch.linalg.lu_factor(A)
-    >>> P, L, U = torch.lu_unpack(LU, pivots)
-    >>> # P, L, U are the same as returned by linalg.lu
-    >>> P_, L_, U_ = torch.linalg.lu(A)
-    >>> torch.allclose(P, P_) and torch.allclose(L, L_) and torch.allclose(U, U_)
-    True
+    >>> A_LU, pivots = A.lu()
+    >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
+    >>> P
+    tensor([[[1., 0., 0.],
+             [0., 1., 0.],
+             [0., 0., 1.]],
 
+            [[0., 0., 1.],
+             [0., 1., 0.],
+             [1., 0., 0.]]])
+    >>> A_L
+    tensor([[[ 1.0000,  0.0000],
+             [ 0.4763,  1.0000],
+             [ 0.3683,  0.1135]],
+
+            [[ 1.0000,  0.0000],
+             [ 0.2957,  1.0000],
+             [-0.9668, -0.3335]]])
+    >>> A_U
+    tensor([[[ 2.1962,  1.0881],
+             [ 0.0000, -0.8681]],
+
+            [[-1.0947,  0.3736],
+             [ 0.0000,  0.5718]]])
+    >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+    >>> torch.norm(A_ - A)
+    tensor(2.9802e-08)
 """.format(**common_args))
 
 add_docstr(torch.less, r"""
@@ -5815,26 +5761,16 @@ add_docstr(torch.lu_solve,
 lu_solve(b, LU_data, LU_pivots, *, out=None) -> Tensor
 
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
-LU factorization of A from :func:`~linalg.lu_factor`.
+LU factorization of A from :meth:`torch.lu`.
 
 This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
-
-.. warning::
-
-    :func:`torch.lu_solve` is deprecated in favor of :func:`torch.linalg.lu_solve`.
-    :func:`torch.lu_solve` will be removed in a future PyTorch release.
-    ``X = torch.lu_solve(B, LU, pivots)`` should be replaced with
-
-    .. code:: python
-
-        X = torch.linalg.lu_solve(LU, pivots, B)
 
 Arguments:
     b (Tensor): the RHS tensor of size :math:`(*, m, k)`, where :math:`*`
                 is zero or more batch dimensions.
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`~linalg.lu_factor` of size :math:`(*, m, m)`,
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu` of size :math:`(*, m, m)`,
                        where :math:`*` is zero or more batch dimensions.
-    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`~linalg.lu_factor` of size :math:`(*, m)`,
+    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`torch.lu` of size :math:`(*, m)`,
                            where :math:`*` is zero or more batch dimensions.
                            The batch dimensions of :attr:`LU_pivots` must be equal to the batch dimensions of
                            :attr:`LU_data`.
@@ -5846,9 +5782,9 @@ Example::
 
     >>> A = torch.randn(2, 3, 3)
     >>> b = torch.randn(2, 3, 1)
-    >>> LU, pivots = torch.linalg.lu_factor(A)
-    >>> x = torch.lu_solve(b, LU, pivots)
-    >>> torch.dist(A @ x, b)
+    >>> A_LU = torch.lu(A)
+    >>> x = torch.lu_solve(b, *A_LU)
+    >>> torch.norm(torch.bmm(A, x) - b)
     tensor(1.00000e-07 *
            2.8312)
 """.format(**common_args))
