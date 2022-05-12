@@ -7084,7 +7084,7 @@ TEST_F(NVFuserTest, FusionGridReduction9_CUDA) {
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
   at::Tensor t2 = at::randn({numel_x}, options);
 
-  at::ArrayRef<IValue> aten_inputs = {t0, t2};
+  std::vector<IValue> aten_inputs = {t0, t2};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
