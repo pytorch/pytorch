@@ -12095,10 +12095,6 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestCompositeCompliance',
                                      'test_operator'),
-                        # MISSING 'aten::isnan'
-                        DecorateInfo(unittest.expectedFailure,
-                                     'TestMeta', 'test_meta',
-                                     dtypes=floating_types_and(torch.half, torch.bfloat16)),
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
