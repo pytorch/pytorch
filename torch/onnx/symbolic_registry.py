@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, Tuple, Union
 import torch._C
 from torch.onnx import _constants
 
-SymbolicFunction = Callable[..., Union[torch._C.Value, Tuple[torch._C.Value]]]
+_SymbolicFunction = Callable[..., Union[torch._C.Value, Tuple[torch._C.Value]]]
 
 """
 The symbolic registry "_registry" is a dictionary that maps operators
@@ -19,7 +19,7 @@ The map's entries are as follows : _registry[(domain, version)][op_name] = op_sy
 """
 _registry: Dict[
     Tuple[str, int],
-    Dict[str, SymbolicFunction],
+    Dict[str, _SymbolicFunction],
 ] = {}
 
 _symbolic_versions: Dict[Union[int, str], Any] = {}
@@ -79,6 +79,8 @@ def register_ops_in_version(domain: str, version: int):
 
 
 def get_ops_in_version(version: int):
+    if not _symbolic_versions:
+        _import_symbolic_opsets()
     members = inspect.getmembers(_symbolic_versions[version])
     domain_opname_ops = []
     for obj in members:
@@ -143,7 +145,7 @@ def get_op_supported_version(opname: str, domain: str, version: int):
     return None
 
 
-def get_registered_op(opname: str, domain: str, version: int) -> SymbolicFunction:
+def get_registered_op(opname: str, domain: str, version: int) -> _SymbolicFunction:
     if domain is None or version is None:
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
@@ -171,6 +173,3 @@ class UnsupportedOperatorError(RuntimeError):
                 "it with the right domain and version."
             )
         super().__init__(msg)
-
-
-_import_symbolic_opsets()
