@@ -948,7 +948,6 @@ class TestOperators(TestCase):
         xfail('put'),
         xfail('quantile'),
         xfail('renorm'),
-        xfail('solve'),
         xfail('symeig'),
         xfail('take'),
         xfail('tensor_split'),
@@ -1051,7 +1050,6 @@ class TestOperators(TestCase):
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('as_strided'),
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
-        skip('solve'),
         xfail('column_stack', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('svd_lowrank', ''),
@@ -1154,7 +1152,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.softplus', ''),
         xfail('put', ''),
         xfail('renorm', ''),
-        xfail('solve', ''),
         xfail('std_mean', ''),
         xfail('symeig', ''),
         xfail('take', ''),
