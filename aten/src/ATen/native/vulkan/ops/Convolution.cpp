@@ -1,8 +1,9 @@
-#include <ATen/native/vulkan/ops/Convolution.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
+#include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/ops/Convolution.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -290,7 +291,7 @@ vTensor pack_weights(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const Tensor weight = weight_arg.contiguous();
 
@@ -322,7 +323,7 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const int64_t src_w = weight.size(Layout::Filter::output);
   const int64_t packed_w = div_up(src_w, INT64_C(4));
@@ -549,14 +550,15 @@ Conv2dOpContext Conv2dOpContext::create(
     groups,
     method,
     output_min,
-    output_max,
+    output_max
   };
 }
 
 void Conv2dOpContext::conv2d_sliding_window(
     const api::Shader::Descriptor& shader,
     vTensor& v_output,
-    const vTensor& v_input) const {
+    const vTensor& v_input,
+    const std::string& op_name) const {
   bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && packed_.v_weight.has_image());
   TORCH_CHECK(valid, "Not Implemented!")
 
@@ -564,6 +566,8 @@ void Conv2dOpContext::conv2d_sliding_window(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     const struct Block final {
       uvec3 extents;
       int32_t ic4;
@@ -667,103 +671,106 @@ void Conv2dOpContext::conv2d_winograd_2_3(
   api::Context* const context = api::context();
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
+  {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "prepacked::conv2d_clamp_run (conv2d_winograd_2_3)");
 
-  vTensor v_input_winograd{
-    context,
+    vTensor v_input_winograd{
+      context,
+      {
+        v_input.sizes()[Layout::Activation4D::batch],
+        v_input.sizes()[Layout::Activation4D::channels],
+        out_h_units*4,
+        out_w_units*4,
+      },
+      v_output.options(),
+    };
+
     {
-      v_input.sizes()[Layout::Activation4D::batch],
-      v_input.sizes()[Layout::Activation4D::channels],
-      out_h_units*4,
-      out_w_units*4,
-    },
-    v_output.options(),
-  };
-
-  {
-    const struct TransformBlock final {
-      uvec3 extents;
-      uint32_t fill;
-      ivec2 limits;
-      ivec2 padding;
-    } transform_block {
-      v_input_winograd.extents(),
-      0u,
-      {
-        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
-        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
-      },
-      {
-        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::height]),
-      },
-    };
-
-    context->dispatch(
-        command_buffer,
-        {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
-        VK_KERNEL(transform_winograd_2_3_sh),
+      const struct TransformBlock final {
+        uvec3 extents;
+        uint32_t fill;
+        ivec2 limits;
+        ivec2 padding;
+      } transform_block {
         v_input_winograd.extents(),
-        adaptive_work_group_size(v_input_winograd.extents()),
-        v_input_winograd.image(
-            command_buffer,
-            vTensor::Stage::Compute,
-            vTensor::Access::Write),
-        v_input.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        context->resource().pool.uniform(transform_block).object);
-
-  }
-  {
-    const struct Block final {
-      uvec3 extents;
-      int32_t ic4;
-      vec2 clamp;
-    } block {
-      v_output.extents(),
-      safe_downcast<int32_t>(packed_.filter[Layout::Filter::input] / 4),
-      {
-        packed_.output_min,
-        packed_.output_max,
-      },
-    };
-
-    uvec3 global_size = {
-      safe_downcast<uint32_t>(out_w_units),
-      safe_downcast<uint32_t>(out_h_units),
-      v_output.extents().data[2u],
-    };
-
-    context->dispatch(
-        command_buffer,
+        0u,
         {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
+          safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
         },
-        VK_KERNEL(conv2d_winograd_2_3),
-        global_size,
-        adaptive_work_group_size(global_size),
-        v_output.image(
-            command_buffer,
-            vTensor::Stage::Compute,
-            vTensor::Access::Write),
-        v_input_winograd.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        packed_.v_weight.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        packed_.v_bias.buffer(
-            command_buffer,
-            vTensor::Stage::Compute),
-        context->resource().pool.uniform(block).object);
+        {
+          safe_downcast<int32_t>(packed_.padding[Layout::Parameter::width]),
+          safe_downcast<int32_t>(packed_.padding[Layout::Parameter::height]),
+        },
+      };
+
+      context->dispatch(
+          command_buffer,
+          {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          },
+          VK_KERNEL(transform_winograd_2_3_sh),
+          v_input_winograd.extents(),
+          adaptive_work_group_size(v_input_winograd.extents()),
+          v_input_winograd.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
+          v_input.image(
+              command_buffer,
+              vTensor::Stage::Compute),
+          context->resource().pool.uniform(transform_block).object);
+
+    }
+    {
+      const struct Block final {
+        uvec3 extents;
+        int32_t ic4;
+        vec2 clamp;
+      } block {
+        v_output.extents(),
+        safe_downcast<int32_t>(packed_.filter[Layout::Filter::input] / 4),
+        {
+          packed_.output_min,
+          packed_.output_max,
+        },
+      };
+
+      uvec3 global_size = {
+        safe_downcast<uint32_t>(out_w_units),
+        safe_downcast<uint32_t>(out_h_units),
+        v_output.extents().data[2u],
+      };
+
+      context->dispatch(
+          command_buffer,
+          {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          },
+          VK_KERNEL(conv2d_winograd_2_3),
+          global_size,
+          adaptive_work_group_size(global_size),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
+          v_input_winograd.image(
+              command_buffer,
+              vTensor::Stage::Compute),
+          packed_.v_weight.image(
+              command_buffer,
+              vTensor::Stage::Compute),
+          packed_.v_bias.buffer(
+              command_buffer,
+              vTensor::Stage::Compute),
+          context->resource().pool.uniform(block).object);
+    }
   }
   command_pool.submit(context->gpu().queue, command_buffer);
 }
@@ -797,19 +804,22 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
       conv2d_sliding_window(
         VK_KERNEL(conv2d_dw),
         v_output,
-        v_input);
+        v_input,
+        "prepacked::conv2d_clamp_run (conv2d_sliding_window::conv2d_dw)");
       break;
     case Conv2dPointwise:
       conv2d_sliding_window(
         VK_KERNEL(conv2d_pw_2x2),
         v_output,
-        v_input);
+        v_input,
+        "prepacked::conv2d_clamp_run (conv2d_sliding_window::conv2d_pw_2x2)");
       break;
     default:
       conv2d_sliding_window(
         VK_KERNEL(conv2d),
         v_output,
-        v_input);
+        v_input,
+        "prepacked::conv2d_clamp_run (conv2d_sliding_window::conv2d)");
       break;
   }
 

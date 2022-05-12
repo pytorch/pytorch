@@ -86,6 +86,10 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyEnumType::Kind:
         // no op, there is nothing to tag
         break;
+      case c10::SymIntType::Kind:
+        TORCH_CHECK(!w.value.toSymInt().is_symbolic());
+        // no op, there is nothing to tag
+        break;
       case DynamicType::Kind:
       case UnionType::Kind:
       case EnumType::Kind:
@@ -467,7 +471,7 @@ PickleOpCode Unpickler::readInstruction() {
         caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
 
         at::DataPtr storage_ptr;
-        if (numel > 0) {
+        if (numel > 0 && !device.is_meta()) {
           // If there are no elements in the tensor, there's no point in
           // reading a zero (0) byte file from the input stream and paying
           // that cost.
@@ -487,7 +491,7 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       auto options = at::CPU(type).options();
-      if (use_storage_device_) {
+      if (use_storage_device_ && !device.is_meta()) {
         options = options.device(storage.device());
         device = storage.device();
       }

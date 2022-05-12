@@ -17,9 +17,6 @@ BackendDevice::BackendDevice()
 BackendDevice::BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int64_t ordinal)
   : type_(std::move(type)), ordinal_(ordinal) {}
 
-BackendDevice::BackendDevice(const std::string& device_spec)
-  : BackendDevice::BackendDevice() {}
-
 int8_t BackendDevice::type() const {
   TORCH_INTERNAL_ASSERT(type_);
   return type_->type;
@@ -52,6 +49,15 @@ BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
 // TODO(whc) refactor this: we need to support non 1 on 1 mapping for torch/XLA.
 c10::Device backendDeviceToAtenDevice(const BackendDevice& device) {
   return c10::Device(at::kLazy, device.ordinal());
+}
+
+c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors) {
+  for (auto& tensor: tensors) {
+    if (auto lt = TryGetLtcTensor(tensor)) {
+      return lt->GetDevice();
+    }
+  }
+  return c10::nullopt;
 }
 
 c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {

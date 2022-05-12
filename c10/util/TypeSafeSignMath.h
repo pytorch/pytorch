@@ -70,6 +70,14 @@ inline constexpr bool signs_differ(const T& a, const U& b) {
   return is_negative(a) != is_negative(b);
 }
 
+// Suppress sign compare warning when compiling with GCC
+// as later does not account for short-circuit rule before
+// raising the warning, see https://godbolt.org/z/Tr3Msnz99
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#endif
+
 /// Returns true if x is greater than the greatest value of the type Limit
 template <typename Limit, typename T>
 inline constexpr bool greater_than_max(const T& x) {
@@ -77,6 +85,10 @@ inline constexpr bool greater_than_max(const T& x) {
       std::numeric_limits<T>::digits > std::numeric_limits<Limit>::digits;
   return can_overflow && x > std::numeric_limits<Limit>::max();
 }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 
 /// Returns true if x < lowest(Limit). Standard comparison
 template <typename Limit, typename T>

@@ -21,7 +21,6 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     bool is_miopen_acceptable = ((input.scalar_type() == at::kFloat)|| (input.scalar_type() == at::kHalf)) &&
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
-                                (dropout_state == 0.0) &&
                                 (at::globalContext().userEnabledCuDNN());
     return is_miopen_acceptable;
 }
@@ -1118,6 +1117,18 @@ bool _use_cudnn_rnn_flatten_weight() {
   return detail::getCUDAHooks().compiledWithCuDNN();
 }
 
+// NB: This a (composite) wrapper for _thnn_fused_lstm_cell_backward_impl.
+//     It duplicates the outputs of this function so the non-composite verison doesn't have to.
+//     The point is so that we avoid triggering TensorImpl use count asserts in debug mode
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+      const Tensor& cx, const Tensor& cy,
+      const Tensor& workspace, bool has_bias) {
+  TORCH_INTERNAL_ASSERT(!GradMode::is_enabled());
+  auto ret = at::_thnn_fused_lstm_cell_backward_impl(grad_hy_opt, grad_cy_opt, cx, cy, workspace, has_bias);
+  return std::make_tuple(std::get<0>(ret), std::get<0>(ret), std::get<1>(ret), std::get<2>(ret), std::get<2>(ret));
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // PUBLIC FUNCTIONS
 ////////////////////////////////////////////////////////////////////////////////
@@ -1833,7 +1844,7 @@ DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_typ
 
 namespace {
 
-static auto ensure_linear_params_registered = register_linear_params();
+static C10_UNUSED auto ensure_linear_params_registered = register_linear_params();
 
 static auto cell_params_base_registry =
     torch::selective_class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))

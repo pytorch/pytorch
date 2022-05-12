@@ -1,6 +1,8 @@
 import copy
 import warnings
-from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
+
+__all__ = ["IterableWrapperIterDataPipe", ]
 
 
 class IterableWrapperIterDataPipe(IterDataPipe):

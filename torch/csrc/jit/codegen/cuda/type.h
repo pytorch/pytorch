@@ -2,6 +2,7 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <c10/macros/Export.h>
 
@@ -54,12 +55,33 @@ enum class PredicateType {
   ReductionWrite
 };
 
-enum class DataType { Double, Float, Half, Int, Int32, Bool, BFloat16, Null };
+// Index type is a convenience type that may be a 64 or 32 signed integer.
+// This is helpful for math on indexing/size when we don't know what the index
+// type might be. This allows us to prevent assuming the welford count must be
+// int64_t which is relatively heavy to carry around. Index will be resolved
+// at compile time with KernelIndexMode.
+enum class DataType {
+  Double,
+  Float,
+  Half,
+  Int,
+  Index,
+  Int32,
+  Bool,
+  BFloat16,
+  ComplexFloat,
+  ComplexDouble,
+  Null
+};
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
-// Returns if the datatype is an integer type
+// Returns if the datatype is an boolean type
 bool isIntegralType(DataType dtype);
+// Returns if the datatype is an integer type
+bool isBooleanType(DataType dtype);
+// Returns if the datatype is a complex type
+bool isComplexType(DataType dtype);
 
 enum class ExprType {
   Invalid,
@@ -69,14 +91,17 @@ enum class ExprType {
   ReductionOp,
   BroadcastOp,
   WelfordOp,
+  MmaOp,
   TransposeOp,
   ShiftOp,
   GatherOp,
+  ViewDtypeOp,
   ViewOp,
   Split,
   Merge,
   Allocate,
-  Sync,
+  BlockSync,
+  GridSync,
   InitMagicZero,
   UpdateMagicZero,
   ForLoop,
@@ -84,6 +109,7 @@ enum class ExprType {
   GridReduction,
   GridBroadcast,
   GridWelford,
+  AllocateFusedReduction
 };
 
 enum class UnaryOpType {
@@ -110,6 +136,7 @@ enum class UnaryOpType {
   Log10,
   Log1p,
   Log2,
+  EraseType,
   Neg,
   RandLike,
   Reciprocal,
@@ -126,7 +153,15 @@ enum class UnaryOpType {
   Trunc,
 
   // Might be a bitwise operator or boolean operator.
-  Not
+  Not,
+
+  // Operators returning boolean values
+  IsFinite,
+  IsInf,
+  IsNan,
+  IsNegInf,
+  IsPosInf,
+  IsReal,
 };
 
 // Primarily for Not, which could be Not a boolean, or a bitwise not.
@@ -182,7 +217,7 @@ bool isLogicalOp(const BinaryOpType bopt);
 // on input, for example bitwise_and is also used for boolean and in the jit
 bool alsoBooleanOperator(const BinaryOpType bopt);
 
-enum class TernaryOpType { Clamp, Threshold, Where };
+enum class TernaryOpType { Clamp, Lerp, Threshold, Where };
 
 enum class ParallelType {
   BIDz,
@@ -195,6 +230,7 @@ enum class ParallelType {
   MisalignedVectorize,
   Unroll,
   Unswitch,
+  Mma,
   Serial
 };
 
@@ -280,6 +316,7 @@ TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> integer_op_str(const BinaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> bool_op_str(const BinaryOpType);
 
 TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);

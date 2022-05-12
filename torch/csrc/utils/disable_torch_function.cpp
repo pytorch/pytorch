@@ -3,13 +3,14 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <ATen/PythonTorchFunctionTLS.h>
+
 namespace torch {
-  static thread_local bool enable_torch_function = true;
   PyObject* disabled_torch_function = nullptr;
   PyObject* disabled_torch_dispatch = nullptr;
 
   bool torch_function_enabled() {
-      return enable_torch_function;
+      return !at::impl::PythonTorchFunctionTLS::is_disabled();
   }
 
   PyObject* disabled_torch_function_impl() {
@@ -36,18 +37,18 @@ typedef struct {
 } DisableTorchFunction;
 
 PyObject* DisableTorchFunction__enter(PyObject* self, PyObject *unused) {
-    ((DisableTorchFunction*)self)->old_state = torch::enable_torch_function;
-    torch::enable_torch_function = false;
+    ((DisableTorchFunction*)self)->old_state = at::impl::PythonTorchFunctionTLS::is_disabled();
+    at::impl::PythonTorchFunctionTLS::set_disabled(true);
     Py_RETURN_NONE;
 }
 
 PyObject* DisableTorchFunction__exit(PyObject* self, PyObject *unused) {
-    torch::enable_torch_function = ((DisableTorchFunction*)self)->old_state;
+    at::impl::PythonTorchFunctionTLS::set_disabled(((DisableTorchFunction*)self)->old_state);
     Py_RETURN_NONE;
 }
 
 PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject *unused) {
-    if (torch::enable_torch_function) {
+    if (torch::torch_function_enabled()) {
         Py_RETURN_TRUE;
     } else
     {
@@ -119,19 +120,22 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   py::tuple py_args;
   if (args == nullptr) {
     py_args = py::make_tuple();
-  }
-  else {
+  } else if (PyList_Check(args)) {
+    py_args = py::reinterpret_steal<py::tuple>(PyList_AsTuple(args));
+  } else if (PyTuple_Check(args)) {
     py_args = py::reinterpret_borrow<py::tuple>(args);
+  } else {
+    throw torch::TypeError("expected List or Tuple (got %s)", Py_TYPE(args)->tp_name);
   }
 
   // These are all C-API calls so no exceptions will be raised
   // and therefore no need for RAII approach to storing
   // the old value.
-  bool old_value = torch::enable_torch_function;
-  torch::enable_torch_function = false;
+  bool old_value = at::impl::PythonTorchFunctionTLS::is_disabled();
+  at::impl::PythonTorchFunctionTLS::set_disabled(true);
   // kwargs can safely be nullptr here.
   PyObject *result = PyObject_Call(func, py_args.ptr(), kwargs);
-  torch::enable_torch_function = old_value;
+  at::impl::PythonTorchFunctionTLS::set_disabled(old_value);
   return result;
   END_HANDLE_TH_ERRORS
 }
@@ -145,9 +149,12 @@ PyObject* THPModule_disable_torch_dispatch(PyObject *self, PyObject *a) {
   py::tuple py_args;
   if (args == nullptr) {
     py_args = py::make_tuple();
-  }
-  else {
+  } else if (PyList_Check(args)) {
+    py_args = py::reinterpret_steal<py::tuple>(PyList_AsTuple(args));
+  } else if (PyTuple_Check(args)) {
     py_args = py::reinterpret_borrow<py::tuple>(args);
+  } else {
+    throw torch::TypeError("expected List or Tuple (got %s)", Py_TYPE(args)->tp_name);
   }
 
   // This implementation is not completely correct.  The moral
@@ -169,7 +176,9 @@ PyObject* THPModule_disable_torch_dispatch(PyObject *self, PyObject *a) {
       // included in AFTER, so it is included in the negation (and that's
       // correct: we want to exclude Python key and everything BEFORE it.)
   );
-  return PyObject_Call(func, py_args.ptr(), kwargs);
+  auto r = PyObject_Call(func, py_args.ptr(), kwargs);
+  if (r == nullptr) throw python_error();
+  return r;
   END_HANDLE_TH_ERRORS
 }
 
@@ -214,8 +223,9 @@ inline bool has_torch_function_attr(PyObject* obj) {
 }
 
 namespace torch {
-auto check_has_torch_function(PyObject* obj) -> bool
-{
+auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
+  if (!ignore_mode && at::impl::PythonTorchFunctionTLS::get_mode())
+    return true;
   PyTypeObject *tp = Py_TYPE(obj);
   return (
     !THPVariable_CheckTypeExact(tp) &&

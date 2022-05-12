@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/ReduceOps.h>
 
 #include <ATen/native/LinearAlgebra.h>
@@ -6,8 +7,23 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorCompare.h>
 
-#include <ATen/Functions.h>
+#include <ATen/Context.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/core/NamedTensor.h>
 #include <ATen/TensorIterator.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/full.h>
+#include <ATen/ops/imag.h>
+#include <ATen/ops/kthvalue_native.h>
+#include <ATen/ops/median_native.h>
+#include <ATen/ops/nanmedian_native.h>
+#include <ATen/ops/where.h>
+#endif
 
 namespace at { namespace native {
 namespace {

@@ -89,12 +89,12 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--ai_pep_format",
+        "--report_aibench",
         type=benchmark_utils.str2bool,
         nargs='?',
         const=True,
         default=False,
-        help="Print result when running on AI-PEP"
+        help="Print result when running on AIBench"
     )
 
     parser.add_argument(
