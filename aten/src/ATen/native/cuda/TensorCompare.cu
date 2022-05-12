@@ -43,12 +43,8 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_cuda", [&] {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
       // Propagate nan, which doesn't propagate automatically for ROCm
-      if (at::_isnan(v)) {
-        return v;
-      } else if (at::_isnan(lower)) {
-        return lower;
-      } else if at::_isnan(upper)) {
-        return upper;
+      if (at::_isnan(v) || at::_isnan(lower) || at::_isnan(upper)) {
+        return NAN;
       } else {
         return ::min(::max(v, lower), upper);
       }
