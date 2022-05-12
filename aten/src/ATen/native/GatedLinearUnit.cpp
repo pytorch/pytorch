@@ -94,7 +94,7 @@ Tensor glu_jvp(
   return dglu;
 }
 
-Tensor glu_vjp(
+Tensor glu_backward_jvp(
     const Tensor& grad_x,
     const Tensor& grad_glu,
     const Tensor& x,
