@@ -699,6 +699,23 @@ inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
 }
 
 template <>
+inline void convert(const BFloat16* src, float* dst, int64_t n) {
+  int64_t i;
+#pragma unroll
+  for (i = 0; i <= (n - Vectorized<BFloat16>::size()); i += Vectorized<BFloat16>::size()) {
+    auto vsrc = _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
+    __m256 o1, o2;
+    cvtbf16_fp32(vsrc, o1, o2);
+    _mm256_storeu_ps(dst + i, o1);
+    _mm256_storeu_ps(dst + i + Vectorized<float>::size(), o2);
+  }
+#pragma unroll
+  for (; i < n; i++) {
+    dst[i] = static_cast<float>(src[i]);
+  }
+}
+
+template <>
 Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a,
     const Vectorized<BFloat16>& b, const Vectorized<BFloat16>& c) {
   __m256 a_lo, a_hi;
