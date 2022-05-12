@@ -1485,7 +1485,7 @@ def _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
 def _need_symbolic_context(symbolic_fn) -> bool:
     """Checks if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`."""
     params = tuple(inspect.signature(symbolic_fn).parameters.values())
-    # When the annotation is postponed evaluated, the annotation is a string
+    # When the annotation is postpone-evaluated, the annotation is a string
     # and not a type. We need to use get_type_hints to get the real type.
     if not params:
         return False
