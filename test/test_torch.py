@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize, noncontiguous_like)
+    skipIfNotRegistered, bytes_to_scalar, parametrize)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -2755,7 +2755,6 @@ else:
             self.assertEqual(sz, y.size())
 
     # FIXME: move to indexing test suite
-    @onlyCPU
     @parametrize("reduce", ['prod', 'amin', 'amax', 'mean'])
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_index_reduce(self, device, dtype, reduce):
@@ -2774,10 +2773,12 @@ else:
                         dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=True)
                     src = torch.randn(*size[:dim], num_src, *size[dim + 1:], dtype=dtype, device=device)
                     if not src_contig:
-                        src = noncontiguous_like(src)
+                        # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
+                        src = torch.testing.make_non_contiguous(src)
                     idx = torch.randint(num_dest, (num_src,), dtype=idx_dtype, device=device)
                     if not index_contig:
-                        idx = noncontiguous_like(idx)
+                        # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
+                        idx = torch.testing.make_non_contiguous(idx)
                     expected = dest.clone()
                     dest._index_reduce_(dim, idx, src, reduce, include_self=include_self)
                     # fill rows in idx with reduction inits if include_self=False
