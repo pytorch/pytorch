@@ -1224,7 +1224,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/library.cpp",
     "aten/src/ATen/native/quantized/cpu/ruy_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/xnnpack_utils.cpp",
-    "aten/src/ATen/native/quantized/LinearUnpack.cpp",
+    "aten/src/ATen/native/quantized/qlinear_unpack.cpp",
     "aten/src/ATen/quantized/QTensorImpl.cpp",
     "aten/src/ATen/quantized/Quantizer.cpp",
     "aten/src/ATen/native/Activation.cpp",
