@@ -27,7 +27,7 @@ from . import (
     RandomSampler,
     BatchSampler,
     Dataset,
-    _DataPipeSerializationWrapper,
+    _IterDataPipeSerializationWrapper,
     _MapDataPipeSerializationWrapper)
 from . import _utils
 
