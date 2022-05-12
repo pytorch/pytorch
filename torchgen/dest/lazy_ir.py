@@ -353,19 +353,16 @@ class GenLazyNativeFuncDefinition:
         value_args = schema.filtered_args(values=True, scalars=False)
         scalar_args = schema.filtered_args(values=False, scalars=True)
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        if len(value_types_names) > 0:
-            get_device_str = (
-                f"{self.get_device_fn}({', '.join(value_types_names)})"
-            )
-        else:
-            optional_device = OptionalCType(BaseCType(deviceT))
-            for a in scalar_args:
-                if a.lazy_type == optional_device:
-                    get_device_str = f"atenDeviceToBackendDevice({a.name})"
-                    break
-            else:
-                raise ValueError("Expected at least one Value or Device type")
-
+        optional_device = OptionalCType(BaseCType(deviceT))
+        optional_devices = [
+            a.name for a in scalar_args if a.lazy_type == optional_device
+        ]
+        assert (
+            len(value_types_names) > 0 or len(optional_devices) > 0
+        ), "Expected at least one Value or Device type"
+        get_device_str = (
+            f"{self.get_device_fn}({', '.join(value_types_names + optional_devices)})"
+        )
         return f"""auto common_device = {get_device_str};
         TORCH_INTERNAL_ASSERT(common_device);
         """

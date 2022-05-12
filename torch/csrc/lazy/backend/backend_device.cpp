@@ -46,12 +46,6 @@ BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
   int64_t ordinal = device.has_index() ? device.index() : 0;
   return BackendDevice(getBackend()->GetDefaultDeviceType(), ordinal);
 }
-c10::optional<BackendDevice> atenDeviceToBackendDevice(const c10::optional<c10::Device> device) {
-  if (device) {
-    return c10::make_optional(atenDeviceToBackendDevice(*device));
-  }
-  return c10::nullopt;
-}
 
 // TODO(whc) refactor this: we need to support non 1 on 1 mapping for torch/XLA.
 c10::Device backendDeviceToAtenDevice(const BackendDevice& device) {
@@ -70,6 +64,13 @@ c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors) {
 c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
   if (auto lt = TryGetLtcTensor(tensor)) {
     return lt->GetDevice();
+  }
+  return c10::nullopt;
+}
+
+c10::optional<BackendDevice> GetBackendDevice(const c10::optional<c10::Device> device) {
+  if (device) {
+    return c10::make_optional(atenDeviceToBackendDevice(*device));
   }
   return c10::nullopt;
 }
