@@ -140,7 +140,7 @@ void LTCTensorImpl::shallow_copy_from(
   generation_ = 0;
 }
 
-c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {
+c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
   return c10::SymIntArrayRef(sym_sizes_.data(), sym_sizes_.size());
 }
 
