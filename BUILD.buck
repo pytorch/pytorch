@@ -590,7 +590,6 @@ cxx_binary(
         "-DBUILD_LITE_INTERPRETER",
     ],
     linker_flags = [
-        "-dl",
         "-Wl,--no-as-needed",
         "-ldl",
         "-pthread"
@@ -608,6 +607,7 @@ cxx_binary(
         'dl.c',
     ],
     linker_flags = [
-        "-dl",
+        "-Wl,--no-as-needed",
+        "-ldl",
     ],
 )
