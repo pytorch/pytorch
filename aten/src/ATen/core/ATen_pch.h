@@ -99,7 +99,6 @@
 #include <c10/core/StorageImpl.h>
 #include <c10/core/Stream.h>
 #include <c10/core/SymInt.h>
-#include <ATen/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
@@ -171,5 +170,7 @@
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/core/symbol.h>
+
+#include <ATen/core/SymIntArrayRef.h>
 
 #pragma pop_macro("TORCH_ASSERT_NO_OPERATORS")
