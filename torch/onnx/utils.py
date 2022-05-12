@@ -1482,10 +1482,19 @@ def _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
     )
 
 
-def _need_symbolic_context(symbolic_fn):
+def _need_symbolic_context(symbolic_fn) -> bool:
     """Checks if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`."""
-    params = list(inspect.signature(symbolic_fn).parameters.values())
-    return params and issubclass(params[0].annotation, torch.onnx.SymbolicContext)
+    params = tuple(inspect.signature(symbolic_fn).parameters.values())
+    # When the annotation is postponed evaluated, the annotation is a string
+    # and not a type. We need to use get_type_hints to get the real type.
+    if not params:
+        return False
+    first_param_name = params[0].name
+    type_hints = typing.get_type_hints(symbolic_fn)
+    if first_param_name not in type_hints:
+        return False
+    param_type = type_hints[first_param_name]
+    return issubclass(param_type, torch.onnx.SymbolicContext)
 
 
 def _get_aten_op_overload_name(n: torch._C.Node) -> str:
