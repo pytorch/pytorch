@@ -391,7 +391,7 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss)
+@register_decomposition(aten.huber_loss, register_meta=True)
 @pw_cast_for_opmath
 def huber_loss(
     self: Tensor,
