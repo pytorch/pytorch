@@ -58,6 +58,7 @@
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 #include <torch/csrc/jit/passes/quantization/quantization_type.h>
+#include <torch/csrc/jit/passes/refine_tuple_types.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
@@ -899,6 +900,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_remove_dropout",
           [](script::Module& module) { return removeDropout(module); })
+      .def(
+          "_jit_pass_refine_tuple_types",
+          [](std::shared_ptr<Graph>& graph) { return RefineTupleTypes(graph); })
       .def(
           "_jit_pass_transform_conv1d_to_conv2d",
           [](std::shared_ptr<Graph>& graph) {
