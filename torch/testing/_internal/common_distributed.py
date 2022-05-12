@@ -17,7 +17,6 @@ from enum import Enum
 from functools import (
     partial,
     reduce,
-    cache,
     wraps
 )
 from io import StringIO
@@ -804,17 +803,24 @@ class MultiProcessTestCase(TestCase):
     def is_master(self) -> bool:
         return self.rank == 0
 
-@cache
+# Cannot use functools.cache as it requires python 3.9
+EFA_PROBE_RESULT = None
+
 def has_efa() -> bool:
     """
     If shell command `fi_info -p efa -t FI_EP_RDM` returns exit code 0 then we assume that the machine has
     Libfabric EFA interfaces and EFA software components installed,
     see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html.
     """
+    global EFA_PROBE_RESULT
+    if EFA_PROBE_RESULT is not None:
+        return EFA_PROBE_RESULT
+
     try:
-        return subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"]).returncode == 0
+        EFA_PROBE_RESULT = subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"]).returncode == 0
     except FileNotFoundError:
-        return False
+        EFA_PROBE_RESULT = False
+    return EFA_PROBE_RESULT
 
 
 def tp_transports():
