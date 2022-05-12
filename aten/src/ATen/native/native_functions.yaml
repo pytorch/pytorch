@@ -1121,7 +1121,7 @@
   dispatch:
     CPU: cat_out_cpu
     CUDA: cat_out_cuda
-    #MPS: cat_out_mps
+    MPS: cat_out_mps
     QuantizedCPU: cat_out_quantized_cpu
 
 - func: cat.names(Tensor[] tensors, Dimname dim) -> Tensor

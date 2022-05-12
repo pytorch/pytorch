@@ -481,193 +481,206 @@ inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) 
   //return out;
 //}
 
-//TORCH_IMPL_FUNC(cat_out_mps)
-      //(ITensorListRef tensors,
-       //int64_t dimension,
-       //int64_t valid,
-       //bool all_contiguous,
-       //bool all_same_dtype,
-       //bool all_same_sizes_and_stride,
-       //MemoryFormat memory_format,
-       //const Tensor& out) {
-  //using namespace mps;
-  //if (out.numel() == 0) {
-    //return;
-  //}
+TORCH_IMPL_FUNC(cat_out_mps)
+      (ITensorListRef inputs,
+       int64_t dimension,
+       int64_t valid,
+       bool all_contiguous,
+       bool all_same_dtype,
+       bool all_same_sizes_and_stride,
+       MemoryFormat memory_format,
+       const Tensor& out) {
+  using namespace mps;
+  if (out.numel() == 0) {
+    return;
+  }
 
-  //check_cat_no_zero_dim(inputs);
-  //dimension = legacy_cat_wrap_dim(dimension, inputs);
+  auto materialized_inputs = inputs.materialize();
 
-  //// previously, size [0] tensors were the only possible empty tensors; thus, it
-  //// wasn't possible to cat empty tensors unless all the other tensors were
-  //// 1-dimensional, so we allowed these tensors to be "skipped".  We maintain
-  //// this behavior for backwards compatibility, but only for this specific size
-  //// (i.e. other empty sizes are not skipped).
-  //// FIXME: warn if this is the case
-  //auto should_skip = [](const Tensor& t) {
-    //return t.dim() == 1 && at::native::size(t, 0) == 0;
-  //};
+  int idx = 0;
+  for(const Tensor& t : materialized_inputs) {
+    TORCH_CHECK(t.dim() > 0,
+             "zero-dimensional tensor (at position ", idx, ") cannot be concatenated");
+    idx++;
+  }
 
-  //const Tensor* notSkippedTensor = NULL; // non-owning reference
-  //int nDims = 0;
+  dimension = legacy_cat_wrap_dim(dimension, inputs);
 
-  //// Check for type promotion
-  //TORCH_CHECK(
-      //canCast(result_type(inputs), out.scalar_type()),
-      //"torch.cat(): input types ",
-      //" can't be cast to the desired output type ",
-      //out.scalar_type());
+  // previously, size [0] tensors were the only possible empty tensors; thus, it
+  // wasn't possible to cat empty tensors unless all the other tensors were
+  // 1-dimensional, so we allowed these tensors to be "skipped".  We maintain
+  // this behavior for backwards compatibility, but only for this specific size
+  // (i.e. other empty sizes are not skipped).
+  // FIXME: warn if this is the case
+  auto should_skip = [](const Tensor& t) {
+    return t.dim() == 1 && at::native::size(t, 0) == 0;
+  };
 
-  //// Inputs cannot alias the output tensor
-  //for (int i = 0; i < inputs.size(); i++) {
-    //auto lap = at::get_overlap_status(out, inputs[i]);
-    //TORCH_CHECK(
-        //lap != at::MemOverlapStatus::PARTIAL &&
-            //lap != at::MemOverlapStatus::FULL,
-        //"torch.cat(): unsupported operation: the input tensors cannot refer to any "
-        //"of the output memory locations. Found overlap in input "
-        //"tensor ",
-        //i);
-  //}
-  //at::assert_no_internal_overlap(out);
+  const Tensor* notSkippedTensor = NULL; // non-owning reference
+  int nDims = 0;
 
-  //for (int i = 0; i < inputs.size(); i++) {
-    //if (should_skip(inputs[i])) {
-      //continue;
-    //}
-    //nDims = inputs[i].dim();
-    //notSkippedTensor = &inputs[i];
-  //}
+  // Check for type promotion
+  TORCH_CHECK(
+      canCast(result_type(inputs), out.scalar_type()),
+      "torch.cat(): input types ",
+      " can't be cast to the desired output type ",
+      out.scalar_type());
 
-  //// If all inputs are empty tensors, return an empty tensor
-  //if (notSkippedTensor == NULL) {
-    //return out;
-  //}
+  // Inputs cannot alias the output tensor
+  idx = 0;
+  for(const Tensor& t : materialized_inputs) {
+    auto lap = at::get_overlap_status(out, t);
+    TORCH_CHECK(
+        lap != at::MemOverlapStatus::PARTIAL &&
+            lap != at::MemOverlapStatus::FULL,
+        "torch.cat(): unsupported operation: the input tensors cannot refer to any "
+        "of the output memory locations. Found overlap in input "
+        "tensor ",
+        idx);
+    idx++;
+  }
+  at::assert_no_internal_overlap(out);
 
-  //TORCH_CHECK(
-      //inputs.size() > 0,
-      //"torch.cat(): invalid number of inputs ",
-      //inputs.size());
-  //TORCH_CHECK(dimension >= 0, "torch.cat(): invalid dimension ", dimension);
+  for(const Tensor& t : materialized_inputs) {
+    if (should_skip(t)) {
+      continue;
+    }
+    nDims = t.dim();
+    // TODO: Is this OK?
+    notSkippedTensor = &t;
+  }
 
-  //for (const Tensor& t : inputs) {
-    //TORCH_CHECK(
-        //t.device() == notSkippedTensor->device(),
-        //"torch.cat(): all input tensors must be on the same device. Received ",
-        //t.device(),
-        //" and ",
-        //notSkippedTensor->device());
-  //}
+  // If all inputs are empty tensors, return an empty tensor
+  if (notSkippedTensor == NULL) {
+    return;
+  }
 
-  //TORCH_CHECK(
-      //out.device() == notSkippedTensor->device(),
-      //"torch.cat(): all input tensors and out must be on the same device, but inputs are on ",
-      //notSkippedTensor->device(),
-      //" and out is on ",
-      //out.device());
+  TORCH_CHECK(
+      inputs.size() > 0,
+      "torch.cat(): invalid number of inputs ",
+      inputs.size());
+  TORCH_CHECK(dimension >= 0, "torch.cat(): invalid dimension ", dimension);
 
-  //// TODO: Factor out `compute_output_memory_format`
-  //c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
+  for (const Tensor& t : inputs) {
+    TORCH_CHECK(
+        t.device() == notSkippedTensor->device(),
+        "torch.cat(): all input tensors must be on the same device. Received ",
+        t.device(),
+        " and ",
+        notSkippedTensor->device());
+  }
 
-  //std::vector<int64_t> size(notSkippedTensor->sizes().vec());
+  TORCH_CHECK(
+      out.device() == notSkippedTensor->device(),
+      "torch.cat(): all input tensors and out must be on the same device, but inputs are on ",
+      notSkippedTensor->device(),
+      " and out is on ",
+      out.device());
 
-  //// Compute size of the result in the cat dimension
-  //int64_t cat_dim_size = 0;
-  //for (int i = 0; i < inputs.size(); i++) {
-    //const Tensor& tensor = inputs[i];
-    //if (should_skip(tensor)) {
-      //continue;
-    //}
-    //// TODO: Factor out `check_shape_except_dim`
-    //check_shape_except_dim(*notSkippedTensor, tensor, dimension, i);
-    //cat_dim_size += at::native::size(tensor, dimension);
-  //}
+  // TODO: memory_format is now an argument?
+  // // TODO: Factor out `compute_output_memory_format`
+  // c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
 
-  //// Compute the size of the result
-  //size[dimension] = cat_dim_size;
+  std::vector<int64_t> size(notSkippedTensor->sizes().vec());
 
-  //// skip resizing if size of result is same as expected
-  //if (out.sizes() != size) {
-    //out.resize_(size, memory_format);
-  //}
+  // Compute size of the result in the cat dimension
+  int64_t cat_dim_size = 0;
+  idx = 0;
+  for(const Tensor& tensor : materialized_inputs) {
+    if (should_skip(tensor)) {
+      continue;
+    }
+    // TODO: Factor out `check_shape_except_dim`
+    check_shape_except_dim(*notSkippedTensor, tensor, dimension, idx);
+    cat_dim_size += at::native::size(tensor, dimension);
+    idx++;
+  }
 
-  //if (out.numel() == 0) {
-    //return out;
-  //}
+  // Compute the size of the result
+  size[dimension] = cat_dim_size;
 
-  //// Get stream
-  //MPSStream* stream = getCurrentMPSStream();
+  // skip resizing if size of result is same as expected
+  if (out.sizes() != size) {
+    out.resize_(size, memory_format);
+  }
 
-  //struct CachedGraph : public MPSCachedGraph
-  //{
-    //CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    //// TODO: Free this when no longer needed globally
-    //MPSGraphTensor** inputMPSGraphTensors_ = nil;
-    //MPSGraphTensor* outputTensor_ = nil;
-  //};
+  if (out.numel() == 0) {
+    return;
+  }
 
-  //MPSGraphCache *cache_ = MPSGraphCache::getInstance();
+  // Get stream
+  MPSStream* stream = getCurrentMPSStream();
 
-  //@autoreleasepool {
-    //string key = "cat_out_mps:" + getMPSTypeString(result_type(inputs))
-                                //+ ":" + to_string(inputs.size())
-                                //+ ":" + to_string(dimension);
-    //CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-    //if(!cachedGraph) {
-      //MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
-        //CachedGraph *newCachedGraph = nil;
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    // TODO: Free this when no longer needed globally
+    MPSGraphTensor** inputMPSGraphTensors_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
 
-        //@autoreleasepool {
-          //// Initialize graph
-          //MPSGraph *mpsGraph = make_mps_graph();
-          //newCachedGraph = new CachedGraph(mpsGraph);
+  MPSGraphCache *cache_ = MPSGraphCache::getInstance();
 
-          //// Create placeholders
-          //MPSGraphTensor* inputMPSGraphTensors[inputs.size()];
+  @autoreleasepool {
+    string key = "cat_out_mps:" + getMPSTypeString(result_type(inputs))
+                                + ":" + to_string(inputs.size())
+                                + ":" + to_string(dimension);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    if(!cachedGraph) {
+      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+        CachedGraph *newCachedGraph = nil;
 
-          //for(int i = 0; i < inputs.size(); i++)
-            //inputMPSGraphTensors[i] = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(result_type(inputs)));
+        @autoreleasepool {
+          // Initialize graph
+          MPSGraph *mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
 
-          //auto inputTensorsArray = [NSArray arrayWithObjects:inputMPSGraphTensors
-                                                       //count:inputs.size()];
-          //// Use concatTensors to concatenate
-          //MPSGraphTensor* outputTensor = [mpsGraph concatTensors:inputTensorsArray
-                                                       //dimension:dimension // Maybe convert this from int64_t -> int32
-                                                            //name:nil];
+          // Create placeholders
+          MPSGraphTensor* inputMPSGraphTensors[inputs.size()];
 
-          //newCachedGraph->inputMPSGraphTensors_ = (MPSGraphTensor**)malloc(inputs.size() * sizeof(MPSGraphTensor*));
+          for(int i = 0; i < inputs.size(); i++)
+            inputMPSGraphTensors[i] = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(result_type(inputs)));
 
-          //for(int i = 0; i < inputs.size(); i++)
-            //newCachedGraph->inputMPSGraphTensors_[i] = inputMPSGraphTensors[i];
-          //newCachedGraph->outputTensor_ = outputTensor;
-        //}
-        //return newCachedGraph;
-      //});
-      //cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
-    //}
+          auto inputTensorsArray = [NSArray arrayWithObjects:inputMPSGraphTensors
+                                                       count:inputs.size()];
+          // Use concatTensors to concatenate
+          MPSGraphTensor* outputTensor = [mpsGraph concatTensors:inputTensorsArray
+                                                       dimension:dimension // Maybe convert this from int64_t -> int32
+                                                            name:nil];
 
-    //std::vector<Placeholder> inputPlaceholders;
-    //for(int i = 0; i < inputs.size(); i++) {
-      //const Tensor& tensor = inputs[i];
-      //Placeholder currentInputPlaceholder = Placeholder(cachedGraph->inputMPSGraphTensors_[i], tensor);
-      //inputPlaceholders.push_back(currentInputPlaceholder);
-    //}
+          newCachedGraph->inputMPSGraphTensors_ = (MPSGraphTensor**)malloc(inputs.size() * sizeof(MPSGraphTensor*));
 
-    //Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
+          for(int i = 0; i < inputs.size(); i++)
+            newCachedGraph->inputMPSGraphTensors_[i] = inputMPSGraphTensors[i];
+          newCachedGraph->outputTensor_ = outputTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    }
 
-    //NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
-    //for (int i = 0; i < inputs.size(); i++) {
-      //feeds[(inputPlaceholders[i]).getMPSGraphTensor()] = (inputPlaceholders[i]).getMPSGraphTensorData();
-    //}
-    //NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      //outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-    //};
+    std::vector<Placeholder> inputPlaceholders;
+    int i = 0;
+    for(const Tensor& tensor : materialized_inputs) {
+      Placeholder currentInputPlaceholder = Placeholder(cachedGraph->inputMPSGraphTensors_[i], tensor);
+      inputPlaceholders.push_back(currentInputPlaceholder);
+      i++;
+    }
 
-    //mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  //}
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
 
-  //return out;
-//}
+    NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
+    for (int i = 0; i < inputs.size(); i++) {
+      feeds[(inputPlaceholders[i]).getMPSGraphTensor()] = (inputPlaceholders[i]).getMPSGraphTensorData();
+    }
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+    };
+
+    mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+
+}
 
 void upsample_backward_out_mps(const Tensor& grad_output,
                                IntArrayRef output_size,
