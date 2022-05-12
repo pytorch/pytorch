@@ -24,7 +24,9 @@ struct sum_functor {
 const char sum_name[] = "sum";
 template <>
 struct sum_functor<c10::complex<at::Half>> {
-#if AT_USE_JITERATOR()
+// jiterator reduction fails on windows
+// Ref: https://github.com/pytorch/pytorch/issues/77305
+#if AT_USE_JITERATOR() && !defined(_MSC_VER)
   void operator()(TensorIterator& iter) {
     using scalar_t = c10::complex<at::Half>;
     std::string func = jiterator_stringify(
@@ -59,7 +61,9 @@ const char prod_name[] = "prod";
 
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct prod_functor {
-  #if AT_USE_JITERATOR()
+  // jiterator reduction fails on windows
+  // Ref: https://github.com/pytorch/pytorch/issues/77305
+  #if AT_USE_JITERATOR() && !defined(_MSC_VER)
   void operator()(TensorIterator& iter) {
     std::string func = jiterator_stringify(
     arg_t combine(arg_t a, arg_t b) {
@@ -93,7 +97,9 @@ struct prod_functor<bool> {
 // jiterated specialization for `complex<Half>`
 template <>
 struct prod_functor<c10::complex<at::Half>> {
-#if AT_USE_JITERATOR()
+// jiterator reduction fails on windows
+// Ref: https://github.com/pytorch/pytorch/issues/77305
+#if AT_USE_JITERATOR() && !defined(_MSC_VER)
   void operator()(TensorIterator& iter) {
     using scalar_t = c10::complex<at::Half>;
     std::string func =
