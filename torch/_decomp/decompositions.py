@@ -1268,3 +1268,67 @@ def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
     maxes_squeezed = torch.masked_fill(maxes_squeezed, maxes_squeezed.abs() == float('inf'), 0)
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
+
+
+@register_decomposition(aten.constant_pad_nd.default)
+def constant_pad_nd(self: Tensor, pad: List[int], value: float=0) -> Tensor:
+    assert len(pad) % 2 == 0, f"Length of pad must be even but instead it equals {len(pad)}"
+    input_sizes = self.shape
+    l_inp = self.dim()
+
+    l_pad = len(pad) // 2
+    l_diff = l_inp - l_pad
+    assert l_inp >= l_pad, f"Length of pad should be no more than twice the number of "\
+        f"dimensions of the input. Pad length is {len(pad)} while the input has {l_inp} dimensions."
+    new_shape = []
+    all_pads_non_positive = True
+    c_input = self
+    for i in range(l_diff, l_inp):
+        pad_idx = 2 * (l_inp - i - 1)
+        if pad[pad_idx] < 0:
+            c_input = c_input.narrow(i, -pad[pad_idx], c_input.size(i) + pad[pad_idx])
+        elif pad[pad_idx] != 0:
+            all_pads_non_positive = False
+        if pad[pad_idx + 1] < 0:
+            c_input = c_input.narrow(i, 0, c_input.size(i) + pad[pad_idx + 1])
+        elif pad[pad_idx + 1] != 0:
+            all_pads_non_positive = False
+
+    if all_pads_non_positive:
+        return c_input.clone()
+
+    for i in range(l_diff):
+        new_shape.append(input_sizes[i])
+
+    for i in range(l_pad):
+        pad_idx = len(pad) - (i + 1) * 2
+        new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
+        assert new_dim > 0, f"The input size {input_sizes[l_diff + i]}, plus negative padding {pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, which is invalid. Check dimension {l_diff + i} of your input."
+        new_shape.append(new_dim)
+
+    output = self.new_full(new_shape, value)
+    # Not copying quantization semantics for now
+    # const auto memory_format = self.suggest_memory_format();
+    # if (self.is_quantized()) {
+    #     const auto qscheme = self.qscheme();
+    #     TORCH_CHECK(qscheme == kPerTensorAffine || qscheme == kPerTensorSymmetric,
+    #                 "Only per-tensor padding is supported.");
+    #     output = at::_empty_affine_quantized(
+    #         new_shape, self.options().memory_format(memory_format),
+    #         self.q_scale(), self.q_zero_point(), c10::nullopt);
+    # } else {
+    #     output = at::empty(new_shape, self.options().memory_format(memory_format));
+    # }
+    # output.fill_(value);
+    c_output = output
+    for i in range(l_diff, l_inp):
+        pad_idx = 2 * (l_inp - i - 1)
+        if pad[pad_idx] > 0:
+            c_output = c_output.narrow(i, pad[pad_idx], c_output.size(i) - pad[pad_idx])
+        if pad[pad_idx + 1] > 0:
+            c_output = c_output.narrow(i, 0, c_output.size(i) - pad[pad_idx + 1])
+    c_output.copy_(c_input)
+    return output
+
+
+
