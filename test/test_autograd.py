@@ -6577,7 +6577,13 @@ class TestAutogradForwardMode(TestCase):
             dual.as_strided((5,), (1,), 0)
 
     def test_metadata_check_checks_ignores_size_zero(self):
-        # Only fails when dtype is complex! Why?
+        a = torch.ones(0).as_strided((0, 1,), (1, 1,), 0)
+        b = torch.ones(0).as_strided((0, 1,), (1, 0,), 0)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(a, b)
+            torch.diagonal(dual, offset=0)
+
         input= torch.rand([0, 1], dtype=torch.complex128, requires_grad=True)
         func = partial(torch.diagonal, offset=0)
         torch.autograd.gradcheck(func, (input,), check_forward_ad=True)
