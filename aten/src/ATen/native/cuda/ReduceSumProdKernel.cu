@@ -6,6 +6,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/jit_macros.h>
+#include <ATen/OpMathType.h>
 
 namespace at { namespace native {
 
@@ -37,7 +38,7 @@ struct sum_functor<c10::complex<at::Half>> {
 #else
   void operator()(TensorIterator& iter) {
     using scalar_t = c10::complex<at::Half>;
-    using acc_t = c10::complex<float>;
+    using acc_t = at::opmath_type<scalar_t>;
     gpu_reduce_kernel<scalar_t, scalar_t>(
         iter, func_wrapper<scalar_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
           return a + b;
@@ -102,7 +103,7 @@ struct prod_functor<c10::complex<at::Half>> {
 #else
   void operator()(TensorIterator& iter) {
     using scalar_t = c10::complex<at::Half>;
-    using acc_t = c10::complex<float>;
+    using acc_t = at::opmath_type<scalar_t>;
     gpu_reduce_kernel<scalar_t, scalar_t>(
         iter,
         func_wrapper<scalar_t>(
