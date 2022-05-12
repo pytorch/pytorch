@@ -1,4 +1,4 @@
-from typing import List, Any, Optional, Union, Dict, Callable
+from typing import List, Any, Optional, Union, Dict, Callable, Tuple
 import math
 number = Union[int, float]
 # flake8: noqa
@@ -844,6 +844,14 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
         shape.append(input[i])
     return shape
 
+def nonzero_lower_bound(input: List[int]):
+    assert len(input) >= 1
+    return [0, len(input)]
+
+def nonzero_upper_bound(input: List[int]):
+    assert len(input) >= 1
+    return [numel(input), len(input)]
+
 def _reduce_along_dim(self: List[int], dim: int, keepdim: bool):
     dim = maybe_wrap_dim(dim, len(self))
     out: List[int] = []
@@ -860,27 +868,34 @@ def argmax(self: List[int], dim: Optional[int] = None, keepdim: bool = False) ->
         return []
     return _reduce_along_dim(self, dim, keepdim)
 
-shape_compute_graph_mapping : Dict[str, torch._C.ScriptFunction] = {}
-script_func_map: Dict[Callable, torch._C.ScriptFunction] = {}
+ScriptFn = torch._C.ScriptFunction
+shape_compute_graph_mapping : Dict[str, ScriptFn ] = {}
+bounded_compute_graph_mapping : Dict[str, Tuple[ScriptFn, ScriptFn]] = {}
+script_func_map: Dict[Callable, ScriptFn] = {}
+
+def process_func(func: Callable):
+    if func not in script_func_map:
+        scripted_func = torch.jit.script(func)
+
+        torch._C._jit_pass_inline(scripted_func.graph)
+
+        for _ in range(2):
+            torch._C._jit_pass_peephole(scripted_func.graph)
+            torch._C._jit_pass_constant_propagation(scripted_func.graph)
+
+        script_func_map[func] = scripted_func
+    return script_func_map[func]
+
 
 def add_shape_compute_mapping(operator_schema: str, func: Callable):
     global shape_compute_graph_mapping
-    global shape_compute_graph_set
 
-    if func in script_func_map:
-        shape_compute_graph_mapping[operator_schema] = script_func_map[func]
-        return
+    shape_compute_graph_mapping[operator_schema] = process_func(func)
 
-    scripted_func = torch.jit.script(func)
-
-    torch._C._jit_pass_inline(scripted_func.graph)
-
-    for _ in range(2):
-        torch._C._jit_pass_peephole(scripted_func.graph)
-        torch._C._jit_pass_constant_propagation(scripted_func.graph)
-
-    script_func_map[func] = scripted_func
-    shape_compute_graph_mapping[operator_schema] = scripted_func
+def add_bounded_compute_mapping(operator_schema: str, lower_bound_func: Callable, upper_bound_func: Callable):
+    # Adds a shape compute function for both upper and lower bounds
+    fns = (process_func(lower_bound_func), process_func(upper_bound_func))
+    bounded_compute_graph_mapping[operator_schema] = fns
 
 add_shape_compute_mapping("aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", unary)
 add_shape_compute_mapping("aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", unary)
@@ -944,3 +959,6 @@ add_shape_compute_mapping("aten::where.ScalarSelf(Tensor condition, Scalar self,
 add_shape_compute_mapping("aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", broadcast_inplace)
 
 # quantized_conv_prepack TODO
+
+# Shape Compute Fn with upper and lower bounds
+add_bounded_compute_mapping("aten::nonzero(Tensor self) -> (Tensor)", nonzero_lower_bound, nonzero_upper_bound)
