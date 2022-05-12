@@ -557,7 +557,6 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   }
 
   // backward in inference mode is not supported in cudnn, fallback to native
-  // TODO: verify the same thing in miopen
   if (impl_index == 0 || (!train)) {
     return at::native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var_transform, train, epsilon, output_mask);
   } else if (impl_index == 1) {
