@@ -88,7 +88,7 @@ def _offsets_to_split_sizes(
     return input_split_sizes, output_split_sizes
 
 
-def reshard_flatten_tensor(
+def _reshard_flatten_tensor(
     input_tensor: ShardedTensor,
     output_spec: ShardingSpec,
     world_size: int,
@@ -140,7 +140,7 @@ def reshard_flatten_tensor(
     return local_shard
 
 
-def gather_state_dict(
+def _gather_state_dict(
     state_dict: Dict[str, Any], curr_rank: int, output_rank: int = 0
 ) -> Dict[str, Any]:
     """
@@ -151,7 +151,6 @@ def gather_state_dict(
     new_state_dict = {}
     for key, tensor in state_dict.items():
         if isinstance(tensor, ShardedTensor):
-            new_state_dict[key] = tensor
             output_tensor = (
                 torch.empty(tensor.shape).cuda() if curr_rank == output_rank else None
             )

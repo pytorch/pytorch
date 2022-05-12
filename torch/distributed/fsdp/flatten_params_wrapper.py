@@ -284,9 +284,11 @@ class FlattenParamsWrapper(nn.Module):
     def __init__(self, module: nn.Module, param_list: List[nn.Parameter]):
         super().__init__()
         self._fpw_module = module
-        # This attribute explicitly shows whether this FlattenParamsWrapper
-        # contains parameters or not. Testing self.flat_parm is None or not
-        # is not accurate.
+        # People may test whether this module contains parameters by using
+        # `getattr(module, "flat_param") is None`. This is not always accurate
+        # as the above condition is also true if this module is unflattened.
+        # `no_params` explicitly shows this module has no parameters and
+        # is always correct regardless flattened or unflattened.
         self.no_params = True
         self.flat_param = None
 

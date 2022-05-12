@@ -18,7 +18,7 @@ from torch.distributed.fsdp import (
     MixedPrecision,
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
-from torch.distributed.fsdp.shard_utils import gather_state_dict
+from torch.distributed.fsdp.shard_utils import _gather_state_dict
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
@@ -405,7 +405,7 @@ class TestFSDPStateDict(FSDPTest):
             with torch.no_grad():
                 param.zero_()
 
-        fsdp_state_dict = gather_state_dict(fsdp_state_dict, self.rank)
+        fsdp_state_dict = _gather_state_dict(fsdp_state_dict, self.rank)
 
         # Load fsdp's full state dict into the local and verify params are as
         # expected.
@@ -489,7 +489,7 @@ class TestFSDPStateDict(FSDPTest):
 
         if state_dict_type == "local_state_dict":
             return
-        state_dict = gather_state_dict(state_dict, self.rank)
+        state_dict = _gather_state_dict(state_dict, self.rank)
         with fsdp.summon_full_params(fsdp):
             if self.rank == 0:
                 local.load_state_dict(state_dict)

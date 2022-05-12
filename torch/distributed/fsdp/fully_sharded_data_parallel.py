@@ -1895,6 +1895,9 @@ class FullyShardedDataParallel(nn.Module):
             )
 
         nonsharded_tensors = []
+        # TODO: Reduce the communication by using only one _all_gather_base to
+        # gather all the parameters in this layer. This can be achieved by
+        # concatenated all the local shards and then append the padding.
         for module_name, _, param_name in self.module.flat_param._param_infos:
             module_name = module_name.replace(f"{FPW_MODULE}.", "")
             module_name = module_name.replace(f"{FPW_MODULE}", "")
@@ -1924,16 +1927,17 @@ class FullyShardedDataParallel(nn.Module):
         # Create a new flat_param from the loaded, non-sharded tensors.
         flat_param = self.module.flat_param
         loaded_flat_param = FlatParameter(nonsharded_tensors, requires_grad=False)
-        offset = flat_param.numel() * self.rank
-        length = flat_param.numel() - flat_param.num_padded
 
         # Get the chunk from the loaded flat_param for the local rank.
-        loaded_flat_param = loaded_flat_param.narrow(0, offset, length)
-        if flat_param.num_padded not in (0, flat_param.numel()):
-            assert loaded_flat_param.numel() < flat_param.numel(), (
-                f"Local shard size = {flat_param.numel()} and the tensor in "
-                f"the state_dict is {loaded_flat_param.numel()}."
-            )
+        loaded_flat_param, num_to_pad = self._get_shard(loaded_flat_param)
+        assert flat_param.numel() == loaded_flat_param.numel(), (
+            f"The loaded local chunk has different numel({flat_param.numel()}) "
+            f"from the local chunk {flat_param.numel()}."
+        )
+        assert flat_param.num_padded == num_topad, (
+            f"The loaded local chunk has different padding({num_to_pad}) "
+            f"from the local chunk {flat_param.num_padded}."
+        )
             loaded_flat_param = F.pad(loaded_flat_param, [0, flat_param.num_padded])
         state_dict[f"{prefix}_fsdp_wrapped_module.flat_param"] = loaded_flat_param
 
