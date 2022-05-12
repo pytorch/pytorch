@@ -1,4 +1,5 @@
 import functools
+import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta
