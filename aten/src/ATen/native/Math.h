@@ -3016,6 +3016,8 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_i0(T x) {
             +8.04490411014108831608e-01,
     };
 
+    T y;
+
     if (x < T(0.0)) {
         x = -x;
     }
