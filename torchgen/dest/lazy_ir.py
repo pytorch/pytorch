@@ -13,6 +13,7 @@ import torchgen.api.dispatcher as dispatcher
 from torchgen.api.lazy import (
     LazyIrSchema,
     LazyArgument,
+    getValueT,
     isValueType,
     tensorListValueT,
 )
@@ -33,7 +34,11 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
             elif arg.lazy_type.type is tensorListValueT:
                 return f"lazy_{arg.name}_tensorlist"
             elif arg.is_symint_or_list:
-                return f"Value(std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>({arg.name}.toSymbolicIntNode())->node_, 0)"
+                cpp_type = arg.lazy_type.cpp_type()
+                return (
+                    f"{cpp_type}(std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>"
+                    f"({arg.name}.toSymbolicIntNode())->node_, 0)"
+                )
             return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.lazy_type, OptionalCType):
             if arg.is_wrapped_scalar:
@@ -119,16 +124,6 @@ class GenLazyIR(ABC):
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
         return self.gen(f)
 
-    @method_with_native_function
-    def gen_opkind_definition(
-        self, f: Union[NativeFunctionsGroup, NativeFunction]
-    ) -> List[str]:
-        func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
-        schema = LazyIrSchema(func)
-        return [
-            f"const OpKind {schema.node_name}::class_op_kind{{{aten_symbol(schema)}}};"
-        ]
-
     # there is no lowering functionality generated unless this IR base class is subclassed and
     # implemented as a backend-specific node
     def lowering_function(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
@@ -212,7 +207,9 @@ class GenLazyIR(ABC):
             f"""\
 class {schema.node_name} : public {self.node_base} {{
  public:
-  static const OpKind class_op_kind;
+  static OpKind ClassOpKind() {{
+    return OpKind({aten_symbol(schema)});
+  }}
 
   {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
       : {self.node_base_ctor_call(schema)}{comma_if_scalar_initializers}
@@ -233,6 +230,7 @@ class {schema.node_name} : public {self.node_base} {{
 
   {scalar_decls}
   {has_optional_decls}
+
 }};
 
 """,
@@ -263,7 +261,6 @@ class GenLazyNativeFuncDefinition:
     create_from_first_tensor: bool
     create_aten_from_ltc_tensor: str
     tuple_aten_from_ltc_tensors: str
-    lazy_value_class: str
     lazy_tensor_ptr: str
 
     def lazy_tensor_decls(self, func: NativeFunction, schema: LazyIrSchema) -> str:
@@ -381,7 +378,7 @@ class GenLazyNativeFuncDefinition:
         if returns_length > 1:
             bridge_str = f"""std::vector<{self.lazy_tensor_ptr}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
-            lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({self.lazy_value_class}(node, i), *common_device));
+            lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({getValueT()}(node, i), *common_device));
         }}
         auto result = {self.tuple_aten_from_ltc_tensors}<{returns_length}>(lazy_tensors);"""
 
@@ -405,7 +402,6 @@ class GenLazyNativeFuncDefinition:
         schema = LazyIrSchema(func.func)
         return [
             f"""\
-
     {sig.decl(name=f"{self.class_method_name}::{metadata.kernel}")} {{
         {self.force_eager_fallback(func, schema)}
         {self.metrics(func, schema)}

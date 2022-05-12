@@ -4,6 +4,7 @@ import torch._prims as prims
 import torch._prims.utils as utils
 from torch._prims.utils import (
     DimsType,
+    ShapeType,
     TensorLike,
     TensorLikeType,
     DimsSequenceType,
@@ -91,12 +92,12 @@ __all__ = [
     # 'hypot',
     "igamma",
     "igammac",
-    # 'isclose', # abs, sub, le, add, mul
+    "isclose",
     # 'lcm',
     # 'ldexp',
     "le",
-    # 'logical_and',
-    # 'logical_or',
+    "logical_and",
+    "logical_or",
     # 'logical_xor',
     "lt",
     # 'max', # implement with reductions
@@ -122,6 +123,7 @@ __all__ = [
     #
     # Data conversion and movement references
     #
+    "clone",
     "copy_to",  # TODO: add opinfo
     #
     # Reduction ops
@@ -133,10 +135,17 @@ __all__ = [
     # View & Shape Ops
     #
     "cat",
+    "chunk",
+    "flatten",
+    "flip",
+    "narrow",
     "permute",
-    "transpose",
+    "stack",
     "swap_axes",  # alias for transpose
+    "squeeze",
     "tensor_split",
+    "transpose",
+    "unsqueeze",
 ]
 
 Tensor = torch.Tensor
@@ -233,7 +242,7 @@ def _make_elementwise_unary_reference(
         return prim(a)
 
     if aten_op is infer_aten_op:
-        aten_op = getattr(torch.ops.aten, prim.__name__)
+        aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
         register_decomposition(aten_op)(_ref)
 
@@ -281,7 +290,8 @@ erf = _make_elementwise_unary_reference(
 )
 
 erfinv = _make_elementwise_unary_reference(
-    prims.erf_inv, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    prims.erf_inv,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.erfinv,  # prim/aten name mismatch
 )
 
@@ -302,7 +312,8 @@ floor = _make_elementwise_unary_reference(
 )
 
 isfinite = _make_elementwise_unary_reference(
-    prims.is_finite, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    prims.is_finite,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
 )
 
@@ -312,7 +323,8 @@ def _isnan(a: Tensor) -> Tensor:
 
 
 isnan = _make_elementwise_unary_reference(
-    _isnan, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    _isnan,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
 )
 
@@ -338,7 +350,8 @@ reciprocal = _make_elementwise_unary_reference(
 
 # TODO: round takes additional kwargs
 round = _make_elementwise_unary_reference(
-    prims.round, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    prims.round,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
 
@@ -359,7 +372,8 @@ sqrt = _make_elementwise_unary_reference(
 )
 
 square = _make_elementwise_unary_reference(
-    prims.square, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    prims.square,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
     aten_op=None,  # CompositeImplicitAutograd
 )
 
@@ -369,9 +383,12 @@ tan = _make_elementwise_unary_reference(
 
 
 def _make_elementwise_binary_reference(
-    prim: Callable, *, type_promotion_kind, aten_op=infer_aten_op
+    prim: Callable,
+    *,
+    type_promotion_kind,
+    aten_op=infer_aten_op,
+    has_out=True,
 ) -> Callable:
-    @out_wrapper
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"), type_promotion_kind=type_promotion_kind
     )
@@ -382,8 +399,11 @@ def _make_elementwise_binary_reference(
         a, b = _maybe_broadcast(a, b)
         return prim(a, b)
 
+    if has_out:
+        _ref = out_wrapper(_ref)
+
     if aten_op is infer_aten_op:
-        aten_op = getattr(torch.ops.aten, prim.__name__)
+        aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
         register_decomposition(aten_op)(_ref)
 
@@ -429,12 +449,14 @@ atan2 = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 bitwise_and = _make_elementwise_binary_reference(
-    prims.bitwise_and, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    prims.bitwise_and,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_left_shift = _make_elementwise_binary_reference(
-    prims.shift_left, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    prims.shift_left,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_left_shift,  # prim/aten name mismatch
 )
 
@@ -504,9 +526,91 @@ igammac = _make_elementwise_binary_reference(
     prims.igammac, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
+
+def isclose(
+    a: TensorLikeType,
+    b: TensorLikeType,
+    rtol: float = 1e-05,
+    atol: float = 1e-08,
+    equal_nan: bool = False,
+) -> TensorLikeType:
+    if a.dtype != b.dtype:
+        msg = "Attempting to compare tensors of different dtypes {0} and {1}!".format(
+            a.dtype, b.dtype
+        )
+        raise ValueError(a, b)
+    if rtol < 0:
+        msg = "rtol must be greater than or equal to zero, but got {0}!".format(rtol)
+    if atol < 0:
+        msg = "atol must be greater than or equal to zero, but got {0}!".format(atol)
+
+    close = eq(a, b)
+    if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):
+        close = logical_or(close, logical_and(isnan(a), isnan(b)))
+
+    # Note: In case of zero tolerances the closeness inequality degenerates to an equality check.
+    # In this case, the short-circuit prevents false positives as detailed in the paragraph below.
+    if atol == 0 and rtol == 0:
+        return close
+
+    # Note [closeness error computation]
+    # atol and rtol are provided as doubles, so the computation
+    # rtol * other will produce a float or complex tensor.
+    # When the difference (self - other) is compared to it then the
+    # tensor representing the difference will also be cast to float or complex.
+    # However, since (self - other) in uint8 is very likely to produce a
+    # negative value, this moves the cast forward so the difference is
+    # always computed in a float or complex type.
+    # If the values of the integer tensors cannot be exactly represented
+    # by the default scalar type then this may cause an incorrect result.
+    if not utils.is_float_dtype(a.dtype) and not utils.is_complex_dtype(a.dtype):
+        a = prims.convert_element_type(a, torch.get_default_dtype())
+        b = prims.convert_element_type(b, torch.get_default_dtype())
+
+    allowed_error = add(atol, abs(mul(b, rtol)))
+    actual_error = abs(sub(a, b))
+
+    # Computes finite closeness
+    result = logical_or(
+        close, logical_and(isfinite(actual_error), le(actual_error, allowed_error))
+    )
+
+    return result
+
+
 # TODO: add docstring
 le = _make_elementwise_binary_reference(
     prims.le, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+)
+
+
+def _logical_and(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b.dtype):
+        b = ne(b, 0)
+    return bitwise_and(a, b)
+
+
+logical_and = _make_elementwise_binary_reference(
+    _logical_and,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_and,
+)
+
+
+def _logical_or(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b.dtype):
+        b = ne(b, 0)
+    return bitwise_or(a, b)
+
+
+logical_or = _make_elementwise_binary_reference(
+    _logical_or,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_or,
 )
 
 # TODO: add docstring
@@ -620,6 +724,10 @@ def where(
 #
 # Data Movement References
 #
+def clone(
+    a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
+) -> TensorLikeType:
+    return prims.clone(a, memory_format=memory_format)
 
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
@@ -781,9 +889,81 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return prims.concatenate(tensors, _dim)
 
 
+def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
+    if chunks <= 0:
+        msg = "Expected at least one chunk, but got {0}!".format(chunks)
+        raise ValueError(msg)
+
+    dim = utils.canonicalize_dim(a.ndim, dim)
+    length = a.shape[dim]
+    chunk_size = math.ceil(length / chunks)
+    full_chunks = math.floor(length / chunk_size)
+    tail_chunk_size = length % chunk_size
+
+    result = []
+    for i in range(full_chunks):
+        result.append(narrow(a, dim, i * chunk_size, chunk_size))
+
+    if tail_chunk_size != 0:
+        result.append(narrow(a, dim, full_chunks * chunk_size, tail_chunk_size))
+
+    return tuple(result)
+
+
+# Note: flatten, unlike prim.collapse and prim.collapse_view has an inclusive end_dim
+def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorLikeType:
+    start_dim = utils.canonicalize_dim(a.ndim, start_dim)
+    end_dim = utils.canonicalize_dim(a.ndim, end_dim) + 1
+
+    # Tries to take a view
+    # TODO: we could look at directing collapse_view to skip its meta function here
+    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    if new_shape is not None:
+        return prims.collapse_view(a, start_dim, end_dim)
+
+    # Makes a copy if it can't make a view
+    result = prims.collapse(a, start_dim, end_dim)
+    return result
+
+
+def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
+    return prims.rev(a, dims)
+
+
+def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
+    dim = utils.canonicalize_dim(a.ndim, dim)
+    return prims.slice_in_dim(a, start, start + length, axis=dim)
+
+
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
+
+
+# update to cat then view instead of unsqueezing each tensor
+@out_wrapper
+def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
+    tensors = tuple(unsqueeze(a, dim) for a in tensors)
+    return cat(tensors, dim)
+
+
+# Note: although squeeze is documented as having the out= kwarg it doesn't
+def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
+    if dim is not None:
+        dim = utils.canonicalize_dim(a.ndim, dim)
+        # Short-circuits if the tensor has no dimensions
+        if len(a.shape) == 0:
+            assert dim == 0
+            return prims.view_of(a)
+
+        # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
+        if a.shape[dim] != 1:
+            return prims.view_of(a)
+        return prims.squeeze(a, (dim,))
+
+    dims = tuple(idx for idx in range(len(a.shape)) if a.shape[idx] == 1)
+    return prims.squeeze(a, dims)
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
@@ -873,6 +1053,13 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _permutation[_dim0] = _dim1
     _permutation[_dim1] = _dim0
     return prims.transpose(a, _permutation)
+
+
+def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
+    # Note that unsqueeze canonicalizes with rank + 1 because it allows
+    # a new innermost dimension to be specified
+    dim = utils.canonicalize_dim(a.ndim + 1, dim)
+    return prims.expand_dims(a, (dim,))
 
 
 # Aliases for transpose
