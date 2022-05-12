@@ -366,7 +366,76 @@ def prepare_fx(
     Args:
       * `model`: torch.nn.Module model, must be in eval mode
 
-      * `quantization_config`: config for specifying how to prepare the model for quantization
+      * `quantization_config`: config for specifying how to prepare the model for quantization::
+
+          quantization_config = PrepareQuantizationConfig()
+              # default_qconfig
+              .set_global(global_qconfig)
+              # match on module type, function, or method name
+              .set_object_type(torch.nn.Linear, qconfig1)
+              .set_object_type(torch.nn.functional.linear, qconfig1)
+              # match on module name regex
+              .set_module_name_regex("foo.*bar.*conv[0-9]+", qconfig1)
+              .set_module_name_regex("foo.*bar.*", qconfig2)
+              .set_module_name_regex("foo.*", qconfig3)
+              # match on module name
+              .set_module_name("module1", qconfig1)
+              .set_module_name("module2", qconfig2)
+              # match on module name, object type, and index
+              .set_module_name_object_type_order("module3", torch.nn.functional.linear, 0, qconfig3)
+
+      * `prepare_custom_config_dict`: customization configuration dictionary for quantization tool::
+
+          prepare_custom_config_dict = {
+            # optional: specify the path for standalone modules
+            # These modules are symbolically traced and quantized as one unit
+            "standalone_module_name": [
+               # module_name, qconfig_dict, prepare_custom_config_dict
+               ("submodule.standalone",
+                None,  # qconfig_dict for the prepare function called in the submodule,
+                       # None means use qconfig from parent qconfig_dict
+                {"input_quantized_idxs": [], "output_quantized_idxs": []}),  # prepare_custom_config_dict
+                {}  # backend_config_dict, TODO: point to README doc when it's ready
+            ],
+            "standalone_module_class": [
+                # module_class, qconfig_dict, prepare_custom_config_dict
+                (StandaloneModule,
+                 None,  # qconfig_dict for the prepare function called in the submodule,
+                        # None means use qconfig from parent qconfig_dict
+                {"input_quantized_idxs": [0], "output_quantized_idxs": [0]},  # prepare_custom_config_dict
+                {})  # backend_config_dict, TODO: point to README doc when it's ready
+            ],
+            # user will manually define the corresponding observed
+            # module class which has a from_float class method that converts
+            # float custom module to observed custom module
+            # (only needed for static quantization)
+            "float_to_observed_custom_module_class": {
+               "static": {
+                   CustomModule: ObservedCustomModule
+               }
+            },
+            # the qualified names for the submodule that are not symbolically traceable
+            "non_traceable_module_name": [
+               "non_traceable_module"
+            ],
+            # the module classes that are not symbolically traceable
+            # we'll also put dynamic/weight_only custom module here
+            "non_traceable_module_class": [
+               NonTraceableModule
+            ],
+            # By default, inputs and outputs of the graph are assumed to be in
+            # fp32. Providing `input_quantized_idxs` will set the inputs with the
+            # corresponding indices to be quantized. Providing
+            # `output_quantized_idxs` will set the outputs with the corresponding
+            # indices to be quantized.
+            "input_quantized_idxs": [0],
+            "output_quantized_idxs": [0],
+            # Attributes that are not used in forward function will
+            # be removed when constructing GraphModule, this is a list of attributes
+            # to preserve as an attribute of the GraphModule even when they are
+            # not used in the code, these attributes will also persist through deepcopy
+            "preserved_attributes": ["preserved_attr"],
+          }
 
       * `equalization_config`: config for specifying how to perform equalization on the model
 
