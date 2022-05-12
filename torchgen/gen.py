@@ -484,7 +484,11 @@ class RegisterSchema:
             return None
         if len(f.tags) == 0:
             return f"m.def({cpp_string(str(f.func))});\n"
-        tags = "std::unordered_set<Tags>({" + ", ".join([f"{tag}" for tag in f.tags]) + "})"
+        tags = (
+            "std::unordered_set<Tags>({"
+            + ", ".join([f"{tag}" for tag in f.tags])
+            + "})"
+        )
         return f"m.def({cpp_string(str(f.func))}, {tags});\n"
 
 
@@ -1836,10 +1840,13 @@ def gen_headers(
 
     def gen_tags_enum() -> Dict[str, str]:
         return {
-            "enum_of_valid_tags" : ("enum Tags\n{\n" + ",\n".join(
-            [f"{tag}" for tag in valid_tags]
-            ) + "};\n")
+            "enum_of_valid_tags": (
+                "enum Tags\n{\n"
+                + ",\n".join([f"{tag}" for tag in valid_tags])
+                + "\n};\n"
+            )
         }
+
     core_fm.write("enum_tags.h", gen_tags_enum)
 
 
@@ -2484,7 +2491,7 @@ def main() -> None:
     if "headers" in options.generate:
         gen_headers(
             native_functions=native_functions,
-            valid_tags = valid_tags,
+            valid_tags=valid_tags,
             grouped_native_functions=grouped_native_functions,
             structured_native_functions=structured_native_functions,
             static_dispatch_idx=static_dispatch_idx,

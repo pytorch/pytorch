@@ -594,11 +594,6 @@ class TORCH_API Library final {
   ///   m.def("add(Tensor self, Tensor other) -> Tensor");
   /// }
   /// ```
-  // template <typename Schema>
-  // Library& def(Schema&& raw_schema, ) & {
-  //   c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
-  //   return _def(std::move(s));
-  // }
 
   template <typename Schema>
   Library& def(Schema&& raw_schema, std::unordered_set<Tags> tags = {}) & {
