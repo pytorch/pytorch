@@ -44,6 +44,7 @@ NodePtr ReuseOrMakeNode(Args&&... args) {
 }
 
 struct IrBuilder {
+  virtual ~IrBuilder() = default;
   virtual NodePtr MakeDeviceData(const std::shared_ptr<BackendData>& data) const = 0;
   virtual NodePtr MakeScalar(const at::Scalar& value, const at::ScalarType& type) const = 0;
   virtual NodePtr MakeExpand(const Value& input0, const std::vector<int64_t>& size, const bool& is_scalar_expand) const = 0;
