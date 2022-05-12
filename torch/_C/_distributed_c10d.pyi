@@ -134,7 +134,7 @@ class TCPStore(Store):
         self,
         host_name: str,
         port: int,
-        world_size: int = ...,
+        world_size: Optional[int] = ...,
         is_master: bool = ...,
         timeout: timedelta = ...,
         wait_for_workers: bool = ...,
