@@ -1934,7 +1934,7 @@ class FullyShardedDataParallel(nn.Module):
             f"The loaded local chunk has different numel({flat_param.numel()}) "
             f"from the local chunk {flat_param.numel()}."
         )
-        assert flat_param.num_padded == num_topad, (
+        assert flat_param.num_padded == num_to_pad, (
             f"The loaded local chunk has different padding({num_to_pad}) "
             f"from the local chunk {flat_param.num_padded}."
         )
