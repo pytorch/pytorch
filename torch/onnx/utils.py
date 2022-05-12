@@ -3,6 +3,8 @@
 These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
+from __future__ import annotations
+
 import contextlib
 import copy
 import inspect
@@ -819,7 +821,7 @@ def export_to_pretty_string(
     input_names=None,
     output_names=None,
     operator_export_type=torch._C._onnx.OperatorExportTypes.ONNX,
-    export_type=torch.onnx.ExportTypes.PROTOBUF_FILE,
+    export_type=None,
     google_printer=False,
     opset_version=None,
     keep_initializers_as_inputs=None,
@@ -828,6 +830,8 @@ def export_to_pretty_string(
     do_constant_folding=True,
     dynamic_axes=None,
 ):
+    if export_type is None:
+        export_type = torch.onnx.ExportTypes.PROTOBUF_FILE
 
     if opset_version is None:
         opset_version = _constants.onnx_default_opset
@@ -994,7 +998,7 @@ def _export(
     input_names=None,
     output_names=None,
     operator_export_type=torch._C._onnx.OperatorExportTypes.ONNX,
-    export_type=torch.onnx.ExportTypes.PROTOBUF_FILE,
+    export_type=None,
     opset_version=None,
     do_constant_folding=True,
     dynamic_axes=None,
@@ -1005,6 +1009,8 @@ def _export(
     onnx_shape_inference=True,
     export_modules_as_functions=False,
 ):
+    if export_type is None:
+        export_type = torch.onnx.ExportTypes.PROTOBUF_FILE
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
@@ -1035,7 +1041,9 @@ def _export(
 
         if not operator_export_type:
             if torch._C._onnx._CAFFE2_ATEN_FALLBACK:
-                operator_export_type = torch._C._onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+                operator_export_type = (
+                    torch._C._onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+                )
             else:
                 operator_export_type = torch._C._onnx.OperatorExportTypes.ONNX
 
@@ -1415,7 +1423,8 @@ def _run_symbolic_function(
         if operator_export_type == torch._C._onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
         elif (
-            operator_export_type == torch._C._onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+            operator_export_type
+            == torch._C._onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
             and not symbolic_helper.is_caffe2_aten_fallback()
         ):
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
