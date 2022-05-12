@@ -1698,7 +1698,7 @@ class TestFrozenOptimizations(JitTestCase):
         FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.graph)
 
         x = torch.rand((3, 3, 32, 32), dtype=torch.half).cuda()
-        
+
         self.assertEqual(mod_eager(x), scripted_mod(x), atol=1e-2, rtol=1e-2)
         self.assertEqual(mod_eager(x), scripted_mod(x), atol=1e-2, rtol=1e-2)
 
