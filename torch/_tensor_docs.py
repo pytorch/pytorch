@@ -1818,9 +1818,9 @@ match :attr:`self`, or an error will be raised.
 
 For a 3-D tensor the output is given as::
 
-    self[index[i], : , :] += alpha * src[i, :, :]  # if dim == 0
-    self[:, index[i] , :] += alpha * src[:, i, :]  # if dim == 1
-    self[:, : , index[i]] += alpha * src[:, :, i]  # if dim == 2
+    self[index[i], :, :] += alpha * src[i, :, :]  # if dim == 0
+    self[:, index[i], :] += alpha * src[:, i, :]  # if dim == 1
+    self[:, :, index[i]] += alpha * src[:, :, i]  # if dim == 2
 
 Note:
     {forward_reproducibility_note}
@@ -1956,9 +1956,9 @@ match :attr:`self`, or an error will be raised.
 For a 3-D tensor with :obj:`reduce="prod"` and :obj:`include_self=True` the
 output is given as::
 
-    self[index[i], : , :] *= src[i, :, :]  # if dim == 0
-    self[:, index[i] , :] *= src[:, i, :]  # if dim == 1
-    self[:, : , index[i]] *= src[:, :, i]  # if dim == 2
+    self[index[i], :, :] *= src[i, :, :]  # if dim == 0
+    self[:, index[i], :] *= src[:, i, :]  # if dim == 1
+    self[:, :, index[i]] *= src[:, :, i]  # if dim == 2
 
 Note:
     {forward_reproducibility_note}
