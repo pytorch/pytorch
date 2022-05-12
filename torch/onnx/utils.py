@@ -25,7 +25,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
     symbolic_registry,
 )
-from torch.onnx._globals import _FLAGS
+from torch.onnx._globals import GLOBALS
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
@@ -67,12 +67,12 @@ def select_model_mode_for_export(model, mode):
             mode == torch.onnx.TrainingMode.PRESERVE and is_originally_training
         ):
 
-            if _FLAGS.export_onnx_opset_version < 12:
+            if GLOBALS.export_onnx_opset_version < 12:
                 warnings.warn(
                     "You are exporting the model in training mode with onnx opset version {}. "
                     "Opset versions lower than opset 12 will not be able to export nodes such as "
                     "Dropout and BatchNorm correctly.".format(
-                        _FLAGS.export_onnx_opset_version
+                        GLOBALS.export_onnx_opset_version
                     )
                 )
             is_export_training = True
@@ -296,7 +296,7 @@ def _optimize_graph(
 
     # onnx only supports tensors, so we turn all out number types into tensors
     torch._C._jit_pass_erase_number_types(graph)
-    if _FLAGS.onnx_shape_inference:
+    if GLOBALS.onnx_shape_inference:
         input_names = [] if input_names is None else input_names
         dynamic_axes = {} if dynamic_axes is None else dynamic_axes
         torch._C._jit_pass_onnx_set_dynamic_input_shape(
@@ -308,12 +308,12 @@ def _optimize_graph(
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_onnx_scalar_type_analysis(
-        graph, True, _FLAGS.export_onnx_opset_version
+        graph, True, GLOBALS.export_onnx_opset_version
     )
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_onnx_peephole(
-        graph, _FLAGS.export_onnx_opset_version, fixed_batch_size
+        graph, GLOBALS.export_onnx_opset_version, fixed_batch_size
     )
     torch._C._jit_pass_lint(graph)
 
@@ -326,9 +326,9 @@ def _optimize_graph(
     torch._C._jit_pass_lint(graph)
     graph = torch._C._jit_pass_canonicalize(graph)
     torch._C._jit_pass_lint(graph)
-    if _FLAGS.onnx_shape_inference:
+    if GLOBALS.onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, _FLAGS.export_onnx_opset_version
+            graph, params_dict, GLOBALS.export_onnx_opset_version
         )
     return graph
 
@@ -749,7 +749,7 @@ def _model_to_graph(
             example_outputs_final += unpack_quantized_tensor(example_output)
         out_vars, desc = torch.jit._flatten(example_outputs_final)
         torch._C._jit_pass_onnx_assign_output_shape(
-            graph, out_vars, desc, _FLAGS.onnx_shape_inference, is_script
+            graph, out_vars, desc, GLOBALS.onnx_shape_inference, is_script
         )
 
     # NB: ONNX requires complete information about output types, which might be
@@ -769,7 +769,7 @@ def _model_to_graph(
                 graph,
                 output_tensors,
                 out_desc,
-                _FLAGS.onnx_shape_inference,
+                GLOBALS.onnx_shape_inference,
                 is_script,
             )
 
@@ -781,23 +781,23 @@ def _model_to_graph(
 
     if (
         do_constant_folding
-        and _FLAGS.export_onnx_opset_version in _constants.onnx_constant_folding_opsets
+        and GLOBALS.export_onnx_opset_version in _constants.onnx_constant_folding_opsets
     ):
         params_dict = torch._C._jit_pass_onnx_constant_fold(
-            graph, params_dict, _FLAGS.export_onnx_opset_version
+            graph, params_dict, GLOBALS.export_onnx_opset_version
         )
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
-    if _FLAGS.onnx_shape_inference:
+    if GLOBALS.onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, _FLAGS.export_onnx_opset_version
+            graph, params_dict, GLOBALS.export_onnx_opset_version
         )
 
     params_dict = torch._C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
     # For ONNX opset < 9, constants only have three data types: float16, float, double.
     # In this pass transform constants of other data types to float/double + cast operator.
-    if _FLAGS.export_onnx_opset_version < 9:
+    if GLOBALS.export_onnx_opset_version < 9:
         torch._C._jit_pass_onnx_cast_all_constant_to_floating(graph)
 
     params_dict = torch._C._jit_pass_filter_non_tensor_arguments(params_dict)
@@ -1353,7 +1353,7 @@ def _run_symbolic_function(
         None when the node gets cloned as is into the new graph.
     """
 
-    opset_version = _FLAGS.export_onnx_opset_version
+    opset_version = GLOBALS.export_onnx_opset_version
     symbolic_helper.is_caffe2_aten_fallback = symbolic_helper.is_caffe2_aten_fallback
 
     # See Note [Export inplace]

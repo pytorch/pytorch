@@ -13,7 +13,7 @@ from torch.nn.modules.utils import _pair, _single, _triple
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx._globals import _FLAGS
+from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import (
     ScalarType,
     _parse_arg,
@@ -528,12 +528,12 @@ def expand_as(g, self, other):
 
 @parse_args("v", "v", "i", "b", "v")
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
-    if scale_grad_by_freq and _FLAGS.training_mode:
+    if scale_grad_by_freq and GLOBALS.training_mode:
         raise RuntimeError(
             "Unsupported: ONNX export of embedding with scale_grad_by_freq=True "
             "for training mode. ONNX does not support scaling the gradients."
         )
-    if padding_idx >= 0 and _FLAGS.training_mode:
+    if padding_idx >= 0 and GLOBALS.training_mode:
         warnings.warn(
             "Warning: ONNX export of embedding with padding_idx >= 0 "
             "for training mode. "
@@ -837,7 +837,7 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     dtype_0 = inputs[0].type().scalarType()
 
     require_cast = not sym_help._is_fp(inputs[0]) and (
-        opset_before is None or _FLAGS.export_onnx_opset_version < opset_before
+        opset_before is None or GLOBALS.export_onnx_opset_version < opset_before
     )
 
     if require_cast:
@@ -1791,7 +1791,7 @@ def batch_norm(
     if (
         torch.is_autocast_enabled()
         and not args_have_same_dtype([input, weight, bias, running_mean, running_var])
-        and _FLAGS.export_onnx_opset_version < 15
+        and GLOBALS.export_onnx_opset_version < 15
     ):
         return sym_help._onnx_opset_unsupported_detailed(
             "BatchNormalization",
@@ -2610,7 +2610,7 @@ def slice(g, self, *args):
             or ((not is_end_none) and (not is_end_onnx_const))
             or dim.node().kind() != "onnx::Constant"
         ):
-            if _FLAGS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+            if GLOBALS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
                 raise RuntimeError(
                     "Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice "
                     "is a deprecated experimental op. Please use statically allocated "
@@ -3953,7 +3953,7 @@ def index(g, self, index):
         if not sym_help._is_none(index) and (
             index.type().scalarType() == "Byte" or index.type().scalarType() == "Bool"
         ):
-            if _FLAGS.export_onnx_opset_version < 9:
+            if GLOBALS.export_onnx_opset_version < 9:
                 raise RuntimeError(
                     "Exporting masked indices are only supported after ONNX opset 9."
                 )
@@ -4009,7 +4009,7 @@ def index(g, self, index):
             #       update the warning to recommend exporting with higher opset version.
             warnings.warn(
                 "Exporting aten::index operator of advanced indexing in opset "
-                + str(_FLAGS.export_onnx_opset_version)
+                + str(GLOBALS.export_onnx_opset_version)
                 + " is achieved by combination of multiple ONNX operators, "
                 + "including Reshape, Transpose, Concat, and Gather. "
                 + "If indices include negative values, the exported graph will produce incorrect results."
@@ -4827,8 +4827,8 @@ class Prim:
         env = ctx.env
         params_dict = ctx.params_dict
 
-        operator_export_type = _FLAGS.operator_export_type
-        opset_version = _FLAGS.export_onnx_opset_version
+        operator_export_type = GLOBALS.operator_export_type
+        opset_version = GLOBALS.export_onnx_opset_version
 
         new_op_outputs = g.op("Loop", *inputs, outputs=n.outputsSize())
         new_node = (
@@ -4861,7 +4861,7 @@ class Prim:
             new_node, opset_version
         )
         # Run shape type inference for Loop after subblock is converted.
-        if _FLAGS.onnx_shape_inference:
+        if GLOBALS.onnx_shape_inference:
             torch._C._jit_pass_onnx_node_shape_type_inference(
                 new_node, params_dict, opset_version
             )
@@ -4874,8 +4874,8 @@ class Prim:
         env = ctx.env
         params_dict = ctx.params_dict
 
-        operator_export_type = _FLAGS.operator_export_type
-        opset_version = _FLAGS.export_onnx_opset_version
+        operator_export_type = GLOBALS.operator_export_type
+        opset_version = GLOBALS.export_onnx_opset_version
 
         static_if = inputs[0].node().kind() == "onnx::Constant"
         if static_if:
@@ -4950,7 +4950,7 @@ class Prim:
                 new_node, opset_version
             )
             # Run shape type inference for If after subblock is converted.
-            if _FLAGS.onnx_shape_inference:
+            if GLOBALS.onnx_shape_inference:
                 torch._C._jit_pass_onnx_node_shape_type_inference(
                     new_node, params_dict, opset_version
                 )

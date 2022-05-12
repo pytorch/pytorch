@@ -4,7 +4,7 @@ import re
 from typing import Iterable, Tuple, Union
 
 import torch
-from torch.onnx._globals import _FLAGS
+from torch.onnx._globals import GLOBALS
 
 
 def _graph_op(
@@ -61,9 +61,9 @@ def _graph_op(
     # Import utils to get _params_dict because it is a global that is accessed by c++ code
     from torch.onnx import utils
 
-    if _FLAGS.onnx_shape_inference:
+    if GLOBALS.onnx_shape_inference:
         torch._C._jit_pass_onnx_node_shape_type_inference(
-            n, utils._params_dict, _FLAGS.export_onnx_opset_version
+            n, utils._params_dict, GLOBALS.export_onnx_opset_version
         )
 
     if outputs == 1:
@@ -134,7 +134,7 @@ def _scalar(x):
 
 def _is_caffe2_aten_fallback():
     return (
-        _FLAGS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+        GLOBALS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
         and torch.onnx._CAFFE2_ATEN_FALLBACK
     )
 
