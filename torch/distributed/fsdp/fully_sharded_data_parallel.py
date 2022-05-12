@@ -1938,7 +1938,6 @@ class FullyShardedDataParallel(nn.Module):
             f"The loaded local chunk has different padding({num_to_pad}) "
             f"from the local chunk {flat_param.num_padded}."
         )
-            loaded_flat_param = F.pad(loaded_flat_param, [0, flat_param.num_padded])
         state_dict[f"{prefix}_fsdp_wrapped_module.flat_param"] = loaded_flat_param
 
     @staticmethod
