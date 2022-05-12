@@ -6,6 +6,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include "c10/core/SymIntArrayRef.h"
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -360,6 +361,10 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
 IntArrayRef TensorImpl::sizes_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
+}
+c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have sym sizes");
 }
 IntArrayRef TensorImpl::strides_custom() const {
   TORCH_CHECK(
