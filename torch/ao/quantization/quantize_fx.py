@@ -397,6 +397,7 @@ def prepare_fx(
                 {"input_quantized_idxs": [], "output_quantized_idxs": []}),  # prepare_custom_config_dict
                 {}  # backend_config_dict, TODO: point to README doc when it's ready
             ],
+
             "standalone_module_class": [
                 # module_class, qconfig_dict, prepare_custom_config_dict
                 (StandaloneModule,
@@ -405,6 +406,7 @@ def prepare_fx(
                 {"input_quantized_idxs": [0], "output_quantized_idxs": [0]},  # prepare_custom_config_dict
                 {})  # backend_config_dict, TODO: point to README doc when it's ready
             ],
+
             # user will manually define the corresponding observed
             # module class which has a from_float class method that converts
             # float custom module to observed custom module
@@ -414,15 +416,18 @@ def prepare_fx(
                    CustomModule: ObservedCustomModule
                }
             },
+
             # the qualified names for the submodule that are not symbolically traceable
             "non_traceable_module_name": [
                "non_traceable_module"
             ],
+
             # the module classes that are not symbolically traceable
             # we'll also put dynamic/weight_only custom module here
             "non_traceable_module_class": [
                NonTraceableModule
             ],
+
             # By default, inputs and outputs of the graph are assumed to be in
             # fp32. Providing `input_quantized_idxs` will set the inputs with the
             # corresponding indices to be quantized. Providing
@@ -430,6 +435,7 @@ def prepare_fx(
             # indices to be quantized.
             "input_quantized_idxs": [0],
             "output_quantized_idxs": [0],
+
             # Attributes that are not used in forward function will
             # be removed when constructing GraphModule, this is a list of attributes
             # to preserve as an attribute of the GraphModule even when they are
