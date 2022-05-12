@@ -169,7 +169,9 @@ def _wrap_tensor_meta(f):
     def unwrap(t):
         # TODO: doesn't setup aliasing relation on views correctly
         if isinstance(t, TensorMeta):
-            return torch.empty_strided(t.shape, t.stride(), dtype=t.dtype, device='meta')
+            return torch.empty_strided(
+                t.shape, t.stride(), dtype=t.dtype, device="meta"
+            )
         else:
             return t
 
