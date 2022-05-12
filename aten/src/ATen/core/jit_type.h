@@ -2087,24 +2087,12 @@ protected:
 EnumerationType() : Type(Kind) {}
 };
 
-struct LayoutType;
-using LayoutTypePtr = SingletonTypePtr<LayoutType>;
-// This type represents a Generator
-struct TORCH_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
-std::string str() const override {
-return "Layout";
-}
-static const TypeKind Kind = TypeKind::LayoutType;
-// global singleton
-static LayoutTypePtr get();
-
-private:
-LayoutType() : EnumerationType() {}
-};
+// WARNING: These enumeration types below DO NOT actually get parsed out
+// from the logical schema strings, instead they are mapped as ints.  To
+// observe these types, use real_type() instead of type() on Argument
 
 struct ScalarTypeType;
 using ScalarTypeTypePtr = SingletonTypePtr<ScalarTypeType>;
-// This type represents a Generator
 struct TORCH_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
 std::string str() const override {
 return "ScalarType";
@@ -2115,6 +2103,34 @@ static ScalarTypeTypePtr get();
 
 private:
 ScalarTypeType() : EnumerationType() {}
+};
+
+struct MemoryFormatType;
+using MemoryFormatTypePtr = SingletonTypePtr<MemoryFormatType>;
+struct TORCH_API MemoryFormatType : public EnumerationType<TypeKind::MemoryFormatType> {
+std::string str() const override {
+return "MemoryFormatType";
+}
+static const TypeKind Kind = TypeKind::MemoryFormatType;
+// global singleton
+static MemoryFormatTypePtr get();
+
+private:
+MemoryFormatType() : EnumerationType() {}
+};
+
+struct LayoutType;
+using LayoutTypePtr = SingletonTypePtr<LayoutType>;
+struct TORCH_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
+std::string str() const override {
+return "LayoutType";
+}
+static const TypeKind Kind = TypeKind::LayoutType;
+// global singleton
+static LayoutTypePtr get();
+
+private:
+LayoutType() : EnumerationType() {}
 };
 
 // the common supertype of all lists,
