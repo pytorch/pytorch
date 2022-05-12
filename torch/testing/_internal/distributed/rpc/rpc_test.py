@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     sandcastle_skip_if,
     get_cycles_per_ms,
+    tp_transports,
 )
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -5094,7 +5095,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     def test_infer_backend_from_options(self):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
-            init_method=self.init_method
+            init_method=self.init_method,
+            _transports=tp_transports()
         )
 
         rpc.init_rpc(
@@ -5113,7 +5115,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
         NUM_THREADS = 27
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
             init_method=self.rpc_backend_options.init_method,
-            num_worker_threads=NUM_THREADS
+            num_worker_threads=NUM_THREADS,
+            _transports=tp_transports(),
         )
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -5136,7 +5139,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
             init_method=self.rpc_backend_options.init_method,
             num_worker_threads=self.rpc_backend_options.num_worker_threads,
-            rpc_timeout=timeout
+            rpc_timeout=timeout,
+            _transports=tp_transports(),
         )
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -5889,7 +5893,8 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
                 init_method=options.init_method,
                 num_worker_threads=options.num_worker_threads,
-                device_maps={dst: {0: 1, 1: 0}}
+                device_maps={dst: {0: 1, 1: 0}},
+                _transports=tp_transports()
             )
         )
 
