@@ -3093,7 +3093,8 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_i1(T x) {
 //            +7.78576235018280120474e-01,
 //    };
 
-    T x = std::abs(x);
+    x = std::abs(x);
+    
     T y;
 
     if (x <= T(8.0)) {
