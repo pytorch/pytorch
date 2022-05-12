@@ -6380,7 +6380,7 @@ class TestTorch(TestCase):
                 storage_class._new_with_weak_ptr()
 
             with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
-                storage_class._new_shared_filename(0, 0, 0)
+                storage_class._new_shared_filename_cpu(0, 0, 0)
 
     def test_storage_casts(self):
         storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
