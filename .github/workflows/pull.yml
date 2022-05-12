@@ -51,7 +51,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-py3.7-gcc7-pch
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc7-pch
+      docker-image-name: pytorch-linux-xenial-py3.7-gcc7
 
   linux-xenial-py3_7-gcc7-pch-test:
     name: linux-xenial-py3.7-gcc7-pch
