@@ -331,7 +331,7 @@ static void isin_default_kernel_cpu(
   });
 }
 
-static void clamp_kernel_impl(TensorIterator& iter) {
+static void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
