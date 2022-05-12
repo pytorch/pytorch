@@ -16278,6 +16278,48 @@ class TestNNDeviceType(NNTestCase):
             helper(4, 8, 9, 14, 5, 8, contig)
             helper(4, 8, 11, 11, 1, 1, contig)
 
+    @dtypes(torch.float, torch.double)
+    def test_pooling_max_nhwc(self, device, dtype):
+        def helper(n, c, h, w, kernel_size, stride, padding, dilation, contig, device):
+            output_height = math.floor((h + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1) / stride[0] + 1)
+            output_width = math.floor((w + 2 * padding[1] - dilation[1] * (kernel_size[1] - 1) - 1) / stride[1] + 1)
+
+            input = torch.randint(1, 10, (n, c, h, w), device=device, dtype=dtype)
+            input = input.contiguous(memory_format=torch.channels_last)
+            grad = torch.randint(1, 10, (n, c, output_height, output_width), device=device, dtype=dtype)
+            grad = grad.contiguous(memory_format=torch.channels_last)
+            if not contig:
+                input = input[:, ::2, :, :]
+                grad = grad[:, ::2, :, :]
+            input.requires_grad_(True)
+            pool = torch.nn.MaxPool2d(
+                kernel_size, stride, padding, dilation, return_indices=True, ceil_mode=False
+            )
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.MaxPool2d(
+                kernel_size, stride, padding, dilation, return_indices=True, ceil_mode=False
+            ).to(device)
+
+            out, ind = pool(input)
+            out.backward(grad)
+            ref_out, ref_ind = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ind.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_ind.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(ind, ref_ind)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        for contig in [True, False]:
+            helper(4, 8, 10, 10, (2, 2), (1, 1), (1, 1), (2, 2), contig, device)
+            helper(4, 8, 9, 14, (2, 2), (1, 1), (1, 1), (2, 2), contig, device)
+            helper(4, 8, 11, 11, (4, 4), (2, 2), (2, 2), (2, 2), contig, device)
+
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
         weight = embd.weight
