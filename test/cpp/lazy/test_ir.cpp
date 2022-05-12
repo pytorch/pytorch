@@ -17,10 +17,12 @@ namespace lazy {
 
 class TestLeafNode : public Node {
  public:
-  static const OpKind class_op_kind;
+  static OpKind ClassOpKind() {
+    return OpKind();
+  }
 
   explicit TestLeafNode(size_t param)
-      : Node(OpKind(), /* num_outputs */ 1),
+      : Node(ClassOpKind(), /* num_outputs */ 1),
         hash_(Hash(param)),
         param_(param) {}
   ~TestLeafNode() override = default;
@@ -39,8 +41,6 @@ class TestLeafNode : public Node {
   hash_t hash_;
   size_t param_;
 };
-
-const OpKind TestLeafNode::class_op_kind = OpKind();
 
 TEST(IrTest, BasicTest) {
   NodePtr node1 = MakeNode<TestLeafNode>(1);

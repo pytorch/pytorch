@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/compatibility/backport.h>
 #include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
+#include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
@@ -2247,6 +2248,17 @@ void initJitScriptBindings(PyObject* module) {
       .def(py::init<>());
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
+  });
+
+  m.def("_get_file_format", [](const std::string& path) {
+    switch (getFileFormat(path)) {
+      case FileFormat::FlatbufferFileFormat:
+        return "flatbuffer";
+      case FileFormat::ZipFileFormat:
+        return "zipfile";
+      default:
+        return "invalid";
+    }
   });
 
   initScriptDictBindings(module);

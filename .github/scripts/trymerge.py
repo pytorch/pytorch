@@ -111,7 +111,10 @@ query ($owner: String!, $name: String!, $number: Int!) {
           }
           state
         }
-        totalCount
+        pageInfo {
+          startCursor
+          hasPreviousPage
+        }
       }
       comments(last: 5) {
         nodes {
@@ -269,6 +272,27 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String) {
 }
 """
 
+GH_GET_PR_PREV_REVIEWS_QUERY = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      reviews(last: 100, before: $cursor) {
+        nodes {
+          author {
+            login
+          }
+          state
+        }
+        pageInfo {
+          startCursor
+          hasPreviousPage
+        }
+      }
+    }
+  }
+}
+"""
+
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_SOURCE_ID = re.compile(r'^ghstack-source-id: (.+)\n?', re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
@@ -381,6 +405,7 @@ class GitHubPR:
         self.conclusions: Optional[Dict[str, str]] = None
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
+        self._reviews: Optional[List[Tuple[str, str]]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -426,21 +451,29 @@ class GitHubPR:
             raise RuntimeError("Changed file count mismatch")
         return self.changed_files
 
-    def _get_reviewers(self) -> List[Tuple[str, str]]:
-        reviews_count = int(self.info["reviews"]["totalCount"])
-        nodes = self.info["reviews"]["nodes"]
-        if len(nodes) != reviews_count:
-            raise RuntimeError("Can't fetch all PR reviews")
+    def _get_reviews(self) -> List[Tuple[str, str]]:
+        if self._reviews is None:
+            self._reviews = []
+            info = self.info
+            for _ in range(100):
+                nodes = info["reviews"]["nodes"]
+                self._reviews = [(node["author"]["login"], node["state"]) for node in nodes] + self._reviews
+                if not info["reviews"]["pageInfo"]["hasPreviousPage"]:
+                    break
+                rc = gh_graphql(GH_GET_PR_PREV_REVIEWS_QUERY,
+                                name=self.project,
+                                owner=self.org,
+                                number=self.pr_num,
+                                cursor=info["reviews"]["pageInfo"]["startCursor"])
+                info = rc["data"]["repository"]["pullRequest"]
         reviews = {}
-        for node in nodes:
-            author = node["author"]["login"]
-            state = node["state"]
+        for (author, state) in self._reviews:
             if state != "COMMENTED":
                 reviews[author] = state
         return list(reviews.items())
 
     def get_approved_by(self) -> List[str]:
-        return [login for (login, state) in self._get_reviewers() if state == "APPROVED"]
+        return [login for (login, state) in self._get_reviews() if state == "APPROVED"]
 
     def get_commit_count(self) -> int:
         return int(self.info["commits_with_authors"]["totalCount"])
@@ -530,7 +563,12 @@ class GitHubPR:
         authors = self.get_authors()
         if len(authors) == 1:
             return next(iter(authors.values()))
-        return self.get_authors()[self.get_pr_creator_login()]
+        creator = self.get_pr_creator_login()
+        # If PR creator is not among authors
+        # Assume it was authored by first commit author
+        if creator not in authors:
+            return self.get_committer_author(0)
+        return authors[creator]
 
     def get_title(self) -> str:
         return cast(str, self.info["title"])

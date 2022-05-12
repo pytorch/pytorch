@@ -532,7 +532,9 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedParameterDict(
     auto name_v =
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
     m.graph()->insertGetAttr(self_, name);
-    values.push_back(tryGetAttr(loc, m, name));
+    auto val = tryGetAttr(loc, m, name);
+    TORCH_INTERNAL_ASSERT(val != nullptr, "Could not find attribute ", name);
+    values.push_back(val);
     keys.push_back(name_v);
   }
 
