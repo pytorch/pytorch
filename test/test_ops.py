@@ -961,7 +961,8 @@ class TestCommon(TestCase):
 
         for sample in op.sample_inputs(device, dtype):
             actual = op(sample.input, *sample.args, **sample.kwargs)
-            transformed_sample = sample.transform(lambda x: x.to(torch.complex64))
+            transformed_sample = sample.transform(lambda x: x.to(torch.complex64) if isinstance(
+                x, torch.Tensor) and x.dtype is torch.complex32 else x)
             expected = op(
                 transformed_sample.input,
                 *transformed_sample.args,

@@ -1879,7 +1879,7 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
       ptr += ilp_factor * stride;
     }
     for (; i < n; ++i) {
-      const auto& val = *reinterpret_cast<const scalar_t*>(ptr);
+      const auto& val = c10::load<scalar_t>(ptr);
       if (val != scalar_t(0)) {
         ++nonzero[0];
       }
