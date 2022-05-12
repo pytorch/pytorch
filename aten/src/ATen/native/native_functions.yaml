@@ -1945,6 +1945,15 @@
     QuantizedCPU: quantized_resize_cpu_
     SparseCsrCPU, SparseCsrCUDA: resize_sparse_csr_
 
+# This is a utility function to enable users to resize out tensor while registering kernels for out variants.
+# Eventually, we can consider exposing `resize_output` as a public API to ship it with python op registration
+# to make it easy to register out variants for ops.
+- func: _resize_output_(Tensor(a!) self, int[] size, Device device) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
+  variants: function
+  dispatch:
+    Meta: _resize_output_
+
 - func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   category_override: factory
   variants: function
@@ -4687,6 +4696,10 @@
   dispatch:
     CPU, NestedTensorCPU: transform_bias_rescale_qkv_cpu
     CUDA, NestedTensorCUDA: transform_bias_rescale_qkv_cuda
+
+- func: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
+  dispatch:
+    CPU, CUDA: NestedTensor_nested_tensor_from_mask
 
 - func: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   device_check: NoCheck # cpu_nested_shape_example will always be on CPU
@@ -9043,6 +9056,11 @@
   dispatch:
     CPU: glu_backward_cpu
     CUDA: glu_backward_cuda
+
+- func: glu_jvp(Tensor glu, Tensor x, Tensor dx, int dim) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU, CUDA: glu_jvp
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
