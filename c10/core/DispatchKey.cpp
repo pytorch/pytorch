@@ -260,6 +260,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},
       {"ORT", c10::DispatchKey::ORT},
+      {"MPS", c10::DispatchKey::MPS},
       {"Vulkan", c10::DispatchKey::Vulkan},
       {"Metal", c10::DispatchKey::Metal},
       {"VE", c10::DispatchKey::VE},
