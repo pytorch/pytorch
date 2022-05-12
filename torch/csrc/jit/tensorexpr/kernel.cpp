@@ -1585,7 +1585,8 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
                     if (has_symbolic_strides) {
                       output_strides.push_back(getSymbolicOutputStrideDesc(el));
                     } else {
-                      // It is a concrete tensor but does not have stride information
+                      // It is a concrete tensor but does not have stride
+                      // information
                       if (!(el->isCompleteTensor()))
                         return true;
                     }
