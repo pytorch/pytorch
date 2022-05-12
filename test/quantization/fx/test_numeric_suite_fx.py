@@ -576,6 +576,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 # the GroupNorm swap is not implemented in FX Graph
                 # mode quantization yet
                 nn.GroupNorm,
+                # nnq.ReLU6 is no longer swapped, because nn.ReLU6 can
+                # take quantized inputs
+                nn.ReLU6,
             )
             if fp32_type in types_to_skip:
                 continue
@@ -1496,6 +1499,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 # the GroupNorm swap is not implemented in FX Graph
                 # mode quantization yet
                 nn.GroupNorm,
+                # nnq.ReLU6 is no longer swapped, because nn.ReLU6 can
+                # take quantized inputs
+                nn.ReLU6,
             )
             if fp32_type in types_to_skip:
                 continue
