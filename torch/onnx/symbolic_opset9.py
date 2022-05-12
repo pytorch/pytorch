@@ -3927,9 +3927,11 @@ def linspace(g, start, end, steps, dtype, layout, device, pin_memory):
     )
     return add(g, mul(g, range_tensor, step), start)
 
+
 def lift(g, self):
     # at::lift() is a no-op from the perspective of tracing for onnx
     return self
+
 
 def masked_fill(g, self, mask, value):
     mask = _cast_Bool(g, mask, False)  # type: ignore[name-defined]
