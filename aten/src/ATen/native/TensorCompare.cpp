@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/Exception.h>
+#include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/NamedTensorUtils.h>
@@ -207,8 +208,6 @@ DEFINE_DISPATCH(isposinf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-glob
 DEFINE_DISPATCH(isneginf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mode_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_min_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_min_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_max_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -573,9 +572,9 @@ TORCH_IMPL_FUNC(clamp_Tensor_out)
   if (min && max) {
     clamp_stub(device_type(), *this);
   } else if (min) {
-    clamp_min_stub(device_type(), *this);
+    maximum_stub(device_type(), *this);
   } else if (max) {
-    clamp_max_stub(device_type(), *this);
+    minimum_stub(device_type(), *this);
   }
 }
 
@@ -586,7 +585,7 @@ TORCH_IMPL_FUNC(clamp_max_out)
 
 TORCH_IMPL_FUNC(clamp_max_Tensor_out)
 (const Tensor& self, const Tensor& max, const Tensor& result) {
-  clamp_max_stub(device_type(), *this);
+  minimum_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(clamp_min_out)
@@ -596,7 +595,7 @@ TORCH_IMPL_FUNC(clamp_min_out)
 
 TORCH_IMPL_FUNC(clamp_min_Tensor_out)
 (const Tensor& self, const Tensor& min, const Tensor& result) {
-  clamp_min_stub(device_type(), *this);
+  maximum_stub(device_type(), *this);
 }
 
 // Implements the "clip" alias for clamp
