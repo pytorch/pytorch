@@ -58,9 +58,9 @@ class TestMkldnnFusion(JitTestCase):
 
     def test_conv(self):
         class M(nn.Module):
-            def __init__(self, in_channels, out_channels, **kwargs):
+            def __init__(self, in_channels, out_channels, bias, **kwargs):
                 super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=True, **kwargs)
+                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
 
             def forward(self, x):
                 res = self.conv(x)
@@ -70,20 +70,21 @@ class TestMkldnnFusion(JitTestCase):
             [torch.contiguous_format, True],
             [torch.channels_last, False],  # TODO: enable support on channels_last
         ]:
-            m = M(3, 10, kernel_size=(3, 3)).to(memory_format=memory_format)
-            x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
-            graph = self._check_model(m, x)
-            if enabled:
-                self.assertFused(graph, ['aten::conv2d'])
-                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
-            else:
-                self.assertGraphContains(graph, kind='aten::conv2d')
+            for bias in [True, False]:
+                m = M(3, 10, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
+                x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+                graph = self._check_model(m, x)
+                if enabled:
+                    self.assertFused(graph, ['aten::conv2d'])
+                    self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                else:
+                    self.assertGraphContains(graph, kind='aten::conv2d')
 
     def test_conv_eltwise(self):
         class M(nn.Module):
-            def __init__(self, eltwise_fn, in_channels, out_channels, **kwargs):
+            def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
                 super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=True, **kwargs)
+                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
                 self.eltwise = eltwise_fn
 
             def forward(self, x):
@@ -93,15 +94,16 @@ class TestMkldnnFusion(JitTestCase):
 
         for eltwise in ["relu"]:
             for inplace in [False]:
-                eltwise_fn_name = eltwise + "_" if inplace else eltwise
-                eltwise_fn = get_eltwise_fn(eltwise_fn_name)
+                for bias in [True, False]:
+                    eltwise_fn_name = eltwise + "_" if inplace else eltwise
+                    eltwise_fn = get_eltwise_fn(eltwise_fn_name)
 
-                m = M(eltwise_fn, 3, 10, kernel_size=(3, 3))
-                x = torch.randn(1, 3, 224, 224)
+                    m = M(eltwise_fn, 3, 10, bias, kernel_size=(3, 3))
+                    x = torch.randn(1, 3, 224, 224)
 
-                graph = self._check_model(m, x)
-                self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn_name])
-                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                    graph = self._check_model(m, x)
+                    self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn_name])
+                    self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
 
 
 if __name__ == "__main__":

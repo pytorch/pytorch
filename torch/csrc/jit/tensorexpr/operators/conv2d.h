@@ -66,7 +66,6 @@ bool conv2dIsSupported(
 bool mkldnnPrepackedConvIsSupported(
     const TensorInfo& input,
     const TensorInfo& weight,
-    const TensorInfo& bias,
     const std::vector<int64_t>& stride,
     const std::vector<int64_t>& pad,
     const std::vector<int64_t>& dilation,

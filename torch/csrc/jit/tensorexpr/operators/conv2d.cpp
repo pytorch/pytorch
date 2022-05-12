@@ -312,20 +312,17 @@ bool conv2dIsSupported(
 bool mkldnnPrepackedConvIsSupported(
     const TensorInfo& input,
     const TensorInfo& weight,
-    const TensorInfo& bias,
     const std::vector<int64_t>& stride,
     const std::vector<int64_t>& pad,
     const std::vector<int64_t>& dilation,
     int64_t groups) {
 #if AT_MKLDNN_ENABLED()
   if (input.dtype != c10::ScalarType::Float ||
-      weight.dtype != c10::ScalarType::Float ||
-      bias.dtype != c10::ScalarType::Float) {
+      weight.dtype != c10::ScalarType::Float) {
     GRAPH_DEBUG("conv2dIsSupported: only float32 allowed");
     return false;
   }
-  if (input.dims.size() != 4 || weight.dims.size() != 4 ||
-      bias.dims.size() != 1) {
+  if (input.dims.size() != 4 || weight.dims.size() != 4) {
     GRAPH_DEBUG("conv2dIsSupported: inputs are the wrong size");
     return false;
   }

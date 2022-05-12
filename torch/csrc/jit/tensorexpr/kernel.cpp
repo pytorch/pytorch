@@ -283,16 +283,10 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
   auto const& dilation = toIValue(node->input(5));
   auto const& groups = toIValue(node->input(6));
 
-  // Everything should be statically known.
-  if (!input || !weight || !bias || !stride || !pad || !dilation || !groups) {
+  // Everything should be statically known (bias could be NoneType =
+  // prim::Constant()).
+  if (!input || !weight || !stride || !pad || !dilation || !groups) {
     GRAPH_DEBUG("some params aren't static");
-    return false;
-  }
-
-  // All inputs should be contiguous so no transposition is required.
-  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1)) ||
-      !isContiguous(node->input(2))) {
-    GRAPH_DEBUG("conv2dIsSupported: some inputs are not contiguous");
     return false;
   }
 
@@ -303,10 +297,15 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
     return false;
   }
 
+  // All inputs should be contiguous so no transposition is required.
+  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1))) {
+    GRAPH_DEBUG("conv2dIsSupported: some inputs are not contiguous");
+    return false;
+  }
+
   return mkldnnPrepackedConvIsSupported(
       *input,
       *weight,
-      *bias,
       _pair_int(*stride),
       _pair_int(*pad),
       _pair_int(*dilation),
