@@ -45,7 +45,7 @@ void verifyShapeInfo(
   EXPECT_EQ(shape_info.getDimType(), t);
   const auto& shape = shape_info.shape;
   ASSERT_EQ(shape.dims_size(), dims.size());
-  for (int i = 0; i < dims.size(); ++i) {
+  for (unsigned i = 0; i < dims.size(); ++i) {
     EXPECT_EQ(dims[i], shape.dims(i));
   }
   EXPECT_EQ(shape.data_type(), dtype);

@@ -489,10 +489,8 @@ void multiReductionInliner(
     }
     for (auto out : ir_utils::filterByType<TensorView>(fusion->outputs())) {
       // only terminating outputs
-      if (out->uses().size()) {
-        continue;
-      }
-      if (outs_of_reds.find(out) != outs_of_reds.end()) {
+      if (out->uses().size() || outs_of_reds.find(out) != outs_of_reds.end() ||
+          out->isFusionInput()) {
         continue;
       }
       compute_to.push_back(out);
@@ -535,12 +533,6 @@ int idPos(const IterDomain* id) {
   }
   inner_most--;
 
-  // Broadcast
-  if (id->isBroadcast() || id->isImplicitBroadcast()) {
-    return inner_most;
-  }
-  inner_most--;
-
   // Reduction and unrolled
   if (id->isReduction() &&
       (id->getParallelType() == ParallelType::Unroll ||
@@ -564,6 +556,12 @@ int idPos(const IterDomain* id) {
 
   // Reduction and thread
   if (id->isReduction() && id->isThread()) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Broadcast
+  if (id->isBroadcast() || id->isImplicitBroadcast()) {
     return inner_most;
   }
   inner_most--;

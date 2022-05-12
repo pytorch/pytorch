@@ -1,8 +1,9 @@
-#include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -86,7 +87,7 @@ vTensor pack_weights(const Tensor& weight_arg) {
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const Tensor weight = at::permute(weight_arg, {1, 0, 2, 3}).contiguous();
 
@@ -105,7 +106,7 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const int64_t src_w = weight.size(Layout::TransposedFilter::output);
   const int64_t packed_w = div_up(src_w, INT64_C(4));
@@ -353,6 +354,8 @@ void TransposeConv2dOpContext::conv2d_transpose_sliding_window(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "prepacked::conv2d_transpose_clamp_run (conv2d_transpose_sliding_window)");
+
     const struct Block final {
       uvec3 extents;
       int32_t ic4;

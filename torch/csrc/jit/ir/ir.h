@@ -1624,9 +1624,10 @@ TORCH_API std::vector<Node*> findAllNodes(
     Symbol kind,
     bool recurse);
 
-struct OperatorSet {
+struct TORCH_API OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
   std::vector<std::shared_ptr<Operator>> getOps() const;
+  void insert(std::initializer_list<const char*> sig_literals);
 
  private:
   friend struct Node;

@@ -7,7 +7,7 @@ namespace at {
 
 // See TensorGeometry.h on why this is useful now that we cache is_contiguous.
 bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
-  assert(sizes.size() < static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()));
+  assert(!overflows<std::int64_t>(sizes.size()));
   auto dim = static_cast<std::int64_t>(sizes.size());
   int64_t expected_stride = 1;
   bool contig_if_nonempty = true;

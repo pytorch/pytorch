@@ -285,6 +285,12 @@ void UnmappableReductionDomains::handle(ReductionOp* op) {
   handleReductionOutput(out_tv);
 }
 
+void UnmappableReductionDomains::handle(MmaOp* mma) {
+  // Builds a map from reduction domains to consumer domains.
+  TensorView* out_tv = mma->out()->as<TensorView>();
+  handleReductionOutput(out_tv);
+}
+
 void UnmappableReductionDomains::handle(WelfordOp* op) {
   // Builds a map from reduction domains to consumer domains.
   handleReductionOutput(op->outAvg()->as<TensorView>());

@@ -763,19 +763,27 @@ static void fuseListConstructListUnpack(Block* b) {
 
 // https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
 static void eraseTupleConstruct(Block* block) {
-  size_t index = 0;
-  // TupleConstruct is generated from the symbolics in quantized domain, and consumed
-  // by other quantized operators. The remained TupleConstruct should be at the output of the blocks.
+  std::vector<Value*> new_block_outputs;
+  bool found_tuple_construct = false;
+  // TupleConstruct is generated from the symbolics in quantized domain, and
+  // consumed by other quantized operators. The remained TupleConstruct should
+  // be at the output of the blocks.
   for (auto* output : block->outputs()) {
     auto output_node = output->node();
     if (output_node->kind() == prim::TupleConstruct) {
-      block->eraseOutput(index);
-      size_t input_index = 0;
-      for (auto* input: output_node->inputs()) {
-        block->insertOutput(index + (input_index++), input);
+      found_tuple_construct = true;
+      for (auto* input : output_node->inputs()) {
+        new_block_outputs.emplace_back(input);
       }
+    } else {
+      new_block_outputs.emplace_back(output);
     }
-    index++;
+  }
+  if (found_tuple_construct) {
+    block->removeAllOutputs();
+    for (auto* output : new_block_outputs) {
+      block->registerOutput(output);
+    }
   }
 }
 

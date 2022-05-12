@@ -215,8 +215,6 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
   }
 
   void handle(kir::ForLoop* fl) final {
-    const auto gpu_lower = GpuLower::current();
-
     kir::ForLoop* cloned_loop = fl == double_buffer_loop_
         ? cloned_top_level_loop_
         : IrBuilder::create<kir::ForLoop>(fl);
@@ -407,7 +405,7 @@ class DoubleBufferInserter : private kir::ExprMutator {
     // RAW sync is not inserted for double buffered tensors. The only
     // exception is the prologue load.
     if (write_to_smem) {
-      auto sync = IrBuilder::create<kir::Sync>();
+      auto sync = IrBuilder::create<kir::BlockSync>();
       registerInsertBefore(double_buffer_loop, sync);
     }
 

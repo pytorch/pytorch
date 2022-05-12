@@ -6,6 +6,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <array>
 #include <cctype>
@@ -34,9 +35,20 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
+  if (input.dim() == 3 && bias->defined() && input.is_contiguous()) {
+    // Also hit the fused path for contiguous 3D input.
+    const auto input_sizes = input.sizes();
+    const auto result = at::addmm(*bias, input.view({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
+    return result.view({input_sizes[0], input_sizes[1], result.size(1)});
+  }
   auto output = at::matmul(input, weight.t());
   if (bias->defined()) {
-    output.add_(*bias);
+    // for composite compliance use out-of-place version of `add`
+    if (isTensorSubclassLike(*bias)) {
+      output = at::add(output, *bias);
+    } else {
+      output.add_(*bias);
+    }
   }
   return output;
 }
