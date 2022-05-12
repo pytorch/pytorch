@@ -3093,24 +3093,26 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_i1(T x) {
             +7.78576235018280120474e-01,
     };
 
-    T y;
-    T z;
+    T x = std::abs(x);
 
-    z = std::abs(x);
+    if (x <= T{8.0}) {
+        auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
+        auto A = std::get<0>(coeff_pair);
+        auto len = std::get<1>(coeff_pair);
 
-    if (z <= T(8.0)) {
-	      y = (z / T(2.0)) - T(2.0);
+        T y = (x / T(2.0)) - T(2.0);
 
-	      z = chbevl(y, A, 29) * z;
-    } else {
-	      z = chbevl(T(32.0) / z - T(2.0), B, 25) / sqrt(z);
+        const T y = chbevl(y, A, len) * x;
+
+        return (x < T(0.0)) ? -y : y;
     }
+    auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
+    auto B = std::get<0>(coeff_pair);
+    auto len = std::get<1>(coeff_pair);
 
-    if (x < 0.0) {
-        z = -z;
-    }
+    const auto y = chbevl(T(32.0) / x - T(2.0), B, len) / std::sqrt(x);
 
-    return z;
+    return (x < T(0.0)) ? -y : y;
 } // scaled_modified_bessel_i1
 
 template<typename T>
