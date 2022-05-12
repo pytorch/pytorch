@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
@@ -131,8 +132,9 @@ namespace {
 class ReduceMultiply {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMul(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMul(self_data_start + index, *src_data);
   }
 };
 static ReduceMultiply reduce_multiply;
@@ -140,8 +142,8 @@ static ReduceMultiply reduce_multiply;
 class ReduceAdd {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicAddNoReturn(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
   }
 };
 static ReduceAdd reduce_add;
@@ -149,8 +151,9 @@ static ReduceAdd reduce_add;
 class ReduceMinimum {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMin(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMin(self_data_start + index, *src_data);
   }
 };
 static ReduceMinimum reduce_minimum;
@@ -158,8 +161,9 @@ static ReduceMinimum reduce_minimum;
 class ReduceMaximum {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMax(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMax(self_data_start + index, *src_data);
   }
 };
 static ReduceMaximum reduce_maximum;
@@ -420,6 +424,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     int srcAddDim,
                                     IndexType innerSize,
                                     int64_t dstAddDimSize,
+                                    int64_t dstNumel,
                                     const func_t& op,
                                     T alpha) {
   // In order to avoid reloading the index that we are copying, load
@@ -447,7 +452,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       srcOffset += srcIndex * src.strides[srcAddDim];
 
       T val = src.data[srcOffset] * alpha;
-      op(&dst.data[dstOffset], &val);
+      op(dst.data, dstOffset, dstNumel, &val);
     }
 
   }
@@ -469,6 +474,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     IndexType totalSize,
                                     IndexType innerSize,
                                     int64_t dstAddDimSize,
+                                    int64_t dstNumel,
                                     const func_t& op,
                                     T alpha) {
   // We stride over the output including the indexed dimension
@@ -500,7 +506,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
     srcOffset += srcIndex * src.strides[srcAddDim];
 
     T val = src.data[srcOffset] * alpha;
-    op(&dst.data[dstOffset], &val);
+    op(dst.data, dstOffset, dstNumel, &val);
   }
 }
 
@@ -570,6 +576,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   ptrdiff_t sourceTotalSize = source.numel();
   int64_t selfAddDimSize = self_.size(dim);
   ptrdiff_t numIndex = index.numel();
+  int64_t selfNumel = self_.numel();
 
   if (sliceSize == 0) {
     return;
@@ -583,7 +590,8 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
       selfInfo, sourceInfo, indexInfo,                                                  \
-      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize, reduce_add, alpha_value);    \
+      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize,                              \
+      selfNumel, reduce_add, alpha_value);                                              \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
@@ -594,7 +602,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       selfInfo, sourceInfo, indexInfo,                                      \
       selfAddDim, sourceAddDim, sourceTotalSize,                            \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
-      selfAddDimSize, reduce_add, alpha_value);                             \
+      selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
@@ -741,6 +749,7 @@ void index_reduce_func_cuda_impl(
   ptrdiff_t sourceTotalSize = source.numel();
   int64_t selfReduceDimSize = self_.size(dim);
   ptrdiff_t numIndex = index.numel();
+  int64_t selfNumel = self_.numel();
 
   if (sliceSize == 0) {
     return;
@@ -754,7 +763,8 @@ void index_reduce_func_cuda_impl(
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>                \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
       selfInfo, sourceInfo, indexInfo,                                                               \
-      selfReduceDim, sourceReduceDim, sliceSize, selfReduceDimSize, reduce_func, alpha_value);       \
+      selfReduceDim, sourceReduceDim, sliceSize, selfReduceDimSize,                                  \
+      selfNumel, reduce_func, alpha_value);                                                          \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                                     \
@@ -765,7 +775,7 @@ void index_reduce_func_cuda_impl(
       selfInfo, sourceInfo, indexInfo,                                                   \
       selfReduceDim, sourceReduceDim, sourceTotalSize,                                   \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                             \
-      selfReduceDimSize, reduce_func, alpha_value);                                      \
+      selfReduceDimSize, selfNumel, reduce_func, alpha_value);                           \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
