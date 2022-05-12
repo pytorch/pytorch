@@ -1,10 +1,10 @@
 cd third_party
 
 echo "\n[Generating wrappers for cpuionfo]"
-python generate-cpuinfo-wrappers.py
+python3 generate-cpuinfo-wrappers.py
 
 echo "\n[Generating wrappers for xnnpack]"
-python generate-xnnpack-wrappers.py
+python3 generate-xnnpack-wrappers.py
 
 # bazel-skylib
 echo "\n[Downloading bazel-skylib-1.0.2]"

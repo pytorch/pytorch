@@ -1,4 +1,5 @@
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
+load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load(
     "//tools:build_variables.bzl",
@@ -321,32 +322,17 @@ def gen_aten_files(
         backends = static_dispatch_backend
     else:
         backends = enabled_backends
-    native.genrule(
+    fb_xplat_genrule(
         name = name,
-        # default_outs = ["."],
+        default_outs = ["."],
         outs = get_aten_generated_files(backends),
         cmd = "$(exe //torchgen:gen) " + " ".join([
             "--source-path $(location //:aten_src_path)/aten/src/ATen",
             "--install_dir $OUT",
         ] + extra_params),
         visibility = visibility,
-        # compatible_with = compatible_with,
+        compatible_with = compatible_with,
     )
-
-def get_aten_derived_type_srcs(enabled_backends):
-    return [
-        "Register" + derived_type + ".cpp"
-        for derived_type in enabled_backends
-    ] + [
-        derived_type + "Functions.h"
-        for derived_type in enabled_backends
-        if derived_type in PT_BACKEND_HEADERS or derived_type in get_static_dispatch_backend()
-    ] + [
-        derived_type + "Functions_inl.h"
-        for derived_type in enabled_backends
-        if derived_type in PT_BACKEND_HEADERS or derived_type in get_static_dispatch_backend()
-    ]
-
 
 def get_aten_generated_files(enabled_backends):
     # NB: RegisterMeta counts as an optionally enabled backend,
@@ -412,7 +398,7 @@ def get_template_registration_file_rules(rule_name):
 # tests that may require both native and non-native codes. This rule is used to generate
 # both aten_cpu and aten_native_cpu. They are using the same compilation setups.
 def build_aten_cpu(name, srcs, deps = []):
-    cxx_library(
+    native.cxx_library(
         name = name,
         srcs = srcs,
         header_namespace = "",
@@ -482,7 +468,7 @@ def pt_operator_registry(
         train = False,
         labels = [],
         env = [],
-        template_select = False, # true?
+        template_select = True,
         enforce_traced_op_list = False,
         pt_allow_forced_schema_registration = True,
         enable_flatbuffer = False,
@@ -514,7 +500,7 @@ def pt_operator_registry(
         # operator list, it's suggested to turn this option off.
         exported_preprocessor_flags.append("-DTEMPLATE_SELECTIVE_BUILD")
     kwargs.pop("exported_headers", [])
-    cxx_library(
+    native.cxx_library(
         name = name,
         srcs = code_gen_srcs,
         linker_flags = [
@@ -523,8 +509,8 @@ def pt_operator_registry(
         link_whole = True,
         soname = "libtorch-code-gen.$(ext)",
         compiler_flags = get_aten_compiler_flags(),
-        # cxx_platform_compiler_flags = ["-DHAVE_AVX2_CPU_DEFINITION"],
-        # cxx_platform_deps = ["fbsource//xplat/caffe2:cpukernel_avx2"], # TODO
+        platform_compiler_flags = get_cpukernel_avx2_flags(),
+        platform_deps = get_cpukernel_avx2_deps(),
         header_namespace = "ATen",
         exported_headers = code_gen_files["headers"],
         exported_preprocessor_flags = exported_preprocessor_flags,
@@ -566,15 +552,15 @@ def pt_operator_query_codegen(name, deps = [], train = False, enforce_traced_op_
     oplist_dir_name = name + "_pt_oplist"
 
     # @lint-ignore BUCKLINT
-    native.genrule(
+    fb_xplat_genrule(
         name = oplist_dir_name,
         cmd = ("$(exe //:gen_oplist) " +
                "--model_file_list_path $(@query_outputs 'attrfilter(labels, pt_operator_library, deps(set({deps})))') " +
                ("" if enforce_traced_op_list else "--allow_include_all_overloads ") +
                "--output_dir $OUT ").format(deps = " ".join(["\"{}\"".format(d) for d in deps])),
         outs = get_gen_oplist_outs(),
-        # default_outs = ["."],
-        # compatible_with = compatible_with,
+        default_outs = ["."],
+        compatible_with = compatible_with,
     )
 
     # Aten files
@@ -587,7 +573,7 @@ def pt_operator_query_codegen(name, deps = [], train = False, enforce_traced_op_
     if train and pt_allow_forced_schema_registration:
         extra_flags["force_schema_registration"] = True
 
-    #if get_enable_lightweight_dispatch():
+    # if get_enable_lightweight_dispatch():
     #    unboxing_genrule = name + "_unboxing"
     #    gen_aten_unboxing_files(
     #        unboxing_genrule,
@@ -637,33 +623,33 @@ def pt_operator_query_codegen(name, deps = [], train = False, enforce_traced_op_
         "selected_mobile_ops.h": ":{}[selected_mobile_ops.h]".format(oplist_dir_name),
     }
 
-    if get_enable_lightweight_dispatch():
-        srcs.extend([
-            ":{}[UnboxingFunctions_0.cpp]".format(unboxing_genrule),
-            ":{}[UnboxingFunctions_1.cpp]".format(unboxing_genrule),
-            ":{}[UnboxingFunctions_2.cpp]".format(unboxing_genrule),
-            ":{}[UnboxingFunctions_3.cpp]".format(unboxing_genrule),
-            ":{}[UnboxingFunctions_4.cpp]".format(unboxing_genrule),
-            ":{}[RegisterCodegenUnboxedKernels_0.cpp]".format(unboxing_genrule),
-            ":{}[RegisterCodegenUnboxedKernels_1.cpp]".format(unboxing_genrule),
-            ":{}[RegisterCodegenUnboxedKernels_2.cpp]".format(unboxing_genrule),
-            ":{}[RegisterCodegenUnboxedKernels_3.cpp]".format(unboxing_genrule),
-            ":{}[RegisterCodegenUnboxedKernels_4.cpp]".format(unboxing_genrule),
-            ":{}[RegisterCodegenUnboxedKernels_5.cpp]".format(unboxing_genrule),
-            ":{}[RegisterCodegenUnboxedKernels_6.cpp]".format(unboxing_genrule),
-            ":{}[RegisterCodegenUnboxedKernels_7.cpp]".format(unboxing_genrule),
-            ":{}[RegisterCodegenUnboxedKernels_8.cpp]".format(unboxing_genrule),
-            ":{}[RegisterCodegenUnboxedKernels_9.cpp]".format(unboxing_genrule),
-        ])
-        headers["UnboxingFunctions.h"] = ":{}[UnboxingFunctions.h]".format(unboxing_genrule)
+    # if get_enable_lightweight_dispatch():
+    #     srcs.extend([
+    #         ":{}[UnboxingFunctions_0.cpp]".format(unboxing_genrule),
+    #         ":{}[UnboxingFunctions_1.cpp]".format(unboxing_genrule),
+    #         ":{}[UnboxingFunctions_2.cpp]".format(unboxing_genrule),
+    #         ":{}[UnboxingFunctions_3.cpp]".format(unboxing_genrule),
+    #         ":{}[UnboxingFunctions_4.cpp]".format(unboxing_genrule),
+    #         ":{}[RegisterCodegenUnboxedKernels_0.cpp]".format(unboxing_genrule),
+    #         ":{}[RegisterCodegenUnboxedKernels_1.cpp]".format(unboxing_genrule),
+    #         ":{}[RegisterCodegenUnboxedKernels_2.cpp]".format(unboxing_genrule),
+    #         ":{}[RegisterCodegenUnboxedKernels_3.cpp]".format(unboxing_genrule),
+    #         ":{}[RegisterCodegenUnboxedKernels_4.cpp]".format(unboxing_genrule),
+    #         ":{}[RegisterCodegenUnboxedKernels_5.cpp]".format(unboxing_genrule),
+    #         ":{}[RegisterCodegenUnboxedKernels_6.cpp]".format(unboxing_genrule),
+    #         ":{}[RegisterCodegenUnboxedKernels_7.cpp]".format(unboxing_genrule),
+    #         ":{}[RegisterCodegenUnboxedKernels_8.cpp]".format(unboxing_genrule),
+    #         ":{}[RegisterCodegenUnboxedKernels_9.cpp]".format(unboxing_genrule),
+    #     ])
+    #     headers["UnboxingFunctions.h"] = ":{}[UnboxingFunctions.h]".format(unboxing_genrule)
     return {"headers": headers, "srcs": srcs}
 
 
 def gen_aten_libtorch_files(name, extra_params = [], compatible_with = []):
-    native.genrule(
+    fb_xplat_genrule(
         name = name,
         outs = get_generate_code_bin_outs(),
-        # default_outs = ["."],
+        default_outs = ["."],
         bash = "mkdir -p tools && " +
                "$(exe //tools/setup_helpers:generate_code_bin) " + " ".join(
             # Mobile build only needs libtorch - skip python bindings for now, except
@@ -684,7 +670,7 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = []):
                 "--install_dir $OUT",
             ] + extra_params,
         ),
-        #compatible_with = compatible_with,
+        compatible_with = compatible_with,
     )
 
 
@@ -694,7 +680,7 @@ def copy_template_registration_files(name):
 
     template_source_dict = get_template_source_dict()
 
-    filegroup(
+    native.filegroup(
         name = "templated_selective_build_srcs",
         # NB: no glob here, there are generated targets in this list!
         srcs = glob(TEMPLATE_SOURCE_LIST) + aten_ufunc_generated_all_cpu_sources(":gen_aten[{}]"),
@@ -730,12 +716,12 @@ def copy_template_registration_files(name):
         cmd.append("cp -f " + ufunc_file + " $OUT/aten/src/ATen")
         cmd_exe.append("copy " + ufunc_file + " $OUT/aten/src/ATen")
 
-    native.genrule(
+    fb_xplat_genrule(
         name = name,
         cmd = " && ".join(cmd),
         cmd_exe = "@powershell -Command " + ("; ".join(cmd_exe)),
         outs = get_template_registration_files_outs(),
-        # default_outs = ["."],
+        default_outs = ["."],
     )
 
 def pt_operator_library(
@@ -759,7 +745,7 @@ def pt_operator_library(
 
         visibility = kwargs.pop("visibility", ["PUBLIC"])
 
-        genrule(
+        fb_xplat_genrule(
             name = name,
             out = "model_operators.yaml",
             cmd = (
@@ -794,10 +780,46 @@ def pt_operator_library(
             pass
             # ensure_ops_are_declared(ops)
 
-        cxx_library(
+        native.cxx_library(
             name = name,
             compiler_flags = get_pt_compiler_flags(),
             cxx_platform_compiler_flags = get_cpukernel_avx2_flags(),
             exported_deps = exported_deps,
             **kwargs
         )
+
+def compose_platform_setting_list(settings):
+    """Settings object:
+    os/cpu pair: should be valid key, or at most one part can be wildcard.
+    flags: the values added to the compiler flags
+    """
+    result = []
+    for setting in settings:
+        result = result.append([
+            "^{}-{}$".format(setting["os"], setting["cpu"]),
+            setting["flags"]
+        ])
+    return result
+
+def get_cpukernel_avx2_flags():
+    # flags = compose_platform_setting_list([
+    #     {
+    #         "cpu": "x86_64",
+    #         "flags": ["-DHAVE_AVX2_CPU_DEFINITION"],
+    #         "os": "macosx",
+    #     },
+    # ]) if build_cpukernel_avx2() else []
+    return []
+
+def build_cpukernel_avx2():
+    return not is_arvr_mode()
+
+def get_cpukernel_avx2_deps():
+    # flags = compose_platform_setting_list([
+    #     {
+    #         "cpu": "x86_64",
+    #         "flags": ["fbsource//xplat/caffe2:cpukernel_avx2"],
+    #         "os": "macosx",
+    #     },
+    # ]) if build_cpukernel_avx2() else []
+    return []

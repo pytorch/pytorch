@@ -1,4 +1,5 @@
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
+load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load(
     "//tools:build_variables.bzl",
     "aten_cpu_source_list",
@@ -165,7 +166,7 @@ cxx_library(
     visibility = ["PUBLIC"],
 )
 
-genrule(
+fb_xplat_genrule(
     name = "generate_aten_config",
     srcs = [
         "aten/src/ATen/Config.h.in",
@@ -191,7 +192,7 @@ genrule(
     outs = {
         "Config.h": ["Config.h"],
     },
-    # default_outs = ["."],
+    default_outs = ["."],
 )
 
 gen_aten_files(
@@ -302,7 +303,7 @@ python_library(
     visibility = ["PUBLIC"],
 )
 
-genrule(
+fb_xplat_genrule(
     name = "generate-version-header",
     srcs = [
         "torch/csrc/api/include/torch/version.h.in",
@@ -319,7 +320,7 @@ genrule(
     outs = {
         "version.h": ["version.h"],
     },
-    # default_outs = ["."],
+    default_outs = ["."],
 )
 
 cxx_library(
