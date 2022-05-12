@@ -16,6 +16,7 @@ from torch._prims.utils import (
 )
 from torch.overrides import has_torch_function, handle_torch_function
 import torch.library
+from torch.utils._pytree import tree_map
 
 from typing import Sequence, Optional, Union, Callable, List, Tuple, Any
 from functools import reduce, partial
@@ -25,6 +26,7 @@ import math
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
+prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
 
 # Experimental module containing prototype "primitive" operations.
 
@@ -157,6 +159,30 @@ class RETURN_TYPE(Enum):
     INPLACE = (2,)
 
 
+def _wrap_tensor_meta(f):
+    def wrap(t):
+        if isinstance(t, torch.Tensor):
+            return TensorMeta(t)
+        else:
+            return t
+
+    def unwrap(t):
+        # TODO: doesn't setup aliasing relation on views correctly
+        if isinstance(t, TensorMeta):
+            return torch.empty_strided(
+                t.shape, t.stride(), dtype=t.dtype, device="meta"
+            )
+        else:
+            return t
+
+    def wrapper(*args, **kwargs):
+        wrapped_args = tree_map(wrap, args)
+        wrapped_kwargs = tree_map(wrap, kwargs)
+        return tree_map(unwrap, f(*wrapped_args, **wrapped_kwargs))
+
+    return wrapper
+
+
 def _make_prim(
     *,
     schema: str,
@@ -182,7 +208,7 @@ def _make_prim(
 
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
-    # TODO: register meta
+    prim_meta_impl.impl(name, _wrap_tensor_meta(meta))
 
     _prim = getattr(torch.ops.prims, name).default
 
