@@ -63,11 +63,11 @@ class _DataPipeSerializationWrapper:
     def __len__(self): ...
 
 
-class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
+class IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
     def __iter__(self): ...
 
 
-class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):
+class MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):
     def __getitem__(self, idx): ...
 
 

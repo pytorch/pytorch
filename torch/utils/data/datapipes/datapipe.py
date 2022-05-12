@@ -21,8 +21,8 @@ __all__ = [
     "DFIterDataPipe",
     "IterDataPipe",
     "MapDataPipe",
-    "_IterDataPipeSerializationWrapper",
-    "_MapDataPipeSerializationWrapper"
+    "IterDataPipeSerializationWrapper",
+    "MapDataPipeSerializationWrapper"
 ]
 
 T = TypeVar('T')
@@ -296,12 +296,12 @@ class _DataPipeSerializationWrapper:
             )
 
 
-class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
+class IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
     def __iter__(self):
         yield from self._datapipe
 
 
-class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):
+class MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):
     def __getitem__(self, idx):
         return self._datapipe[idx]
 
