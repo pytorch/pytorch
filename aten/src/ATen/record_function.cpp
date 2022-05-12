@@ -500,73 +500,63 @@ C10_ALWAYS_INLINE bool tryRunCallback(
 RecordFunction::RecordFunction(RecordScope scope)
     : RecordFunction(getStepCallbacks(scope)) {}
 
-RecordFunction::RecordFunction(StepCallbacks&& step_callbacks) {
-  if (!step_callbacks.empty()) {
-    state_.emplace(std::move(step_callbacks));
-    state_->ctx_.resize(state_->step_callbacks_.callbacks_.size());
-    if (state_->step_callbacks_.needs_ids_) {
-      setHandle(next_unique_record_function_handle());
-    }
+RecordFunction::RecordFunction(StepCallbacks&& step_callbacks)
+    : step_callbacks_{std::move(step_callbacks)} {
+  ctx_.resize(step_callbacks_.callbacks_.size());
+  if (step_callbacks_.needs_ids_) {
+    setHandle(next_unique_record_function_handle());
   }
 }
 
 void RecordFunction::runStartCallbacks() {
-  for (const auto i : c10::irange(state_->step_callbacks_.callbacks_.size())) {
+  for (const auto i : c10::irange(step_callbacks_.callbacks_.size())) {
     tryRunCallback</*is_start=*/true>(
-        state_->step_callbacks_.callbacks_[i], *this, state_->ctx_[i]);
+        step_callbacks_.callbacks_[i], *this, ctx_[i]);
   }
-  state_->called_start_callbacks_ = true;
+  called_start_callbacks_ = true;
 }
 
 void RecordFunction::end() {
-  if (isActive() && state_->called_start_callbacks_) {
-    for (const auto i : c10::irange(state_->step_callbacks_.callbacks_.size())) {
+  if (called_start_callbacks_) {
+    for (const auto i : c10::irange(step_callbacks_.callbacks_.size())) {
       tryRunCallback</*is_start=*/false>(
-        state_->step_callbacks_.callbacks_[i], *this, state_->ctx_[i]);
+        step_callbacks_.callbacks_[i], *this, ctx_[i]);
     }
-    state_.reset();
+    step_callbacks_.callbacks_.clear();
   }
 }
 
 const char* RecordFunction::name() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      state_, "Called name() on inactive RecordFunction");
   return c10::visit(
       c10::overloaded(
           [](const std::string& name) { return name.c_str(); },
           [](const schema_ref_t schema) {
             return schema.get().name().c_str();
           }),
-      state_->fn_);
+      fn_);
 }
 
 size_t RecordFunction::num_inputs() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      state_, "Called num_inputs() on inactive RecordFunction");
   return c10::visit(
       c10::overloaded(
-          [&](const std::string&) { return state_->inputs_.size(); },
+          [&](const std::string&) { return inputs_.size(); },
           [](const schema_ref_t schema) {
             return schema.get().arguments().size();
           }),
-      state_->fn_);
+      fn_);
 }
 
 size_t RecordFunction::num_outputs() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      state_, "Called num_outputs() on inactive RecordFunction");
   return c10::visit(
       c10::overloaded(
-          [&](const std::string&) { return state_->outputs_.size(); },
+          [&](const std::string&) { return outputs_.size(); },
           [](const schema_ref_t schema) {
             return schema.get().returns().size();
           }),
-      state_->fn_);
+      fn_);
 }
 
 c10::optional<OperatorName> RecordFunction::operator_name() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      state_, "Called operator_name() on inactive RecordFunction");
   return c10::visit(
       c10::overloaded(
           [&](const std::string&) -> c10::optional<OperatorName> {
@@ -575,7 +565,7 @@ c10::optional<OperatorName> RecordFunction::operator_name() const {
           [](const schema_ref_t schema) -> c10::optional<OperatorName> {
             return schema.get().operator_name();
           }),
-      state_->fn_);
+      fn_);
 }
 
 StepCallbacks getStepCallbacks(RecordScope scope) {
@@ -679,22 +669,16 @@ uint64_t RecordFunction::currentThreadId() {
 }
 
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
-  if (!isActive()) {
-    return;
-  }
-  state_->fn_ = name;
-  state_->sequence_nr_ = sequence_nr;
+  fn_ = name;
+  sequence_nr_ = sequence_nr;
 
   runStartCallbacks();
   invalidateInputs();
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
-  if (!isActive()) {
-    return;
-  }
-  state_->fn_ = std::move(name);
-  state_->sequence_nr_ = sequence_nr;
+  fn_ = std::move(name);
+  sequence_nr_ = sequence_nr;
 
   runStartCallbacks();
   invalidateInputs();
@@ -703,11 +687,8 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
 void RecordFunction::before(
     RecordFunction::schema_ref_t schema,
     int64_t sequence_nr) {
-  if (!isActive()) {
-    return;
-  }
-  state_->sequence_nr_ = sequence_nr;
-  state_->fn_ = schema;
+  sequence_nr_ = sequence_nr;
+  fn_ = schema;
 
   runStartCallbacks();
   invalidateInputs();
@@ -727,27 +708,22 @@ RecordFunction::~RecordFunction() {
 }
 
 void RecordFunction::_setAsync() {
-  if (isActive()) {
-    state_->is_async_ = true;
-  }
+  is_async_ = true;
 }
 
 bool RecordFunction::isAsync() const {
-  if (isActive()) {
-    return state_->is_async_;
-  }
-  return false;
+  return is_async_;
 }
 
 void RecordFunction::_setStaticRuntimeOutVariant() {
   if (isActive()) {
-    state_->is_static_runtime_out_variant_ = true;
+    is_static_runtime_out_variant_ = true;
   }
 }
 
 bool RecordFunction::isStaticRuntimeOutVariant() const {
   if (isActive()) {
-    return state_->is_static_runtime_out_variant_;
+    return is_static_runtime_out_variant_;
   }
   return false;
 }

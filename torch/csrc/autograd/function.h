@@ -154,7 +154,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     auto step_callbacks = at::getStepCallbacks(at::RecordScope::BACKWARD_FUNCTION);
     if (!step_callbacks.empty()) {
       at::RecordFunction guard(std::move(step_callbacks));
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
       // Using sequence number and thread id to correlate with
       // the forward pass function
       guard.setForwardThreadId(thread_id_);

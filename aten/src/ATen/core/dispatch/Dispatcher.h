@@ -498,7 +498,6 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   // If callbacks need inputs, we box the arguments and pass them to the guard.
   // Note: For perf reasons we wouldn't want to prematurely box the arguments.
   at::RecordFunction guard(std::move(stepCallbacks));
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.operatorDef_->op.isObserved());
   auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
   auto& schema = op.schema();
@@ -555,7 +554,6 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   auto step_callbacks = at::getStepCallbacks(at::RecordScope::FUNCTION);
   if (C10_UNLIKELY(!step_callbacks.empty() && entry.isObserved())) {
     at::RecordFunction guard(std::move(step_callbacks));
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
     auto& schema = op.schema();
     auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
