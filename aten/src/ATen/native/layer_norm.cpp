@@ -200,6 +200,10 @@ Tensor& layer_norm_out(
     double eps,
     bool /* cudnn_enable, deprecated */,
     Tensor& output) {
+
+  // First check if the devices match (CPU vs GPU)
+  TORCH_CHECK(input.device() == output.device());
+
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -213,6 +217,9 @@ Tensor& layer_norm_out(
   auto X = input.expect_contiguous();
   auto gamma = weight.expect_contiguous();
   auto beta = bias.expect_contiguous();
+
+  TORCH_CHECK(!gamma->defined() || input.device() == gamma->device());
+  TORCH_CHECK(!beta->defined() || input.device() == beta->device());
 
   Tensor mean = at::empty({M}, X->options());
   Tensor rstd = at::empty({M}, X->options());
