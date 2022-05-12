@@ -140,7 +140,7 @@ def sharded_detach(args, kwargs, pg):
         for local_shard in self_st.local_shards()
     ]
     new_metadata = copy.deepcopy(self_st.metadata())
-    new_metadata.tensor_properties.requires_grad = False 
+    new_metadata.tensor_properties.requires_grad = False
     return detached_local_shards, new_metadata
 
 _register_sharded_op_on_local_shards(
