@@ -1251,35 +1251,14 @@ Tensor min_max_mps
   }
   apparent_input_shape[0] = [NSNumber numberWithInt:num_in_elements];
 
-  // Output is a single value
-  NSMutableArray<NSNumber*> *apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-  apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-  apparent_out_shape[0] = @1;
-
-  int64_t num_output_dims = 0;
-  auto output_shape = std::make_unique<int64_t>(num_output_dims * sizeof(int64_t));
-
-  Tensor output_t = at::native::empty_mps(
-                      IntArrayRef(output_shape.get(), num_output_dims),
-                      input_t.scalar_type(),
-                      c10::nullopt,
-                      kMPS,
-                      c10::nullopt,
-                      c10::nullopt);
+  Tensor output_t = at::native::empty_mps({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   if (output_t.numel() == 0 || num_in_elements == 0) {
     return output_t;
   }
 
-  auto stream = at::mps::getCurrentMPSStream();
-
   @autoreleasepool {
-
-    // Reduction axes
-    NSMutableArray<NSNumber *> *axes = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-    axes[0] = @0;
-
-    string key = func_name + ":" + native_mps::getMPSTypeString(input_t.scalar_type());
+    string key = func_name + mps::getTensorsStringKey(input_t);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     // Initialize once if configuration not found in cache
     if(!cachedGraph) {
@@ -1297,11 +1276,11 @@ Tensor min_max_mps
 
           if(reduction_type == "max")
             outputTensor = [mpsGraph reductionMaximumWithTensor:inputTensor
-                                                           axes:axes
+                                                           axes:@[@0]
                                                            name:nil];
           else if(reduction_type == "min")
             outputTensor = [mpsGraph reductionMinimumWithTensor:inputTensor
-                                                           axes:axes
+                                                           axes:@[@0]
                                                            name:nil];
 
           newCachedGraph->inputTensor_ = inputTensor;
@@ -1314,7 +1293,7 @@ Tensor min_max_mps
     }
 
     auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t, apparent_input_shape);
-    auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
+    auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output_t, @[@1]);
 
     NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
       inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
@@ -1324,7 +1303,7 @@ Tensor min_max_mps
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
 
-    native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    native_mps::runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
   }
 
   return output_t;

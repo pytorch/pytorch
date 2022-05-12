@@ -865,7 +865,6 @@ void smooth_l1_loss_template(
       // Output is a single value in case reduction is set to mean or sum
       NSMutableArray<NSNumber*> *apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
       apparent_out_shape[0] = @1;
-      int64_t num_output_dims = 0;
       mpsInputShape = apparent_input_shape;
       mpsOutputShape = apparent_out_shape;
   }

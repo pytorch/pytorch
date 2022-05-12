@@ -19,35 +19,10 @@ namespace native {
 
 Tensor dot_mps(
   const Tensor &self,
-  const Tensor &other){
+  const Tensor &other)
+{
   using namespace mps;
-
-  TORCH_CHECK(self.is_mps());
-  TORCH_CHECK(other.is_mps());
-
-  IntArrayRef input_shape = self.sizes();
-  int64_t num_input_dims = input_shape.size();
-  NSMutableArray<NSNumber*> *apparent_input_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-  int64_t num_in_elements = 1;
-  for(int i = 0; i < num_input_dims; i++) {
-      num_in_elements *= input_shape[i];
-  }
-  apparent_input_shape[0] = [NSNumber numberWithInt:num_in_elements];
-
-  // Output is a single value in case reduction is set to mean or sum
-  NSMutableArray<NSNumber*> *apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-  apparent_out_shape[0] = @1;
-  int64_t num_output_dims = 0;
-  int64_t* output_shape = (int64_t *)malloc(num_output_dims * sizeof(int64_t));
-
-  auto output = at::native::empty_mps(
-                  IntArrayRef(output_shape, num_output_dims),
-                  self.scalar_type(),
-                  c10::nullopt,
-                  kMPS,
-                  c10::nullopt,
-                  c10::nullopt);
-  TORCH_CHECK(output.is_mps());
+  auto output = at::native::empty_mps({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   struct CachedGraph : public MPSCachedGraph
   {
@@ -83,8 +58,6 @@ Tensor dot_mps(
           MPSGraphTensor *dotProductTensor = [mpsGraph reductionSumWithTensor: dot
                                                                          axes: nil
                                                                          name: @"dotProduct"];
-
-
           newCachedGraph->selfTensor_ = selfTensor;
           newCachedGraph->otherTensor_ = otherTensor;
           newCachedGraph->outputTensor_ = dotProductTensor;

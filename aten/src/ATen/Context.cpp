@@ -235,6 +235,9 @@ bool Context::hasMPS() {
 #else
   return false;
 #endif
+#else
+   return false;
+ #endif
 }
 
 bool Context::hasOpenMP() {

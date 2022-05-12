@@ -46,16 +46,11 @@ void clamp_tensor_out_mps(const Tensor& input_t,
     const bool has_min = (min_opt.has_value() && min_opt->defined());
     const bool has_max = (max_opt.has_value() && max_opt->defined());
 
-    c10::MaybeOwned<Tensor> min_maybe_owned =
-    at::borrow_from_optional_tensor(min_opt.get());
-    c10::MaybeOwned<Tensor> max_maybe_owned =
-    at::borrow_from_optional_tensor(max_opt.get());
-
     TORCH_CHECK(has_min || has_max, op_name + ": either min, max or both tensors must be defined")
     if (has_min)
-        TORCH_CHECK(min_maybe_owned->is_same_size(input_t), op_name + ": min and input tensors must be of the same shape")
+        TORCH_CHECK(min_opt->is_same_size(input_t), op_name + ": min and input tensors must be of the same shape")
     if (has_max)
-        TORCH_CHECK(max_maybe_owned->is_same_size(input_t), op_name + ": max and input tensors must be of the same shape")
+        TORCH_CHECK(max_opt->is_same_size(input_t), op_name + ": max and input tensors must be of the same shape")
 
     if (output_t.numel() == 0)
         return;
@@ -76,9 +71,9 @@ void clamp_tensor_out_mps(const Tensor& input_t,
                     newCachedGraph = new CachedGraph(mpsGraph);
 
                     if (has_min)
-                        newCachedGraph->minTensor = mpsGraphRankedPlaceHolder(mpsGraph, *min_maybe_owned);
+                        newCachedGraph->minTensor = mpsGraphRankedPlaceHolder(mpsGraph, *min_opt);
                     if (has_max)
-                        newCachedGraph->maxTensor = mpsGraphRankedPlaceHolder(mpsGraph, *max_maybe_owned);
+                        newCachedGraph->maxTensor = mpsGraphRankedPlaceHolder(mpsGraph, *max_opt);
 
                     clamp_mps_graph(newCachedGraph, input_t);
                 }
@@ -93,11 +88,11 @@ void clamp_tensor_out_mps(const Tensor& input_t,
         NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
         feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
         if (has_min) {
-            auto minPlaceholder = Placeholder(cachedGraph->minTensor, *min_maybe_owned);
+            auto minPlaceholder = Placeholder(cachedGraph->minTensor, *min_opt);
             feeds[minPlaceholder.getMPSGraphTensor()] = minPlaceholder.getMPSGraphTensorData();
         }
         if (has_max) {
-            auto maxPlaceholder = Placeholder(cachedGraph->maxTensor, *max_maybe_owned);
+            auto maxPlaceholder = Placeholder(cachedGraph->maxTensor, *max_opt);
             feeds[maxPlaceholder.getMPSGraphTensor()] = maxPlaceholder.getMPSGraphTensorData();
         }
 
@@ -192,25 +187,10 @@ TORCH_IMPL_FUNC(clamp_out_mps)
     mps::clamp_scalar_out_mps(input_t, min, max, const_cast<Tensor&>(output_t), "clamp_out_mps");
 }
 
-// Templates don't work with the build system, so there are two versions (Tensor/Scalar) for each clamp_x op
-Tensor clamp_mps(const Tensor& input_t, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max)
-{
-    Tensor result = at::empty({0}, input_t.options());
-    mps::clamp_tensor_out_mps(input_t, min, max, result, __func__);
-    return result;
-}
-
-Tensor clamp_mps(const Tensor& input_t, const OptionalScalarRef min, const OptionalScalarRef max)
-{
-    Tensor result = at::empty({0}, input_t.options());
-    mps::clamp_scalar_out_mps(input_t, min, max, result, __func__);
-    return result;
-}
-
 TORCH_IMPL_FUNC(clamp_min_Tensor_out_mps)
 (const Tensor& input_t, const Tensor& min, const Tensor& output_t)
 {
-    mps::clamp_tensor_out_mps(input_t, min, c10::nullopt, output_t, __func__);
+    mps::clamp_tensor_out_mps(input_t, min, at::OptionalTensorRef(), output_t, __func__);
 }
 
 TORCH_IMPL_FUNC(clamp_min_out_mps)
@@ -222,7 +202,7 @@ TORCH_IMPL_FUNC(clamp_min_out_mps)
 TORCH_IMPL_FUNC(clamp_max_Tensor_out_mps)
 (const Tensor& input_t, const Tensor& max, const Tensor& output_t)
 {
-    mps::clamp_tensor_out_mps(input_t, c10::nullopt, max, output_t, __func__);
+    mps::clamp_tensor_out_mps(input_t, at::OptionalTensorRef(), max, output_t, __func__);
 }
 
 TORCH_IMPL_FUNC(clamp_max_out_mps)
@@ -230,5 +210,6 @@ TORCH_IMPL_FUNC(clamp_max_out_mps)
 {
     mps::clamp_scalar_out_mps(input_t, at::OptionalScalarRef(), max, output_t, __func__);
 }
-}
-}
+
+} // namespace native
+} // namespace at
