@@ -19143,12 +19143,12 @@ class TestNNDeviceType(NNTestCase):
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_conv_thnn_nhwc(self, device, dtype):
-        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups):
+        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups, weight_memory_format):
             input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
                 .to(memory_format=torch.channels_last)
             input.requires_grad_()
             conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)\
-                .to(device='cpu', dtype=dtype, memory_format=torch.channels_last)
+                .to(device='cpu', dtype=dtype, memory_format=weight_memory_format)
             for p in conv.parameters():
                 p.data = torch.randint_like(p, -3, 3)
 
@@ -19175,15 +19175,16 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
 
         with torch.backends.mkldnn.flags(enabled=False):
-            # non-dilated conv: thnn_conv2d normal path (with im2col)
-            helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1)
-            helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8)
-            # non-dilated conv: thnn_conv2d fast path (skip im2col)
-            helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1)
-            helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16)
-            # dilated conv: slow_conv_dilated2d
-            helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1)
-            helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16)
+            for mf in [torch.contiguous_format, torch.channels_last]:
+                # non-dilated conv: thnn_conv2d normal path (with im2col)
+                helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1, weight_memory_format=mf)
+                helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8, weight_memory_format=mf)
+                # non-dilated conv: thnn_conv2d fast path (skip im2col)
+                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1, weight_memory_format=mf)
+                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16, weight_memory_format=mf)
+                # dilated conv: slow_conv_dilated2d
+                helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1, weight_memory_format=mf)
+                helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16, weight_memory_format=mf)
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
