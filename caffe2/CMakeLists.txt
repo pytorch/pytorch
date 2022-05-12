@@ -89,8 +89,10 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
   list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
+  list(APPEND Caffe2_MPS_SRCS ${ATen_MPS_SRCS})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
+  list(APPEND Caffe2_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
   list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
@@ -230,6 +232,11 @@ if(PRINT_CMAKE_DEBUG_INFO)
     message(STATUS "  " ${tmp})
   endforeach()
 
+  message(STATUS "MPS sources: ")
+  foreach(tmp ${Caffe2_MPS_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
   message(STATUS "HIP test sources: ")
   foreach(tmp ${Caffe2_HIP_TEST_SRCS})
     message(STATUS "  " ${tmp})
@@ -237,6 +244,11 @@ if(PRINT_CMAKE_DEBUG_INFO)
 
   message(STATUS "ATen CPU test sources: ")
   foreach(tmp ${ATen_CPU_TEST_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
+  message(STATUS "ATen MPS test sources: ")
+  foreach(tmp ${ATen_MPS_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
 
@@ -417,6 +429,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     COMMAND
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
+      --tags-path "aten/src/ATen/native/tags.yaml"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
@@ -424,6 +437,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${GEN_PER_OPERATOR_FLAG}
     DEPENDS
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
     "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
     "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
     "${TORCH_ROOT}/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
@@ -533,6 +547,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/context.cpp
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/observer/PTMCoreMLObserver.mm
       )
       list(APPEND TORCH_SRCS ${COREML_DELEGATE_SRCS})
     endif()
@@ -654,6 +669,26 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
   endif()
 
+  if(USE_MLCOMPUTE)
+    include(../mlc/mlc_build.cmake)
+  endif()
+
+  if(BUILD_ONEDNN_GRAPH)
+    list(APPEND Caffe2_CPU_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/LlgaTensorImpl.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_fuser.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_rewriter.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_helper.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/register_interface.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/interface.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/defer_size_check.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/layout_propagation.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/prepare_binary.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/guard_shape.cpp
+    )
+  endif()
+
   if(USE_ROCM)
     list(APPEND Caffe2_HIP_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
     if(USE_NCCL)
@@ -734,14 +769,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
-      ${TORCH_SRC_DIR}/csrc/utils/crash_handler.cpp
     )
   endif()
 
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 endif()
 
-# NOTE [ Linking AVX-n and non-AVX-n files ]
+if(USE_MPS)
+  list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
+endif()
+
+# NOTE [ Linking AVX and non-AVX files ]
 #
 # Regardless of the CPU capabilities, we build some files with AVX2, and AVX512
 # instruction set. If the host CPU doesn't support those, we simply ignore their
@@ -1073,10 +1111,9 @@ if(USE_TBB)
   target_link_libraries(torch_cpu PUBLIC TBB::tbb)
 endif()
 
-if(USE_BREAKPAD)
-  target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
-  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src)
-  target_link_libraries(torch_cpu PRIVATE breakpad)
+if(BUILD_CAFFE2 AND BUILD_CAFFE2_OPS AND USE_FBGEMM)
+  # FIXME: quantization/server/conv_dnnlowp_op.cc depends on fbgemm/src/RefImplementations.h
+  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party)
 endif()
 
   target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
@@ -1793,6 +1830,25 @@ if(BUILD_TEST)
       endif()
     endif()
   endforeach()
+
+  if(USE_MPS)
+    foreach(test_src ${Caffe2_MPS_TEST_SRCS})
+      get_filename_component(test_name ${test_src} NAME_WE)
+      add_executable(${test_name} "${test_src}")
+      target_link_libraries(${test_name} torch_library gtest_main)
+      target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+      target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+      if(INSTALL_TEST)
+        install(TARGETS ${test_name} DESTINATION test)
+        # Install PDB files for MSVC builds
+        if(MSVC AND BUILD_SHARED_LIBS)
+          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+        endif()
+      endif()
+    endforeach()
+  endif()
 
   if(USE_CUDA)
     foreach(test_src ${Caffe2_GPU_TEST_SRCS})

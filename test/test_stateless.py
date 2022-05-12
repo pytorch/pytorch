@@ -178,5 +178,20 @@ exit(len(w))
         else:
             self.assertTrue(False, "No warning was raised.")
 
+class TestPythonOptimizeMode(TestCase):
+    def test_runs_with_optimize_flag(self):
+        script = """
+import torch
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, '-OO', '-c', script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),)
+        except subprocess.CalledProcessError as e:
+            self.assertFalse(e.returncode, "Import failed while running python in optimized mode")
+
 if __name__ == '__main__':
     run_tests()

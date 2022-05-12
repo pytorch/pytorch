@@ -1813,19 +1813,23 @@ class TestQuantizedOps(TestCase):
                 error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
 
                 for name, op in ops_under_test.items():
-                    qX_hat = op(qX, output_size=output_size)
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(
-                        X_ref, qX_hat.int_repr(), atol=1.0,
-                        rtol=0, msg=error_message.format(name, X_ref, qX_hat))
-                    self.assertEqual(
-                        scale, qX_hat.q_scale(),
-                        msg=error_message.format(name + '.scale', scale,
-                                                 qX_hat.q_scale()))
-                    self.assertEqual(
-                        zero_point, qX_hat.q_zero_point(),
-                        msg=error_message.format(name + '.zero_point', scale,
-                                                 qX_hat.q_zero_point()))
+                    # TODO: torch.cuda.is_available() should be swapped for a flag that checks if cudnn
+                    # is enabled in the build when cudnn supports adaptive average pooling
+                    devices = ["cpu", "cuda"] if (dim == 2 and torch.cuda.is_available()) else ["cpu"]
+                    for device in devices:
+                        qX_hat = op(qX.to(device=device), output_size=output_size)
+                        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                        self.assertEqualIgnoreType(
+                            X_ref, qX_hat.int_repr(), atol=1.0,
+                            rtol=0, msg=error_message.format(name, X_ref, qX_hat))
+                        self.assertEqual(
+                            scale, qX_hat.q_scale(),
+                            msg=error_message.format(name + '.scale', scale,
+                                                     qX_hat.q_scale()))
+                        self.assertEqual(
+                            zero_point, qX_hat.q_zero_point(),
+                            msg=error_message.format(name + '.zero_point', scale,
+                                                     qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool3d_ndhwc(self):
@@ -4462,16 +4466,12 @@ class TestQuantizedConv(TestCase):
                 Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False, input_dtype=X_qdtype, output_dtype=X_qdtype)
 
     @given(batch_size=st.integers(1, 3),
-           # only multiples of 16 are supported right now, might be fixed in
-           # next release of cudnn
-           # input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           input_channels_per_group=st.sampled_from([16, 32]),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           input_channels_per_group=st.integers(1, 32),
            height=st.integers(10, 16),
            width=st.integers(7, 14),
-           # only multiples of 16 are supported right now, might be fixed in
-           # next release of cudnn
-           # output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           output_channels_per_group=st.sampled_from([16, 32]),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           output_channels_per_group=st.integers(1, 32),
            # groups=st.integers(1, 3),
            groups=st.integers(1, 1),
            kernel_h=st.integers(1, 7),

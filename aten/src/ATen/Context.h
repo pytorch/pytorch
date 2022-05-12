@@ -22,6 +22,8 @@ namespace at {
 
 class Tensor;
 
+enum class TORCH_API Float32MatmulPrecision {HIGHEST, HIGH, MEDIUM};
+
 class TORCH_API Context {
  public:
   Context();
@@ -204,10 +206,13 @@ class TORCH_API Context {
   // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
   void alertCuBLASConfigNotDeterministic() const;
 
+  void setFloat32MatmulPrecision(const std::string & s);
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
+  Float32MatmulPrecision float32MatmulPrecision() const;
+  void setFloat32MatmulPrecision(Float32MatmulPrecision p);
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
   at::QEngine qEngine() const;
@@ -245,8 +250,8 @@ class TORCH_API Context {
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool benchmark_cudnn = false;
+  Float32MatmulPrecision float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
   bool allow_tf32_cudnn = true;
-  bool allow_tf32_cublas = true;
   bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
   at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;

@@ -23,5 +23,7 @@ TORCH_API c10::optional<GraphFunction*> GetDecompositionFunction(
 // For invocation in C++, recommended is to assign to static local variable
 TORCH_API Function* GetDecompositionExecutor(const char* schema_literal);
 
+TORCH_API Function* GetDecompositionExecutor(const FunctionSchema& schema);
+
 } // namespace jit
 } // namespace torch

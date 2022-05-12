@@ -73,7 +73,7 @@ class LoggingTensor(torch.Tensor):
         return rs
 
 class LoggingTensorMode(LoggingTensor):
-    # no_dispatch is only needed if you use enable_python_mode.
+    # no_dispatch is only needed if you use enable_torch_dispatch_mode.
     # It prevents infinite recursion.
     context = no_dispatch
 

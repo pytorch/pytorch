@@ -24,6 +24,126 @@ namespace cuda {
 
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 
+// There are 3 sources of information on whether to enable nvfuser:
+// 1. assigned value from setEnabled() - takes precendence if it has been set
+// 2. value from environment variable - only used if setEnabled() is unset
+// 3. default value - used if both 1 and 2 are unset.
+//
+// If 1 or 2 tries to enable nvfuser when it cannot be enabled (e.g. cuda not
+// available), then an error will be thrown. The default will not error.
+class NVFuserEnabler {
+ private:
+  c10::optional<bool> runtime_assigned_fuser_enabled_ = c10::nullopt;
+  std::once_flag enabled_check_flag_;
+  std::mutex mutex_;
+
+  static bool nvfuserCanBeEnabled() {
+#ifdef USE_ROCM
+    return false;
+#else
+    return at::globalContext().hasCUDA() &&
+        NVFuserPassManager::isRegistered() && getExecutorMode();
+#endif
+  }
+
+  static void assertFuserCanBeEnabled(bool is_enabled) {
+    if (!is_enabled) {
+      return;
+    }
+    TORCH_CHECK(
+        nvfuserCanBeEnabled(),
+        "Running CUDA fuser is only supported on CUDA builds.");
+  }
+
+  static c10::optional<bool> getFuserEnabledEnvVar() {
+    static const char* enable_c_str = std::getenv("PYTORCH_JIT_ENABLE_NVFUSER");
+    if (!enable_c_str) {
+      return c10::nullopt;
+    }
+    std::string enable(enable_c_str);
+    if (enable == "0" || enable == "OFF") {
+      return false;
+    }
+    return true;
+  }
+
+  static c10::optional<bool> getCachedFuserEnabledEnvVar() {
+    static c10::optional<bool> default_enabled = getFuserEnabledEnvVar();
+    return default_enabled;
+  }
+
+  static bool getNNCNotNVFuser() {
+    static const char* env_c_str =
+        std::getenv("PYTORCH_JIT_USE_NNC_NOT_NVFUSER");
+    if (!env_c_str) {
+      return false;
+    }
+    std::string env(env_c_str);
+    if (env == "1" || env == "ON") {
+      return true;
+    }
+    return false;
+  }
+
+  static bool getCachedNNCNotNVFuser() {
+    static bool force_disable = getNNCNotNVFuser();
+    return force_disable;
+  }
+
+  bool isEnabledImpl() {
+    std::call_once(enabled_check_flag_, [&]() {
+      // if environment variable is setting the value, we must
+      if (!runtime_assigned_fuser_enabled_.has_value() &&
+          getCachedFuserEnabledEnvVar().has_value()) {
+        assertFuserCanBeEnabled(*getCachedFuserEnabledEnvVar());
+      }
+    });
+    // 0. opportunity to force disable NVFuser
+    if (getCachedNNCNotNVFuser()) {
+      return false;
+    }
+    // 1. if user has explicitly assigned fuser value, that value takes
+    // precedence.
+    if (runtime_assigned_fuser_enabled_.has_value()) {
+      return *runtime_assigned_fuser_enabled_;
+    }
+    // 2. next precedence is any value assigned by
+    if (getCachedFuserEnabledEnvVar().has_value()) {
+      return *getCachedFuserEnabledEnvVar();
+    }
+    // 3. default value
+#ifdef FBCODE_CAFFE2
+    return false;
+#else
+    return nvfuserCanBeEnabled();
+#endif
+  }
+
+ public:
+  bool setEnabled(bool is_enabled) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    assertFuserCanBeEnabled(is_enabled);
+    bool old_value = isEnabledImpl();
+    runtime_assigned_fuser_enabled_ = is_enabled;
+    return old_value;
+  }
+
+  bool isEnabled() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return isEnabledImpl();
+  }
+};
+
+static NVFuserEnabler nvfuser_enabler;
+
+bool isEnabled() {
+  return nvfuser_enabler.isEnabled();
+}
+
+bool setEnabled(bool is_enabled) {
+  return nvfuser_enabler.setEnabled(is_enabled);
+}
+
 bool getSingletonFusion() {
   return FLAGS_torch_jit_nvfuser_singleton_fusion;
 }
@@ -68,6 +188,10 @@ void runFusionGroup(const Node* fusion_node, Stack& stack) {
 }
 
 void fuseGraph(std::shared_ptr<Graph>& graph) {
+  if (!isEnabled()) {
+    return;
+  }
+
   TORCH_CHECK(
       getFuserInterface()->fn_fuse_graph != nullptr,
       "Running the CUDA fuser requires a CUDA build.");
@@ -558,6 +682,24 @@ RegisterOperators view_guard({
                 tensor_constraint,
                 view_sizes_constraint);
             push(stack, IValue(guard_status));
+            return;
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+RegisterOperators ivalue_guard({
+    Operator(
+        "prim::CudaFusionIvalGuard(...) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::ArrayRef<IValue> inputs = last(stack, 2);
+            drop(stack, 2);
+            if (!fuser::cuda::getCudaFusionGuardMode()) {
+              push(stack, IValue(true));
+              return;
+            }
+            push(stack, inputs[0].equals(inputs[1]));
             return;
           };
         },
