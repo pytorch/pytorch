@@ -6,6 +6,7 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
