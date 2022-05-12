@@ -74,6 +74,11 @@ if(INTERN_BUILD_ATEN_OPS)
     set(GEN_ROCM_FLAG --rocm)
   endif()
 
+  set(GEN_MPS_FLAG)
+  if(USE_MPS)
+    set(GEN_MPS_FLAG --mps)
+  endif()
+
   set(CUSTOM_BUILD_FLAGS)
   if(INTERN_BUILD_MOBILE)
     if(USE_VULKAN)
@@ -136,6 +141,7 @@ if(INTERN_BUILD_ATEN_OPS)
         COMMAND ${GEN_UNBOXING_COMMAND_sources}
         DEPENDS ${all_unboxing_script} ${sources_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
   else() # Otherwise do not generate or include sources into build.
@@ -153,6 +159,7 @@ if(INTERN_BUILD_ATEN_OPS)
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
+      ${GEN_MPS_FLAG}
       ${CUSTOM_BUILD_FLAGS}
   )
 
@@ -210,6 +217,7 @@ if(INTERN_BUILD_ATEN_OPS)
       COMMAND ${GEN_COMMAND_${gen_type}}
       DEPENDS ${all_python} ${${gen_type}_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
       WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
   endforeach()
