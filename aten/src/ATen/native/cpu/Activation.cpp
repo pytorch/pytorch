@@ -886,6 +886,25 @@ void glu_kernel(TensorIteratorBase& iter) {
   });
 }
 
+void glu_jvp_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_jvp_cpu", [&] {
+    using Vec = Vectorized<scalar_t>;
+    const scalar_t one(1);
+    const Vec ones(one);
+    cpu_kernel_vec(
+      iter,
+      [one](scalar_t res, scalar_t b, scalar_t da, scalar_t db) -> scalar_t {
+        const auto sig_b = one / (one + std::exp(-b));
+        return da * sig_b + res * (db - sig_b * db);
+      },
+      [ones](Vec res, Vec b, Vec da, Vec db) -> Vec {
+        const auto sig_b = ones / (ones + b.neg().exp());
+        return da * sig_b + res * (db - sig_b * db);
+      }
+    );
+  });
+}
+
 void glu_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_backward_cpu", [&] {
     using Vec = Vectorized<scalar_t>;
@@ -1053,6 +1072,7 @@ REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 REGISTER_DISPATCH(glu_stub, &glu_kernel);
 REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
+REGISTER_DISPATCH(glu_jvp_stub, &glu_jvp_kernel);
 REGISTER_DISPATCH(silu_stub, &silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
 REGISTER_DISPATCH(mish_stub, &mish_kernel);
