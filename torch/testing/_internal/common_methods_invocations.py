@@ -14667,8 +14667,8 @@ op_db: List[OpInfo] = [
                    # TODO: add `torch.chalf` backward dtype support.
                    # AssertionError: The supported dtypes for angle on device type cuda are incorrect!
                    # The following dtypes did not work in backward but are listed by the OpInfo: {torch.complex32}.
-                   backward_dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-                   backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool),
+                   backward_dtypes=floating_and_complex_types_and(torch.bool, torch.bfloat16, torch.float16),
+                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse_csr=True,
