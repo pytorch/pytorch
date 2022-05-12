@@ -68,10 +68,6 @@ jobs:
           echo -e "" > .buckconfig
           sh scripts/buck_setup.sh
 
-      - name: Build dl
-        run: |
-          buck build :dl
-
       - name: Build glog
         run: |
           buck build third_party:glog
@@ -96,21 +92,17 @@ jobs:
         run: |
           buck build aten/src/ATen/native/quantized/cpu/qnnpack/... --keep-going
 
-      - name: Build tools
+      - name: Build aten_cpu
         run: |
-          buck build tools/... --keep-going
+          buck build :aten_cpu
 
-      # - name: Build aten_cpu
-      #   run: |
-      #     buck build :aten_cpu
+      - name: Build torch_mobile_core
+        run: |
+          buck build :torch_mobile_core
 
-      # - name: Build torch_mobile_core
-      #   run: |
-      #     buck build :torch_mobile_core
-
-      # - name: Build torch_mobile_all_ops
-      #   run: |
-      #     buck build :torch_mobile_all_ops
+      - name: Build torch_mobile_all_ops
+        run: |
+          buck build :torch_mobile_all_ops
 
       - name: Build mobile benchmark
         run: |

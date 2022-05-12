@@ -474,7 +474,6 @@ cxx_library(
     link_whole = True,
     linker_flags = [
         "-Wl,--no-as-needed",
-        "-ldl",
     ],
     visibility = ["PUBLIC"],
     exported_deps = [
@@ -499,7 +498,7 @@ cxx_library(
     link_whole = True,
     linker_flags = [
         "-Wl,--no-as-needed",
-        "-ldl",
+        # "-ldl",
     ],
     visibility = ["PUBLIC"],
     deps = [
@@ -600,16 +599,5 @@ cxx_binary(
         ":torch_mobile_core",
         ":torch_mobile_all_ops",
         "//c10:c10",
-    ],
-)
-
-cxx_binary(
-    name = 'dl',
-    srcs = [
-        'dl.c',
-    ],
-    linker_flags = [
-        "-Wl,--no-as-needed",
-        "-ldl",
     ],
 )
