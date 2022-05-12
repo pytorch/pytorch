@@ -1010,7 +1010,11 @@ def swap_custom_module_to_observed(
         node: Node,
         qconfig: QConfigAny,
         modules: Dict[str, torch.nn.Module],
-        prepare_custom_config_dict: Dict[str, Any]):
+        prepare_custom_config_dict: Dict[str, Any],
+        unique_module_instance_names: List[str]):
+    # only swap each module instance once
+    if str(node.target) not in unique_module_instance_names:
+        return
     custom_module = modules[node.target]  # type: ignore[index]
     custom_module_class_mapping = prepare_custom_config_dict.get(
         "float_to_observed_custom_module_class", {})
@@ -1122,6 +1126,11 @@ def insert_observers_for_model(
     # have a dtype assigned. Now, we insert observers for inputs
     # of this node (if needed for this node), and the output of this node
     # (if needed for this node).
+
+    # dictionary from module fqn to module instances, single entry for each module instance
+    # this is used in some operations to make sure we only do the operation once for
+    # each module instance, e.g. swapping custom modules to observed custom modules
+    unique_module_instance_names = list(dict(model.named_modules(remove_duplicate=True)).keys())
 
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
@@ -1256,7 +1265,7 @@ def insert_observers_for_model(
                                     remove_output_observer(node, model, modules)
 
                             if qhandler is not None and qhandler.is_custom_module():
-                                swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config_dict)
+                                swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config_dict, unique_module_instance_names)
 
                 else:  # output
                     maybe_insert_observers_before_graph_output(

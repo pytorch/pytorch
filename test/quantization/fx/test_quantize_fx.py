@@ -2290,6 +2290,141 @@ class TestQuantizeFx(QuantizationTestCase):
             self.assertEqual(res, ref_res)
 
     @skipIfNoFBGEMM
+    def test_custom_module_class_multiple_uses(self):
+        """ Makes sure the swaps are working when the custom module is used multiple times
+        """
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class ObservedCustomModule(torch.nn.Module):
+            def __init__(self, linear):
+                super().__init__()
+                self.linear = linear
+
+            def forward(self, x):
+                return self.linear(x)
+
+            @classmethod
+            def from_float(cls, float_module):
+                assert hasattr(float_module, 'qconfig')
+                observed = cls(float_module.linear)
+                observed.qconfig = float_module.qconfig
+                return observed
+
+        class StaticQuantCustomModule(torch.nn.Module):
+            def __init__(self, linear):
+                super().__init__()
+                self.linear = linear
+
+            def forward(self, x):
+                return self.linear(x)
+
+            @classmethod
+            def from_observed(cls, observed_module):
+                assert hasattr(observed_module, 'qconfig')
+                assert hasattr(observed_module, 'activation_post_process')
+                observed_module.linear.activation_post_process = \
+                    observed_module.activation_post_process
+                quantized = cls(nnq.Linear.from_float(observed_module.linear))
+                return quantized
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.custom = CustomModule()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.custom(x)
+                # use custom module multiple times
+                # fx graph mode quant need to make sure it is swapped only once
+                x = self.custom(x)
+                return x
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                x = self.linear2(x)
+                return x
+
+        data = torch.randn(3, 3)
+        # instantiate M and RefM and align the parameters
+        original_m = M().eval()
+        original_ref_m = RefM().eval()
+        original_ref_m.linear1.weight = torch.nn.Parameter(original_m.linear.weight.detach())
+        original_ref_m.linear1.bias = torch.nn.Parameter(original_m.linear.bias.detach())
+        original_ref_m.linear2.weight = torch.nn.Parameter(original_m.custom.linear.weight.detach())
+        original_ref_m.linear2.bias = torch.nn.Parameter(original_m.custom.linear.bias.detach())
+
+        test_configs = {
+            "static": (default_qconfig, StaticQuantCustomModule, 3),
+        }
+
+        quant_type = QuantType.STATIC
+        key = quant_type_to_str(quant_type)
+        qconfig, quantized_module_class, num_observers = test_configs[key]
+        qconfig_dict = {"": qconfig}
+        prepare_custom_config_dict = {
+            "float_to_observed_custom_module_class": {
+                "static": {
+                    CustomModule: ObservedCustomModule
+                }
+            }
+        }
+        convert_custom_config_dict = {
+            "observed_to_quantized_custom_module_class": {
+                "static": {
+                    ObservedCustomModule: quantized_module_class
+                }
+            }
+        }
+
+        # check prepared model
+        m = prepare_fx(
+            original_m,
+            qconfig_dict,
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        # calibration
+        m(data)
+        # all activation observers are inserted in the top level module
+        count_check = {
+            ns.call_module(torch.ao.quantization.MinMaxObserver): num_observers
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
+
+        # check converted/quantized model
+        m = convert_fx(
+            m,
+            convert_custom_config_dict=convert_custom_config_dict)
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor) : 1,
+            ns.call_module(nnq.Linear) : 1,
+            ns.call_method('dequantize') : 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
+        self.assertEqual(type(m.custom), quantized_module_class)
+        res = m(data)
+
+        # quantize the reference model
+        ref_m = prepare_fx(original_ref_m, qconfig_dict)
+        ref_m(data)
+        ref_m = convert_fx(ref_m)
+        ref_res = ref_m(data)
+        self.assertEqual(res, ref_res)
+
+    @skipIfNoFBGEMM
     def test_custom_module_class_input_has_multiple_users(self):
         """ Tests that the flow still works when the input of custom module
         has multiple users
