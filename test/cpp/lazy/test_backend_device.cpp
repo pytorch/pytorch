@@ -20,11 +20,12 @@ TEST(BackendDeviceTest, BackendDeviceType) {
 TEST(BackendDeviceTest, Basic1) {
   auto device = BackendDevice();
 
-  EXPECT_EQ(device.type(), 0);
   EXPECT_EQ(device.ordinal(), 0);
   if (std::getenv("LTC_TS_CUDA") != nullptr) {
+    EXPECT_EQ(device.type(), 1);
     EXPECT_STREQ(device.toString().c_str(), "CUDA0");
   } else {
+    EXPECT_EQ(device.type(), 0);
     EXPECT_STREQ(device.toString().c_str(), "CPU0");
   }
 }
