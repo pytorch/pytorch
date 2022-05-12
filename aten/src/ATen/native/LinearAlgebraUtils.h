@@ -623,7 +623,10 @@ static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  if (ndim > 3) {
+    return input.transpose(-2, -1).is_contiguous();
+  }
   auto leading_dimension = input_strides[ndim - 1];
   auto rows = input_sizes[ndim - 2];
   bool batch_stride_compatible = true;
@@ -641,7 +644,10 @@ static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
+  if (ndim > 3) {
+    return input.is_contiguous();
+  }
   auto leading_dimension = input_strides[ndim - 2];
   auto cols = input_sizes[ndim - 1];
   bool batch_stride_compatible = true;
