@@ -217,10 +217,10 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
   int64_t new_batch_idx = 0;
   int64_t original_idx = 0;
 
-  for (auto it = shape.begin(); it != shape.end(); ++it) {
+  for (auto it : shape) {
     // Keep only dimensions != 1 and the batch dimension (irrespective of size).
-    if (*it != 1 || original_idx == bdim) {
-      squeezed_sizes.push_back(*it);
+    if (it != 1 || original_idx == bdim) {
+      squeezed_sizes.push_back(it);
       if (original_idx == bdim) {
         before_batch_idx = false;
       }
