@@ -589,6 +589,7 @@ cxx_binary(
     preprocessor_flags = [
         "-DBUILD_LITE_INTERPRETER",
     ],
+    linker_flags = ["-lpthread", "-ldl"],
     deps = [
         ":torch_mobile_core",
         ":torch_mobile_all_ops",
