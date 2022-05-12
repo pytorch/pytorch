@@ -46,20 +46,20 @@ jobs:
       build-environment: linux-xenial-py3.7-gcc5.4
       docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4-build.outputs.docker-image }}
 
-  linux-xenial-py3_7-gcc7-build:
-    name: linux-xenial-py3.7-gcc7
+  linux-xenial-py3_7-gcc7-pch-build:
+    name: linux-xenial-py3.7-gcc7-pch
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc7
+      build-environment: linux-xenial-py3.7-gcc7-pch
+      docker-image-name: pytorch-linux-xenial-py3.7-gcc7-pch
 
-  linux-xenial-py3_7-gcc7-test:
-    name: linux-xenial-py3.7-gcc7
+  linux-xenial-py3_7-gcc7-pch-test:
+    name: linux-xenial-py3.7-gcc7-pch
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-py3_7-gcc7-build
+    needs: linux-xenial-py3_7-gcc7-pch-build
     with:
-      build-environment: linux-xenial-py3.7-gcc7
-      docker-image: ${{ needs.linux-xenial-py3_7-gcc7-build.outputs.docker-image }}
+      build-environment: linux-xenial-py3.7-gcc7-pch
+      docker-image: ${{ needs.linux-xenial-py3_7-gcc7-pch-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },

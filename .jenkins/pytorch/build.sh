@@ -181,6 +181,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
 fi
 
+if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
+    export USE_PRECOMPILED_HEADERS=1
+fi
+
 if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc5.4-build* ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
 fi
