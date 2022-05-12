@@ -49,6 +49,10 @@ class Beta(ExponentialFamily):
         return self.concentration1 / (self.concentration1 + self.concentration0)
 
     @property
+    def mode(self):
+        return self._dirichlet.mode[..., 0]
+
+    @property
     def variance(self):
         total = self.concentration1 + self.concentration0
         return (self.concentration1 * self.concentration0 /
