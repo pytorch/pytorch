@@ -872,7 +872,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
         xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('nn.functional.max_unpool1d', 'grad'),
-        xfail('lu_unpack')
+        xfail('lu_unpack'),
+        xfail('glu'),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
