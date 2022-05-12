@@ -60,7 +60,28 @@ _T = TypeVar("_T", bound="QuantizationConfigBase")
 
 class QuantizationConfigBase:
     """
-    TODO: write this
+    Config for specifying how to quantize a given model.
+
+    The user can specify QConfigs using the following methods (in increasing match priority):
+
+        `set_global`: sets the global (default) qconfig
+        `set_object_type`: sets the qconfig for a given module type, function, or method name
+        `set_module_name_regex`: sets the qconfig for modules matching the given regex string
+        `set_module_name`: sets the qconfig for modules matching the given module name
+        `set_module_name_object_type_order`: sets the qconfig for modules matching a combination
+            of the given module name, object type, and the index at which the module appears
+
+    Example usage::
+
+        quantization_config = PrepareQuantizationConfig()
+            .set_global(global_qconfig)
+            .set_object_type(torch.nn.Linear, qconfig1)
+            .set_object_type(torch.nn.ReLU, qconfig1)
+            .set_module_name_regex("foo.*bar.*conv[0-9]+", qconfig1)
+            .set_module_name_regex("foo.*", qconfig2)
+            .set_module_name("module1", qconfig1)
+            .set_module_name("module2", qconfig2)
+            .set_module_name_object_type_order("foo.bar", torch.nn.functional.linear, 0, qconfig3)
     """
 
     def __init__(self):
@@ -78,28 +99,44 @@ class QuantizationConfigBase:
 
     def set_global(self: _T, global_qconfig: QConfigAny) -> _T:
         """
-        TODO: write this
+        Set the global (default) qconfig.
         """
         self.global_qconfig = global_qconfig
         return self
 
-    def set_object_type(self: _T, object_type: Callable, qconfig: QConfigAny) -> _T:
+    def set_object_type(self: _T, object_type: Union[Callable, str], qconfig: QConfigAny) -> _T:
         """
-        TODO: write this
+        Set the qconfig for a given module type, function, or method name.
+        If the qconfig for an existing object type was already set, the new qconfig will override the old one.
         """
         self.object_type_qconfigs.append(QConfigObjectTypeEntry(object_type, qconfig))
         return self
 
     def set_module_name_regex(self: _T, module_name_regex: str, qconfig: QConfigAny) -> _T:
         """
-        TODO: write this
+        Set the qconfig for modules matching the given regex string.
+
+        Regexes will be matched in the order in which they are registered through this method.
+        Thus, the caller should register more specific patterns first, e.g.::
+
+            quantization_config = PrepareQuantizationConfig()
+                .set_module_name_regex("foo.*bar.*conv[0-9]+", qconfig1)
+                .set_module_name_regex("foo.*bar.*", qconfig2)
+                .set_module_name_regex("foo.*", qconfig3)
+
+        In this example, "foo.bar.conv0" would match qconfig1, "foo.bar.linear" would match qconfig2,
+        and "foo.baz.relu" would match qconfig3.
+
+        If the qconfig for an existing module name regex was already set, the new qconfig will override the
+        old one while preserving the order in which the regexes were originally registered.
         """
         self.module_name_regex_qconfigs.append(QConfigModuleNameRegexEntry(module_name_regex, qconfig))
         return self
 
     def set_module_name(self: _T, module_name: str, qconfig: QConfigAny) -> _T:
         """
-        TODO: write this
+        Set the qconfig for modules matching the given module name.
+        If the qconfig for an existing module name was already set, the new qconfig will override the old one.
         """
         self.module_name_qconfigs.append(QConfigModuleNameEntry(module_name, qconfig))
         return self
@@ -111,7 +148,11 @@ class QuantizationConfigBase:
             index: int,
             qconfig: QConfigAny) -> _T:
         """
-        TODO: write this
+        Set the qconfig for modules matching a combination of the given module name, object type,
+        and the index at which the module appears.
+
+        If the qconfig for an existing (module name, object type, index) combination was already set,
+        the new qconfig will override the old one.
         """
         self.module_name_object_type_order_qconfigs.append(
             QConfigModuleNameObjectTypeOrderEntry(module_name, object_type, index, qconfig))
@@ -119,8 +160,17 @@ class QuantizationConfigBase:
 
     def to_dict(self) -> Dict[str, Any]:
         """
-        TODO: write this
+        Convert this `QuantizationConfigBase` to a qconfig dictionary with the following keys:
+
+            "" (for global qconfig)
+            "object_type"
+            "module_name_regex"
+            "module_name"
+            "module_name_object_type_order"
+
+        The values of this dictionary are lists of tuples.
         """
+
         def to_tuple_list(l):
             return [astuple(e) for e in l]
         return {
@@ -134,7 +184,15 @@ class QuantizationConfigBase:
     @classmethod
     def from_dict(cls: Type[_T], qconfig_dict: Dict[str, Any]) -> _T:
         """
-        TODO: write this
+        Create a `QuantizationConfigBase` from a qconfig dictionary with the following keys (all optional):
+
+            "" (for global qconfig)
+            "object_type"
+            "module_name_regex"
+            "module_name"
+            "module_name_object_type_order"
+
+        The values of this dictionary are expected to be lists of tuples.
         """
         conf = cls()
         if GLOBAL_DICT_KEY in qconfig_dict:
@@ -152,20 +210,23 @@ class QuantizationConfigBase:
 
 class EqualizationConfig(QuantizationConfigBase):
     """
-    TODO: write this
+    Config for specifying how to perform equalization on a model.
+    For full details, please refer to the documentation for `QuantizationConfigBase`.
     """
     pass
 
 
 class PrepareQuantizationConfig(QuantizationConfigBase):
     """
-    TODO: write this
+    Config for specifying how to prepare a model for quantization.
+    For full details, please refer to the documentation for `QuantizationConfigBase`.
     """
     pass
 
 
 class ConvertQuantizationConfig(QuantizationConfigBase):
     """
-    TODO: write this
+    Config for specifying how to convert a model for quantization.
+    For full details, please refer to the documentation for `QuantizationConfigBase`.
     """
     pass

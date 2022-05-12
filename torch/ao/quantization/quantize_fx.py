@@ -361,117 +361,14 @@ def prepare_fx(
     equalization_config: Optional[Union[EqualizationConfig, Dict[str, Any]]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
 ) -> ObservedGraphModule:
-    # TODO(andrew): update this comment
     r""" Prepare a model for post training static quantization
 
     Args:
       * `model`: torch.nn.Module model, must be in eval mode
 
-      * `qconfig_dict`: qconfig_dict is a dictionary with the following configurations::
+      * `quantization_config`: config for specifying how to prepare the model for quantization
 
-          qconfig_dict = {
-            # optional, global config
-            "": qconfig?,
-
-            # optional, used for module and function types
-            # could also be split into module_types and function_types if we prefer
-            "object_type": [
-              (torch.nn.Conv2d, qconfig?),
-              (torch.nn.functional.add, qconfig?),
-              ...,
-             ],
-
-            # optional, used for module names
-            "module_name": [
-              ("foo.bar", qconfig?)
-              ...,
-            ],
-
-            # optional, matched in order, first match takes precedence
-            "module_name_regex": [
-              ("foo.*bar.*conv[0-9]+", qconfig?)
-              ...,
-            ],
-
-            # optional, used for matching object type invocations in a submodule by
-            # order
-            # TODO(future PR): potentially support multiple indices ('0,1') and/or
-            #   ranges ('0:3').
-            "module_name_object_type_order": [
-              # fully_qualified_name, object_type, index, qconfig
-              ("foo.bar", torch.nn.functional.linear, 0, qconfig?),
-            ],
-
-            # priority (in increasing order):
-            #   global, object_type, module_name_regex, module_name,
-            #   module_name_object_type_order
-            # qconfig == None means fusion and quantization should be skipped for anything
-            # matching the rule
-          }
-
-      * `prepare_custom_config_dict`: customization configuration dictionary for quantization tool::
-
-          prepare_custom_config_dict = {
-            # optional: specify the path for standalone modules
-            # These modules are symbolically traced and quantized as one unit
-            "standalone_module_name": [
-               # module_name, qconfig_dict, prepare_custom_config_dict
-               ("submodule.standalone",
-                None,  # qconfig_dict for the prepare function called in the submodule,
-                       # None means use qconfig from parent qconfig_dict
-                {"input_quantized_idxs": [], "output_quantized_idxs": []}),  # prepare_custom_config_dict
-                {}  # backend_config_dict, TODO: point to README doc when it's ready
-            ],
-
-            "standalone_module_class": [
-                # module_class, qconfig_dict, prepare_custom_config_dict
-                (StandaloneModule,
-                 None,  # qconfig_dict for the prepare function called in the submodule,
-                        # None means use qconfig from parent qconfig_dict
-                {"input_quantized_idxs": [0], "output_quantized_idxs": [0]},  # prepare_custom_config_dict
-                {})  # backend_config_dict, TODO: point to README doc when it's ready
-            ],
-
-            # user will manually define the corresponding observed
-            # module class which has a from_float class method that converts
-            # float custom module to observed custom module
-            # (only needed for static quantization)
-            "float_to_observed_custom_module_class": {
-               "static": {
-                   CustomModule: ObservedCustomModule
-               }
-            },
-
-            # the qualified names for the submodule that are not symbolically traceable
-            "non_traceable_module_name": [
-               "non_traceable_module"
-            ],
-
-            # the module classes that are not symbolically traceable
-            # we'll also put dynamic/weight_only custom module here
-            "non_traceable_module_class": [
-               NonTraceableModule
-            ],
-
-            # By default, inputs and outputs of the graph are assumed to be in
-            # fp32. Providing `input_quantized_idxs` will set the inputs with the
-            # corresponding indices to be quantized. Providing
-            # `output_quantized_idxs` will set the outputs with the corresponding
-            # indices to be quantized.
-            "input_quantized_idxs": [0],
-            "output_quantized_idxs": [0],
-
-            # Attributes that are not used in forward function will
-            # be removed when constructing GraphModule, this is a list of attributes
-            # to preserve as an attribute of the GraphModule even when they are
-            # not used in the code, these attributes will also persist through deepcopy
-            "preserved_attributes": ["preserved_attr"],
-          }
-
-      * `equalization_qconfig_dict`: equalization_qconfig_dict is a dictionary
-        with a similar structure as qconfig_dict except it will contain
-        configurations specific to equalization techniques such as input-weight
-        equalization.
+      * `equalization_config`: config for specifying how to perform equalization on the model
 
       * `backend_config_dict`: a dictionary that specifies how operators are quantized
          in a backend, this includes how the operaetors are observed,
@@ -479,9 +376,8 @@ def prepare_fx(
          inserted, supported dtypes etc. The structure of the dictionary is still WIP
          and will change in the future, please don't use right now.
 
-
     Return:
-      A GraphModule with observer (configured by qconfig_dict), ready for calibration
+      A GraphModule with observer (configured by quantization_config), ready for calibration
 
     Example::
 
@@ -497,11 +393,10 @@ def prepare_fx(
                 for image, target in data_loader:
                     model(image)
 
-        qconfig_dict = {"": qconfig}
-        prepared_model = prepare_fx(float_model, qconfig_dict)
+        quantization_config = PrepareQuantizationConfig().set_global(qconfig)
+        prepared_model = prepare_fx(float_model, quantization_config)
         # Run calibration
         calibrate(prepared_model, sample_inference_data)
-
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_fx")
     return _prepare_fx(
@@ -545,8 +440,8 @@ def prepare_qat_fx(
                 ...
 
         float_model.train()
-        qconfig_dict = {"": qconfig}
-        prepared_model = prepare_fx(float_model, qconfig_dict)
+        quantization_config = PrepareQuantizationConfig().set_global(qconfig)
+        prepared_model = prepare_fx(float_model, quantization_config)
         # Run calibration
         train_loop(prepared_model, train_loop)
 
@@ -610,7 +505,6 @@ def convert_fx(
     quantization_config: Union[ConvertQuantizationConfig, Dict[str, Any]] = None,
     backend_config_dict: Dict[str, Any] = None,
 ) -> torch.nn.Module:
-    # TODO(andrew): edit this comment
     r""" Convert a calibrated or trained model to a quantized model
 
     Args:
@@ -645,26 +539,18 @@ def convert_fx(
 
         * `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
 
-        * `qconfig_dict`: qconfig_dict with either same keys as what is passed to
-          the qconfig_dict in `prepare_fx` API, with same values or `None`, or
-          additional keys with values set to `None`
+        * `quantization_config`: config for specifying how to convert a model for quantization.
+
+           The keys must include the ones in the quantization_config passed to `prepare_fx` or `prepare_qat_fx`,
+           with the same values or `None`. Additional keys can be specified with values set to `None`.
 
           For each entry whose value is set to None, we skip quantizing that entry in the model::
 
-            qconfig_dict = {
-              # used for object_type, skip quantizing torch.nn.functional.add
-              "object_type": [
-                (torch.nn.functional.add, None),
-                (torch.nn.functional.linear, qconfig_from_prepare)
-                ...,
-              ],
-
-              # sed for module names, skip quantizing "foo.bar"
-              "module_name": [
-                ("foo.bar", None)
-                ...,
-              ],
-            }
+            quantization_config = ConvertQuantizationConfig
+                .set_global(qconfig_from_prepare)
+                .set_object_type(torch.nn.functional.add, None)  # skip quantizing torch.nn.functional.add
+                .set_object_type(torch.nn.functional.linear, qconfig_from_prepare)
+                .set_module_name("foo.bar", None)  # skip quantizing module "foo.bar"
 
          * `backend_config_dict`: A configuration for the backend which describes how
             operators should be quantized in the backend, this includes quantization
