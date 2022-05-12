@@ -13,9 +13,8 @@ from torch.onnx import (
     symbolic_opset14,
     symbolic_opset15,
     symbolic_opset16,
+    symbolic_registry,
 )
-
-from torch.onnx import symbolic_registry  # isort:skip
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
