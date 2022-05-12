@@ -102,7 +102,7 @@ if(APPLE)
       OUTPUT_VARIABLE _macosx_sdk_version
       OUTPUT_STRIP_TRAILING_WHITESPACE)
     if(NOT _exit_code EQUAL 0)
-        message(FATAL_ERROR "unable to get sdk version")
+      message(FATAL_ERROR "MPS: unable to get MacOS sdk version")
     endif()
     set(_MPS_supported_os_version OFF)
     if(_macosx_sdk_version VERSION_GREATER_EQUAL 12.3)

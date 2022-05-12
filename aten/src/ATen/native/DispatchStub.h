@@ -166,8 +166,6 @@ public:
   }
 
   static TORCH_API FnPtr DEFAULT;
-
-
 #ifdef HAVE_AVX512_CPU_DEFINITION
   static TORCH_API FnPtr AVX512;
 #endif
@@ -201,7 +199,6 @@ struct RegisterHIPDispatch {
 };
 
 } // anonymous namespace
-
 // Compiler will complain if you put things like std::tuple<Tensor, Tensor> in
 // the `fn` argument of DECLARE_DISPATCH. Some possible workarounds, e.g.,
 // adding parentheses and using helper struct to get rid of the parentheses, do

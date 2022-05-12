@@ -118,7 +118,7 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
     case ScalarType::Bool:
       return MPSDataTypeBool;
     default:
-      TORCH_INTERNAL_ASSERT(false, "Trying to convert ", scalar_type, " to the MPS backend but there is no mapping for it.")
+      TORCH_CHECK_TYPE(false, "Trying to convert ", scalar_type, " to the MPS backend but there is no mapping for it.")
   }
 }
 
