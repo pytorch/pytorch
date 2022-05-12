@@ -290,6 +290,7 @@ def _optimize_graph(
 
     # onnx only supports tensors, so we turn all out number types into tensors
     torch._C._jit_pass_erase_number_types(graph)
+
     if _onnx_shape_inference:
         input_names = [] if input_names is None else input_names
         dynamic_axes = {} if dynamic_axes is None else dynamic_axes
@@ -439,51 +440,37 @@ def _decide_constant_folding(do_constant_folding, operator_export_type, training
     return do_constant_folding
 
 
-def _signature(model) -> inspect.Signature:
-    should_be_callable = getattr(model, "forward", model)
-    if callable(should_be_callable):
-        return inspect.signature(should_be_callable)
-    raise ValueError("model has no forward method and is not callable")
-
-
 def _decide_input_format(model, args):
     try:
-        sig = _signature(model)
-    except ValueError as e:
-        warnings.warn("%s, skipping _decide_input_format" % e)
-        return args
-    try:
+        sig = inspect.signature(model.forward)
         ordered_list_keys = list(sig.parameters.keys())
-        if ordered_list_keys[0] == "self":
-            ordered_list_keys = ordered_list_keys[1:]
-        args_dict: Dict = {}
-        if isinstance(args, list):
-            args_list = args
-        elif isinstance(args, tuple):
-            args_list = list(args)
-        else:
-            args_list = [args]
-        if isinstance(args_list[-1], dict):
-            args_dict = args_list[-1]
-            args_list = args_list[:-1]
-        n_nonkeyword = len(args_list)
-        for optional_arg in ordered_list_keys[n_nonkeyword:]:
-            if optional_arg in args_dict:
-                args_list.append(args_dict[optional_arg])
-            # Check if this arg has a default value
-            else:
-                param = sig.parameters[optional_arg]
-                if param.default != param.empty:
-                    args_list.append(param.default)
-        args = args_list if isinstance(args, list) else tuple(args_list)
+        if isinstance(args[-1], dict):
+            args_dict = args[-1]
+            args = list(args)[:-1]
+            n_nonkeyword = len(args)
+            for optional_arg in ordered_list_keys[n_nonkeyword:]:
+                if optional_arg in args_dict:
+                    args.append(args_dict[optional_arg])
+                # Check if this arg has a default value
+                else:
+                    param = sig.parameters[optional_arg]
+                    if param.default is param.empty:
+                        args.append(None)
+                    else:
+                        args.append(param.default)
+            args = tuple(args)
+        return args
+    # Cases of models without forward functions and dict inputs
+    except (AttributeError, ValueError):
+        warnings.warn("Model has no forward function")
+        return args
     # Cases of models with no input args
     except IndexError:
-        warnings.warn("No input args, skipping _decide_input_format")
+        warnings.warn("No input args")
+        return args
     except Exception as e:
         warnings.warn("Skipping _decide_input_format\n {}".format(e.args[0]))
-
-    return args
-
+        return args
 
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
@@ -527,66 +514,37 @@ def _get_param_count_list(method_graph, args_params):
             in_vars, _ = torch.jit._flatten(arg_params_)
             param_count_list.append(len(in_vars))
         else:
-            param_count_list.append(arg_params_ is not None)
-
+            param_count_list.append(1)
     return param_count_list
-
-
-def _check_flatten_did_not_remove(original, jit_flattened):
-    """torch.jit._flatten removes None. Check if it did so in this case."""
-
-    def flatten(x):
-        if isinstance(x, (list, tuple)):
-            for inner in x:
-                for y in flatten(inner):
-                    yield y
-        elif isinstance(x, dict):
-            for inner in x.values():
-                for y in flatten(inner):
-                    yield y
-        else:
-            yield x
-
-    flattened_with_none = list(flatten(original))
-    num_none = len(flattened_with_none) - len(jit_flattened)
-    assert num_none >= 0
-    if num_none:
-        raise ValueError(
-            f"args contained {num_none} None's after flattening. "
-            "When exporting a ScriptModule or ScriptFunction, no args may "
-            "be None because that breaks type propagation."
-        )
 
 
 def _create_jit_graph(model, args):
     torch_out = None
     params: Union[List, Tuple]
-    if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
-        flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
-        _check_flatten_did_not_remove(args, flattened_args)
     if isinstance(model, torch.jit.ScriptModule):
         try:
             graph = model.forward.graph
+            torch._C._jit_pass_onnx_function_substitution(graph)
+            freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
+            module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
+            method_graph = module._get_method("forward").graph
+            args_params = tuple(args) + tuple(params)
+            param_count_list = _get_param_count_list(method_graph, args_params)
+            in_vars, _ = torch.jit._flatten(args_params)
+            graph = torch._C._propagate_and_assign_input_shapes(
+                method_graph, tuple(in_vars), param_count_list, False, False
+            )
         except AttributeError as e:
             raise RuntimeError("'forward' method must be a script method") from e
-        torch._C._jit_pass_onnx_function_substitution(graph)
-        freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
-        module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
-        method_graph = module._get_method("forward").graph
-        args_params = tuple(args) + tuple(params)
-        param_count_list = _get_param_count_list(method_graph, args_params)
-        in_vars, _ = torch.jit._flatten(args_params)
-        graph = torch._C._propagate_and_assign_input_shapes(
-            method_graph, tuple(in_vars), param_count_list, False, False
-        )
         return graph, params, torch_out, module
     elif isinstance(model, torch.jit.ScriptFunction):
         params = ()
+        in_vars, in_desc = torch.jit._flatten(tuple(args))
         graph = model.graph
         torch._C._jit_pass_onnx_function_substitution(graph)
         param_count_list = _get_param_count_list(graph, args)
         graph = torch._C._propagate_and_assign_input_shapes(
-            graph, flattened_args, param_count_list, False, False
+            graph, tuple(in_vars), param_count_list, False, False
         )
         return graph, params, torch_out, None
     else:
@@ -619,11 +577,11 @@ def _get_example_outputs(model, args):
         input_args = input_args[:-1]
 
     example_outputs = model(*input_args, **input_kwargs)
-    if isinstance(example_outputs, list):
-        example_outputs = [example_outputs]
-    elif not isinstance(example_outputs, tuple):
+    if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
         example_outputs = (example_outputs,)
 
+    if isinstance(example_outputs, list):
+        example_outputs = [example_outputs]
     return example_outputs
 
 
@@ -718,6 +676,7 @@ def _model_to_graph(
 
     model = _pre_trace_quant_model(model, args)
     graph, params, torch_out, module = _create_jit_graph(model, args)
+
     params_dict = _get_named_param_dict(graph, params)
 
     try:
@@ -736,21 +695,26 @@ def _model_to_graph(
         raise
     from torch.onnx.symbolic_helper import _onnx_shape_inference
 
-    is_script = isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule))
-    if is_script:
+    if isinstance(model, torch.jit.ScriptModule) or isinstance(
+        model, torch.jit.ScriptFunction
+    ):
         example_outputs = _get_example_outputs(model, args)
         example_outputs_final = ()
         for example_output in example_outputs:
             example_outputs_final += unpack_quantized_tensor(example_output)
         out_vars, desc = torch.jit._flatten(example_outputs_final)
         torch._C._jit_pass_onnx_assign_output_shape(
-            graph, out_vars, desc, _onnx_shape_inference, is_script
+            graph, out_vars, desc, _onnx_shape_inference
         )
+    else:
+        flatten_args, _ = torch._C._jit_flatten(args)
+        # make sure that the param dict and the graph match each other
+        assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
-    else:
-        if not isinstance(torch_out, (list, tuple)):
+    if torch_out is not None:
+        if not (isinstance(torch_out, list) or isinstance(torch_out, tuple)):
             output_wrapped = [torch_out]
         else:
             output_wrapped = torch_out  # type: ignore[assignment]
@@ -761,7 +725,7 @@ def _model_to_graph(
         # single value in PyTorch.
         if not any(getattr(out, "is_quantized", False) for out in output_tensors):
             torch._C._jit_pass_onnx_assign_output_shape(
-                graph, output_tensors, out_desc, _onnx_shape_inference, is_script
+                graph, output_tensors, out_desc, _onnx_shape_inference
             )
 
     _set_input_and_output_names(graph, input_names, output_names)
@@ -1256,7 +1220,7 @@ def _set_input_and_output_names(graph, input_names, output_names):
     set_names(list(graph.outputs()), output_names, "output")
 
 
-_attr_pattern = re.compile("^(.+)_(([ifstgz])|(ty))$")
+_attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
 def _run_symbolic_method(g, op_name, symbolic_fn, args):

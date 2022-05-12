@@ -297,11 +297,6 @@ class GraphEncoder {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
-  void EncodeTypeProto(
-      onnx::TypeProto* type_proto,
-      const TypePtr& node_type,
-      const std::string& name);
-
   void EncodeLocalFunctionOpsetImport(
       onnx::FunctionProto* func_proto,
       const Node* n,
@@ -358,16 +353,6 @@ class GraphEncoder {
       const std::string& onnx_file_path = std::string());
 
   void AddAttribute(onnx::FunctionProto* func_proto, const std::string& name);
-
-  void TensorTypeToONNXType(
-      const TensorTypePtr& tensor_type,
-      const std::string& dim_name_prefix,
-      const std::string& name,
-      const std::unordered_map<
-          std::string,
-          std::unordered_map<int64_t, std::string>>& dynamic_axes,
-      onnx::TypeProto_Tensor* onnx_tensor_type,
-      bool assign_dim_param = true);
 
   SymbolDimMap symbol_dim_map_;
   onnx::ModelProto model_proto_;
@@ -446,10 +431,6 @@ onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
       return onnx::AttributeProto_AttributeType_TENSOR;
     case AttributeKind::ts:
       return onnx::AttributeProto_AttributeType_TENSORS;
-    case AttributeKind::ty:
-      return onnx::AttributeProto_AttributeType_TYPE_PROTO;
-    case AttributeKind::tys:
-      return onnx::AttributeProto_AttributeType_TYPE_PROTOS;
     case AttributeKind::g:
       return onnx::AttributeProto_AttributeType_GRAPH;
     case AttributeKind::gs:
@@ -560,43 +541,6 @@ GraphEncoder::GraphEncoder(
   }
 }
 
-void GraphEncoder::TensorTypeToONNXType(
-    const TensorTypePtr& tensor_type,
-    const std::string& dim_name_prefix,
-    const std::string& name,
-    const std::unordered_map<
-        std::string,
-        std::unordered_map<int64_t, std::string>>& dynamic_axes,
-    onnx::TypeProto_Tensor* onnx_tensor_type,
-    bool assign_dim_param) {
-  if (tensor_type->dim()) {
-    onnx::TensorShapeProto* shape = onnx_tensor_type->mutable_shape();
-    auto sizes = tensor_type->symbolic_sizes().sizes().value();
-    for (const auto i : c10::irange(sizes.size())) {
-      shape->add_dim();
-      if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
-          (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
-        shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
-        if (!sizes[i].is_static()) {
-          symbol_dim_map_[sizes[i]] = dynamic_axes.at(name).at(i);
-        }
-      } else if (sizes[i].is_static()) {
-        shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
-      } else if (assign_dim_param) {
-        if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
-          symbol_dim_map_[sizes[i]] =
-              dim_name_prefix + name + "_dim_" + std::to_string(i);
-        }
-        shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
-      }
-    }
-  }
-  if (tensor_type->scalarType()) {
-    onnx_tensor_type->set_elem_type(
-        ATenTypeToOnnxType(tensor_type->scalarType().value()));
-  }
-}
-
 void GraphEncoder::EncodeValueInfoType(
     onnx::TypeProto* onnx_type,
     const TypePtr node_type,
@@ -604,10 +548,44 @@ void GraphEncoder::EncodeValueInfoType(
     const std::unordered_map<
         std::string,
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
-  std::string dim_name_prefix;
-  if (n->node()->kind() != prim::Param) {
-    dim_name_prefix = n->node()->kind().toUnqualString();
-  }
+  auto tensorTypeToONNXType = [&dynamic_axes, n, this](
+                                  const TensorTypePtr& t,
+                                  onnx::TypeProto_Tensor* onnx_tensor_type,
+                                  bool assign_dim_param) {
+    std::string name = n->debugName();
+    if (t->dim()) {
+      onnx::TensorShapeProto* shape = onnx_tensor_type->mutable_shape();
+      auto sizes = t->symbolic_sizes().sizes().value();
+      for (const auto i : c10::irange(sizes.size())) {
+        shape->add_dim();
+        if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
+            (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
+          shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
+          if (!sizes[i].is_static()) {
+            symbol_dim_map_[sizes[i]] = dynamic_axes.at(name).at(i);
+          }
+        } else if (sizes[i].is_static()) {
+          shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
+        } else if (assign_dim_param) {
+          if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
+            if (n->node()->kind() == prim::Param) {
+              symbol_dim_map_[sizes[i]] = name + "_dim_" + std::to_string(i);
+            } else {
+              std::string op_type = n->node()->kind().toUnqualString();
+              symbol_dim_map_[sizes[i]] =
+                  op_type + name + "_dim_" + std::to_string(i);
+            }
+          }
+          shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
+        }
+      }
+    }
+    if (t->scalarType()) {
+      onnx_tensor_type->set_elem_type(
+          ATenTypeToOnnxType(t->scalarType().value()));
+    }
+  };
+
   if (TensorTypePtr tensor_type = node_type->cast<TensorType>()) {
     if (tensor_type->dim() || tensor_type->scalarType()) {
       // Encode type if either shape or dtype exists.
@@ -619,13 +597,7 @@ void GraphEncoder::EncodeValueInfoType(
       // to denote an unknown dimension.
       // Create and assign dim_param for normal tensor type.
       auto is_sequence_tensor = static_cast<bool>(n->type()->cast<ListType>());
-      TensorTypeToONNXType(
-          tensor_type,
-          dim_name_prefix,
-          n->debugName(),
-          dynamic_axes,
-          onnx_tensor_type,
-          !is_sequence_tensor);
+      tensorTypeToONNXType(tensor_type, onnx_tensor_type, !is_sequence_tensor);
     }
   } else if (BoolTypePtr bool_type = node_type->cast<BoolType>()) {
     onnx::TypeProto_Tensor* onnx_tensor_type = onnx_type->mutable_tensor_type();
@@ -642,37 +614,6 @@ void GraphEncoder::EncodeValueInfoType(
         onnx_type->mutable_sequence_type();
     onnx::TypeProto* onnx_tensor_type = sequence_type->mutable_elem_type();
     EncodeValueInfoType(onnx_tensor_type, list_elem_type, n, dynamic_axes);
-  } else if (OptionalTypePtr optional_type = node_type->cast<OptionalType>()) {
-    auto elem_type = optional_type->getElementType();
-    if (TensorTypePtr tensor_type = elem_type->cast<TensorType>()) {
-      onnx::TypeProto_Optional* onnx_optional_type =
-          onnx_type->mutable_optional_type();
-      onnx::TypeProto_Tensor* onnx_tensor_type =
-          onnx_optional_type->mutable_elem_type()->mutable_tensor_type();
-      TensorTypeToONNXType(
-          tensor_type,
-          dim_name_prefix,
-          n->debugName(),
-          dynamic_axes,
-          onnx_tensor_type);
-    } else if (ListTypePtr inner_node_type = elem_type->cast<ListType>()) {
-      auto list_elem_type = inner_node_type->getElementType();
-      if (TensorTypePtr tensor_type = list_elem_type->cast<TensorType>()) {
-        onnx::TypeProto_Optional* onnx_optional_type =
-            onnx_type->mutable_optional_type();
-        onnx::TypeProto_Sequence* onnx_optional_sequence_type =
-            onnx_optional_type->mutable_elem_type()->mutable_sequence_type();
-        onnx::TypeProto_Tensor* onnx_tensor_type =
-            onnx_optional_sequence_type->mutable_elem_type()
-                ->mutable_tensor_type();
-        TensorTypeToONNXType(
-            tensor_type,
-            dim_name_prefix,
-            n->debugName(),
-            dynamic_axes,
-            onnx_tensor_type);
-      }
-    }
   }
 }
 
@@ -1038,26 +979,6 @@ void GraphEncoder::AddAttribute(
         EncodeTensor(t, v, {}, use_external_data_format, onnx_file_path);
       }
       break;
-    case AttributeKind::ty: {
-      attr->set_type(onnx::AttributeProto_AttributeType_TYPE_PROTO);
-      auto tp = attr->mutable_tp();
-      const TypePtr& node_type = node->ty(name);
-      EncodeTypeProto(
-          tp, node_type, node_proto->op_type() + "_" + name.toDisplayString());
-    } break;
-    case AttributeKind::tys: {
-      attr->set_type(onnx::AttributeProto_AttributeType_TYPE_PROTOS);
-      size_t index = 0;
-      for (auto& v : node->tys(name)) {
-        auto tp = attr->add_type_protos();
-        EncodeTypeProto(
-            tp,
-            v,
-            node_proto->op_type() + "_" + name.toDisplayString() + "_" +
-                std::to_string(index));
-        index++;
-      }
-    } break;
     case AttributeKind::g: {
       auto g = attr->mutable_g();
       EncodeGraph(
@@ -1177,21 +1098,6 @@ void GraphEncoder::EncodeLocalFunction(
         use_external_data_format,
         onnx_file_path);
     EncodeLocalFunctionOpsetImport(func_proto, fsub_n, custom_domains);
-  }
-}
-
-void GraphEncoder::EncodeTypeProto(
-    onnx::TypeProto* type_proto,
-    const TypePtr& node_type,
-    const std::string& name) {
-  if (TensorTypePtr tensor_type = node_type->cast<TensorType>()) {
-    onnx::TypeProto_Tensor* onnx_tensor_type =
-        type_proto->mutable_tensor_type();
-    TensorTypeToONNXType(tensor_type, "", name, {}, onnx_tensor_type);
-  } else if (ListTypePtr list_type = node_type->cast<ListType>()) {
-    onnx::TypeProto_Sequence* seq_type = type_proto->mutable_sequence_type();
-    auto elem_type = list_type->getElementType();
-    EncodeTypeProto(seq_type->mutable_elem_type(), elem_type, name);
   }
 }
 

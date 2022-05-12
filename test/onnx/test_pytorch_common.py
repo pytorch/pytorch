@@ -91,12 +91,21 @@ def skipForAllOpsetVersions():
 
     return skip_dec
 
-
-# skips tests for scripting.
-def skipScriptTest(min_opset_version=float("inf")):
+# Enables tests for scripting, instead of only tracing the model.
+def enableScriptTest():
     def script_dec(func):
         def wrapper(self):
-            self.is_script_test_enabled = self.opset_version >= min_opset_version
+            self.is_script_test_enabled = True
+            return func(self)
+        return wrapper
+    return script_dec
+
+
+# Disable tests for scripting.
+def disableScriptTest():
+    def script_dec(func):
+        def wrapper(self):
+            self.is_script_test_enabled = False
             return func(self)
 
         return wrapper

@@ -20,7 +20,7 @@ from test_pytorch_common import (
     run_tests,
     skipIfNoLapack,
     skipIfUnsupportedMinOpsetVersion,
-    skipScriptTest,
+    disableScriptTest,
 )
 from torchvision.models import shufflenet_v2_x1_0
 from torchvision.models.alexnet import alexnet
@@ -82,7 +82,7 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(PReluNet(), x)
 
-    @skipScriptTest()
+    @disableScriptTest()
     def test_concat(self):
         input_a = Variable(torch.randn(BATCH_SIZE, 3))
         input_b = Variable(torch.randn(BATCH_SIZE, 3))
@@ -93,12 +93,12 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 10, 12))
         self.exportTest(PermuteNet(), x)
 
-    @skipScriptTest()
+    @disableScriptTest()
     def test_embedding_sequential_1(self):
         x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
         self.exportTest(EmbeddingNetwork1(), x)
 
-    @skipScriptTest()
+    @disableScriptTest()
     def test_embedding_sequential_2(self):
         x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
         self.exportTest(EmbeddingNetwork2(), x)
@@ -152,7 +152,7 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
 
-    @skipScriptTest(min_opset_version=15)  # None type in outputs
+    @disableScriptTest()  # None type in outputs
     def test_inception(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
         self.exportTest(toC(inception_v3()), toC(x))
@@ -175,14 +175,14 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(densenet121()), toC(x), rtol=1e-2, atol=1e-5)
 
-    @skipScriptTest()
+    @disableScriptTest()
     def test_dcgan_netD(self):
         netD = _netD(1)
         netD.apply(weights_init)
         input = Variable(torch.empty(bsz, 3, imgsz, imgsz).normal_(0, 1))
         self.exportTest(toC(netD), toC(input))
 
-    @skipScriptTest()
+    @disableScriptTest()
     def test_dcgan_netG(self):
         netG = _netG(1)
         netG.apply(weights_init)
@@ -239,7 +239,7 @@ class TestModels(TestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    @skipScriptTest(min_opset_version=15)  # None type in outputs
+    @disableScriptTest()  # None type in outputs
     def test_googlenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
@@ -252,7 +252,7 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(mobilenet_v2()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @skipScriptTest()  # prim_data
+    @disableScriptTest()  # prim_data
     def test_shufflenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(shufflenet_v2_x1_0()), toC(x), rtol=1e-3, atol=1e-5)
