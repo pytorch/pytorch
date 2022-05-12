@@ -97,15 +97,22 @@ if(APPLE)
     # Determine if we can link against MPSGraph
     set(MPS_FOUND OFF)
     execute_process(
+      COMMAND bash -c "xcodebuild -sdk macosx -version SDKVersion"
+      RESULT_VARIABLE _exit_code
+      OUTPUT_VARIABLE _macosx_sdk_version
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _exit_code EQUAL 0)
+        message(FATAL_ERROR "unable to get sdk version")
+    endif()
+    set(_MPS_supported_os_version OFF)
+    if(_macosx_sdk_version VERSION_GREATER_EQUAL 12.3)
+        set(_MPS_supported_os_version ON)
+    endif()
+    message(STATUS "sdk version: ${_macosx_sdk_version}, mps supported: ${_MPS_supported_os_version}")
+    execute_process(
       COMMAND bash -c "xcrun --sdk macosx --show-sdk-path"
       OUTPUT_VARIABLE _macosx_sdk_path
       OUTPUT_STRIP_TRAILING_WHITESPACE)
-    set(_MPS_supported_os_version OFF)
-    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin"
-        AND DARWIN_MAJOR_VERSION VERSION_GREATER_EQUAL 21
-        AND DARWIN_MINOR_VERSION VERSION_GREATER_EQUAL 3)
-      set(_MPS_supported_os_version ON)
-    endif()
     set(_SDK_SEARCH_PATH "${_macosx_sdk_path}/System/Library/Frameworks/")
     set(_FRAMEWORK_SEARCH_PATH "/System/Library/Frameworks/")
 

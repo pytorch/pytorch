@@ -118,13 +118,14 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
     case ScalarType::Bool:
       return MPSDataTypeBool;
     default:
-      TORCH_CHECK_TYPE(false, "Unsupported data type '", scalar_type, "' on MPS backend");
+      TORCH_INTERNAL_ASSERT(false, "Trying to convert ", scalar_type, " to the MPS backend but there is no mapping for it.")
   }
 }
 
 MPSDataType getMPSScalarType(ScalarType scalar_type) {
   switch (scalar_type) {
-    // Intentional fall-through as we can support Scalars with Double type
+    // This is an intentional fallthrough supporting Double for Scalar
+    // types as they are casted to Float32 currently.
     case ScalarType::Double:
     case ScalarType::Float:
       return MPSDataTypeFloat32;
@@ -141,7 +142,7 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
     case ScalarType::Bool:
       return MPSDataTypeBool;
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported data type '", scalar_type, "' on MPS backend");
+      TORCH_INTERNAL_ASSERT(false, "Trying to convert ", scalar_type, " to the MPS backend but there is no mapping for it.")
   }
 }
 
@@ -393,6 +394,17 @@ MPSGraphTensor* mpsGraphConstantFloatPlaceHolder(MPSGraph *mpsGraph, const doubl
   return [mpsGraph constantWithScalar:value
                                 shape:mpsShape
                              dataType:MPSDataTypeFloat32];
+}
+
+MPSGraphTensor* mpsGraphConstantPlaceHolder(MPSGraph *mpsGraph, const double value, MPSShape* mpsShape, MPSDataType dataType) {
+  // Bool is not handled by constantWithScalar
+  MPSGraphTensor* constPlaceHolder = [mpsGraph constantWithScalar:value
+                                                            shape:mpsShape
+                                                         dataType:(dataType == MPSDataTypeBool ? MPSDataTypeFloat32 : dataType)];
+  if (dataType == MPSDataTypeBool)
+    return [mpsGraph castTensor:constPlaceHolder toType:MPSDataTypeBool name:@"ConstantBoolTensor"];
+
+  return constPlaceHolder;
 }
 
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType) {

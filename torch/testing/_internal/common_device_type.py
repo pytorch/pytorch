@@ -514,6 +514,9 @@ def get_device_type_test_bases():
         elif torch.backends.mps.is_available():
             test_bases.append(MPSTestBase)
 
+    if TEST_WITH_MPS:
+        test_bases.append(MPSTestBase)
+
     return test_bases
 
 device_type_test_bases = get_device_type_test_bases()

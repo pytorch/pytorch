@@ -711,6 +711,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_float32_matmul_precision", THPModule_setFloat32MatmulPrecision, METH_O,  nullptr},
   {"_get_cublas_allow_fp16_reduced_precision_reduction", THPModule_allowFP16ReductionCuBLAS, METH_NOARGS, nullptr},
   {"_set_cublas_allow_fp16_reduced_precision_reduction", THPModule_setAllowFP16ReductionCuBLAS, METH_O, nullptr},
+  //{"_get_mps_debug_verbose", THPModule_getUserEnabledDebugMPSVerbose, METH_NOARGS,     nullptr},
+  //{"_set_mps_debug_verbose", THPModule_setUserEnabledDebugMPSVerbose, METH_O,  nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
   {"_vmapmode_decrement_nesting", THPModule_vmapmode_decrement_nesting, METH_NOARGS, nullptr},
   {"_debug_only_display_vmap_fallback_warnings", THPModule_set_display_vmap_fallback_warnings_mode, METH_O, nullptr},

@@ -166,6 +166,8 @@ public:
   }
 
   static TORCH_API FnPtr DEFAULT;
+
+
 #ifdef HAVE_AVX512_CPU_DEFINITION
   static TORCH_API FnPtr AVX512;
 #endif
@@ -197,6 +199,7 @@ struct RegisterHIPDispatch {
     stub.set_cuda_dispatch_ptr(value);
   }
 };
+
 } // anonymous namespace
 
 // Compiler will complain if you put things like std::tuple<Tensor, Tensor> in

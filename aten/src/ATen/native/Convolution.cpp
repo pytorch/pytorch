@@ -213,6 +213,18 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
 #endif
 }
 
+auto ConvParams::use_mps( const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  // These checks need to be expanded. Currently we have very limited set of
+  // checks for MPS.
+  if (needs_64bit_indexing_no_split(input, weight)) {
+    return false;
+  }
+  if (!input.is_mps()) {
+    return false;
+  }
+  return true;
+}
+
 auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const -> bool {
   if (needs_64bit_indexing_no_split(input, weight)) {
     return false;
@@ -1153,6 +1165,12 @@ ConvBackend select_conv_backend(
         // unsupported
       }
     }
+  } else if (params.use_mps(input, weight)) {
+    if (params.transposed) {
+      return ConvBackend::MpsTranspose;
+    } else {
+      return ConvBackend::Mps;
+    }
   } else {
     // Only reach here when input is backend with out-of-source implementation.
     return ConvBackend::Overrideable;
@@ -1419,6 +1437,33 @@ at::Tensor _convolution(
           outputs[g] = _convolution_nogroup_backend(input_g, weight_g, bias_g, backend, params);
         }
         output = at::cat(outputs, 1);
+      }
+      break;
+    case ConvBackend::Mps:
+      TORCH_CHECK(input.options().type_equal(weight.options()),
+               "Input type (", input.toString(), ") and weight type (", weight.toString(),
+               ") should be the same");
+      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
+               "Input type (", input.toString(), ") and bias type (", bias.toString(),
+               ") should be the same");
+
+      output = at::mps_convolution(input.contiguous(), weight, bias.defined() ? bias.contiguous() : bias,
+                                     params.padding, params.stride, params.dilation,
+                                     params.groups);
+      break;
+    case ConvBackend::MpsTranspose:
+      TORCH_CHECK(input.options().type_equal(weight.options()),
+               "Input type (", input.toString(), ") and weight type (", weight.toString(),
+               ") should be the same");
+      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
+               "Input type (", input.toString(), ") and bias type (", bias.toString(),
+               ") should be the same");
+      output = at::mps_convolution_transpose(
+          input.contiguous(backend_memory_format), weight,
+          params.padding, params.output_padding,
+          params.stride, params.dilation, params.groups);
+      if (bias.defined()) {
+        output.add_(reshape_bias(input.dim(), bias));
       }
       break;
   }
@@ -1801,6 +1846,25 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
           grad_output, weight, params.padding, params.stride,
           params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
           input_weight_output_mask);
+      break;
+    }
+    case ConvBackend::Mps:
+    {
+      check_input_same_type_as_parameters(input, weight);
+      std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
+        at::mps_convolution_backward(input, grad_output, weight, params.padding,
+          params.stride, params.dilation, params.groups, output_mask);
+      break;
+    }
+    case ConvBackend::MpsTranspose:
+    {
+      check_input_same_type_as_parameters(input, weight);
+      std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
+      std::tie(backend_grad_input, backend_grad_weight) = at::mps_convolution_transpose_backward(
+        // Only make input contiguous when it is necessary for the backwards computation
+        output_mask[1] ? input.contiguous(backend_memory_format) : input,
+        grad_output, weight, params.padding, params.output_padding,
+        params.stride, params.dilation, params.groups, input_weight_output_mask);
       break;
     }
     case ConvBackend::CudnnTranspose:
