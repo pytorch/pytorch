@@ -251,21 +251,23 @@ def min_cut_rematerialization_partition(
         return required_fw_nodes, required_bw_nodes, unclaimed_nodes
 
     required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
-    cache = {}
 
-    def dist_from_fw(node):
-        if node in cache:
-            return cache[node]
+    def dist_from_bw(node):
+        print(node)
         if node not in required_fw_nodes:
             return 0
         dist = int(1e9)
         for n in node.users:
-            dist = min(dist_from_fw(n) + 1, dist)
-        cache[node] = dist
+            dist = min(dist_from_bw(n) + 1, dist)
         return dist
 
-    for node in joint_module.graph.nodes:
-        node.dist_from_fw = dist_from_fw(node)
+    for node in reversed(joint_module.graph.nodes):
+        if node not in required_fw_nodes:
+            node.dist_from_bw = 0
+        else:
+            node.dist_from_bw = int(1e9)
+            for n in node.users:
+                node.dist_from_bw = min(node.dist_from_bw, n.dist_from_bw + 1)
 
     aten = torch.ops.aten
 
@@ -325,7 +327,7 @@ def min_cut_rematerialization_partition(
         mem_sz = _size_of(node.meta['tensor_meta'])
 
         # Heuristic to bias towards nodes closer to the backwards pass
-        mem_sz = int(mem_sz + node.dist_from_fw)
+        mem_sz = int(mem_sz + node.dist_from_bw)
 
         if is_materialized(node):
             return mem_sz
