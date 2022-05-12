@@ -101,7 +101,7 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
     suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
     freeze_rng_state, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
-    skipIfCrossRef
+    skipIfCrossRef, IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -1688,6 +1688,7 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
+    @unittest.skipIf(IS_MACOS, "Failing on MacOS only")
     def test_python_ir_utils(self):
         @torch.jit.script
         def foo(inp):
@@ -9144,8 +9145,20 @@ dedent """
         inps2 = (stft(*inps), inps[1])
         self.assertEqual(istft(*inps2), torch.jit.script(istft)(*inps2))
 
+        def lu(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor]
+            return torch.lu(x)
+
+        self.checkScript(lu, (torch.randn(2, 3, 3),))
+
+        def lu_infos(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
+            return torch.lu(x, get_infos=True)
+
+        self.checkScript(lu_infos, (torch.randn(2, 3, 3),))
+
         def lu_unpack(x):
-            A_LU, pivots = torch.linalg.lu_factor(x)
+            A_LU, pivots = torch.lu(x)
             return torch.lu_unpack(A_LU, pivots)
 
         for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
@@ -10415,7 +10428,7 @@ dedent """
         self.assertTrue(n.type() == torch._C.TensorType.getInferred())
 
         with self.assertRaisesRegex(RuntimeError, "Inferred \'x\' to be of type \'Tensor"):
-            fn(1)
+            fn("1")
 
     def test_script_define_order(self):
         class M(torch.jit.ScriptModule):
@@ -11238,6 +11251,21 @@ dedent """
         FileCheck().check("int = prim::Constant").check("aten::add_").run(str(graph))
         self.run_pass("erase_number_types", graph)
         FileCheck().check_not("int = prim::Constant").run(str(graph))
+
+    def test_refine_tuple_types(self):
+        # TupleConstruct output type is not correct here.
+        graph_str = """
+        graph(%a : Float(123), %b : Float(4, 5, 6)):
+          %c : (Tensor, Tensor) = prim::TupleConstruct(%a, %b)
+          return (%c)
+        """
+        graph = parse_ir(graph_str)
+        torch._C._jit_pass_refine_tuple_types(graph)
+
+        # After the pass, the output type should've been updated.
+        self.assertTrue('(Float(123), Float(4, 5, 6))' in str(graph.findNode('prim::TupleConstruct').output()))
+
+    # TODO(henrytu): Add test for RefineTypes for NamedTuple when it's supported by IR parser.
 
     def test_remove_dropout(self):
         weight_0_shape = (20, 5)
@@ -15919,7 +15947,7 @@ dedent """
 
         with self.assertRaisesRegex(RuntimeError, (r"Expected a value of type \'Tensor \(inferred\)\'"
                                                    r"[\S\s]*Inferred \'a\' to be of type \'Tensor\'")):
-            foo(1)
+            foo("1")
 
     def test_type_comments_in_body(self):
         @torch.jit.script

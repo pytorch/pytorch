@@ -1,6 +1,7 @@
 from collections import OrderedDict, namedtuple
 import itertools
 import warnings
+import weakref
 import functools
 
 import torch
@@ -36,6 +37,20 @@ def _addindent(s_, numSpaces):
     s = '\n'.join(s)
     s = first + '\n' + s
     return s
+
+
+def _wrap_hook(hook, module):
+    weak_module = weakref.ref(module)
+
+    @functools.wraps(hook)
+    def inner(*args, **kwargs):
+        module = weak_module()
+        if module is None:
+            raise RuntimeError("You are trying to call hook of a dead object!")
+        else:
+            return hook(module, *args, **kwargs)
+
+    return inner
 
 
 r"""This tracks hooks common to all modules that are executed before/after
@@ -1166,8 +1181,7 @@ class Module:
             grad_fn = var.grad_fn
             if grad_fn is not None:
                 for hook in non_full_backward_hooks:
-                    wrapper = functools.partial(hook, self)
-                    functools.update_wrapper(wrapper, hook)
+                    wrapper = _wrap_hook(hook, self)
                     grad_fn.register_hook(wrapper)
                 self._maybe_warn_non_full_backward_hook(input, result, grad_fn)
 
@@ -1402,7 +1416,7 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
         if with_module:
-            hook = functools.partial(hook, self)
+            hook = _wrap_hook(hook, self)
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 
@@ -1555,6 +1569,9 @@ class Module:
             exists in :attr:`state_dict`, :meth:`load_state_dict` will raise a
             ``RuntimeError``.
         """
+        if not isinstance(state_dict, Mapping):
+            raise TypeError("Expected state_dict to be dict-like, got {}.".format(type(state_dict)))
+
         missing_keys: List[str] = []
         unexpected_keys: List[str] = []
         error_msgs: List[str] = []
