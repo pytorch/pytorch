@@ -586,7 +586,7 @@ TORCH_IMPL_FUNC(norm_out_mps)
 
 Tensor std_var_common_impl_mps(
   const Tensor & input_t,
-  c10::optional<IntArrayRef> dim,
+  at::OptionalIntArrayRef dim,
   c10::optional<int64_t> correction,
   bool keepdim,
   StdVarType stdVarType)
@@ -834,16 +834,16 @@ Tensor std_var_common_impl_mps(
 
 Tensor var_mps(
   const Tensor & input_t,
-  c10::optional<IntArrayRef> dim,
+  at::OptionalIntArrayRef dim,
   c10::optional<int64_t> correction,
   bool keepdim)
 {
   return std_var_common_impl_mps(input_t, dim, correction, keepdim, STANDARD_VARIANCE);
 }
 
-Tensor std_mps
-  (const Tensor & input_t,
-   c10::optional<IntArrayRef> dim,
+Tensor std_mps(
+   const Tensor & input_t,
+   at::OptionalIntArrayRef dim,
    c10::optional<int64_t> correction,
    bool keepdim)
 {

@@ -4577,7 +4577,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: std
-    #MPS: std_mps
+    MPS: std_mps
 
 - func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
@@ -4974,7 +4974,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: var
-    #MPS: var_mps
+    MPS: var_mps
 
 - func: var.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
