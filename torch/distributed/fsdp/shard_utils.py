@@ -1,7 +1,7 @@
 import bisect
 import itertools
 import math
-from typing import List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -11,7 +11,6 @@ from torch.distributed._shard.sharding_spec import (
     EnumerableShardingSpec,
     ShardingSpec,
 )
-
 
 def _sharding_spec_to_offsets(
     sharding_spec: ShardingSpec, tensor_numel: int, world_size: int
@@ -139,3 +138,24 @@ def reshard_flatten_tensor(
         group=process_group,
     )
     return local_shard
+
+
+def gather_state_dict(
+    state_dict: Dict[str, Any], curr_rank: int, output_rank: int = 0
+) -> Dict[str, Any]:
+    """
+    Given a state_dict, this API gathers all the ShardedTensor in the state_dict
+    to the output_rank, and creates a new state_dict which the values are either
+    the gathered tensors (rank == output_rank) or None (rank != output_rank).
+    """
+    new_state_dict = {}
+    for key, tensor in state_dict.items():
+        if isinstance(tensor, ShardedTensor):
+            new_state_dict[key] = tensor
+            output_tensor = (
+                torch.empty(tensor.shape).cuda() if curr_rank == output_rank else None
+            )
+            tensor.gather(0, output_tensor)
+            tensor = output_tensor
+        new_state_dict[key] = tensor
+    return new_state_dict

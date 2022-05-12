@@ -7,6 +7,7 @@ from functools import partial
 from typing import Any, Dict
 
 import torch
+import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
@@ -16,9 +17,10 @@ from torch.distributed.fsdp import (
     CPUOffload,
     MixedPrecision,
 )
+from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
+from torch.distributed.fsdp.shard_utils import gather_state_dict
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.nn import Linear, Module
-import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -36,7 +38,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
-from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
 
 
 if not dist.is_available():
@@ -54,7 +55,11 @@ INNER_SHAPE = [4, 4]
 OUTER_SHAPE = [4, 5]
 BUFFER_SHAPE = [5, 5]
 
-_SUPPORTED_STATE_DICT_IMPLS = ["state_dict", "local_state_dict"]
+_UNFLATTENED_STATE_DICT_IMPLS = ["state_dict", "sharded_state_dict"]
+_FLATTENED_STATE_DICT_IMPLS = ["local_state_dict"]
+_SUPPORTED_STATE_DICT_IMPLS = (
+    _UNFLATTENED_STATE_DICT_IMPLS + _FLATTENED_STATE_DICT_IMPLS
+)
 
 STATE_DICT_MAPPING = {
     "state_dict": StateDictType.FULL_STATE_DICT,
@@ -107,15 +112,16 @@ class TestFSDPStateDict(FSDPTest):
         model = FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs)
         return model
 
-    def _get_full_state_dict_mgr(self, model, state_dict_rank0_and_offload):
-        return FSDP.state_dict_type(
-            model,
-            StateDictType.FULL_STATE_DICT,
-            FullStateDictConfig(
+    def _get_state_dict_mgr(self, model, state_dict_type, state_dict_rank0_and_offload):
+        _state_dict_type = STATE_DICT_MAPPING[state_dict_type]
+        if state_dict_type == "state_dict":
+            config = FullStateDictConfig(
                 rank0_only=state_dict_rank0_and_offload,
                 offload_to_cpu=state_dict_rank0_and_offload,
             )
-        )
+        else:
+            config = None
+        return FSDP.state_dict_type(model, _state_dict_type, config)
 
     def _validate_state_dict_contents(
         self, fsdp_state_dict, state_dict_rank0_and_offload, ignore_keys=None
@@ -127,35 +133,44 @@ class TestFSDPStateDict(FSDPTest):
                     if ignore_keys and key in ignore_keys:
                         continue
                     self.assertEqual(
-                        tensor.device, torch.device("cpu"),
-                        f"{key} is unexpectedly on device {tensor.device}"
+                        tensor.device,
+                        torch.device("cpu"),
+                        f"{key} is unexpectedly on device {tensor.device}",
                     )
             else:
                 self.assertEqual(fsdp_state_dict, {})
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
     @parametrize(
         "cpu_offload",
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     @parametrize("fp16", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
-    def test_basic_save_and_load_state_dict(self, cpu_offload, fp16, state_dict_rank0_and_offload):
+    def test_basic_save_and_load_state_dict(
+        self, state_dict_type, cpu_offload, fp16, state_dict_rank0_and_offload
+    ):
         """
         Tests that we can save a state_dict and load it into a blank model
         with various configs such as fp16 and cpu offload and parameters
         match as expected.
         """
+        if state_dict_rank0_and_offload and state_dict_type != "state_dict":
+            return
         for model_call in [
             partial(self._get_simple_nested_model, cpu_offload=cpu_offload),
             partial(self._get_simple_model, cpu_offload=cpu_offload),
         ]:
             model = model_call()
-            full_state_dict_mgr = self._get_full_state_dict_mgr(
-                model, state_dict_rank0_and_offload
+
+            ctx = self._get_state_dict_mgr(
+                model, state_dict_type, state_dict_rank0_and_offload
             )
-            with full_state_dict_mgr:
-                fsdp_state_dict = _get_state_dict(model, cpu_offload.offload_params, fp16)
+            with ctx:
+                fsdp_state_dict = _get_state_dict(
+                    model, cpu_offload.offload_params, fp16
+                )
 
             self._validate_state_dict_contents(
                 fsdp_state_dict, state_dict_rank0_and_offload
@@ -188,7 +203,8 @@ class TestFSDPStateDict(FSDPTest):
                 for key in fsdp_state_dict.keys():
                     fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
 
-            model_new.load_state_dict(fsdp_state_dict)
+            with FSDP.state_dict_type(model_new, STATE_DICT_MAPPING[state_dict_type]):
+                model_new.load_state_dict(fsdp_state_dict)
             with FullyShardedDataParallel.summon_full_params(model_new):
                 with FullyShardedDataParallel.summon_full_params(model):
                     params = list(model.parameters())
@@ -199,21 +215,28 @@ class TestFSDPStateDict(FSDPTest):
                             self.assertEqual(tensor.dtype, torch.float16)
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
     @parametrize("mixed_precision", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
     def test_save_and_load_after_forward_state_dict(
-        self, mixed_precision, state_dict_rank0_and_offload
+        self, state_dict_type, mixed_precision, state_dict_rank0_and_offload
     ):
         """
         Test that saving after some training results in params being updated as
         expected.
         """
+        if state_dict_rank0_and_offload and state_dict_type != "state_dict":
+            return
         torch.cuda.set_device(self.rank)
-        mixed_precision = MixedPrecision(
-            param_dtype=torch.float16,
-            reduce_dtype=torch.float16,
-            buffer_dtype=torch.float16,
-        ) if mixed_precision else None
+        mixed_precision = (
+            MixedPrecision(
+                param_dtype=torch.float16,
+                reduce_dtype=torch.float16,
+                buffer_dtype=torch.float16,
+            )
+            if mixed_precision
+            else None
+        )
         model = self._get_simple_nested_model(mixed_precision=mixed_precision)
         optim = torch.optim.SGD(model.parameters(), lr=0.1)
         initial_params = _get_full_detached_param(model)
@@ -230,11 +253,17 @@ class TestFSDPStateDict(FSDPTest):
         # Ensure some training occured
         self.assertNotEqual(initial_params, trained_params)
         # Save a copy of the state_dict
-        fsd_mgr = self._get_full_state_dict_mgr(
-            model, state_dict_rank0_and_offload
+        fsd_mgr = self._get_state_dict_mgr(
+            model, state_dict_type, state_dict_rank0_and_offload
         )
         with fsd_mgr:
-            state_dict = {k: v.clone() for k, v in model.state_dict().items()}
+            state_dict = model.state_dict()
+            if state_dict_type == "state_dict":
+                state_dict = {k: v.clone() for k, v in state_dict.items()}
+            else:
+                for sharded_tensor in state_dict.values():
+                    shard = sharded_tensor._local_shards[0]
+                    shard.tensor = shard.tensor.clone().detach_()
         self._validate_state_dict_contents(state_dict, state_dict_rank0_and_offload)
         _zero_model(model)
 
@@ -250,7 +279,8 @@ class TestFSDPStateDict(FSDPTest):
             for key in state_dict.keys():
                 state_dict[key] = state_dict[key].cuda()
 
-        model.load_state_dict(state_dict)
+        with FSDP.state_dict_type(model, STATE_DICT_MAPPING[state_dict_type]):
+            model.load_state_dict(state_dict)
         loaded_params = _get_full_detached_param(model)
         self.assertEqual(loaded_params, trained_params)
 
@@ -326,7 +356,7 @@ class TestFSDPStateDict(FSDPTest):
         state_dict = self._state_dict(self._initialize_model(True), state_dict_type)
         if state_dict_type == "local_state_dict":
             self.assertEqual(set(["flat_param", "inner.flat_param"]), state_dict.keys())
-        elif state_dict_type == "state_dict":
+        elif state_dict_type in ("state_dict", "sharded_state_dict"):
             # Keys should match local model.
             local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
             local_keys = local_model.state_dict().keys()
@@ -335,11 +365,16 @@ class TestFSDPStateDict(FSDPTest):
             raise NotImplementedError(f"No test for {state_dict_type}!")
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
     @parametrize("state_dict_rank0_and_offload", [True, False])
-    def test_state_dict_load_into_local_module(self, state_dict_rank0_and_offload):
+    def test_state_dict_load_into_local_module(
+        self, state_dict_type, state_dict_rank0_and_offload
+    ):
         """
         Tests that FSDP's state_dict can be loaded into a local model.
         """
+        if state_dict_rank0_and_offload and state_dict_type != "state_dict":
+            return
         model = self._initialize_model(wrap_fsdp=True, register_buffers=True)
         optim = SGD(model.parameters(), lr=0.1)
         in_data = torch.rand(64, 4, requires_grad=True, device=torch.device("cuda"))
@@ -353,7 +388,9 @@ class TestFSDPStateDict(FSDPTest):
             fsdp_params = deepcopy(list(model.parameters()))
 
         # get FSDP state_dict. Note that by default we return full_state_dict.
-        sd_mgr = self._get_full_state_dict_mgr(model, state_dict_rank0_and_offload)
+        sd_mgr = self._get_state_dict_mgr(
+            model, state_dict_type, state_dict_rank0_and_offload
+        )
         with sd_mgr:
             fsdp_state_dict = model.state_dict()
 
@@ -368,6 +405,8 @@ class TestFSDPStateDict(FSDPTest):
             with torch.no_grad():
                 param.zero_()
 
+        fsdp_state_dict = gather_state_dict(fsdp_state_dict, self.rank)
+
         # Load fsdp's full state dict into the local and verify params are as
         # expected.
         if state_dict_rank0_and_offload:
@@ -376,10 +415,11 @@ class TestFSDPStateDict(FSDPTest):
             for key in fsdp_state_dict.keys():
                 fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
 
-        blank_local_model.load_state_dict(fsdp_state_dict)
-        local_params = list(blank_local_model.parameters())
-        for fsdp_param, local_param in zip(fsdp_params, local_params):
-            self.assertEqual(fsdp_param, local_param)
+        if self.rank == 0:
+            blank_local_model.load_state_dict(fsdp_state_dict)
+            local_params = list(blank_local_model.parameters())
+            for fsdp_param, local_param in zip(fsdp_params, local_params):
+                self.assertEqual(fsdp_param, local_param)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
@@ -395,7 +435,8 @@ class TestFSDPStateDict(FSDPTest):
                 # Full name of linear_skip param tensors in SkipModel, as would be
                 # stored in checkpoint.
                 linear_skip_tensor_names = [
-                    k for k in dict(module.named_parameters()).keys()
+                    k
+                    for k in dict(module.named_parameters()).keys()
                     if LINEAR_SKIP in k
                 ]
                 # skip SkipModule
@@ -446,9 +487,12 @@ class TestFSDPStateDict(FSDPTest):
             for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
                 self.assertNotEqual(p1, p2)
 
-        if state_dict_type != "local_state_dict":
-            local.load_state_dict(state_dict)
-            with fsdp.summon_full_params(fsdp):
+        if state_dict_type == "local_state_dict":
+            return
+        state_dict = gather_state_dict(state_dict, self.rank)
+        with fsdp.summon_full_params(fsdp):
+            if self.rank == 0:
+                local.load_state_dict(state_dict)
                 for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
                     self.assertEqual(p1, p2)
 
@@ -468,7 +512,8 @@ class TestFSDPStateDict(FSDPTest):
         model = Model(wrap_fsdp=True, register_buffers=True).cuda()
         ignored_modules = [model.outer]
         ignored_tensor_to_tensor_name = {
-            model.outer.bias: "outer.bias", model.outer.weight: "outer.weight",
+            model.outer.bias: "outer.bias",
+            model.outer.weight: "outer.weight",
             model.outer.buffer: "outer.buffer",
         }
         buffer_to_buffer_name = {
