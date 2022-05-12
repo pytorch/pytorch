@@ -13,6 +13,7 @@ import torch.nn.intrinsic.qat as nniqat
 import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
 import torch.nn.qat.dynamic as nnqatd
+from torch.ao.quantization.backend_config import get_native_backend_config_dict
 
 from .ns_types import NSNodeTargetType
 
@@ -20,46 +21,26 @@ from typing import Set, Dict, List, Optional
 
 
 def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
+    # note: this set is modified below by items from backend_config_dict
     sets_of_related_ops: List[Set[NSNodeTargetType]] = [
         # conv modules
         set([
             nn.Conv1d,
             nnq.Conv1d,
             nnqd.Conv1d,
-            nnqat.Conv1d,
-            nniqat.ConvBn1d,
-            nniqat.ConvBnReLU1d,
-            nniqat.ConvReLU1d,
             nniq.ConvReLU1d,
-            nni.ConvBn1d,
-            nni.ConvBnReLU1d,
-            nni.ConvReLU1d,
         ]),
         set([
             nn.Conv2d,
             nnq.Conv2d,
             nnqd.Conv2d,
-            nnqat.Conv2d,
-            nniqat.ConvBn2d,
-            nniqat.ConvBnReLU2d,
-            nniqat.ConvReLU2d,
             nniq.ConvReLU2d,
-            nni.ConvBn2d,
-            nni.ConvBnReLU2d,
-            nni.ConvReLU2d,
         ]),
         set([
             nn.Conv3d,
             nnq.Conv3d,
             nnqd.Conv3d,
-            nnqat.Conv3d,
-            nniqat.ConvBn3d,
-            nniqat.ConvBnReLU3d,
-            nniqat.ConvReLU3d,
             nniq.ConvReLU3d,
-            nni.ConvBn3d,
-            nni.ConvBnReLU3d,
-            nni.ConvReLU3d,
         ]),
         # conv functionals
         set([
@@ -81,15 +62,10 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.Linear,
             nnq.Linear,
-            nni.LinearReLU,
-            nni.LinearBn1d,
             nniq.LinearReLU,
             nniqd.LinearReLU,
-            nnqat.Linear,
             nnqatd.Linear,
             nnqd.Linear,
-            nniqat.LinearReLU,
-            nniqat.LinearBn1d,
             nn.modules.linear.NonDynamicallyQuantizableLinear,
         ]),
         # linear functionals
@@ -215,13 +191,11 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.Embedding,
             nnq.Embedding,
-            nnqat.Embedding,
         ]),
         # EmbeddingBag
         set([
             nn.EmbeddingBag,
             nnq.EmbeddingBag,
-            nnqat.EmbeddingBag,
         ]),
         # GroupNorm
         set([
@@ -404,6 +378,44 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nnq.Softmax,
         ]),
     ]
+
+    # for each floating point op, add versions of the op added by
+    # backend_config_dict
+    backend_config_dict = get_native_backend_config_dict()
+
+    new_connections = []
+    for config in backend_config_dict['configs']:
+
+        if 'pattern' not in config:
+            continue
+
+        # format: (c, (b, a))
+        pattern = config['pattern']
+        first_element = pattern
+        # look from the end, because pattern is in reverse order
+        while isinstance(first_element, (list, tuple)):
+            first_element = first_element[-1]
+
+        if 'fused_module' in config:
+            # case 1: pattern fuses a pattern of ops into an op
+            # example: nn.Conv1d, nn.ReLU fused into nni.ConvReLU1d
+            new_connections.append((first_element, config['fused_module']))
+
+        if 'qat_module' in config:
+            # case 2: pattern swaps a module into a QAT module
+            # example: nni.ConvReLU1d swapped into nniqat.ConvReLU1d
+            new_connections.append((first_element, config['qat_module']))
+
+        # TODO(future PR): add more cases here
+
+
+    # add the new connections from backend_config_dict
+    for item1, item2 in new_connections:
+        for set_of_related_ops in sets_of_related_ops:
+            if item1 in set_of_related_ops or item2 in set_of_related_ops:
+                set_of_related_ops.add(item1)
+                set_of_related_ops.add(item2)
+                break
 
     base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]] = {}
 
