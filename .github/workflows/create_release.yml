@@ -6,6 +6,7 @@ on:
     branches:
       - master
       - main
+      - nightly
   release:
     types: [published]
   pull_request:
