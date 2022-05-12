@@ -2780,7 +2780,7 @@ else:
                         # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
                         idx = torch.testing.make_non_contiguous(idx)
                     expected = dest.clone()
-                    dest._index_reduce_(dim, idx, src, reduce, include_self=include_self)
+                    dest.index_reduce_(dim, idx, src, reduce, include_self=include_self)
                     # fill rows in idx with reduction inits if include_self=False
                     if (not include_self):
                         expected.index_fill_(dim, idx.long(), reduction_init[reduce])

@@ -63,6 +63,7 @@
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
@@ -311,7 +312,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
-TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
+TORCH_PRECOMPUTE_META_FUNC(index_reduce)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -320,10 +321,10 @@ TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
  bool include_self) {
   (void)include_self;
   TORCH_CHECK(reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce == "amin",
-              "_index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
+              "index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
   dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "_index_reduce");
-  return TORCH_PRECOMPUTE_STRUCT(_index_reduce)().set_dim(dim);
+  index_func_meta_impl(*this, self, dim, index, source, "index_reduce");
+  return TORCH_PRECOMPUTE_STRUCT(index_reduce)().set_dim(dim);
 }
 
 } // namespace meta
@@ -1025,7 +1026,7 @@ void index_reduce_func_impl(
   }
 }
 
-TORCH_IMPL_FUNC(_index_reduce_cpu_out)
+TORCH_IMPL_FUNC(index_reduce_cpu_out)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -1379,7 +1380,14 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
+  auto result = grad.new_zeros(self.sizes());
+  // for composite compliance, use out-of-place variant of
+  // `scatter_add` if index tensor is a Tensor Subclass.
+  if (isTensorSubclassLike(index)) {
+    return result.scatter_add(dim, index, grad);
+  }
+  result.scatter_add_(dim, index, grad);
+  return result;
 }
 
 static void scatter_reduce_exclude_self_helper(
@@ -1731,7 +1739,14 @@ Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Ten
   // implicitly handles broadcasting).
   auto result = at::zeros_like(
       input.expand(at::infer_size(input.sizes(), mask.sizes())), at::MemoryFormat::Preserve);
-  return result.masked_scatter_(mask, grad);
+
+  // for composite compliance, use out-of-place variant
+  // of `masked_scatter`.
+  if (areAnyTensorSubclassLike({grad, mask})) {
+    return result.masked_scatter(mask, grad);
+  }
+  result.masked_scatter_(mask, grad);
+  return result;
 }
 
 namespace {
