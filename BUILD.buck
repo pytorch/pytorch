@@ -607,6 +607,8 @@ cxx_binary(
         'dl.c',
     ],
     linker_flags = [
+        "-dl",
+        "-Wl,--no-as-needed",
         "-ldl",
     ],
 )
