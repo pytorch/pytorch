@@ -1291,6 +1291,9 @@ void sampled_addmm_out_sparse_csr(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(B.layout() == Layout::Strided);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C.is_sparse_csr());
 
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) == batchCount(B));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) == batchCount(C));
+
   cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
   cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
@@ -1301,56 +1304,62 @@ void sampled_addmm_out_sparse_csr(
       C.scalar_type(),
       "sampled_addmm_out_sparse_csr",
       [&] {
-        auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(*A_);
-        auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(*B_);
-        auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C);
-        auto beta_ = beta.to<scalar_t>();
-        auto alpha_ = alpha.to<scalar_t>();
-        auto compute_type = at::cuda::getCudaDataType<scalar_t>();
-        auto handle = at::cuda::getCurrentCUDASparseHandle();
-        size_t buffer_size = 0;
-        TORCH_CUDASPARSE_CHECK(cusparseSDDMM_bufferSize(
-            handle,
-            opA,
-            opB,
-            &alpha_,
-            descA.descriptor(),
-            descB.descriptor(),
-            &beta_,
-            descC.descriptor(),
-            compute_type,
-            CUSPARSE_SDDMM_ALG_DEFAULT,
-            &buffer_size // output
-            ));
+        // CUDA 11.6 doesn't support batched inputs, it raises an error:
+        // ** On entry to cusparseSDDMM_bufferSize(): batched SDDMM is not supported
+        // So we need to resort to the for loop
+        for (const auto i : c10::irange(batchCount(A))) {
+          auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(*A_, /*batch_offset=*/i);
+          auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(*B_, /*batch_offset=*/i);
+          auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C, /*batch_offset=*/i);
 
-        auto& allocator = *c10::cuda::CUDACachingAllocator::get();
-        auto buffer = allocator.allocate(buffer_size);
+          auto beta_ = beta.to<scalar_t>();
+          auto alpha_ = alpha.to<scalar_t>();
+          auto compute_type = at::cuda::getCudaDataType<scalar_t>();
+          auto handle = at::cuda::getCurrentCUDASparseHandle();
+          size_t buffer_size = 0;
+          TORCH_CUDASPARSE_CHECK(cusparseSDDMM_bufferSize(
+              handle,
+              opA,
+              opB,
+              &alpha_,
+              descA.descriptor(),
+              descB.descriptor(),
+              &beta_,
+              descC.descriptor(),
+              compute_type,
+              CUSPARSE_SDDMM_ALG_DEFAULT,
+              &buffer_size // output
+              ));
 
-        TORCH_CUDASPARSE_CHECK(cusparseSDDMM_preprocess(
-            handle,
-            opA,
-            opB,
-            &alpha_,
-            descA.descriptor(),
-            descB.descriptor(),
-            &beta_,
-            descC.descriptor(),
-            compute_type,
-            CUSPARSE_SDDMM_ALG_DEFAULT,
-            buffer.get()));
+          auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+          auto buffer = allocator.allocate(buffer_size);
 
-        TORCH_CUDASPARSE_CHECK(cusparseSDDMM(
-            handle,
-            opA,
-            opB,
-            &alpha_,
-            descA.descriptor(),
-            descB.descriptor(),
-            &beta_,
-            descC.descriptor(),
-            compute_type,
-            CUSPARSE_SDDMM_ALG_DEFAULT,
-            buffer.get()));
+          TORCH_CUDASPARSE_CHECK(cusparseSDDMM_preprocess(
+              handle,
+              opA,
+              opB,
+              &alpha_,
+              descA.descriptor(),
+              descB.descriptor(),
+              &beta_,
+              descC.descriptor(),
+              compute_type,
+              CUSPARSE_SDDMM_ALG_DEFAULT,
+              buffer.get()));
+
+          TORCH_CUDASPARSE_CHECK(cusparseSDDMM(
+              handle,
+              opA,
+              opB,
+              &alpha_,
+              descA.descriptor(),
+              descB.descriptor(),
+              &beta_,
+              descC.descriptor(),
+              compute_type,
+              CUSPARSE_SDDMM_ALG_DEFAULT,
+              buffer.get()));
+        }
       });
 #endif
 }
