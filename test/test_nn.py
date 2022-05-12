@@ -10,6 +10,8 @@ import unittest.mock as mock
 import itertools
 import warnings
 import pickle
+import gc
+import weakref
 from copy import deepcopy
 from itertools import repeat, product
 from functools import reduce, partial
@@ -19158,13 +19160,16 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
             self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
 
-        # non-dilated conv goes to thnn_conv2d
-        # dilated conv goes to slow_conv_dilated2d
         with torch.backends.mkldnn.flags(enabled=False):
+            # non-dilated conv: thnn_conv2d normal path (with im2col)
             helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1)
             helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8)
+            # non-dilated conv: thnn_conv2d fast path (skip im2col)
             helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1)
             helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16)
+            # dilated conv: slow_conv_dilated2d
+            helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1)
+            helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16)
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
@@ -21432,6 +21437,23 @@ class TestStateDictHooks(TestCase):
         m_load._register_load_state_dict_pre_hook(hook_with_module, True)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
+
+    def test_no_extra_ref_to_module(self):
+        try:
+            gc.disable()
+            m = nn.Linear(10, 10)
+
+            def hook_with_module(*args, **kwargs):
+                pass
+
+            m._register_load_state_dict_pre_hook(hook_with_module, True)
+            weak_m = weakref.ref(m)
+            del m
+
+            self.assertEqual(weak_m(), None)
+        finally:
+            gc.enable()
+
 
     def test_load_state_dict_module_pre_hook(self):
         hook_called = 0
