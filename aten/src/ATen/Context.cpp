@@ -350,17 +350,17 @@ bool NoTF32Guard::should_disable_tf32() {
 // This information can be used, for example, to select implementations
 // with different numerical or performance characteristics.
 // See https://pytorch.org/docs/stable/notes/numerical_accuracy.html for details.
-thread_local bool BackwardPassGuard::is_backward_pass_;
+thread_local bool ROCmBackwardPassGuard::is_backward_pass_;
 
-BackwardPassGuard::BackwardPassGuard() {
+ROCmBackwardPassGuard::ROCmBackwardPassGuard() {
   is_backward_pass_ = true;
 }
 
-BackwardPassGuard::~BackwardPassGuard() {
+ROCmBackwardPassGuard::~ROCmBackwardPassGuard() {
   is_backward_pass_ = false;
 }
 
-bool BackwardPassGuard::is_backward_pass() {
+bool ROCmBackwardPassGuard::is_backward_pass() {
   return is_backward_pass_;
 }
 #endif

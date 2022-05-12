@@ -253,7 +253,7 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
 #ifdef USE_ROCM
   int flag = 0;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
-  flag = at::BackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
+  flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
 #endif
   TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&falpha, a, rocblas_datatype_f16_r, (int)lda, stridea,
@@ -403,7 +403,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 #ifdef USE_ROCM
   int flag = 0;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
-  flag = at::BackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
+  flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
 #endif
   TORCH_CUDABLAS_CHECK(rocblas_gemm_ex(
       handle,

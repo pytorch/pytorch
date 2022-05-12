@@ -404,9 +404,9 @@ private:
 };
 
 #ifdef USE_ROCM
-struct TORCH_API BackwardPassGuard {
-  BackwardPassGuard();
-  ~BackwardPassGuard();
+struct TORCH_API ROCmBackwardPassGuard {
+  ROCmBackwardPassGuard();
+  ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
 private:
   static thread_local bool is_backward_pass_;

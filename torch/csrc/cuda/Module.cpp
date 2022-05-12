@@ -634,7 +634,7 @@ PyObject * THCPModule_rocm_is_backward_pass(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
 #if USE_ROCM
-  bool value = at::BackwardPassGuard::is_backward_pass();
+  bool value = at::ROCmBackwardPassGuard::is_backward_pass();
 #else
   bool value = false;
 #endif
