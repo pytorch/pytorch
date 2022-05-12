@@ -1,12 +1,17 @@
 #pragma once
 
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <lazy/core/internal_ops/ltc_ops.h>
 
 namespace torch {
 namespace lazy {
 
 class TORCH_API NarrowViewUpdate : public TsNode {
  public:
+  static OpKind ClassOpKind() {
+    return ltc_narrow_view_update;
+  }
+
   NarrowViewUpdate(
       const Value& input,
       const Value& source,

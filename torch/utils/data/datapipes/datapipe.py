@@ -2,7 +2,6 @@ import functools
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
-from torch.utils.data._utils.serialization import serialize_fn, SerializationType, deserialize_fn, DILL_AVAILABLE
 from torch.utils.data.dataset import Dataset, IterableDataset
 
 __all__ = [
@@ -101,26 +100,14 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         cls.functions[function_name] = function
 
     def __getstate__(self):
+        """
+        This contains special logic to serialize `lambda` functions when `dill` is available.
+        If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
+        `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
+        """
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
-        # TODO: Fix `dill` circular dependency - https://github.com/pytorch/data/issues/237
-        if DILL_AVAILABLE:
-            state_dict = {}
-            for k, v in self.__dict__.items():
-                if callable(v):
-                    state_dict[k] = serialize_fn(v)
-                else:
-                    state_dict[k] = v
-            return state_dict
-        else:
-            return self.__dict__
-
-    def __setstate__(self, state_dict):
-        for k, v in state_dict.items():
-            if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
-                self.__dict__[k] = deserialize_fn(v)
-            else:
-                self.__dict__[k] = v
+        return self.__dict__
 
     def __reduce_ex__(self, *args, **kwargs):
         if IterDataPipe.reduce_ex_hook is not None:
@@ -153,6 +140,15 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
             return self.str_hook(self)
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
+
+    def reset(self):
+        r"""
+        Reset the `IterDataPipe` to the initial state. By default, no-op. For subclasses of `IterDataPipe`,
+        depending on their functionalities, they may want to override this method with implementations that
+        may clear the buffers and reset pointers of the DataPipe.
+        The `reset` method is always called when `__iter__` is called as part of `hook_iterator`.
+        """
+        pass
 
 
 class DFIterDataPipe(IterDataPipe):
@@ -222,26 +218,14 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         cls.functions[function_name] = function
 
     def __getstate__(self):
+        """
+        This contains special logic to serialize `lambda` functions when `dill` is available.
+        If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
+        `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
+        """
         if MapDataPipe.getstate_hook is not None:
             return MapDataPipe.getstate_hook(self)
-        # TODO: Fix `dill` circular dependency - https://github.com/pytorch/data/issues/237
-        if DILL_AVAILABLE:
-            state_dict = {}
-            for k, v in self.__dict__.items():
-                if callable(v):
-                    state_dict[k] = serialize_fn(v)
-                else:
-                    state_dict[k] = v
-            return state_dict
-        else:
-            return self.__dict__
-
-    def __setstate__(self, state_dict):
-        for k, v in state_dict.items():
-            if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
-                self.__dict__[k] = deserialize_fn(v)
-            else:
-                self.__dict__[k] = v
+        return self.__dict__
 
     def __reduce_ex__(self, *args, **kwargs):
         if MapDataPipe.reduce_ex_hook is not None:
