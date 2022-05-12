@@ -391,7 +391,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
 
 #ifdef USE_ROCM
   // Keep track of backward pass for rocblas.
-  at::BackwardPassGuard in_backward;
+  at::ROCmBackwardPassGuard in_backward;
 #endif
 
   // local_ready_queue should already been initialized when we get into thread_main
