@@ -1545,11 +1545,7 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
 
   // Check whether the Value is TensorType
   auto _is_tensor = [](const jit::Value* el) {
-    if (el->type()->kind() == TypeKind::TensorType) {
-      return true;
-    } else {
-      return false;
-    }
+    return el->type()->kind() == TypeKind::TensorType;
   };
 
   std::vector<torch::jit::StrideInput> empty_strides = {};
@@ -1586,8 +1582,14 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
 
                     auto has_symbolic_strides = sym_stride_outputs_.size() > 0;
                     std::vector<torch::jit::StrideInput> output_strides = {};
-                    if (has_symbolic_strides)
+                    if (has_symbolic_strides) {
                       output_strides.push_back(getSymbolicOutputStrideDesc(el));
+                    } else {
+                      // It is a concrete tensor but does not have stride information
+                      if (!(el->isCompleteTensor()))
+                        return true;
+                    }
+
                     return MemoryLayoutPolicy::kChannelsLastNdContiguous ==
                         _get_preferred_mem_policy(
                                el,
