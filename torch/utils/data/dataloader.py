@@ -26,9 +26,10 @@ from . import (
     SequentialSampler,
     RandomSampler,
     BatchSampler,
-    Dataset,
-    IterDataPipeSerializationWrapper,
-    MapDataPipeSerializationWrapper)
+    Dataset,)
+
+from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
+
 from . import _utils
 
 import torch.utils.data.graph_settings
@@ -221,9 +222,9 @@ class DataLoader(Generic[T_co]):
 
         # _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
         if isinstance(self.dataset, IterDataPipe):
-            self.dataset = IterDataPipeSerializationWrapper(self.dataset)
+            self.dataset = _IterDataPipeSerializationWrapper(self.dataset)
         elif isinstance(self.dataset, MapDataPipe):
-            self.dataset = MapDataPipeSerializationWrapper(self.dataset)
+            self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
 
         # Arg-check dataset related before checking samplers because we want to
         # tell users that iterable-style datasets are incompatible with custom
