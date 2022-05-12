@@ -17076,6 +17076,10 @@ op_db: List[OpInfo] = [
         nan_policy='propagate',
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        # FIXME: mean needs 'dim' parameter when using the 'out' overload.
+        # Adding it with 'generate_args_kwargs' does not work, since these also get passed
+        # onto the reference implementations.
+        supports_out=False,
         assert_autodiffed=True,
         assert_jit_shape_analysis=True,
         promotes_int_to_float=True,
@@ -17083,11 +17087,6 @@ op_db: List[OpInfo] = [
         ref=reference_reduction_numpy(np.mean),
         error_inputs_func=error_inputs_mean,
         skips=(
-            # FIXME: mean needs 'dim' parameter when using the 'out' overload.
-            # Adding it with 'generate_args_kwargs' does not work, since these also get passed
-            # onto the reference implementations.
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),
             # FIXME: mean does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: mean reduces all dimensions when dim=[]
