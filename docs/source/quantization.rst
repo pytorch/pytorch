@@ -604,7 +604,7 @@ The following table compares the differences between Eager Mode Quantization and
 |                 |Static, Dynamic,   |Static, Dynamic,   |
 |                 |Weight Only        |Weight Only        |
 |                 |                   |                   |
-|                 |Quantiztion Aware  |Quantiztion Aware  |
+|                 |Quantization Aware |Quantization Aware |
 |                 |Training:          |Training:          |
 |                 |Static             |Static             |
 +-----------------+-------------------+-------------------+
