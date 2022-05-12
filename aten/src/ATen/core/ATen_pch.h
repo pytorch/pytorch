@@ -99,7 +99,7 @@
 #include <c10/core/StorageImpl.h>
 #include <c10/core/Stream.h>
 #include <c10/core/SymInt.h>
-#include <c10/core/SymIntArrayRef.h>
+#include <ATen/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
