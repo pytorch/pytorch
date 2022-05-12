@@ -1121,7 +1121,7 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(aten.detach)
+@register_decomposition(aten.detach, disable_meta=True)
 def detach_decomposition(x):
     return x
 
