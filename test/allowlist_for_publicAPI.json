@@ -258,7 +258,6 @@
     "Argument",
     "Callable",
     "Dict",
-    "EqualizationConfig",
     "Graph",
     "GraphModule",
     "List",
@@ -442,6 +441,7 @@
     "Dict",
     "OrderedDict",
     "QConfigAny",
+    "QConfigMapping",
     "Union",
     "get_combined_dict",
     "get_default_qat_module_mappings"
