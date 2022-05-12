@@ -26,7 +26,7 @@
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/index_add_native.h>
-#include <ATen/ops/_index_reduce_native.h>
+#include <ATen/ops/index_reduce_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
 #endif
@@ -860,7 +860,7 @@ TORCH_IMPL_FUNC(index_add_cuda_out)
   index_add_cuda_impl(self, dim, index, source, alpha, result);
 }
 
-TORCH_IMPL_FUNC(_index_reduce_cuda_out)
+TORCH_IMPL_FUNC(index_reduce_cuda_out)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,

@@ -225,6 +225,12 @@ index_copy(input, dim, index, source, *, out=None) -> Tensor
 See :meth:`~Tensor.index_add_` for function description.
 """)
 
+add_docstr(torch.index_reduce, r"""
+index_reduce(input, dim, index, source, reduce, *, include_self=True, out=None) -> Tensor
+
+See :meth:`~Tensor.index_reduce_` for function description.
+""")
+
 add_docstr(torch.add, r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
 
