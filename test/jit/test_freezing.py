@@ -1687,7 +1687,7 @@ class TestFrozenOptimizations(JitTestCase):
             def __init__(self, in_channels, out_channels, **kwargs):
                 super(ConvBN, self).__init__()
                 self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=False, dtype=torch.half, **kwargs)
-                self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001, dtype=torch.half)
+                self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001, dtype=torch.float)
 
             def forward(self, x):
                 return self.bn(self.conv(x))
