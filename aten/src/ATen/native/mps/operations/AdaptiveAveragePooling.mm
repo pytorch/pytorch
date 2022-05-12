@@ -85,17 +85,27 @@ Tensor adaptive_avg_pool2d_mps
 
   IntArrayRef output_shape;
 
-  int64_t osizeH = output_size[0];
-  int64_t osizeW = output_size[1];
+  auto osizeH = output_size[0];
+  auto osizeW = output_size[1];
+
+  std::vector<long long> out_dims = {};
 
   if(input.ndimension() == 4) {
-    int64_t sizeB = input.size(0);
-    int64_t sizeD = input.size(1);
-    output_shape = IntArrayRef({sizeB, sizeD, osizeH, osizeW});
+    auto sizeB = input.size(0);
+    auto sizeD = input.size(1);
+
+    out_dims.push_back(sizeB);
+    out_dims.push_back(sizeD);
+    out_dims.push_back(osizeH);
+    out_dims.push_back(osizeW);
+    output_shape = IntArrayRef(out_dims);
   }
   else {
-    int64_t sizeD = input.size(0);
-    output_shape = IntArrayRef({sizeD, osizeH, osizeW});
+    auto sizeD = input.size(0);
+    out_dims.push_back(sizeD);
+    out_dims.push_back(osizeH);
+    out_dims.push_back(osizeW);
+    output_shape = IntArrayRef(out_dims);
   }
 
   const auto memory_format = input.suggest_memory_format();
@@ -106,7 +116,6 @@ Tensor adaptive_avg_pool2d_mps
                       kMPS,
                       c10::nullopt,
                       memory_format);
-
   return adaptive_avg_pool2d_out_mps(input, output_size, output);
 
 }
