@@ -526,6 +526,31 @@ class TestUnaryUfuncs(TestCase):
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
 
+    @onlyCPU
+    def test_nan_to_num_bfloat16(self, device):
+        def test_dtype(fn, input, dtype):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out = fn(input)
+            out.sum().backward()
+            out2 = fn(input2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2, exact_dtype=False)
+            self.assertEqual(input.grad, input2.grad, exact_dtype=False)
+
+        def func():
+            return torch.nan_to_num
+
+        shapes = [[1, 3, 6, 6], [1, 3, 6, 128], [1, 3, 256, 256]]
+        for shape in shapes:
+            x = torch.randn(shape, device=device)
+            extremals = [float('nan'), float('inf'), -float('inf')]
+            for id1, id2, extremal in zip(torch.randint(0, 2, (3,)), torch.randint(0, 5, (3,)), extremals):
+                x[0, id1, id2, :] = extremal
+            test_dtype(func(), x, torch.bfloat16)
+
     @dtypes(torch.cdouble)
     def test_complex_edge_values(self, device, dtype):
         # sqrt Test Reference: https://github.com/pytorch/pytorch/pull/47424
