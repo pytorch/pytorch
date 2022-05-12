@@ -277,7 +277,6 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
 #if AT_MKLDNN_ENABLED()
   auto const& input = getTensorInfoJit(node->input(0));
   auto const& weight = getTensorInfoJit(node->input(1));
-  auto const& bias = getTensorInfoJit(node->input(2));
   auto const& stride = toIValue(node->input(3));
   auto const& pad = toIValue(node->input(4));
   auto const& dilation = toIValue(node->input(5));
