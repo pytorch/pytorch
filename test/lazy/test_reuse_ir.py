@@ -37,7 +37,7 @@ class TestLazyReuseIr(TestCase):
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused::N5torch4lazy9AddTensorE") >= 16
+        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 16
         metrics.reset()
         torch._lazy.ir_cache.reset()
 
@@ -66,8 +66,8 @@ class TestLazyReuseIr(TestCase):
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused::N5torch4lazy9AddTensorE") >= 10
-        assert metrics.counter_value("IrNodeReused::N5torch4lazy9SubTensorE") >= 4
+        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 10
+        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 4
         metrics.reset()
         torch._lazy.ir_cache.reset()
 
@@ -97,7 +97,7 @@ class TestLazyReuseIr(TestCase):
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused::N5torch4lazy9AddTensorE") >= 11
+        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 11
         metrics.reset()
         torch._lazy.ir_cache.reset()
         torch._lazy.config.set_force_fallback("")
