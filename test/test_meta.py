@@ -825,19 +825,6 @@ class TestMeta(TestCase):
         else:
             do_test()
 
-class TestMetaGeneric(TestCase):
-    def test_decomps_used_for_meta(self):
-        for op in decomposition_table:
-            name = op._schema.name
-            if op._schema.overload_name:
-                name += "." + op._schema.overload_name
-            if name in ["aten::detach"]:
-                continue
-            r = torch._C._dispatch_has_kernel_for_dispatch_key(name, 'Meta')
-            if not r:
-                print(name)
-            # self.assertTrue(r, f'{name} has a decomposition but no meta kernel')
-
 instantiate_device_type_tests(TestMeta, globals())
 
 if __name__ == "__main__":
