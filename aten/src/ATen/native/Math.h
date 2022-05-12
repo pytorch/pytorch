@@ -3016,10 +3016,12 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_i0(T x) {
             +8.04490411014108831608e-01,
     };
 
-    if (x < 0) x = -x;
+    if (x < T(0.0)) {
+        x = -x;
+    }
 
-    if (x <= 8.0) {
-        T y = (x / T(2.0)) - T(2.0);
+    if (x <= T(8.0)) {
+        y = (x / T(2.0)) - T(2.0);
 
         return chbevl(y, A, 30);
     }
@@ -3089,21 +3091,22 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_i1(T x) {
             +7.78576235018280120474e-01,
     };
 
-    T z = std::abs(x);
+    T y;
+    T z;
 
-    if (z <= 8.0) {
-        T y = (z / T(2.0)) - T(2.0);
+    z = std::abs(x);
 
-        T a = chbevl(y, A, 29);
+    if (z <= T(8.0)) {
+	      y = (z / T(2.0)) - T(2.0);
 
-        z = a * z;
+	      z = chbevl(y, A, 29) * z;
     } else {
-        T b = chbevl(T(32.0) / z - T(2.0), B, 25);
-
-        z = b / std::sqrt(z);
+	      z = chbevl(T(32.0) / z - T(2.0), B, 25) / sqrt(z);
     }
 
-    if (x < T(0.0)) z = -z;
+    if (x < 0.0) {
+        z = -z;
+    }
 
     return z;
 } // scaled_modified_bessel_i1
@@ -3151,23 +3154,23 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_k0(T x) {
             +2.44030308206595545468e+00,
     };
 
+    T y;
+
     if (x == T(0.0)) {
-        return std::numeric_limits<T>::infinity();
+	      return std::numeric_limits<T>::infinity();
     } else if (x < T(0.0)) {
-        return std::numeric_limits<T>::quiet_NaN();
+	      return std::numeric_limits<T>::quiet_NaN();
     }
 
     if (x <= T(2.0)) {
-        T y = x * x - T(2.0);
+        y = x * x - T(2.0);
 
-        T a = chbevl(y, A, 10);
+        y = chbevl(y, A, 10) - std::log(T(0.5) * x) * modified_bessel_i0(x);
 
-        return (a - std::log(T(0.5) * x) * modified_bessel_i0(x)) * std::exp(x);
+	      return y * std::exp(x);
     }
 
-    T b = chbevl(T(8.0) / x - T(2.0), B, 25);
-
-    return b / std::sqrt(x);
+    return chbevl(T(8.0) / x - T(2.0), B, 25) / std::sqrt(x);
 } // scaled_modified_bessel_k0
 
 template<typename T>
@@ -3214,6 +3217,8 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_k1(T x) {
             +2.72062619048444266945e+00,
     };
 
+    T y;
+
     if (x == T(0.0)) {
         return std::numeric_limits<T>::infinity();
     } else if (x < T(0.0)) {
@@ -3221,16 +3226,14 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_k1(T x) {
     }
 
     if (x <= T(2.0)) {
-        T y = x * x - T(2.0);
+        y = x * x - T(2.0);
 
-        T a = chbevl(y, A, 11);
+        y = std::log(T(0.5) * x) * modified_bessel_i1(x) + chbevl(y, A, 11) / x;
 
-        return (std::log(T(0.5) * x) * modified_bessel_i1(x) + a / x) * std::exp(x);
+        return y * std::exp(x);
     }
 
-    T b = chbevl(T(8.0) / x - T(2.0), B, 25);
-
-    return b / std::sqrt(x);
+    return chbevl(T(8.0) / x - T(2.0), B, 25) / std::sqrt(x);
 } // scaled_modified_bessel_k1
 
 /*
