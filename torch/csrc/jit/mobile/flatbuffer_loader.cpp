@@ -583,8 +583,16 @@ c10::Storage FlatbufferLoader::getStorage(uint32_t index) {
   if (!storage_loaded_[index]) {
     auto* storage = module_->storage_data()->GetMutableObject(index);
     size_t size = storage->data()->size();
-    void* ptr = static_cast<void*>(storage->mutable_data()->data());
-    at::DataPtr data(ptr, ptr, deleteNothing2, DeviceType::CPU);
+
+    at::DataPtr data;
+    if (should_copy_tensor_memory_) {
+      auto* allocator = at::GetCPUAllocator();
+      data = allocator->allocate(size);
+      memcpy(data.get(), storage->data()->data(), size);
+    } else {
+      void* ptr = static_cast<void*>(storage->mutable_data()->data());
+      data = at::DataPtr(ptr, ptr, deleteNothing2, DeviceType::CPU);
+    }
     storages_[index] =
         c10::Storage(c10::Storage::use_byte_size_t(), size, std::move(data));
     storage_loaded_[index] = true;
@@ -678,8 +686,11 @@ mobile::Module parse_and_initialize_mobile_module(
 
 mobile::Module initialize_mobile_module(
     mobile::serialization::Module* flatbuffer_module,
-    c10::optional<at::Device>) {
-  mobile::Module m = FlatbufferLoader().parseModule(flatbuffer_module);
+    c10::optional<at::Device>,
+    bool should_copy_tensor_memory) {
+  auto flatbufferLoader = FlatbufferLoader();
+  flatbufferLoader.setShouldCopyTensorMemory(should_copy_tensor_memory);
+  mobile::Module m = flatbufferLoader.parseModule(flatbuffer_module);
   return m;
 }
 

@@ -487,10 +487,10 @@ class TestBinaryUfuncs(TestCase):
         )
 
         make_lhs_scalar_tensor = partial(
-            make_tensor, (), device=device, **op.lhs_make_tensor_kwargs
+            make_tensor, (), device='cpu', **op.lhs_make_tensor_kwargs
         )
         make_rhs_scalar_tensor = partial(
-            make_tensor, (), device=device, **op.rhs_make_tensor_kwargs
+            make_tensor, (), device='cpu', **op.rhs_make_tensor_kwargs
         )
 
         def _supported(dtypes):
