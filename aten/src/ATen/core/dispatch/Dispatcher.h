@@ -259,8 +259,8 @@ private:
   Dispatcher();
 
   static int64_t sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey);
-  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey);
-  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args);
+  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey);
+  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args);
 
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
   OperatorHandle findOrRegisterName_(const OperatorName& op_name);
@@ -497,6 +497,8 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.operatorDef_->op.isObserved());
   auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
   if (guard.needsInputs()) {
+    auto& schema = op.schema();
+    auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
     constexpr auto num_boxed_args = impl::boxed_size<Args...>();
     // If we used std::array<IValue, num_boxed_args> here, we would
     // have to spend time default constructing the IValues in
@@ -514,7 +516,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
     // couldn't use it even if we wanted to because we are currently
     // stuck on C++14 rather than C++17, but we could do a backport
     // similar to folly::launder if needed.)
-    runRecordFunction(guard, op, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
+    runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
     for (size_t ii = 0; ii < num_boxed_args; ++ii) {
       reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
     }
@@ -572,8 +574,10 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
     at::RecordFunction guard(std::move(step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-    guard.needsInputs() ? runRecordFunction(guard, op, dispatchKey, c10::ArrayRef<const c10::IValue>(stack->data(), stack->size()))
-                        : runRecordFunction(guard, op, dispatchKey);
+    auto& schema = op.schema();
+    auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
+    guard.needsInputs() ? runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(stack->data(), stack->size()))
+                        : runRecordFunction(guard, schema_ref, dispatchKey);
 
     // keeping the guard alive while executing the kernel
     kernel.callBoxed(op, dispatchKeySet, stack);
