@@ -1302,6 +1302,7 @@ def _register_jit_decomposition(decomp, use_python=False):
 
 _register_jit_decomposition(torch.ops.aten.trace.default)
 _register_jit_decomposition(torch.ops.aten.nll_loss_backward.default)
+_register_jit_decomposition(torch.ops.aten.nll_loss2d_backward.default)
 _register_jit_decomposition(torch.ops.aten.mse_loss_backward.default)
 _register_jit_decomposition(torch.ops.aten.l1_loss_backward.default)
 _register_jit_decomposition(torch.ops.aten._log_softmax_backward_data.default)
