@@ -6,6 +6,7 @@ on:
 
 jobs:
   do_revert:
+    name: try_revert_pr_${{ github.event.client_payload.pr_num }}
     runs-on: ubuntu-20.04
     steps:
       - name: Setup Python
