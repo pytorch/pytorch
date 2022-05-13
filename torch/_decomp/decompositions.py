@@ -852,7 +852,6 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
 
 # TODO: Correct the type promotion semantics
 @register_decomposition(aten.native_layer_norm)
-@pw_cast_for_opmath
 def native_layer_norm(
     input: Tensor,
     normalized_shape: List[int],
@@ -872,22 +871,22 @@ def native_layer_norm(
     if M > 0:
         input_reshaped = input.view(1, M, -1)
     else:
-        return (input, input.new_zeros((0,)), input.new_zeros((0,)))
+        return (input, input.new_zeros((0,), dtype=torch.float), input.new_zeros((0,), dtype=torch.float))
 
     # Unlike Batch Normalization, which applies scalar scale and bias for each
     # entire channel/plane with the affine option, Layer Normalization applies
     # per-element scale and bias. E.g. For input {N, C, H, W}, weight for
     # batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
-    out, mean, rstd = aten.native_batch_norm(
-        input_reshaped,
-        weight=None,
-        bias=None,
-        running_mean=None,
-        running_var=None,
-        training=True,
-        momentum=0.0,
-        eps=eps,
-    )
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    reduction_dims = [0] + list(range(2, input_reshaped.dim()))
+    input_acc = input_reshaped.to(dtype=computation_dtype)
+    biased_var = torch.var(input_acc, dim=reduction_dims, unbiased=False)
+    mean = torch.mean(input_acc, dim=reduction_dims)
+    rstd = torch.rsqrt(biased_var + eps)
+    mean = _unsqueeze_to_dim(mean, input.dim())
+    rstd = _unsqueeze_to_dim(rstd, input.dim())
+
+    out = ((input - mean) * rstd)
     out = out.view(input_shape)
     if weight is not None:
         out = out * weight
@@ -899,12 +898,15 @@ def native_layer_norm(
         stat_shape.append(1)
     mean = mean.view(stat_shape)
     rstd = rstd.view(stat_shape)
-    return (out, mean, rstd)
+    if not input.is_cuda:
+        mean = mean.to(dtype=input.dtype)
+        rstd = rstd.to(dtype=input.dtype)
+    return (out.to(dtype=input.dtype), mean, rstd)
 
 
 # TODO: Correct the type promotion semantics
-@register_decomposition(aten.native_layer_norm_backward)
-@pw_cast_for_opmath
+# TODO: Fix native_layer_norm_backward
+# @register_decomposition(aten.native_layer_norm_backward)
 def native_layer_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -975,7 +977,7 @@ def native_layer_norm_backward(
         d_bias = None
     return (d_input, d_weight, d_bias)
 
-# TODO: Correct the type promotion semantics
+
 @register_decomposition(aten.native_batch_norm)
 def native_batch_norm(
     input: Tensor,
@@ -993,7 +995,7 @@ def native_batch_norm(
         input_acc = input.to(dtype=computation_dtype)
         biased_var = torch.var(input_acc, dim=reduction_dims, unbiased=False)
         save_mean = torch.mean(input_acc, dim=reduction_dims)
-        save_invstd = 1 / (torch.sqrt(biased_var + eps))
+        save_invstd = torch.rsqrt(biased_var + eps)
 
         if running_mean is not None:
             running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
