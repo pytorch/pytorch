@@ -2692,6 +2692,9 @@
 - func: linear.out(Tensor input, Tensor weight, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
 
+# TODO: Add this function to MPS dispatch key so that we avoid declaring it in
+# native_functions.yaml
+# https://github.com/pytorch/pytorch/issues/77394
 - func: mps_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
@@ -3099,6 +3102,9 @@
 
 - func: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
 
+# TODO: Add this function to MPS dispatch key so that we avoid declaring it in
+# native_functions.yaml
+# https://github.com/pytorch/pytorch/issues/77394
 - func: mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
     CompositeExplicitAutograd: mps_max_pool2d
@@ -3245,6 +3251,9 @@
   dispatch:
     CPU, CUDA: amin_out
 
+# TODO: Add this function to MPS dispatch key so that we avoid declaring it in
+# native_functions.yaml
+# https://github.com/pytorch/pytorch/issues/77394
 - func: mps_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   dispatch:
     CompositeExplicitAutograd: mps_convolution

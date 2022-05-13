@@ -1443,6 +1443,7 @@ at::Tensor _convolution(
         output = at::cat(outputs, 1);
       }
       break;
+#ifdef USE_MPS
     case ConvBackend::Mps:
       TORCH_CHECK(input.options().type_equal(weight.options()),
                "Input type (", input.toString(), ") and weight type (", weight.toString(),
@@ -1470,6 +1471,7 @@ at::Tensor _convolution(
         output.add_(reshape_bias(input.dim(), bias));
       }
       break;
+#endif
   }
 
   if (k == 3 && !input.is_mkldnn()) {
@@ -1852,6 +1854,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
           input_weight_output_mask);
       break;
     }
+#ifdef USE_MPS
     case ConvBackend::Mps:
     {
       check_input_same_type_as_parameters(input, weight);
@@ -1871,6 +1874,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         params.stride, params.dilation, params.groups, input_weight_output_mask);
       break;
     }
+#endif
     case ConvBackend::CudnnTranspose:
     {
       check_input_same_type_as_parameters(input, weight);

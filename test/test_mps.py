@@ -1166,39 +1166,6 @@ class TestMPS(TestCase):
         helper(threshold=0.5,  value=-15, num_elems=100)
         helper(threshold=1,    value=10,  num_elems=100, inplace=True, requires_grad=False)
 
-    def test_gelu(self):
-        def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
-            numpy_dtype = {
-                torch.bfloat16: torch.float, torch.float: torch.float, torch.double: torch.double
-            }[dtype]
-            devices = ['cpu']
-            devices += ['mps']
-
-            def _gelu_ref(X):
-                return X * stats.norm.cdf(X)
-
-            for d in devices:
-                if contiguous:
-                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
-                else:
-                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
-                res = F.gelu(X)
-                ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
-
-        for n in range(1, 10):
-            for m in range(1, 10):
-                _test_gelu(n, m, torch.float32, True)
-                # _test_gelu(n, m, torch.float32, False)
-
-        # Test multi threaded
-        num_threads = torch.get_num_threads()
-        torch.set_num_threads(4)
-        try:
-            _test_gelu(32, 32, torch.float32, False)
-        finally:
-            torch.set_num_threads(num_threads)
-
     # Test pow
     def test_pow(self):
         def helper(shape):
@@ -1475,9 +1442,6 @@ class TestNLLLoss(TestCase):
         self._nll_loss_helper([2, 3, 1, 7], "none", torch.empty([2, 1, 7], device=device))
         self._nll_loss_helper([2, 3, 5, 1], "none", torch.empty([2, 5, 1], device=device))
         self._nll_loss_helper([2, 3, 5, 7, 1], "none", torch.empty([2, 5, 7, 1], device=device))
-        self._nll_loss_helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device))
-        self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device))
-        self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device))
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_empty_tensor_reduction_mean(self, device='cpu'):
@@ -1487,11 +1451,7 @@ class TestNLLLoss(TestCase):
         self._nll_loss_helper([2, 3, 1, 7], "mean", nan)
         self._nll_loss_helper([2, 3, 5, 1], "mean", nan)
         self._nll_loss_helper([2, 3, 5, 7, 1], "mean", nan)
-#        self._nll_loss_helper([2, 3, 0, 7], "mean", nan, device)
-#        self._nll_loss_helper([2, 3, 5, 0], "mean", nan, device)
-#        self._nll_loss_helper([2, 3, 5, 7, 0], "mean", nan, device)
 
-#
     def test_nll_loss_empty_tensor_reduction_sum(self, device='cpu'):
         zero = torch.tensor(0, device=device)
         self._nll_loss_helper([1, 3], "sum", zero)
@@ -1499,26 +1459,6 @@ class TestNLLLoss(TestCase):
         self._nll_loss_helper([2, 3, 1, 7], "sum", zero)
         self._nll_loss_helper([2, 3, 5, 1], "sum", zero)
         self._nll_loss_helper([2, 3, 5, 7, 1], "sum", zero)
-#        self._nll_loss_helper([2, 3, 0, 7], "sum", zero, device)
-#        self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device)
-#        self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
-
-    # Failing with nan vs inf difference
-    # def test_nll_loss_total_weight_is_zero(self):
-
-        # def helper(input_size):
-            # for device in ['cpu', 'mps']:
-                # input = torch.ones(input_size, requires_grad=True, device=device)
-                # num_channels = input_size[1]
-                # target_size = (input_size[0], ) + tuple(input_size[2:])
-                # target = torch.zeros(target_size, dtype=torch.long, device=device)
-                # weight = torch.zeros([num_channels], device=device)
-                # output = F.nll_loss(input, target, weight)
-                # self.assertEqual(output.item(), 0)
-
-        # helper([2, 3])
-        # helper([2, 3, 5, 7])
-        # helper([2, 3, 5, 7, 9])
 
     def test_nll_loss_byte_target_matches_long(self, device='cpu'):
         N, C = 10, 4
@@ -2718,36 +2658,11 @@ class TestNLLLoss(TestCase):
         helper((2,6,3,5))
         helper((2,8,4,5))
 
-    # Test sum backward
-    def test_sum_backward(self):
-        def helper(n, c, h, w):
-            cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            clamp_min_t_result = torch.clamp_min(x, min=min_t)
-            clamp_min_t_result_cpu = torch.clamp_min(cpu_x, min=cpu_min_t)
-
-            self.assertEqual(clamp_min_t_result, clamp_min_t_result_cpu)
-
-        helper(2, 8, 4, 5)
-
-
-    # Test stride functionality. This basic example passes on MPS.
-    def test_as_strided(self):
-        def helper(n, c):
-            cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-            strided_cpu = torch.as_strided(cpu_x, (2,2), (1,2))
-            strided_mps = torch.as_strided(x, (2,2), (1,2))
-
-            self.assertEqual(strided_mps, strided_cpu)
-
-        helper(3, 3)
-
     def test_expand(self):
         def helper(n, c):
-            cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
-            x = torch.randn(n, c, device='mps', dtype=torch.float, requires_grad=True)
+            values = [[1.0], [4.0], [7.0]]
+            cpu_x = torch.tensor(values, device='cpu')
+            x = cpu_x.detach().clone().to('mps')
 
             strided_cpu = torch.as_strided(cpu_x, (3,4), (1,0))
             strided_mps = torch.as_strided(x, (3,4), (1,0))
