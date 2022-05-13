@@ -430,7 +430,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
                 solutions[i].solution_id,
                 solutions[i].algorithm);
     }
-    
+
     if (force_default) {
         // find default alg
         for (size_t i=0; i<solution_count; ++i) {
@@ -512,7 +512,7 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
                 solutions[i].solution_id,
                 solutions[i].algorithm);
     }
-    
+
     if (force_default) {
         // find default alg
         for (size_t i=0; i<solution_count; ++i) {
@@ -594,7 +594,7 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
                 solutions[i].solution_id,
                 solutions[i].algorithm);
     }
-    
+
     if (force_default) {
         // find default alg
         for (size_t i=0; i<solution_count; ++i) {
