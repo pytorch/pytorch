@@ -1688,6 +1688,23 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
+    def test_permute_inputs_binding(self):
+        @torch.jit.script
+        def foo(i, j, k):
+            pass
+
+        g = foo.graph
+
+        idxs = []
+        for i, inp in enumerate(g.inputs()):
+            inp.setDebugName(f"inp{i}")
+            idxs.append(i)
+
+        permuted_idxs = list(np.random.permutation(idxs))
+        g.permuteInputs(permuted_idxs)
+        for i, inp in enumerate(g.inputs()):
+            self.assertEqual(f"inp{permuted_idxs[i]}", inp.debugName())
+
     @unittest.skipIf(IS_MACOS, "Failing on MacOS only")
     def test_python_ir_utils(self):
         @torch.jit.script
