@@ -166,7 +166,7 @@ void initDispatchBindings(PyObject* module) {
       parseKind(kind),
       std::move(name),
       std::string(dispatch) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(dispatch)),
-      file,
+      "<unknown>", // temporary workaround
       linenum);
     END_HANDLE_TH_ERRORS_PYBIND
   }, "", py::arg("kind"), py::arg("name"), py::arg("dispatch"), py::arg("file")="/dev/null", py::arg("linenum")=0)
