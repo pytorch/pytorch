@@ -5810,15 +5810,33 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     return wrapped_fn
 
 def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwargs):
-    nd_tensor = partial(make_tensor, (S, S + 1, S + 2), device=device,
-                        dtype=dtype, requires_grad=requires_grad)
-    oned_tensor = partial(make_tensor, (31,), device=device,
-                          dtype=dtype, requires_grad=requires_grad)
+    is_fp16_or_chalf = dtype == torch.complex32 or dtype == torch.half
+    if not is_fp16_or_chalf:
+        nd_tensor = partial(make_tensor, (S, S + 1, S + 2), device=device,
+                            dtype=dtype, requires_grad=requires_grad)
+        oned_tensor = partial(make_tensor, (31,), device=device,
+                              dtype=dtype, requires_grad=requires_grad)
+    else:
+        # cuFFT supports powers of 2 for half and complex half precision
+        # NOTE: For hfft, hfft2, hfftn, irfft, irfft2, irfftn with default args
+        # where output_size n=2*(input_size - 1), we make sure that logical fft size is a power of two
+        if self.name in ['fft.hfft', 'fft.irfft']:
+            shapes = ((2, 9, 9), (33,))
+        elif self.name in ['fft.hfft2', 'fft.irfft2']:
+            shapes = ((2, 8, 9), (33,))
+        elif self.name in ['fft.hfftn', 'fft.irfftn']:
+            shapes = ((2, 2, 33), (33,))
+        else:
+            shapes = ((2, 8, 16), (32,))
+        nd_tensor = partial(make_tensor, shapes[0], device=device,
+                            dtype=dtype, requires_grad=requires_grad)
+        oned_tensor = partial(make_tensor, shapes[1], device=device,
+                              dtype=dtype, requires_grad=requires_grad)
 
     if self.ndimensional == SpectralFuncType.ND:
         return [
             SampleInput(nd_tensor(),
-                        kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
+                        kwargs=dict(s=(3, 10) if not is_fp16_or_chalf else (4, 8), dim=(1, 2), norm='ortho')),
             SampleInput(nd_tensor(),
                         kwargs=dict(norm='ortho')),
             SampleInput(nd_tensor(),
@@ -5832,11 +5850,11 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
     elif self.ndimensional == SpectralFuncType.TwoD:
         return [
             SampleInput(nd_tensor(),
-                        kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
+                        kwargs=dict(s=(3, 10) if not is_fp16_or_chalf else (4, 8), dim=(1, 2), norm='ortho')),
             SampleInput(nd_tensor(),
                         kwargs=dict(norm='ortho')),
             SampleInput(nd_tensor(),
-                        kwargs=dict(s=(6, 8))),
+                        kwargs=dict(s=(6, 8) if not is_fp16_or_chalf else (4, 8))),
             SampleInput(nd_tensor(),
                         kwargs=dict(dim=0)),
             SampleInput(nd_tensor(),
@@ -5847,11 +5865,12 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
     else:
         return [
             SampleInput(nd_tensor(),
-                        kwargs=dict(n=10, dim=1, norm='ortho')),
+                        kwargs=dict(n=10 if not is_fp16_or_chalf else 8, dim=1, norm='ortho')),
             SampleInput(nd_tensor(),
                         kwargs=dict(norm='ortho')),
             SampleInput(nd_tensor(),
-                        kwargs=dict(n=7)),
+                        kwargs=dict(n=7 if not is_fp16_or_chalf else 8)
+                        ),
             SampleInput(oned_tensor()),
 
             *(SampleInput(nd_tensor(),
@@ -5887,6 +5906,8 @@ class SpectralFuncInfo(OpInfo):
         decorators = list(decorators) if decorators is not None else []
         decorators += [
             skipCPUIfNoFFT,
+            DecorateInfo(toleranceOverride({torch.chalf: tol(4e-2, 4e-2)}),
+                         "TestCommon", "test_complex_half_reference_testing")
         ]
 
         super().__init__(name=name,
@@ -10638,6 +10659,10 @@ op_db: List[OpInfo] = [
                      ref=np.fft.fft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      ),
@@ -10646,6 +10671,10 @@ op_db: List[OpInfo] = [
                      ref=np.fft.fft2,
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      decorators=[precisionOverride(
@@ -10656,6 +10685,10 @@ op_db: List[OpInfo] = [
                      ref=np.fft.fftn,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      decorators=[precisionOverride(
@@ -10666,6 +10699,10 @@ op_db: List[OpInfo] = [
                      ref=np.fft.hfft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_gradgrad=False),
@@ -10674,6 +10711,10 @@ op_db: List[OpInfo] = [
                      ref=scipy.fft.hfft2 if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_gradgrad=False,
@@ -10687,6 +10728,10 @@ op_db: List[OpInfo] = [
                      ref=scipy.fft.hfftn if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_gradgrad=False,
@@ -10700,6 +10745,9 @@ op_db: List[OpInfo] = [
                      ref=np.fft.rfft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and(torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,)),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
@@ -10711,6 +10759,9 @@ op_db: List[OpInfo] = [
                      ref=np.fft.rfft2,
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and(torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,)),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
@@ -10723,6 +10774,9 @@ op_db: List[OpInfo] = [
                      ref=np.fft.rfftn,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and(torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,)),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
@@ -10736,7 +10790,11 @@ op_db: List[OpInfo] = [
                      ndimensional=SpectralFuncType.OneD,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
-                     dtypes=all_types_and_complex_and(torch.bool)),
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),),
     SpectralFuncInfo('fft.ifft2',
                      aten_name='fft_ifft2',
                      ref=np.fft.ifft2,
@@ -10744,6 +10802,10 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      decorators=[
                          DecorateInfo(
                              precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
@@ -10756,6 +10818,10 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      decorators=[
                          DecorateInfo(
                              precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
@@ -10768,6 +10834,9 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and(torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,)),
                      skips=(
                      ),
                      check_batched_grad=False),
@@ -10778,6 +10847,9 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and(torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,)),
                      check_batched_grad=False,
                      check_batched_gradgrad=False,
                      decorators=(
@@ -10794,6 +10866,9 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archss
+                     dtypesIfCUDA=all_types_and(torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,)),
                      check_batched_grad=False,
                      check_batched_gradgrad=False,
                      decorators=[
@@ -10812,6 +10887,10 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.irfft2',
                      aten_name='fft_irfft2',
@@ -10820,6 +10899,10 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      check_batched_gradgrad=False,
                      decorators=[
                          DecorateInfo(
@@ -10833,6 +10916,10 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
+                     # rocFFT doesn't support Half/Complex Half Precision FFT
+                     # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
+                     dtypesIfCUDA=all_types_and_complex_and(
+                         torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
                      check_batched_gradgrad=False,
                      decorators=[
                          DecorateInfo(
