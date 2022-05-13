@@ -70,7 +70,6 @@ def define_targets(rules):
     rules.cc_library(
         name = "generated-autograd-headers",
         hdrs = [":{}".format(h) for h in _GENERATED_AUTOGRAD_CPP_HEADERS + _GENERATED_AUTOGRAD_PYTHON_HEADERS],
-        tags = ["no-caffe2-headers"],
         visibility = ["//visibility:public"],
     )
 
