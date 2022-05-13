@@ -55,85 +55,67 @@ class TSNodeLowering : public TSNodeLoweringInterface {
   // classes
   TSOpVector LowerNonCodegenOps(const torch::lazy::Node* node) {
     if (node->op().op == at::aten::as_strided) {
-      return LowerAsStrided(torch::lazy::NodeCast<torch::lazy::AsStrided>(
-          node, torch::lazy::OpKind(at::aten::as_strided)));
+      return LowerAsStrided(torch::lazy::NodeCast<torch::lazy::AsStrided>(node));
     }
     if (node->op() == *torch::lazy::ltc_as_strided_view_update) {
       return LowerAsStridedViewUpdate(
-          torch::lazy::NodeCast<torch::lazy::AsStridedViewUpdate>(
-              node, *torch::lazy::ltc_as_strided_view_update));
+          torch::lazy::NodeCast<torch::lazy::AsStridedViewUpdate>(node));
     }
     if (node->op() == *torch::lazy::ltc_cast) {
-      return LowerCast(torch::lazy::NodeCast<torch::lazy::Cast>(
-          node, *torch::lazy::ltc_cast));
+      return LowerCast(torch::lazy::NodeCast<torch::lazy::Cast>(node));
     }
     if (node->op() == *torch::lazy::ltc_select_view_update) {
       return LowerSelectViewUpdate(
-          torch::lazy::NodeCast<torch::lazy::SelectViewUpdate>(
-              node, *torch::lazy::ltc_select_view_update));
+          torch::lazy::NodeCast<torch::lazy::SelectViewUpdate>(node));
     }
     if (node->op() == *torch::lazy::ltc_narrow_view_update) {
       return LowerNarrowViewUpdate(
-          torch::lazy::NodeCast<torch::lazy::NarrowViewUpdate>(
-              node, *torch::lazy::ltc_narrow_view_update));
+          torch::lazy::NodeCast<torch::lazy::NarrowViewUpdate>(node));
     }
     if (node->op().op == at::prim::Constant) {
-      return LowerScalar(torch::lazy::NodeCast<torch::lazy::Scalar>(
-          node, torch::lazy::OpKind(at::prim::Constant)));
+      return LowerScalar(torch::lazy::NodeCast<torch::lazy::Scalar>(node));
     }
     if (node->op().op == at::aten::native_batch_norm) {
       return LowerBatchNorm(
-          torch::lazy::NodeCast<TSNativeBatchNormForward>(
-              node, torch::lazy::OpKind(at::aten::native_batch_norm)));
+          torch::lazy::NodeCast<TSNativeBatchNormForward>(node));
     }
     if (node->op().op == at::aten::native_batch_norm_backward) {
       return LowerBatchNormBackward(
-          torch::lazy::NodeCast<TSNativeBatchNormBackward>(
-              node, torch::lazy::OpKind(at::aten::native_batch_norm_backward)));
+          torch::lazy::NodeCast<TSNativeBatchNormBackward>(node));
     }
     if (node->op().op == at::aten::expand) {
       return LowerExpand(
-          torch::lazy::NodeCast<torch::lazy::Expand>(
-              node, torch::lazy::OpKind(at::aten::expand)));
+          torch::lazy::NodeCast<torch::lazy::Expand>(node));
     }
     if (node->op().op == at::aten::narrow) {
-      return LowerNarrow(torch::lazy::NodeCast<torch::lazy::Narrow>(
-          node, torch::lazy::OpKind(at::aten::narrow)));
+      return LowerNarrow(torch::lazy::NodeCast<torch::lazy::Narrow>(node));
     }
     if (node->op().op == at::aten::permute) {
-      return LowerPermute(torch::lazy::NodeCast<torch::lazy::Permute>(
-          node, torch::lazy::OpKind(at::aten::permute)));
+      return LowerPermute(torch::lazy::NodeCast<torch::lazy::Permute>(node));
     }
     if (node->op().op == at::aten::select) {
-      return LowerSelect(torch::lazy::NodeCast<torch::lazy::Select>(
-          node, torch::lazy::OpKind(at::aten::select)));
+      return LowerSelect(torch::lazy::NodeCast<torch::lazy::Select>(node));
     }
     if (node->op().op == at::aten::squeeze) {
       return LowerSqueeze(
-          torch::lazy::NodeCast<Squeeze>(
-              node, torch::lazy::OpKind(at::aten::squeeze)));
+          torch::lazy::NodeCast<Squeeze>(node));
     }
     if (node->op().op == at::aten::unsqueeze) {
       return LowerUnsqueeze(
-          torch::lazy::NodeCast<Unsqueeze>(
-              node, torch::lazy::OpKind(at::aten::unsqueeze)));
+          torch::lazy::NodeCast<Unsqueeze>(node));
     }
     if (node->op().op == at::aten::view) {
-      return LowerView(torch::lazy::NodeCast<torch::lazy::View>(
-          node, torch::lazy::OpKind(at::aten::view)));
+      return LowerView(torch::lazy::NodeCast<torch::lazy::View>(node));
     }
     if (node->op().op == at::aten::diagonal) {
-      return LowerDiagonal(torch::lazy::NodeCast<torch::lazy::Diagonal>(
-          node, torch::lazy::OpKind(at::aten::diagonal)));
+      return LowerDiagonal(torch::lazy::NodeCast<torch::lazy::Diagonal>(node));
     }
     if (node->op() == *torch::lazy::ltc_diagonal_view_update) {
-      return LowerDiagonalViewUpdate(torch::lazy::NodeCast<torch::lazy::DiagonalViewUpdate>(
-          node, *torch::lazy::ltc_diagonal_view_update));
+      return LowerDiagonalViewUpdate(torch::lazy::NodeCast<torch::lazy::DiagonalViewUpdate>(node));
     }
     if (node->op() == *torch::lazy::ltc_device_data) {
       const torch::lazy::DeviceData* device_data_node =
-          torch::lazy::NodeCast<torch::lazy::DeviceData>(
-              node, *torch::lazy::ltc_device_data);
+          torch::lazy::NodeCast<torch::lazy::DeviceData>(node);
       auto infoptr = device_data_node->data()->info();
       auto deviceDataInfoPtr = (torch::lazy::LazyGraphExecutor::DeviceDataInfo*) infoptr;
       if (GRAPH_DUMP_ENABLED) {
