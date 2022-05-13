@@ -879,7 +879,7 @@ def unconvertible_ops(
 ):
     r"""
     Converts the model with operator_export_type set to
-    _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of
+    torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of
     all the ops that are not supported/implemented by the exporter.
 
     Args:
@@ -889,7 +889,7 @@ def unconvertible_ops(
         opset_version: Same as corresponding arg to torch.onnx.export.
 
     Returns:
-        Tuple[_C.Graph, List[str]], where the list includes the names
+        Tuple[torch._C.Graph, List[str]], where the list includes the names
         of the unconvertible ops.
     """
 
