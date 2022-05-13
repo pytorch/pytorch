@@ -14524,13 +14524,13 @@ class TestNNDeviceType(NNTestCase):
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_groupnorm_nhwc(self, device, dtype):
-        def helper(self, size, groups):
+        def helper(self, size, groups, memory_format):
             channels = size[1]
             input = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
-            input = input.contiguous(memory_format=torch.channels_last)
+            input = input.contiguous(memory_format=memory_format)
             input.retain_grad()
             grad = torch.randn(size, dtype=dtype, device=device)
-            grad = grad.contiguous(memory_format=torch.channels_last)
+            grad = grad.contiguous(memory_format=memory_format)
             gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
             gn.weight.data.uniform_()
             gn.bias.data.uniform_()
@@ -14545,15 +14545,16 @@ class TestNNDeviceType(NNTestCase):
             ref_out = ref_gn(ref_input)
             ref_out.backward(ref_grad)
 
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
             self.assertTrue(ref_out.is_contiguous())
             self.assertEqual(out, ref_out)
             self.assertEqual(gn.weight.grad, ref_gn.weight.grad)
             self.assertEqual(gn.bias.grad, ref_gn.bias.grad)
             self.assertEqual(input.grad, ref_input.grad)
 
-        helper(self, (4, 8, 10, 10), 4)
-        helper(self, (2, 30, 9, 9), 3)
+        helper(self, (4, 8, 10, 10), 4, torch.channels_last)
+        helper(self, (2, 30, 9, 9), 3, torch.channels_last)
+        helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d)
 
     @onlyNativeDeviceTypes
     def test_GroupNorm_numeric(self, device):
