@@ -10,6 +10,7 @@ import numbers
 import os
 import re
 import textwrap
+import typing
 import warnings
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -1010,16 +1011,6 @@ def _export(
     export_modules_as_functions=False,
 ):
 
-    if export_modules_as_functions and opset_version < 15:
-        raise ValueError(
-            "`export_modules_as_functions` is not supported for `opset_version` < 15."
-            "This is because `opset_version` < 15 implies IR version < 8, which means "
-            "no local function support. "
-        )
-    export_modules_as_functions = _setup_trace_module_map(
-        model, export_modules_as_functions
-    )
-
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
             "torch.nn.DataParallel is not supported by ONNX "
@@ -1043,6 +1034,17 @@ def _export(
 
         if opset_version is None:
             opset_version = _default_onnx_opset_version
+
+        if export_modules_as_functions and opset_version < 15:
+            raise ValueError(
+                "`export_modules_as_functions` is not supported for `opset_version` < 15."
+                "This is because `opset_version` < 15 implies IR version < 8, which means "
+                "no local function support. "
+            )
+        export_modules_as_functions = _setup_trace_module_map(
+            model, export_modules_as_functions
+        )
+
         if not operator_export_type:
             if torch.onnx._CAFFE2_ATEN_FALLBACK:
                 operator_export_type = torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -1481,10 +1483,19 @@ def _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
     )
 
 
-def _need_symbolic_context(symbolic_fn):
+def _need_symbolic_context(symbolic_fn) -> bool:
     """Checks if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`."""
-    params = list(inspect.signature(symbolic_fn).parameters.values())
-    return params and issubclass(params[0].annotation, torch.onnx.SymbolicContext)
+    params = tuple(inspect.signature(symbolic_fn).parameters.values())
+    # When the annotation is postpone-evaluated, the annotation is a string
+    # and not a type. We need to use get_type_hints to get the real type.
+    if not params:
+        return False
+    first_param_name = params[0].name
+    type_hints = typing.get_type_hints(symbolic_fn)
+    if first_param_name not in type_hints:
+        return False
+    param_type = type_hints[first_param_name]
+    return issubclass(param_type, torch.onnx.SymbolicContext)
 
 
 def _get_aten_op_overload_name(n: torch._C.Node) -> str:
