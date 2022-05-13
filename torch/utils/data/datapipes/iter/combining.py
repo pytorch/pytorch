@@ -193,7 +193,7 @@ class _ChildDataPipe(IterDataPipe):
     will pass its instance_id to get the next value from its main DataPipe.
 
     Note:
-        ChildDataPipe, like all other IterDataPipe, follows the singler iterator per IterDataPipe constraint.
+        ChildDataPipe, like all other IterDataPipe, follows the single iterator per IterDataPipe constraint.
         Since ChildDataPipes share a common buffer, when an iterator is created for one of the ChildDataPipes,
         the previous iterators  for all ChildDataPipes must be invalidated, with the exception when a ChildDataPipe
         hasn't had an iterator created from it since the last invalidation. See the example below.
@@ -223,18 +223,12 @@ class _ChildDataPipe(IterDataPipe):
         self.instance_id = instance_id
 
     def __iter__(self):
-        if not self.main_datapipe.is_every_instance_exhausted():
-            warnings.warn("Some child DataPipes are not exhausted when __iter__ is called. We are resetting "
-                          "the buffer and each child DataPipe will read from the start again.", UserWarning)
         # Note that the logic behind setting iterator ID and `reset` are handled within `hook_iterator`
         # We want to separate the code for reset and yield, so that 'reset' executes before __next__ is called
-        return self.get_generator_by_instance(self.instance_id)
+        return self.main_datapipe.get_next_element_by_instance(self.instance_id)
 
     def __len__(self):
         return len(self.main_datapipe)
-
-    def get_generator_by_instance(self, instance_id: int):
-        yield from self.main_datapipe.get_next_element_by_instance(self.instance_id)
 
     # This method is called by `hook_iterator` in `_typing.py`.
     def _set_main_datapipe_valid_iterator_id(self) -> int:
@@ -250,6 +244,9 @@ class _ChildDataPipe(IterDataPipe):
         elif self.main_datapipe._valid_iterator_id == self._valid_iterator_id:  # type: ignore[has-type]
             self.main_datapipe._valid_iterator_id += 1  # type: ignore[attr-defined]
             # Whenever a new generation of iterator is created, the `main_datapipe` must reset
+            if not self.main_datapipe.is_every_instance_exhausted():
+                warnings.warn("Some child DataPipes are not exhausted when __iter__ is called. We are resetting "
+                              "the buffer and each child DataPipe will read from the start again.", UserWarning)
             self.main_datapipe.reset()
         # 3. Otherwise, the iterator is behind the others, so it will just need to catch up by setting
         #    the instance's iterator to match that of `main_datapipe`
@@ -333,7 +330,6 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             )
         self.current_buffer_usage = 0
         self.child_buffers: List[Deque[T_co]] = [deque() for _ in range(num_instances)]
-        self.instance_started: List[bool] = [False] * num_instances
         self.classifier_fn = classifier_fn
         self.drop_none = drop_none
         self.main_datapipe_exhausted = False
@@ -365,7 +361,6 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         if self._datapipe_iterator is None and not self.main_datapipe_exhausted:
             self._datapipe_iterator = iter(self.main_datapipe)
         stop = False
-        self.instance_started[instance_id] = True
         while not stop:
             if self.child_buffers[instance_id]:
                 self.current_buffer_usage -= 1
@@ -382,10 +377,9 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         return self.main_datapipe_exhausted and all(not child_buffer for child_buffer in self.child_buffers)
 
     def reset(self):
-        self._datapipe_iterator = iter(self.main_datapipe)
+        self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
-        self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
 
     def __getstate__(self):
@@ -412,7 +406,6 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
-        self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
 
     def __del__(self):
