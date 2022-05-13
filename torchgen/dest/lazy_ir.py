@@ -207,7 +207,12 @@ class GenLazyIR(ABC):
             f"""\
 class {schema.node_name} : public {self.node_base} {{
  public:
-  {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
+  static torch::lazy::OpKind ClassOpKind() {{
+    return torch::lazy::OpKind({aten_symbol(schema)});
+  }}
+
+  {schema.node_name}({node_ctor_args}, std::vector<torch::lazy::Shape>&& shapes)
+
       : {self.node_base_ctor_call(schema)}{comma_if_scalar_initializers}
         {scalar_initializers}
 
@@ -258,6 +263,7 @@ class GenLazyNativeFuncDefinition:
     create_aten_from_ltc_tensor: str
     tuple_aten_from_ltc_tensors: str
     lazy_tensor_ptr: str
+    get_device_fn: str
 
     def lazy_tensor_decls(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
@@ -304,14 +310,10 @@ class GenLazyNativeFuncDefinition:
     def get_device(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        if func.func.arguments.tensor_options is not None:
-            # This is safe to do because every function we're generating follows the dispatcher API:
-            # all TensorOptions arguments are exploded into their individual pieces.
-            value_types_names.append(func.func.arguments.tensor_options.device.name)
         assert (
             len(value_types_names) > 0
         ), "Code below assumes there is at least one tensor arg"
-        return f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
+        return f"""auto common_device = {self.get_device_fn}({', '.join(value_types_names)});
         TORCH_INTERNAL_ASSERT(common_device);
         """
 
@@ -322,14 +324,15 @@ class GenLazyNativeFuncDefinition:
         returns_length = len(schema.returns)
         # call the meta kernel if it exists, to compute output shape/dtype for our IR
         if func.structured or func.structured_delegate is not None:
-            meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
+            meta_out = """std::vector<torch::lazy::Shape> shapes{
+        torch::lazy::Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
 
                 def this_shape(i: int) -> str:
-                    return f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
+                    return f"torch::lazy::Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
 
                 shapes_str = ",".join([this_shape(i) for i in range(returns_length)])
-                meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
+                meta_out = "std::vector<torch::lazy::Shape> shapes{" + shapes_str + "};"
 
             shape_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(a.name) for a in all_args)});
         {meta_out}"""
@@ -344,8 +347,8 @@ class GenLazyNativeFuncDefinition:
         # Calculating which dimensions are symbolic
         func_schema_str = "aten::" + str(func.func)
         shape_str += f"""
-        if(symbolicShapeEnabled()){{
-            std::vector<jit::IValue> inputs = {{ {', '.join(str(a.name) for a in all_args)} }};
+        if(torch::lazy::symbolicShapeEnabled()){{
+            std::vector<torch::jit::IValue> inputs = {{ {', '.join(str(a.name) for a in all_args)} }};
             char* schema_str = "{func_schema_str}";
             applySymbolicShapesOnLT(schema_str, inputs, shapes);
         }}
@@ -368,12 +371,6 @@ class GenLazyNativeFuncDefinition:
         returns_length = len(schema.returns)
         value_args = schema.filtered_args(values=True, scalars=False)
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        if func.func.arguments.tensor_options is not None:
-            # Note: this is wrong, but I think that the "first_tensor_name" code below
-            # shouldn't actually be needed anywhere. I took a a look at XLA's implementation,
-            # and they don't need it for `arange_out()`.
-            # (we can also fix things by just having them lower arange() instead)
-            value_types_names.append(func.func.arguments.tensor_options.device.name)
         assert (
             len(value_types_names) > 0
         ), "Code below assumes there is at least one tensor arg"
@@ -444,7 +441,7 @@ class ComputeShapeSignature:
 
     @property
     def shape_decl(self) -> str:
-        return f"TORCH_API std::vector<Shape> compute_shape_{self.__decl_suffix()}"
+        return f"TORCH_API std::vector<torch::lazy::Shape> compute_shape_{self.__decl_suffix()}"
 
     @property
     def shape_call(self) -> str:
