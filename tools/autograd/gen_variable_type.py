@@ -332,6 +332,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "to_sparse",
     "sparse_sampled_addmm",
     "linalg_lu",
+    "pixel_shuffle",
+    "pixel_unshuffle",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
