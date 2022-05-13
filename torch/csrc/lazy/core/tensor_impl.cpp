@@ -7,8 +7,6 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
-// I guess we will need to use one of IRBuilder methods here
-#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 
 namespace torch {
 namespace lazy {
@@ -90,7 +88,7 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   auto rank = tensor_->shape().Get().sizes().size();
   sym_sizes_.reserve(rank);
   for (auto i: c10::irange(rank)) {
-    auto dim_node = MakeNode<SizeNode>(this->tensor_->GetIrValue(), i);
+    auto dim_node = MakeSizeNode(this->tensor_->GetIrValue(), i);
     auto sn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
     sym_sizes_.push_back(sn->toSymInt());
   }
