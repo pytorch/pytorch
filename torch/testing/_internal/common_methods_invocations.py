@@ -15549,7 +15549,7 @@ op_db: List[OpInfo] = [
                             dtypes=(torch.float, torch.cfloat)),
                # TypeError: 'int' object is not iterable
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               # RuntimeError: "neg_conj_cpu" not implemented for 'ComplexHalf'
                # RuntimeError: "neg_conj_cuda" not implemented for 'ComplexHalf'
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
            )
