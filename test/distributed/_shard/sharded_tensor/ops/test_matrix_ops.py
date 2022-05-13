@@ -235,16 +235,15 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             with torch.no_grad():
                 tensor_normed = layer_norm(tensor)
             st_expected = _shard_tensor(tensor_normed, spec)
-            self.assertTrue(
-                torch.allclose(
-                    st.local_tensor(),
-                    st_expected.local_tensor(),
-                )
+            self.assertEqual(
+                st.local_tensor(),
+                st_expected.local_tensor(),
             )
             self.assertTrue(
                 torch.allclose(
                     st,
                     st_expected,
+                    atol=1e-6,
                 )
             )
             st_expected = torch.nn.functional.layer_norm(
@@ -254,6 +253,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 torch.allclose(
                     st,
                     st_expected,
+                    atol=1e-6,
                 )
             )
 

@@ -3,21 +3,21 @@ import math
 
 import torch
 import torch.distributed as dist
-from torch.distributed._shard._utils import narrow_tensor
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
+)
+from torch.distributed._shard.sharding_spec._internals import (
+    get_chunk_sharding_params,
+)
+from torch.distributed.nn.functional import (
+    all_reduce,
 )
 
 from ._common import (
     _chunk_sharding_spec_check,
     _register_sharded_op_on_local_tensor,
 )
-from torch.distributed._shard.sharding_spec._internals import (
-    get_split_size,
-)
-from torch.distributed.nn.functional import (
-    scatter,
-)
+
 
 def transpose_same_dim(*args, **kwargs):
     """
@@ -247,6 +247,7 @@ _register_sharded_op_on_local_tensor(
     customized_func=sharded_view,
 )
 
+
 def sharded_bmm_check(*args, **kwargs):
     """
     Perform extra checks for the sharded_bmm op, for example, st2 needs to
@@ -277,6 +278,7 @@ def sharded_bmm_check(*args, **kwargs):
         raise NotImplementedError(
             "Both st and st2 need to have same placements for bmm."
         )
+
 
 def sharded_bmm(args, kwargs, pg):
     """
@@ -311,6 +313,7 @@ _register_sharded_op_on_local_tensor(
     extra_check=sharded_bmm_check,
     customized_func=sharded_bmm,
 )
+
 
 def sharded_layer_norm_check(*args, **kwargs):
     """
@@ -353,48 +356,45 @@ def sharded_layer_norm(args, kwargs, pg):
     """
     st = args[0]
     normalized_shape = args[1]
-    local_tensor = st.local_tensor()
-    current_rank = dist.get_rank(pg)  # type: ignore[attr-defined]
-    global_tensor = (
-        torch.empty(st.size(), device=st.local_tensor().device)
-        if current_rank == 0
-        else None
-    )
-    st.gather(dst=0, out=global_tensor)
-
     sharding_dim = st.sharding_spec().dim  # type: ignore[attr-defined]
-    world_size = dist.get_world_size(pg)
-    split_size = get_split_size(st.size(sharding_dim), world_size)
-    scatter_shape = list(st.size())
-    scatter_shape[sharding_dim] = split_size  # type: ignore[index]
-    scatter_list = [
-        torch.empty(scatter_shape, device=st.local_tensor().device)
-    ] * world_size
-    if current_rank == 0:
-        args = (global_tensor, normalized_shape, *args[2:])
-        global_tensor = torch.nn.functional.layer_norm(*args, **kwargs)
-        for idx, placement in enumerate(st.sharding_spec().placements):  # type: ignore[attr-defined]
-            shard_meta = st.metadata().shards_metadata[idx]
-            narrowed_tensor = narrow_tensor(global_tensor, shard_meta)
-            if shard_meta.shard_sizes[sharding_dim] < split_size:  # type: ignore[index]
-                # for the last shard that might be smaller to other shards
-                # resize the narrowed tensor to the same size and use it for
-                # the scatter collective as dist.scatter requires same size
-                # inputs on every rank
-                tensor_to_scatter = (
-                    narrowed_tensor.detach().clone().resize_(scatter_shape)
-                )
-            else:
-                tensor_to_scatter = narrowed_tensor.detach().clone().contiguous()
-            scatter_list[placement.rank()] = tensor_to_scatter
-    local_tensor = scatter(scatter_list, src=0, group=pg)
-    local_metadata = st.local_shards()[0].metadata
-    if list(local_tensor.size()) != local_metadata.shard_sizes:
-        # detach again after receiving to ensure local shards remain a leaf node
-        local_tensor = local_tensor.resize_(local_metadata.shard_sizes).detach()
+    sharding_dim = sharding_dim if sharding_dim >= 0 else st.dim() + sharding_dim
+    local_tensor = st.local_tensor()
+    # If sharding dim is smaller than shape start, we just perform a local norm.
+    shape_start = st.dim() - len(normalized_shape)
+    if shape_start > sharding_dim:
+        args = (local_tensor, *args[1:])
+        local_tensor = torch.nn.functional.layer_norm(*args, **kwargs)
+        return local_tensor, st.sharding_spec(), st.size()
 
-    # Sync requires_grad to local_shard.
-    local_tensor.requires_grad = st.requires_grad
+    elementwise_affine = kwargs.get("elementwise_affine", False)
+    eps = kwargs.get("eps", 1e-05)
+
+    norm_dims = tuple(i for i in range(-1, -len(normalized_shape) - 1, -1))
+    local_size = math.prod(local_tensor.size()[shape_start:])  # type: ignore[attr-defined]
+    st_size = math.prod(st.size()[shape_start:])  # type: ignore[attr-defined]
+    local_mean = torch.mul(local_tensor.mean(norm_dims, keepdim=True), local_size)
+    global_mean = torch.div(all_reduce(local_mean), st_size)
+    local_variant_sq = torch.square(local_tensor - global_mean).sum(
+        norm_dims, keepdim=True
+    )
+    global_variant = torch.div(all_reduce(local_variant_sq), st_size)
+
+    denom = torch.rsqrt(global_variant + eps)
+    local_tensor = torch.mul(local_tensor - global_mean, denom)
+
+    if elementwise_affine:
+        weight = kwargs["weight"]
+        bias = kwargs["bias"]
+        current_rank = dist.get_rank(pg)  # type: ignore[attr-defined]
+        world_size = dist.get_world_size(pg)
+        (start_pos, chunk_size) = get_chunk_sharding_params(
+            bias.size(0), world_size, st.sharding_spec(), current_rank
+        )
+        local_tensor = torch.addmm(
+            torch.narrow(bias, 0, start_pos, chunk_size),
+            local_tensor,
+            torch.narrow(weight, sharding_dim - shape_start, start_pos, chunk_size),
+        )
 
     return local_tensor, st.sharding_spec(), st.size()
 
