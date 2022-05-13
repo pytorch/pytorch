@@ -568,7 +568,7 @@ def _fake_add(constant, data):
 
 
 def _fake_filter_fn(data):
-    return data >= 5
+    return True
 
 
 def _fake_filter_fn_constant(constant, data):
@@ -2281,7 +2281,7 @@ class TestIterDataPipeSingletonConstraint(TestCase):
     iterators are invalidated. These tests aim to ensure `IterDataPipe` follows this behavior.
     """
 
-    def test_iterdatapipe_singleton_constraint(self):
+    def test_iterdatapipe_singleton_generator(self):
         r"""
         Testing for the case where IterDataPipe's `__iter__` is a generator function.
         """
@@ -2298,6 +2298,21 @@ class TestIterDataPipeSingletonConstraint(TestCase):
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(it1)
 
+        # Functional Test: extend the test to a pipeline
+        dps = source_dp.map(_fake_fn).filter(_fake_filter_fn)
+        it = iter(dps)
+        self.assertEqual(list(range(10)), list(it))
+
+        # Functional Test: multiple simultaneous references to the same DataPipe fails
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            for _ in zip(source_dp, source_dp):
+                pass
+
+        # Function Test: sequential references work
+        for _ in zip(list(source_dp), list(source_dp)):
+            pass
+
+    def test_iterdatapipe_singleton_self_next(self):
         r"""
         Testing for the case where IterDataPipe's `__iter__` returns `self` and there is a `__next__` method
         Note that the following DataPipe by is singleton by default (because `__iter__` returns `self`).
@@ -2326,6 +2341,25 @@ class TestIterDataPipeSingletonConstraint(TestCase):
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(source_dp)
 
+        # Functional Test: extend the test to a pipeline
+        source_dp = _CustomIterDP_Self(dp.iter.IterableWrapper(range(10)).map(_fake_fn).filter(_fake_filter_fn))
+        it1 = iter(source_dp)
+        self.assertEqual(0, next(it1))
+        self.assertEqual(1, next(source_dp))
+        it2 = iter(source_dp)
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it1)
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it2)
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(source_dp)
+
+        # Functional Test: multiple simultaneous references to the same DataPipe fails
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            for _ in zip(source_dp, source_dp):
+                pass
+
+    def test_iterdatapipe_singleton_new_object(self):
         r"""
         Testing for the case where IterDataPipe's `__iter__` isn't a generator nor returns `self`,
         and there isn't a `__next__` method.
@@ -2345,6 +2379,49 @@ class TestIterDataPipeSingletonConstraint(TestCase):
         self.assertEqual(1, next(it2))
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(it1)
+
+        # Functional Test: extend the test to a pipeline
+        source_dp = _CustomIterDP(dp.iter.IterableWrapper(range(10)).map(_fake_fn).filter(_fake_filter_fn))
+        it1 = iter(source_dp)
+        self.assertEqual(0, next(it1))
+        it2 = iter(source_dp)
+        self.assertEqual(1, next(it2))
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it1)
+
+        # Functional Test: multiple simultaneous references to the same DataPipe fails
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            for _ in zip(source_dp, source_dp):
+                pass
+
+    def test_iterdatapipe_singleton_buggy(self):
+        r"""
+        Buggy test case case where IterDataPipe's `__iter__` returns a new object, but also has
+        a `__next__` method.
+        """
+        class _CustomIterDP(IterDataPipe):
+            def __init__(self, iterable):
+                self.source = iterable
+                self.iterable = iter(iterable)
+
+            def __iter__(self):
+                return iter(self.source)  # Intentionally not returning `self`
+
+            def __next__(self):
+                return next(self.iterable)
+
+        # Functional Test:
+        source_dp = _CustomIterDP(range(10))
+        self.assertEqual(0, next(source_dp))
+        it1 = iter(source_dp)
+        self.assertEqual(0, next(it1))
+        self.assertEqual(1, next(source_dp))
+        it2 = iter(source_dp)  # invalidates both `dp` and `it1`
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it1)
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(source_dp)
+        self.assertEqual(list(range(10)), list(it2))  # `it2` still works because it is a new object
 
 
 if __name__ == '__main__':
