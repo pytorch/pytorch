@@ -22,13 +22,18 @@ def get_sha(pytorch_root: Union[str, Path]) -> str:
 
 def get_tag(pytorch_root: Union[str, Path]) -> str:
     try:
-        return (
+        tag = (
             subprocess.check_output(
                 ["git", "describe", "--tags", "--exact"], cwd=pytorch_root
             )
             .decode("ascii")
             .strip()
         )
+        # Valid version tags should always start with "v"
+        if not tag.startswith("v"):
+            return tag
+        else:
+            return UNKNOWN
     except Exception:
         return UNKNOWN
 
