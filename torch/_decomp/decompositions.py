@@ -877,7 +877,7 @@ def native_layer_norm(
     computation_dtype = utils.get_computation_dtype(input.dtype)
 
     axis = input.dim() - len(normalized_shape)
-    if prod(input.shape[:axis]) == 0:
+    if prod(list(input.shape[:axis])) == 0:
         mean = input.new_zeros((0,), dtype=computation_dtype)
         rstd = input.new_zeros((0,), dtype=computation_dtype)
         out = input
@@ -897,6 +897,10 @@ def native_layer_norm(
         rstd = rstd.to(dtype=input.dtype)
     return (out, mean, rstd)
 
+def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
+    if x is not None:
+        return x.to(dtype)
+    return x
 
 # TODO: Correct the type promotion semantics
 @register_decomposition(aten.native_layer_norm_backward)
@@ -913,7 +917,8 @@ def native_layer_norm_backward(
     input_shape = input.shape
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
-    grad_out, input_, weight, bias = [x.to(computation_dtype) if x is not None else x for x in (grad_out, input, weight, bias)]
+    grad_out_cast, input_cast, weight_cast, bias_cast = [x.to(computation_dtype) if x is not None else x for x in (grad_out, input, weight, bias)]
+    assert grad_out_cast is not None
 
     axis = input_ndim - len(normalized_shape)
     inner_dims = input_shape[axis:]
@@ -935,11 +940,11 @@ def native_layer_norm_backward(
             input.new_zeros(input_shape[axis:]),
         )
 
-    x_hat = (input_ - mean) * rstd
-    if weight is not None:
-        grad_x_hat = grad_out * weight
+    x_hat = (input_cast - mean) * rstd
+    if weight_cast is not None:
+        grad_x_hat = grad_out_cast * weight_cast
     else:
-        grad_x_hat = grad_out
+        grad_x_hat = grad_out_cast
     a = grad_x_hat * N
     b = torch.sum(grad_x_hat, inner_dim_indices, True)
     c1 = torch.mul(grad_x_hat, x_hat)
@@ -947,27 +952,27 @@ def native_layer_norm_backward(
     c3 = torch.mul(x_hat, c2)
 
     inner = a - b - c3
-    d_input = None
-    d_weight = None
-    d_bias = None
+    d_input: Optional[Tensor] = None
+    d_weight: Optional[Tensor] = None
+    d_bias: Optional[Tensor] = None
     if output_mask[0]:
-        d_input: Optional[Tensor] = (rstd / N) * inner
+        d_input = (rstd / N) * inner
 
-    if output_mask[1] and weight is not None:
+    if output_mask[1] and weight_cast is not None:
         if len(outer_dim_indices) > 0:
-            d_weight: Optional[Tensor] = torch.sum(
-                grad_out * x_hat, outer_dim_indices, False
+            d_weight = torch.sum(
+                grad_out_cast * x_hat, outer_dim_indices, False
             )
         else:
-            d_weight = grad_out * x_hat
+            d_weight = grad_out_cast * x_hat
 
-    if output_mask[2] and bias is not None:
+    if output_mask[2] and bias_cast is not None:
         if len(outer_dim_indices) > 0:
-            d_bias: Optional[Tensor] = torch.sum(grad_out, outer_dim_indices, False)
+            d_bias = torch.sum(grad_out_cast, outer_dim_indices, False)
         else:
-            d_bias = grad_out
+            d_bias = grad_out_cast
 
-    return tuple(x.to(input.dtype) if x is not None else x for x in (d_input, d_weight, d_bias))
+    return _maybe_cast(d_input, input.dtype), _maybe_cast(d_weight, input.dtype), _maybe_cast(d_bias, input.dtype)
 
 
 @register_decomposition(aten.native_batch_norm)
