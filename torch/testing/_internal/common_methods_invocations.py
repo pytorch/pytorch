@@ -18467,8 +18467,10 @@ python_ref_db = [
         "_refs.permute",
         torch_opinfo_name="permute",
         skips=(
+            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
             DecorateInfo(unittest.expectedFailure, 'TestCommon',
                          'test_python_reference_consistency', dtypes=(torch.chalf,), device_type='cuda'),
+            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
             DecorateInfo(unittest.expectedFailure, 'TestCommon',
                          'test_python_reference_meta_functions', dtypes=(torch.chalf,), device_type='cuda'),
         ),
