@@ -15,7 +15,19 @@ import textwrap
 import typing
 import warnings
 import zipfile
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    BinaryIO,
+    Callable,
+    Collection,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -143,21 +155,23 @@ def exporter_context(model, mode, verbose):
 
 
 def export(
-    model,
-    args,
-    f,
-    export_params=True,
-    verbose=False,
-    training=None,
-    input_names=None,
-    output_names=None,
-    operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
-    opset_version=None,
-    do_constant_folding=True,
-    dynamic_axes=None,
-    keep_initializers_as_inputs=None,
-    custom_opsets=None,
-    export_modules_as_functions=False,
+    model: Union[torch.nn.Module, torch.jit.ScriptModule, torch.jit.ScriptFunction],
+    args: Union[Tuple[Any, ...], torch.Tensor],
+    f: Union[str, BinaryIO],
+    export_params: bool = True,
+    verbose: bool = False,
+    training = None,
+    input_names: Optional[Sequence[str]] = None,
+    output_names: Optional[Sequence[str]] = None,
+    operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX,
+    opset_version: Optional[int] = None,
+    do_constant_folding: bool = True,
+    dynamic_axes: Optional[
+        Union[Mapping[str, Mapping[int, str]], Mapping[str, Sequence[int]]]
+    ] = None,
+    keep_initializers_as_inputs: Optional[bool] = None,
+    custom_opsets: Optional[Mapping[str, int]] = None,
+    export_modules_as_functions: Union[bool, Collection[torch.nn.Module]] = False,
 ):
 
     _export(
