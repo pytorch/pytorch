@@ -40,4 +40,4 @@ jobs:
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi
 
-concurrency: try-merge
+concurrency: try-merge-${{ github.event.client_payload.on_green }}
