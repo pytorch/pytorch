@@ -119,12 +119,14 @@ cxx_library(
         ("aten/src", "ATen/quantized/*.h"),
         ("aten/src", "ATen/vulkan/*.h"),
         ("aten/src", "ATen/metal/*.h"),
+        ("aten/src", "ATen/mps/*.h"),
         ("aten/src", "ATen/nnapi/*.h"),
         # ATen Native
         ("aten/src", "ATen/native/*.h"),
         ("aten/src", "ATen/native/ao_sparse/quantized/cpu/*.h"),
         ("aten/src", "ATen/native/cpu/**/*.h"),
         ("aten/src", "ATen/native/sparse/*.h"),
+        ("aten/src", "ATen/native/mps/*.h"),
         ("aten/src", "ATen/native/nested/*.h"),
         ("aten/src", "ATen/native/quantized/*.h"),
         ("aten/src", "ATen/native/quantized/cpu/*.h"),
@@ -591,7 +593,7 @@ cxx_binary(
         "-DBUILD_LITE_INTERPRETER",
     ],
     linker_flags = [
-        "-Wl,--no-as-needed",
+        # "-Wl,--no-as-needed",
         "-ldl",
         "-pthread"
     ],

@@ -658,7 +658,7 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = []):
             # for ovrsource, which needs Python bindings.
             (["--subset libtorch"] if not is_arvr_mode() else []) + [
                 "--native-functions-path $(location :aten_src_path)/aten/src/ATen/native/native_functions.yaml",
-                # "--tags-path $(location :aten_src_path)/aten/src/ATen/native/tags.yaml", # todo D35992309
+                "--tags-path $(location :aten_src_path)/aten/src/ATen/native/tags.yaml", # todo D35992309
                 "--install_dir $OUT",
             ] + extra_params,
         ),
@@ -668,7 +668,7 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = []):
             # for ovrsource, which needs Python bindings.
             (["--subset libtorch"] if not is_arvr_mode() else []) + [
                 "--native-functions-path $(location :aten_src_path)/aten/src/ATen/native/native_functions.yaml",
-                # "--tags-path $(location :aten_src_path)/aten/src/ATen/native/tags.yaml",
+                "--tags-path $(location :aten_src_path)/aten/src/ATen/native/tags.yaml",
                 "--install_dir $OUT",
             ] + extra_params,
         ),
