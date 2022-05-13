@@ -122,7 +122,12 @@ Tensor max_pool2d(
     return at::mkldnn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
-
+#ifdef USE_MPS
+  if (self.is_mps()) {
+    return at::_mps_max_pool2d(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+  }
+#endif
 #if defined(C10_MOBILE)
   if(xnnpack::use_max_pool2d(self, kernel_size, padding, stride,
                              dilation, ceil_mode)) {

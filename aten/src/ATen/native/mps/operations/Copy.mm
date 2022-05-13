@@ -11,7 +11,6 @@
 #include <torch/library.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/Optional.h>
-#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -28,8 +27,6 @@ MPSGraphTensor* chainViewOperation(MPSGraph* mpsGraph, IntArrayRef size,
       NSData* shapeData = [NSData dataWithBytes : sizeArray
                                     length : size.size()*sizeof(int32_t)];
 
-      //NSString *strData = [[NSString alloc]initWithData:shapeData encoding:NSUTF8StringEncoding];
-      //NSLog(@"%@",strData);
       MPSGraphTensor* shapeTensor =  [mpsGraph constantWithData : shapeData
                                                         shape : @[[NSNumber numberWithUnsignedInteger: size.size()]]
                                                       dataType : MPSDataTypeInt32];
@@ -207,6 +204,7 @@ void* pageAlignedBlockPtr(
 static at::Tensor& copy_from_mps_(at::Tensor& self, const at::Tensor& src,
                            bool non_blocking) {
 
+  using namespace mps;
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* stream = getCurrentMPSStream();
   uint64_t size = src.nbytes();
@@ -395,7 +393,6 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
       "mps_copy_ is implemented only for *->MPS; MPS->*");
   return dst;
 }
-
 } // namespace mps
 
 Tensor _copy_from_and_resize_mps(const at::Tensor& self, const at::Tensor& dst)
