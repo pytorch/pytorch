@@ -2,7 +2,7 @@ import importlib
 import inspect
 import itertools
 import warnings
-from typing import Any, Callable, Dict, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 from torch import _C
 from torch.onnx import _constants
@@ -50,23 +50,22 @@ def register_ops_helper(domain: str, version: int, iter_version: int):
 
 
 def register_ops_in_version(domain: str, version: int):
-    # iterates through the symbolic functions of
-    # the specified opset version, and the previous
-    # opset versions for operators supported in
-    # previous versions.
+    """Iterates through the symbolic functions of the specified opset version, and the
+    previous opset versions for operators supported in previous versions.
 
-    # Opset 9 is the base version. It is selected as the base version because
-    #   1. It is the first opset version supported by PyTorch export.
-    #   2. opset 9 is more robust than previous opset versions. Opset versions like 7/8 have limitations
-    #      that certain basic operators cannot be expressed in ONNX. Instead of basing on these limitations,
-    #      we chose to handle them as special cases separately.
-    # Backward support for opset versions beyond opset 7 is not in our roadmap.
+    Opset 9 is the base version. It is selected as the base version because
+        1. It is the first opset version supported by PyTorch export.
+        2. opset 9 is more robust than previous opset versions. Opset versions like 7/8 have limitations
+            that certain basic operators cannot be expressed in ONNX. Instead of basing on these limitations,
+            we chose to handle them as special cases separately.
+    Backward support for opset versions beyond opset 7 is not in our roadmap.
 
-    # For opset versions other than 9, by default they will inherit the symbolic functions defined in
-    # symbolic_opset9.py.
-    # To extend support for updated operators in different opset versions on top of opset 9,
-    # simply add the updated symbolic functions in the respective symbolic_opset{version}.py file.
-    # Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.py for example.
+    For opset versions other than 9, by default they will inherit the symbolic functions defined in
+    symbolic_opset9.py.
+    To extend support for updated operators in different opset versions on top of opset 9,
+    simply add the updated symbolic functions in the respective symbolic_opset{version}.py file.
+    Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.py for example.
+    """
     iter_version = version
     while iter_version != 9:
         register_ops_helper(domain, version, iter_version)
@@ -119,8 +118,6 @@ def register_op(opname, op, domain, version):
 
 
 def is_registered_op(opname: str, domain: str, version: int):
-    if domain is None or version is None:
-        warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
     return (domain, version) in _registry and opname in _registry[(domain, version)]
 
@@ -135,13 +132,12 @@ def unregister_op(opname: str, domain: str, version: int):
         warnings.warn("The opname " + opname + " is not registered.")
 
 
-def get_op_supported_version(opname: str, domain: str, version: int):
-    iter_version = version
-    while iter_version <= _constants.onnx_main_opset:
+def get_op_supported_version(opname: str, domain: str, version: int) -> Optional[int]:
+    for iter_version in range(version, _constants.onnx_main_opset + 1):
         ops = [(op[0], op[1]) for op in get_ops_in_version(iter_version)]
+        # TODO(justinchuby): Optimize this linear search in this function.
         if (domain, opname) in ops:
             return iter_version
-        iter_version += 1
     return None
 
 
