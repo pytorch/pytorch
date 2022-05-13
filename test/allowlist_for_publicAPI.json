@@ -44,6 +44,8 @@
     "MovingAveragePerChannelMinMaxObserver",
     "Tuple",
     "abstractmethod",
+    "default_fixed_qparams_range_0to1_fake_quant",
+    "default_fixed_qparams_range_0to1_observer",
     "default_affine_fixed_qparams_fake_quant",
     "default_affine_fixed_qparams_observer",
     "default_dynamic_fake_quant",
@@ -55,6 +57,8 @@
     "default_fused_wt_fake_quant",
     "default_histogram_fake_quant",
     "default_per_channel_weight_fake_quant",
+    "default_fixed_qparams_range_neg1to1_fake_quant",
+    "default_fixed_qparams_range_neg1to1_observer",
     "default_symmetric_fixed_qparams_fake_quant",
     "default_symmetric_fixed_qparams_observer",
     "default_weight_fake_quant",
@@ -86,6 +90,8 @@
     "FixedQParamsFakeQuantize",
     "List",
     "ObservationType",
+    "default_fixed_qparams_range_0to1_observer",
+    "default_fixed_qparams_range_neg1to1_observer",
     "default_affine_fixed_qparams_observer",
     "default_symmetric_fixed_qparams_observer",
     "fuse_conv_bn",
@@ -445,6 +451,8 @@
     "QuantStub",
     "Set",
     "Union",
+    "default_fixed_qparams_range_0to1_fake_quant",
+    "default_fixed_qparams_range_neg1to1_fake_quant",
     "default_affine_fixed_qparams_fake_quant",
     "default_symmetric_fixed_qparams_fake_quant",
     "get_combined_dict",
@@ -529,13 +537,6 @@
     "set_grad_enabled",
     "variable"
   ],
-  "torch.autograd.anomaly_mode": [
-    "Any"
-  ],
-  "torch.autograd.forward_ad": [
-    "Any",
-    "namedtuple"
-  ],
   "torch.autograd.function": [
     "Any",
     "List",
@@ -546,18 +547,6 @@
   "torch.autograd.functional": [
     "List",
     "Tuple"
-  ],
-  "torch.autograd.gradcheck": [
-    "Callable",
-    "Dict",
-    "Iterable",
-    "List",
-    "Optional",
-    "Tuple",
-    "Union",
-    "is_tensor_like",
-    "product",
-    "vmap"
   ],
   "torch.autograd.graph": [
     "Any",
@@ -633,13 +622,6 @@
     "Tuple",
     "amp_definitely_not_available",
     "defaultdict"
-  ],
-  "torch.cuda.memory": [
-    "Any",
-    "Device",
-    "Dict",
-    "Union",
-    "is_initialized"
   ],
   "torch.cuda.nccl": [
     "init_rank",
@@ -998,6 +980,7 @@
     "Iterable",
     "Iterator",
     "List",
+    "Mapping",
     "NamedTuple",
     "Optional",
     "Parameter",
@@ -1065,6 +1048,7 @@
     "Dict",
     "Iterator",
     "List",
+    "Mapping",
     "Module",
     "Optional",
     "Parameter",
@@ -2087,7 +2071,11 @@
     "householder_product",
     "inv",
     "inv_ex",
+    "ldl_factor",
+    "ldl_factor_ex",
+    "ldl_solve",
     "lstsq",
+    "lu",
     "lu_factor",
     "lu_factor_ex",
     "matmul",
@@ -2106,6 +2094,7 @@
     "svdvals",
     "tensorinv",
     "tensorsolve",
+    "vander",
     "vector_norm"
   ],
   "torch.multiprocessing": [
@@ -2340,6 +2329,7 @@
   "torch.nn.modules.linear": [
     "LazyModuleMixin",
     "Module",
+    "NonDynamicallyQuantizableLinear",
     "Parameter",
     "Tensor",
     "UninitializedParameter"
@@ -2874,6 +2864,7 @@
     "convert",
     "convert_dynamic_jit",
     "convert_jit",
+    "default_fixed_qparams_range_0to1_fake_quant",
     "default_affine_fixed_qparams_fake_quant",
     "default_debug_observer",
     "default_dynamic_quant_observer",
@@ -2888,6 +2879,7 @@
     "default_per_channel_weight_fake_quant",
     "default_per_channel_weight_observer",
     "default_placeholder_observer",
+    "default_fixed_qparams_range_neg1to1_fake_quant",
     "default_symmetric_fixed_qparams_fake_quant",
     "default_weight_fake_quant",
     "default_weight_observer",
@@ -2940,6 +2932,7 @@
     "FakeQuantizeBase",
     "FixedQParamsFakeQuantize",
     "FusedMovingAvgObsFakeQuantize",
+    "default_fixed_qparams_range_0to1_fake_quant",
     "default_affine_fixed_qparams_fake_quant",
     "default_fake_quant",
     "default_fused_act_fake_quant",
@@ -2947,6 +2940,7 @@
     "default_fused_wt_fake_quant",
     "default_histogram_fake_quant",
     "default_per_channel_weight_fake_quant",
+    "default_fixed_qparams_range_neg1to1_fake_quant",
     "default_symmetric_fixed_qparams_fake_quant",
     "default_weight_fake_quant",
     "disable_fake_quant",
@@ -3250,273 +3244,13 @@
     "runtime_validation",
     "runtime_validation_disabled"
   ],
-  "torch.utils.data.communication.eventloop": [
-    "IterDataPipe",
-    "MapDataPipe"
-  ],
-  "torch.utils.data.communication.iter": [
-    "IterDataPipe"
-  ],
-  "torch.utils.data.communication.map": [
-    "MapDataPipe"
-  ],
   "torch.utils.data.dataloader": [
-    "Any",
-    "BatchSampler",
-    "Callable",
-    "Dataset",
-    "ExceptionWrapper",
-    "Generic",
-    "IterDataPipe",
-    "Iterable",
-    "IterableDataset",
-    "List",
-    "Optional",
-    "RandomSampler",
-    "Sampler",
-    "Sequence",
-    "SequentialSampler",
-    "TypeVar",
-    "Union",
     "default_collate",
     "default_convert",
     "get_worker_info"
   ],
-  "torch.utils.data.dataloader_experimental": [
-    "Any",
-    "DataLoader",
-    "IterDataPipe",
-    "IterableWrapper",
-    "List"
-  ],
   "torch.utils.data.datapipes.dataframe": [
     "DFIterDataPipe"
-  ],
-  "torch.utils.data.datapipes.dataframe.dataframes": [
-    "Any",
-    "DFIterDataPipe",
-    "DataChunkDF",
-    "Dict",
-    "IterDataPipe",
-    "List",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.dataframe.datapipes": [
-    "DFIterDataPipe",
-    "IterDataPipe",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.dataframe.structures": [
-    "DataChunk"
-  ],
-  "torch.utils.data.datapipes.datapipe": [
-    "Callable",
-    "Dataset",
-    "Dict",
-    "Generic",
-    "IterableDataset",
-    "Iterator",
-    "Optional",
-    "SerializationType",
-    "TypeVar",
-    "deserialize_fn",
-    "serialize_fn"
-  ],
-  "torch.utils.data.datapipes.iter.callable": [
-    "Callable",
-    "IterDataPipe",
-    "Iterator",
-    "Sized",
-    "TypeVar",
-    "check_lambda_fn",
-    "default_collate",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.iter.combinatorics": [
-    "Dict",
-    "IterDataPipe",
-    "Iterator",
-    "List",
-    "Optional",
-    "Sampler",
-    "SequentialSampler",
-    "Sized",
-    "Tuple",
-    "Type",
-    "TypeVar",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.iter.combining": [
-    "Any",
-    "Callable",
-    "Deque",
-    "IterDataPipe",
-    "Iterator",
-    "List",
-    "Optional",
-    "SerializationType",
-    "Set",
-    "Sized",
-    "Tuple",
-    "TypeVar",
-    "check_lambda_fn",
-    "deque",
-    "deserialize_fn",
-    "functional_datapipe",
-    "serialize_fn"
-  ],
-  "torch.utils.data.datapipes.iter.filelister": [
-    "IterDataPipe",
-    "IterableWrapper",
-    "Iterator",
-    "List",
-    "Sequence",
-    "Union",
-    "get_file_pathnames_from_root"
-  ],
-  "torch.utils.data.datapipes.iter.fileopener": [
-    "IOBase",
-    "IterDataPipe",
-    "Iterable",
-    "Optional",
-    "Tuple",
-    "deprecation_warning",
-    "get_file_binaries_from_pathnames"
-  ],
-  "torch.utils.data.datapipes.iter.grouping": [
-    "Any",
-    "Callable",
-    "DataChunk",
-    "DefaultDict",
-    "IterDataPipe",
-    "Iterator",
-    "List",
-    "Optional",
-    "Sized",
-    "TypeVar",
-    "check_lambda_fn",
-    "defaultdict",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.iter.routeddecoder": [
-    "Any",
-    "BufferedIOBase",
-    "Callable",
-    "Decoder",
-    "IterDataPipe",
-    "Iterable",
-    "Iterator",
-    "Sized",
-    "Tuple",
-    "decoder_basichandlers",
-    "decoder_imagehandler",
-    "deprecation_warning",
-    "extension_extract_fn",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.iter.selecting": [
-    "Callable",
-    "IterDataPipe",
-    "Iterator",
-    "TypeVar",
-    "check_lambda_fn",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.iter.streamreader": [
-    "IterDataPipe",
-    "Tuple"
-  ],
-  "torch.utils.data.datapipes.iter.utils": [
-    "IterDataPipe"
-  ],
-  "torch.utils.data.datapipes.map.callable": [
-    "Callable",
-    "MapDataPipe",
-    "TypeVar",
-    "check_lambda_fn",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.map.combinatorics": [
-    "Iterator",
-    "List",
-    "MapDataPipe",
-    "Optional",
-    "TypeVar",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.map.combining": [
-    "MapDataPipe",
-    "Sized",
-    "Tuple",
-    "TypeVar",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.map.grouping": [
-    "DataChunk",
-    "List",
-    "MapDataPipe",
-    "Optional",
-    "Sized",
-    "TypeVar",
-    "functional_datapipe"
-  ],
-  "torch.utils.data.datapipes.map.utils": [
-    "MapDataPipe"
-  ],
-  "torch.utils.data.datapipes.utils.common": [
-    "IOBase",
-    "Iterable",
-    "List",
-    "Optional",
-    "Tuple",
-    "Union"
-  ],
-  "torch.utils.data.datapipes.utils.decoder": [
-    "ImageHandler",
-    "MatHandler",
-    "handle_extension"
-  ],
-  "torch.utils.data.dataset": [
-    "Generator",
-    "Generic",
-    "Iterable",
-    "Iterator",
-    "List",
-    "Optional",
-    "Sequence",
-    "Tensor",
-    "Tuple",
-    "TypeVar",
-    "randperm"
-  ],
-  "torch.utils.data.distributed": [
-    "Dataset",
-    "Iterator",
-    "Optional",
-    "Sampler",
-    "TypeVar"
-  ],
-  "torch.utils.data.graph": [
-    "Any",
-    "Dict",
-    "IterDataPipe",
-    "MapDataPipe",
-    "Set"
-  ],
-  "torch.utils.data.graph_settings": [
-    "Shuffler"
-  ],
-  "torch.utils.data.sampler": [
-    "Generic",
-    "Iterable",
-    "Iterator",
-    "List",
-    "Optional",
-    "Sequence",
-    "Sized",
-    "Tensor",
-    "TypeVar",
-    "Union"
   ],
   "torch.utils.dlpack": [
     "Any",
