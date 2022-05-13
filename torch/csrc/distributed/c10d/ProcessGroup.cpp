@@ -217,13 +217,32 @@ void ProcessGroup::init() {
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::broadcast(
     std::vector<at::Tensor>& tensors, const BroadcastOptions& opts) {
-  static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast", "")
-      .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(at::TensorList,
+  // static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast", "")
+  //     .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(at::TensorList,
+  //         const c10::intrusive_ptr<::c10d::ProcessGroup>&, int64_t, int64_t, int64_t)>();
+  // // It's awakward to unbox the opts here and box them again in the custom C++ op.
+  // // But it's also complicated to make opts as a CustomClassHolder. Leave it as it is now.
+  // return op.call(tensors, c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this), opts.rootRank,
+  //     opts.rootTensor, opts.timeout.count());
+
+  // This code basically is copied from the last Lazy PR.
+  // AoTAutograd has a similar problem as LazyTensor where it expects the return type to be tensor|(tensor)|[tensor].
+  // Then it wraps the returns with the fx.Proxy which can then trace the op.
+  // So here we use directly broadcast_ above instead.
+  auto& tensor = tensors[0];
+  static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast_", "")
+      .typed<at::Tensor(const at::Tensor&,
           const c10::intrusive_ptr<::c10d::ProcessGroup>&, int64_t, int64_t, int64_t)>();
-  // It's awakward to unbox the opts here and box them again in the custom C++ op.
-  // But it's also complicated to make opts as a CustomClassHolder. Leave it as it is now.
-  return op.call(tensors, c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this), opts.rootRank,
+  op.call(tensor, c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this), opts.rootRank,
       opts.rootTensor, opts.timeout.count());
+  auto future = c10::make_intrusive<at::ivalue::Future>(c10::TensorType::get(),
+      std::vector<c10::Device>{tensor.device()});
+  future->markCompleted(tensor);
+  auto work = c10::make_intrusive<c10d::ProcessGroup::Work>(getRank(), c10d::OpType::BROADCAST,
+      /*profilingTitle=*/nullptr, tensors);
+  work->setFuture(std::move(future));
+  work->finish();
+  return work;
 }
 
 } // namespace c10d
