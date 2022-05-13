@@ -364,7 +364,7 @@ def _init_test_roi_heads_faster_rcnn():
 
 
 def _construct_tensor_for_quantization_test(
-    shape: Tuple[int],
+    shape: Tuple[int, ...],
     offset: Optional[Union[int, float]] = None,
     max_val: Optional[Union[int, float]] = None,
 ) -> torch.Tensor:
@@ -12584,6 +12584,31 @@ class _TestONNXRuntime:
         # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test(
             (3, 4, 8, 8), offset=-384, max_val=12
+        )
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_qat_maxpool2d(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.pool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.pool(x)
+                x = self.dequant(x)
+                return x
+        model = M()
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model.train())
+        model = torch.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test(
+            (4, 4, 3, 2)
         )
         self.run_test(model, input)
 
