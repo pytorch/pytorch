@@ -3091,6 +3091,8 @@
   ],
   "torch.special": [
     "digamma",
+    "elliptic_integral_e",
+    "elliptic_integral_k",
     "entr",
     "erf",
     "erfc",

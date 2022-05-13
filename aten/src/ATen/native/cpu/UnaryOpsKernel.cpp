@@ -15,6 +15,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
+#include <ATen/OpMathType.h>
 
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
@@ -174,12 +175,19 @@ void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
 }
 
 static void abs_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t a) -> scalar_t { return abs_impl(a); },
-        [=](Vectorized<scalar_t> a) { return a.abs(); });
-  });
+  auto dtype = iter.dtype();
+  if (dtype == kComplexHalf) {
+    using scalar_t = c10::complex<Half>;
+    using opmath_t = at::opmath_type<scalar_t>;
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return abs_impl(opmath_t{a}); });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return abs_impl(a); },
+          [=](Vectorized<scalar_t> a) { return a.abs(); });
+    });
+  }
 }
 
 static void angle_kernel(TensorIteratorBase& iter) {
@@ -294,13 +302,21 @@ static void signbit_kernel(TensorIteratorBase& iter){
   });
 }
 
-static void sgn_kernel(TensorIteratorBase& iter){
-  AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sgn_cpu", [&]() {
-    cpu_kernel_vec(
-      iter,
-      [=](scalar_t a) -> scalar_t { return sgn_impl(a); },
-      [=](Vectorized<scalar_t> a) { return a.sgn(); });
-  });
+static void sgn_kernel(TensorIteratorBase& iter) {
+  auto dtype = iter.dtype();
+  if (dtype == kComplexHalf) {
+    using scalar_t = c10::complex<Half>;
+    using opmath_t = at::opmath_type<scalar_t>;
+    cpu_kernel(
+        iter, [=](scalar_t a) -> scalar_t { return sgn_impl(opmath_t{a}); });
+  } else {
+    AT_DISPATCH_COMPLEX_TYPES(dtype, "sgn_cpu", [&]() {
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return sgn_impl(a); },
+        [=](Vectorized<scalar_t> a) { return a.sgn(); });
+    });
+  }
 }
 
 static void sinc_kernel(TensorIteratorBase& iter) {
@@ -543,6 +559,22 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
       });
 }
 
+static void elliptic_integral_e_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_e_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) -> scalar_t {
+            return elliptic_integral_e(x);
+        });
+    });
+} // elliptic_integral_e_kernel
+
+static void elliptic_integral_k_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_k_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) -> scalar_t {
+            return elliptic_integral_k(x);
+        });
+    });
+} // elliptic_integral_e_kernel
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -633,7 +665,8 @@ REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
-
+REGISTER_DISPATCH(special_elliptic_integral_e_stub, &CPU_CAPABILITY::elliptic_integral_e_kernel);
+REGISTER_DISPATCH(special_elliptic_integral_k_stub, &CPU_CAPABILITY::elliptic_integral_k_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(acos)

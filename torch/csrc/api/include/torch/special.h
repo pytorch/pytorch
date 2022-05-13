@@ -565,4 +565,36 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Complete elliptic integral E(m).
+/// See https://pytorch.org/docs/master/special.html#torch.special.special_elliptic_integral_e.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::special_elliptic_integral_e(t);
+/// ```
+inline Tensor special_elliptic_integral_e(const Tensor& self) {
+  return torch::special_elliptic_integral_e(self);
+}
+
+inline Tensor& special_elliptic_integral_e_out(Tensor& result, const Tensor& self) {
+  return torch::special_elliptic_integral_k_out(result, self);
+}
+
+/// Complete elliptic integral of the first kind K(m).
+/// See https://pytorch.org/docs/master/special.html#torch.special.special_elliptic_integral_k.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::special_elliptic_integral_k(t);
+/// ```
+inline Tensor special_elliptic_integral_k(const Tensor& self) {
+  return torch::special_elliptic_integral_k(self);
+}
+
+inline Tensor& special_elliptic_integral_k_out(Tensor& result, const Tensor& self) {
+  return torch::special_elliptic_integral_k_out(result, self);
+}
+
 }} // torch::special

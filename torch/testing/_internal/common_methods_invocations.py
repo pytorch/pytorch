@@ -18001,6 +18001,26 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
+    UnaryUfuncInfo(
+        'special.elliptic_integral_e',
+        ref=scipy.special.ellipk if TEST_SCIPY else _NOTHING,
+        domain=(None, 1),
+        supports_inplace_autograd=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        dtypes=all_types_and(torch.bool),
+        dtypesIfCUDA=all_types_and(torch.bool),
+    ),
+    UnaryUfuncInfo(
+        'special.elliptic_integral_k',
+        ref=scipy.special.ellipe if TEST_SCIPY else _NOTHING,
+        domain=(None, 1),
+        supports_inplace_autograd=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        dtypes=all_types_and(torch.bool),
+        dtypesIfCUDA=all_types_and(torch.bool),
+    ),
 ]
 
 # NOTE [Python References]

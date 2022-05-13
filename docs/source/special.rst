@@ -44,3 +44,12 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+
+Elliptic Functions and Integrals
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Elliptic Integrals
+""""""""""""""""""
+
+.. autofunction:: elliptic_integral_e
+.. autofunction:: elliptic_integral_k

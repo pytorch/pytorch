@@ -374,6 +374,34 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
+void elliptic_integral_e_kernel_cuda(TensorIteratorBase& iterator) {
+#ifdef USE_JITERATOR
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_e_cuda", [&]() {
+        jitted_gpu_kernel<elliptic_integral_e_name, scalar_t, scalar_t, 1>(iterator, elliptic_integral_e_string);
+    });
+#else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_e_cuda", [&]() {
+        gpu_kernel(iterator, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+            return elliptic_integral_e(x);
+        });
+    });
+#endif
+} // elliptic_integral_e_kernel_cuda
+
+void elliptic_integral_k_kernel_cuda(TensorIteratorBase& iterator) {
+#ifdef USE_JITERATOR
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_k_cuda", [&]() {
+        jitted_gpu_kernel<elliptic_integral_k_name, scalar_t, scalar_t, 1>(iterator, elliptic_integral_k_string);
+    });
+#else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_k_cuda", [&]() {
+        gpu_kernel(iterator, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+            return elliptic_integral_k(x);
+        });
+    });
+#endif
+} // elliptic_integral_k_kernel_cuda
+
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
 REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_cuda);
@@ -390,6 +418,8 @@ REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
 REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
 REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_cuda);
 REGISTER_DISPATCH(special_erfcx_stub, &erfcx_kernel_cuda);
+REGISTER_DISPATCH(special_elliptic_integral_e_stub, &elliptic_integral_e_kernel_cuda);
+REGISTER_DISPATCH(special_elliptic_integral_k_stub, &elliptic_integral_k_kernel_cuda);
 
 } // namespace native
 } // namespace at
