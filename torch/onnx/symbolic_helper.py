@@ -371,8 +371,8 @@ def _is_tensor_list(x):
 
 
 def _is_scalar_list(x):
-    """
-    Check if x is a scalar list, for example: List[float], List[int].
+    """Checks if x is a scalar list, for example: List[float], List[int].
+
     Besides checking the type is ListType, we also check if the data type is
     a valid ONNX data type.
     """
@@ -539,12 +539,13 @@ def _is_fp(value):
 
 
 def _generate_wrapped_number(g, scalar):
-    """
-    Create a wrapped number based on https://github.com/pytorch/pytorch/issues/9515
+    """Creates a wrapped number based on https://github.com/pytorch/pytorch/issues/9515.
+
     A Tensor is a considered a "wrapped number" if it is
     auto-wrapped from a C++ or Python number type. Integer types are
     wrapped as 0-dim int64 tensors and floating-point types are
     wrapped as 0-dim double tensors.
+
     The input to this function is constant value. If the data type
     is a floating point type, it is converted to a 0-dim double
     tensor, else it is converted to a 0-dim tensor of its original type
@@ -946,9 +947,7 @@ def _unbind_helper(g, self, dim, _outputs):
     if GLOBALS.export_onnx_opset_version < 11:
         from torch.onnx.symbolic_opset9 import unbind
     elif GLOBALS.export_onnx_opset_version <= 12:
-        from torch.onnx.symbolic_opset11 import (
-            unbind,  # type: ignore[no-redef]
-        )
+        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
     else:
         from torch.onnx.symbolic_opset13 import (
             unbind,  # type: ignore[no-redef]
@@ -961,9 +960,7 @@ def _scatter_helper(g, self, dim, index, src):
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import (
-            scatter,  # type: ignore[no-redef]
-        )
+        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
     return scatter(g, self, dim, index, src)
 
 
@@ -1010,9 +1007,7 @@ def _arange_helper(g, *args):
     if GLOBALS.export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import arange
     else:
-        from torch.onnx.symbolic_opset11 import (
-            arange,  # type: ignore[no-redef]
-        )
+        from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
     return arange(g, *args)
 
 

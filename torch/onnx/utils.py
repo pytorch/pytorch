@@ -711,10 +711,9 @@ def _model_to_graph(
     """Converts model into an ONNX graph.
 
     Returns:
-        graph (_C.Graph): A TorchScript IR Graph with ONNX nodes.
-        params_dict (Dict[str, torch.Tensor]): Dict from input param name to param value.
-        torch_out (Union[NoneType, torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]]):
-            The output tensors resulting from the trace of ``model``.
+        graph: A TorchScript IR Graph with ONNX nodes.
+        params_dict: Dict from input param name to param value.
+        torch_out: The output tensors resulting from the trace of ``model``.
             If ``model`` is a :class:`torch.jit.ScriptModule` or :class:`torch.jit.ScriptFunction`,
             this will be None, since we are not doing any tracing.
     """
