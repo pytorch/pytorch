@@ -8,6 +8,11 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/Copy.h>
 
+#define MPS_ERROR_NOT_COMPILED "PyTorch code as not compiled with MPS enabled"
+#define MPS_ERROR_RUNTIME_TOO_LOW \
+  "The MPS backend is supported on MacOS 12.3+.", \
+  "Current OS version can be queried using `sw_vers`"
+
 namespace at { namespace detail {
 TensorBase empty_mps(
     IntArrayRef size,
@@ -50,13 +55,13 @@ TensorBase empty_mps(
     tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
     return tensor;
   } else {
-    TORCH_INTERNAL_ASSERT(false, "MPS backend supported MacOS 12.3+")
+    TORCH_CHECK(false, MPS_ERROR_RUNTIME_TOO_LOW)
   }
 #else
-  TORCH_INTERNAL_ASSERT(false, "MPS backend supported MacOS 12.3+")
+  TORCH_CHECK(false, MPS_ERROR_NOT_COMPILED)
 #endif
 #else
-  TORCH_INTERNAL_ASSERT(false, "MPS backend supported MacOS 12.3+")
+  TORCH_CHECK(false, MPS_ERROR_NOT_COMPILED)
 #endif
 }
 
@@ -87,13 +92,13 @@ TensorBase empty_strided_mps(
     return at::detail::empty_strided_generic(
         size, stride, allocator, mps_dks, dtype);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "MPS backend supported MacOS 12.3+")
+    TORCH_CHECK(false, MPS_ERROR_RUNTIME_TOO_LOW)
   }
 #else
-  TORCH_INTERNAL_ASSERT(false, "MPS backend supported MacOS 12.3+")
+  TORCH_CHECK(false, MPS_ERROR_NOT_COMPILED)
 #endif
 #else
-  TORCH_INTERNAL_ASSERT(false, "MPS backend supported MacOS 12.3+")
+  TORCH_CHECK(false, MPS_ERROR_NOT_COMPILED)
 #endif
 }
 
