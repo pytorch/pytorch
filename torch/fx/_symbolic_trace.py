@@ -523,12 +523,7 @@ class Tracer(TracerBase):
         """
         if isinstance(root, torch.nn.Module):
             self.root = root
-
-            assert hasattr(
-                type(root), self.traced_func_name
-            ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
-
-            fn = getattr(type(root), self.traced_func_name)
+            fn = type(root).forward
             self.submodule_paths = {mod: name for name, mod in root.named_modules()}
         else:
             self.root = torch.nn.Module()
