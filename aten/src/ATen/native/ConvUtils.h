@@ -174,8 +174,14 @@ constexpr int weight_input_channels_dim = 1;
 // Often written as 2 + max_dim (extra dims for batch size and channels)
 constexpr int max_dim = 3;
 
-static inline void conv_check_args(CheckedFrom c, IntArrayRef args,
-                                   size_t expected_size, const char* arg_name)
+// ---------------------------------------------------------------------
+//
+// Checking
+//
+// ---------------------------------------------------------------------
+
+// Used on pad, stride and dilation
+static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, const char* arg_name)
 {
   TORCH_CHECK(args.size() <= expected_size,
            "Too many ", arg_name, " values (", args.size(), ") supplied, expecting ",
@@ -194,14 +200,30 @@ static inline void conv_check_args(CheckedFrom c, IntArrayRef args,
   }
 }
 
-static inline void convolution_shape_check(
+
+// NOTE [ Convolution checks ]
+//
+// NB: For many call sites, it is not strictly necessary to check all of
+// these relationships (for example, for forward convolution, we compute
+// the size of output ourselves, so we don't actually need to check
+// output.  However, writing a single function that does everything
+// means we get to reuse it for both forwards and all backwards
+// variants, even when the set of "real" inputs varies.  The magic of
+// relational computing!
+//
+// (There is one downside, which is that it is slightly harder to write
+// error messages which are able to distinguish between real inputs
+// (which the user can change) and computed inputs (which the user can
+// only indirectly affect).  It would be an interesting exercise to
+// come up with a general framework to handle such situations.)
+static void convolution_shape_check(
     CheckedFrom c,
     const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
 {
-  conv_check_args(c, padding, input->dim() - 2, "padding");
-  conv_check_args(c, stride, padding.size(), "stride");
-  conv_check_args(c, dilation, padding.size(), "dilation");
+  check_args(c, padding, input->dim() - 2, "padding");
+  check_args(c, stride, padding.size(), "stride");
+  check_args(c, dilation, padding.size(), "dilation");
 
   // Input
   checkDimRange(c, input, 3, 6 /* exclusive */);
