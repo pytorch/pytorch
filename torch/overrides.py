@@ -264,6 +264,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.unflatten,
         Tensor.to_sparse_coo,
         Tensor.to_sparse_csr,
+        Tensor.to_sparse_bsr,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
         Tensor._make_wrapper_subclass,
