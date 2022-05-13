@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/Exception.h>
+#include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/NamedTensorUtils.h>
@@ -53,6 +54,31 @@ const OptionalScalarRef max) {
   }
   build_unary_op(maybe_get_output(), self.to(result_type));
 }
+
+TORCH_META_FUNC2(clamp, Tensor) (
+const Tensor& self,
+const OptionalTensorRef min,
+const OptionalTensorRef max) {
+  TORCH_CHECK(min || max, "torch.clamp: At least one of 'min' or 'max' must not be None");
+  TORCH_CHECK(!isComplexType(self.scalar_type()), "clamp is not supported for complex types");
+  #define CLAMP_CONFIG()                    \
+    TensorIteratorConfig()                  \
+      .set_check_mem_overlap(true)          \
+      .add_output(maybe_get_output())       \
+      .add_input(self)                      \
+      .promote_inputs_to_common_dtype(true) \
+      .cast_common_dtype_to_outputs(true)   \
+      .enforce_safe_casting_to_output(true)
+
+  if (min && max) {
+    build(CLAMP_CONFIG().add_input(*min).add_input(*max));
+  } else if (min) {
+    build(CLAMP_CONFIG().add_input(*min));
+  } else if (max) {
+    build(CLAMP_CONFIG().add_input(*max));
+  }
+}
+
 
 TORCH_META_FUNC(clamp_max) (
   const Tensor& self,
@@ -182,8 +208,6 @@ DEFINE_DISPATCH(isposinf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-glob
 DEFINE_DISPATCH(isneginf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mode_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_min_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_min_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_max_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -542,50 +566,16 @@ TORCH_IMPL_FUNC(clamp_out)
   }
 }
 
-Tensor& clamp_out(const Tensor& self, const c10::optional<Tensor>& min,
-                  const c10::optional<Tensor>& max, Tensor& result) {
+TORCH_IMPL_FUNC(clamp_Tensor_out)
+(const Tensor& self, const OptionalTensorRef min,
+                  const OptionalTensorRef max, const Tensor&) {
   if (min && max) {
-    TORCH_CHECK(self.layout() == Layout::Strided,
-                "torch.clamp only supports strided layout, got: ", self.layout());
-    auto iter = TensorIteratorConfig()
-                .set_check_mem_overlap(true)
-                .add_output(result)
-                .add_input(self)
-                .add_input(*min)
-                .add_input(*max)
-                .promote_inputs_to_common_dtype(true)
-                .cast_common_dtype_to_outputs(true)
-                .enforce_safe_casting_to_output(true)
-                .build();
-    clamp_stub(iter.device_type(), iter);
-  } else if (max) {
-    at::clamp_max_outf(self, *max, result);
+    clamp_stub(device_type(), *this);
   } else if (min) {
-    at::clamp_min_outf(self, *min, result);
-  } else {
-    TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
+    maximum_stub(device_type(), *this);
+  } else if (max) {
+    minimum_stub(device_type(), *this);
   }
-  return result;
-}
-
-Tensor clamp(const Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
-  //manual type promotion to send to `out`
-  //won't be needed once clamp is ported to structured
-  at::native::ResultTypeState state = {};
-  state = at::native::update_result_type_state(self, state);
-  if (min) {
-    state = at::native::update_result_type_state(*min, state);
-  }
-  if (max) {
-    state = at::native::update_result_type_state(*max, state);
-  }
-  auto result_type = at::native::result_type(state);
-  Tensor result = at::empty({0}, self.options().dtype(result_type));
-  return at::clamp_outf(self, min, max, result);
-}
-
-Tensor& clamp_(Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
-  return at::clamp_outf(self, min, max, self);
 }
 
 TORCH_IMPL_FUNC(clamp_max_out)
@@ -595,7 +585,7 @@ TORCH_IMPL_FUNC(clamp_max_out)
 
 TORCH_IMPL_FUNC(clamp_max_Tensor_out)
 (const Tensor& self, const Tensor& max, const Tensor& result) {
-  clamp_max_stub(device_type(), *this);
+  minimum_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(clamp_min_out)
@@ -605,7 +595,7 @@ TORCH_IMPL_FUNC(clamp_min_out)
 
 TORCH_IMPL_FUNC(clamp_min_Tensor_out)
 (const Tensor& self, const Tensor& min, const Tensor& result) {
-  clamp_min_stub(device_type(), *this);
+  maximum_stub(device_type(), *this);
 }
 
 // Implements the "clip" alias for clamp
