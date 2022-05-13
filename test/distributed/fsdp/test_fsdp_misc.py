@@ -54,6 +54,15 @@ class TestFSDPMisc(FSDPTest):
             torch.cuda.current_device() if use_index
             else torch.device("cuda", torch.cuda.current_device())
         )
+
+        def _check_device_matches(fsdp, dev_id):
+            devices = {p.device for p in fsdp.parameters()}
+            self.assertEqual(1, len(devices))
+            found_dev = devices.pop()
+            if use_index and not isinstance(dev_id, torch.device):
+                dev_id = torch.device("cuda", dev_id)
+            self.assertEqual(found_dev, dev_id)
+
         mod = NestedWrappedModule(
             group=self.process_group,
             wrap_fsdp=True,
@@ -63,12 +72,7 @@ class TestFSDPMisc(FSDPTest):
         )
         fsdp = FSDP(mod, device_id=dev_id)
         # Check FSDP parameters are moved.
-        devices = {p.device for p in fsdp.parameters()}
-        self.assertEqual(1, len(devices))
-        found_dev = devices.pop()
-        if use_index:
-            dev_id = torch.device("cuda", dev_id)
-        self.assertEqual(found_dev, dev_id)
+        _check_device_matches(fsdp, dev_id)
         # device_id matching module device before FSDP construction
         # should not throw errors.
         mod = NestedWrappedModule(
@@ -79,6 +83,17 @@ class TestFSDPMisc(FSDPTest):
             device_id=dev_id
         )
         fsdp = FSDP(mod, device_id=dev_id)
+        _check_device_matches(fsdp, dev_id)
+        # Passing in torch.device("cuda") should work.
+        mod = NestedWrappedModule(
+            group=self.process_group,
+            wrap_fsdp=True,
+            wrap_everything=True,
+            fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+            device_id=torch.device("cuda")
+        )
+        fsdp = FSDP(mod, device_id=torch.device("cuda"))
+        _check_device_matches(fsdp, torch.device("cuda", torch.cuda.current_device()))
 
     @skip_if_lt_x_gpu(2)
     def test_module_device_mismatches_device_id(self):
@@ -158,17 +173,17 @@ class TestFSDPMisc(FSDPTest):
         is run on GPU.
         """
         torch.cuda.set_device(self.rank)
-        mod = NestedWrappedModule(
-            group=self.process_group,
-            wrap_fsdp=True,
-            wrap_everything=True,
-            fsdp_init_mode=FSDPInitMode.CUDA_NEVER,
-        )
         regex = "Module is input on CPU"
         context = self.assertWarnsRegex(
             expected_warning=UserWarning, expected_regex=regex
         )
         with context:
+            mod = NestedWrappedModule(
+                group=self.process_group,
+                wrap_fsdp=True,
+                wrap_everything=True,
+                fsdp_init_mode=FSDPInitMode.CUDA_NEVER,
+            )
             fsdp = FSDP(mod)
         devices = {p.device for p in fsdp.parameters()}
         self.assertEqual(1, len(devices))
