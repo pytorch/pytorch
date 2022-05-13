@@ -1,18 +1,35 @@
-"""Flags that control the ONNX exporter."""
+"""Globals used internally by the ONNX exporter.
 
+Do not use this module outside of `torch.onnx` and its tests.
+
+Be very judicious when adding any new global variables. Do not create new global
+variables unless they are absolutely necessary.
+"""
+from __future__ import annotations
+
+import typing
 from typing import Optional
 
-import torch._C
+# This module should only depend on _constants and nothing else in torch.onnx to keep
+# dependency direction clean.
 from torch.onnx import _constants
 
+if typing.TYPE_CHECKING:
+    # Postpone type checking to avoid circular dependencies.
+    from torch.onnx import OperatorExportTypes, TrainingMode
 
-class _InternalFlags:
-    """Flags used internally by ONNX exporter."""
+
+class _InternalGlobals:
+    """Globals used internally by ONNX exporter.
+
+    NOTE: Be very judicious when adding any new variables. Do not create new
+    global variables unless they are absolutely necessary.
+    """
 
     def __init__(self):
         self._export_onnx_opset_version = _constants.onnx_default_opset
-        self.operator_export_type: Optional[torch._C._onnx.OperatorExportTypes] = None
-        self.training_mode = None
+        self.operator_export_type: Optional[OperatorExportTypes] = None
+        self.training_mode: Optional[TrainingMode] = None
         self.onnx_shape_inference: bool = False
 
     @property
@@ -28,4 +45,4 @@ class _InternalFlags:
         self._export_onnx_opset_version = value
 
 
-_FLAGS = _InternalFlags()
+GLOBALS = _InternalGlobals()

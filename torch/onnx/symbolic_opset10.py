@@ -10,8 +10,8 @@ from torch.nn.modules.utils import _pair, _single, _triple
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx._globals import _FLAGS
-from torch.onnx.symbolic_helper import parse_args
+from torch.onnx._globals import GLOBALS
+from torch.onnx.symbolic_helper import parse_args, quantized_args
 from torch.onnx.symbolic_opset9 import (
     add,
     conv2d,
@@ -80,6 +80,7 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
+    @quantized_args(True, False, False, False, False, False)
     @parse_args("v", "is", "is", "is", "is", "i")
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if not stride:
@@ -327,7 +328,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and _FLAGS.training_mode:
+    if scale_grad_by_freq and GLOBALS.training_mode:
         return sym_help._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )

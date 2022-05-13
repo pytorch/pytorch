@@ -173,3 +173,6 @@ class UnsupportedOperatorError(RuntimeError):
                 "it with the right domain and version."
             )
         super().__init__(msg)
+
+
+_import_symbolic_opsets()

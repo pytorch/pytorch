@@ -10,11 +10,11 @@ import torch
 import torch.onnx
 from torch.nn import Module
 from torch.onnx import producer_name, producer_version
-from torch.onnx._globals import _FLAGS
+from torch.onnx._globals import GLOBALS
 
 
 def check_onnx_opset_operator(
-    model, ops, opset_version=_FLAGS.export_onnx_opset_version
+    model, ops, opset_version=GLOBALS.export_onnx_opset_version
 ):
     # check_onnx_components
     assert (
