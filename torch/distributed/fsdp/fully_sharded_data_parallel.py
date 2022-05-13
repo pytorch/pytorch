@@ -682,18 +682,9 @@ class FullyShardedDataParallel(nn.Module):
                 deferred_init.materialize_module(module, check_fn=check_fn)
 
         # Check that module was placed onto a single device.
-        # Note that we need to check unwrapped module children, but exclude
-        # FSDP and ignored modules.
-        unwrapped_modules = set()
-        for mod in module.modules():
-            if (
-                mod not in ignored_modules
-                and not isinstance(mod, FullyShardedDataParallel)
-                and not isinstance(mod, FlattenParamsWrapper)
-            ):
-                unwrapped_modules.add(mod)
-
-        module_devices = {p.device for x in unwrapped_modules for p in x.parameters()}
+        module_devices = set(
+            p.device for p in module.parameters() if p not in ignored_params and not isinstance(p, FlatParameter)
+        )
 
         if len(module_devices) > 1:
             raise RuntimeError(

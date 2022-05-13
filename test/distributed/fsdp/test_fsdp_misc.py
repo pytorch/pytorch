@@ -1,9 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
-import os
 import sys
 from contextlib import suppress
-from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -108,8 +106,8 @@ class TestFSDPMisc(FSDPTest):
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.a = nn.Linear(1, 1).to(0)
-                self.b = nn.Linear(1, 1).to(1)
+                self.a = nn.Linear(1, 1).cuda()
+                self.b = nn.Linear(1, 1)
 
         with self.assertRaisesRegex(
             RuntimeError, "FSDP only supports single device modules"
