@@ -2678,8 +2678,8 @@ class TestCudaFuser(JitTestCase):
             responses = []
             for i in range(2):
                 inp = torch.rand((3, 3, 32, 32)).cuda()
-                weight = torch.rand((x+i, 3, 7, 7)).cuda()
-                bias = torch.rand((x+i)).cuda()
+                weight = torch.rand((x + i, 3, 7, 7)).cuda()
+                bias = torch.rand((x + i)).cuda()
                 res = torch.nn.functional.conv2d(inp, weight, bias, padding=3)
                 responses.append(res)
             return responses
