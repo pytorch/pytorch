@@ -260,7 +260,7 @@
 
 - name: angle(Tensor self) -> Tensor
   self: angle_backward(grad, self)
-  result: handle_r_to_c(result.scalar_type(), angle_backward(self_t, self_p))
+  result: handle_r_to_c(result.scalar_type(), angle_backward(self_t.conj(), self_p).conj())
 
 # The four items below are necessary because TensorIterator doesn't work on
 # Variables (codegen does not unwrap the input Tensor for all() and any() ).
@@ -1419,10 +1419,6 @@
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
-- name: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
-  self: solve_backward_self(grad, self, A)
-  A: solve_backward_A(grad, self, A, solution)
-
 - name: linalg_solve(Tensor input, Tensor other) -> Tensor
   input: solve_backward_A(grad, other, input, result)
   other: solve_backward_self(grad, other, input)
@@ -1857,6 +1853,7 @@
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)
+  result: glu_jvp(result, self_p, self_t, dim)
 
 - name: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   self: hardshrink_backward(grad, self, lambd)
