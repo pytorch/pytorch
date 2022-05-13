@@ -484,21 +484,24 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
       std::move(version_counter), allow_tensor_metadata_change);
 }
 
-void TensorImpl::copy_tensor_metadata_except_version_counter(
+// This function copies all of the metadata from the src tensor except for:
+// - key_set_
+// - storage_
+// - storage_access_should_throw_
+// - sizes_strides_policy_
+// - version_counter_
+// - allow_tensor_metadata_change_
+// The idea is that if we have a "wrapper tensor" (like in functionalization),
+// all of the above are properties that the wrapper will want to customize,
+// while everything else should be mirrored between the wrapper and the inner
+// tensor.
+void TensorImpl::copy_generic_tensor_metadata(
     const TensorImpl* src_impl,
-    TensorImpl* dest_impl,
-    bool allow_tensor_metadata_change) {
-  dest_impl->storage_ = src_impl->storage_;
+    TensorImpl* dest_impl) {
   dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  // Copying tensor metadata doesn't change the PyObject (maybe
-  // it should), which means that we have to preserve whatever the
-  // original Python keyset was (as it's associated with the PyObject
-  // being a tensor subclass or not)
-  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
-      (dest_impl->key_set_ & c10::python_ks);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ =
       src_impl->is_channels_last_contiguous_;
@@ -510,13 +513,30 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
       src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
+  if (src_impl->named_tensor_meta_ != nullptr) {
+    dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
+  }
+}
+
+void TensorImpl::copy_tensor_metadata_except_version_counter(
+    const TensorImpl* src_impl,
+    TensorImpl* dest_impl,
+    bool allow_tensor_metadata_change) {
+  // First call the generic copy function
+  copy_generic_tensor_metadata(src_impl, dest_impl);
+  // Then copy everything else (see the comment at copy_generic_tensor_metadata
+  // for the list of metadata that it does not directly copy).
+  dest_impl->storage_ = src_impl->storage_;
+  // Copying tensor metadata doesn't change the PyObject (maybe
+  // it should), which means that we have to preserve whatever the
+  // original Python keyset was (as it's associated with the PyObject
+  // being a tensor subclass or not)
+  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
+      (dest_impl->key_set_ & c10::python_ks);
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
   dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
-  if (src_impl->named_tensor_meta_ != nullptr) {
-    dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
-  }
 }
 
 void TensorImpl::copy_tensor_metadata(
