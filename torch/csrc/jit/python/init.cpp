@@ -146,10 +146,34 @@ void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   auto jit = m.def_submodule("_jit");
 
-  py::register_exception<JITException>(m, "JITException");
+  static py::exception<JITException> exc(m, "JITException");
+
+  py::register_exception_translator([](std::exception_ptr p) {
+    try {
+      if (p) {
+        std::rethrow_exception(p);
+      }
+    } catch (const JITException& e) {
+      // special handling of JITException, to set its python class name and msg
+      py::gil_scoped_acquire acquire;
+      const auto& className = e.getPythonClassName();
+      const auto& originalMsg = e.getOriginalMsg();
+      JITException::setCaughtOriginalMsg(originalMsg.value_or(""));
+      JITException::setCaughtPythonClassName(className.value_or(""));
+      exc(e.what());
+    }
+  });
+
+  m.def(
+      "_get_caught_jit_exception_class_name",
+      JITException::getCaughtPythonClassName);
+  m.def(
+      "_get_caught_jit_exception_original_msg",
+      JITException::getCaughtOriginalMsg);
 
   py::class_<python::IODescriptor> iodescriptor(
-      m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
+      m,
+      "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
       .def(
