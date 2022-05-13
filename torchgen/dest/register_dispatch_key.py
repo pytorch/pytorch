@@ -56,6 +56,8 @@ def gen_registration_headers(
             headers.append("#include <ATen/hip/EmptyTensor.h>")
         else:
             headers.append("#include <ATen/cuda/EmptyTensor.h>")
+    elif backend_index.dispatch_key == DispatchKey.MPS:
+        headers.append("#include <ATen/mps/EmptyTensor.h>")
     elif per_operator_headers:
         headers += [
             "#include <ATen/ops/empty.h>",
@@ -79,6 +81,7 @@ def gen_empty_impl_names(
         DispatchKey.Meta,
         DispatchKey.CPU,
         DispatchKey.CUDA,
+        DispatchKey.MPS,
     ):
         dispatch = str(backend_index.dispatch_key).lower()
         empty_impl = f"at::detail::empty_{dispatch}"
@@ -567,6 +570,7 @@ void set_output_{name}(
     def gen_class_set_output_body(self, k: SchemaKind, maybe_create_proxy: bool) -> str:
         if self.backend_index.dispatch_key in [
             DispatchKey.CUDA,
+            DispatchKey.MPS,
             DispatchKey.CompositeExplicitAutograd,
         ]:
             maybe_set_guard = """
@@ -597,6 +601,7 @@ if (C10_UNLIKELY(maybe_proxy.has_value())) {
                 DispatchKey.Meta,
                 DispatchKey.CPU,
                 DispatchKey.CUDA,
+                DispatchKey.MPS,
                 DispatchKey.CompositeExplicitAutograd,
             )
             return f"""{maybe_set_guard_line}
@@ -658,6 +663,8 @@ resize_out(out, sizes, strides, options);
                 guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
             guard_field = "c10::OptionalDeviceGuard guard_;"
+        elif self.backend_index.dispatch_key == DispatchKey.MPS:
+            guard_field = "c10::OptionalMPSGuard guard_;"
         else:
             guard_field = ""
 
