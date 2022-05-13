@@ -13,7 +13,7 @@ import torch.onnx.symbolic_helper as sym_help
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
-from torch._C import ListType, OptionalType
+from torch._C import DeviceObjType, ListType, OptionalType
 from torch.nn.modules.utils import _pair, _single, _triple
 from torch.onnx.symbolic_helper import (
     ScalarType,
@@ -1409,12 +1409,18 @@ def __not_(g, self):
 
 
 def eq(g, self, other):
+    if isinstance(self.type(), DeviceObjType) and isinstance(
+        other.type(), DeviceObjType
+    ):
+        # ONNX doesn't have devices, so consider them all to be equal.
+        # The no-op check for equality will get constant-folded.
+        return g.op("Constant", value_t=torch.tensor(True, dtype=torch.bool))
     return g.op("Equal", self, other)
 
 
 @wrap_logical_op_with_negation
 def ne(g, self, other):
-    return g.op("Equal", self, other)
+    return eq(g, self, other)
 
 
 def gt(g, input, other):
@@ -2770,11 +2776,7 @@ def to(g, self, *args):
             return (
                 args[0].node().kind() == "prim::device"
                 or args[0].type().isSubtypeOf(ListType.ofInts())
-                or (
-                    sym_help._is_value(args[0])
-                    and args[0].node().kind() == "onnx::Constant"
-                    and isinstance(args[0].node()["value"], str)
-                )
+                or isinstance(args[0].type(), DeviceObjType)
             )
         elif len(args) == 5:
             # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
@@ -2858,15 +2860,15 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     input_sizes = sym_help._get_tensor_sizes(input)
     if repeats_dim is None:
         raise RuntimeError(
-            "Unsupported: ONNX export of repeat_interleave for unknown " "repeats rank."
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats rank."
         )
     if repeats_sizes is None:
         raise RuntimeError(
-            "Unsupported: ONNX export of repeat_interleave for unknown " "repeats size."
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats size."
         )
     if input_sizes is None:
         raise RuntimeError(
-            "Unsupported: ONNX export of repeat_interleave for unknown " "input size."
+            "Unsupported: ONNX export of repeat_interleave for unknown input size."
         )
 
     input_sizes_temp = input_sizes.copy()
@@ -4965,7 +4967,11 @@ class Prim:
 
         if n.mustBeNone():
             return None
-
+        # This must go before checking for string values, because some device constants
+        # have string values, but we want to keep them as unconverted Device types so
+        # that eq() can work on them.
+        if isinstance(n.output().type(), DeviceObjType):
+            return None
         if n.kindOf("value") == "t":
             return g.op("Constant", value_t=n["value"])
         if n.kindOf("value") == "s":
@@ -4974,11 +4980,6 @@ class Prim:
             ListType.ofInts()
         ) or n.output().type().isSubtypeOf(ListType.ofFloats()):
             return g.op("Constant", value_t=torch.tensor(n["value"]))
-            # vals = n.output().toIValue()
-            # value = torch.stack([torch.tensor(v) for v in vals]) if len(vals) else []
-            # return g.op("Constant", value_t=value)
-        elif n.output().type().kind() == "DeviceObjType":
-            return None
         else:
             raise RuntimeError(
                 "Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
