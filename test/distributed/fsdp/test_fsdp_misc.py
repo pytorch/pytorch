@@ -85,14 +85,19 @@ class TestFSDPMisc(FSDPTest):
         fsdp = FSDP(mod, device_id=dev_id)
         _check_device_matches(fsdp, dev_id)
         # Passing in torch.device("cuda") should work.
-        mod = NestedWrappedModule(
-            group=self.process_group,
-            wrap_fsdp=True,
-            wrap_everything=True,
-            fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
-            device_id=torch.device("cuda")
+        regex = "does not have explicit index"
+        context = self.assertWarnsRegex(
+            expected_warning=UserWarning, expected_regex=regex
         )
-        fsdp = FSDP(mod, device_id=torch.device("cuda"))
+        with context:
+            mod = NestedWrappedModule(
+                group=self.process_group,
+                wrap_fsdp=True,
+                wrap_everything=True,
+                fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+                device_id=torch.device("cuda")
+            )
+            fsdp = FSDP(mod, device_id=torch.device("cuda"))
         _check_device_matches(fsdp, torch.device("cuda", torch.cuda.current_device()))
 
     @skip_if_lt_x_gpu(2)
