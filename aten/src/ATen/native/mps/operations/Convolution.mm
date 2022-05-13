@@ -449,7 +449,7 @@ Tensor mps_convolution_transpose_forward(
 {
   auto input_size = conv_input_size(grad_output.sizes(), weight.sizes(),
                                     padding, output_padding, stride, dilation, groups);
-  return at::mps_convolution_backward_input(input_size, grad_output, weight,
+  return mps_convolution_backward_input(input_size, grad_output, weight,
                                     padding, stride, dilation, groups, false);
 }
 
@@ -479,7 +479,7 @@ Tensor mps_convolution_transpose_backward_weight(
     const Tensor& input_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
 {
-  return at::mps_convolution_backward_weights(
+  return mps_convolution_backward_weights(
       weight_size, input_t, grad_output_t,
       padding, stride, dilation, groups, false);
 }
