@@ -21,7 +21,7 @@ __host__ __device__ static inline scalar_t angle_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> angle_wrapper(c10::complex<T> v) {
-  return T{std::arg(v), 0};
+  return T{std::arg(v)};
 }
 
 const char angle_name[] = "angle_kernel";
