@@ -4,6 +4,8 @@ import torch._prims as prims
 import torch._prims.utils as utils
 from torch._prims.utils import (
     DimsType,
+    ShapeType,
+    StrideType,
     TensorLike,
     TensorLikeType,
     DimsSequenceType,
@@ -91,12 +93,12 @@ __all__ = [
     # 'hypot',
     "igamma",
     "igammac",
-    # 'isclose', # abs, sub, le, add, mul
+    "isclose",
     # 'lcm',
     # 'ldexp',
     "le",
-    # 'logical_and',
-    # 'logical_or',
+    "logical_and",
+    "logical_or",
     # 'logical_xor',
     "lt",
     # 'max', # implement with reductions
@@ -122,6 +124,7 @@ __all__ = [
     #
     # Data conversion and movement references
     #
+    "clone",
     "copy_to",  # TODO: add opinfo
     #
     # Reduction ops
@@ -132,11 +135,21 @@ __all__ = [
     #
     # View & Shape Ops
     #
+    "as_strided",
     "cat",
+    "chunk",
+    "flatten",
+    "flip",
+    "narrow",
     "permute",
-    "transpose",
+    "reshape",
+    "stack",
     "swap_axes",  # alias for transpose
+    "squeeze",
     "tensor_split",
+    "transpose",
+    "unsqueeze",
+    "view",
 ]
 
 Tensor = torch.Tensor
@@ -233,7 +246,7 @@ def _make_elementwise_unary_reference(
         return prim(a)
 
     if aten_op is infer_aten_op:
-        aten_op = getattr(torch.ops.aten, prim.__name__)
+        aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
         register_decomposition(aten_op)(_ref)
 
@@ -281,7 +294,8 @@ erf = _make_elementwise_unary_reference(
 )
 
 erfinv = _make_elementwise_unary_reference(
-    prims.erf_inv, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    prims.erf_inv,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.erfinv,  # prim/aten name mismatch
 )
 
@@ -302,7 +316,8 @@ floor = _make_elementwise_unary_reference(
 )
 
 isfinite = _make_elementwise_unary_reference(
-    prims.is_finite, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    prims.is_finite,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
 )
 
@@ -312,7 +327,8 @@ def _isnan(a: Tensor) -> Tensor:
 
 
 isnan = _make_elementwise_unary_reference(
-    _isnan, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    _isnan,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
 )
 
@@ -338,7 +354,8 @@ reciprocal = _make_elementwise_unary_reference(
 
 # TODO: round takes additional kwargs
 round = _make_elementwise_unary_reference(
-    prims.round, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    prims.round,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
 
@@ -359,7 +376,8 @@ sqrt = _make_elementwise_unary_reference(
 )
 
 square = _make_elementwise_unary_reference(
-    prims.square, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    prims.square,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
     aten_op=None,  # CompositeImplicitAutograd
 )
 
@@ -369,9 +387,12 @@ tan = _make_elementwise_unary_reference(
 
 
 def _make_elementwise_binary_reference(
-    prim: Callable, *, type_promotion_kind, aten_op=infer_aten_op
+    prim: Callable,
+    *,
+    type_promotion_kind,
+    aten_op=infer_aten_op,
+    has_out=True,
 ) -> Callable:
-    @out_wrapper
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"), type_promotion_kind=type_promotion_kind
     )
@@ -382,8 +403,11 @@ def _make_elementwise_binary_reference(
         a, b = _maybe_broadcast(a, b)
         return prim(a, b)
 
+    if has_out:
+        _ref = out_wrapper(_ref)
+
     if aten_op is infer_aten_op:
-        aten_op = getattr(torch.ops.aten, prim.__name__)
+        aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
         register_decomposition(aten_op)(_ref)
 
@@ -429,12 +453,14 @@ atan2 = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 bitwise_and = _make_elementwise_binary_reference(
-    prims.bitwise_and, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    prims.bitwise_and,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_left_shift = _make_elementwise_binary_reference(
-    prims.shift_left, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    prims.shift_left,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_left_shift,  # prim/aten name mismatch
 )
 
@@ -504,9 +530,91 @@ igammac = _make_elementwise_binary_reference(
     prims.igammac, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
+
+def isclose(
+    a: TensorLikeType,
+    b: TensorLikeType,
+    rtol: float = 1e-05,
+    atol: float = 1e-08,
+    equal_nan: bool = False,
+) -> TensorLikeType:
+    if a.dtype != b.dtype:
+        msg = "Attempting to compare tensors of different dtypes {0} and {1}!".format(
+            a.dtype, b.dtype
+        )
+        raise ValueError(a, b)
+    if rtol < 0:
+        msg = "rtol must be greater than or equal to zero, but got {0}!".format(rtol)
+    if atol < 0:
+        msg = "atol must be greater than or equal to zero, but got {0}!".format(atol)
+
+    close = eq(a, b)
+    if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):
+        close = logical_or(close, logical_and(isnan(a), isnan(b)))
+
+    # Note: In case of zero tolerances the closeness inequality degenerates to an equality check.
+    # In this case, the short-circuit prevents false positives as detailed in the paragraph below.
+    if atol == 0 and rtol == 0:
+        return close
+
+    # Note [closeness error computation]
+    # atol and rtol are provided as doubles, so the computation
+    # rtol * other will produce a float or complex tensor.
+    # When the difference (self - other) is compared to it then the
+    # tensor representing the difference will also be cast to float or complex.
+    # However, since (self - other) in uint8 is very likely to produce a
+    # negative value, this moves the cast forward so the difference is
+    # always computed in a float or complex type.
+    # If the values of the integer tensors cannot be exactly represented
+    # by the default scalar type then this may cause an incorrect result.
+    if not utils.is_float_dtype(a.dtype) and not utils.is_complex_dtype(a.dtype):
+        a = prims.convert_element_type(a, torch.get_default_dtype())
+        b = prims.convert_element_type(b, torch.get_default_dtype())
+
+    allowed_error = add(atol, abs(mul(b, rtol)))
+    actual_error = abs(sub(a, b))
+
+    # Computes finite closeness
+    result = logical_or(
+        close, logical_and(isfinite(actual_error), le(actual_error, allowed_error))
+    )
+
+    return result
+
+
 # TODO: add docstring
 le = _make_elementwise_binary_reference(
     prims.le, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+)
+
+
+def _logical_and(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b.dtype):
+        b = ne(b, 0)
+    return bitwise_and(a, b)
+
+
+logical_and = _make_elementwise_binary_reference(
+    _logical_and,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_and,
+)
+
+
+def _logical_or(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b.dtype):
+        b = ne(b, 0)
+    return bitwise_or(a, b)
+
+
+logical_or = _make_elementwise_binary_reference(
+    _logical_or,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_or,
 )
 
 # TODO: add docstring
@@ -597,7 +705,7 @@ true_divide = _make_elementwise_binary_reference(
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
-@register_decomposition(torch.ops.aten.where)
+@register_decomposition(torch.ops.aten.where, register_meta=True)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
@@ -620,6 +728,10 @@ def where(
 #
 # Data Movement References
 #
+def clone(
+    a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
+) -> TensorLikeType:
+    return prims.clone(a, memory_format=memory_format)
 
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
@@ -695,7 +807,9 @@ def _reduction(
 
     if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
         result_dtype = dtype if dtype else a.dtype
-        result = prims.convert_element_type(result, result_dtype)
+        if result.dtype != result_dtype:
+            result = prims.convert_element_type(result, result_dtype)
+
     return result
 
 
@@ -771,6 +885,12 @@ def amax(
     )
 
 
+def as_strided(
+    a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int = 0
+) -> TensorLikeType:
+    return prims.as_strided(a, size, stride, storage_offset)
+
+
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
@@ -781,9 +901,227 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return prims.concatenate(tensors, _dim)
 
 
+def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
+    if chunks <= 0:
+        msg = "Expected at least one chunk, but got {0}!".format(chunks)
+        raise ValueError(msg)
+
+    dim = utils.canonicalize_dim(a.ndim, dim)
+    length = a.shape[dim]
+    chunk_size = math.ceil(length / chunks)
+    full_chunks = math.floor(length / chunk_size)
+    tail_chunk_size = length % chunk_size
+
+    result = []
+    for i in range(full_chunks):
+        result.append(narrow(a, dim, i * chunk_size, chunk_size))
+
+    if tail_chunk_size != 0:
+        result.append(narrow(a, dim, full_chunks * chunk_size, tail_chunk_size))
+
+    return tuple(result)
+
+
+# Note: flatten, unlike prim.collapse and prim.collapse_view has an inclusive end_dim
+# Note: flatten, unlike other shape operators, returns the input tensor on a no-op (unless
+# a 0D tensor is flattened, in which case it's returned in 1D)
+def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorLikeType:
+    start_dim = utils.canonicalize_dim(a.ndim, start_dim)
+    end_dim = utils.canonicalize_dim(a.ndim, end_dim)
+
+    # Short-circuits on no-op
+    if start_dim == end_dim and a.ndim != 0:
+        return a
+
+    # Tries to take a view
+    # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
+    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim + 1)
+    if new_shape is not None:
+        return prims.collapse_view(a, start_dim, end_dim + 1)
+
+    # Makes a copy if it can't make a view
+    return prims.collapse(a, start_dim, end_dim + 1)
+
+
+def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
+    return prims.rev(a, dims)
+
+
+def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
+    dim = utils.canonicalize_dim(a.ndim, dim)
+    return prims.slice_in_dim(a, start, start + length, axis=dim)
+
+
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
+
+
+def _reshape_view_helper(
+    a: TensorLikeType, shape: ShapeType, *, allow_copy: bool
+) -> TensorLikeType:
+    # NOTE: Reshape may be given a shape with a -1 length
+    # This indicates that the dimension's length should be inferred
+    # Creates a valid shape
+
+    for idx in range(len(shape)):
+        if shape[idx] == -1:
+            # Verifies there's only one dimension of length -1 in the shape
+            if shape.count(-1) > 1:
+                msg = "Can only infer the length of one dimension, but got shape {0}!".format(
+                    str(shape)
+                )
+                raise ValueError(msg)
+
+            # TODO: improve error message
+            if a.numel() > 0:
+                length = reduce(
+                    operator.floordiv, (x for x in shape if x != -1), a.numel()
+                )
+            else:
+                msg = "Cannot reshape a tensor of zero elements into shape {0} because the unspecified length is ambiguous!".format(
+                    str(shape)
+                )
+                raise ValueError(msg)
+
+            shape = list(shape)
+            shape[idx] = length
+            break
+
+    # Short-circuits if shape is the same
+    utils.validate_shape(shape)
+    if tuple(a.shape) == tuple(shape):
+        return prims.view_of(a)
+
+    numel = reduce(operator.mul, shape) if len(shape) > 0 else 1
+    if a.numel() != numel:
+        msg = "Attempting to reshape a tensor with shape {0} and {1} elements to a shape {2} with {3} elements!".format(
+            str(a.shape), a.numel(), str(shape), numel
+        )
+        raise ValueError(msg)
+
+    # Special-cases tensors with no elements
+    if a.numel() == 0:
+        return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
+
+    # Special-cases reshaping zero dim tensors
+    if a.ndim == 0:
+        _a = a
+        for length in shape:
+            assert length == 1
+            _a = unsqueeze(_a, -1)
+        return _a
+
+    # Special-cases reshaping to zero dim tensors
+    if len(shape) == 0:
+        _a = a
+        for length in a.shape:
+            assert length == 1
+            _a = squeeze(_a, -1)
+        return _a
+
+    # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
+
+    # NOTE [Reshape Algorithm]
+    # This algorithm works by attempting to greedily construct the desired dimensions in
+    # the output shape, left to right. It does this by, conceptually, accumulating
+    # dimensions of the original tensor, also left to right, until the dimension
+    # can be constructed using prims.split_dim.
+    # The algorithm also has special handling for tail squeezes/unsqueezes, like
+    # if a reshape from (5, 5) to (5, 5, 1) or vice versa.
+    #
+    # This algorithm does not flatten the original tensor and then split dims as appropriate
+    # because that would create copies more often than this algorithm. flatten is the only
+    # operation below which can create a view or a copy, and while it prefers creating
+    # views it may sometimes create a copy if the tensor's strides do not permit a view.
+    # As a result, this algorithm tries to minimize flattening.
+    #
+    # Note that a better version of this algorithm may exist. Regions which could be
+    # flattened without creating a copy can be identified in advance, and that might
+    # allow fewer flatten calls or faster short-circuiting to make a copy.
+    idx = 0
+    a_ = a
+    for length in shape:
+        # Handles tail unsqueezes
+        if idx >= a_.ndim:
+            assert length == 1
+            a_ = unsqueeze(a_, -1)
+            idx = idx + 1
+            continue
+
+        # Skips dimensions that are already the correct length
+        if length == a_.shape[idx]:
+            idx = idx + 1
+            continue
+
+        # Gathers enough original dimensions such that this new dimension can be created
+        # Note that this accumulation will terminate because we've verified a and the shape
+        # specify the same number of elements above
+        accum = a_.shape[idx]
+        end = idx
+        while accum % length != 0:
+            end = end + 1
+            accum = accum * a_.shape[end]
+        if end != idx:
+            # NOTE: in this case multiple dimensions must be flatten to create the desired dimension
+            # This flattening is why reshape sometimes creates a copy -- because flattening
+            # may return a view of a copy
+
+            # Checks if collapse can be a view and short-circuits to copying reshape if it can't
+            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end + 1)
+            if new_shape is None:
+                if allow_copy:
+                    return prims.reshape(a, shape)
+
+                msg = "Cannot view a tensor with shape {0} and strides {1} as a tensor with shape {2}!".format(
+                    a.shape, a.stride(), shape
+                )
+                raise ValueError(msg)
+
+            a_ = flatten(a_, idx, end)
+
+        # Splits the (possibly flattened) dimension to create the desired dim length
+        if accum != length:
+            a_ = prims.split_dim(a_, idx, length)
+
+        idx = idx + 1
+
+    # Squeezes tail
+    while idx < a_.ndim:
+        assert a_.shape[idx] == 1
+        a_ = squeeze(a_, idx)
+
+    return a_
+
+
+def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
+    return _reshape_view_helper(a, shape, allow_copy=True)
+
+
+# update to cat then view instead of unsqueezing each tensor
+@out_wrapper
+def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
+    tensors = tuple(unsqueeze(a, dim) for a in tensors)
+    return cat(tensors, dim)
+
+
+# Note: although squeeze is documented as having the out= kwarg it doesn't
+def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
+    if dim is not None:
+        dim = utils.canonicalize_dim(a.ndim, dim)
+        # Short-circuits if the tensor has no dimensions
+        if len(a.shape) == 0:
+            assert dim == 0
+            return prims.view_of(a)
+
+        # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
+        if a.shape[dim] != 1:
+            return prims.view_of(a)
+        return prims.squeeze(a, (dim,))
+
+    dims = tuple(idx for idx in range(len(a.shape)) if a.shape[idx] == 1)
+    return prims.squeeze(a, dims)
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
@@ -867,7 +1205,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
     if a.ndim <= 1:
-        return a
+        return prims.view_of(a)
 
     _permutation = list(range(0, a.ndim))
     _permutation[_dim0] = _dim1
@@ -877,3 +1215,14 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 
 # Aliases for transpose
 swap_axes = transpose
+
+
+def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
+    # Note that unsqueeze canonicalizes with rank + 1 because it allows
+    # a new innermost dimension to be specified
+    dim = utils.canonicalize_dim(a.ndim + 1, dim)
+    return prims.expand_dims(a, (dim,))
+
+
+def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
+    return _reshape_view_helper(a, shape, allow_copy=False)

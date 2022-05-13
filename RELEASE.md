@@ -22,6 +22,11 @@
     - [Triage](#triage)
     - [Building a release schedule / cherry picking](#building-a-release-schedule--cherry-picking)
     - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
+- [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
+  - [Python](#python)
+    - [TL;DR](#tldr)
+  - [Accelerator Software](#accelerator-software)
+    - [Special support cases](#special-support-cases)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
 
@@ -215,6 +220,32 @@ Patch releases should be considered if a regression meets the following criteria
 
 1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates)
 2. Patch Release Managers will follow the process of [Promoting RCs to Stable](#promoting-rcs-to-stable)
+
+# Hardware / Software Support in Binary Build Matrix
+
+PyTorch has a support matrix across a couple of different axis. This section should be used as a decision making framework to drive hardware / software support decisions
+
+## Python
+
+For versions of Python that we support we follow the [NEP 29 policy](https://numpy.org/neps/nep-0029-deprecation_policy.html), which was originally drafted by numpy.
+
+### TL;DR
+
+* All minor versions of Python released 42 months prior to the project, and at minimum the two latest minor versions.
+* All minor versions of numpy released in the 24 months prior to the project, and at minimum the last three minor versions.
+
+## Accelerator Software
+
+For acclerator software like CUDA and ROCm we will typically use the following criteria:
+* Support latest 2 minor versions
+
+### Special support cases
+
+In some instances support for a particular version of software will continue if a need is found. For example, our CUDA 11 binaries do not currently meet
+the size restrictions for publishing on PyPI so the default version that is published to PyPI is CUDA 10.2.
+
+These special support cases will be handled on a case by case basis and support may be continued if current PyTorch maintainers feel as though there may still be a
+need to support these particular versions of software.
 
 # Special Topics
 
