@@ -65,7 +65,6 @@ jobs:
 
       - name: Download third party libraries and generate wrappers
         run: |
-          echo -e "" > .buckconfig
           sh scripts/buck_setup.sh
 
       - name: Build glog

@@ -1,4 +1,6 @@
 #!/bin/bash
+printf "\n[Creating .buckconfig]\n"
+cp .buckconfig.oss .buckconfig
 
 cd third_party
 
