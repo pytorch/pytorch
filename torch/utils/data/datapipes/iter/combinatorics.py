@@ -94,13 +94,13 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
                  unbatch_level: int = 0
                  ) -> None:
         super().__init__()
+        self.buffer: List[T_co] = []
         assert buffer_size > 0, "buffer_size should be larger than 0"
         if unbatch_level == 0:
             self.datapipe = datapipe
         else:
             self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
-        self.buffer: List[T_co] = []
         self._enabled = True
 
     @staticmethod
@@ -155,5 +155,4 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         self.buffer = []
 
     def __del__(self):
-        if hasattr(self, "buffer"):
-            self.buffer.clear()
+        self.buffer.clear()
