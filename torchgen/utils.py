@@ -296,19 +296,21 @@ def make_file_manager(
 
 # Helper function to create a pretty representation for dataclasses
 def dataclass_repr(
-    obj: object,
+    obj: Any,
     indent: int = 0,
     width: int = 80,
 ) -> str:
     # built-in pprint module support dataclasses from python 3.10
     if sys.version_info >= (3, 10):
         from pprint import pformat
+
         return pformat(obj, indent, width)
 
     return _pformat(obj, indent=indent, width=width)
 
+
 def _pformat(
-    obj: object,
+    obj: Any,
     indent: int,
     width: int,
     curr_indent: int = 0,
@@ -341,31 +343,41 @@ def _pformat(
     body = f",\n{indent_str}".join(fields_str)
     return f"{class_name}({body})"
 
+
 def _format_dict(
-    attr: Dict,
+    attr: Dict[Any, Any],
     indent: int,
     width: int,
     curr_indent: int,
 ) -> str:
-    curr_indent += (indent + 3)
+    curr_indent += indent + 3
     dict_repr = []
     for k, v in attr.items():
         k_repr = repr(k)
-        v_str = _pformat(v, indent, width, curr_indent + len(k_repr)) if is_dataclass(v) else repr(v)
+        v_str = (
+            _pformat(v, indent, width, curr_indent + len(k_repr))
+            if is_dataclass(v)
+            else repr(v)
+        )
         dict_repr.append(f"{k_repr}: {v_str}")
 
     return _format(dict_repr, indent, width, curr_indent, "{", "}")
 
+
 def _format_list(
-    attr: Union[List, Set, Tuple],
+    attr: Union[List[Any], Set[Any], Tuple[Any]],
     indent: int,
     width: int,
     curr_indent: int,
 ) -> str:
-    curr_indent += (indent + 1)
-    list_repr = [_pformat(l, indent, width, curr_indent) if is_dataclass(l) else repr(l) for l in attr]
+    curr_indent += indent + 1
+    list_repr = [
+        _pformat(l, indent, width, curr_indent) if is_dataclass(l) else repr(l)
+        for l in attr
+    ]
     start, end = ("[", "]") if isinstance(attr, list) else ("(", ")")
     return _format(list_repr, indent, width, curr_indent, start, end)
+
 
 def _format(
     fields_str: List[str],
@@ -382,5 +394,5 @@ def _format(
         curr_indent_str = " " * curr_indent
 
     indent_str = " " * indent
-    fields_str = f", {delimiter}{curr_indent_str}".join(fields_str)
-    return f"{start}{indent_str}{fields_str}{end}"
+    body = f", {delimiter}{curr_indent_str}".join(fields_str)
+    return f"{start}{indent_str}{body}{end}"
