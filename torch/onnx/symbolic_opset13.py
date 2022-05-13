@@ -64,7 +64,6 @@ def frobenius_norm(g, self, dim=None, keepdim=False):
 
 @parse_args("v", "v", "i", "i")
 def split(g, self, split_size_or_sizes, dim, _outputs=None):
-    import pdb; pdb.set_trace()
     if not sym_help._is_split_static(split_size_or_sizes, _outputs):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
         if _outputs is None:
@@ -132,11 +131,11 @@ def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
 @parse_args("v", "v", "i", "i")
 def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
     if not sym_help._is_split_static(indices_or_sections, _outputs):
+        is_scalar = sym_help._get_tensor_rank(indices_or_sections)
         axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
         axis = unsqueeze(g, axis, 0)
 
-        if sym_help._is_tensor(indices_or_sections):
-            
+        if sym_help._is_tensor(indices_or_sections) and not is_scalar: # 1-d tensor
             # loop conditions
             const_1 = g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))
             loop_len = sym_help._size_helper(g, indices_or_sections, g.op("Constant", value_t=torch.tensor(0)))
@@ -175,55 +174,25 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             last_slice = g.op("Slice", self, start, end, axis)
 
             return g.op("SequenceInsert", loop_out, last_slice)
-
+        elif sym_help._is_tensor(indices_or_sections): # scalar tensor
+            pass
         else:
-            indices_or_sections_sizes = sym_help._get_tensor_dim_size(indices_or_sections, 0)
-            for i in range([0, *indices_or_sections_sizes]):
-                start = g.op("SequenceAt", indices_or_sections, block_input_iter)
-                end = g.op("Gather", indices_or_sections, i, axis)
-                indices_or_sections_sizes
-                g.op("Slice", self, start, end, axis)
-            g.op("ConcatFromSequence", ())
-            import pdb
-            pdb.set_trace()
-        
-        split_out = g.op("Slice", self, indices_or_sections, axis, )
-        indices = [
-            sym_help._unsqueeze_helper(g, v, [0])
-            for v in sym_help._unpack_list(indices_or_sections)
-        ]
-        
-        
-        if _outputs is None:
-            return split_out
-        # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
-        if (
-            sym_help._is_packed_list(indices_or_sections)
-            and len(sym_help._unpack_list(indices_or_sections)) == _outputs
-        ):
-            split_sizes = [
-                sym_help._unsqueeze_helper(g, v, [0])
-                for v in sym_help._unpack_list(indices_or_sections)
-            ]
+            if (
+                sym_help._is_packed_list(indices_or_sections)
+                and len(sym_help._unpack_list(indices_or_sections)) == _outputs - 1
+            ):
 
-            start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-            axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
-            res = []
-            for i in range(_outputs):
-                end = g.op(
-                    "Add", start, split_sizes[i]
-                )  # split_sizes is a list of same length as _outputs
+                start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+                res = []
+                for i in range(_outputs - 1):
+                    end = g.op("Gather", indices_or_sections, i, axis)
+                    res.append(g.op("Slice", self, start, end, axis))
+                    start = end
+                
+
+                end = sym_help._size_helper(g, self, axis)
                 res.append(g.op("Slice", self, start, end, axis))
-                start = end
-            return res
-        return [
-            g.op(
-                "SequenceAt",
-                split_out,
-                g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)),
-            )
-            for i in range(_outputs)
-        ]
+                return res
 
     split_val = indices_or_sections.node()["value"]
     if split_val.dim() > 0:
@@ -236,8 +205,11 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             size = split_size * _outputs
         else:
             raise RuntimeError("Unknown dimension size not supported")
-    splits = [split_size] * (size // split_size)
-    leftover = size % split_size
+    if size % split_size == 0:
+        return g.op("Split", self, split_size, axis_i=dim, outputs=_outputs)
+
+    splits = size % split_size * [size // split_size + 1]
+    leftover = (split_size - size % split_size) * [size // split_size]
     if leftover:
         splits.append(leftover)
     splits = g.op("Constant", value_t=torch.tensor(splits))
