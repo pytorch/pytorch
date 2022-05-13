@@ -16,6 +16,7 @@ from torch._prims.utils import (
 )
 from torch.overrides import has_torch_function, handle_torch_function
 import torch.library
+from torch.utils._pytree import tree_map
 
 from typing import Sequence, Optional, Union, Callable, List, Tuple, Any
 from functools import reduce, partial
@@ -23,8 +24,9 @@ from enum import Enum
 import operator
 import math
 
-prim = torch.library.Library('prims', 'DEF')
-prim_impl = torch.library.Library('prims', 'IMPL', 'CompositeExplicitAutograd')
+prim = torch.library.Library("prims", "DEF")
+prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
+prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
 
 # Experimental module containing prototype "primitive" operations.
 
@@ -157,6 +159,30 @@ class RETURN_TYPE(Enum):
     INPLACE = (2,)
 
 
+def _wrap_tensor_meta(f):
+    def wrap(t):
+        if isinstance(t, torch.Tensor):
+            return TensorMeta(t)
+        else:
+            return t
+
+    def unwrap(t):
+        # TODO: doesn't setup aliasing relation on views correctly
+        if isinstance(t, TensorMeta):
+            return torch.empty_strided(
+                t.shape, t.stride(), dtype=t.dtype, device="meta"
+            )
+        else:
+            return t
+
+    def wrapper(*args, **kwargs):
+        wrapped_args = tree_map(wrap, args)
+        wrapped_kwargs = tree_map(wrap, kwargs)
+        return tree_map(unwrap, f(*wrapped_args, **wrapped_kwargs))
+
+    return wrapper
+
+
 def _make_prim(
     *,
     schema: str,
@@ -164,7 +190,7 @@ def _make_prim(
     impl_aten: Callable,
     impl_nvfuser: Optional[Callable] = None,
     return_type: RETURN_TYPE,
-    doc: str
+    doc: str,
 ):
     """
     Creates a primitive operation.
@@ -180,9 +206,9 @@ def _make_prim(
         meta(*args, **kwargs)
         return impl_aten(*args, **kwargs)
 
-    name = schema.split('(')[0]
+    name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
-    # TODO: register meta
+    prim_meta_impl.impl(name, _wrap_tensor_meta(meta))
 
     _prim = getattr(torch.ops.prims, name).default
 
@@ -257,7 +283,7 @@ def _make_elementwise_unary_prim(
         schema=f"{name}(Tensor self) -> Tensor",
         meta=partial(_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -272,7 +298,7 @@ def _make_elementwise_binary_prim(
         schema=f"{name}(Tensor self, Tensor other) -> Tensor",
         meta=partial(_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -1679,11 +1705,8 @@ _amin_doc = """
     specified in the dim argument
     """
 
-def _make_reduction_prim(
-    name: str,
-    impl_aten,
-    doc
-):
+
+def _make_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim."""
     return _make_prim(
         schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
@@ -1693,11 +1716,8 @@ def _make_reduction_prim(
         doc=doc,
     )
 
-def _make_bool_reduction_prim(
-    name: str,
-    impl_aten,
-    doc
-):
+
+def _make_bool_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim that reduces to bool."""
     return _make_prim(
         schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",

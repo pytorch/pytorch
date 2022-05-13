@@ -828,9 +828,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       OP_PAIR(
           "fb::sigrid_transforms", "static_runtime::fused_sigrid_transforms"),
       OP_PAIR(
-          "static_runtime::variadic_grouped_accessor_op",
-          "static_runtime::fused_variadic_grouped_accessor_op"),
-      OP_PAIR(
           "static_runtime::variadic_grouped_accessor_op_v2",
           "static_runtime::fused_variadic_grouped_accessor_op_v2"),
       OP_PAIR(
@@ -975,12 +972,6 @@ void RemoveImmutableInputDictLookups(
 }
 
 void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
-  // Migration to v2 is still in progress. For now, SR will support
-  // both versions of this op.
-  UseVariadicOp(
-      graph,
-      fromQualString("grouped_accessor::grouped_accessor_op"),
-      fromQualString("static_runtime::variadic_grouped_accessor_op"));
   UseVariadicOp(
       graph,
       fromQualString("grouped_accessor::grouped_accessor_op_v2"),
