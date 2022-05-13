@@ -1,13 +1,14 @@
 import enum
+import functools
 import inspect
+import sys
 import warnings
-from functools import wraps
-from sys import maxsize as maxsize
 from typing import Set
 
 import torch
+import torch._C._onnx as _C_onnx
 import torch.onnx
-from torch._C import OptionalType
+from torch import _C
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
@@ -192,7 +193,7 @@ def parse_args(*arg_descriptors):
     def decorator(fn):
         fn._arg_descriptors = arg_descriptors
 
-        @wraps(fn)
+        @functools.wraps(fn)
         def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
             FILE_BUG_MSG = (
@@ -271,7 +272,7 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
         fn._scale = scale
         fn._zero_point = zero_point
 
-        @wraps(fn)
+        @functools.wraps(fn)
         def wrapper(g, *args, **kwargs):
             _scale = fn._scale
             if _scale is not None:
@@ -317,7 +318,7 @@ def _scalar(x):
     return x.item()
 
 
-def _if_scalar_type_as(g: torch._C.Graph, self, tensor):
+def _if_scalar_type_as(g: _C.Graph, self, tensor):
     """
     Convert self into the same type of tensor, as necessary.
 
@@ -325,7 +326,7 @@ def _if_scalar_type_as(g: torch._C.Graph, self, tensor):
     actually need to insert an ONNX cast operator here; just
     fix up the scalar.
     """
-    if isinstance(self, torch._C.Value):
+    if isinstance(self, _C.Value):
         return self
 
     scalar_type = tensor.type().scalarType()
@@ -341,7 +342,7 @@ def _is_none(x):
 
 
 def _is_value(x):
-    return isinstance(x, torch._C.Value)
+    return isinstance(x, _C.Value)
 
 
 def _is_constant(value):
@@ -352,15 +353,15 @@ def _is_constant(value):
 
 
 def _is_tensor(x):
-    return x.type().isSubtypeOf(torch._C.TensorType.get())
+    return x.type().isSubtypeOf(_C.TensorType.get())
 
 
 def _is_list(x):
-    return isinstance(x.type(), torch._C.ListType)
+    return isinstance(x.type(), _C.ListType)
 
 
 def _is_tensor_list(x):
-    return _is_list(x) and isinstance(x.type().getElementType(), torch._C.TensorType)
+    return _is_list(x) and isinstance(x.type().getElementType(), _C.TensorType)
 
 
 def _is_scalar_list(x):
@@ -427,7 +428,7 @@ def _get_dim_for_cross(input, dim):
 
 def _unimplemented(op, msg):
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
-    if torch._C._onnx._CAFFE2_ATEN_FALLBACK:
+    if _C_onnx._CAFFE2_ATEN_FALLBACK:
         warnings.warn(
             "ONNX export failed on " + op + " because " + msg + " not supported"
         )
@@ -686,7 +687,7 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
         offsets = g.op("Constant", value_t=torch.ones(offset, dtype=torch.float32))
         dividend = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx["Float"])
         divisor = _slice_helper(
-            g, g.op("Shape", input), axes=[0], ends=[maxsize], starts=[offset]
+            g, g.op("Shape", input), axes=[0], ends=[sys.maxsize], starts=[offset]
         )
         divisor = g.op("Cast", divisor, to_i=cast_pytorch_to_onnx["Float"])
         scale_dims = g.op("Div", dividend, divisor)
@@ -735,7 +736,7 @@ def _get_interpolate_attributes(g, mode, args):
 def _interpolate_get_scales(g, scale_factor, dim):
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
     scale_factor_rank = _get_tensor_rank(scale_factor)
-    if isinstance(scale_factor.type(), torch._C.ListType) or (
+    if isinstance(scale_factor.type(), _C.ListType) or (
         scale_factor_rank is not None and scale_factor_rank > 0
     ):
         return g.op("Concat", offsets, scale_factor, axis_i=0)
@@ -941,9 +942,13 @@ def _unbind_helper(g, self, dim, _outputs):
     if GLOBALS.export_onnx_opset_version < 11:
         from torch.onnx.symbolic_opset9 import unbind
     elif GLOBALS.export_onnx_opset_version <= 12:
-        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset11 import (
+            unbind,  # type: ignore[no-redef]
+        )
     else:
-        from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset13 import (
+            unbind,  # type: ignore[no-redef]
+        )
     return unbind(g, self, dim, _outputs)
 
 
@@ -952,7 +957,9 @@ def _scatter_helper(g, self, dim, index, src):
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset11 import (
+            scatter,  # type: ignore[no-redef]
+        )
     return scatter(g, self, dim, index, src)
 
 
@@ -999,7 +1006,9 @@ def _arange_helper(g, *args):
     if GLOBALS.export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import arange
     else:
-        from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset11 import (
+            arange,  # type: ignore[no-redef]
+        )
     return arange(g, *args)
 
 
@@ -1022,7 +1031,9 @@ def _index_fill_reshape_helper(g, self, dim, index):
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset11 import (
+            scatter,  # type: ignore[no-redef]
+        )
 
     if self.type().dim() is None:
         return _unimplemented("index_fill", "input rank not accesible")
@@ -1173,7 +1184,7 @@ def _is_split_static(split_size_or_sizes, _outputs):
 
 def _optional_input_placeholder_tensor(g):
     n = g.op("prim::Constant")
-    n.setType(OptionalType.ofTensor())
+    n.setType(_C.OptionalType.ofTensor())
     return n
 
 
@@ -1325,19 +1336,19 @@ def _set_onnx_shape_inference(onnx_shape_inference: bool):
 # TODO: remove these once we support Type's in the JIT IR and we can once again
 # use the unified toType operator
 cast_pytorch_to_onnx = {
-    "Byte": torch._C._onnx.TensorProtoDataType.UINT8,
-    "Char": torch._C._onnx.TensorProtoDataType.INT8,
-    "Double": torch._C._onnx.TensorProtoDataType.DOUBLE,
-    "Float": torch._C._onnx.TensorProtoDataType.FLOAT,
-    "Half": torch._C._onnx.TensorProtoDataType.FLOAT16,
-    "Int": torch._C._onnx.TensorProtoDataType.INT32,
-    "Long": torch._C._onnx.TensorProtoDataType.INT64,
-    "Short": torch._C._onnx.TensorProtoDataType.INT16,
-    "Bool": torch._C._onnx.TensorProtoDataType.BOOL,
-    "ComplexFloat": torch._C._onnx.TensorProtoDataType.COMPLEX64,
-    "ComplexDouble": torch._C._onnx.TensorProtoDataType.COMPLEX128,
-    "BFloat16": torch._C._onnx.TensorProtoDataType.BFLOAT16,
-    "Undefined": torch._C._onnx.TensorProtoDataType.UNDEFINED,
+    "Byte": _C_onnx.TensorProtoDataType.UINT8,
+    "Char": _C_onnx.TensorProtoDataType.INT8,
+    "Double": _C_onnx.TensorProtoDataType.DOUBLE,
+    "Float": _C_onnx.TensorProtoDataType.FLOAT,
+    "Half": _C_onnx.TensorProtoDataType.FLOAT16,
+    "Int": _C_onnx.TensorProtoDataType.INT32,
+    "Long": _C_onnx.TensorProtoDataType.INT64,
+    "Short": _C_onnx.TensorProtoDataType.INT16,
+    "Bool": _C_onnx.TensorProtoDataType.BOOL,
+    "ComplexFloat": _C_onnx.TensorProtoDataType.COMPLEX64,
+    "ComplexDouble": _C_onnx.TensorProtoDataType.COMPLEX128,
+    "BFloat16": _C_onnx.TensorProtoDataType.BFLOAT16,
+    "Undefined": _C_onnx.TensorProtoDataType.UNDEFINED,
 }
 
 scalar_name_to_pytorch = {

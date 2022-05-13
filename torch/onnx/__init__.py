@@ -1,6 +1,6 @@
 from typing import Dict
 
-import torch._C as _C
+from torch import _C
 from torch.onnx import (
     symbolic_helper,
     symbolic_opset7,
