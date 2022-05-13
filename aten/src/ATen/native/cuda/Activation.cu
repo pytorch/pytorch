@@ -36,6 +36,31 @@ void glu_kernel(TensorIteratorBase& iter) {
 }
 
 // -----------------------------------
+// glu forward ad
+// -----------------------------------
+void glu_jvp_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "glu_cuda", [&]() {
+      using acc_t = at::acc_type<scalar_t, true>;
+      gpu_kernel(iter, [] GPU_LAMBDA (
+            scalar_t res_,
+            scalar_t b_,
+            scalar_t da_,
+            scalar_t db_) -> scalar_t {
+          const acc_t res = res_;
+          const acc_t b = b_;
+          const acc_t da = da_;
+          const acc_t db = db_;
+          const acc_t one = acc_t(1);
+
+          const acc_t sig_b = one / (one + std::exp(-b));
+          return (
+              da * sig_b + res * (db - sig_b * db)
+          );
+      });
+  });
+}
+
+// -----------------------------------
 // glu backward
 // -----------------------------------
 
@@ -107,11 +132,12 @@ void launch_glu_backward_kernel(const TensorIteratorBase& iter,
 void launch_log_sigmoid_forward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
                                  "log_sigmoid_forward_cuda", [&] {
-    using acc_t = acc_type<scalar_t, true>;
+    using opmath_t = at::opmath_type<scalar_t>;
+
     gpu_kernel(iter,
         [] GPU_LAMBDA (scalar_t in_) -> scalar_t {
-          const acc_t in = in_;
-          const auto min = std::min(acc_t(0), in);
+          const opmath_t in = in_;
+          const auto min = std::min(opmath_t(0), in);
           const auto z = std::exp(-std::abs(in));
           return min - std::log1p(z);
         });
@@ -125,17 +151,17 @@ void launch_log_sigmoid_forward_kernel(TensorIteratorBase& iter) {
 void log_sigmoid_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
                                  "log_sigmoid_backward_cuda", [&] {
-    using acc_t = acc_type<scalar_t, true>;
+    using opmath_t = at::opmath_type<scalar_t>;
     gpu_kernel(iter,
         [] GPU_LAMBDA (scalar_t in_, scalar_t grad_out_) -> scalar_t {
-          const acc_t in = in_;
-          const acc_t grad_out = grad_out_;
+          const opmath_t in = in_;
+          const opmath_t grad_out = grad_out_;
 
-          auto in_negative = in < acc_t(0);
-          auto max_deriv = in_negative ? acc_t(1) : acc_t(0);
-          auto sign = in_negative ? acc_t(1) : -acc_t(1);
+          auto in_negative = in < opmath_t(0);
+          auto max_deriv = in_negative ? opmath_t(1) : opmath_t(0);
+          auto sign = in_negative ? opmath_t(1) : -opmath_t(1);
           const auto z = std::exp(-std::abs(in));
-          return grad_out * (max_deriv - sign * (z / (acc_t(1) + z)));
+          return grad_out * (max_deriv - sign * (z / (opmath_t(1) + z)));
         });
   });
 }
@@ -641,6 +667,7 @@ REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
 REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(glu_stub, &glu_kernel);
+REGISTER_DISPATCH(glu_jvp_stub, &glu_jvp_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
 REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);

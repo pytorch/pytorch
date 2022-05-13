@@ -339,17 +339,31 @@ def match_differentiability_info(
         for info in differentiability_infos
         if info.func.func.kind() == SchemaKind.functional
     }
+    non_functional_info_by_signature = {
+        info.func.func.signature(strip_default=True): info
+        for info in differentiability_infos
+        if info.func.func.kind() != SchemaKind.functional
+    }
 
     def find_info(f: NativeFunction) -> Tuple[Optional[DifferentiabilityInfo], bool]:
+        # (1) Check for an exact match
         if f.func in info_by_schema:
             return info_by_schema[f.func], True
 
-        # if there is no exact match look for the out-of-place signature.
+        # (2) If no exact match, check if the out-of-place variant
+        # of this operator has a match.
         # i.e mul() for mul_() or mul_out()
-        return (
-            functional_info_by_signature.get(f.func.signature(strip_default=True)),
-            False,
-        )
+        f_sig = f.func.signature(strip_default=True)
+        if f_sig in functional_info_by_signature:
+            return functional_info_by_signature[f_sig], False
+
+        # (3) Some operators have a derivative explicitly defined for the mutable
+        # variant, but get a code-generated out-of-place variant.
+        # Use that if available
+        if "generated" in f.tags and f_sig in non_functional_info_by_signature:
+            return non_functional_info_by_signature[f_sig], False
+
+        return None, False
 
     result: List[NativeFunctionWithDifferentiabilityInfo] = []
     for f in native_functions:
