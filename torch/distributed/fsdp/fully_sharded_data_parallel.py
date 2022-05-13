@@ -547,6 +547,7 @@ class FullyShardedDataParallel(nn.Module):
                 >>> # With torchdistX
                 >>> module = deferred_init.deferred_init(MyModule, device="cuda")
                 >>> # Will initialize via deferred_init.materialize_module().
+                >>> fsdp_model = FSDP(module, auto_wrap_policy=size_based_auto_wrap_policy)
 
         device_id (Optional[Union[int, torch.device]]): An ``int`` or ``torch.device``
             describing the CUDA device FSDP module should be moved to before
@@ -556,7 +557,6 @@ class FullyShardedDataParallel(nn.Module):
             If specified, resulting FSDP instances will reside on this device.
             Note that if ``device_id`` is specified but input module is already
             on a different CUDA device, errors will be thrown.
-                >>> fsdp_model = FSDP(module, auto_wrap_policy=size_based_auto_wrap_policy)
 
     """
 
