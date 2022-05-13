@@ -295,7 +295,11 @@ def make_file_manager(
 
 
 # Helper function to create a pretty representation for dataclasses
-def dataclass_repr(obj, indent=0, width=80) -> str:
+def dataclass_repr(
+    obj: object,
+    indent: int = 0,
+    width: int = 80,
+) -> str:
     # built-in pprint module support dataclasses from python 3.10
     if sys.version_info >= (3, 10):
         from pprint import pformat
@@ -303,7 +307,12 @@ def dataclass_repr(obj, indent=0, width=80) -> str:
 
     return _pformat(obj, indent=indent, width=width)
 
-def _pformat(obj, indent, width, curr_indent=0) -> str:
+def _pformat(
+    obj: object,
+    indent: int,
+    width: int,
+    curr_indent: int = 0,
+) -> str:
     assert is_dataclass(obj), f"obj should be a dataclass, received: {type(obj)}"
 
     class_name = obj.__class__.__name__
@@ -332,7 +341,12 @@ def _pformat(obj, indent, width, curr_indent=0) -> str:
     body = f",\n{indent_str}".join(fields_str)
     return f"{class_name}({body})"
 
-def _format_dict(attr, indent, width, curr_indent) -> str:
+def _format_dict(
+    attr: Dict,
+    indent: int,
+    width: int,
+    curr_indent: int,
+) -> str:
     curr_indent += (indent + 3)
     dict_repr = []
     for k, v in attr.items():
@@ -342,13 +356,25 @@ def _format_dict(attr, indent, width, curr_indent) -> str:
 
     return _format(dict_repr, indent, width, curr_indent, "{", "}")
 
-def _format_list(attr, indent, width, curr_indent) -> str:
+def _format_list(
+    attr: Union[List, Set, Tuple],
+    indent: int,
+    width: int,
+    curr_indent: int,
+) -> str:
     curr_indent += (indent + 1)
     list_repr = [_pformat(l, indent, width, curr_indent) if is_dataclass(l) else repr(l) for l in attr]
     start, end = ("[", "]") if isinstance(attr, list) else ("(", ")")
     return _format(list_repr, indent, width, curr_indent, start, end)
 
-def _format(fields_str, indent, width, curr_indent, start, end) -> str:
+def _format(
+    fields_str: List[str],
+    indent: int,
+    width: int,
+    curr_indent: int,
+    start: str,
+    end: str,
+) -> str:
     delimiter, curr_indent_str = "", ""
     # if it exceed the max width then we place one element per line
     if len(repr(fields_str)) >= width:
