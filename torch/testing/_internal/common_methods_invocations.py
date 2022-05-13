@@ -9902,7 +9902,7 @@ op_db: List[OpInfo] = [
                    )),
     BinaryUfuncInfo('atan2',
                     aliases=('arctan2',),
-                    dtypes=all_types_and(torch.bool),
+                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
@@ -13188,7 +13188,7 @@ op_db: List[OpInfo] = [
            aten_name='glu',
            supports_autograd=True,
            sample_inputs_func=sample_inputs_glu,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -14736,12 +14736,7 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse_csr=True,
-                   supports_complex_to_float=True,
-                   skips=(
-                       # The complex formula might be wrong
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
-                                    dtypes=complex_types()),
-                   )),
+                   supports_complex_to_float=True,),
     UnaryUfuncInfo('isfinite',
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -15553,14 +15548,18 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                             dtypes=(torch.float, torch.cfloat)),
                # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
+                            device_type='cpu'),
                # TypeError: 'int' object is not iterable
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view',
+                            device_type='cpu'),
                # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view',
+                            device_type='cpu'),
                # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               # RuntimeError: "neg_conj_cuda" not implemented for 'ComplexHalf'
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
            )
            ),
@@ -15865,7 +15864,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('histc',
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
@@ -16007,6 +16006,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            backward_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            skips=(
                # JIT has issue when op is passed as lambda
@@ -17232,7 +17232,7 @@ op_db: List[OpInfo] = [
         promotes_int_to_int64=True,
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         dtypes=all_types_and_complex_and(torch.bool),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_prod,
         ref=reference_reduction_numpy(np.prod),
         skips=(
@@ -17259,6 +17259,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         ref=reference_reduction_numpy(np.sum),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
