@@ -16431,9 +16431,6 @@ class TestProducerVersion(TestCase):
 
     def test_version(self):
         # issue gh-32561
-        print("VERSIONS???")
-        print(torch.__version__)
-        print(torch.onnx.producer_version)
         self.assertTrue(torch.__version__.startswith(torch.onnx.producer_version))
 
 for test in module_tests + new_module_tests + additional_module_tests:
