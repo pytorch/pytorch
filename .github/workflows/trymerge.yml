@@ -39,3 +39,5 @@ jobs:
           else
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi
+
+concurrency: try-merge
