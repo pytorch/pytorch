@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
 from enum import Enum
+from functools import reduce
+import operator
 
 import torch
 
@@ -160,7 +162,7 @@ TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
     """
     Checks that two tensor likes have the same shape,
-    dtype, and device.
+    dtype and device.
 
     In the future this will validate additional metadata, like
     strides.
@@ -182,6 +184,16 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
         raise AssertionError(msg)
 
 
+def compare_significant_strides(a: TensorLikeType, b: TensorLikeType):
+    assert a.ndim == b.ndim
+
+    for idx in range(a.ndim):
+        assert a.shape[idx] == b.shape[idx]
+        if a.shape[idx] == 0 or a.shape[idx] == 1:
+            continue
+        assert a.stride()[idx] == b.stride()[idx]
+
+
 #
 # Common helper functions
 #
@@ -197,7 +209,7 @@ def validate_dim_length(length: int):
     assert length >= 0
 
 
-def validate_shape(shape: Sequence):
+def validate_shape(shape: ShapeType):
     """
     Validates that a sequence represents a valid shape.
     """
@@ -207,25 +219,42 @@ def validate_shape(shape: Sequence):
         validate_dim_length(l)
 
 
-def validate_idx(shape: Sequence, idx: int):
+def validate_strides(strides: StrideType):
     """
-    Validates that idx is a valid idx for the given shape.
-    0 and -1 is a valid index for an empty shape
+    Verifies the object specifies valid strides.
+    """
+
+    assert isinstance(strides, Sequence)
+    for stride in strides:
+        assert stride >= 0
+
+
+def validate_idx(rank: int, idx: int):
+    """
+    Validates that idx is a valid index for the given shape.
+    Assumes the index is already canonicalized.
     """
 
     assert isinstance(idx, int)
-    ndim = len(shape) if len(shape) else 1
-    assert idx >= 0 and idx < ndim
+    assert isinstance(rank, int)
+
+    assert idx >= 0 and idx < rank or idx == 0
 
 
-def validate_exclusive_idx(shape: Sequence, ex_idx: int):
+def validate_dimension_indices(rank: int, indices: DimsSequenceType):
+    for idx in indices:
+        validate_idx(rank, idx)
+
+
+def validate_exclusive_idx(rank: int, ex_idx: int):
     """
     Validates that ex_idx is a valid exclusive index
     for the given shape.
     """
 
     assert isinstance(ex_idx, int)
-    assert ex_idx > 0 and ex_idx <= len(shape)
+    assert isinstance(rank, int)
+    assert ex_idx > 0 and ex_idx <= rank
 
 
 # "Wraps" a dim (up to one time) for the given rank, allowing
@@ -368,18 +397,22 @@ _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
 
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
+    assert isinstance(dtype, torch.dtype)
     return dtype is torch.bool
 
 
 def is_integer_dtype(dtype: torch.dtype) -> bool:
+    assert isinstance(dtype, torch.dtype)
     return dtype in _integer_dtypes
 
 
 def is_float_dtype(dtype: torch.dtype) -> bool:
+    assert isinstance(dtype, torch.dtype)
     return dtype in _float_dtypes
 
 
 def is_complex_dtype(dtype: torch.dtype) -> bool:
+    assert isinstance(dtype, torch.dtype)
     return dtype in _complex_dtypes
 
 
@@ -530,6 +563,7 @@ def get_higher_dtype(
     raise RuntimeError("Unexpected termination!")
 
 
+# TODO: maybe unify with can_cast_to?
 def is_weakly_lesser_type(a: type, b: type) -> bool:
     """
     Compares two types, a and b, returning True if a is weakly "less" than b.
@@ -865,7 +899,7 @@ def wrap_device(d: Union[str, torch.device]) -> torch.device:
     return d
 
 
-def make_contiguous_strides_for(shape: Sequence) -> Tuple[int, ...]:
+def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     validate_shape(shape)
     if not shape:
         return ()
@@ -873,7 +907,8 @@ def make_contiguous_strides_for(shape: Sequence) -> Tuple[int, ...]:
     multiplier = 1
     strides = [multiplier]
     for l in reversed(shape[1:]):
-        multiplier = l * multiplier
+        if l != 0:
+            multiplier = l * multiplier
         strides.append(multiplier)
 
     return tuple(reversed(strides))
@@ -883,7 +918,7 @@ def compute_reduction_output_shape(
     shape: ShapeType, dimensions: Sequence
 ) -> Tuple[int, ...]:
     for idx in dimensions:
-        validate_idx(shape, idx)
+        validate_idx(len(shape), idx)
 
     new_shape = []
     for idx in range(len(shape)):
@@ -902,3 +937,30 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
     if len(dims) != len(set(dims)):
         raise RuntimeError("duplicate value in the list of dims")
     return dims
+
+
+def check_in_bounds_for_storage(
+    a: torch._TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
+):
+    """
+    Determines if the given shape, strides, and offset are valid for the given storage.
+    """
+
+    # Short-circuits if the shape has no elements
+    if reduce(operator.mul, shape) == 0:
+        return
+
+    length = a.size() - storage_offset
+    max_offset = 0
+    for x, y in zip(shape, strides):
+        max_offset = max_offset + (x - 1) * y
+
+    if max_offset >= length:
+        required_length = max_offset + storage_offset
+        msg = (
+            "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
+            "which requires a storage of size {4}".format(
+                a.size(), storage_offset, str(shape), str(strides), required_length
+            )
+        )
+        raise ValueError(msg)
