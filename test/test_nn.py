@@ -42,7 +42,7 @@ from torch.testing._internal.common_dtype import integral_types, floating_types_
     floating_and_complex_types_and
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
-    download_file, get_function_arglist, load_tests, \
+    download_file, get_function_arglist, load_tests, skipIfMps,\
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -17209,6 +17209,7 @@ class TestNNDeviceType(NNTestCase):
         tol = 2 * torch.finfo(dtype).eps
         self.assertEqual(logits_soft.grad, logits_hard.grad, atol=tol, rtol=0)
 
+    @skipIfMps
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_gumbel_softmax(self, device, dtype):
@@ -18645,27 +18646,32 @@ class TestNNDeviceType(NNTestCase):
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
+    @skipIfMps
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
+    @skipIfMps
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_maxpool_indices_no_batch_dim(self, device, dtype):
         """Check that indices with no batch dim is consistent with a single batch."""
@@ -18831,6 +18837,7 @@ class TestNNDeviceType(NNTestCase):
                                        lambda: fn_module(x))
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -18845,6 +18852,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(x.shape[2], res.shape[2])
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -19165,12 +19173,12 @@ class TestNNDeviceType(NNTestCase):
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_conv_thnn_nhwc(self, device, dtype):
-        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups):
+        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups, weight_memory_format):
             input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
                 .to(memory_format=torch.channels_last)
             input.requires_grad_()
             conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)\
-                .to(device='cpu', dtype=dtype, memory_format=torch.channels_last)
+                .to(device='cpu', dtype=dtype, memory_format=weight_memory_format)
             for p in conv.parameters():
                 p.data = torch.randint_like(p, -3, 3)
 
@@ -19197,15 +19205,16 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
 
         with torch.backends.mkldnn.flags(enabled=False):
-            # non-dilated conv: thnn_conv2d normal path (with im2col)
-            helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1)
-            helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8)
-            # non-dilated conv: thnn_conv2d fast path (skip im2col)
-            helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1)
-            helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16)
-            # dilated conv: slow_conv_dilated2d
-            helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1)
-            helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16)
+            for mf in [torch.contiguous_format, torch.channels_last]:
+                # non-dilated conv: thnn_conv2d normal path (with im2col)
+                helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1, weight_memory_format=mf)
+                helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8, weight_memory_format=mf)
+                # non-dilated conv: thnn_conv2d fast path (skip im2col)
+                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1, weight_memory_format=mf)
+                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16, weight_memory_format=mf)
+                # dilated conv: slow_conv_dilated2d
+                helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1, weight_memory_format=mf)
+                helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16, weight_memory_format=mf)
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
