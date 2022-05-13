@@ -45,7 +45,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps,\
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
-    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype
+    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -21623,6 +21623,7 @@ class TestStateDictHooks(TestCase):
         self.assertEqual([], ret.missing_keys)
         self.assertEqual([], ret.unexpected_keys)
 
+    @unittest.skipIf(IS_WINDOWS, "Tempfile permission issue on windows")
     def test_load_state_dict_post_hook_backward_compatibility(self):
         def my_post_load_hook(mod, _):
             nonlocal called
