@@ -15,7 +15,7 @@ from typing import Optional
 from torch.onnx import _constants
 
 if typing.TYPE_CHECKING:
-    # Posepone type checking to avoid circular dependencies.
+    # Postpone type checking to avoid circular dependencies.
     from torch.onnx import OperatorExportTypes, TrainingMode
 
 
