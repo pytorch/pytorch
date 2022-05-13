@@ -1636,6 +1636,11 @@ class TestTensorCreation(TestCase):
         expected = torch.empty(0, 5, dtype=a.dtype, device=device)
         self.assertEqual(c, expected)
 
+        # test memory error
+        c = torch.combinations(a, r=100)
+        expected = torch.empty(0, 100, dtype=a.dtype, device=device)
+        self.assertEqual(c, expected)
+
         # test empty imput
         a = torch.empty(0, device=device)
         c1 = torch.combinations(a)
