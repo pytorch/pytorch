@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
+#include <torch/csrc/jit/passes/check_strict_fusion.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -650,7 +651,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
     // value
 #ifndef C10_MOBILE
-    if (RegisterCudaFuseGraph::isRegistered()) {
+    if (torch::jit::fuser::cuda::isEnabled()) {
       torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
     }
 #endif
@@ -671,6 +672,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
   runFinalOptimizations(copy);
+  CheckStrictFusion(copy);
   GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ = ExecutionPlan(copy, function_name_);
   return *optimized_plan_;

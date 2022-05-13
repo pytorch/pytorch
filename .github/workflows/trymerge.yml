@@ -6,7 +6,8 @@ on:
 
 jobs:
   do_merge:
-    runs-on: ubuntu-20.04
+    name: try_merge_pr_${{ github.event.client_payload.pr_num }}
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -29,9 +30,12 @@ jobs:
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FORCE: ${{ github.event.client_payload.force}}
+          ON_GREEN: ${{ github.event.client_payload.on_green}}
         run: |
           if [ -n "${FORCE}" ]; then
             python3 .github/scripts/trymerge.py --force "${PR_NUM}"
+          elif [ -n "${ON_GREEN}" ]; then
+            python3 .github/scripts/trymerge.py --on-green "${PR_NUM}"
           else
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi

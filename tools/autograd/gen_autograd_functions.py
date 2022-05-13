@@ -8,14 +8,14 @@ from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
 from typing import List, Sequence, Tuple
 
-from tools.codegen.api.autograd import (
+from torchgen.api.autograd import (
     Derivative,
     DifferentiabilityInfo,
     SavedAttribute,
     uses_retain_variables,
     uses_single_grad,
 )
-from tools.codegen.api.types import (
+from torchgen.api.types import (
     Binding,
     BaseCType,
     OptionalCType,
@@ -32,9 +32,9 @@ from tools.codegen.api.types import (
     ArrayRefCType,
     optionalIntArrayRefT,
 )
-from tools.codegen.code_template import CodeTemplate
-from tools.codegen.utils import FileManager
-from tools.codegen.model import Argument
+from torchgen.code_template import CodeTemplate
+from torchgen.utils import FileManager
+from torchgen.model import Argument
 
 FUNCTION_DECLARATION = CodeTemplate(
     """\

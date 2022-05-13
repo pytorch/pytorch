@@ -7,7 +7,7 @@ namespace torch {
 namespace {
   // TODO: Consider representing debug info as a struct instead so you
   // don't have to allocate strings all the time
-  std::string debugString(const char* file, uint32_t line) {
+  std::string debugString(const std::string& file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
@@ -15,7 +15,7 @@ namespace {
 #endif
   }
 
-  std::string debugString(std::string debug, const char* file, uint32_t line) {
+  std::string debugString(std::string debug, const std::string& file, uint32_t line) {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
