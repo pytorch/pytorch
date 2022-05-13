@@ -503,4 +503,8 @@ Tensor csr_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   return at::native::_csr_to_block_csr(self, blocksize);
 }
 
+Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
+  return self.to_sparse_csr().to_sparse_bsr(blocksize);
+}
+
 }} // namespace at::native

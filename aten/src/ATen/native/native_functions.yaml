@@ -3960,6 +3960,7 @@
   dispatch:
     MkldnnCPU: mkldnn_gelu
     QuantizedCPU: gelu_quantized_cpu
+    QuantizedCUDA: gelu_quantized_cuda
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_gelu
 
 - func: gelu_backward.grad_input(Tensor grad_output, Tensor self, *, str approximate='none', Tensor(a!) grad_input) -> Tensor(a!)
@@ -5817,6 +5818,7 @@
 - func: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
   variants: method
   dispatch:
+    CPU, CUDA: dense_to_sparse_bsr
     SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_bsr
 
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
