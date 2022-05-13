@@ -127,6 +127,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 #include <stdint.h>
 #include <unordered_map>
 
+#define AT_MIOPEN_MAX_SOLUTIONS 10
 
 namespace at { namespace native {
 
@@ -401,7 +402,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
   static miopenConvSolution_t getSolution(const ConvolutionArgs& args, bool force_default) {
     size_t max_solution_count;
     size_t solution_count;
-    miopenConvSolution_t solutions[20];
+    miopenConvSolution_t solutions[AT_MIOPEN_MAX_SOLUTIONS];
     MIOPEN_CHECK(miopenConvolutionForwardGetSolutionCount(
         args.handle,
         args.wdesc.desc(),
@@ -409,10 +410,9 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
         args.cdesc.desc(),
         args.odesc.desc(),
         &max_solution_count));
-    if (max_solution_count > 20) {
-        fprintf(stderr, "JEFF UH OH in miopenConvFwdAlgorithm_t getSolution\n");
+    if (max_solution_count > AT_MIOPEN_MAX_SOLUTIONS) {
+        AT_ERROR("miopenConvFwdAlgorithm_t getSolution max_solution_count > AT_MIOPEN_MAX_SOLUTIONS");
     }
-    fprintf(stderr, "miopenConvFwdAlgorithm_t max_solution_count=%zu\n", max_solution_count);
     MIOPEN_CHECK(miopenConvolutionForwardGetSolution(
         args.handle,
         args.wdesc.desc(),
@@ -422,14 +422,6 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
         max_solution_count,
         &solution_count,
         solutions));
-    for (size_t i=0; i<solution_count; ++i) {
-        fprintf(stderr, "solution[%zu] time=%f size=%zu id=%lu alg=%d\n",
-                i,
-                solutions[i].time,
-                solutions[i].workspace_size,
-                solutions[i].solution_id,
-                solutions[i].algorithm);
-    }
 
     if (force_default) {
         // find default alg
@@ -444,7 +436,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
                 return solutions[i];
             }
         }
-        // now what?
+        // now what? fall through and hope for the best
     }
 
     return solutions[0];
@@ -483,7 +475,7 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
   static miopenConvSolution_t getSolution(const ConvolutionArgs& args, bool force_default) {
     size_t max_solution_count;
     size_t solution_count;
-    miopenConvSolution_t solutions[20];
+    miopenConvSolution_t solutions[AT_MIOPEN_MAX_SOLUTIONS];
     MIOPEN_CHECK(miopenConvolutionBackwardDataGetSolutionCount(
         args.handle,
         args.odesc.desc(),
@@ -491,10 +483,9 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
         args.cdesc.desc(),
         args.idesc.desc(),
         &max_solution_count));
-    if (max_solution_count > 20) {
-        fprintf(stderr, "JEFF UH OH in miopenConvBwdDataAlgorithm_t getSolution\n");
+    if (max_solution_count > AT_MIOPEN_MAX_SOLUTIONS) {
+        AT_ERROR("miopenConvBwdDataAlgorithm_t getSolution max_solution_count > AT_MIOPEN_MAX_SOLUTIONS");
     }
-    fprintf(stderr, "miopenConvBwdDataAlgorithm_t max_solution_count=%zu\n", max_solution_count);
     MIOPEN_CHECK(miopenConvolutionBackwardDataGetSolution(
         args.handle,
         args.odesc.desc(),
@@ -504,14 +495,6 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
         max_solution_count,
         &solution_count,
         solutions));
-    for (size_t i=0; i<solution_count; ++i) {
-        fprintf(stderr, "solution[%zu] time=%f size=%zu id=%lu alg=%d\n",
-                i,
-                solutions[i].time,
-                solutions[i].workspace_size,
-                solutions[i].solution_id,
-                solutions[i].algorithm);
-    }
 
     if (force_default) {
         // find default alg
@@ -526,7 +509,7 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
                 return solutions[i];
             }
         }
-        // now what?
+        // now what? fall through and hope for the best
     }
 
     return solutions[0];
@@ -565,7 +548,7 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
   static miopenConvSolution_t getSolution(const ConvolutionArgs& args, bool force_default) {
     size_t max_solution_count;
     size_t solution_count;
-    miopenConvSolution_t solutions[20];
+    miopenConvSolution_t solutions[AT_MIOPEN_MAX_SOLUTIONS];
     MIOPEN_CHECK(miopenConvolutionBackwardWeightsGetSolutionCount(
         args.handle,
         args.odesc.desc(),
@@ -573,10 +556,9 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
         args.cdesc.desc(),
         args.wdesc.desc(),
         &max_solution_count));
-    if (max_solution_count > 20) {
-        fprintf(stderr, "JEFF UH OH in miopenConvBwdWeightsAlgorithm_t getSolution\n");
+    if (max_solution_count > AT_MIOPEN_MAX_SOLUTIONS) {
+        AT_ERROR("miopenConvBwdWeightsAlgorithm_t getSolution max_solution_count > AT_MIOPEN_MAX_SOLUTIONS");
     }
-    fprintf(stderr, "miopenConvBwdWeightsAlgorithm_t max_solution_count=%zu\n", max_solution_count);
     MIOPEN_CHECK(miopenConvolutionBackwardWeightsGetSolution(
         args.handle,
         args.odesc.desc(),
@@ -586,14 +568,6 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
         max_solution_count,
         &solution_count,
         solutions));
-    for (size_t i=0; i<solution_count; ++i) {
-        fprintf(stderr, "solution[%zu] time=%f size=%zu id=%lu alg=%d\n",
-                i,
-                solutions[i].time,
-                solutions[i].workspace_size,
-                solutions[i].solution_id,
-                solutions[i].algorithm);
-    }
 
     if (force_default) {
         // find default alg
@@ -608,7 +582,7 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
                 return solutions[i];
             }
         }
-        // now what?
+        // now what? fall through and hope for the best
     }
 
     return solutions[0];
@@ -620,8 +594,6 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   using search = algorithm_search<algo_t>;
   auto& cache = search::cache();
   auto& wsscache = search::wsscache();
-
-  (void)search::getSolution(args, false);
 
   if (cache.find(args.params, algo)) {
     return;
