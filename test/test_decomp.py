@@ -150,6 +150,7 @@ def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
     if orig.numel() == 0 or decomp.numel() == 0:
         assert orig.numel() == decomp.numel()
         return
+    assert orig.shape == decomp.shape, f"Operation:  {op}"
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
         decomp_diff = (decomp - ref).abs().max()

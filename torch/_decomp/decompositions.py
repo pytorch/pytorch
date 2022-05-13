@@ -849,8 +849,24 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
         return out
     return beta * self + out
 
+# This computes the mean and variance along the specifized normalization dims,
+# then normalizes along those dims. Finally, it returns the mean and variance of
+# the normalized dims
+# Example:
+# input: [2, 3, 4, 5], norm_dims: [1, 3]
+# (before squeezing) mean: [2, 1, 4, 1]
+# (after squeezing) mean: [2, 4]
+def normalize(input, norm_dims, eps):
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    input_acc = input.to(dtype=computation_dtype)
+    biased_var = torch.var(input_acc, dim=norm_dims, unbiased=False, keepdim=True)
+    mean = torch.mean(input_acc, dim=norm_dims, keepdim=True)
+    rstd = torch.rsqrt(biased_var + eps)
 
-# TODO: Correct the type promotion semantics
+    out = ((input - mean) * rstd)
+    return out, mean, rstd
+
+
 @register_decomposition(aten.native_layer_norm)
 def native_layer_norm(
     input: Tensor,
@@ -859,49 +875,28 @@ def native_layer_norm(
     bias: Optional[Tensor],
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    input_shape = input.shape
-    input_ndim = input.dim()
-
-    axis = input_ndim - len(normalized_shape)
-    M = prod(input_shape[:axis])  # type: ignore[arg-type]
-
-    # Hmm... not sure how I get around this...
-    # Basically, native_batch_norm doesn't support 0-entry tensors, while
-    # native_layer_norm does (and is tested by OpInfos!)
-    if M > 0:
-        input_reshaped = input.view(1, M, -1)
-    else:
-        return (input, input.new_zeros((0,), dtype=torch.float), input.new_zeros((0,), dtype=torch.float))
-
-    # Unlike Batch Normalization, which applies scalar scale and bias for each
-    # entire channel/plane with the affine option, Layer Normalization applies
-    # per-element scale and bias. E.g. For input {N, C, H, W}, weight for
-    # batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
     computation_dtype = utils.get_computation_dtype(input.dtype)
-    reduction_dims = [0] + list(range(2, input_reshaped.dim()))
-    input_acc = input_reshaped.to(dtype=computation_dtype)
-    biased_var = torch.var(input_acc, dim=reduction_dims, unbiased=False)
-    mean = torch.mean(input_acc, dim=reduction_dims)
-    rstd = torch.rsqrt(biased_var + eps)
-    mean = _unsqueeze_to_dim(mean, input.dim())
-    rstd = _unsqueeze_to_dim(rstd, input.dim())
 
-    out = ((input - mean) * rstd)
-    out = out.view(input_shape)
-    if weight is not None:
-        out = out * weight
-    if bias is not None:
-        out = out + bias
+    axis = input.dim() - len(normalized_shape)
+    if prod(input.shape[:axis]) == 0:
+        mean = input.new_zeros((0,), dtype=computation_dtype)
+        rstd = input.new_zeros((0,), dtype=computation_dtype)
+        out = input
+    else:
+        reduction_dims = list(range(axis, input.dim()))
+        out, mean, rstd = normalize(input, reduction_dims, eps)
 
-    stat_shape = list(input_shape[:axis])
-    for _ in range(axis, input.dim()):
-        stat_shape.append(1)
-    mean = mean.view(stat_shape)
-    rstd = rstd.view(stat_shape)
+        if weight is not None:
+            out = out * weight
+        if bias is not None:
+            out = out + bias
+
+        out = out.to(dtype=input.dtype)
+
     if not input.is_cuda:
         mean = mean.to(dtype=input.dtype)
         rstd = rstd.to(dtype=input.dtype)
-    return (out.to(dtype=input.dtype), mean, rstd)
+    return (out, mean, rstd)
 
 
 # TODO: Correct the type promotion semantics
@@ -992,11 +987,10 @@ def native_batch_norm(
     reduction_dims = [0] + list(range(2, input.dim()))
     computation_dtype = utils.get_computation_dtype(input.dtype)
     if training:
-        input_acc = input.to(dtype=computation_dtype)
-        biased_var = torch.var(input_acc, dim=reduction_dims, unbiased=False)
-        save_mean = torch.mean(input_acc, dim=reduction_dims)
-        save_invstd = torch.rsqrt(biased_var + eps)
+        output, mean, rstd = normalize(input, reduction_dims, eps)
 
+        save_mean = _squeeze_multiple(mean, reduction_dims)
+        save_rstd = _squeeze_multiple(rstd, reduction_dims)
         if running_mean is not None:
             running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
         if running_var is not None:
@@ -1004,10 +998,8 @@ def native_batch_norm(
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            unbiased_var = biased_var * (n / (n - 1))
+            unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (n / (n - 1))
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
-        mean = save_mean
-        invstd = save_invstd
     else:
         assert running_mean is not None and running_var is not None
         running_mean = running_mean.to(dtype=computation_dtype)
@@ -1017,10 +1009,13 @@ def native_batch_norm(
         # Very annoying inconsistency where CPU and CUDA give different shapes
         if input.device.type == "cuda":
             save_mean = running_mean
-            save_invstd = invstd
+            save_rstd = invstd
         else:
             save_mean = input.new_zeros((0,))
-            save_invstd = input.new_zeros((0,))
+            save_rstd = input.new_zeros((0,))
+        mean = _unsqueeze_to_dim(mean, input.dim() - 1)
+        invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
+        output = ((input - mean) * invstd)
 
     if weight is None:
         weight = input.new_ones(())
@@ -1028,12 +1023,10 @@ def native_batch_norm(
     if bias is None:
         bias = input.new_zeros(())
 
-    mean = _unsqueeze_to_dim(mean, input.dim() - 1)
-    invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
     weight = _unsqueeze_to_dim(weight, input.dim() - 1)
     bias = _unsqueeze_to_dim(bias, input.dim() - 1)
-    output = ((input - mean) * invstd) * weight + bias
-    return output.to(dtype=input.dtype), save_mean, save_invstd
+    output = output * weight + bias
+    return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
 @register_decomposition(aten.clamp_min)
