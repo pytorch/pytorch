@@ -17,8 +17,9 @@ from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithS
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
 from torch.testing._internal.common_jit import JitCommonTestCase
-from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, slowTest
+from torch.testing._internal.common_methods_invocations import op_db, SampleInput
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, slowTest, \
+    is_iterable_of_tensors, freeze_rng_state
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
@@ -163,14 +164,6 @@ class TestCudaFuser(JitTestCase):
         ]
         if TEST_BF16:
             self.support_tensor_dtypes.append(torch.bfloat16)
-
-        self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
-        self.old_guard = torch._C._jit_set_nvfuser_guard_mode(False)
-        torch._C._debug_set_autodiff_subgraph_inlining(False)
-        self.old_value = torch._C._jit_set_autocast_mode(True)
 
         if(RUN_NVFUSER):
             self.cuda_fuser_options = CudaFuserTestOptions()
@@ -4684,16 +4677,26 @@ class TestPassManagerCudaFuser(JitTestCase):
             torch._C._jit_set_nvfuser_enabled(True)
             torch._C._jit_set_nvfuser_enabled(False)
 
-class TestCudaFuserOpInfo(JitCommonTestCase):
+# See TestNNCOpInfoParent
+class TestCudaFuserOpInfoParent(JitCommonTestCase):
+    pass
+
+class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
     def setUp(self):
+        super(TestCudaFuserOpInfoParent, self).setUp()
         if RUN_NVFUSER:
             self.cuda_fuser_options = CudaFuserTestOptions()
+            # enables guard mode since tracing could change graph to violate guard.
+            torch._C._jit_set_nvfuser_guard_mode(True)
         self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
 
     def tearDown(self):
         if RUN_NVFUSER:
             self.cuda_fuser_options.restore()
+
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
+
+        super(TestCudaFuserOpInfoParent, self).tearDown()
 
     @slowTest
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -4711,11 +4714,75 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
 
             self.assertEqual(ref, val, exact_layout=True)
 
+        # Note: Clearing CU after NVFuser tests
         # https://github.com/pytorch/pytorch/issues/35600
         # each torch.jit.trace adds state to the _python_cu compilation unit
         # since this test traces a lot of functions, out-of-memory can occur
         # if the CU is not cleared.
         torch.jit._state._python_cu.drop_all_functions()
+
+    @slowTest
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    @ops(op_db, allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32,
+                                torch.float64, torch.complex64, torch.complex128))
+    def test_nvfuser_extremal_values(self, device, dtype, op):
+        variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
+
+        def _get_extremal_tensor(x, val, dtype):
+            if x.dtype != dtype:
+                return x
+            return torch.full_like(x, val)
+
+        def _get_extremal_input(x, val, dtype):
+            if isinstance(x, torch.Tensor):
+                return _get_extremal_tensor(x, val, dtype)
+            elif is_iterable_of_tensors(x):
+                return [_get_extremal_tensor(y, val, dtype) for y in x]
+            return x
+
+        def _get_extremal_sample(sample: SampleInput, val, dtype):
+            extremal_sample = SampleInput(
+                input=_get_extremal_input(sample.input, val, dtype),
+                args=[_get_extremal_input(x, val, dtype) for x in sample.args],
+                kwargs={k: _get_extremal_input(v, val, dtype) for k, v in sample.kwargs.items()},
+            )
+            return extremal_sample
+
+        def _get_extremal_samples(sample: SampleInput, dtype):
+            vals = [float('inf'), float('-inf'), float('nan')]
+            if dtype.is_complex:
+                complex_vals = itertools.product(vals, vals)
+                vals = list(map(lambda x: complex(*x), complex_vals))
+            for val in vals:
+                yield _get_extremal_sample(sample, val, dtype)
+
+        variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
+
+        for variant, sample in variant_sample_pairs:
+
+            trace = create_traced_fn(self, variant, cache_traced_fn=True)
+            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            for extremal_sample in _get_extremal_samples(sample, dtype):
+                try:
+                    with freeze_rng_state():
+                        ref = variant(*clone_inputs((extremal_sample.input, *extremal_sample.args)),
+                                      **extremal_sample.kwargs)
+                except (torch._C._LinAlgError, RuntimeError, ValueError):
+                    # if eager errors out, then don't expect NVFuser to pass
+                    continue
+
+                with freeze_rng_state():
+                    val = trace(*clone_inputs((extremal_sample.input, *extremal_sample.args)),
+                                **extremal_sample.kwargs)
+
+                self.assertEqual(val, ref, equal_nan=True, exact_device=True)
+
+            # See [Note: Clearing CU after NVFuser tests]
+            torch.jit._state._python_cu.drop_all_functions()
 
 instantiate_device_type_tests(TestCudaFuserOpInfo, globals(), only_for=("cuda"))
 
