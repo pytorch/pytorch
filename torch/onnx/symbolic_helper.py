@@ -380,7 +380,8 @@ def _is_scalar_list(x):
 
 def is_caffe2_aten_fallback():
     return (
-        GLOBALS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+        GLOBALS.operator_export_type
+        == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
         and torch.onnx._CAFFE2_ATEN_FALLBACK
     )
 
