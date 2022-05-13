@@ -153,6 +153,7 @@ torch::nn::SampleModule|Yes|Yes
 
 API | Implementation Parity | Doc Parity
 ------------- | ------------- | -------------
+F::bias|Yes|No
 F::conv1d|Yes|No
 F::conv2d|Yes|No
 F::conv3d|Yes|No

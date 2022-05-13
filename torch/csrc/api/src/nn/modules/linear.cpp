@@ -25,7 +25,7 @@ void BiasImpl::reset() {
 }
 
 void BiasImpl::reset_parameters() {
-  torch::nn::init::uniform_(bias); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+  torch::nn::init::normal_(bias); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 }
 
 void BiasImpl::pretty_print(std::ostream& stream) const {

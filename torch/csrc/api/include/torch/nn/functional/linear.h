@@ -7,7 +7,6 @@ namespace nn {
 namespace functional {
 
 inline Tensor bias(const Tensor& input, const Tensor& bias){
-  // Do I need to check the constraints here?
   return torch::bias(input, bias);
 }
 

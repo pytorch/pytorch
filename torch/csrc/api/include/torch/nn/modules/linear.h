@@ -15,7 +15,7 @@ namespace nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bias ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// Adds a bias vector to las dim of input
+/// Adds a bias vector to last dim of input
 
 class TORCH_API BiasImpl : public Cloneable<BiasImpl> {
  public:
@@ -27,11 +27,10 @@ class TORCH_API BiasImpl : public Cloneable<BiasImpl> {
 
   void reset_parameters();
 
-  /// Pretty prints the `Linear` module into the given `stream`.
+  /// Pretty prints the `Bias` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
-  /// Transforms the `input` tensor by multiplying with the `weight` and
-  /// optionally adding the `bias`, if `with_bias` is true in the options.
+  /// Transforms the `input` tensor by adding `bias`.
   Tensor forward(const Tensor& input);
 
   /// The options used to configure this module.

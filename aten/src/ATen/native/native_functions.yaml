@@ -5805,6 +5805,11 @@
     SparseCPU, SparseCUDA: coo_to_sparse_csr
     SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_csr
 
+- func: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
+  variants: method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_bsr
+
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
   dispatch:
@@ -6296,21 +6301,21 @@
 - func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
   variants: function, method
 
-- func: _index_reduce.out(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True, Tensor(a!) out) -> Tensor(a!)
+- func: index_reduce.out(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
   precomputed:
   - dim -> int dim
   dispatch:
-    CPU: _index_reduce_cpu_out
-    CUDA: _index_reduce_cuda_out
+    CPU: index_reduce_cpu_out
+    CUDA: index_reduce_cuda_out
 
-- func: _index_reduce_(Tensor(a!) self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor(a!)
-  structured_delegate: _index_reduce.out
+- func: index_reduce_(Tensor(a!) self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor(a!)
+  structured_delegate: index_reduce.out
   variants: method
 
-- func: _index_reduce(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor
-  structured_delegate: _index_reduce.out
+- func: index_reduce(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor
+  structured_delegate: index_reduce.out
   variants: function, method
 
 - func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)

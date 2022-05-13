@@ -1942,6 +1942,8 @@ Shape:
     - Input: math:`(*, num\_features)` where `*` means any number of
       additional dimensions, including none
     - Bias: :math:`(num\_features)` or :math:`()`
+    - Output: :math:`(*, num\_features)` where `*` means any number of
+      additional dimensions, including none, same shape as Input
 """)
 
 linear = _add_docstr(

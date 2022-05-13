@@ -24,6 +24,11 @@ class Bias(Module):
     tensorArgs:
         num_features:  the size of vector parameter that will be used to add bias
 
+    Shape:
+    - Input: :math:`(*, H_{last_dim})` where :math:`*` means any number of
+      dimensions including none and :math:`H_{last_dim} = \text{num\_features}`.
+    - Output: :math:`(*, H_{last_dim})`, same shape as the input.
+
     Attributes:
         bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized from
