@@ -128,7 +128,6 @@ class TestFSDPMisc(FSDPTest):
         (they are effective noops, but ensure FSDP does not assume module
         has parameters during init)
         """
-        print(f"Rank {self.rank} current device {torch.cuda.current_device()}")
         # Test CPU
         no_params = nn.ReLU()
         module = FSDP(no_params)
@@ -138,8 +137,6 @@ class TestFSDPMisc(FSDPTest):
         # Test CPU + device_id
         no_params = nn.ReLU()
         module = FSDP(no_params, device_id=torch.cuda.current_device())
-        # CUDA device mismatch does not raise error, since there are
-        # no params to check.
         # For modules with no params, wrong device_id will raise error about
         # inconsistency between compute_device and device_id, since compute_device
         # is computed as torch.cuda.current_device when there are no params.
