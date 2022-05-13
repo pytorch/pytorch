@@ -6139,6 +6139,7 @@
   - dim -> int dim
   dispatch:
     CPU: _index_reduce_cpu_out
+    CUDA: _index_reduce_cuda_out
 
 - func: _index_reduce_(Tensor(a!) self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor(a!)
   structured_delegate: _index_reduce.out
