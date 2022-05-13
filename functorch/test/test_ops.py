@@ -1359,10 +1359,9 @@ class TestOperators(TestCase):
                 if op.name == 'nn.functional.binary_cross_entropy':  # reverse second derivative wrt target not defined
                     in_dims = 1
                 compare_jacobians(primals, cotangents, in_dims)
-                return
-
-            expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
-            self.assertEqual(result, expected)
+            else:
+                expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
+                self.assertEqual(result, expected)
 
     @ops(filter(lambda op: op.name == "nn.functional.group_norm", functorch_lagging_op_db + additional_op_db),
          allowed_dtypes=(torch.float32, torch.double))  # TODO: generalize
