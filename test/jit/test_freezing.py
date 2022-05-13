@@ -1696,6 +1696,11 @@ class TestFrozenOptimizations(JitTestCase):
         scripted_mod = torch.jit.script(mod_eager)
         scripted_mod = torch.jit.freeze(scripted_mod)
         FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.graph)
+        conv_node = scripted_mod.graph.findNode("aten::conv2d", True)
+        self.assertTrue(conv_node is not None)
+        bias_input = conv_node.namedInput("bias")
+        self.assertTrue(bias_input is not None)
+        self.assertTrue(bias_input.type().dtype() == torch.half)
 
         x = torch.rand((3, 3, 32, 32), dtype=torch.half).cuda()
 
