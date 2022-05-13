@@ -303,7 +303,10 @@ please convert it to an inplace operator"""
 
 
 def parse_native_yaml_struct(
-    es: object, valid_tags: Set[str], path: str = "<stdin>"
+    es: object,
+    valid_tags: Set[str],
+    ignore_keys: Optional[Set[DispatchKey]] = None,
+    path: str = "<stdin>",
 ) -> ParsedYaml:
     assert isinstance(es, list)
     rs: List[NativeFunction] = []
@@ -313,7 +316,7 @@ def parse_native_yaml_struct(
         loc = Location(path, e["__line__"])
         funcs = e.get("func")
         with context(lambda: f"in {loc}:\n  {funcs}"):
-            func, m = NativeFunction.from_yaml(e, loc, valid_tags)
+            func, m = NativeFunction.from_yaml(e, loc, valid_tags, ignore_keys)
             rs.append(func)
             BackendIndex.grow_index(bs, m)
     error_check_native_functions(rs)
@@ -367,7 +370,9 @@ def parse_tags_yaml(path: str) -> Set[str]:
     return valid_tags
 
 
-def parse_native_yaml(path: str, tags_yaml_path: str) -> ParsedYaml:
+def parse_native_yaml(
+    path: str, tags_yaml_path: str, ignore_keys: Optional[Set[DispatchKey]] = None
+) -> ParsedYaml:
     # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
@@ -375,7 +380,7 @@ def parse_native_yaml(path: str, tags_yaml_path: str) -> ParsedYaml:
         with open(path, "r") as f:
             es = yaml.load(f, Loader=LineLoader)
         _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(
-            es, valid_tags, path=path
+            es, valid_tags, ignore_keys, path=path
         )
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
@@ -1428,42 +1433,44 @@ def get_grouped_by_view_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[Union[NativeFunction, NativeFunctionsViewGroup]]:
     def maybe_create_view_group(
-        d: Dict[ViewSchemaKind, NativeFunction]
+        d: Dict[Union[ViewSchemaKind, SchemaKind], NativeFunction]
     ) -> List[Union[NativeFunction, NativeFunctionsViewGroup]]:
         funcs: List[Union[NativeFunction, NativeFunctionsViewGroup]] = []
-        if ViewSchemaKind.aliasing not in d:
-            # Case 1: this op / op group is not aliasing, so we don't create a view group.
-            # return the original (ungrouped) native functions instead.
-            for func in d.values():
-                funcs.append(func)
-        else:
-            # Case 2: this op group contains an aliasing op, so we create a ViewGroup for it.
-            # The handling for out= ops here is unfortunate.
-            # out= ops don't really make sense for view operators.
-            # However, we have at least one existing {view}_copy.out operator in native_functions.yaml.
-            # It shouldn't be part of a view group, so we explicitly don't group it.
-            # There currently aren't any out= view ops (and there probably shouldn't be).
-            # We also expect that when we hit this case, the `non_aliasing` op in the dict
-            # *must* be a view_copy op (this is asserted in the NativeFunctionsViewGroup constructor)
-            if ViewSchemaKind.out in d:
-                funcs.append(d[ViewSchemaKind.out])
+        if ViewSchemaKind.aliasing in d:
+            view = d.pop(ViewSchemaKind.aliasing)
+            view_inplace = d.pop(ViewSchemaKind.aliasing_inplace, None)
+            view_copy = d.pop(SchemaKind.functional, None)
 
             funcs.append(
                 NativeFunctionsViewGroup(
-                    view=d[ViewSchemaKind.aliasing],
-                    view_copy=d.get(ViewSchemaKind.non_aliasing, None),
-                    view_inplace=d.get(ViewSchemaKind.inplace, None),
+                    view=view,
+                    view_copy=view_copy,
+                    view_inplace=view_inplace,
                 )
             )
+        # Take the remaining functions that weren't part of the view group
+        # and emit them separately
+        for func in d.values():
+            funcs.append(func)
         return funcs
 
     grouped_by_views: Dict[
-        FunctionSchema, Dict[ViewSchemaKind, NativeFunction]
+        FunctionSchema, Dict[Union[SchemaKind, ViewSchemaKind], NativeFunction]
     ] = defaultdict(dict)
     for f in native_functions:
         schema = f.func.view_signature()
-        assert f.view_schema_kind not in grouped_by_views[schema]
-        grouped_by_views[schema][f.view_schema_kind] = f
+        view_kind: ViewSchemaKind = f.view_schema_kind
+        # We need to group up ops relevant to the same "view", consisting of:
+        # view op (ViewSchemaKind.aliasing)
+        # view_inplace op (ViewSchemaKind.aliasing_inplace)
+        # view_copy op (SchemaKind.functional)
+        if view_kind == ViewSchemaKind.non_aliasing:
+            kind = f.func.kind()
+            assert kind not in grouped_by_views[schema]
+            grouped_by_views[schema][kind] = f
+        else:
+            assert view_kind not in grouped_by_views[schema]
+            grouped_by_views[schema][view_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
 
@@ -2446,6 +2453,11 @@ def main() -> None:
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
     )
+    parser.add_argument(
+        "--mps",
+        action="store_true",
+        help="Generate MPS registration code when set",
+    )
     # TODO: --op_registration_whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
     # custom build.
@@ -2494,6 +2506,7 @@ def main() -> None:
         default=["headers", "sources", "declarations_yaml"],
         help="Generate only a subset of files",
     )
+
     options = parser.parse_args()
 
     selector = get_custom_build_selector(
@@ -2503,13 +2516,25 @@ def main() -> None:
 
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
     tags_yaml_path = os.path.join(options.source_path, "native/tags.yaml")
-    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
+
+    from torchgen.model import dispatch_keys
+
+    # TODO: stop generating CUDA kernels for non-CUDA builds
+    ignore_keys = set()
+    if not options.mps:
+        ignore_keys.add(DispatchKey.MPS)
+
+        if DispatchKey.MPS in dispatch_keys:
+            del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
+
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
     )
 
     grouped_native_functions = get_grouped_native_functions(native_functions)
+
     structured_native_functions = [
         g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)
     ]
@@ -2556,8 +2581,6 @@ def main() -> None:
 #include <ATen/hip/ATenHIPGeneral.h>
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>"""
-
-    from torchgen.model import dispatch_keys
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set

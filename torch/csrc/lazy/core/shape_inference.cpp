@@ -81,13 +81,12 @@ std::vector<int64_t> expand_param_if_needed(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
-std::vector<Shape> compute_shape_arange(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
+TORCH_API std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
   double size_d = 0;
   // shape inference code copied from RangeFactories.cpp arange_out function
   // Note: AT_DISPATCH_ALL_TYPES_AND is just a macro that defines the correct c++ scalar_t type depending on out tensor
 
-  TORCH_INTERNAL_ASSERT(dtype.has_value());
-  AT_DISPATCH_ALL_TYPES_AND(c10::kBFloat16, dtype.value(), "compute_shape_arange_out", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
     // Note: acc_type further defines an accumulataion type depending on the scalar_t and whether its on cuda vs cpu.
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
@@ -131,7 +130,7 @@ std::vector<Shape> compute_shape_arange(const at::Scalar & start, const at::Scal
   // If any of start, end, or stop are floating-point, the dtype is inferred to be the default dtype, see get_default_dtype().
   // Otherwise, the dtype is inferred to be torch.int64.
 
-  return {Shape(dtype.value(), {size})};
+  return {Shape(out.scalar_type(), {size})};
 }
 
 std::vector<Shape> compute_shape_abs(const at::Tensor & self) {
@@ -540,6 +539,10 @@ std::vector<Shape> compute_shape__adaptive_avg_pool2d_backward(const at::Tensor 
 
 std::vector<Shape> compute_shape_glu_backward(const at::Tensor & grad_output, const at::Tensor & self, int64_t dim) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_glu_jvp(const at::Tensor & glu, const at::Tensor & x, const at::Tensor & dx, int64_t dim) {
+  return {Shape(glu.scalar_type(), glu.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction) {
