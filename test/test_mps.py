@@ -17,11 +17,6 @@ from torch.distributions import (Uniform)
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
 import torch
-from torch.utils._pytree import tree_map
-
-from typing import Iterator
-import logging
-import contextlib
 
 # Same logic as test_cuda.py
 if not torch.backends.mps.is_available():
