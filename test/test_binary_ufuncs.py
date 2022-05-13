@@ -3988,6 +3988,13 @@ class TestBinaryUfuncs(TestCase):
             )
             self.assertEqual(expected, actual.view(-1), rtol=0, atol=0.02)
 
+            # bfloat16
+            a_bf16 = a.bfloat16()
+            b_bf16 = b.bfloat16()
+            actual_bf16 = a_bf16.atan2(b_bf16)
+            self.assertEqual(actual_bf16, actual.bfloat16())
+            self.assertEqual(expected, actual_bf16.view(-1), exact_dtype=False, rtol=0, atol=0.02)
+
         _test_atan2_with_size((2, 2), device)
         _test_atan2_with_size((3, 3), device)
         _test_atan2_with_size((5, 5), device)
