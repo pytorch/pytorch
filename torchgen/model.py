@@ -52,6 +52,7 @@ class DispatchKey(Enum):
     Dense = auto()
     FPGA = auto()
     ORT = auto()
+    MPS = auto()
     Vulkan = auto()
     Metal = auto()
     MKLDNN = auto()
@@ -109,6 +110,7 @@ class DispatchKey(Enum):
     AutogradXLA = auto()
     AutogradLazy = auto()
     AutogradIPU = auto()
+    AutogradMPS = auto()
     AutogradXPU = auto()
     AutogradPrivateUse1 = auto()
     AutogradPrivateUse2 = auto()
@@ -139,7 +141,8 @@ class DispatchKey(Enum):
         raise AssertionError(f"unknown dispatch key {value}")
 
 
-STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
+STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU}
+UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Set of supported dispatch keys
 dispatch_keys = [
@@ -148,6 +151,7 @@ dispatch_keys = [
     DispatchKey.SparseCsrCPU,
     DispatchKey.MkldnnCPU,
     DispatchKey.CUDA,
+    DispatchKey.MPS,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -192,7 +196,7 @@ def is_structured_dispatch_key(dk: DispatchKey) -> bool:
 
 def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
     # For now, ufunc dispatch keys coincide with structured keys
-    return dk in STRUCTURED_DISPATCH_KEYS
+    return dk in UFUNC_DISPATCH_KEYS
 
 
 # This is oddly named ScalarType and not DType for symmetry with C++
@@ -293,7 +297,7 @@ class DeviceCheckType(Enum):
 
 
 ViewSchemaKind = Enum(
-    "ViewSchemaKind", ("aliasing", "inplace", "out", "mutable", "non_aliasing")
+    "ViewSchemaKind", ("aliasing", "aliasing_inplace", "non_aliasing")
 )
 
 # The basic input to the code generation is native_functions.yaml.
@@ -351,6 +355,14 @@ class NativeFunction:
     # The location in the YAML file were this native function entry was
     # defined.  This is for conveniently reporting error messages!
     loc: "Location"
+
+    # A list of operators that are expected to be auto-generated for this NativeFunction.
+    # Note: This list isn't actually directly used by the codegen to generate anything.
+    # Instead, the codegen figures out what operators to generate purely based off of
+    # function schema, and uses the autogen declarations to error check.
+    # We expect every NativeFunction that gets auto-generated be explicitly called out
+    # in native_functions.yaml
+    autogen: List["OperatorName"]
 
     # If non-empty, this kernel is subject to ufunc codegen.
     # Sorted by ufunc_key
@@ -412,7 +424,10 @@ class NativeFunction:
     # We parse both the NativeFunction + backend-specific information about it, which it stored in a corresponding BackendIndex.
     @staticmethod
     def from_yaml(
-        ei: Dict[str, object], loc: "Location", valid_tags: Set[str]
+        ei: Dict[str, object],
+        loc: "Location",
+        valid_tags: Set[str],
+        ignore_keys: Optional[Set[DispatchKey]] = None,
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
@@ -530,6 +545,8 @@ class NativeFunction:
                 assert isinstance(ks, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
+                    if ignore_keys and dispatch_key in ignore_keys:
+                        continue
                     assert dispatch_key in dispatch_keys, (
                         f"Dispatch key {dispatch_key} of kernel {v} "
                         "is not a supported dispatch key."
@@ -575,6 +592,14 @@ class NativeFunction:
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
         )
 
+        autogen_str = e.pop("autogen", "")
+        assert isinstance(autogen_str, str)
+        autogen = (
+            []
+            if autogen_str == ""
+            else [OperatorName.parse(x) for x in autogen_str.split(", ")]
+        )
+
         raw_ufunc_inner_loop = e.pop("ufunc_inner_loop", {})
         ufunc_inner_loop = {}
         if isinstance(raw_ufunc_inner_loop, str):
@@ -596,7 +621,7 @@ class NativeFunction:
         # Program the BackendIndex for the implicit dispatch entry from ufunc
         if ufunc_inner_loop:
             assert structured, "ufunc must be structured"
-            for dispatch_key in STRUCTURED_DISPATCH_KEYS:
+            for dispatch_key in UFUNC_DISPATCH_KEYS:
                 assert (
                     dispatch_key not in dispatch
                 ), f"ufunc should not have explicit dispatch entry for {dispatch_key}"
@@ -645,6 +670,7 @@ class NativeFunction:
                 structured_delegate=structured_delegate,
                 structured_inherits=structured_inherits,
                 precomputed=precomputed,
+                autogen=autogen,
                 ufunc_inner_loop=ufunc_inner_loop,
                 manual_kernel_registration=manual_kernel_registration,
                 manual_cpp_binding=manual_cpp_binding,
@@ -747,20 +773,13 @@ class NativeFunction:
 
     @property
     def view_schema_kind(self) -> ViewSchemaKind:
-        # This covers both "ordinary" inplace ops, and inplace_views
-        k = self.func.kind()
-        if k == SchemaKind.inplace:
-            return ViewSchemaKind.inplace
-        elif k == SchemaKind.out:
-            return ViewSchemaKind.out
-        elif k == SchemaKind.mutable:
-            return ViewSchemaKind.mutable
+        if self.is_view_op and self.func.name.name.inplace:
+            assert "inplace_view" in self.tags
+            return ViewSchemaKind.aliasing_inplace
+        if self.is_view_op:
+            return ViewSchemaKind.aliasing
         else:
-            return (
-                ViewSchemaKind.aliasing
-                if self.is_view_op
-                else ViewSchemaKind.non_aliasing
-            )
+            return ViewSchemaKind.non_aliasing
 
     @property
     def root_name(self) -> str:
@@ -796,42 +815,18 @@ class NativeFunctionsGroup:
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
                 )
         assert self.functional.func.kind() == SchemaKind.functional
-        assert (
-            not self.functional.is_view_op
-        ), "View operator shouldn't be grouped into NativeFunctionsGroup objects. Did you add an out= variant to a view operator?"
+        assert not self.functional.is_view_op, (
+            "View operator shouldn't be grouped into NativeFunctionsGroup objects."
+            f"This is likely because you tried to add an out= variant for '{f.func.name}', which is an existing view operator."
+            "out= variants of view operators are not valid. Please reach out to to the core team if you have questions."
+        )
         assert self.out.func.kind() == SchemaKind.out
 
         if self.inplace is not None:
             assert self.inplace.func.kind() == SchemaKind.inplace
-            mutable_inputs = [
-                a
-                for a in f.func.arguments.flat_all
-                if a.annotation is not None and a.annotation.is_write
-            ]
-            immutable_rets = [r for r in f.func.returns if r.annotation is None]
-            assert len(mutable_inputs) + len(immutable_rets) == len(
-                self.functional.func.returns
-            ), f"""\
-Found an inplace operator ({self.inplace.func}) with {len(mutable_inputs)} mutable inputs
- and {len(immutable_rets)} non-aliased return arguments
- but found a corresponding out-of-place operator ({self.functional.func}) that had an incorrect number of return arguments.
- Expected {len(mutable_inputs) + len(immutable_rets)} returns, but found {len(self.functional.func.returns)}."""
 
         if self.mutable is not None:
             assert self.mutable.func.kind() == SchemaKind.mutable
-            mutable_inputs = [
-                a
-                for a in f.func.arguments.flat_all
-                if a.annotation is not None and a.annotation.is_write
-            ]
-            immutable_rets = [r for r in f.func.returns if r.annotation is None]
-            assert len(mutable_inputs) + len(immutable_rets) == len(
-                self.functional.func.returns
-            ), f"""\
-Found a mutating operator ({self.mutable.func}) with {len(mutable_inputs)} mutable inputs
- and {len(immutable_rets)} non-aliased return arguments
- but found a corresponding out-of-place operator ({self.functional.func}) that had an incorrect number of return arguments.
- Expected {len(mutable_inputs) + len(immutable_rets)} returns, but found {len(self.functional.func.returns)}."""
 
         if self.structured:
             # For now, structured composite kernels are not supported (need some
@@ -844,6 +839,25 @@ Found a mutating operator ({self.mutable.func}) with {len(mutable_inputs)} mutab
             )
             if self.inplace is not None:
                 assert self.inplace.structured_delegate == self.out.func.name
+
+        generated_fns = [
+            str(f.func.name) for f in self.functions() if "generated" in f.tags
+        ]
+        generated_fns_str = ", ".join(str(x) for x in generated_fns)
+        expected_generated_fns = f.autogen
+        expected_generated_fns_str = ", ".join(str(x) for x in expected_generated_fns)
+        if len(expected_generated_fns) == 0 and len(generated_fns) > 0:
+            raise RuntimeError(
+                f"The codegen expects to be able to generate '{generated_fns_str}'."
+                " In order to generate them however, we expect them to be called out explicitly in the yaml."
+                f" Please add an 'autogen: {generated_fns_str}' line to the entry for {str(f.func.name)}"
+            )
+        if expected_generated_fns_str != generated_fns_str:
+            raise RuntimeError(
+                f"The codegen expects to be able to generate '{generated_fns_str}'."
+                f" To do so, it expects a line: 'autogen: {generated_fns_str}'."
+                f" Instead, it found 'autogen: {generated_fns_str}'"
+            )
 
     def signature(self) -> "FunctionSchema":
         return self.out.func.signature()
@@ -950,6 +964,7 @@ Found a mutating operator ({self.mutable.func}) with {len(mutable_inputs)} mutab
                 structured_delegate=None,
                 structured_inherits=None,
                 precomputed=None,
+                autogen=[],
                 ufunc_inner_loop={},
                 manual_kernel_registration=False,
                 manual_cpp_binding=False,
@@ -1164,32 +1179,23 @@ class FunctionSchema:
         assert str(r) == func, f"{str(r)} != {func}"
         return r
 
+    def returns_are_aliased(self) -> bool:
+        # We assert earlier that schemas can't have a mix of aliased and non-aliased returns
+        return any(
+            r
+            for r in self.returns
+            if r.annotation is not None and r.annotation.is_write
+        )
+
     def __post_init__(self) -> None:
         for arg, ret in zip(self.arguments.out, self.returns):
             assert arg.annotation == ret.annotation, (
                 "Out arguments must have matching return Tensor; furthermore, "
                 "the ith-argument needs to correspond to the ith return"
             )
-        mutable_pre_self_positionals = [
-            a
-            for a in self.arguments.pre_self_positional
-            if a.annotation is not None and a.annotation.is_write
-        ]
-        mutable_post_self_positionals = [
-            a
-            for a in self.arguments.post_self_positional
-            if a.annotation is not None and a.annotation.is_write
-        ]
-        # Mutable pre_self_positional will complicate the SchemaKind.mutable logic a bit,
-        # and there doesn't seem like a very compelling case for allowing them.
-        # If we want to add them later, we just need to teach `SchemaKind.mutable` code
-        # to handle them properly.
-        assert (
-            len(mutable_pre_self_positionals) == 0
-        ), "mutable pre_self_positional arguments are not currently supported in the schema"
-        # And we also enforce that if you have any mutable, post-self positional args, then they are not returned.
+        # We also enforce that if you have any mutable, positional args, then they are not returned.
         # This makes it easier to group these functions properly with their functional/out= counterparts.
-        for a in mutable_post_self_positionals:
+        for a in self.arguments.post_self_positional_mutable:
             assert not any(
                 a.annotation == r.annotation for r in self.returns
             ), f"If you have a schema with mutable positional args, we expect them to not be returned. schema: {str(self)}"
@@ -1205,7 +1211,11 @@ class FunctionSchema:
             for ret in self.returns
             if ret.annotation is not None and ret.annotation.is_write
         ]
-        immutable_returns = [ret for ret in self.returns if ret.annotation is None]
+        immutable_returns = [
+            ret
+            for ret in self.returns
+            if ret.annotation is None or not ret.annotation.is_write
+        ]
         # Some assertions: We don't want any functions with a return type of "-> (Tensor(a!), Tensor)",
         # because:
         # (1) It's more annoying to handle properly
@@ -1253,6 +1263,19 @@ class FunctionSchema:
                 # You can't method chain on non-tensor self arguments though (like a List[Tensor])
                 # so in all other cases we expect the return type to be none.
                 assert len(self.returns) == 0
+
+        if self.arguments.tensor_options is not None:
+            assert self.kind() == SchemaKind.functional, (
+                "Found an operator that is not functional, but has tensor options arguments."
+                "This is not allowed- tensor options arguments are only allowed for factory functions."
+                f"schema: {str(self)}"
+            )
+        if "functional" in str(self.name.overload_name):
+            assert self.kind() == SchemaKind.functional, (
+                "Found an operator that is not functional, but its overload contains the string 'functional'."
+                "This is a special keyword in the codegen, please use a different overload name."
+                f"schema: {str(self)}"
+            )
 
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
@@ -1327,8 +1350,13 @@ class FunctionSchema:
             ]
             if len(aliased_args) == 0:
                 outs.append(None)
-            else:
+            elif len(aliased_args) == 1:
                 outs.append(aliased_args[0].name)
+            else:
+                aliased_names = ", ".join(a.name for a in aliased_args)
+                raise AssertionError(
+                    f"Found a return ({r.name})that aliases multiple inputs ({aliased_names})"
+                )
         return outs
 
     def signature(
@@ -1355,7 +1383,7 @@ class FunctionSchema:
           because you cannot overload on mutability annotation)
         - Return names are stripped since they are not overloadable and
           some variants have return names but some not
-        - TensorOptions are are dropped
+        - TensorOptions are dropped
           because out= variants of factory functions don't include them
           (and we want to be able to pair up factory functions with their out variants)
 
@@ -1466,7 +1494,7 @@ class FunctionSchema:
         #
         # Note that:
         # (1) This also means that we can *only* generate an out= variant from a mutable schema
-        #     if the mutable schema has any tensor-like non-aliasing returns.
+        #     if the mutable schema has at least one tensor-like non-aliasing return.
         # (2) The generated out= variant still has mutable positional arguments,
         #     but if necessary we could probably add another out= variant that also
         #     functionalizes the mutable arguments (a functional_out variant)
@@ -1919,6 +1947,10 @@ class Arguments:
         ret.extend(self.post_self_positional)
         return ret
 
+    @property
+    def post_self_positional_mutable(self) -> Sequence[Argument]:
+        return [a for a in self.post_self_positional if a.is_write]
+
     # NB: doesn't contain out arguments
     @property
     def flat_kwarg_only(self) -> Sequence[Argument]:
@@ -2177,6 +2209,17 @@ class Arguments:
             assert not self.pre_self_positional
         if self.tensor_options is None:
             assert not self.post_tensor_options_kwarg_only
+
+        # We don't allow any of the following to have argument annotations,
+        # to keep things simple.
+        mutable_pre_self_positionals = [
+            a
+            for a in self.pre_self_positional
+            if a.annotation is not None and a.annotation.is_write
+        ]
+        assert (
+            len(mutable_pre_self_positionals) == 0
+        ), "mutable pre_self_positional arguments are not currently supported in the schema"
 
 
 # Names that validly are __iXXX__ indicating inplace operations.

@@ -282,6 +282,7 @@ def run_gen_lazy_tensor(
     tuple_aten_from_ltc_tensors: str = "torch::lazy::TupleAtenFromLtcTensors",
     lazy_value_class: str = "torch::lazy::Value",
     lazy_tensor_ptr: str = "LazyTensorPtr",
+    get_device_fn: str = "torch::lazy::GetBackendDevice",
 ) -> None:
     lv_tokens = lazy_value_class.split("::")
     lv_class = lv_tokens[-1]
@@ -335,10 +336,11 @@ def run_gen_lazy_tensor(
         """
 
         for x in xs:
-            f = x.functional if isinstance(x, NativeFunctionsGroup) else x
-            if f.func.name in full_codegen:
-                for r in func(f):
-                    yield r
+            fs = list(x.functions()) if isinstance(x, NativeFunctionsGroup) else [x]
+            for f in fs:
+                if f.func.name in full_codegen:
+                    for r in func(f):
+                        yield r
 
     selector = SelectiveBuilder.get_nop_selector()
 
@@ -466,6 +468,7 @@ def run_gen_lazy_tensor(
                         create_aten_from_ltc_tensor,
                         tuple_aten_from_ltc_tensors,
                         lazy_tensor_ptr,
+                        get_device_fn,
                     ),
                     grouped_native_functions,
                 )
