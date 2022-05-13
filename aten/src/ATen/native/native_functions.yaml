@@ -1516,10 +1516,6 @@
   dispatch:
     MPS: mps_convolution_transpose
 
-- func: mps_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
-
-- func: mps_convolution_transpose_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
-
 - func: mps_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool[2] output_mask) -> (Tensor, Tensor)
   dispatch:
     MPS: mps_convolution_transpose_backward
@@ -3107,11 +3103,11 @@
 # https://github.com/pytorch/pytorch/issues/77394
 - func: mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    CompositeExplicitAutograd: mps_max_pool2d
+    MPS: mps_max_pool2d
 
 - func: mps_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    CompositeExplicitAutograd: mps_max_pool2d_backward
+    MPS: mps_max_pool2d_backward
 
 - func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
@@ -3256,11 +3252,7 @@
 # https://github.com/pytorch/pytorch/issues/77394
 - func: mps_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   dispatch:
-    CompositeExplicitAutograd: mps_convolution
-
-- func: mps_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor
-
-- func: mps_convolution_backward_weights(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor
+    MPS: mps_convolution
 
 - func: mps_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:

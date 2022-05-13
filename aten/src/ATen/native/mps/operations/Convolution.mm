@@ -433,10 +433,10 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> mps_convolution_backward(
     }
   } else {
     if (output_mask[0]) {
-      grad_input = at::mps_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, output_mask[2]);
+      grad_input = mps_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, output_mask[2]);
     }
     if (output_mask[1]) {
-      grad_weight = at::mps_convolution_backward_weights(weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2]);
+      grad_weight = mps_convolution_backward_weights(weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2]);
     }
   }
 
@@ -494,10 +494,10 @@ std::tuple<Tensor,Tensor> mps_convolution_transpose_backward(
 
   Tensor grad_input, grad_weight;
   if (output_mask[0]) {
-    grad_input = at::mps_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups);
+    grad_input = mps_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups);
   }
   if (output_mask[1]) {
-    grad_weight = at::mps_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups);
+    grad_weight = mps_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups);
   }
 
   return std::tuple<Tensor,Tensor>{grad_input, grad_weight};
