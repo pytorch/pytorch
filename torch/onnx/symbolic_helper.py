@@ -7,11 +7,12 @@ from typing import Set
 
 import torch
 import torch.onnx
+from torch._C import OptionalType
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
-import torch.onnx.utils
-from torch._C import OptionalType
+from torch.onnx import _patch_torch  # noqa: F401
+from torch.onnx._globals import GLOBALS
 
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
@@ -165,24 +166,27 @@ def parse_args(*arg_descriptors):
     """A decorator which converts args from torch._C.Value to built-in types.
 
     For example:
+
+    ```
     @parse_args('v', 'i', 'fs')
     foo(g, a, b, c):
-      assert isinstance(a, torch._C.Value)
-      assert isinstance(b, int)
-      assert isinstance(c, list)
-      assert isinstance(c[0], float)
+        assert isinstance(a, torch._C.Value)
+        assert isinstance(b, int)
+        assert isinstance(c, list)
+        assert isinstance(c[0], float)
+    ```
 
     Args:
-      arg_descriptors: list of str, where each element is
-        a string that specifies the type to convert to. Valid descriptors:
-        "v": no conversion, keep torch._C.Value.
-        "i": int
-        "is": list(int)
-        "f": float
-        "fs": list of float
-        "b": bool
-        "s": str
-        "t": torch.Tensor
+        arg_descriptors: list of str, where each element is
+            a string that specifies the type to convert to. Valid descriptors:
+            "v": no conversion, keep torch._C.Value.
+            "i": int
+            "is": list of int
+            "f": float
+            "fs": list of float
+            "b": bool
+            "s": str
+            "t": torch.Tensor
     """
 
     def decorator(fn):
@@ -313,7 +317,7 @@ def _scalar(x):
     return x.item()
 
 
-def _if_scalar_type_as(g, self, tensor):
+def _if_scalar_type_as(g: torch._C.Graph, self, tensor):
     """
     Convert self into the same type of tensor, as necessary.
 
@@ -376,7 +380,8 @@ def _is_scalar_list(x):
 
 def is_caffe2_aten_fallback():
     return (
-        _operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+        GLOBALS.operator_export_type
+        == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
         and torch.onnx._CAFFE2_ATEN_FALLBACK
     )
 
@@ -426,7 +431,7 @@ def _unimplemented(op, msg):
         warnings.warn(
             "ONNX export failed on " + op + " because " + msg + " not supported"
         )
-    elif _operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+    elif GLOBALS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}")
 
 
@@ -462,7 +467,7 @@ def _block_list_in_opset(name):
         raise RuntimeError(
             "ONNX export failed on {}, which is not implemented for opset {}. "
             "Try exporting with other opset versions.".format(
-                name, _export_onnx_opset_version
+                name, GLOBALS.export_onnx_opset_version
             )
         )
 
@@ -498,7 +503,7 @@ def _select_helper(g, self, dim, index, apply_reshape=True):
 
 
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
-    if _export_onnx_opset_version <= 9:
+    if GLOBALS.export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import _slice as _slice9
 
         return _slice9(g, input, axes, starts, ends)
@@ -554,7 +559,7 @@ def _sort_helper(g, input, dim, decending=True, out=None):
         shape_,
         g.op("Constant", value_t=torch.tensor([dim], dtype=torch.int64)),
     )
-    if _export_onnx_opset_version <= 10:
+    if GLOBALS.export_onnx_opset_version <= 10:
         if not decending:
             _unimplemented("Sort", "Ascending is not supported")
         return g.op("TopK", input, dim_size_, axis_i=dim, outputs=2)
@@ -573,7 +578,7 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
         k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
         if _try_get_scalar_type(k) != "Long":
             k = g.op("Cast", k, to_i=torch.onnx.TensorProtoDataType.INT64)
-    if _export_onnx_opset_version <= 10:
+    if GLOBALS.export_onnx_opset_version <= 10:
         if not largest:
             _unimplemented("TopK", "Ascending is not supported")
         return g.op("TopK", input, k, axis_i=dim, outputs=2)
@@ -584,7 +589,7 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
 
 
 def _lt_helper(g, input, other):
-    if _export_onnx_opset_version <= 8:
+    if GLOBALS.export_onnx_opset_version <= 8:
         from torch.onnx.symbolic_opset8 import lt as _lt8
 
         return _lt8(g, input, other)
@@ -595,12 +600,14 @@ def _lt_helper(g, input, other):
 
 
 def _interpolate_warning(interpolate_mode):
-    onnx_op = "onnx:Resize" if _export_onnx_opset_version >= 10 else "onnx:Upsample"
+    onnx_op = (
+        "onnx:Resize" if GLOBALS.export_onnx_opset_version >= 10 else "onnx:Upsample"
+    )
     warnings.warn(
         "You are trying to export the model with "
         + onnx_op
         + " for ONNX opset version "
-        "" + str(_export_onnx_opset_version) + ". "
+        "" + str(GLOBALS.export_onnx_opset_version) + ". "
         "This operator might cause results to not match the expected results by PyTorch.\n"
         "ONNX's Upsample/Resize operator did not match Pytorch's Interpolation until opset 11. "
         "Attributes to determine how to transform the input were added in onnx:Resize in opset 11 "
@@ -611,12 +618,12 @@ def _interpolate_warning(interpolate_mode):
 
 def _unsqueeze_helper(g, input, axes_i):
     if _is_constant(axes_i[0]):
-        if _export_onnx_opset_version >= 13:
+        if GLOBALS.export_onnx_opset_version >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Unsqueeze", input, axes)
         return g.op("Unsqueeze", input, axes_i=axes_i)
     # Tensor type
-    if _export_onnx_opset_version < 13:
+    if GLOBALS.export_onnx_opset_version < 13:
         raise ValueError(
             f"Opset version must be >= 13 for Unsqueeze with dynamic axes. {input.node().sourceRange()}"
         )
@@ -625,12 +632,12 @@ def _unsqueeze_helper(g, input, axes_i):
 
 def _squeeze_helper(g, input, axes_i):
     if _is_constant(axes_i[0]):
-        if _export_onnx_opset_version >= 13:
+        if GLOBALS.export_onnx_opset_version >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Squeeze", input, axes)
         return g.op("Squeeze", input, axes_i=axes_i)
     # Tensor type
-    if _export_onnx_opset_version < 13:
+    if GLOBALS.export_onnx_opset_version < 13:
         raise ValueError(
             f"Opset version must be >= 13 for Squeeze with dynamic axes. {input.node().sourceRange()}"
         )
@@ -649,7 +656,7 @@ def _squeeze_helper(g, input, axes_i):
 
 def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_i=0):
     keepdims_i = _maybe_get_const(keepdims_i, "i")
-    if _export_onnx_opset_version >= 13:
+    if GLOBALS.export_onnx_opset_version >= 13:
         if axes_i:
             if not _is_value(axes_i):
                 axes_i = g.op(
@@ -793,7 +800,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
             output_size = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx["Long"])
             output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
 
-            if _export_onnx_opset_version >= 13:
+            if GLOBALS.export_onnx_opset_version >= 13:
                 empty_roi = _optional_input_placeholder_tensor(g)
                 empty_scales = _optional_input_placeholder_tensor(g)
             else:
@@ -816,7 +823,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
                 nearest_mode_s="floor",
             )  # only valid when mode="nearest"
         else:
-            if _export_onnx_opset_version >= 13:
+            if GLOBALS.export_onnx_opset_version >= 13:
                 empty_roi = _optional_input_placeholder_tensor(g)
             else:
                 empty_roi = g.op(
@@ -887,7 +894,7 @@ def __interpolate_helper(
         size = g.op("Cast", size, to_i=cast_pytorch_to_onnx["Long"])
         size = g.op("Concat", input_size, size, axis_i=0)
 
-        if _export_onnx_opset_version >= 13:
+        if GLOBALS.export_onnx_opset_version >= 13:
             empty_roi = _optional_input_placeholder_tensor(g)
             empty_scales = _optional_input_placeholder_tensor(g)
         else:
@@ -912,7 +919,7 @@ def __interpolate_helper(
         if rank is None:
             return _unimplemented("interpolate (with scales)", "missing input shape")
 
-        if _export_onnx_opset_version >= 13:
+        if GLOBALS.export_onnx_opset_version >= 13:
             empty_roi = _optional_input_placeholder_tensor(g)
         else:
             empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
@@ -931,9 +938,9 @@ def __interpolate_helper(
 
 
 def _unbind_helper(g, self, dim, _outputs):
-    if _export_onnx_opset_version < 11:
+    if GLOBALS.export_onnx_opset_version < 11:
         from torch.onnx.symbolic_opset9 import unbind
-    elif _export_onnx_opset_version <= 12:
+    elif GLOBALS.export_onnx_opset_version <= 12:
         from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
     else:
         from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
@@ -941,7 +948,7 @@ def _unbind_helper(g, self, dim, _outputs):
 
 
 def _scatter_helper(g, self, dim, index, src):
-    if _export_onnx_opset_version <= 10:
+    if GLOBALS.export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
@@ -950,7 +957,7 @@ def _scatter_helper(g, self, dim, index, src):
 
 
 def _repeat_interleave_split_helper(g, self, reps, dim):
-    if _export_onnx_opset_version <= 12:
+    if GLOBALS.export_onnx_opset_version <= 12:
         split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
         from torch.onnx.symbolic_opset13 import split
@@ -989,7 +996,7 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
 
 
 def _arange_helper(g, *args):
-    if _export_onnx_opset_version <= 10:
+    if GLOBALS.export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import arange
     else:
         from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
@@ -1011,7 +1018,7 @@ def _index_fill_reshape_helper(g, self, dim, index):
 
     from torch.onnx.symbolic_opset9 import expand
 
-    if _export_onnx_opset_version <= 10:
+    if GLOBALS.export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
@@ -1040,10 +1047,10 @@ def _reshape_helper(g, input, shape, allowzero=0):
     shape = _maybe_get_const(shape, "is")
     if not _is_value(shape):
         shape = g.op("Constant", value_t=torch.LongTensor(shape))
-    if _export_onnx_opset_version <= 13:
+    if GLOBALS.export_onnx_opset_version <= 13:
         if allowzero == 1:
             raise _onnx_opset_unsupported(
-                "Reshape with allowzero=1", _export_onnx_opset_version, 14
+                "Reshape with allowzero=1", GLOBALS.export_onnx_opset_version, 14
             )
         return g.op("Reshape", input, shape)
     else:
@@ -1111,12 +1118,11 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
 
 
 def check_training_mode(op_train_mode, op_name):
-    global _training_mode
     op_train_mode = True if op_train_mode == 1 else False
-    if _training_mode is not None and op_train_mode != _training_mode:
+    if GLOBALS.training_mode is not None and op_train_mode != GLOBALS.training_mode:
         op_mode = "training " if op_train_mode else "inference"
-        training_mode = "training " if _training_mode else "inference"
-        # setting the model mode could result in op_mode != _training_mode
+        training_mode = "training " if GLOBALS.training_mode else "inference"
+        # setting the model mode could result in op_mode != _flags.training_mode
         # if the model is a FuncModule. In this case we warn the user of
         # the state and export depending on op_mode
         # This is to support use-cases of fixing certain layer weights
@@ -1207,10 +1213,10 @@ def dequantize_helper(g, qtensor, qdtype=None):
     scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
     zero_point = g.op("Cast", zero_point, to_i=qdtype)
 
-    if axis_i is not None and _export_onnx_opset_version < 13:
+    if axis_i is not None and GLOBALS.export_onnx_opset_version < 13:
         _onnx_opset_unsupported_detailed(
             "DequantizeLinear",
-            _export_onnx_opset_version,
+            GLOBALS.export_onnx_opset_version,
             13,
             "Attribute axis is not supported.",
         )
@@ -1232,12 +1238,16 @@ def quantize_helper(g, tensor, scale, zero_point, axis=None):
         scale: torch._C.Value, quantized scale.
         zero_point: torch._C.Value, quantized zero point.
         axis: Optional[torch._C.Value] default None, if None, represents per tensor quantization.
-          Otherwise, represents per channel quantization, along given axis.
+            Otherwise, represents per channel quantization, along given axis.
     """
-    if axis is not None and not _is_none(axis) and _export_onnx_opset_version < 13:
+    if (
+        axis is not None
+        and not _is_none(axis)
+        and GLOBALS.export_onnx_opset_version < 13
+    ):
         _onnx_opset_unsupported_detailed(
             "QuantizeLinear",
-            _export_onnx_opset_version,
+            GLOBALS.export_onnx_opset_version,
             13,
             "Attribute axis is not supported.",
         )
@@ -1289,43 +1299,23 @@ def args_have_same_dtype(args):
     return has_same_dtype
 
 
-_default_onnx_opset_version = 13
-_onnx_main_opset = 16
-_onnx_stable_opsets = list(range(7, _onnx_main_opset))
-_export_onnx_opset_version = _default_onnx_opset_version
-_constant_folding_opset_versions = list(range(9, _onnx_main_opset + 1))
-
-
-def _set_opset_version(opset_version):
-    global _export_onnx_opset_version
-    if opset_version in _onnx_stable_opsets + [_onnx_main_opset]:
-        _export_onnx_opset_version = opset_version
-        return
-    raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
-
-
-_operator_export_type = None
+# TODO(justinchuby): Delete these setters, users should set the vars directly.
+def _set_opset_version(opset_version: int):
+    GLOBALS.export_onnx_opset_version = opset_version
 
 
 def _set_operator_export_type(operator_export_type):
-    global _operator_export_type
-    _operator_export_type = operator_export_type
-
-
-_training_mode = None
+    GLOBALS.operator_export_type = operator_export_type
 
 
 def _set_training_mode(training_mode):
-    global _training_mode
-    _training_mode = training_mode
+    GLOBALS.training_mode = training_mode
 
 
-_onnx_shape_inference = False
 # This function is for debug use only.
-# onnx_shape_inference = True by default.
-def _set_onnx_shape_inference(onnx_shape_inference):
-    global _onnx_shape_inference
-    _onnx_shape_inference = onnx_shape_inference
+# onnx_shape_inference = False by default.
+def _set_onnx_shape_inference(onnx_shape_inference: bool):
+    GLOBALS.onnx_shape_inference = onnx_shape_inference
 
 
 # Metaprogram symbolics for each ATen native specialized cast operator.

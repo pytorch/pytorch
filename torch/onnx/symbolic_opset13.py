@@ -4,6 +4,7 @@
 # This file exports ONNX ops for opset 13
 import torch
 import torch.onnx.symbolic_helper as sym_help
+import torch.onnx.utils
 from torch.onnx.symbolic_helper import _unimplemented, parse_args
 from torch.onnx.symbolic_opset9 import (
     _maybe_cast_reduce_op_input,
@@ -19,11 +20,6 @@ from torch.onnx.symbolic_opset9 import (
     zeros,
 )
 from torch.onnx.symbolic_opset11 import unsqueeze
-from torch.onnx.utils import (
-    _add_block,
-    _add_input_to_block,
-    _add_output_to_block,
-)
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -391,10 +387,10 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     loop = g.op("Loop", loop_len, loop_condition, final_splits)
 
     # Loop inputs
-    loop_block = _add_block(loop.node())
-    block_input_iter = _add_input_to_block(loop_block)
-    cond = _add_input_to_block(loop_block)
-    final_splits = _add_input_to_block(loop_block)
+    loop_block = torch.onnx.utils._add_block(loop.node())
+    block_input_iter = torch.onnx.utils._add_input_to_block(loop_block)
+    cond = torch.onnx.utils._add_input_to_block(loop_block)
+    final_splits = torch.onnx.utils._add_input_to_block(loop_block)
 
     r_split = loop_block.op("SequenceAt", r_splits, block_input_iter)
     i_split = loop_block.op("SequenceAt", i_splits, block_input_iter)
@@ -414,8 +410,8 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
 
     # Loop outputs
     cond_out = loop_block.op("Cast", loop_condition, to_i=9)
-    _add_output_to_block(loop_block, cond_out)
-    _add_output_to_block(loop_block, final_splits)
+    torch.onnx.utils._add_output_to_block(loop_block, cond_out)
+    torch.onnx.utils._add_output_to_block(loop_block, final_splits)
 
     loop_out = loop.node().output()
     loop_out = g.op("ConcatFromSequence", loop_out, axis_i=dim)
@@ -518,7 +514,7 @@ def diagonal(g, self, offset, dim1, dim2):
     if_op = g.op("If", overrun_cond)
     if_node = if_op.node()
 
-    if_block = _add_block(if_node)
+    if_block = torch.onnx.utils._add_block(if_node)
     gather_indices_if_block = if_block.op("Add", gather_indices, select_window)
     gather_indices_if_block = sym_help._unsqueeze_helper(
         if_block, gather_indices_if_block, [rank - 1]
@@ -526,11 +522,11 @@ def diagonal(g, self, offset, dim1, dim2):
     final_non_overrun_ = if_block.op(
         "GatherND", result, gather_indices_if_block, batch_dims_i=rank - 2
     )
-    _add_output_to_block(if_block, final_non_overrun_)
+    torch.onnx.utils._add_output_to_block(if_block, final_non_overrun_)
 
-    else_block = _add_block(if_node)
+    else_block = torch.onnx.utils._add_block(if_node)
     final_overrun_ = zeros(else_block, gather_shape, 6, None, None)
-    _add_output_to_block(else_block, final_overrun_)
+    torch.onnx.utils._add_output_to_block(else_block, final_overrun_)
     return if_op
 
 

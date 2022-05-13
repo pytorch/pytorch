@@ -1,17 +1,17 @@
-# -*- coding: utf-8 -*-
-
-from sys import maxsize
+import sys
+import warnings
 
 import torch
 import torch.onnx
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9
+from torch.nn.modules.utils import _pair, _single, _triple
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
-import torch.onnx.utils
-from torch.nn.modules.utils import _pair, _single, _triple
-from torch.onnx.symbolic_helper import _unimplemented, parse_args, quantized_args
+from torch.onnx import _patch_torch  # noqa: F401
+from torch.onnx._globals import GLOBALS
+from torch.onnx.symbolic_helper import parse_args, quantized_args
 from torch.onnx.symbolic_opset9 import (
     add,
     conv2d,
@@ -202,7 +202,7 @@ def _interpolate(name, dim, interpolate_mode):
         sym_help._interpolate_warning(interpolate_mode)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
-            return _unimplemented(name, "align_corners == True")
+            return sym_help._unimplemented(name, "align_corners == True")
         if scales is None:
             scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
         return g.op("Resize", input, scales, mode_s=interpolate_mode)
@@ -328,13 +328,12 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and sym_help._training_mode:
+    if scale_grad_by_freq and GLOBALS.training_mode:
         return sym_help._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )
     if padding_idx is not None and padding_idx >= 0:
         raise RuntimeError("embedding_bag with padding_idx")
-    import warnings
 
     from torch.onnx.symbolic_opset9 import select
 
@@ -351,7 +350,7 @@ def embedding_bag(
             offset_len = offsets_dim_0
             offsets_extended = [
                 offsets,
-                g.op("Constant", value_t=torch.tensor([maxsize])),
+                g.op("Constant", value_t=torch.tensor([sys.maxsize])),
             ]
             offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
         list_ = []
