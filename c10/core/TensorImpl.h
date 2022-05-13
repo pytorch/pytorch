@@ -637,6 +637,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(
             sizes_strides_policy_ >=
             static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+      if (is_python_dispatch()) {
+        impl::PyInterpreter* interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+        if (interpreter) {
+          return interpreter->is_contiguous(this);
+        }
+        TORCH_CHECK(
+            false,
+            "cannot access PyObject for Tensor on interpreter ",
+            pyobj_interpreter_.load()->name());
+      }
       return is_contiguous_custom(memory_format);
     }
     return is_contiguous_default(memory_format);
@@ -2214,6 +2224,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   Storage storage_;
+
+ public:
+  void set_custom_strides_policy() {
+    set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  }
 
  private:
   // This pointer points to an AutogradMeta struct that stores autograd-specific

@@ -126,21 +126,25 @@ struct C10_API PyInterpreter {
       torch::jit::Stack* stack,
       // This is a Tensor subclass type object
       const std::shared_ptr<SafePyObject>& type);
+  using is_contiguous_sig = bool(const PyInterpreter*, const TensorImpl*);
 
   PyInterpreter(
       name_sig* name_fn,
       decref_sig* decref_fn,
       detach_sig* detach,
-      dispatch_sig* dispatch)
+      dispatch_sig* dispatch,
+      is_contiguous_sig* is_contiguous)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
         detach_fn_(detach),
-        dispatch_fn_(dispatch) {}
+        dispatch_fn_(dispatch),
+        is_contiguous_fn_(is_contiguous) {}
 
   name_sig* name_fn_;
   decref_sig* decref_fn_;
   detach_sig* detach_fn_;
   dispatch_sig* dispatch_fn_;
+  is_contiguous_sig* is_contiguous_fn_;
 
   // UBSAN suppression fixes: "call to function
   // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
@@ -173,6 +177,11 @@ struct C10_API PyInterpreter {
       torch::jit::Stack* stack,
       const std::shared_ptr<SafePyObject>& type) const {
     return (*dispatch_fn_)(this, op, stack, type);
+  }
+
+  __ubsan_ignore_function__ bool is_contiguous(
+      const TensorImpl* self) const {
+    return (*is_contiguous_fn_)(this, self);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.

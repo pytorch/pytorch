@@ -1145,6 +1145,52 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
         #    - More steps....
         y.exp()
 
+    def test_is_contiguous_slow_path(self):
+        data = torch.randn(3, 3)
+        contiguous_data = data.clone()
+        not_contiguous_data = torch.as_strided(data.clone(), (2, 2), (1, 2))
+
+        class ExampleTensor1(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data):
+                return torch.Tensor._make_subclass(cls, data, True, True)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                return NotImplemented
+
+        class ExampleTensor2(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data):
+                return torch.Tensor._make_subclass(cls, data, True, True)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func.overloadpacket == torch.ops.aten.is_contiguous:
+                    return contiguous_data.is_contiguous()
+                return NotImplemented
+
+        class ExampleTensor3(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data):
+                return torch.Tensor._make_subclass(cls, data, True, True)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func.overloadpacket == torch.ops.aten.is_contiguous:
+                    return not_contiguous_data.is_contiguous()
+                return NotImplemented
+
+        err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
+        with self.assertRaisesRegex(TypeError, err_msg):
+            e = ExampleTensor1(torch.randn(3, 3))
+            e.is_contiguous()
+
+        e = ExampleTensor2(torch.randn(3, 3))
+        self.assertEqual(e.is_contiguous(), True)
+
+        e = ExampleTensor3(torch.randn(3, 3))
+        self.assertEqual(e.is_contiguous(), False)
 
 
 if __name__ == '__main__':
