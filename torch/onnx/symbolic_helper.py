@@ -240,14 +240,23 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
     """A decorator which extends support for quantized version of the base operator.
     Quantization is detected by examining the arguments that are annotated by
     `arg_q_descriptors`.
+
     If quantization is detected, the base operator symbolic function will be wrapped with
     argument dequantization and output quantization.
+
     Otherwise, only base symbolic function will be invoked.
+
     For example:
+
+    ```
     @quantized_args(True, False)
     def foo(g, x, y):
         return x + y
+    ```
+
     is equivalent to
+
+    ```
     def q_foo(g, x, y):
         if is_quantized_tensor(x):
             x = dequantize(x)
@@ -255,6 +264,8 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
             return quantize(out)
         else:
             return foo(g, x, y)
+    ```
+
     Args:
         arg_q_descriptors: list of bool, where each element represents if the
           argument is QTensor for quantized version of this operator.
@@ -1194,6 +1205,7 @@ def _handle_reduce_dim_none(g, self, op_name):
 
 def dequantize_helper(g, qtensor, qdtype=None):
     """Appends to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
+
     Args:
         g: Graph, the ONNX IR graph that is under construction.
         qtensor: torch._C.Value, either a tuple of (quantized_tensor, scale, zero_point) for per tensor quantization,
@@ -1234,6 +1246,7 @@ def dequantize_helper(g, qtensor, qdtype=None):
 
 def quantize_helper(g, tensor, scale, zero_point, axis=None):
     """Appends to graph `g` ONNX nodes that quantizes `tensor` based on `scale`, `zero_point` and `axis`.
+
     Args:
         g: Graph, the ONNX IR graph that is under construction.
         tensor: torch._C.Value, representing the tensor to be quantized.
