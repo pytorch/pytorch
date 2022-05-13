@@ -12,7 +12,7 @@ full_codegen:
   - addcdiv
   - addcmul
   - addmm
-  - arange.start_step
+  - arange.start_out
   - all
   - any
   - avg_pool2d
@@ -52,6 +52,7 @@ full_codegen:
   - gelu_backward
   - glu
   - glu_backward
+  - glu_jvp
   - grid_sampler_2d
   - grid_sampler_2d_backward
   - gt.Scalar

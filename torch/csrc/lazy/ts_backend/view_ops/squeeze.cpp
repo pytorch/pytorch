@@ -7,7 +7,7 @@ namespace torch {
 namespace lazy {
 
 Squeeze::Squeeze(const torch::lazy::Value& input, int dim)
-    : torch::lazy::TsNode(torch::lazy::OpKind(at::aten::squeeze), {input},
+    : torch::lazy::TsNode(ClassOpKind(), {input},
                           /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   addComputedShape(
