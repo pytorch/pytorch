@@ -39,7 +39,7 @@ def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIN
                 return x
 
         def decrease_prec(x):
-            if isinstance(x, Tensor):
+            if isinstance(x, Tensor) and x.dtype == computation_dtype:
                 return x.to(result_dtype)
             else:
                 return x
