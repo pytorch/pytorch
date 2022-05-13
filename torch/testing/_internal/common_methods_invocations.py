@@ -15936,6 +15936,7 @@ op_db: List[OpInfo] = [
     OpInfo('unfold',
            op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           backward_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18465,6 +18466,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                         'test_python_reference_consistency', dtypes=(torch.chalf,), device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon',
+                         'test_python_reference_meta_functions', dtypes=(torch.chalf,), device_type='cuda'),
+        ),
     ),
     PythonRefInfo(
         "_refs.stack",
