@@ -3595,8 +3595,14 @@
   variants: function, method
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
+  dispatch:
+    CPU: pixel_shuffle_cpu
+    CompositeExplicitAutograd: math_pixel_shuffle
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
+  dispatch:
+    CPU: pixel_unshuffle_cpu
+    CompositeExplicitAutograd: math_pixel_unshuffle
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:

@@ -9419,6 +9419,28 @@ class TestNN(NNTestCase):
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
+    def test_pixel_shuffle_nhwc_cpu(self):
+        input = torch.randn(3, 18, 4, 4, device='cpu')
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randn(3, 18, 4, 4, device='cpu')
+        ps = torch.nn.PixelShuffle(3)
+        pus = torch.nn.PixelUnshuffle(3)
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_ps = torch.nn.PixelShuffle(3)
+        ref_pus = torch.nn.PixelUnshuffle(3)
+
+        out = pus(ps(input))
+        out.backward(grad)
+        ref_out = ref_pus(ref_ps(ref_input))
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
+
     # These tests should be OpInfo'd
     def test_elu_inplace_on_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
