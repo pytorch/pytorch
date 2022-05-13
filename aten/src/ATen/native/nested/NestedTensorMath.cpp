@@ -336,7 +336,9 @@ Tensor nested_from_padded_generic(
 Tensor NestedTensor_to_padded_tensor_generic(
     const Tensor& t,
     double padding,
-    OptionalIntArrayRef output_size) {
+    OptionalIntArrayRef output_size,
+    c10::optional<Layout> output_layout) {
+  TORCH_CHECK(!output_layout, "output_layout is currently not supported.");
   // TODO: skipped optimization for case of all 1x1 tensors
   auto& nt = *get_nested_tensor_impl(t);
   auto max_size = NestedTensor_get_max_size(nt);

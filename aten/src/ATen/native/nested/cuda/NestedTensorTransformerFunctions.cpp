@@ -129,11 +129,12 @@ Tensor batch_offsets_from_efficient_size(const Tensor& ef_sizes) {
 Tensor NestedTensor_to_padded_tensor_cuda(
     const Tensor& t,
     double padding,
-    OptionalIntArrayRef output_size) {
+    OptionalIntArrayRef output_size,
+    c10::optional<Layout> output_layout) {
   int64_t t_dim = t.dim();
   if (t_dim >= 2 && t_dim <= 4 &&
       (t.dtype() == at::kFloat || t.dtype() == at::kDouble ||
-       t.dtype() == at::kHalf)) {
+       t.dtype() == at::kHalf) && !output_layout) {
     auto* nt_input = get_nested_tensor_impl(t);
     TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
     const auto& nt_buffer = nt_input->get_buffer();
@@ -200,7 +201,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(
         });
     return output;
   }
-  return NestedTensor_to_padded_tensor_generic(t, padding, output_size);
+  return NestedTensor_to_padded_tensor_generic(t, padding, output_size, output_layout);
 }
 } // namespace native
 } // namespace at
