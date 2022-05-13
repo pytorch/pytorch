@@ -131,22 +131,20 @@ def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
 
 @parse_args("v", "v", "i", "i")
 def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
-    import pdb
-    pdb.set_trace()
     if not sym_help._is_split_static(indices_or_sections, _outputs):
         axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
-        
+        axis = unsqueeze(g, axis, 0)
+
         if sym_help._is_tensor(indices_or_sections):
             
-            
-            padding_0 = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-            indices_or_sections = g.op("Concat", padding_0, indices_or_sections, axis_i=0)
-
             # loop conditions
             const_1 = g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))
-            loop_len = sym_help._size_helper(g, indices_or_sections, g.op("Constant", value_t=torch.LongTensor([0])))
-            loop_len = g.op("Add", loop_len, const_1)
+            loop_len = sym_help._size_helper(g, indices_or_sections, g.op("Constant", value_t=torch.tensor(0)))
+            loop_len = unsqueeze(g, loop_len, 0)
             loop_condition = g.op("Cast", const_1, to_i=9)
+
+            padding_0 = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+            indices_or_sections = g.op("Concat", padding_0, indices_or_sections, axis_i=0)
 
             # Create an empty sequence to store final expansions
             final_splits = g.op("SequenceEmpty")
@@ -157,11 +155,12 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             block_input_iter = _add_input_to_block(loop_block)
             cond = _add_input_to_block(loop_block)
             final_splits = _add_input_to_block(loop_block)
-            
-            start = loop_block.op("SequenceAt", indices_or_sections, block_input_iter)
-            end = loop_block.op("SequenceAt", indices_or_sections, loop_block.op("Add", block_input_iter, const_1))
 
-            loop_block.op("Slice", indices_or_sections, start, end, axis)
+            start = loop_block.op("Gather", indices_or_sections, block_input_iter, axis_i=0)
+            end = loop_block.op("Gather", indices_or_sections, loop_block.op("Add", block_input_iter, const_1), axis_i=0)
+
+            slice = loop_block.op("Slice", self, start, end, axis)
+            final_splits = loop_block.op("SequenceInsert", final_splits, slice)
 
             # Loop outputs
             cond_out = loop_block.op("Cast", loop_condition, to_i=9)
@@ -169,18 +168,18 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             _add_output_to_block(loop_block, final_splits)
 
             loop_out = loop.node().output()
-            last_idx = g.op("Constant", value_t=torch.tensor(-1, dtype=torch.long))
-            last_element = g.op("SequenceAt", indices_or_sections, last_idx)
-            last_slice = g.op("Slice", indices_or_sections, last_element, last_idx, axis)
+            start = g.op("Gather", indices_or_sections, g.op("Constant", value_t=torch.tensor(-1, dtype=torch.long)), axis_i=0)
+            start = unsqueeze(g, start, 0)
+            end = sym_help._size_helper(g, self, axis)
+            
+            last_slice = g.op("Slice", self, start, end, axis)
 
-            import pdb
-            pdb.set_trace()
-            return g.op("Concat", loop_out, last_slice, axis_i=dim)
+            return g.op("SequenceInsert", loop_out, last_slice)
 
         else:
             indices_or_sections_sizes = sym_help._get_tensor_dim_size(indices_or_sections, 0)
             for i in range([0, *indices_or_sections_sizes]):
-                start = op("SequenceAt", indices_or_sections, block_input_iter)
+                start = g.op("SequenceAt", indices_or_sections, block_input_iter)
                 end = g.op("Gather", indices_or_sections, i, axis)
                 indices_or_sections_sizes
                 g.op("Slice", self, start, end, axis)
