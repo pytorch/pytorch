@@ -851,8 +851,6 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
-def rebase_on_mergebot_branch() -> None:
-    print("hello")
 
 def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
