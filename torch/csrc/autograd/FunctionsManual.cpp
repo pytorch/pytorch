@@ -1589,14 +1589,15 @@ Tensor binary_cross_entropy_double_backward_target(
   auto res = -grad * grad_output;
 
   if (isDefined(weight)) {
-    if (!isTensorSubclassLike(weight.value())) {
-      res.mul_(weight.value());
-    } else {
-      res = res * weight.value();
-    }
+    res = isTensorSubclassLike(weight.value())
+      ? res.mul(weight.value())
+      : res.mul_(weight.value());
   }
 
-  auto denom = (1 - self).mul_(self);
+  auto neg_self = 1 - self;
+  auto denom = isTensorSubclassLike(self)
+    ? neg_self.mul(self)
+    : neg_self.mul_(self);
   {
     at::NoGradGuard guard;
     // Default eps in binary_cross_entropy for ALL dtypes
@@ -1605,7 +1606,9 @@ Tensor binary_cross_entropy_double_backward_target(
     denom.clamp_min_(eps);
   }
 
-  res = res.div_(denom);
+  res = isTensorSubclassLike(denom)
+    ? res.div(denom)
+    : res.div_(denom);
 
   if (reduction == at::Reduction::Mean) {
     res.div_(target.numel());
