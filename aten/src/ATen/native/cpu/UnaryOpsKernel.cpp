@@ -179,7 +179,7 @@ static void abs_kernel(TensorIteratorBase& iter) {
   if (dtype == kComplexHalf) {
     using scalar_t = c10::complex<Half>;
     using opmath_t = at::opmath_type<scalar_t>;
-    cpu_kernel(iter, [=](scalar_t a) { return scalar_t{abs_impl(opmath_t{a})}; });
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return abs_impl(opmath_t{a}); });
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
       cpu_kernel_vec(
@@ -308,7 +308,7 @@ static void sgn_kernel(TensorIteratorBase& iter) {
     using scalar_t = c10::complex<Half>;
     using opmath_t = at::opmath_type<scalar_t>;
     cpu_kernel(
-        iter, [=](scalar_t a) -> scalar_t { return scalar_t{sgn_impl(opmath_t{a})}; });
+        iter, [=](scalar_t a) -> scalar_t { return sgn_impl(opmath_t{a}); });
   } else {
     AT_DISPATCH_COMPLEX_TYPES(dtype, "sgn_cpu", [&]() {
       cpu_kernel_vec(

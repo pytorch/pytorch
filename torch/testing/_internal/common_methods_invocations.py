@@ -18287,6 +18287,7 @@ python_ref_db = [
         skips=(
             # On CPU: Output Mismatch as complexhalf uses non-vectorized path vs ref which seems to use
             # vectorized path
+            # See also : https://github.com/pytorch/pytorch/issues/48486
             # On CUDA: RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
                          dtypes=(torch.chalf,)),
