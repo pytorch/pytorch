@@ -4,9 +4,9 @@ import torch._C as C
 
 """
 PythonDispatcher class is a thin python-binding to C++ dispatcher and it
-is designed to show how dispatcher precompute works. In particular,
+is designed to show how dispatcher precomputes works. In particular,
 it shows for a certain op `foo`, what the computed dispatch table looks
-like after user register their kernels to certains dispatch keys.
+like after users register their kernels to certain dispatch keys.
 
 In the real C++ dispatcher we support many dispatch keys for different
 functionalities. For simplicity PythonDispatcher only supports dispatch

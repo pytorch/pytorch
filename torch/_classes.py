@@ -31,10 +31,10 @@ class _Classes(types.ModuleType):
         """
         Loads a shared library from the given path into the current process.
 
-        The library being loaded may run global initialization code to register
+        The library is loaded and may run global initialization code to register
         custom classes with the PyTorch JIT runtime. This allows dynamically
-        loading custom classes. For this, you should compile your class
-        and the static registration code into a shared library object, and then
+        loading custom classes. For this, you should compile your class and
+        the static registration code into a shared library object, and then
         call ``torch.classes.load_library('path/to/libcustom.so')`` to load the
         shared object.
 

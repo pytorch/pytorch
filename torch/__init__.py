@@ -334,17 +334,17 @@ def set_default_tensor_type(t):
 def set_default_dtype(d):
     r"""
 
-    Sets the default floating point dtype to :attr:`d`. Supports torch.float32
+    Sets the default floating-point dtype to :attr:`d`. Supports torch.float32
     and torch.float64 as inputs. Other dtypes may be accepted without complaint
     but are not supported and are unlikely to work as expected.
 
-    When PyTorch is initialized its default floating point dtype is torch.float32,
+    When PyTorch is initialized its default floating-point dtype is torch.float32,
     and the intent of set_default_dtype(torch.float64) is to facilitate NumPy-like
-    type inference. The default floating point dtype is used to:
+    type inference. The default floating-point dtype is used to:
 
-    1. Implicitly determine the default complex dtype. When the default floating point
+    1. Implicitly determine the default complex dtype. When the default floating-point
        type is float32 the default complex dtype is complex64, and when the default
-       floating point type is float64 the default complex type is complex128.
+       floating-point type is float64 the default complex type is complex128.
     2. Infer the dtype for tensors constructed using Python floats or complex Python
        numbers. See examples below.
     3. Determine the result of type promotion between bool and integer tensors and
@@ -378,10 +378,10 @@ def set_default_dtype(d):
 
 def use_deterministic_algorithms(mode, *, warn_only=False):
     r""" Sets whether PyTorch operations must use "deterministic"
-    algorithms. That is, algorithms which, given the same input, and when
+    algorithms. That is algorithms that, are given the same input, and when
     run on the same software and hardware, always produce the same output.
     When enabled, operations will use deterministic algorithms when available,
-    and if only nondeterministic algorithms are available they will throw a
+    and if only non-deterministic algorithms are available they will throw a
     :class:`RuntimeError` when called.
 
     .. note:: :func:`torch.set_deterministic_debug_mode` offers an alternative

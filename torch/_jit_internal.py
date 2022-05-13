@@ -101,7 +101,7 @@ def createResolutionCallbackFromEnv(lookup_base):
             return value
         except Exception:
             """
-            The python resolver fails in several cases in known unit tests, and is intended
+            In several cases in known unit tests, the python resolver fails and is intended
             to fall back gracefully to the c++ resolver in general.  For example, python 2 style
             annotations which are frequent in our unit tests often fail with types e.g. int not
             resolvable from the calling frame.
@@ -117,11 +117,11 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
     returns the value of the variable in the scope of the caller of
     the function which called createResolutionCallbackFromFrame (by default).
 
-    This is used to enable access in-scope Python variables inside
+    This is used to enable access to in-scope Python variables inside
     TorchScript fragments.
 
-    frames_up is number of additional frames to go up on the stack.
-    The default value is 0, which correspond to the frame of the caller
+    frames_up is the number of additional frames to go up on the stack.
+    The default value is 0, which corresponds to the caller's frame
     of createResolutionCallbackFromFrame. Also for example, if frames_up is set
     to 1, then the frame of the caller's caller of createResolutionCallbackFromFrame
     will be taken.
