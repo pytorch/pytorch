@@ -99,9 +99,26 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(const c10::OperatorHa
 
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
 
+  auto schemaAwareToPyObject = [&](int64_t idx) -> py::object {
+    const auto& arg = schema.arguments()[idx];
+    if (arg.real_type()->kind() == c10::ScalarTypeType::Kind) {
+      auto* obj = getTHPDtype(static_cast<c10::ScalarType>(arguments[idx].toInt()));
+      return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(obj));
+    } else if (arg.real_type()->kind() == c10::LayoutType::Kind) {
+      auto* obj = getTHPLayout(static_cast<c10::Layout>(arguments[idx].toInt()));
+      return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(obj));
+    } else if (arg.real_type()->kind() == c10::MemoryFormatType::Kind) {
+      // TODO: https://github.com/pytorch/pytorch/issues/77135
+      auto* obj = THPMemoryFormat_New(static_cast<c10::MemoryFormat>(arguments[idx].toInt()), "unused");
+      return py::reinterpret_steal<py::object>(reinterpret_cast<PyObject*>(obj));
+    } else {
+      return torch::jit::toPyObject(arguments[idx]);
+    }
+  };
+
   // Populate positional arguments
   for (const auto idx : c10::irange(positional_default_start)) {
-    PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(arguments[idx]).release().ptr());
+    PyTuple_SET_ITEM(args.ptr(), idx, schemaAwareToPyObject(idx).release().ptr());
   }
 
   // Populate keyword arguments
@@ -109,7 +126,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(const c10::OperatorHa
     // But don't populate default keyword arguments
     if (is_default(idx)) continue;
     const auto& arg = schema.arguments()[idx];
-    kwargs[py::cast(arg.name())] = torch::jit::toPyObject(arguments[idx]);
+    kwargs[py::cast(arg.name())] = schemaAwareToPyObject(idx);
   }
   return std::make_pair(std::move(args), std::move(kwargs));
 }
