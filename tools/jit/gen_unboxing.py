@@ -8,7 +8,7 @@ from torchgen.api.translate import translate
 from torchgen.api.types import CppSignatureGroup
 from torchgen.api.unboxing import convert_arguments
 from torchgen.context import method_with_native_function
-from torchgen.gen import parse_native_yaml, cpp_string
+from torchgen.gen import parse_native_yaml, cpp_string, get_custom_build_selector
 from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import Target, FileManager, mapMaybe, make_file_manager
@@ -208,13 +208,20 @@ def main() -> None:
         "full operator name with overload or just a bare operator name. "
         "The operator names also contain the namespace prefix (e.g. aten::)",
     )
+    parser.add_argument(
+        "--op_registration_allowlist",
+        nargs="*",
+        help="filter op registrations by the allowlist (if set); "
+        "each item is `namespace`::`operator name` without overload name; "
+        "e.g.: aten::empty aten::conv2d ...",
+    )
 
     options = parser.parse_args()
 
-    if options.op_selection_yaml_path is not None:
-        selector = SelectiveBuilder.from_yaml_path(options.op_selection_yaml_path)
-    else:
-        selector = SelectiveBuilder.get_nop_selector()
+    selector = get_custom_build_selector(
+        options.op_registration_allowlist,
+        options.op_selection_yaml_path,
+    )
 
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
     tags_yaml_path = os.path.join(options.source_path, "native/tags.yaml")
