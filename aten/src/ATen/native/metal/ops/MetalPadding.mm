@@ -13,7 +13,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-// API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor reflection_pad2d(const Tensor& input, IntArrayRef padding) {
   TORCH_CHECK(input.is_metal());
 

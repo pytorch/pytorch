@@ -120,5 +120,15 @@ void test_only_reset_flag() {
   isVersionMapSorted = false;
 }
 
+static bool calculatePackageVersionBasedOnUpgraders = false;
+
+void calculate_package_version_based_on_upgraders(bool val) {
+  calculatePackageVersionBasedOnUpgraders = val;
+}
+
+bool get_version_calculator_flag() {
+  return calculatePackageVersionBasedOnUpgraders;
+}
+
 } // namespace jit
 } // namespace torch

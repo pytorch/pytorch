@@ -1,0 +1,33 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: 0 0 * * *
+  push:
+    tags:
+      - ciflow/nightly/*
+  workflow_dispatch:
+
+
+concurrency:
+  group: ${{ github.workflow }}--${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  docs-build:
+    name: docs build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-py3.7-gcc5.4
+      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
+
+  docs-push:
+    name: docs push
+    uses: ./.github/workflows/_docs.yml
+    needs: docs-build
+    with:
+      build-environment: linux-xenial-py3.7-gcc5.4
+      docker-image: ${{ needs.docs-build.outputs.docker-image }}
+      push: true
+    secrets:
+      GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

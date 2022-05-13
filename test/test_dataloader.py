@@ -842,6 +842,21 @@ class BulkLoadingSampler(torch.utils.data.Sampler):
         return int(math.ceil(len(self.dataset) / float(self.batch_size)))
 
 
+class TestMultiEpochDataset(IterableDataset):
+    def __init__(self, length):
+        self.length = length
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        assert worker_info is not None
+        worker_id = worker_info.id
+        for idx in range(self.length // worker_info.num_workers):
+            yield worker_id
+
+    def __len__(self):
+        return self.length
+
+
 class CustomList(list):
     pass
 
@@ -1425,6 +1440,19 @@ except RuntimeError as e:
         batch_size = 1
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
         self.assertEqual(set(int(batch) for batch in get_dataloader()), set(int(batch) for batch in get_dataloader()))
+
+    def test_multi_epochs_reproducibility(self):
+        num_workers = 2
+        batch_size = 10
+        num_epochs = 3
+
+        dataset = TestMultiEpochDataset(batch_size * num_workers)
+        dataloader = self._get_data_loader(dataset, batch_size=batch_size,
+                                           shuffle=False, num_workers=num_workers)
+
+        for ind in range(num_epochs):
+            for batch_idx, sample in enumerate(dataloader):
+                self.assertEqual(sample.tolist(), [batch_idx % num_workers] * batch_size)
 
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
@@ -2145,6 +2173,13 @@ class TestDataLoader2(TestCase):
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
 
+    class Sorter(IterDataPipe):
+        def __init__(self, datapipe):
+            self.datapipe = datapipe
+
+        def __iter__(self):
+            return iter(sorted(self.datapipe))
+
     def test_shuffle(self):
         items = list(range(1000))
         dp = IterableWrapper(items).sharding_filter().shuffle()
@@ -2152,18 +2187,26 @@ class TestDataLoader2(TestCase):
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
         self.assertEqual(items, list(dl))
 
-        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=False,
-                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False,
+                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
         self.assertEqual(items, list(dl))
 
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
-        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=True,
-                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True,
+                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
+
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
+        self.assertEqual(list(dl), items)
+
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True,
+                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        self.assertEqual(list(dl), items)
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2306,6 +2349,19 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory_device(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True, pin_memory_device='cuda')
+        for sample in loader:
+            self.assertTrue(sample['a_tensor'].is_pinned(device='cuda'))
+            self.assertTrue(sample['another_dict']['a_number'].is_pinned(device='cuda'))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory_with_only_device(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory_device='cuda')
+        for sample in loader:
+            self.assertFalse(sample['a_tensor'].is_pinned(device='cuda'))
+            self.assertFalse(sample['another_dict']['a_number'].is_pinned(device='cuda'))
 
 class DummyDataset(torch.utils.data.Dataset):
     def __init__(self):

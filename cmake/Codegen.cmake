@@ -67,11 +67,16 @@ if(INTERN_BUILD_ATEN_OPS)
     set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
   endif()
 
-  file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/*.py")
+  file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
 
   set(GEN_ROCM_FLAG)
   if(USE_ROCM)
     set(GEN_ROCM_FLAG --rocm)
+  endif()
+
+  set(GEN_MPS_FLAG)
+  if(USE_MPS)
+    set(GEN_MPS_FLAG --mps)
   endif()
 
   set(CUSTOM_BUILD_FLAGS)
@@ -98,9 +103,49 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   if(STATIC_DISPATCH_BACKEND)
-    message(STATUS "Custom build with static dispatch backend: ${STATIC_DISPATCH_BACKEND}")
+    message(STATUS "Custom build with static dispatch backends: ${STATIC_DISPATCH_BACKEND}")
+    list(LENGTH STATIC_DISPATCH_BACKEND len)
     list(APPEND CUSTOM_BUILD_FLAGS
       --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
+  endif()
+
+  # Codegen unboxing
+  if(USE_LIGHTWEIGHT_DISPATCH)
+    file(GLOB_RECURSE all_unboxing_script "${CMAKE_CURRENT_LIST_DIR}/../tools/jit/*.py")
+    list(APPEND CUSTOM_BUILD_FLAGS --skip_dispatcher_op_registration)
+    set(GEN_UNBOXING_COMMAND
+        "${PYTHON_EXECUTABLE}" -m tools.jit.gen_unboxing
+        --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
+        --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+        )
+    set("GEN_UNBOXING_COMMAND_sources"
+        ${GEN_UNBOXING_COMMAND}
+        --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake
+        )
+    message(STATUS "Generating sources for lightweight dispatch")
+    execute_process(
+        COMMAND ${GEN_UNBOXING_COMMAND_sources} --dry-run
+        RESULT_VARIABLE RETURN_VALUE
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+    if(NOT RETURN_VALUE EQUAL 0)
+      message(FATAL_ERROR "Failed to get generated_unboxing_sources list")
+    endif()
+
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake")
+    add_custom_command(
+        COMMENT "Generating ATen unboxing sources"
+        OUTPUT
+        ${generated_unboxing_sources}
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake
+        COMMAND ${GEN_UNBOXING_COMMAND_sources}
+        DEPENDS ${all_unboxing_script} ${sources_templates}
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+  else() # Otherwise do not generate or include sources into build.
+    set(generated_unboxing_sources "")
   endif()
 
   set(GEN_PER_OPERATOR_FLAG)
@@ -109,13 +154,13 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   set(GEN_COMMAND
-      "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
+      "${PYTHON_EXECUTABLE}" -m torchgen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
+      ${GEN_MPS_FLAG}
       ${CUSTOM_BUILD_FLAGS}
-      ${GEN_VULKAN_FLAGS}
   )
 
   file(GLOB_RECURSE headers_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
@@ -172,6 +217,7 @@ if(INTERN_BUILD_ATEN_OPS)
       COMMAND ${GEN_COMMAND_${gen_type}}
       DEPENDS ${all_python} ${${gen_type}_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
       WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
   endforeach()
@@ -182,7 +228,7 @@ if(INTERN_BUILD_ATEN_OPS)
   add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
       ${generated_headers} ${core_generated_headers} ${cpu_vec_generated_headers} ${ops_generated_headers}
       ${generated_sources} ${core_generated_sources} ${cpu_vec_generated_sources} ${ops_generated_sources}
-      ${generated_declarations_yaml})
+      ${generated_declarations_yaml} ${generated_unboxing_sources})
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
       ${cuda_generated_headers} ${cuda_generated_sources})
   add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)

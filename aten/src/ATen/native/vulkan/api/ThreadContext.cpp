@@ -35,6 +35,13 @@ ThreadContext::SingletonThreadLocalObject<Resource>::SingletonThreadLocalObject(
   : object_(gpu) {
 }
 
+template<>
+ThreadContext::SingletonThreadLocalObject<QueryPool>::SingletonThreadLocalObject(const GPU& gpu)
+  : object_(gpu.device,
+      gpu.adapter->timestamp_compute_and_graphics(),
+      gpu.adapter->timestamp_period()) {
+}
+
 } // namespace api
 } // namespace vulkan
 } // namespace native

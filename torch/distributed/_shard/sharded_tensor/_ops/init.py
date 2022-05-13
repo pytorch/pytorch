@@ -1,4 +1,5 @@
 import torch
+import torch.distributed._shard.sharded_tensor as sharded_tensor
 from torch.distributed._shard.sharded_tensor import (
     sharded_op_impl,
 )
@@ -103,3 +104,40 @@ def constant_(types, args=(), kwargs=None, pg=None):
     for shard in sharded_tensor.local_shards():
         torch.nn.init.constant_(shard.tensor, val=val)
     return sharded_tensor
+
+tensor_like_creation_op_map = {
+    torch.full_like: sharded_tensor.full,
+    torch.empty_like: sharded_tensor.empty,
+    torch.zeros_like: sharded_tensor.zeros,
+    torch.ones_like: sharded_tensor.ones,
+    torch.rand_like: sharded_tensor.rand,
+    torch.randn_like: sharded_tensor.randn,
+}
+
+# tensor ops that behave the same as the default tensor
+def register_tensor_creation_op(op):
+    @sharded_op_impl(op)
+    def tensor_creation_op(types, args=(), kwargs=None, pg=None):
+        """
+        Handles ``__torch_function__`` dispatch for tensor creation ops that
+        takes a ShardedTensor as argument, such as ``torch.zeros_like`` or
+        ``torch.full_like``.
+        """
+        creation_op = tensor_like_creation_op_map.get(op, None)
+        if creation_op is None:
+            raise RuntimeError(f"Tensor creation {op} not supported!")
+        if kwargs is None:
+            kwargs = {}
+
+        st = args[0]
+
+        new_st = creation_op(st.sharding_spec(), st.size(), *args[1:], **kwargs)  # type: ignore[operator]
+        return new_st
+
+
+register_tensor_creation_op(torch.full_like)
+register_tensor_creation_op(torch.empty_like)
+register_tensor_creation_op(torch.zeros_like)
+register_tensor_creation_op(torch.ones_like)
+register_tensor_creation_op(torch.rand_like)
+register_tensor_creation_op(torch.randn_like)

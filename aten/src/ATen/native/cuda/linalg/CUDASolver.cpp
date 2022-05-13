@@ -149,148 +149,70 @@ void getrs<c10::complex<float>>(
 }
 
 template <>
-void lsvqr<float, float>(
-  CUSOLVER_LINEAR_SOLVER_ARGTYPES(float, float)) {
-    TORCH_CUSOLVER_CHECK(cusolverSpScsrlsvqr(
-        handle,
-        n,
-        nnzA,
-        descrA,
-        csrValA,
-        csrRowPtrA,
-        csrColIndA,
-        b,
-        tol,
-        reorder,
-        x,
-        singularity));
-  }
+void sytrf_bufferSize<double>(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDsytrf_bufferSize(handle, n, A, lda, lwork));
+}
 
 template <>
-void lsvqr<double, double>(
-  CUSOLVER_LINEAR_SOLVER_ARGTYPES(double, double)) {
-    TORCH_CUSOLVER_CHECK(cusolverSpDcsrlsvqr(
-        handle,
-        n,
-        nnzA,
-        descrA,
-        csrValA,
-        csrRowPtrA,
-        csrColIndA,
-        b,
-        tol,
-        reorder,
-        x,
-        singularity));
-  }
+void sytrf_bufferSize<float>(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSsytrf_bufferSize(handle, n, A, lda, lwork));
+}
 
 template <>
-void lsvqr<c10::complex<float>, float>(
-  CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<float>, float)) {
-    TORCH_CUSOLVER_CHECK(cusolverSpCcsrlsvqr(
-        handle,
-        n,
-        nnzA,
-        descrA,
-        reinterpret_cast<const cuComplex*>(csrValA),
-        csrRowPtrA,
-        csrColIndA,
-        reinterpret_cast<const cuComplex*>(b),
-        tol,
-        reorder,
-        reinterpret_cast<cuComplex*>(x),
-        singularity));
-  }
+void sytrf_bufferSize<c10::complex<double>>(
+    CUDASOLVER_SYTRF_BUFFER_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZsytrf_bufferSize(
+      handle, n, reinterpret_cast<cuDoubleComplex*>(A), lda, lwork));
+}
 
 template <>
-void lsvqr<c10::complex<double>, double>(
-  CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<double>, double)) {
-    TORCH_CUSOLVER_CHECK(cusolverSpZcsrlsvqr(
-        handle,
-        n,
-        nnzA,
-        descrA,
-        reinterpret_cast<const cuDoubleComplex*>(csrValA),
-        csrRowPtrA,
-        csrColIndA,
-        reinterpret_cast<const cuDoubleComplex*>(b),
-        tol,
-        reorder,
-        reinterpret_cast<cuDoubleComplex*>(x),
-        singularity));
-  }
+void sytrf_bufferSize<c10::complex<float>>(
+    CUDASOLVER_SYTRF_BUFFER_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCsytrf_bufferSize(
+      handle, n, reinterpret_cast<cuComplex*>(A), lda, lwork));
+}
 
 template <>
-void lsvlu<float, float>(
-  CUSOLVER_LINEAR_SOLVER_ARGTYPES(float, float)) {
-    TORCH_CUSOLVER_CHECK(cusolverSpScsrlsvluHost(
-        handle,
-        n,
-        nnzA,
-        descrA,
-        csrValA,
-        csrRowPtrA,
-        csrColIndA,
-        b,
-        tol,
-        reorder,
-        x,
-        singularity));
-  }
+void sytrf<double>(CUDASOLVER_SYTRF_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnDsytrf(handle, uplo, n, A, lda, ipiv, work, lwork, devInfo));
+}
 
 template <>
-void lsvlu<double, double>(
-  CUSOLVER_LINEAR_SOLVER_ARGTYPES(double, double)) {
-    TORCH_CUSOLVER_CHECK(cusolverSpDcsrlsvluHost(
-        handle,
-        n,
-        nnzA,
-        descrA,
-        csrValA,
-        csrRowPtrA,
-        csrColIndA,
-        b,
-        tol,
-        reorder,
-        x,
-        singularity));
-  }
+void sytrf<float>(CUDASOLVER_SYTRF_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnSsytrf(handle, uplo, n, A, lda, ipiv, work, lwork, devInfo));
+}
 
 template <>
-void lsvlu<c10::complex<float>, float>(
-  CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<float>, float)) {
-    TORCH_CUSOLVER_CHECK(cusolverSpCcsrlsvluHost(
-        handle,
-        n,
-        nnzA,
-        descrA,
-        reinterpret_cast<const cuComplex*>(csrValA),
-        csrRowPtrA,
-        csrColIndA,
-        reinterpret_cast<const cuComplex*>(b),
-        tol,
-        reorder,
-        reinterpret_cast<cuComplex*>(x),
-        singularity));
-  }
+void sytrf<c10::complex<double>>(
+    CUDASOLVER_SYTRF_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZsytrf(
+      handle,
+      uplo,
+      n,
+      reinterpret_cast<cuDoubleComplex*>(A),
+      lda,
+      ipiv,
+      reinterpret_cast<cuDoubleComplex*>(work),
+      lwork,
+      devInfo));
+}
 
 template <>
-void lsvlu<c10::complex<double>, double>(
-  CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<double>, double)) {
-    TORCH_CUSOLVER_CHECK(cusolverSpZcsrlsvluHost(
-        handle,
-        n,
-        nnzA,
-        descrA,
-        reinterpret_cast<const cuDoubleComplex*>(csrValA),
-        csrRowPtrA,
-        csrColIndA,
-        reinterpret_cast<const cuDoubleComplex*>(b),
-        tol,
-        reorder,
-        reinterpret_cast<cuDoubleComplex*>(x),
-        singularity));
-  }
+void sytrf<c10::complex<float>>(
+    CUDASOLVER_SYTRF_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCsytrf(
+      handle,
+      uplo,
+      n,
+      reinterpret_cast<cuComplex*>(A),
+      lda,
+      ipiv,
+      reinterpret_cast<cuComplex*>(work),
+      lwork,
+      devInfo));
+}
 
 template<>
 void gesvd_buffersize<float>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {

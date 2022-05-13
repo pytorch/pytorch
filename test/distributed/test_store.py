@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
-import random
 import sys
 import tempfile
 import time
@@ -248,7 +247,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self._test_numkeys_delkeys(self._create_store())
 
     def _create_client(self, index, addr, port, world_size):
-        client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
+        client_store = dist.TCPStore(addr, port, world_size=world_size, timeout=timedelta(seconds=10))
         self.assertEqual("value".encode(), client_store.get("key"))
         client_store.set(f"new_key{index}", f"new_value{index}")
         self.assertEqual(f"next_value{index}".encode(),
@@ -259,15 +258,16 @@ class TCPStoreTest(TestCase, StoreTestBase):
         server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
         server_store.set("key", "value")
         port = server_store.port
-        world_size = random.randint(5, 10) if world_size == -1 else world_size
-        for i in range(world_size):
+
+        num_indices = world_size if world_size else 1
+        for i in range(num_indices):
             self._create_client(i, addr, port, world_size)
 
     def test_multi_worker_with_fixed_world_size(self):
         self._multi_worker_helper(5)
 
     def test_multi_worker_with_nonfixed_world_size(self):
-        self._multi_worker_helper(-1)
+        self._multi_worker_helper(None)
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -402,6 +402,14 @@ class RendezvousTCPTest(TestCase):
             next(gen)
         with self.assertRaisesRegex(ValueError, "size parameter missing"):
             gen = dist.rendezvous("tcp://127.0.0.1:23456?rank=0")
+            next(gen)
+
+    def test_dns_timeout(self):
+        with self.assertRaisesRegex(TimeoutError, "client socket has timed out after.*dnsnotexist"):
+            gen = dist.rendezvous(
+                "tcp://dnsnotexist:23456?world_size=2&rank=0",
+                timeout=timedelta(seconds=1),
+            )
             next(gen)
 
     @retry_on_connect_failures
