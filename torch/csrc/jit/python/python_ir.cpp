@@ -643,6 +643,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "getModuleHierarchy",
           [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
+      .def(
+          "namedInput",
+          [](Node& n, const std::string& unqualName) {
+            return n.namedInput(unqualName);
+          })
       .NS(addInput)
       .NS(copyMetadata)
       .NS(replaceInput)
