@@ -7,7 +7,7 @@ python_library(
     visibility = ["PUBLIC"],
     deps = [
         #"//third_party:pyyaml",
-        #"//third_party:typing-extensions",
+        "//third_party:typing-extensions",
     ],
 )
 
