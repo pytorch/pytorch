@@ -5009,6 +5009,17 @@ class TestNN(NNTestCase):
         # check that u refers to the same dimension
         self.assertEqual(m.weight_u.shape, m.weight_orig[0, :, 0, 0].shape)
 
+    def test_bias_nn(self):
+        inp = torch.randn(2, 10)
+        bias = torch.nn.Bias(10)
+        x = bias(inp)
+        self.assertEqual(bias.bias + inp, x)
+
+        bad_input = torch.randn(10, 2)
+        with self.assertRaisesRegex(RuntimeError, "Last dimension of input must match the bias size"):
+            bias(bad_input)
+
+
     def test_new_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)
         m = nn.ConvTranspose2d(3, 4, (5, 6))

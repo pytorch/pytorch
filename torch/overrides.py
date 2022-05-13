@@ -332,6 +332,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     # See Issue #28233.
     Tensor = torch.Tensor
     ret: Dict[Callable, Callable] = {
+        torch.nn.functional.bias: lambda input, bias: -1,
         torch.abs: lambda input, out=None: -1,
         torch.absolute: lambda input, out=None: -1,
         torch.adaptive_avg_pool1d: lambda input, output_size: -1,

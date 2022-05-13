@@ -892,6 +892,9 @@
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias=None) -> Tensor
 
+- func: bias(Tensor input, Tensor bias) -> Tensor
+  python_module: nn
+
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: nn

@@ -6,6 +6,11 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+inline Tensor bias(const Tensor& input, const Tensor& bias){
+  // Do I need to check the constraints here?
+  return torch::bias(input, bias);
+}
+
 inline Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias=Tensor()) {
     return torch::bilinear(input1, input2, weight, bias);
 }

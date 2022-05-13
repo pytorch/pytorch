@@ -13,6 +13,40 @@
 namespace torch {
 namespace nn {
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bias ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Adds a bias vector to las dim of input
+
+class TORCH_API BiasImpl : public Cloneable<BiasImpl> {
+ public:
+  BiasImpl(int64_t num_features)
+    : BiasImpl(BiasOptions(num_features)) {}
+  explicit BiasImpl(const BiasOptions& options_);
+
+  void reset() override;
+
+  void reset_parameters();
+
+  /// Pretty prints the `Linear` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// Transforms the `input` tensor by multiplying with the `weight` and
+  /// optionally adding the `bias`, if `with_bias` is true in the options.
+  Tensor forward(const Tensor& input);
+
+  /// The options used to configure this module.
+  BiasOptions options;
+
+  /// The learnable bias added to the last dim of each tensor
+  Tensor bias;
+};
+
+/// A `ModuleHolder` subclass for `BiasImpl`.
+/// See the documentation for `BiasImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Bias);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Identity ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A placeholder identity operator that is argument-insensitive.

@@ -3,6 +3,7 @@
 ## torch::nn
 API | Implementation Parity | Doc Parity
 ------------- | ------------- | -------------
+torch::nn::Bias|Yes|No
 torch::nn::Sequential|Yes|No
 torch::nn::ModuleList|Yes|No
 torch::nn::ModuleDict|No|No

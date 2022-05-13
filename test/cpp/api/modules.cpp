@@ -442,6 +442,19 @@ TEST_F(ModulesTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+TEST_F(ModulesTest, Bias) {
+  Bias model(Bias(5));
+  auto x = torch::ones({2, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2,5}) + model->bias));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 5}));
+}
+
 TEST_F(ModulesTest, FractionalMaxPool2d) {
   FractionalMaxPool2d model(FractionalMaxPool2dOptions(3).output_size(2));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());

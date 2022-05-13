@@ -11,13 +11,53 @@ from .lazy import LazyModuleMixin
 
 
 __all__ = [
+    'Bias',
     'Bilinear',
     'Identity',
     'LazyLinear',
     'Linear',
 ]
 
+class Bias(Module):
+    r"""Adds a bias to the last dimension of an input
 
+    tensorArgs:
+        num_features:  the size of vector parameter that will be used to add bias
+
+    Attributes:
+        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
+                If :attr:`bias` is ``True``, the values are initialized from
+                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                :math:`k = \frac{1}{\text{in\_features}}`
+
+    Examples::
+
+        >>> m = nn.Bias(30)
+        >>> input = torch.randn(128, 30)
+        >>> output = m(input)
+        >>> print(output.size())
+        torch.Size([128, 30])
+    """
+    __constants__ = ['num_features']
+    bias: Tensor
+
+    def __init__(self, num_features: int, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(Bias, self).__init__()
+        self.num_features = num_features
+        self.bias = Parameter(torch.empty(num_features, **factory_kwargs))
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        # Initialize bias with std normal distribution
+        init.normal_(self.bias)
+
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.bias(input, self.bias)
+
+    def extra_repr(self) -> str:
+        return f'num_features={self.num_features}'
 class Identity(Module):
     r"""A placeholder identity operator that is argument-insensitive.
 
