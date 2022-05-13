@@ -26,7 +26,7 @@ enum class DeviceType : int8_t {
   Vulkan = 10, // Vulkan
   Metal = 11, // Metal
   XPU = 12, // XPU
-  MLC = 13, // ML Compute / Apple
+  MPS = 13, // MPS
   Meta = 14, // Meta (tensors with no data)
   HPU = 15, // HPU / HABANA
   VE = 16, // SX-Aurora / NEC
@@ -45,7 +45,7 @@ constexpr DeviceType kHIP = DeviceType::HIP;
 constexpr DeviceType kFPGA = DeviceType::FPGA;
 constexpr DeviceType kORT = DeviceType::ORT;
 constexpr DeviceType kXLA = DeviceType::XLA;
-constexpr DeviceType kMLC = DeviceType::MLC;
+constexpr DeviceType kMPS = DeviceType::MPS;
 constexpr DeviceType kMeta = DeviceType::Meta;
 constexpr DeviceType kVulkan = DeviceType::Vulkan;
 constexpr DeviceType kMetal = DeviceType::Metal;

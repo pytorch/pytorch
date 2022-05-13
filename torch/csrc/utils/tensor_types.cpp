@@ -27,6 +27,7 @@ static const char* backend_to_string(const at::Backend& backend) {
     case at::Backend::SparseXPU: return "torch.xpu.sparse";
     case at::Backend::QuantizedCPU: return "torch.quantized";
     case at::Backend::HPU: return "torch.hpu";
+    case at::Backend::MPS: return "torch.mps";
     default: AT_ERROR("Unimplemented backend ", backend);
   }
 }
