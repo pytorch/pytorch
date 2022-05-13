@@ -1150,47 +1150,60 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
         contiguous_data = data.clone()
         not_contiguous_data = torch.as_strided(data.clone(), (2, 2), (1, 2))
 
-        class ExampleTensor1(torch.Tensor):
-            @staticmethod
-            def __new__(cls, data):
-                return torch.Tensor._make_subclass(cls, data, True, True)
+        def subclass_helper(cls, data, use_wrapper_subclass):
+            if use_wrapper_subclass: 
+                kwargs = {}
+                kwargs["device"] = data.device
+                kwargs["dtype"] = data.dtype
+                kwargs["layout"] = data.layout
+                kwargs["requires_grad"] = True
+                kwargs['use_custom_strides'] = True
+                return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
+            else:
+                return torch.Tensor._make_subclass(cls, data, require_grad=True, use_custom_strides=True)
 
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs):
-                return NotImplemented
+        for use_wrapper_subclass in [True, False]:
+            class ExampleTensor1(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return subclass_helper(cls, data, wrapper)
 
-        class ExampleTensor2(torch.Tensor):
-            @staticmethod
-            def __new__(cls, data):
-                return torch.Tensor._make_subclass(cls, data, True, True)
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
 
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs):
-                if func.overloadpacket == torch.ops.aten.is_contiguous:
-                    return contiguous_data.is_contiguous()
-                return NotImplemented
+            class ExampleTensor2(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return subclass_helper(cls, data, wrapper)
 
-        class ExampleTensor3(torch.Tensor):
-            @staticmethod
-            def __new__(cls, data):
-                return torch.Tensor._make_subclass(cls, data, True, True)
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.is_contiguous:
+                        return contiguous_data.is_contiguous()
+                    return NotImplemented
 
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs):
-                if func.overloadpacket == torch.ops.aten.is_contiguous:
-                    return not_contiguous_data.is_contiguous()
-                return NotImplemented
+            class ExampleTensor3(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return subclass_helper(cls, data, wrapper)
 
-        err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
-        with self.assertRaisesRegex(TypeError, err_msg):
-            e = ExampleTensor1(torch.randn(3, 3))
-            e.is_contiguous()
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.is_contiguous:
+                        return not_contiguous_data.is_contiguous()
+                    return NotImplemented
 
-        e = ExampleTensor2(torch.randn(3, 3))
-        self.assertEqual(e.is_contiguous(), True)
+            err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
+                e.is_contiguous()
 
-        e = ExampleTensor3(torch.randn(3, 3))
-        self.assertEqual(e.is_contiguous(), False)
+            e = ExampleTensor2(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.is_contiguous(), True)
+
+            e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.is_contiguous(), False)
 
 
 if __name__ == '__main__':
