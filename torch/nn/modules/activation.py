@@ -1312,9 +1312,10 @@ class Softmin(Module):
         self.dim = dim
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
         if not hasattr(self, 'dim'):
             self.dim = None
+
+        super().__setstate__(state)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.softmin(input, self.dim, _stacklevel=5)
@@ -1368,9 +1369,10 @@ class Softmax(Module):
         self.dim = dim
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
         if not hasattr(self, 'dim'):
             self.dim = None
+
+        super().__setstate__(state)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.softmax(input, self.dim, _stacklevel=5)
@@ -1439,9 +1441,10 @@ class LogSoftmax(Module):
         self.dim = dim
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
         if not hasattr(self, 'dim'):
             self.dim = None
+
+        super().__setstate__(state)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.log_softmax(input, self.dim, _stacklevel=5)

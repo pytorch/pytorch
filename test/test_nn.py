@@ -17,6 +17,7 @@ from itertools import repeat, product
 from functools import reduce, partial
 from operator import mul
 from collections import OrderedDict
+from tempfile import NamedTemporaryFile
 
 import torch
 
@@ -21621,6 +21622,34 @@ class TestStateDictHooks(TestCase):
         # explicitly ensure that the post hook clearned out incompatible_keys
         self.assertEqual([], ret.missing_keys)
         self.assertEqual([], ret.unexpected_keys)
+
+    def test_load_state_dict_post_hook_backward_compatibility(self):
+        def my_post_load_hook(mod, _):
+            nonlocal called
+            called = True
+
+        for m in [nn.Softmin(10), nn.Softmax(10), nn.LogSoftmax(10)]:
+            called = False
+            sd = deepcopy(m.state_dict())
+            self.assertTrue(hasattr(m, '_load_state_dict_post_hooks'))
+            # Simulate an older model that did not have this attr
+            delattr(m, '_load_state_dict_post_hooks')
+            # Save and load, and ensure that load_state_dict works (without proper
+            # BC we would run into errors because this attribute would be expected).
+            # In particular, Softmax runs into the issue described here:
+            # https://github.com/pytorch/pytorch/issues/77280
+            with NamedTemporaryFile() as f:
+                # Note that torch.save / torch.load is not recommended to save/load
+                # modules.
+                torch.save(m, f.name)
+                m = torch.load(f.name)
+                m.load_state_dict(sd)
+                self.assertFalse(called)
+
+            # Ensure hooks can be registered and called.
+            m.register_load_state_dict_post_hook(my_post_load_hook)
+            m.load_state_dict(sd)
+            self.assertTrue(called)
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
