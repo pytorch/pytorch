@@ -146,8 +146,6 @@ void LTCTensorImpl::setup_size_properties() {
   }
 }
 
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-
 at::IntArrayRef LTCTensorImpl::sizes_custom() const {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
@@ -180,8 +178,6 @@ bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
   CHECK(is_contiguous_) << "Non-contiguous storage for lazy tensor";
   return true;
 }
-
-#endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 
 }  // namespace lazy
 }  // namespace torch
