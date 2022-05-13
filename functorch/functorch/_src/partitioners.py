@@ -251,23 +251,13 @@ def min_cut_rematerialization_partition(
         return required_fw_nodes, required_bw_nodes, unclaimed_nodes
 
     required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
-
-    def dist_from_bw(node):
-        print(node)
-        if node not in required_fw_nodes:
-            return 0
-        dist = int(1e9)
-        for n in node.users:
-            dist = min(dist_from_bw(n) + 1, dist)
-        return dist
-
     for node in reversed(joint_module.graph.nodes):
         if node not in required_fw_nodes:
             node.dist_from_bw = 0
         else:
             node.dist_from_bw = int(1e9)
-            for n in node.users:
-                node.dist_from_bw = min(node.dist_from_bw, n.dist_from_bw + 1)
+            for user in node.users:
+                node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
 
     aten = torch.ops.aten
 
