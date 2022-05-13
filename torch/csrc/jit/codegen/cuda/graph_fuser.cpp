@@ -2215,9 +2215,12 @@ void decomposeConvOps(Block* block) {
 
     auto bias_tensor_type = n->input(2)->type()->cast<c10::TensorType>();
     auto bias_size_opt = bias_tensor_type->sizes().concrete_sizes();
-    TORCH_INTERNAL_ASSERT(
-        bias_size_opt.has_value(),
-        "concrete shape for bias input to conv2d are required");
+    if (!bias_size_opt.has_value()) {
+      TORCH_WARN_ONCE(
+        "concrete shape for bias input is required to decompose into conv + bias"
+      );
+      continue;
+    }
     // bias shape (C)
     auto bias_size = bias_size_opt.value();
 
