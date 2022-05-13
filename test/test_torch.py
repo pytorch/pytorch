@@ -48,7 +48,7 @@ from torch.testing._internal.common_device_type import (
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
-    expectedAlertNondeterministic, get_all_device_types, skipXLA, dtypesIfMPS)
+    expectedAlertNondeterministic, get_all_device_types, skipXLA)
 from typing import Tuple
 import torch.backends.quantized
 import torch.testing._internal.data

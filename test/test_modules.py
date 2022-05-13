@@ -8,16 +8,11 @@ from operator import methodcaller
 
 import torch
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta,
-    dtypes, dtypesIfMPS)
+    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck, skipIfMps)
 from unittest.mock import patch, call
-from torch.testing._internal.common_dtype import (
-    all_types, floating_and_complex_types, get_all_dtypes, get_all_int_dtypes, get_all_complex_dtypes,
-    get_all_fp_dtypes,
-)
 
 
 class TestModule(TestCase):
@@ -206,6 +201,7 @@ class TestModule(TestCase):
             # Check that these methods do not raise errors
             m.__repr__()
             str(m)
+
     @skipIfMps
     @modules(module_db)
     def test_pickle(self, device, dtype, module_info):
@@ -316,6 +312,7 @@ class TestModule(TestCase):
             if obj.grad is not None:
                 obj.grad = None
         self._traverse_obj(obj, inner_zero_grad)
+
     @skipIfMps
     @modules(module_db)
     def test_non_contiguous_tensors(self, device, dtype, module_info):
@@ -472,7 +469,6 @@ class TestModule(TestCase):
 
     @modules([m for m in module_db if m.supports_gradgrad],
              allowed_dtypes=[torch.double])
-
     def test_gradgrad(self, device, dtype, module_info):
         self._test_gradients_helper(device, dtype, module_info, gradgradcheck)
 
