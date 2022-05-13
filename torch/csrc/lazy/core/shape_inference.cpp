@@ -545,6 +545,10 @@ std::vector<Shape> compute_shape_glu_backward(const at::Tensor & grad_output, co
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_glu_jvp(const at::Tensor & glu, const at::Tensor & x, const at::Tensor & dx, int64_t dim) {
+  return {Shape(glu.scalar_type(), glu.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction) {
   TORCH_INTERNAL_ASSERT(grad_output.scalar_type() == self.dtype());
   return {Shape(self.scalar_type(), self.sizes().vec())};
