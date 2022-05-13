@@ -8,15 +8,13 @@
 namespace torch {
 namespace lazy {
 
-const OpKind AsStrided::class_op_kind(at::aten::as_strided);
-
 AsStrided::AsStrided(
     const Value& input,
     std::vector<int64_t> size,
     std::vector<int64_t> stride,
     int64_t storage_offset)
     : TsNode(
-          OpKind(at::aten::as_strided),
+          ClassOpKind(),
           {input},
           [&]() {
             return Shape(input.shape().scalar_type(), size);
