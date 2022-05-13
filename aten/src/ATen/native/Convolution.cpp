@@ -1452,7 +1452,7 @@ at::Tensor _convolution(
                "Input type (", input.toString(), ") and bias type (", bias.toString(),
                ") should be the same");
 
-      output = at::mps_convolution(input.contiguous(), weight, bias.defined() ? bias.contiguous() : bias,
+      output = at::_mps_convolution(input.contiguous(), weight, bias.defined() ? bias.contiguous() : bias,
                                      params.padding, params.stride, params.dilation,
                                      params.groups);
 #else
@@ -1467,7 +1467,7 @@ at::Tensor _convolution(
       TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
                "Input type (", input.toString(), ") and bias type (", bias.toString(),
                ") should be the same");
-      output = at::mps_convolution_transpose(
+      output = at::_mps_convolution_transpose(
           input.contiguous(backend_memory_format), weight,
           params.padding, params.output_padding,
           params.stride, params.dilation, params.groups);

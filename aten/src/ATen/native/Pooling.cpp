@@ -124,7 +124,7 @@ Tensor max_pool2d(
   }
 #ifdef USE_MPS
   if (self.is_mps()) {
-    return at::mps_max_pool2d(
+    return at::_mps_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
 #endif

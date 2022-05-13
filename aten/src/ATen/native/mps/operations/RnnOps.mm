@@ -24,7 +24,7 @@ std::vector<long long> getTensorShape(MPSGraphTensor* mpsTensor) {
     return output_dimensions;
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> lstm_mps(const Tensor& input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
     using namespace mps;
     std::vector<Tensor> kernel_weights;
     std::vector<Tensor> recurrent_kernel_weights;

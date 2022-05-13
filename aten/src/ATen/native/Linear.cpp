@@ -27,7 +27,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     return at::mkldnn_linear(input, weight, *bias);
   }
   if (input.is_mps()) {
-   return at::mps_linear(input, weight, *bias);
+   return at::_mps_linear(input, weight, *bias);
   }
 #if defined(C10_MOBILE)
   if (xnnpack::use_linear(input, weight, *bias)) {

@@ -1512,9 +1512,9 @@
   dispatch:
     CUDA: cudnn_convolution_transpose
 
-- func: mps_convolution_transpose(Tensor self, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups) -> Tensor
+- func: _mps_convolution_transpose(Tensor self, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups) -> Tensor
   dispatch:
-    MPS: mps_convolution_transpose
+    MPS: _mps_convolution_transpose
 
 - func: mps_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool[2] output_mask) -> (Tensor, Tensor)
   dispatch:
@@ -2691,10 +2691,10 @@
 # TODO: Add this function to MPS dispatch key so that we avoid declaring it in
 # native_functions.yaml
 # https://github.com/pytorch/pytorch/issues/77394
-- func: mps_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+- func: _mps_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
-    MPS: mps_linear
+    MPS: _mps_linear
 
 - func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -2713,13 +2713,13 @@
   dispatch:
     MkldnnCPU: mkldnn_linear_backward
 
-- func: mps_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
+- func: _mps_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
   dispatch:
-    MPS: mps_linear_backward_input
+    MPS: _mps_linear_backward_input
 
-- func: mps_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
+- func: _mps_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
   dispatch:
-    MPS: mps_linear_backward_weights
+    MPS: _mps_linear_backward_weights
 
 - func: mps_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -3101,9 +3101,9 @@
 # TODO: Add this function to MPS dispatch key so that we avoid declaring it in
 # native_functions.yaml
 # https://github.com/pytorch/pytorch/issues/77394
-- func: mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+- func: _mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    MPS: mps_max_pool2d
+    MPS: _mps_max_pool2d
 
 - func: mps_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
@@ -3250,9 +3250,9 @@
 # TODO: Add this function to MPS dispatch key so that we avoid declaring it in
 # native_functions.yaml
 # https://github.com/pytorch/pytorch/issues/77394
-- func: mps_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
+- func: _mps_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   dispatch:
-    MPS: mps_convolution
+    MPS: _mps_convolution
 
 - func: mps_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -6051,9 +6051,9 @@
 
 # MPS LSTM implementation
 
-- func: lstm_mps(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+- func: _lstm_mps(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
   dispatch:
-    MPS: lstm_mps
+    MPS: _lstm_mps
 
 - func: lstm_mps_backward(Tensor grad_y, Tensor? grad_hy, Tensor? grad_cy, Tensor z_state, Tensor cell_state_fwd, Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor[], Tensor[])
   dispatch:

@@ -16,7 +16,7 @@ using namespace at::mps;
 namespace at {
 namespace native {
 
-Tensor mps_linear(
+Tensor _mps_linear(
   const Tensor& input,
   const Tensor& weight,
   const c10::optional<Tensor>& bias_opt) {
@@ -146,7 +146,7 @@ Tensor mps_linear(
   return output;
 }
 
-Tensor mps_linear_backward_input(
+Tensor _mps_linear_backward_input(
     IntArrayRef    input_size,
     const Tensor & grad_output,
     const Tensor & weight)
@@ -226,11 +226,11 @@ Tensor mps_linear_backward_input(
   }
 }
 
-std::tuple<Tensor, Tensor> mps_linear_backward_weights(
+std::tuple<Tensor, Tensor> _mps_linear_backward_weights(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight, bool bias_defined)
 {
   TORCH_CHECK(grad_output.is_mps() && input.is_mps(),
-      "mps_linear_backward: grad_output and input needs to be mps layout");
+      "_mps_linear_backward: grad_output and input needs to be mps layout");
 
    struct CachedGraph : public mps::MPSCachedGraph
   {
@@ -346,10 +346,10 @@ std::tuple<Tensor, Tensor, Tensor> mps_linear_backward(
     const Tensor& weight, std::array<bool,3> output_mask) {
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::mps_linear_backward_input(input.sizes(), grad_output, weight);
+    grad_input = at::_mps_linear_backward_input(input.sizes(), grad_output, weight);
   }
   if (output_mask[1] || output_mask[2]) {
-    std::tie(grad_weight, grad_bias) = at::mps_linear_backward_weights(grad_output, input, weight, output_mask[2]);
+    std::tie(grad_weight, grad_bias) = at::_mps_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }

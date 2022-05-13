@@ -38,7 +38,7 @@ void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
   descriptor_.groups = groups;
 }
 
-Tensor mps_convolution(
+Tensor _mps_convolution(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
@@ -453,7 +453,7 @@ Tensor mps_convolution_transpose_forward(
                                     padding, stride, dilation, groups, false);
 }
 
-Tensor mps_convolution_transpose(
+Tensor _mps_convolution_transpose(
     const Tensor& input_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups) {
@@ -469,7 +469,7 @@ Tensor mps_convolution_transpose_backward_input(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups)
 {
-  return at::mps_convolution(
+  return at::_mps_convolution(
     grad_output_t, weight_t, c10::nullopt, padding, stride, dilation, groups);
 }
 
