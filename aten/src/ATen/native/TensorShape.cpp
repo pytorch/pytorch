@@ -3137,7 +3137,7 @@ Tensor diag(const Tensor& self, int64_t dimension) {
 }
 
 Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, self.scalar_type(), "diag", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kBool, self.scalar_type(), "diag", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });
   return result;

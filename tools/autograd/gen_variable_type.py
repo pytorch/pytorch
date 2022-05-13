@@ -851,12 +851,12 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         and (len(differentiable_outputs) > 0)
     )
 
-    # TODO: check with Alban/Jeffrey.
-    # Now that we have out= ops that can have no returns, how should this work?
     if (
         info is not None
         and info.has_derivatives
         and not requires_derivative
+        # out= ops are allowed to have zero returns which cause requires_derivative to be False
+        # we shouldn't error out though (out= ops for autograd just redispatch)
         and len(f.func.returns) > 0
     ):
         raise RuntimeError(
