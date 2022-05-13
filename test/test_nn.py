@@ -42,7 +42,7 @@ from torch.testing._internal.common_dtype import integral_types, floating_types_
     floating_and_complex_types_and
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
-    download_file, get_function_arglist, load_tests, \
+    download_file, get_function_arglist, load_tests, skipIfMps,\
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -13065,6 +13065,17 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
+    def _test_LayerNorm_cpu_mixed_dtype(self, device):
+        for elementwise_affine in [True, False]:
+            # layer norm input shape is normalized to m x n, cpu vectorized on n,
+            # so make sure n exceeds vector length
+            input = torch.empty(2, 3, 11, 3, device=device, dtype=torch.bfloat16).random_(1, 10)
+            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, torch.bfloat16)
+            m2 = deepcopy(m).to(device, torch.float)
+            out = m(input)
+            out2 = m2(input)
+            self.assertEqual(out, out2)
+
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
             (1, 2, 3, 4): 2,
@@ -14439,6 +14450,9 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
 
+        if self.device_type == 'cpu':
+            self._test_LayerNorm_cpu_mixed_dtype(device)
+
     @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):
         def layer_norm_ref(X, gamma, beta, normalized_shape, eps):
@@ -14464,6 +14478,28 @@ class TestNNDeviceType(NNTestCase):
             layer_norm.cpu()
             Y_cpu = layer_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
+
+    @onlyCPU
+    def test_glu_bfloat16(self, device):
+        def test_dtype(fn, input, dtype):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out = fn(input)
+            out.sum().backward()
+            out2 = fn(input2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2, exact_dtype=False)
+            self.assertEqual(input.grad, input2.grad, atol=1e-2, rtol=0, exact_dtype=False)
+
+        def func(device):
+            return torch.nn.GLU(dim=-1).to(device)
+
+        shapes = [[1, 3, 1, 6], [1, 3, 1, 128], [1, 3, 256, 256]]
+        for shape in shapes:
+            x = torch.randn(shape, device=device)
+            test_dtype(func(device), x, torch.bfloat16)
 
     @onlyNativeDeviceTypes
     def test_GroupNorm_general(self, device):
@@ -17173,6 +17209,7 @@ class TestNNDeviceType(NNTestCase):
         tol = 2 * torch.finfo(dtype).eps
         self.assertEqual(logits_soft.grad, logits_hard.grad, atol=tol, rtol=0)
 
+    @skipIfMps
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_gumbel_softmax(self, device, dtype):
@@ -18609,27 +18646,32 @@ class TestNNDeviceType(NNTestCase):
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
+    @skipIfMps
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
+    @skipIfMps
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_maxpool_indices_no_batch_dim(self, device, dtype):
         """Check that indices with no batch dim is consistent with a single batch."""
@@ -18795,6 +18837,7 @@ class TestNNDeviceType(NNTestCase):
                                        lambda: fn_module(x))
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -18809,6 +18852,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(x.shape[2], res.shape[2])
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -19129,12 +19173,12 @@ class TestNNDeviceType(NNTestCase):
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_conv_thnn_nhwc(self, device, dtype):
-        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups):
+        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups, weight_memory_format):
             input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
                 .to(memory_format=torch.channels_last)
             input.requires_grad_()
             conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)\
-                .to(device='cpu', dtype=dtype, memory_format=torch.channels_last)
+                .to(device='cpu', dtype=dtype, memory_format=weight_memory_format)
             for p in conv.parameters():
                 p.data = torch.randint_like(p, -3, 3)
 
@@ -19161,15 +19205,16 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
 
         with torch.backends.mkldnn.flags(enabled=False):
-            # non-dilated conv: thnn_conv2d normal path (with im2col)
-            helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1)
-            helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8)
-            # non-dilated conv: thnn_conv2d fast path (skip im2col)
-            helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1)
-            helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16)
-            # dilated conv: slow_conv_dilated2d
-            helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1)
-            helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16)
+            for mf in [torch.contiguous_format, torch.channels_last]:
+                # non-dilated conv: thnn_conv2d normal path (with im2col)
+                helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1, weight_memory_format=mf)
+                helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8, weight_memory_format=mf)
+                # non-dilated conv: thnn_conv2d fast path (skip im2col)
+                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1, weight_memory_format=mf)
+                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16, weight_memory_format=mf)
+                # dilated conv: slow_conv_dilated2d
+                helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1, weight_memory_format=mf)
+                helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16, weight_memory_format=mf)
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
@@ -19971,7 +20016,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
     def test_elu_inplace_overlap(self, device):
-        x = torch.randn((1, 6), device=device).expand((6, 6))
+        x = torch.randn((1, 6), dtype=torch.bfloat16, device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.elu(x, inplace=True)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -21520,62 +21565,6 @@ class TestStateDictHooks(TestCase):
             )
             m.load_state_dict(state_dict)
             self.assertEqual(2, hook_called)
-
-    def test_load_state_dict_post_hook(self):
-        hook_called = 0
-
-        class MyModule(nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.foo = torch.nn.Parameter(torch.rand(10))
-
-            def my_post_load_hook(self, module, incompatible_keys):
-                assert module is self
-                nonlocal hook_called
-                incompatible_keys.missing_keys.append("foo")
-                incompatible_keys.unexpected_keys.append("bar")
-                hook_called += 1
-
-        nested = MyModule()
-        wrapped = nn.ModuleList([nested])
-        handle = nested.register_load_state_dict_post_hook(
-            nested.my_post_load_hook,
-        )
-        # Hook must be called even if it is wrapped
-        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
-        self.assertEqual(hook_called, 1)
-        # Ensure that the hook modified missing_keys and unexpected_keys
-        missing = ret.missing_keys
-        unexpected = ret.unexpected_keys
-        self.assertEqual(missing, ["foo"])
-        self.assertEqual(unexpected, ["bar"])
-        # When called with strict=True, the error raised should mention the
-        # missing and unexpected keys the hook added.
-        with self.assertRaisesRegex(RuntimeError, "foo.*\n.*bar"):
-            wrapped.load_state_dict(wrapped.state_dict(), strict=True)
-        self.assertEqual(hook_called, 2)
-        # Removing the hook via handle.remove() should cause it not to
-        # fire anymore.
-        handle.remove()
-        # Hook did not run so it should not have added any keys
-        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
-        self.assertEqual(ret.missing_keys, [])
-        self.assertEqual(ret.unexpected_keys, [])
-        # hook_called should not have been incremented
-        self.assertEqual(hook_called, 2)
-
-        def load_hook_clear_incompatible(module, incompatible_keys):
-            incompatible_keys.missing_keys.clear()
-            incompatible_keys.unexpected_keys.clear()
-
-        nested.register_load_state_dict_post_hook(load_hook_clear_incompatible)
-        state_dict = wrapped.state_dict()
-        state_dict["extra"] = torch.ones(1)
-        # load state_dict with strict=True should not throw.
-        ret = wrapped.load_state_dict(state_dict, strict=True)
-        # explicitly ensure that the post hook clearned out incompatible_keys
-        self.assertEqual([], ret.missing_keys)
-        self.assertEqual([], ret.unexpected_keys)
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())

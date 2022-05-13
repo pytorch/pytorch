@@ -948,7 +948,8 @@ std::string generate_reduction_code(
       env.s("max_threads_lb", std::to_string(max_threads_codegen));
       // reductions don't support dynamic casting, so the only way to get nonstandard types
       // is through input
-      if (f_inputs_type == "at::Half") {
+      if (f_inputs_type == "at::Half" || f_inputs_type == "std::complex<at::Half>") {
+        // complex<Half> depends on complex<T> and Half dtypes.
         env.s("half_string", jiterator_half_support_literal);
       } else {
         env.s("half_string", "");
@@ -959,7 +960,9 @@ std::string generate_reduction_code(
         env.s("bfloat16_string", "");
       }
       if (f_inputs_type == "std::complex<float>" ||
-          f_inputs_type == "std::complex<double>" ) {
+          f_inputs_type == "std::complex<double>" ||
+          f_inputs_type == "std::complex<at::Half>" ) {
+        // complex<Half> depends on complex<T> and Half dtypes.
         env.s("traits_string", get_traits_string());
         env.s("complex_body_string", get_complex_body_string());
         env.s("complex_math_string", get_complex_math_string());
@@ -971,8 +974,7 @@ std::string generate_reduction_code(
         env.s("complex", std::to_string(0));
       }
       if (f_inputs_type == "std::complex<at::Half>") {
-        TORCH_CHECK(
-            false, "complex<Half> reduction not supported by JITERATOR");
+        env.s("complex_half_body_string", get_complex_half_body_string());
       } else {
         env.s("complex_half_body_string", "");
       }
