@@ -165,7 +165,9 @@ def _is_packed_list(list_value):
 
 def parse_args(*arg_descriptors):
     """A decorator which converts args from torch._C.Value to built-in types.
+
     For example:
+
     ```
     @parse_args('v', 'i', 'fs')
     foo(g, a, b, c):
@@ -174,6 +176,7 @@ def parse_args(*arg_descriptors):
         assert isinstance(c, list)
         assert isinstance(c[0], float)
     ```
+
     Args:
         arg_descriptors: list of str, where each element is
             a string that specifies the type to convert to. Valid descriptors:
