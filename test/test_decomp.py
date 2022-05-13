@@ -152,7 +152,7 @@ def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
         decomp_diff = (decomp - ref).abs().max()
-        atol = 1e-10
+        atol = 1e-7
         if decomp_diff > orig_diff + atol:
             raise RuntimeError(
                 f"Difference from float64 is larger with decomposition {op.__name__}"
@@ -275,8 +275,6 @@ CROSS_REF_EXCLUDE_SET = {
     # decomp has problem even with opmath
     ("cuda", torch.bfloat16, "nn.functional.layer_norm"),
     ("cuda", torch.float16, "nn.functional.layer_norm"),
-    ("cuda", torch.bfloat16, "nn.functional.batch_norm"),
-    ("cuda", torch.float16, "nn.functional.batch_norm"),
     ("cuda", torch.bfloat16, "nn.functional.instance_norm"),
     ("cuda", torch.float16, "nn.functional.instance_norm"),
     # doesn't work

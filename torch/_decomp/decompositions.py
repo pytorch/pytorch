@@ -975,10 +975,8 @@ def native_layer_norm_backward(
         d_bias = None
     return (d_input, d_weight, d_bias)
 
-
 # TODO: Correct the type promotion semantics
 @register_decomposition(aten.native_batch_norm)
-@pw_cast_for_opmath
 def native_batch_norm(
     input: Tensor,
     weight: Optional[Tensor],
@@ -990,11 +988,11 @@ def native_batch_norm(
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
     reduction_dims = [0] + list(range(2, input.dim()))
+    computation_dtype = utils.get_computation_dtype(input.dtype)
     if training:
-        # save_mean = torch.sum(input / (input.shape[0] * input.shape[2]), dim=reduction_dims)
-        biased_var, save_mean = torch.var_mean(
-            input, dim=reduction_dims, unbiased=False
-        )
+        input_acc = input.to(dtype=computation_dtype)
+        biased_var = torch.var(input_acc, dim=reduction_dims, unbiased=False)
+        save_mean = torch.mean(input_acc, dim=reduction_dims)
         save_invstd = 1 / (torch.sqrt(biased_var + eps))
 
         if running_mean is not None:
@@ -1010,6 +1008,8 @@ def native_batch_norm(
         invstd = save_invstd
     else:
         assert running_mean is not None and running_var is not None
+        running_mean = running_mean.to(dtype=computation_dtype)
+        running_var = running_var.to(dtype=computation_dtype)
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
@@ -1031,7 +1031,7 @@ def native_batch_norm(
     weight = _unsqueeze_to_dim(weight, input.dim() - 1)
     bias = _unsqueeze_to_dim(bias, input.dim() - 1)
     output = ((input - mean) * invstd) * weight + bias
-    return output, save_mean, save_invstd
+    return output.to(dtype=input.dtype), save_mean, save_invstd
 
 
 @register_decomposition(aten.clamp_min)

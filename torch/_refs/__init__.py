@@ -918,7 +918,7 @@ def _reduction(
     # all the math ops (including comparisons) are still defined only for a computation type,
     # so promotion will still happen. We are doing it explicitly here
     inp_dtype = dtype if dtype is not None else a.dtype
-    computation_dtype = utils._get_computation_dtype(inp_dtype)
+    computation_dtype = utils.get_computation_dtype(inp_dtype)
     a_converted = prims.convert_element_type(a, computation_dtype)
     result = prim(a_converted, dims)
 
