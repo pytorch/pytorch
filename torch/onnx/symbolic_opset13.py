@@ -64,6 +64,7 @@ def frobenius_norm(g, self, dim=None, keepdim=False):
 
 @parse_args("v", "v", "i", "i")
 def split(g, self, split_size_or_sizes, dim, _outputs=None):
+    import pdb; pdb.set_trace()
     if not sym_help._is_split_static(split_size_or_sizes, _outputs):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
         if _outputs is None:
@@ -126,6 +127,122 @@ def unsafe_split(g, self, split_size_or_sizes, dim, _outputs=None):
 
 def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     return split_with_sizes(g, self, split_sizes, dim, _outputs)
+
+
+@parse_args("v", "v", "i", "i")
+def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
+    import pdb
+    pdb.set_trace()
+    if not sym_help._is_split_static(indices_or_sections, _outputs):
+        axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+        
+        if sym_help._is_tensor(indices_or_sections):
+            
+            
+            padding_0 = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+            indices_or_sections = g.op("Concat", padding_0, indices_or_sections, axis_i=0)
+
+            # loop conditions
+            const_1 = g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))
+            loop_len = sym_help._size_helper(g, indices_or_sections, g.op("Constant", value_t=torch.LongTensor([0])))
+            loop_len = g.op("Add", loop_len, const_1)
+            loop_condition = g.op("Cast", const_1, to_i=9)
+
+            # Create an empty sequence to store final expansions
+            final_splits = g.op("SequenceEmpty")
+            loop = g.op("Loop", loop_len, loop_condition, final_splits)
+
+            # Loop inputs
+            loop_block = _add_block(loop.node())
+            block_input_iter = _add_input_to_block(loop_block)
+            cond = _add_input_to_block(loop_block)
+            final_splits = _add_input_to_block(loop_block)
+            
+            start = loop_block.op("SequenceAt", indices_or_sections, block_input_iter)
+            end = loop_block.op("SequenceAt", indices_or_sections, loop_block.op("Add", block_input_iter, const_1))
+
+            loop_block.op("Slice", indices_or_sections, start, end, axis)
+
+            # Loop outputs
+            cond_out = loop_block.op("Cast", loop_condition, to_i=9)
+            _add_output_to_block(loop_block, cond_out)
+            _add_output_to_block(loop_block, final_splits)
+
+            loop_out = loop.node().output()
+            last_idx = g.op("Constant", value_t=torch.tensor(-1, dtype=torch.long))
+            last_element = g.op("SequenceAt", indices_or_sections, last_idx)
+            last_slice = g.op("Slice", indices_or_sections, last_element, last_idx, axis)
+
+            import pdb
+            pdb.set_trace()
+            return g.op("Concat", loop_out, last_slice, axis_i=dim)
+
+        else:
+            indices_or_sections_sizes = sym_help._get_tensor_dim_size(indices_or_sections, 0)
+            for i in range([0, *indices_or_sections_sizes]):
+                start = op("SequenceAt", indices_or_sections, block_input_iter)
+                end = g.op("Gather", indices_or_sections, i, axis)
+                indices_or_sections_sizes
+                g.op("Slice", self, start, end, axis)
+            g.op("ConcatFromSequence", ())
+            import pdb
+            pdb.set_trace()
+        
+        split_out = g.op("Slice", self, indices_or_sections, axis, )
+        indices = [
+            sym_help._unsqueeze_helper(g, v, [0])
+            for v in sym_help._unpack_list(indices_or_sections)
+        ]
+        
+        
+        if _outputs is None:
+            return split_out
+        # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
+        if (
+            sym_help._is_packed_list(indices_or_sections)
+            and len(sym_help._unpack_list(indices_or_sections)) == _outputs
+        ):
+            split_sizes = [
+                sym_help._unsqueeze_helper(g, v, [0])
+                for v in sym_help._unpack_list(indices_or_sections)
+            ]
+
+            start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+            axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            res = []
+            for i in range(_outputs):
+                end = g.op(
+                    "Add", start, split_sizes[i]
+                )  # split_sizes is a list of same length as _outputs
+                res.append(g.op("Slice", self, start, end, axis))
+                start = end
+            return res
+        return [
+            g.op(
+                "SequenceAt",
+                split_out,
+                g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)),
+            )
+            for i in range(_outputs)
+        ]
+
+    split_val = indices_or_sections.node()["value"]
+    if split_val.dim() > 0:
+        return g.op("Split", self, indices_or_sections, axis_i=dim, outputs=_outputs)
+    split_size = sym_help._get_const(indices_or_sections, "i", "split_size")
+
+    size = sym_help._get_tensor_dim_size(self, dim)
+    if size is None:
+        if _outputs is not None:
+            size = split_size * _outputs
+        else:
+            raise RuntimeError("Unknown dimension size not supported")
+    splits = [split_size] * (size // split_size)
+    leftover = size % split_size
+    if leftover:
+        splits.append(leftover)
+    splits = g.op("Constant", value_t=torch.tensor(splits))
+    return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 
 @parse_args("v", "i", "i")
