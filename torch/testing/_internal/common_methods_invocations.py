@@ -14757,9 +14757,11 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta", dtypes=(torch.chalf,)),
                        # "nonzero_count_cpu" not implemented for 'ComplexHalf'
                        # "nonzero_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, "TestSparseCSR", "test_sparse_csr_consistency", dtypes=(torch.chalf,)),
+                       DecorateInfo(unittest.expectedFailure, "TestSparseCSR",
+                                    "test_sparse_csr_consistency", dtypes=(torch.chalf,)),
                        # "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, "TestSparseCSR", "test_zero_to_zero_correspondence_unary", dtypes=(torch.chalf,)),
+                       DecorateInfo(unittest.expectedFailure, "TestSparseCSR",
+                                    "test_zero_to_zero_correspondence_unary", dtypes=(torch.chalf,)),
 
                    )),
     UnaryUfuncInfo('isposinf',
