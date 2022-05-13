@@ -28,6 +28,7 @@ const char angle_name[] = "angle_kernel";
 void angle_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if(at::isComplexType(dtype)) {
+    using scalar_t = c10::complex<at::Half>;
 #if AT_USE_JITERATOR()
     static const auto angle_string = jiterator_stringify(
         template <typename T>
