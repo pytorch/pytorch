@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
+import sys
 import math
 import random
 import unittest
@@ -22,85 +23,11 @@ from typing import Iterator
 import logging
 import contextlib
 
-
-# TODO: move this into library proper
-@contextlib.contextmanager
-def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()
-    try:
-        yield
-    finally:
-        del guard
-
-
-# How the chain of calls works for LoggingTensor:
-# 1. Call torch.sin
-# 2. Attempt __torch_function__. In LoggingTensor torch function is disabled so we bypass it entirely
-# 3. Enter dispatcher, wind your way through Autograd
-# 4. Hit Python dispatch key, call __torch_dispatch__
-
-# TODO: TensorBase should work
-class LoggingTensor(torch.Tensor):
-    elem: torch.Tensor
-
-    __slots__ = ['elem']
-
-    @staticmethod
-    def __new__(cls, elem, *args, **kwargs):
-        # The wrapping tensor (LoggingTensor) is just a meta tensor, so it
-        # doesn't hold any memory (meta tensor is generally the preferred type
-        # of tensor you want to make a subclass from)...
-        r = torch.Tensor._make_subclass(cls, elem.to('meta'), elem.requires_grad)
-        # ...the real tensor is held as an element on the tensor.
-        r.elem = elem
-        return r
-
-    def __repr__(self):
-        return f"LoggingTensor({self.elem})"
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        def unwrap(e):
-            return e.elem if isinstance(e, LoggingTensor) else e
-
-        def wrap(e):
-            return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
-
-        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
-        return rs
-
-
-class DispatchWrapperClass(torch.Tensor):
-    # We need to update the new method here to tell PyTorch what should be
-    # the Tensor corresponding to the wrapper object
-    @staticmethod
-    def __new__(cls, wrapped_tensor):
-        # Use a Tensor that has the same metadata as wrapped_tensor for the
-        # wrapper.
-        return torch.Tensor._make_subclass(cls, wrapped_tensor.to('meta'))
-
-    def __init__(self, wrapped_tensor):
-        self.wrapped_tensor = wrapped_tensor
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}(wrapped_tensor={self.wrapped_tensor})"
-
-    # We just rename `function` -> `dispatch`
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        # All the code here live "below" autograd, so no need to worry about it.
-        print(f"Calling into {func.__module__}.{func.__name__}")
-
-        def unwrap(e):
-            return e.wrapped_tensor if isinstance(e, DispatchWrapperClass) else e
-
-        # Wrap back all Tensors into our custom class
-        def wrap(e):
-            return DispatchWrapperClass(e) if isinstance(e, torch.Tensor) else e
-
-        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})))
-        return rs
+# Same logic as test_cuda.py
+if not torch.backends.mps.is_available():
+    print('MPS not available, skipping tests', file=sys.stderr)
+    TestCase = object  # noqa: F811
+    NNTestCase = object  # noqa: F811
 
 
 class MPSReluTest(TestCase):
@@ -147,9 +74,6 @@ class MPSReluTest(TestCase):
                 device="cpu")
 
     def testNumbersGPU(self):
-        # Check for the GPU to be available
-        if not torch.backends.mps.is_available():
-            self.skipTest("No GPU available")
         for t in [np.float16, np.float32]:
             self._testRelu(
                 np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
