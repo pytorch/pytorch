@@ -9804,6 +9804,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16]
                                                                 if (SM53OrLater or TEST_WITH_ROCM) else []),
            assert_autodiffed=True,
+           assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
@@ -12676,6 +12677,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           assert_jit_shape_analysis=True,
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
@@ -13631,6 +13633,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_topk),
     # Multiple variants for batch_norm to test with and without cuDNN disabled
     # See https://github.com/pytorch/pytorch/pull/63218#discussion_r688549391 for more details
@@ -13640,6 +13643,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_batch_norm,
            skips=(
                # see https://github.com/pytorch/pytorch/issues/71286
@@ -15385,7 +15389,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 104448
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),),
-           assert_jit_shape_analysis=False,  # TODO: support index.Tensor()
            sample_inputs_func=sample_inputs_getitem),
     OpInfo('index_put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -17764,6 +17767,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
         supports_forward_ad=True,
+        assert_jit_shape_analysis=True,
         skips=(
             # RuntimeError:
             # undefined value tensor:
