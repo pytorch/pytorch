@@ -899,8 +899,7 @@ def native_layer_norm(
 
 
 # TODO: Correct the type promotion semantics
-# TODO: Fix native_layer_norm_backward
-# @register_decomposition(aten.native_layer_norm_backward)
+@register_decomposition(aten.native_layer_norm_backward)
 def native_layer_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -913,6 +912,8 @@ def native_layer_norm_backward(
 ) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
     input_shape = input.shape
     input_ndim = input.dim()
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    grad_out, input_, weight, bias = [x.to(computation_dtype) if x is not None else x for x in (grad_out, input, weight, bias)]
 
     axis = input_ndim - len(normalized_shape)
     inner_dims = input_shape[axis:]
@@ -934,7 +935,7 @@ def native_layer_norm_backward(
             input.new_zeros(input_shape[axis:]),
         )
 
-    x_hat = (input - mean) * rstd
+    x_hat = (input_ - mean) * rstd
     if weight is not None:
         grad_x_hat = grad_out * weight
     else:
@@ -946,11 +947,11 @@ def native_layer_norm_backward(
     c3 = torch.mul(x_hat, c2)
 
     inner = a - b - c3
-
+    d_input = None
+    d_weight = None
+    d_bias = None
     if output_mask[0]:
         d_input: Optional[Tensor] = (rstd / N) * inner
-    else:
-        d_input = None
 
     if output_mask[1] and weight is not None:
         if len(outer_dim_indices) > 0:
@@ -959,17 +960,14 @@ def native_layer_norm_backward(
             )
         else:
             d_weight = grad_out * x_hat
-    else:
-        d_weight = None
 
     if output_mask[2] and bias is not None:
         if len(outer_dim_indices) > 0:
             d_bias: Optional[Tensor] = torch.sum(grad_out, outer_dim_indices, False)
         else:
             d_bias = grad_out
-    else:
-        d_bias = None
-    return (d_input, d_weight, d_bias)
+
+    return tuple(x.to(input.dtype) if x is not None else x for x in (d_input, d_weight, d_bias))
 
 
 @register_decomposition(aten.native_batch_norm)
