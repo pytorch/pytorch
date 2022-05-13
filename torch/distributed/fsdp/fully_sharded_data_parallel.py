@@ -40,12 +40,6 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
-from .flatten_params_wrapper import (
-    FLAT_PARAM,
-    FPW_MODULE,
-    FlatParameter,
-    FlattenParamsWrapper,
-)
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
@@ -56,15 +50,24 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _unflatten_optim_state,
 )
-from ._utils import _apply_to_tensors, _replace_by_prefix
-from .wrap import _recursive_wrap
+from ._utils import (
+    _apply_to_modules, _apply_to_tensors, _replace_by_prefix,
+    _override_batchnorm_mixed_precision, _contains_batchnorm
+)
+from .flatten_params_wrapper import (
+    FLAT_PARAM,
+    FPW_MODULE,
+    FlatParameter,
+    FlattenParamsWrapper,
+)
+from .wrap import _recursive_wrap, _wrap_batchnorm_individually, _or_policy
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
 
 _TORCHDISTX_AVAIL = True
 try:
-    from torchdistx import fake, deferred_init
+    from torchdistx import deferred_init, fake
 except ImportError:
     _TORCHDISTX_AVAIL = False
 
@@ -321,9 +324,9 @@ class _ExecOrderData():
         _all_flat_params (List[FlatParameter]): A :class:`list` of all
             flattened parameters contained in the FSDP module hierarchy with
             the list index implicitly giving a unique parameter index.
-        param_to_unflat_param_names (Dict[FlatParameter, List[str]]): A mapping
-            from flattened parameter to the comprising unflattened parameters'
-            names.
+        _param_to_unflat_param_names (Dict[FlatParameter, List[str]]): A
+            mapping from flattened parameter to the comprising unflattened
+            parameters' names.
         is_first_iter (bool): Whether executing in the first iteration or not.
         param_order (List[int]): Order that parameters participate in the
             forward pass; constructed on the first iteration and validated
@@ -388,9 +391,8 @@ class _ExecOrderData():
         return self._param_to_unflat_param_names[param]
 
     def reset(self):
-        """Called in :meth:`_wait_for_post_backward` or in
-        :meth:`_post_backward_hook` when inside ``no_sync()`` to reset data for
-        the next iteration."""
+        """Called in :meth:`_wait_for_post_backward` to reset data for the next
+        iteration."""
         self.is_first_iter = False
         self.index = 0
         # `reset()` marks the end of an iteration, so transition if needed
@@ -436,6 +438,10 @@ class FullyShardedDataParallel(nn.Module):
         results since FSDP will use the newly-reduced gradient instead of
         accumulating with any existing gradient.
 
+    .. warning::
+        Changing the original parameter variable names after construction will
+        lead to undefined behavior.
+
     Args:
         module (nn.Module):
             module to be wrapped with FSDP.
@@ -458,13 +464,17 @@ class FullyShardedDataParallel(nn.Module):
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
             the returned FSDP root instance.
-            ``default_auto_wrap_policy`` written in ``torch.distributed.fsdp.wrap`` is
+            ``size_based_auto_wrap_policy`` written in ``torch.distributed.fsdp.wrap`` is
             an example of ``auto_wrap_policy`` callable, this policy wraps layers
-            with parameter sizes larger than 100M. Users can supply the customized
+            with the number of parameters larger than 100M. ``transformer_auto_wrap_policy``
+            written in ``torch.distributed.fsdp.wrap`` is an example of ``auto_wrap_policy``
+            callable for tranformer-like model architectures. Users can supply the customized
             ``auto_wrap_policy`` callable that should accept following arguments:
             ``module: nn.Module``, ``recurse: bool``, ``unwrapped_params: int``,
             extra customized arguments could be added to the customized
-            ``auto_wrap_policy`` callable as well.
+            ``auto_wrap_policy`` callable as well. It is a good practice to print out
+            the sharded model and check whether the sharded model is what
+            the application wants and then adjust accordingly.
 
             Example::
 
@@ -488,12 +498,20 @@ class FullyShardedDataParallel(nn.Module):
             that only floating point data is cast to the reduced precision. This allows
             users potential memory saving and training speedup while trading off
             accuracy during model training. If ``None``, no mixed precision is applied.
+            Note that if ``mixed_precision`` is enabled for FSDP model that
+            contains ``BatchNorm`` with ``auto_wrap_policy``, FSDP will take
+            care to disable mixed precision for ``BatchNorm`` units by wrapping
+            them separately in their own FSDP unit with ``mixed_precision=None``.
+            This is done because several ``BatchNorm`` kernels do not implement
+            reduced type support at the moment. If individually wrapping the model,
+            users must take care to set ``mixed_precision=None`` for
+            ``BatchNorm`` units.
             (Default: ``None``)
         ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
-            own parameters and child modules' parameters are ignored by this
-            instance. None of the modules directly in ``ignored_modules``
-            should be :class:`FullyShardedDataParallel` instances, and any
-            child modules that are already-constructed
+            own parameters and child modules' parameters and buffers are
+            ignored by this instance. None of the modules directly in
+            ``ignored_modules`` should be :class:`FullyShardedDataParallel`
+            instances, and any child modules that are already-constructed
             :class:`FullyShardedDataParallel` instances will not be ignored if
             they are nested under this instance. This argument may be used to
             avoid sharding specific parameters when using an
@@ -523,12 +541,12 @@ class FullyShardedDataParallel(nn.Module):
                 >>> module = MyModule(device="meta")
                 >>> def my_init_fn(module):
                 >>>     # responsible for initializing a module, such as with reset_parameters
-                >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=default_auto_wrap_policy)
+                >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=size_based_auto_wrap_policy)
                 >>> print(next(fsdp_model.parameters()).device) # current CUDA device
                 >>> # With torchdistX
                 >>> module = deferred_init.deferred_init(MyModule, device="cuda")
                 >>> # Will initialize via deferred_init.materialize_module().
-                >>> fsdp_model = FSDP(module, auto_wrap_policy=default_auto_wrap_policy)
+                >>> fsdp_model = FSDP(module, auto_wrap_policy=size_based_auto_wrap_policy)
 
     """
 
@@ -546,19 +564,23 @@ class FullyShardedDataParallel(nn.Module):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        # Save the ignored modules and their parameters, including the
-        # parameter names, which are needed to filter the model state dict
-        self._ignored_modules = self._get_ignored_modules(ignored_modules)
-        ignored_params = self._get_ignored_params(self._ignored_modules)
-        param_to_unflat_param_names = _get_param_to_unflat_param_names(module)
-        self._ignored_param_to_param_name = {}
-        for param in ignored_params:
-            unflat_param_names = param_to_unflat_param_names[param]
-            assert len(unflat_param_names) == 1, \
-                "Only `FlatParameter`s can map to >1 unflattened parameter " \
-                "name, and `_get_ignored_params()` should have excluded " \
-                "them; check `_get_param_to_unflat_param_names()`"
-            self._ignored_param_to_param_name[param] = unflat_param_names[0]
+        # Validate the ignored modules and derive the ignored parameters/buffers
+        ignored_modules = self._get_ignored_modules(module, ignored_modules)
+        ignored_params, ignored_param_names = \
+            self._get_ignored_params(module, ignored_modules)
+        buffer_names = self._get_buffer_names(module)
+        # Compute the names to ignore for full state dict cloning (i.e. those
+        # of the ignored modules' parameters and of all modules' buffers)
+        self._ignored_param_names = ignored_param_names
+        self._buffer_names = buffer_names
+        # NOTE: Since the names are computed at construction time, if the user
+        # changes them later, then FSDP will not properly ignore them. However,
+        # the `FlatParameter` implementation already relies on this assumption.
+        # We do this at construction time since we want the fully prefixed
+        # parameter names matching the keys in the model state dict (namely,
+        # including the wrapped module's name in the prefix), which may be done
+        # most non-intrusively here before flattening.
+
         # if auto_wrap_policy is specified, submodules should not be
         # already wrapped, otherwise we'd attempt to double wrap them resulting
         # in errors.
@@ -568,11 +590,27 @@ class FullyShardedDataParallel(nn.Module):
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
                 err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
             )
+            if mixed_precision is not None and _contains_batchnorm(module):
+                _override_batchnorm_mixed_precision(module)
+                policy_to_use = functools.partial(
+                    _or_policy,
+                    policies=[_wrap_batchnorm_individually, auto_wrap_policy]
+                )
+                warnings.warn(
+                    "Mixed precision was specified for FSDP module with"
+                    " batchnorm submodules wrapped via ``auto_wrap_policy``."
+                    " BatchNorm units will be wrapped as a separate FSDP unit,"
+                    " with mixed_precision disabled (i.e. set to ``None``)"
+                    " as several BatchNorm kernels would raise errors when"
+                    " operating on reduced precision inputs."
+                )
+            else:
+                policy_to_use = auto_wrap_policy
             _recursive_wrap(
                 module,
-                auto_wrap_policy=auto_wrap_policy,
+                auto_wrap_policy=policy_to_use,
                 wrapper_cls=FullyShardedDataParallel,
-                ignored_modules=self._ignored_modules,
+                ignored_modules=ignored_modules,
                 ignored_params=ignored_params,
                 # Note that we have the recursive_wrap skip wrapping for
                 # the outermost (this) module otherwise it will result in a
@@ -737,18 +775,20 @@ class FullyShardedDataParallel(nn.Module):
 
     def _get_ignored_modules(
         self,
+        root_module: torch.nn.Module,
         _ignored_modules: Any,
     ) -> Set[torch.nn.Module]:
         """
-        Checks that ``_ignored_modules`` is an iterable of ``torch.nn.Module``
-        s without any :class:`FullyShardedDataParallel` instances and then
-        returns them and their children as a :class:`set`, excluding nested
-        :class:`FullyShardedDataParallel` instances.
+        Checks that ``_ignored_modules`` (1) is an iterable of
+        ``torch.nn.Module`` s without any :class:`FullyShardedDataParallel`
+        instances and does not contain the top-level ``module`` itself, and
+        then returns them and their children as a :class:`set`, excluding
+        nested :class:`FullyShardedDataParallel` instances.
 
-        We include the child modules to better match user intuition since
-        ignoring a module should ignore its child modules as well, and we
-        exclude :class:`FullyShardedDataParallel` instances since ``self`` may
-        be the intended root instance that manages them.
+        We include the child modules of modules in ``_ignored_modules`` to be
+        more intuitive since ignoring a module should ignore its child modules
+        as well, and we exclude :class:`FullyShardedDataParallel` instances
+        since ``self`` may be the intended root instance that manages them.
         """
         if _ignored_modules is None:
             return set()
@@ -774,19 +814,65 @@ class FullyShardedDataParallel(nn.Module):
             if not isinstance(child, FullyShardedDataParallel) and
             not isinstance(child, FlattenParamsWrapper)
         )
+        if root_module in ignored_modules:
+            raise ValueError(
+                "Trying to ignore the top-level module passed into the FSDP "
+                "constructor itself will result in all parameters being "
+                f"ignored and is not supported: {module}"
+            )
         return ignored_modules
 
     def _get_ignored_params(
         self,
+        root_module: torch.nn.Module,
         ignored_modules: Set[torch.nn.Module],
-    ) -> Set[torch.nn.Parameter]:
+    ) -> Tuple[Set[torch.nn.Parameter], Set[str]]:
         """
-        Returns the parameters of the modules in ``ignored_modules`` as a
-        :class:`set`, excluding any :class:`FlatParameter` s.
+        Returns the parameters of the modules in ``ignored_modules``,
+        excluding any :class:`FlatParameter` s and their fully prefixed names,
+        both as :class:`set` s.
+
+        Args:
+            root_module (torch.nn.Module): Top-level module passed into the
+                FSDP constructor from which to derive the fully prefixed names.
+            ignored_modules (Set[torch.nn.Module]): Modules to ignore.
         """
-        return set(
+        ignored_params = set(
             p for m in ignored_modules for p in m.parameters()
             if not isinstance(p, FlatParameter)
+        )
+        param_to_unflat_param_names = _get_param_to_unflat_param_names(
+            root_module, dedup_shared_params=False,
+        )
+        ignored_param_names = set()
+        for param in ignored_params:
+            unflat_param_names = param_to_unflat_param_names[param]
+            ignored_param_names.update(unflat_param_names)
+        return ignored_params, ignored_param_names
+
+    def _get_buffer_names(self, root_module: torch.nn.Module) -> Set[str]:
+        """
+        Returns the fully prefixed names of all buffers in the module hierarchy
+        rooted at ``root_module`` as a class:`set`.
+
+        Args:
+            root_module (torch.nn.Module): Top-level module passed into the
+                FSDP constructor from which to derive the fully prefixed names.
+        """
+        def module_fn(module, prefix, buffer_names):
+            # For FSDP modules, only add the entry when considering the
+            # contained `FlattenParamsWrapper` to avoid duplication
+            if not isinstance(module, FullyShardedDataParallel):
+                for buffer_name, _ in module.named_buffers(recurse=False):
+                    prefixed_buffer_name = clean_tensor_name(prefix + buffer_name)
+                    buffer_names.add(prefixed_buffer_name)
+
+        def return_fn(buffer_names, *args):
+            return buffer_names
+
+        buffer_names: Set[str] = set()
+        return _apply_to_modules(
+            root_module, module_fn, return_fn, buffer_names,
         )
 
     @classmethod
@@ -1363,8 +1449,12 @@ class FullyShardedDataParallel(nn.Module):
                 m._streams = self._streams
                 m._fsdp_graph_order = self._fsdp_graph_order
                 # Give each non-root FSDP module an alias to the root's
-                # execution order data structure
+                # execution order data structure and the root's ignored
+                # parameters and all buffer names since only the root's names
+                # are fully prefixed like the state dict keys
                 m._exec_order_data = self._exec_order_data
+                m._ignored_param_names = self._ignored_param_names
+                m._buffer_names = self._buffer_names
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -1450,16 +1540,16 @@ class FullyShardedDataParallel(nn.Module):
         # Use default config a state_dict config is not set.
         if state_dict_config is None:
             state_dict_config = _state_dict_type_to_config[state_dict_type]()
-        for module in FullyShardedDataParallel.fsdp_modules(module):
+        for submodule in FullyShardedDataParallel.fsdp_modules(module):
             if prev_state_dict_type is None:
-                prev_state_dict_type = module._state_dict_type
+                prev_state_dict_type = submodule._state_dict_type
             if prev_state_dict_config is None:
-                prev_state_dict_config = module._state_dict_config
-            if prev_state_dict_type != module._state_dict_type:
+                prev_state_dict_config = submodule._state_dict_config
+            if prev_state_dict_type != submodule._state_dict_type:
                 raise RuntimeError(
                     "All FSDP module should the same state_dict_type."
                 )
-            if type(prev_state_dict_config) != type(module._state_dict_config):
+            if type(prev_state_dict_config) != type(submodule._state_dict_config):
                 raise RuntimeError(
                     "All FSDP modules should have the same type of state_dict_config."
                 )
@@ -1469,16 +1559,16 @@ class FullyShardedDataParallel(nn.Module):
                 raise RuntimeError(
                     f"Expected state_dict_config of type {expected_state_dict_config_type} but got {type(state_dict_config)}"
                 )
-            module._state_dict_type = state_dict_type
-            module._state_dict_config = state_dict_config
+            submodule._state_dict_type = state_dict_type
+            submodule._state_dict_config = state_dict_config
         try:
             yield
         finally:
             assert prev_state_dict_type is not None  # Avoid mypy warning
             assert prev_state_dict_config is not None  # Avoid mypy warning
-            for module in FullyShardedDataParallel.fsdp_modules(module):
-                module._state_dict_type = prev_state_dict_type
-                module._state_dict_config = prev_state_dict_config
+            for submodule in FullyShardedDataParallel.fsdp_modules(module):
+                submodule._state_dict_type = prev_state_dict_type
+                submodule._state_dict_config = prev_state_dict_config
 
     def _full_post_state_dict_hook(
         self,
@@ -1492,22 +1582,28 @@ class FullyShardedDataParallel(nn.Module):
         "_fsdp_wrapped_module" prefix.
         """
         self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
-        # state_dict would be blank if rank0_only was enabled.
+        # state_dict is empty for nonzero ranks if `rank0_only` was enabled.
         if not state_dict:
             return state_dict
 
-        ignored_param_names = set(self._ignored_param_to_param_name.values())
+        offload_to_cpu = self._state_dict_config.offload_to_cpu
+        cpu_device = torch.device("cpu")
         for key in state_dict:
-            # Do not need to clone ignored parameters since they are not
-            # sharded
-            clean_param_name = key.replace(FSDP_WRAPPED_MODULE + ".", "").replace(FPW_MODULE + ".", "")
-            if clean_param_name in ignored_param_names:
+            clean_key = clean_tensor_name(key)
+            # Do not need to clone buffers since they are not sharded
+            if clean_key in self._buffer_names:
+                # Offload the buffer to CPU if needed -- we do not do this in
+                # `_summon_full_params()` since without care, that would free
+                # the original buffer's GPU memory and require reallocating
+                # that memory later; this only affects the state dict's buffer
+                # variable and leaves the original buffer's GPU memory intact
+                if offload_to_cpu and state_dict[key].device != cpu_device:
+                    state_dict[key] = state_dict[key].to(cpu_device)
                 continue
-            # Due to recursive call of summon_full_params, avoid unnecessary
-            # reclone of tensors in case they have already been cloned.
-            if (
-                not getattr(state_dict[key], "_has_been_cloned", False)
-            ):
+            # Clone non-ignored parameters before exiting the
+            # `_summon_full_params()` context
+            if clean_key not in self._ignored_param_names and \
+                    not getattr(state_dict[key], "_has_been_cloned", False):
                 try:
                     state_dict[key] = state_dict[key].clone().detach()
                     state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
@@ -1539,9 +1635,8 @@ class FullyShardedDataParallel(nn.Module):
         # nn.Module.state_dict() will detach the parameter. Therefore, we need
         # to get flat_param from the FlattenParamsWrapper to get the metadata.
         flat_param = getattr(self.module, FLAT_PARAM, None)
-        assert (
-            flat_param is not None
-        ), "flat_param cannot be None when doing local_state_dict."
+        if flat_param is None:
+            return state_dict
 
         # Construct a ShardedTensor from the flat_param.
         full_numel = flat_param.full_numel
@@ -1670,8 +1765,12 @@ class FullyShardedDataParallel(nn.Module):
                 return {}
 
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
-            assert getattr(self.module, FLAT_PARAM, None) is not None
-            assert isinstance(self.module.flat_param, FlatParameter)
+            if self.module.flat_param is not None:
+                if not self.module.flat_param._is_sharded:
+                    raise RuntimeError(
+                        "local_state_dict/sharded_state_dict can only be called "
+                        "when parameters are flatten and sharded."
+                    )
             return super().state_dict(*args, **kwargs)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
             raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
@@ -1706,6 +1805,11 @@ class FullyShardedDataParallel(nn.Module):
         """
         _replace_by_prefix(state_dict, prefix, f"{prefix}{FSDP_WRAPPED_MODULE}.")
         key = f"{prefix}{FSDP_WRAPPED_MODULE}.{FLAT_PARAM}"
+        if key not in state_dict:
+            assert getattr(self.module, FLAT_PARAM, None) is None, (
+                "No flat parameter in state_dict but self.module.flat_param is not None"
+            )
+            return
         load_tensor = state_dict[key]
         assert isinstance(
             load_tensor, ShardedTensor
@@ -1824,60 +1928,61 @@ class FullyShardedDataParallel(nn.Module):
             return self.load_state_dict(state_dict, *args)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
-        self._lazy_init()
+        with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
+            self._lazy_init()
 
-        # Start of a forward pass.
-        self.training_state = TrainingState_.FORWARD
+            # Start of a forward pass.
+            self.training_state = TrainingState_.FORWARD
 
-        # Cast inputs to their mixed precision type.
-        if (
-            self._is_root
-            and self._mixed_precision_enabled_for_params()
-        ):
-            input_dtype = self.mixed_precision.param_dtype
-            args, kwargs = self._cast_fp_inputs_to_precision(
-                input_dtype, *args, **kwargs
-            )
-
-        # All-gather full parameters, moving them to compute_device if
-        # necessary.
-        self._rebuild_full_params()
-        # Wait for all_gather full parameters to finish before computation
-        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
-        # Register backward hooks to reshard params and reduce-scatter grads.
-        # These need to be re-registered every forward pass in some cases where grad_fn
-        # is mutated.
-        self._register_post_backward_hooks()
-        outputs = self.module(*args, **kwargs)
-
-        if self not in self._fsdp_graph_order:
-            self._my_fsdp_idx_in_graph = len(self._fsdp_graph_order)
-            self._fsdp_graph_order.append(self)
-
-        if self.reshard_after_forward:
-            self._free_full_params()
+            # Cast inputs to their mixed precision type.
             if (
-                self._mixed_precision_enabled_for_params()
+                self._is_root
+                and self._mixed_precision_enabled_for_params()
             ):
-                self._free_mp_shard(self.params)
-        # Switch to original local shards of params. We maintain this invariant throughout
-        # the code, i.e., ``p.data == p._local_shard`` after each function. This
-        # also ensures that after the first forward, the optimizer state will be
-        # initialized with the correct dtype and (sharded) size, since optimizer
-        # state is typically initialized lazily in ``optim.step()``. Note that
-        # when CPU offload is enabled, _use_param_local_shard implicitly
-        # offloads the local shard to CPU by making p.data point to
-        # p._local_shard, which would reside on CPU.
-        self._use_param_local_shard()
+                input_dtype = self.mixed_precision.param_dtype
+                args, kwargs = self._cast_fp_inputs_to_precision(
+                    input_dtype, *args, **kwargs
+                )
 
-        # Register pre-backward hooks to all-gather the params for the backward
-        # pass (if output's grad was needed). This won't register anything if
-        # we are in eval mode.
-        outputs = self._register_pre_backward_hooks(outputs)
+            # All-gather full parameters, moving them to compute_device if
+            # necessary.
+            self._rebuild_full_params()
+            # Wait for all_gather full parameters to finish before computation
+            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
-        # Done with a forward pass.
-        self.training_state = TrainingState_.IDLE
+            # Register backward hooks to reshard params and reduce-scatter grads.
+            # These need to be re-registered every forward pass in some cases where grad_fn
+            # is mutated.
+            self._register_post_backward_hooks()
+            outputs = self.module(*args, **kwargs)
+
+            if self not in self._fsdp_graph_order:
+                self._my_fsdp_idx_in_graph = len(self._fsdp_graph_order)
+                self._fsdp_graph_order.append(self)
+
+            if self.reshard_after_forward:
+                self._free_full_params()
+                if (
+                    self._mixed_precision_enabled_for_params()
+                ):
+                    self._free_mp_shard(self.params)
+            # Switch to original local shards of params. We maintain this invariant throughout
+            # the code, i.e., ``p.data == p._local_shard`` after each function. This
+            # also ensures that after the first forward, the optimizer state will be
+            # initialized with the correct dtype and (sharded) size, since optimizer
+            # state is typically initialized lazily in ``optim.step()``. Note that
+            # when CPU offload is enabled, _use_param_local_shard implicitly
+            # offloads the local shard to CPU by making p.data point to
+            # p._local_shard, which would reside on CPU.
+            self._use_param_local_shard()
+
+            # Register pre-backward hooks to all-gather the params for the backward
+            # pass (if output's grad was needed). This won't register anything if
+            # we are in eval mode.
+            outputs = self._register_pre_backward_hooks(outputs)
+
+            # Done with a forward pass.
+            self.training_state = TrainingState_.IDLE
 
         return outputs
 
@@ -2323,10 +2428,6 @@ class FullyShardedDataParallel(nn.Module):
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
         if not self._require_backward_grad_sync:
-            # Reset the execution order data structure here since the
-            # `_wait_for_post_backward()` callback is skipped
-            if self._is_root:
-                self._exec_order_data.reset()
             return
 
         # Wait for all work in the current stream to finish, then start the
@@ -2547,11 +2648,7 @@ class FullyShardedDataParallel(nn.Module):
             if isinstance(m, FullyShardedDataParallel):
                 _finalize_params(m)
                 m._pre_backward_hook_has_run = False
-                if any(
-                    p not in self._ignored_param_to_param_name
-                    and p.requires_grad
-                    for p in m.parameters()
-                ):
+                if any(p.requires_grad for p in m.parameters()):
                     # Check if the module has params and if any of them has
                     # the `requires_grad` field set. If `requires_grad=False` for
                     # all the params, the post_backward hook will not fire and the
@@ -2622,6 +2719,10 @@ class FullyShardedDataParallel(nn.Module):
                     # p._is_sharded = False. However when it is set, the
                     # device is always self.compute_device.
                     p.data = p.data.to(self.compute_device, non_blocking=True)
+                # Check the validity of this `_rebuild_full_params()` call in
+                # terms of execution order (regardless of if FSDP actually
+                # needs to all-gather or not)
+                self._check_rebuild_full_params(p)
                 # e.g., when world_size == 1
                 if not p._is_sharded:  # type: ignore[attr-defined]
                     if mixed_precision_cast_ran:
@@ -2682,7 +2783,6 @@ class FullyShardedDataParallel(nn.Module):
                         # Allocate based on full size from all shards.
                         _alloc_storage(p._full_param_padded, size=p_full_size)  # type: ignore[attr-defined]
                         output_tensor = p._full_param_padded  # type: ignore[attr-defined]
-                    self._check_all_gather(p)
                     # Fill output_tensor with (p.data for each shard in self.world_size)
                     dist._all_gather_base(
                         output_tensor, p_data, group=self.process_group
@@ -2703,34 +2803,37 @@ class FullyShardedDataParallel(nn.Module):
                         self._free_mp_shard(cast(List[FlatParameter], [p]))
         return output_tensors
 
-    def _check_all_gather(self, param: FlatParameter):
+    def _check_rebuild_full_params(self, param: FlatParameter):
         """
-        Checks the validity of an all-gather to rebuild the full parameter
-        ``param``. If on the first iteration, this uses an all-gather to check
-        that all ranks plan to all-gather the same parameter, erroring if not,
-        and on subsequent iterations, if the all-gather order differs from that
-        of the first iteration (meaning that we can no longer guarantee correct
-        execution), then we issue a warning to the user. This only issues
+        Checks the validity of a call to :meth:`_rebuild_full_params` in terms
+        of the execution order. If on the first iteration, this uses an
+        all-gather to check that all ranks are running ``forward()`` with the
+        same parameter, erroring if not, and on subsequent iterations, if the
+        forward order differs from that of the first iteration (meaning that we
+        can no longer guarantee correct execution since all-gathers may be
+        mismatched), then we issue a warning to the user. This only issues
         warnings on the first deviating iteration and stops checking
         thereafter.
 
-        For now, only the all-gathers to rebuild full parameters in the forward
-        pass are checked since (1) a correct forward order should imply a
-        correct pre-backward order for typical cases and (2) there may be some
-        issues with pre-fetching that need to be looked into:
-        https://github.com/pytorch/pytorch/issues/76553
+        Only the :meth:`_rebuild_full_params` calls in the forward pass are
+        checked since a correct forward order should imply a correct
+        pre-backward order for typical cases.
 
         Executing in ``no_sync()`` does not affect this check for
         ``FULL_SHARD`` and ``SHARD_GRAD_OP``: (1) Being in ``no_sync()`` in the
-        first iteration does not yield a different all-gather sequence, and (2)
-        being in ``no_sync()`` in a later iteration does not give false
-        positive warnings since the all-gather sequence still matches the first
+        first iteration does not yield a different forward
+        :meth:`_rebuild_full_params()` sequence, and (2) being in ``no_sync()``
+        in a later iteration does not give false positive warnings since the
+        forward :meth:`_rebuild_full_params()` sequence still matches the first
         iteration sequence (for ``FULL_SHARD``) or the first iteration
         sequence's prefix (for ``SHARD_GRAD_OP``).
         """
-        # Only check all-gathers when rebuilding the full parameters in the
-        # forward pass
-        if self.training_state != TrainingState_.FORWARD:
+        # Only check when rebuilding the full parameters in the forward pass,
+        # and skip the check (1) when in eval mode since then there is not a
+        # safe point at which to reset the execution order data and (2) if
+        # world size is 1 since then there is no chance of desynchronization
+        if self.training_state != TrainingState_.FORWARD or \
+                not self.training or self.world_size == 1:
             return
         eod = self._exec_order_data
         param_index = eod.get_param_index(param)
@@ -2741,40 +2844,52 @@ class FullyShardedDataParallel(nn.Module):
                 return
             # However, we may issue multiple warnings on the first deviating
             # iteration to help debugging, where either:
-            # 1. This iteration sees more all-gathers than the first iteration
-            msg_prefix = all_gather_seq = None  # non-`None` means we warn
+            # 1. This iteration sees an extra `_rebuild_full_params()` in
+            # `forward()` compared to the first iteration
+            msg_prefix = curr_param_order = None  # non-`None` means we warn
             if eod.index >= len(eod.param_order):
-                msg_prefix = "Expected no more all-gathers but got an all-gather for "
-                all_gather_seq = eod.param_order + [param_index]
+                msg_prefix = "Expected to not rebuild any more parameters " \
+                    "in `forward()` for this module but trying to rebuild " \
+                    "parameters for "
+                curr_param_order = eod.param_order + [param_index]
             else:
                 expected_param_index = eod.param_order[eod.index]
-                # 2. This iteration sees the same number of all-gathers (so
-                # far) but the current parameter to all-gather differs
+                # 2. This iteration sees the same number of
+                # `_rebuild_full_params()` (so far) but the current parameter
+                # differs
                 if param_index != expected_param_index:
                     expected_param_names = eod.get_unflat_param_names(expected_param_index)
                     assert len(expected_param_names) > 0, \
-                        "The expected parameter to all-gather should always be valid"
-                    msg_prefix = "Expected an all-gather for the FSDP module " \
-                        f"wrapping {expected_param_names} but got an all-gather for "
-                    all_gather_seq = eod.param_order[:eod.index - 1] + [param_index]
+                        "Expected parameter should always be valid"
+                    msg_prefix = "Expected to rebuild parameters in " \
+                        f"`forward()` for {expected_param_names} but " \
+                        "instead trying to rebuild parameters for "
+                    curr_param_order = eod.param_order[:eod.index - 1] + [param_index]
             to_issue_warning = msg_prefix is not None
             if to_issue_warning:
-                assert all_gather_seq is not None
+                assert curr_param_order is not None
                 param_names = eod.get_unflat_param_names(param_index)
                 is_added_param = len(param_names) == 0
                 if is_added_param:
                     msg_suffix = "a newly-added parameter since construction time"
                 else:
-                    msg_suffix = f"the FSDP module wrapping {param_names}"
+                    msg_suffix = f"{param_names}"
                 sub_msg = msg_prefix + msg_suffix
+                first_iter_param_names = [
+                    eod.get_unflat_param_names(index) for index in eod.param_order
+                ]
+                curr_iter_param_names = [
+                    eod.get_unflat_param_names(index) for index in curr_param_order
+                ]
+                print(first_iter_param_names, type(first_iter_param_names))
+                print(curr_iter_param_names, type(curr_iter_param_names))
                 warnings.warn(
-                    "All-gather order differs from that of the first iteration "
+                    "Forward order differs from that of the first iteration "
                     f"on rank {self.rank} -- collectives are unchecked and may "
                     "give incorrect results or hang\n" + sub_msg + "\n" +
-                    f"First iteration's all-gather sequence: {eod.param_order}"
-                    "\nThis iteration's all-gather sequence (so far): "
-                    f"{all_gather_seq}\nwhere indices follow the root FSDP "
-                    "module's `.parameters()` order"
+                    f"First iteration's forward order: {first_iter_param_names}"
+                    "\nThis iteration's forward order (so far): "
+                    f"{curr_iter_param_names}"
                 )
                 eod.warn_status = _ExecOrderWarnStatus.WARNING
             eod.index += 1
@@ -2794,10 +2909,10 @@ class FullyShardedDataParallel(nn.Module):
                     r1_param_names = eod.get_unflat_param_names(i1)
                     r2_param_names = eod.get_unflat_param_names(i2)
                     raise RuntimeError(
-                        f"All-gather order differs across ranks: rank {r1} is "
-                        f"all-gathering the flattened parameter wrapping "
-                        f"{r1_param_names} while rank {r2} is all-gathering "
-                        f"the flattened parameter wrapping {r2_param_names}"
+                        f"Forward order differs across ranks: rank {r1} is "
+                        "rebuilding full parameters in `forward()` for "
+                        f"{r1_param_names} while rank {r2} is rebuilding full "
+                        f"parameters in `forward()` for {r2_param_names}"
                     )
             eod.param_order.append(param_index)
 
@@ -3463,10 +3578,11 @@ def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Ten
 
 def _get_param_to_unflat_param_names(
     model: torch.nn.Module,
+    dedup_shared_params: bool = True,
 ) -> Dict[torch.nn.Parameter, List[str]]:
     """
-    Constructs a mapping from flattened parameters (including non-FSDP-module
-    parameters) to their unflattened parameter names. For non-FSDP-module
+    Constructs a mapping from flattened parameter (including non-FSDP-module
+    parameters) to its unflattened parameter names. For non-FSDP-module
     parameters, these mapped-to lists always contain a single element. The
     unflattened parameter names should match the keys of the model state dict.
 
@@ -3476,26 +3592,26 @@ def _get_param_to_unflat_param_names(
     Args:
         model (torch.nn.Module): Root module (which may or may not be a
             :class:`FullyShardedDataParallel` instance).
+        dedup_shared_params (bool): If ``True``, only includes the first
+            list of unflattened parameter names corresponding to a parameter
+            in the module walk order; if ``False``, then includes all of the
+            unflattened parameter names.
     """
-    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
-
-    def clean_param_name(prefix, param_info):
+    def _clean_param_name(prefix, param_info):
         """This replicates the parameter name cleaning logic in model state
         dict but avoids gathering any parameters."""
-        name = prefix + param_info.module_name + "." + param_info.param_name
-        # FSDP full parameter names may not have both (i.e. `FSDP_PREFIX`), so
-        # we call `replace()` twice separately
-        name = name.replace(FSDP_WRAPPED_MODULE + ".", "")
-        name = name.replace(FPW_MODULE + ".", "")
+        name = clean_tensor_name(
+            prefix + param_info.module_name + "." + param_info.param_name
+        )
         return name
 
-    def f(param_to_unflat_param_names, module: torch.nn.Module, prefix: str):
+    def module_fn(module, prefix, param_to_unflat_param_names):
         # For FSDP modules, only add the entry when considering the contained
         # `FlattenParamsWrapper` to avoid duplication
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
                 prefixed_param_names = [
-                    clean_param_name(prefix, param_info)
+                    _clean_param_name(prefix, param_info)
                     for param_info in param._param_infos
                 ] if isinstance(param, FlatParameter) else [prefix + param_name]
                 # If this parameter has already been visited, then it is a
@@ -3503,14 +3619,16 @@ def _get_param_to_unflat_param_names(
                 is_shared_param = param in param_to_unflat_param_names
                 if not is_shared_param:
                     param_to_unflat_param_names[param] = prefixed_param_names
+                elif not dedup_shared_params:
+                    param_to_unflat_param_names[param].extend(prefixed_param_names)
 
-        for submodule_name, submodule in module.named_children():
-            if submodule is not None:
-                new_prefix = prefix + submodule_name + "."
-                f(param_to_unflat_param_names, submodule, new_prefix)
+    def return_fn(param_to_unflat_param_names):
+        return param_to_unflat_param_names
 
-    f(param_to_unflat_param_names, model, "")
-    return param_to_unflat_param_names
+    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
+    return _apply_to_modules(
+        model, module_fn, return_fn, param_to_unflat_param_names,
+    )
 
 
 def _get_param_to_param_name(
@@ -3550,3 +3668,13 @@ def _get_param_name_to_param(
     """Constructs the inverse mapping of :meth:`_get_param_to_param_name`."""
     param_to_param_name = _get_param_to_param_name(model)
     return dict(zip(param_to_param_name.values(), param_to_param_name.keys()))
+
+
+def clean_tensor_name(tensor_name: str) -> str:
+    """Cleans the parameter or buffer name by removing any FSDP-related
+    prefixes."""
+    # FSDP full tensor names may not have both (i.e. `FSDP_PREFIX`), so we
+    # call `replace()` twice separately
+    tensor_name = tensor_name.replace(FSDP_WRAPPED_MODULE + ".", "")
+    tensor_name = tensor_name.replace(FPW_MODULE + ".", "")
+    return tensor_name

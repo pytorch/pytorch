@@ -19,9 +19,15 @@
 #include <ATen/ops/_nnz_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_validate_sparse_compressed_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
+#include <ATen/ops/_validate_sparse_csc_tensor_args_native.h>
+#include <ATen/ops/_validate_sparse_bsr_tensor_args_native.h>
+#include <ATen/ops/_validate_sparse_bsc_tensor_args_native.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/col_indices_native.h>
 #include <ATen/ops/copy_native.h>
@@ -34,6 +40,9 @@
 #include <ATen/ops/select_native.h>
 #include <ATen/ops/sparse_compressed_tensor_native.h>
 #include <ATen/ops/sparse_csr_tensor_native.h>
+#include <ATen/ops/sparse_csc_tensor_native.h>
+#include <ATen/ops/sparse_bsr_tensor_native.h>
+#include <ATen/ops/sparse_bsc_tensor_native.h>
 #include <ATen/ops/values_native.h>
 #endif
 
@@ -89,24 +98,28 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
 
   TORCH_CHECK(
       compressed_indices.dim() == plain_indices.dim(),
-      "number of dimensions of ", compressed_indices_name, " and ", plain_indices_name, " must be the same.");
+      "number of dimensions of ", compressed_indices_name, " and ", plain_indices_name, " must be the same but got ",
+      compressed_indices.dim(), " and ", plain_indices.dim(), ", respectively");
 
   AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
       layout, "validate_sparse_compressed_tensor_args",
       [&] {
         TORCH_CHECK(
                     compressed_indices.dim() == values.dim(),
-                    "number of dimensions of indices and values must be the same.");
+                    "number of dimensions of indices and values must be the same but got ",
+                    compressed_indices.dim(), " and ", values.dim(), ", respectively");
       },
       [&] {
         TORCH_CHECK(
                     compressed_indices.dim() + 2 == values.dim(),
-                    "number of dimensions of indices must be two less than the number of dimensions of the values.");
+                    "number of dimensions of indices must be two less than the number of dimensions of the values but got ",
+                    compressed_indices.dim(), " + 2 not equal to ", values.dim());
       });
 
   TORCH_CHECK(
       static_cast<size_t>(compressed_indices.dim()) == size.size() - 1,
-      "number of dimensions of indices must be one less than the number of dimensions of the provided size.");
+      "number of dimensions of indices must be one less than the number of dimensions of the provided size but got ",
+      compressed_indices.dim(), " not equal to ", size.size(), " - 1");
 
   int block_ndim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args", [&]{ return 0; }, [&]{ return 2; });
   IntArrayRef block_size = values.sizes().slice(values.dim() - block_ndim, block_ndim);
@@ -183,7 +196,8 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
   auto plain_indices_type = plain_indices.scalar_type();
   TORCH_CHECK(
       compressed_indices_type == plain_indices_type,
-      "both ", compressed_indices_name, " and ", plain_indices_name, " should have the same type.");
+      "both ", compressed_indices_name, " and ", plain_indices_name, " should have the same type, bot got ",
+      compressed_indices_type, " and ", plain_indices_type, ", respectively");
   TORCH_CHECK(
       compressed_indices_type == kInt || compressed_indices_type == kLong,
       compressed_indices_name, " and ", plain_indices_name, " must be an int32 or int64 type, but got: ",
@@ -218,6 +232,18 @@ void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, c
 
 void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
   _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseCsr);
+}
+
+void _validate_sparse_csc_tensor_args(const Tensor& ccol_indices, const Tensor& row_indices, const Tensor& values, IntArrayRef size) {
+  _validate_sparse_compressed_tensor_args_worker(ccol_indices, row_indices, values, size, kSparseCsc);
+}
+
+void _validate_sparse_bsr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
+  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseBsr);
+}
+
+void _validate_sparse_bsc_tensor_args(const Tensor& ccol_indices, const Tensor& row_indices, const Tensor& values, IntArrayRef size) {
+  _validate_sparse_compressed_tensor_args_worker(ccol_indices, row_indices, values, size, kSparseBsc);
 }
 
 // Construction of CSR, CSC, BSR, and BSC tensors.
@@ -298,6 +324,9 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
   }
 
 SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc);
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr);
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc);
 
 DimVector _estimate_sparse_compressed_tensor_size(
     const Tensor& compressed_indices,
@@ -307,7 +336,13 @@ DimVector _estimate_sparse_compressed_tensor_size(
   DimVector size = DimVector(IntArrayRef(plain_indices.sizes().data(), plain_indices.dim() - 1));
   int64_t compressed_dim = (plain_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
   int64_t plain_dim = AT_DISPATCH_INTEGRAL_TYPES(plain_indices.scalar_type(), "estimate_sparse_compressed_tensor_size",
-                                                 [&]() -> int64_t { return plain_indices.max().item<scalar_t>() + 1; });
+                                                 [&]() -> int64_t {
+                                                   if (plain_indices.numel() > 0) {
+                                                     return plain_indices.max().item<scalar_t>() + 1;
+                                                   } else {
+                                                     return 0;
+                                                   }
+                                                   });
   AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "estimate_sparse_compressed_tensor_size",
       [&]{
         size.push_back(compressed_dim);
@@ -418,6 +453,9 @@ Tensor sparse_compressed_tensor(
   }
 
 SPARSE_COMPRESSED_TENSOR(csr, kSparseCsr)
+SPARSE_COMPRESSED_TENSOR(csc, kSparseCsc)
+SPARSE_COMPRESSED_TENSOR(bsr, kSparseBsr)
+SPARSE_COMPRESSED_TENSOR(bsc, kSparseBsc)
 
 Tensor empty_sparse_csr(
     IntArrayRef size,
@@ -472,9 +510,6 @@ const Tensor& resize_sparse_csr_(
 }
 
 Tensor& copy_sparse_csr_(Tensor& self, const Tensor& src, bool non_blocking) {
-  TORCH_CHECK(
-      self.sizes() == src.sizes(),
-      "copy_sparse_csr_: only same size tensors are supported.");
   TORCH_CHECK(
       self.is_sparse_csr() && src.is_sparse_csr(),
       "copy_sparse_csr_: copy between different layouts is not supported. Found self type = ",

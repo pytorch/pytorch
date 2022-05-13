@@ -97,15 +97,22 @@ if(APPLE)
     # Determine if we can link against MPSGraph
     set(MPS_FOUND OFF)
     execute_process(
+      COMMAND bash -c "xcodebuild -sdk macosx -version SDKVersion"
+      RESULT_VARIABLE _exit_code
+      OUTPUT_VARIABLE _macosx_sdk_version
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _exit_code EQUAL 0)
+      message(FATAL_ERROR "MPS: unable to get MacOS sdk version")
+    endif()
+    set(_MPS_supported_os_version OFF)
+    if(_macosx_sdk_version VERSION_GREATER_EQUAL 12.3)
+        set(_MPS_supported_os_version ON)
+    endif()
+    message(STATUS "sdk version: ${_macosx_sdk_version}, mps supported: ${_MPS_supported_os_version}")
+    execute_process(
       COMMAND bash -c "xcrun --sdk macosx --show-sdk-path"
       OUTPUT_VARIABLE _macosx_sdk_path
       OUTPUT_STRIP_TRAILING_WHITESPACE)
-    set(_MPS_supported_os_version OFF)
-    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin"
-        AND DARWIN_MAJOR_VERSION VERSION_GREATER_EQUAL 21
-        AND DARWIN_MINOR_VERSION VERSION_GREATER_EQUAL 3)
-      set(_MPS_supported_os_version ON)
-    endif()
     set(_SDK_SEARCH_PATH "${_macosx_sdk_path}/System/Library/Frameworks/")
     set(_FRAMEWORK_SEARCH_PATH "/System/Library/Frameworks/")
 
@@ -682,6 +689,8 @@ if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VO
   set(USE_FBGEMM OFF)
 endif()
 
+set(BUILD_ONEDNN_GRAPH OFF)
+
 include(cmake/Dependencies.cmake)
 
 if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
@@ -791,6 +800,10 @@ if(NOT MSVC)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
+  endif()
+  if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0.0))
+    # Suppress issue: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43407
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-attributes")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
