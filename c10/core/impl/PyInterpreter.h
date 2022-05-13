@@ -179,8 +179,7 @@ struct C10_API PyInterpreter {
     return (*dispatch_fn_)(this, op, stack, type);
   }
 
-  __ubsan_ignore_function__ bool is_contiguous(
-      const TensorImpl* self) const {
+  __ubsan_ignore_function__ bool is_contiguous(const TensorImpl* self) const {
     return (*is_contiguous_fn_)(this, self);
   }
 

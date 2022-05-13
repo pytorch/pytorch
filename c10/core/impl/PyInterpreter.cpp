@@ -30,9 +30,7 @@ static void noop_dispatch_fn(
       "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
-static bool noop_is_contiguous_fn(
-    const PyInterpreter*,
-    const TensorImpl*) {
+static bool noop_is_contiguous_fn(const PyInterpreter*, const TensorImpl*) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to is_contiguous Tensor with nontrivial PyObject after corresponding interpreter died");

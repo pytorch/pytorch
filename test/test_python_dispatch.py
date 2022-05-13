@@ -1151,7 +1151,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
         not_contiguous_data = torch.as_strided(data.clone(), (2, 2), (1, 2))
 
         def subclass_helper(cls, data, use_wrapper_subclass):
-            if use_wrapper_subclass: 
+            if use_wrapper_subclass:
                 kwargs = {}
                 kwargs["device"] = data.device
                 kwargs["dtype"] = data.dtype
