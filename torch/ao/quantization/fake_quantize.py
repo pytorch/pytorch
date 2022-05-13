@@ -90,30 +90,23 @@ class FakeQuantize(FakeQuantizeBase):
 
     * :attr:`zero_point` specifies the quantized value to which 0 in floating point maps to
 
-    * :attr:`quant_min` specifies the minimum allowable quantized value.
-
-    * :attr:`quant_max` specifies the maximum allowable quantized value.
-
     * :attr:`fake_quant_enabled` controls the application of fake quantization on tensors, note that
       statistics can still be updated.
 
     * :attr:`observer_enabled` controls statistics collection on tensors
 
     * :attr:`dtype` specifies the quantized dtype that is being emulated with fake-quantization,
-        allowable values are torch.qint8 and torch.quint8. The values of quant_min and
-        quant_max should be chosen to be consistent with the dtype
+        allowable values are torch.qint8 and torch.quint8.
 
     Args:
 
         observer (module): Module for observing statistics on input tensors and calculating scale
           and zero-point.
-        quant_min (int): The minimum allowable quantized value.
-        quant_max (int): The maximum allowable quantized value.
         observer_kwargs (optional): Arguments for the observer module
 
     Attributes:
 
-        observer (Module): User provided module that collects statistics on the input tensor and
+        activation_post_process (Module): User provided module that collects statistics on the input tensor and
           provides a method to calculate scale and zero-point.
 
     """
@@ -138,6 +131,8 @@ class FakeQuantize(FakeQuantizeBase):
             assert quant_max <= torch.iinfo(dtype).max, 'quant_max out of bound'
             observer_kwargs.update({"quant_min": quant_min, "quant_max": quant_max})
         self.activation_post_process = observer(**observer_kwargs)
+        # TODO: keeping self.quant_min/max for BC; remove after a couple releases
+        # Users should use self.activation_post_process.quant_min
         self.quant_min = self.activation_post_process.quant_min
         self.quant_max = self.activation_post_process.quant_max
         if _is_float_qparams(self.activation_post_process.qscheme):
@@ -175,11 +170,11 @@ class FakeQuantize(FakeQuantizeBase):
             if self.is_per_channel:
                 X = torch.fake_quantize_per_channel_affine(
                     X, self.scale, self.zero_point,
-                    self.ch_axis, self.quant_min, self.quant_max)
+                    self.ch_axis, self.activation_post_process.quant_min, self.activation_post_process.quant_max)
             else:
                 X = torch.fake_quantize_per_tensor_affine(
                     X, self.scale, self.zero_point,
-                    self.quant_min, self.quant_max)
+                    self.activation_post_process.quant_min, self.activation_post_process.quant_max)
         return X
 
     @torch.jit.export
@@ -188,7 +183,7 @@ class FakeQuantize(FakeQuantizeBase):
                'quant_min={}, quant_max={}, dtype={}, qscheme={}, ch_axis={}, ' \
                'scale={}, zero_point={}'.format(
                    self.fake_quant_enabled, self.observer_enabled,
-                   self.quant_min, self.quant_max,
+                   self.activation_post_process.quant_min, self.activation_post_process.quant_max,
                    self.dtype, self.qscheme, self.ch_axis, self.scale, self.zero_point)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
@@ -241,8 +236,6 @@ class FixedQParamsFakeQuantize(FakeQuantize):
         assert type(self.activation_post_process) == FixedQParamsObserver,\
             "%s's observer must be a %s" % (self.__class__.__name__, FixedQParamsObserver.__name__)
         self._observer_ctr = observer
-        self.quant_min = self.activation_post_process.quant_min
-        self.quant_max = self.activation_post_process.quant_max
         self.scale = self.activation_post_process.scale
         self.zero_point = self.activation_post_process.zero_point
         assert _is_per_tensor(self.qscheme), 'Only per tensor quantization is supported' + \
@@ -258,7 +251,7 @@ class FixedQParamsFakeQuantize(FakeQuantize):
                'dtype={}, quant_min={}, quant_max={}, qscheme={}'.format(
                    self.fake_quant_enabled, self.observer_enabled,
                    self.scale, self.zero_point, self.dtype,
-                   self.quant_min, self.quant_max, self.qscheme)
+                   self.activation_post_process.quant_min, self.activation_post_process.quant_max, self.qscheme)
 
 
 class FusedMovingAvgObsFakeQuantize(FakeQuantize):
@@ -287,13 +280,9 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         super().__init__(observer, quant_min, quant_max, **observer_kwargs)
         assert isinstance(self.activation_post_process, (MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver)),\
             "Fused observer+fake_quant module only works with MovingAverageMinMaxObserver"
-        self.quant_min: int = quant_min
-        self.quant_max: int = quant_max
         self.register_buffer("fake_quant_enabled", torch.tensor([1], dtype=torch.long))
         self.register_buffer("observer_enabled", torch.tensor([1], dtype=torch.long))
         self.is_symmetric_quant = _is_symmetric_quant(self.activation_post_process.qscheme)
-
-        self.quant_min, self.quant_max = self.activation_post_process.quant_min, self.activation_post_process.quant_max
 
     @torch.jit.export
     def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -309,8 +298,8 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
                 self.scale,
                 self.zero_point,
                 self.dtype,
-                self.quant_min,
-                self.quant_max,
+                self.activation_post_process.quant_min,
+                self.activation_post_process.quant_max,
                 self.qscheme,
                 self.activation_post_process.reduce_range,
             )
@@ -326,8 +315,8 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
             self.scale,
             self.zero_point,
             self.activation_post_process.averaging_constant,
-            self.quant_min,
-            self.quant_max,
+            self.activation_post_process.quant_min,
+            self.activation_post_process.quant_max,
             self.ch_axis,
             self.is_per_channel,
             self.is_symmetric_quant,
