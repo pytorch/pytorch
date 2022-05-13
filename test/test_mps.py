@@ -1436,6 +1436,23 @@ class TestNLLLoss(TestCase):
         output_mps.sum().backward()
         self.assertEqual(input.grad, input_mps.grad.to('cpu'))
 
+    def test_as_strided(self):
+        def helper(n, c):
+            values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
+            values_1 = [[1.0, 1.0], [1.0, 1.0]]
+            cpu_x = torch.tensor(values, device='cpu')
+            ones1 = torch.tensor(values_1, device='mps')
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+            strided_cpu = torch.as_strided(cpu_x, (2,2), (2,2))
+            strided_mps = torch.as_strided(x, (2,2), (2,2))
+
+            print("Strided MPS {}".format(strided_mps.to('cpu')))
+            print ("Strided cpu {}".format(strided_cpu))
+
+            self.assertEqual(strided_mps, strided_cpu)
+
+        helper(3, 3)
+
     def test_nll_loss_empty_tensor_reduction_none(self, device='cpu'):
         self._nll_loss_helper([1, 3], "none", torch.empty([0], device=device))
         self._nll_loss_helper([3, 5, 7], "none", torch.empty([5, 7], device=device))
