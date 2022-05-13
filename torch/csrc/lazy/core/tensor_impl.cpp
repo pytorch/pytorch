@@ -9,8 +9,6 @@
 #include <torch/csrc/lazy/core/ir_builder.h>
 // I guess we will need to use one of IRBuilder methods here
 #include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
-#include "ATen/core/SymIntArrayRef.h"
-
 
 namespace torch {
 namespace lazy {

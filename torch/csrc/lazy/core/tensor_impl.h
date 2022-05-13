@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 
 #include <torch/csrc/lazy/core/tensor.h>
-#include "ATen/core/SymIntArrayRef.h"
 
 namespace torch {
 namespace lazy {
