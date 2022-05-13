@@ -964,6 +964,7 @@ def _reshape_view_helper(
     # NOTE: Reshape may be given a shape with a -1 length
     # This indicates that the dimension's length should be inferred
     # Creates a valid shape
+
     for idx in range(len(shape)):
         if shape[idx] == -1:
             # Verifies there's only one dimension of length -1 in the shape
@@ -973,14 +974,23 @@ def _reshape_view_helper(
                 )
                 raise ValueError(msg)
 
-            length = reduce(operator.floordiv, (x for x in shape if x != -1), a.numel())
+            # TODO: improve error message
+            if a.numel() > 0:
+                length = reduce(
+                    operator.floordiv, (x for x in shape if x != -1), a.numel()
+                )
+            else:
+                msg = "Cannot reshape a tensor of zero elements into shape {0} because the unspecified length is ambiguous!".format(
+                    str(shape)
+                )
+                raise ValueError(msg)
+
             shape = list(shape)
             shape[idx] = length
             break
 
-    utils.validate_shape(shape)
-
     # Short-circuits if shape is the same
+    utils.validate_shape(shape)
     if tuple(a.shape) == tuple(shape):
         return prims.view_of(a)
 

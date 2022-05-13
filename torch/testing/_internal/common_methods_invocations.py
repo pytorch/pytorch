@@ -7783,7 +7783,7 @@ def reference_inputs_view_reshape(op, device, dtype, requires_grad, **kwargs):
         ((2, 1, 0, 3, 1), (5, 0)),
         ((1,), ()),
         ((4, 5, 6), (4, 5, 6, 1, 1, 1)),
-        ((), (1, 1, 1, 1))
+        ((), (1, 1, 1, 1)),
     )
 
     irreversible_cases = (
@@ -7816,6 +7816,8 @@ def error_inputs_reshape(op, device, **kwargs):
         ((1, 3, 5), (5, -1, 2)),
         # Two inferred shapes
         ((1, 3, 5), (5, -1, -1)),
+        ((1), (0, -1)),
+        ((0, 5), (0, -1)),
     )
 
     make_arg = partial(make_tensor, dtype=torch.float32, device=device, requires_grad=False)
@@ -7891,12 +7893,14 @@ def reference_inputs_flatten(op, device, dtype, requires_grad, **kwargs):
         ((1, 5, 5, 1, 5, 7, 5, 1), -2, -1),
         ((2, 4, 2), 0, 1),
         ((4, 2, 2), 1, 2),
+        ((0, 3, 4, 5), 1, 3),
     )
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     for shape, start, end in cases:
         yield SampleInput(make_arg(shape), args=(start, end,))
         yield SampleInput(make_arg(shape, noncontiguous=True).transpose(0, -1), args=(start, end,))
+        yield SampleInput(make_arg(shape).transpose(0, -1), args=(start, end,))
 
 def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)

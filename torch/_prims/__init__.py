@@ -940,8 +940,10 @@ def _collapse_view_helper(
 
         length = length * shape[idx]
 
-        if shape[idx + 1] != 1 and not (
-            strides[idx] == strides[idx + 1] * shape[idx + 1]
+        if (
+            a.numel() > 0
+            and shape[idx + 1] != 1
+            and not (strides[idx] == strides[idx + 1] * shape[idx + 1])
         ):
             return None, None
 
@@ -1479,7 +1481,7 @@ def _reshape_meta(a: TensorLikeType, shape: ShapeType):
 
 
 def _reshape_aten(a: Tensor, shape: ShapeType) -> Tensor:
-    return a.clone().reshape(shape).contiguous()
+    return a.reshape(shape).contiguous().clone()
 
 
 _reshape_doc = """
