@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>
+#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
 
 namespace torch {
 namespace jit {
@@ -52,16 +53,47 @@ TensorView* applyViewTransforms(
 
 } // namespace
 
+TensorView* view(TensorView* x, DataType dtype) {
+  if (x->getDataType() == dtype) {
+    return x;
+  }
+
+  // TODO: support view(dtype) for dtypes of different size.
+  TORCH_INTERNAL_ASSERT(
+      dataTypeSize(x->getDataType().value()) == dataTypeSize(dtype),
+      "Currently, aten::view only supports viewing the data as a type with the same size.");
+
+  std::vector<IterDomain*> out_domain;
+  auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
+  out_domain.reserve(inp_domain.size());
+  for (auto d : inp_domain) {
+    out_domain.push_back(d->clone());
+  }
+  auto out = IrBuilder::create<TensorView>(
+      x->container(),
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
+      dtype);
+
+  IrBuilder::create<ViewDtypeOp>(x->container(), out, x, dtype);
+  return out;
+}
+
 TensorView* view(
     TensorView* x,
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes) {
-  TORCH_INTERNAL_ASSERT(x->nDims() == original_sizes.size());
+  TORCH_INTERNAL_ASSERT(
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size() ==
+      original_sizes.size());
 
   auto analyze_view = analyzeView(x, original_sizes, new_sizes);
 
   auto reduction = (!analyze_view.trivial_reduction_axes.empty())
-      ? sum(x, analyze_view.trivial_reduction_axes)
+      ? sum(x,
+            analyze_view.trivial_reduction_axes,
+            false /* keep_dim */,
+            x->getDataType().value())
       : x;
 
   auto view = (!analyze_view.transforms.empty())
@@ -82,7 +114,11 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
       trivial_reduction_axes.push_back(idx);
     }
   }
-  return (trivial_reduction_axes.empty()) ? x : sum(x, trivial_reduction_axes);
+  return (trivial_reduction_axes.empty()) ? x
+                                          : sum(x,
+                                                trivial_reduction_axes,
+                                                false /* keep_dim */,
+                                                x->getDataType().value());
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
@@ -90,9 +126,8 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
   if (dim < 0) {
     dim = (int)(x->nDims()) + dim;
   }
-  TORCH_INTERNAL_ASSERT(dim >= 0 && dim < x->nDims());
-  if (sizes[dim] == 1) {
-    return sum(x, {dim});
+  if (dim >= 0 && dim < x->nDims() && sizes[dim] == 1) {
+    return sum(x, {dim}, false /* keep_dim */, x->getDataType().value());
   } else {
     return set(x);
   }

@@ -77,6 +77,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StreamObjType::Kind:
       case QSchemeType::Kind:
       case LayoutType::Kind:
+      case MemoryFormatType::Kind:
       case ScalarTypeType::Kind:
       case RRefType::Kind:
       case AnyType::Kind:
@@ -84,6 +85,10 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyTupleType::Kind:
       case AnyClassType::Kind:
       case AnyEnumType::Kind:
+        // no op, there is nothing to tag
+        break;
+      case c10::SymIntType::Kind:
+        TORCH_CHECK(!w.value.toSymInt().is_symbolic());
         // no op, there is nothing to tag
         break;
       case DynamicType::Kind:
@@ -467,7 +472,7 @@ PickleOpCode Unpickler::readInstruction() {
         caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
 
         at::DataPtr storage_ptr;
-        if (numel > 0) {
+        if (numel > 0 && !device.is_meta()) {
           // If there are no elements in the tensor, there's no point in
           // reading a zero (0) byte file from the input stream and paying
           // that cost.
@@ -487,7 +492,7 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       auto options = at::CPU(type).options();
-      if (use_storage_device_) {
+      if (use_storage_device_ && !device.is_meta()) {
         options = options.device(storage.device());
         device = storage.device();
       }
@@ -500,7 +505,7 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.is_cuda() || device.is_xpu()) {
+      if (device.is_cuda() || device.is_xpu() || device.is_meta()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(

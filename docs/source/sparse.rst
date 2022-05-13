@@ -1,3 +1,5 @@
+.. automodule:: torch.sparse
+
 .. currentmodule:: torch
 
 .. _sparse-docs:
@@ -475,7 +477,6 @@ multiplication, and ``@`` is matrix multiplication.
    :func:`torch.lobpcg`; no; ``GENEIG(M[sparse_coo]) -> M[strided], M[strided]``
    :func:`torch.pca_lowrank`; yes; ``PCA(M[sparse_coo]) -> M[strided], M[strided], M[strided]``
    :func:`torch.svd_lowrank`; yes; ``SVD(M[sparse_coo]) -> M[strided], M[strided], M[strided]``
-   :func:`torch.linalg.solve`; no; ``M[sparse_csr] @ V[strided] -> V[strided]``
 
 where "Sparse grad?" column indicates if the PyTorch operation supports
 backward with respect to sparse matrix argument. All PyTorch operations,

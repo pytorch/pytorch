@@ -13,45 +13,6 @@ namespace at {
 namespace cuda {
 namespace solver {
 
-#define CUSOLVER_LINEAR_SOLVER_ARGTYPES(scalar_t, value_t)                          \
-    cusolverSpHandle_t handle, int n, int nnzA, const cusparseMatDescr_t descrA,    \
-    const scalar_t *csrValA, const int *csrRowPtrA, const int *csrColIndA,          \
-    const scalar_t *b, value_t tol, int reorder, scalar_t *x, int *singularity
-
-template <typename scalar_t, typename value_t>
-inline void lsvlu(CUSOLVER_LINEAR_SOLVER_ARGTYPES(scalar_t, value_t)) {
-    TORCH_INTERNAL_ASSERT(
-        false,
-        "at::cuda::sparse::lsvlu: not implemented for ",
-        typeid(scalar_t).name());
-}
-
-template <>
-void lsvlu<float, float>(CUSOLVER_LINEAR_SOLVER_ARGTYPES(float, float));
-template <>
-void lsvlu<double, double>(CUSOLVER_LINEAR_SOLVER_ARGTYPES(double, double));
-template <>
-void lsvlu<c10::complex<float>, float>(CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<float>, float));
-template <>
-void lsvlu<c10::complex<double>, double>(CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<double>, double));
-
-template <typename scalar_t, typename value_t>
-inline void lsvqr(CUSOLVER_LINEAR_SOLVER_ARGTYPES(scalar_t, value_t)) {
-    TORCH_INTERNAL_ASSERT(
-        false,
-        "at::cuda::sparse::lsvqr: not implemented for ",
-        typeid(scalar_t).name());
-}
-
-template <>
-void lsvqr<float, float>(CUSOLVER_LINEAR_SOLVER_ARGTYPES(float, float));
-template <>
-void lsvqr<double, double>(CUSOLVER_LINEAR_SOLVER_ARGTYPES(double, double));
-template <>
-void lsvqr<c10::complex<float>, float>(CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<float>, float));
-template <>
-void lsvqr<c10::complex<double>, double>(CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<double>, double));
-
 #define CUDASOLVER_GETRF_ARGTYPES(Dtype)  \
     cusolverDnHandle_t handle, int m, int n, Dtype* dA, int ldda, int* ipiv, int* info
 
@@ -85,6 +46,47 @@ void getrs<c10::complex<double>>(CUDASOLVER_GETRS_ARGTYPES(c10::complex<double>)
 template<>
 void getrs<c10::complex<float>>(CUDASOLVER_GETRS_ARGTYPES(c10::complex<float>));
 
+#define CUDASOLVER_SYTRF_BUFFER_ARGTYPES(Dtype) \
+  cusolverDnHandle_t handle, int n, Dtype *A, int lda, int *lwork
+
+template <class Dtype>
+void sytrf_bufferSize(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(Dtype)) {
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::sytrf_bufferSize: not implemented for ",
+      typeid(Dtype).name());
+}
+template <>
+void sytrf_bufferSize<float>(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(float));
+template <>
+void sytrf_bufferSize<double>(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(double));
+template <>
+void sytrf_bufferSize<c10::complex<double>>(
+    CUDASOLVER_SYTRF_BUFFER_ARGTYPES(c10::complex<double>));
+template <>
+void sytrf_bufferSize<c10::complex<float>>(
+    CUDASOLVER_SYTRF_BUFFER_ARGTYPES(c10::complex<float>));
+
+#define CUDASOLVER_SYTRF_ARGTYPES(Dtype)                                      \
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, Dtype *A, int lda, \
+      int *ipiv, Dtype *work, int lwork, int *devInfo
+
+template <class Dtype>
+void sytrf(CUDASOLVER_SYTRF_ARGTYPES(Dtype)) {
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::sytrf: not implemented for ",
+      typeid(Dtype).name());
+}
+template <>
+void sytrf<float>(CUDASOLVER_SYTRF_ARGTYPES(float));
+template <>
+void sytrf<double>(CUDASOLVER_SYTRF_ARGTYPES(double));
+template <>
+void sytrf<c10::complex<double>>(
+    CUDASOLVER_SYTRF_ARGTYPES(c10::complex<double>));
+template <>
+void sytrf<c10::complex<float>>(CUDASOLVER_SYTRF_ARGTYPES(c10::complex<float>));
 
 #define CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()  \
     cusolverDnHandle_t handle, int m, int n, int *lwork

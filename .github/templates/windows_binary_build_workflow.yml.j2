@@ -21,17 +21,22 @@ name: !{{ build_environment }}
 
 on:
   push:
+    {%- if branches == "nightly" %}
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
+    {%- endif %}
     branches:
-      - nightly
+      - !{{ branches }}
+    {%- if branches == "nightly" %}
     tags:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    {%- endif %}
 {%- for label in ciflow_config.labels | sort %}
-  {%- if label != "ciflow/default" %}
+    {%- if loop.first and branches != "nightly" %}
+    tags:
+    {%- endif %}
       - '!{{ label }}/*'
-  {%- endif %}
 {%- endfor %}
   workflow_dispatch:
 
@@ -54,6 +59,7 @@ env:
 jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
@@ -91,7 +97,7 @@ jobs:
     steps:
       !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}
@@ -107,5 +113,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
+  {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config, True) }}
+  {%- endif %}
 {%- endfor %}

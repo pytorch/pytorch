@@ -26,7 +26,7 @@ TORCH_META_FUNC(renorm)(const Tensor& self, const Scalar& p, int64_t dim, const 
   TORCH_CHECK(maxnorm.toDouble() >= 0.0,
               "renorm: expected maxnorm to be >= 0 but got ", maxnorm.toDouble());
   const auto ndim = self.dim();
-  TORCH_CHECK(ndim > 1, "renorm: input needs at least 2 dimensions, got ", ndim, "dimensions");
+  TORCH_CHECK(ndim > 1, "renorm: input needs at least 2 dimensions, got ", ndim, " dimensions");
   set_output(self.sizes(), self.options());
 }
 
@@ -557,7 +557,6 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   }
 
   // backward in inference mode is not supported in cudnn, fallback to native
-  // TODO: verify the same thing in miopen
   if (impl_index == 0 || (!train)) {
     return at::native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var_transform, train, epsilon, output_mask);
   } else if (impl_index == 1) {

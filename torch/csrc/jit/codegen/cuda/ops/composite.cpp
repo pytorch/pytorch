@@ -49,18 +49,6 @@ TensorView* dropout_backward(TensorView* dy, TensorView* mask, Val* scale) {
   return dx;
 }
 
-Val* softplus(Val* x, Val* beta, Val* threshold) {
-  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
-  TORCH_INTERNAL_ASSERT(beta != nullptr, "Beta is invalid.");
-  TORCH_INTERNAL_ASSERT(
-      threshold != nullptr, "Threshold is not a valid Double.");
-
-  auto op_beta = mul(x, beta);
-  auto maybe_result = div(log1p(exp(op_beta)), beta);
-  auto y = where(gt(op_beta, threshold), x, maybe_result);
-  return y;
-}
-
 LstmResult lstm(
     TensorView* prev_cell,
     TensorView* in_x,
@@ -85,7 +73,53 @@ LstmResult lstm(
   return {cell, hidden};
 }
 
-Val* fast_gelu(Val* x) {
+TensorView* softplus(TensorView* x, Val* beta, Val* threshold) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+  TORCH_INTERNAL_ASSERT(beta != nullptr, "Beta is invalid.");
+  TORCH_INTERNAL_ASSERT(
+      threshold != nullptr, "Threshold is not a valid Double.");
+
+  auto op_beta = mul(x, beta);
+  auto maybe_result = div(log1p(exp(op_beta)), beta);
+  auto y = where(gt(op_beta, threshold), x, maybe_result);
+  return y;
+}
+
+TensorView* gelu(TensorView* x) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid");
+
+  auto kappa = IrBuilder::create<Double>(x->container(), M_SQRT1_2);
+  auto half = IrBuilder::create<Double>(x->container(), 0.5);
+  auto one = IrBuilder::create<Double>(x->container(), 1.);
+
+  auto cdf = mul(half, add(one, erf(mul(x, kappa))));
+  auto y = mul(x, cdf);
+  return y;
+}
+
+TensorView* gelu_backward(TensorView* dy, TensorView* x) {
+  TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid");
+
+  constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+  const double kHalf = 0.5;
+
+  auto cdf_1 = mul(x, IrBuilder::create<Double>(x->container(), M_SQRT1_2));
+  auto cdf_2 = erf(cdf_1);
+  auto cdf_3 = add(cdf_2, IrBuilder::create<Double>(x->container(), 1.));
+  auto cdf_4 = mul(cdf_3, IrBuilder::create<Double>(x->container(), kHalf));
+
+  auto pdf_1 = mul(x, x);
+  auto pdf_2 = mul(pdf_1, IrBuilder::create<Double>(x->container(), -kHalf));
+  auto pdf_3 = exp(pdf_2);
+
+  auto out = addcmul(
+      cdf_4, x, pdf_3, IrBuilder::create<Double>(x->container(), kAlpha));
+  auto dx = mul(out, dy);
+  return dx;
+}
+
+TensorView* tanh_gelu(TensorView* x) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid");
 
   constexpr double kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
@@ -104,7 +138,7 @@ Val* fast_gelu(Val* x) {
   return y;
 }
 
-Val* fast_gelu_backward(Val* dy, Val* x) {
+TensorView* tanh_gelu_backward(TensorView* dy, TensorView* x) {
   TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid");
 
@@ -139,29 +173,7 @@ Val* fast_gelu_backward(Val* dy, Val* x) {
   return dx;
 }
 
-Val* gelu_backward(Val* dy, Val* x) {
-  TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
-  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid");
-
-  constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-  const double kHalf = 0.5;
-
-  auto cdf_1 = mul(x, IrBuilder::create<Double>(x->container(), M_SQRT1_2));
-  auto cdf_2 = erf(cdf_1);
-  auto cdf_3 = add(cdf_2, IrBuilder::create<Double>(x->container(), 1.));
-  auto cdf_4 = mul(cdf_3, IrBuilder::create<Double>(x->container(), kHalf));
-
-  auto pdf_1 = mul(x, x);
-  auto pdf_2 = mul(pdf_1, IrBuilder::create<Double>(x->container(), -kHalf));
-  auto pdf_3 = exp(pdf_2);
-
-  auto out = addcmul(
-      cdf_4, x, pdf_3, IrBuilder::create<Double>(x->container(), kAlpha));
-  auto dx = mul(out, dy);
-  return dx;
-}
-
-Val* tanh_backward(Val* dy, Val* tanh_x) {
+TensorView* tanh_backward(TensorView* dy, TensorView* tanh_x) {
   TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
   TORCH_INTERNAL_ASSERT(tanh_x != nullptr, "Input is invalid");
 
