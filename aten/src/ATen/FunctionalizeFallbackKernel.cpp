@@ -4,6 +4,12 @@
 #include <torch/library.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/to_native.h>
+#endif
+
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
@@ -75,6 +81,15 @@ namespace {
   }
 }
 
+at::Tensor lift_functionalize(const at::Tensor & self) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  return at::functionalization::impl::to_functional_tensor(self);
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
+}
+
+TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
+  m.impl("lift", TORCH_FN(lift_functionalize));
 }
