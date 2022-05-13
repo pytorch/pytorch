@@ -415,7 +415,7 @@ public:
     return true;
   }
 
-  void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
+  void set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
 #define TORCH_DISALLOW_TEMPORARIES_IMPL(methodname, maybestatic)                               \
   maybestatic void methodname(TensorBase&& out, const TensorBase& a, const TensorBase& b) = delete; \
@@ -591,7 +591,7 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
 #undef TORCH_DISALLOW_TEMPORARIES_IMPL
 
   const Tensor& maybe_get_output(int64_t output_idx) override;
-  void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
+  void set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 };
 
 class TORCH_API TensorIteratorConfig final {
