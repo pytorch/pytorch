@@ -2705,23 +2705,6 @@ class TestNLLLoss(TestCase):
 
         helper(3, 3)
 
-    def test_sum_backward(self):
-        def helper(n, c, h, w):
-            cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            all_sum = torch.sum(x)
-            all_sum_cpu = torch.sum(cpu_x)
-
-            all_sum.backward()
-            all_sum_cpu.backward()
-
-            self.assertEqual(all_sum, all_sum_cpu)
-            self.assertEqual(x.grad, cpu_x.grad)
-
-        helper(2, 8, 4, 5)
-
-
     def test_topk(self):
         def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
