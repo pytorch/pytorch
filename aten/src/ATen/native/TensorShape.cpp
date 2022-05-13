@@ -1430,7 +1430,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
     }
 
-    const auto nneg_index = [&index, index_len, &self, size, dim](void) -> Tensor {
+    const auto nneg_index = [&index, index_len, &self, size, dim]() -> Tensor {
       const auto index_contiguous = index.contiguous();
       auto nneg_index = at::empty_like(index_contiguous);
       // nneg_index = (index < 0) * (index + size) + (index >= 0) * index
@@ -1442,6 +1442,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           for (C10_UNUSED const auto _ : c10::irange(start, end)) {
             auto idx = *src++;
             if (idx < -size || idx >= size) {
+               // Mark self and dim as used if code is compiled with STRIP_ERROR_MESSAGES
+              (void)dim;
+              (void)self;
               TORCH_CHECK_INDEX(false,
                   "index_select(): index contains ", idx, " that is out of range for tensor of size ",
                   self.sizes(), " at dimension ", dim
@@ -3323,6 +3326,13 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
+}
+
+// The default implementation of lift is a no-op.
+// If TLS is set appropriately (for wrapper-tensor keys like Functionalize or functorch transforms),
+// then we'll dispatch to one of their implementations, which will properly lift the tensor into a wrapper.
+at::Tensor lift(const at::Tensor& self) {
+    return self;
 }
 
 } // namespace native
