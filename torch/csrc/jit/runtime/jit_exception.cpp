@@ -14,19 +14,19 @@ JITException::JITException(
       python_class_name_(std::move(python_class_name)),
       original_msg_(std::move(original_msg)) {}
 
-  const std::string& JITException::getCaughtOriginalMsg() {
-    return caughtOriginalMsg;
-  }
-  const std::string& JITException::getCaughtPythonClassName() {
-    return caughtPythonClassName;
-  }
-  void JITException::setCaughtOriginalMsg(const std::string& msg) {
-    caughtOriginalMsg = msg;
-  }
-  void JITException::setCaughtPythonClassName(
-      const std::string& pythonClassName) {
-    caughtPythonClassName = pythonClassName;
-  }
+const std::string& JITException::getCaughtOriginalMsg() {
+  return caughtOriginalMsg;
+}
+const std::string& JITException::getCaughtPythonClassName() {
+  return caughtPythonClassName;
+}
+void JITException::setCaughtOriginalMsg(const std::string& msg) {
+  caughtOriginalMsg = msg;
+}
+void JITException::setCaughtPythonClassName(
+    const std::string& pythonClassName) {
+  caughtPythonClassName = pythonClassName;
+}
 
 } // namespace jit
 } // namespace torch
