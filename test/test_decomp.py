@@ -145,7 +145,6 @@ def _getDefaultRtolAndAtol(dtype0, dtype1):
 
 
 def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
-    print(orig.dtype, decomp.dtype)
     assert orig.dtype == decomp.dtype, f"Operation:  {op}"
     if orig.numel() == 0 or decomp.numel() == 0:
         assert orig.numel() == decomp.numel()
@@ -275,10 +274,6 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float64, "nn.functional.dropout"),
     ("cuda", torch.float32, "nn.functional.dropout"),
     # decomp has problem even with opmath
-    # ("cuda", torch.bfloat16, "nn.functional.layer_norm"),
-    # ("cuda", torch.float16, "nn.functional.layer_norm"),
-    ("cuda", torch.bfloat16, "nn.functional.instance_norm"),
-    ("cuda", torch.float16, "nn.functional.instance_norm"),
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
 
