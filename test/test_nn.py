@@ -42,7 +42,7 @@ from torch.testing._internal.common_dtype import integral_types, floating_types_
     floating_and_complex_types_and
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
-    download_file, get_function_arglist, load_tests, \
+    download_file, get_function_arglist, load_tests, skipIfMps,\
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -17220,6 +17220,7 @@ class TestNNDeviceType(NNTestCase):
         tol = 2 * torch.finfo(dtype).eps
         self.assertEqual(logits_soft.grad, logits_hard.grad, atol=tol, rtol=0)
 
+    @skipIfMps
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_gumbel_softmax(self, device, dtype):
@@ -18656,27 +18657,32 @@ class TestNNDeviceType(NNTestCase):
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
+    @skipIfMps
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
+    @skipIfMps
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_maxpool_indices_no_batch_dim(self, device, dtype):
         """Check that indices with no batch dim is consistent with a single batch."""
@@ -18842,6 +18848,7 @@ class TestNNDeviceType(NNTestCase):
                                        lambda: fn_module(x))
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -18856,6 +18863,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(x.shape[2], res.shape[2])
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @skipIfMps
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
