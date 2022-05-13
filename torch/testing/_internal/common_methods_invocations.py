@@ -15333,7 +15333,7 @@ op_db: List[OpInfo] = [
            decorators=[onlyCPU],
            sample_inputs_func=sample_inputs_index),
     OpInfo('__getitem__',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
