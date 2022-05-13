@@ -16,9 +16,11 @@ from torch.onnx import (
     symbolic_registry,
 )
 
+
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
 TrainingMode = _C._onnx.TrainingMode
+_CAFFE2_ATEN_FALLBACK = _C._onnx._CAFFE2_ATEN_FALLBACK
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 

@@ -383,7 +383,7 @@ def is_caffe2_aten_fallback():
     return (
         GLOBALS.operator_export_type
         == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        and torch.onnx._CAFFE2_ATEN_FALLBACK
+        and _C_onnx._CAFFE2_ATEN_FALLBACK
     )
 
 
