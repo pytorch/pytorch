@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import itertools
 import sys
 
 import torch
@@ -228,9 +229,12 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
     @requires_nccl()
     def test_sharded_tensor_layer_norm(self):
         specs = _chunk_sharding_specs_list_for_test([1, 2], seed=10)
-        for spec in specs:
+        flags = [True, False]
+        for spec, flag in itertools.product(specs, flags):
             tensor = torch.rand(16, 35, 26).cuda(self.rank)
-            layer_norm = torch.nn.LayerNorm((35, 26)).cuda(self.rank)
+            layer_norm = torch.nn.LayerNorm((35, 26), elementwise_affine=flag).cuda(
+                self.rank
+            )
             st = layer_norm(_shard_tensor(tensor, spec))
             with torch.no_grad():
                 tensor_normed = layer_norm(tensor)
@@ -247,7 +251,10 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 )
             )
             st_expected = torch.nn.functional.layer_norm(
-                _shard_tensor(tensor, spec), (35, 26)
+                _shard_tensor(tensor, spec),
+                (35, 26),
+                weight=layer_norm.weight,
+                bias=layer_norm.bias,
             )
             self.assertTrue(
                 torch.allclose(
