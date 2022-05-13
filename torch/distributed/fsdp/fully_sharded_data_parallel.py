@@ -430,8 +430,12 @@ class FullyShardedDataParallel(nn.Module):
     .. warning::
         Module should be already placed on the destination device or
         device is set properly using ``torch.cuda.set_device(device_id)``.
+        Alternatively, if module is input on CPU, ``device_id`` argument can
+        be specified to move module to CUDA device during initialization.
         FSDP will get compute device from module first, if module device
-        is CPU, FSDP will then get compute device from current device.
+        is CPU, FSDP will then get compute device from current device. Note
+        that if ``device_id`` is specified, compute device will always match
+        ``device_id``.
 
     .. warning::
         FSDP currently does not support gradient accumulation outside
@@ -442,6 +446,11 @@ class FullyShardedDataParallel(nn.Module):
     .. warning::
         Changing the original parameter variable names after construction will
         lead to undefined behavior.
+
+    .. note::
+        Inputs into FSDP ``forward`` function will be moved to compute device
+        (same device FSDP module is on) before running ``forward``, so user does
+        not have to manually move inputs from CPU -> GPU.
 
     Args:
         module (nn.Module):
@@ -699,58 +708,8 @@ class FullyShardedDataParallel(nn.Module):
                 f"FSDP only supports single device modules, but got params on {module_devices}"
             )
 
-        # Move module to device specified. Note that this is done prior to
-        # setting compute_device to ensure that they align.
-        needs_move_back_to_cpu = False
-        if self.device_id is not None:
-            param = None
-            try:
-                # Get the next unflat param
-                param_gen = module.parameters()
-                while True:
-                    param = next(param_gen)
-                    if not isinstance(param, FlatParameter):
-                        break
-
-                if param.device == torch.device("cpu"):
-                    module = module.to(self.device_id)
-            except StopIteration:
-                # this FSDP instance manages no parameters.
-                pass
-
-            # For GPU modules, module device should match device_id.
-            if param is not None and param.device != self.device_id:
-                raise RuntimeError(
-                    f"Module on rank {self.rank} is given device_id argument "
-                    f"{self.device_id}, but is on {param.device}. "
-                    " Either move module before FSDP init or omit device_id argument."
-                )
-        else:
-            # device_id argument is not specified
-            # If module is on CPU, move it to current device and log a warning.
-            try:
-                # Get the next unflat param
-                param_gen = module.parameters()
-                while True:
-                    param = next(param_gen)
-                    if not isinstance(param, FlatParameter):
-                        break
-
-                if param.device == torch.device("cpu"):
-                    warnings.warn(
-                        f"Module is input on CPU, we are moving it to {torch.cuda.current_device()}"
-                        " to perform parameter verification, flattening, sharding, and will"
-                        " move it back after."
-                    )
-                    needs_move_back_to_cpu = True
-                    # Note that this will match self.compute_device, because
-                    # compute_device is computed as current_device for CPU
-                    # modules.
-                    module = module.to(torch.cuda.current_device())
-            except StopIteration:
-                # this FSDP instance manages no parameters
-                pass
-
+        # Move module appropriately depending on device_id and whether module is on CPU.
+        needs_move_back_to_cpu = self._move_module_if_needed()
 
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
@@ -859,6 +818,67 @@ class FullyShardedDataParallel(nn.Module):
 
         # For validating execution order across ranks
         self._exec_order_data = _ExecOrderData()
+
+    def _move_module_if_needed(self) -> bool:
+        """
+        Moves module appropriately depending on device_id and
+        whether module is on CPU. Returns a ``bool`` indicating
+        whether the module needs to be moved back to CPU before
+        returning to user.
+        """
+        # Move module to device specified. Note that this is done prior to
+        # setting compute_device to ensure that they align.
+        needs_move_back_to_cpu = False
+        if self.device_id is not None:
+            param = None
+            try:
+                # Get the next unflat param
+                param_gen = module.parameters()
+                while True:
+                    param = next(param_gen)
+                    if not isinstance(param, FlatParameter):
+                        break
+
+                if param.device == torch.device("cpu"):
+                    module = module.to(self.device_id)
+            except StopIteration:
+                # this FSDP instance manages no parameters.
+                pass
+
+            # For GPU modules, module device should match device_id.
+            if param is not None and param.device != self.device_id:
+                raise RuntimeError(
+                    f"Module on rank {self.rank} is given device_id argument "
+                    f"{self.device_id}, but is on {param.device}. "
+                    " Either move module before FSDP init or omit device_id argument."
+                )
+        else:
+            # device_id argument is not specified
+            # If module is on CPU, move it to current device and log a warning.
+            try:
+                # Get the next unflat param
+                param_gen = module.parameters()
+                while True:
+                    param = next(param_gen)
+                    if not isinstance(param, FlatParameter):
+                        break
+
+                if param.device == torch.device("cpu"):
+                    warnings.warn(
+                        f"Module is input on CPU, we are moving it to {torch.cuda.current_device()}"
+                        " to perform parameter verification, flattening, sharding, and will"
+                        " move it back after."
+                    )
+                    needs_move_back_to_cpu = True
+                    # Note that this will match self.compute_device, because
+                    # compute_device is computed as current_device for CPU
+                    # modules.
+                    module = module.to(torch.cuda.current_device())
+            except StopIteration:
+                # this FSDP instance manages no parameters
+                pass
+
+        return needs_move_back_to_cpu
 
     def _init_reshard_after_forward(self):
         if self.sharding_strategy == ShardingStrategy.FULL_SHARD:
