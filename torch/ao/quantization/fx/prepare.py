@@ -1383,9 +1383,6 @@ def prepare(
     if equalization_qconfig_dict is None:
         equalization_qconfig_dict = {}
 
-    # This is used to catch the error when people pass around `prepare_custom_config_dict`
-    # as positional argument
-    assert isinstance(example_inputs, Tuple[Any, ...]), "Unexpected type for `example_inputs`"
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,
     # {
