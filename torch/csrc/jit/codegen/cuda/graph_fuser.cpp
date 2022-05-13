@@ -2217,8 +2217,7 @@ void decomposeConvOps(Block* block) {
     auto bias_size_opt = bias_tensor_type->sizes().concrete_sizes();
     if (!bias_size_opt.has_value()) {
       TORCH_WARN_ONCE(
-        "concrete shape for bias input is required to decompose into conv + bias"
-      );
+          "concrete shape for bias input is required to decompose into conv + bias");
       continue;
     }
     // bias shape (C)
