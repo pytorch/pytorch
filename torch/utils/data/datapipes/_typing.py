@@ -6,7 +6,7 @@ import functools
 import inspect
 import numbers
 import sys
-from typing import (Any, Dict, Iterator, Generic, List, Optional, Set, Tuple, TypeVar, Union,
+from typing import (Any, Dict, Iterator, Generic, List, Set, Tuple, TypeVar, Union,
                     get_type_hints)
 from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
 from typing import ForwardRef
@@ -413,7 +413,7 @@ def _set_datapipe_valid_iterator_id(datapipe):
     """
     if hasattr(datapipe, "_is_child_datapipe") and datapipe._is_child_datapipe is True:
         if hasattr(datapipe, "_set_main_datapipe_valid_iterator_id"):
-            datapipe._set_main_datapipe_valid_iterator_id()
+            datapipe._set_main_datapipe_valid_iterator_id()  # reset() is called within this method when appropriate
         else:
             raise RuntimeError("ChildDataPipe must have method `_set_main_datapipe_valid_iterator_id`.")
     else:
@@ -454,7 +454,6 @@ def hook_iterator(namespace, profile_name):
             return getattr(self.iterator, name)
 
     func = namespace['__iter__']
-    iterator_id: Optional[int] = None  # This ID is tied to each created iterator
 
     # ``__iter__`` of IterDataPipe is a generator function
     if inspect.isgeneratorfunction(func):
@@ -462,7 +461,7 @@ def hook_iterator(namespace, profile_name):
         def wrap_generator(*args, **kwargs):
             gen = func(*args, **kwargs)
             datapipe = args[0]
-            iterator_id = _set_datapipe_valid_iterator_id(datapipe)
+            iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
             try:
                 with context():
                     response = gen.send(None)
@@ -507,8 +506,7 @@ def hook_iterator(namespace, profile_name):
         def wrap_iter(*args, **kwargs):
             iter_ret = func(*args, **kwargs)
             datapipe = args[0]
-            nonlocal iterator_id
-            iterator_id = _set_datapipe_valid_iterator_id(datapipe)
+            iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
             return IteratorDecorator(iter_ret, datapipe, iterator_id)
 
         namespace['__iter__'] = wrap_iter
