@@ -2027,9 +2027,6 @@ class FullyShardedDataParallel(nn.Module):
                 args, kwargs = _to_kwargs(args, kwargs, self.compute_device.index, False)
                 args = args[0]
                 kwargs = kwargs[0]
-                # args, kwargs = _to_kwargs(
-                #     args, kwargs, self.compute_device.index, use_side_stream_for_tensor_copies=False
-                # )
 
             # Cast inputs to their mixed precision type.
             if (
