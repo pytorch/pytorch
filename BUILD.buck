@@ -540,7 +540,7 @@ python_library(
     ]),
     base_module = "",
     deps = [
-        "//third_party:pyyaml",
+        #"//third_party:pyyaml",
         "//tools/lite_interpreter:gen_selected_mobile_ops_header",
         "//torchgen:torchgen",
     ],
@@ -563,7 +563,7 @@ python_library(
     ]),
     base_module = "",
     deps = [
-        "//third_party:pyyaml",
+        #"//third_party:pyyaml",
         "//torchgen:torchgen",
     ],
 )

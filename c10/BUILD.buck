@@ -20,8 +20,7 @@ cxx_library(
         "-Wno-global-constructors",
         "-DDISABLE_NAMEDTENSOR",
         "-DSUPPORTS_BACKTRACE=0"
-],
-    preferred_linkage = "static",
+    ],
     exported_headers = subdir_glob(
         [
             ("", "**/*.h"),

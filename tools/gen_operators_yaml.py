@@ -17,8 +17,7 @@ from torchgen.selective_build.selector import merge_kernel_metadata
 # ------------------------------------------------------------------------------
 #
 # This binary is responsible for generating the model_operators.yaml file for
-# each model from a pt_operator_library() BUCK macro invocation. See
-# https://fb.quip.com/2oEzAR5MKqbD#TNCACA9Ikmy for details.
+# each model from a pt_operator_library() BUCK macro invocation.
 #
 # Output YAML file format:
 # ------------------------
