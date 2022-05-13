@@ -11,7 +11,7 @@ import torch.onnx.symbolic_opset9
 # ONNX symbolics
 import torch.onnx.utils
 from torch.nn.modules.utils import _pair, _single, _triple
-from torch.onnx.symbolic_helper import _unimplemented, parse_args
+from torch.onnx.symbolic_helper import _unimplemented, parse_args, quantized_args
 from torch.onnx.symbolic_opset9 import (
     add,
     conv2d,
@@ -80,6 +80,7 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
+    @quantized_args(True, False, False, False, False, False)
     @parse_args("v", "is", "is", "is", "is", "i")
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if not stride:
