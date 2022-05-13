@@ -36,10 +36,7 @@ from test_pytorch_common import (
     skipScriptTest,
 )
 from torchvision import ops
-from torchvision.models.detection.faster_rcnn import (
-    FastRCNNPredictor,
-    TwoMLPHead,
-)
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
 from torchvision.models.detection.image_list import ImageList
 from torchvision.models.detection.roi_heads import RoIHeads
 from torchvision.models.detection.rpn import (
@@ -364,7 +361,7 @@ def _init_test_roi_heads_faster_rcnn():
 
 
 def _construct_tensor_for_quantization_test(
-    shape: Tuple[int],
+    shape: Tuple[int, ...],
     offset: Optional[Union[int, float]] = None,
     max_val: Optional[Union[int, float]] = None,
 ) -> torch.Tensor:
@@ -929,9 +926,7 @@ class _TestONNXRuntime:
     def test_heatmaps_to_keypoints(self):
         maps = torch.rand(10, 1, 26, 26)
         rois = torch.rand(10, 4)
-        from torchvision.models.detection.roi_heads import (
-            heatmaps_to_keypoints,
-        )
+        from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
 
         out = heatmaps_to_keypoints(maps, rois)
         jit_trace = torch.jit.trace(heatmaps_to_keypoints, (maps, rois))
@@ -942,9 +937,7 @@ class _TestONNXRuntime:
 
         maps2 = torch.rand(20, 2, 21, 21)
         rois2 = torch.rand(20, 4)
-        from torchvision.models.detection.roi_heads import (
-            heatmaps_to_keypoints,
-        )
+        from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
 
         out2 = heatmaps_to_keypoints(maps2, rois2)
         out_trace2 = jit_trace(maps2, rois2)
@@ -12585,6 +12578,30 @@ class _TestONNXRuntime:
         input = _construct_tensor_for_quantization_test(
             (3, 4, 8, 8), offset=-384, max_val=12
         )
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_qat_maxpool2d(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.pool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.pool(x)
+                x = self.dequant(x)
+                return x
+
+        model = M()
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model.train())
+        model = torch.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
