@@ -18166,7 +18166,7 @@ python_ref_db = [
                          dtypes=(torch.chalf,)),
             # Same reason as `test_python_reference_consistency`
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,)), 
+                         dtypes=(torch.chalf,)),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
