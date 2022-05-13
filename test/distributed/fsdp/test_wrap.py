@@ -308,6 +308,7 @@ class TestAutoWrap(TestCase):
         # For all the tests here, we use a fake group
         self.process_group = DummyProcessGroup(rank=0, size=1)
 
+    @skip_if_lt_x_gpu(2)
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_wrap(self, wrap_method):
         if wrap_method == WrapMethod.WRAP_API:
@@ -324,6 +325,7 @@ class TestAutoWrap(TestCase):
         self.assertEqual(layer.rank, self.process_group.rank())
         self.assertEqual(layer.world_size, self.process_group.size())
 
+    @skip_if_lt_x_gpu(2)
     def test_wrap_disabled_outside_context(self):
         pg = self.process_group
 
@@ -340,6 +342,7 @@ class TestAutoWrap(TestCase):
         self.assertFalse(isinstance(model.lin, FSDP))
         self.assertTrue(isinstance(model.lin, nn.Linear))
 
+    @skip_if_lt_x_gpu(2)
     def test_wrap_override_defaults(self):
         new_process_group = DummyProcessGroup(rank=0, size=2)
         with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
@@ -349,6 +352,7 @@ class TestAutoWrap(TestCase):
         self.assertEqual(layer.rank, 0)
         self.assertEqual(layer.world_size, 2)
 
+    @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not torch.cuda.is_available(), "Test Requires CUDA")
     def test_always_wrap(self):
         """
@@ -359,6 +363,7 @@ class TestAutoWrap(TestCase):
         model = FSDP(seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy)
         TestFSDPWrap.NestedSequentialModel.verify_model_all_wrapped(self, model)
 
+    @skip_if_lt_x_gpu(2)
     def test_transformer_auto_wrap_policy(self):
         model = TransformerWithSharedParams(group=self.process_group)
         my_auto_wrap_policy = functools.partial(
@@ -376,6 +381,7 @@ class TestAutoWrap(TestCase):
         for layer in fsdp_model.module.module.transformer.decoder.layers:
             self.assertTrue(isinstance(layer, FSDP))
 
+    @skip_if_lt_x_gpu(2)
     def test_auto_wrap_api(self):
         """
         Test to ensure with auto wrap, we wrap child modules correctly based on the min_num_params.
@@ -393,7 +399,7 @@ class TestAutoWrap(TestCase):
 
         TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
 
-
+    @skip_if_lt_x_gpu(2)
     def test_auto_wrap_preset_exclude_wrap(self):
         """
         Test to ensure excluded modules are not wrapped, regardless if the total param size is greater than the
@@ -414,6 +420,7 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model[0], nn.Linear))
         self.assertTrue(isinstance(model[1], nn.Linear))
 
+    @skip_if_lt_x_gpu(2)
     def test_auto_wrap_preset_exclude_wrap_include_children(self):
         """
         Test to ensure excluded modules are not wrapped, but children are if param size is greater than
@@ -428,6 +435,7 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model, FSDP))
         self.assertTrue(isinstance(model[0], FSDP))
 
+    @skip_if_lt_x_gpu(2)
     def test_auto_wrap_preset_force_leaf(self):
         """
         Test to ensure force-leaf modules are not wrapped, and children are not wrapped. The
@@ -443,6 +451,7 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[1], nn.MultiheadAttention))
         self.assertTrue(isinstance(model.module[1].out_proj, nn.Linear))
 
+    @skip_if_lt_x_gpu(2)
     def test_auto_wrap_preset_force_leaf_custom(self):
         """
         Test to ensure force-leaf modules are not wrapped.
@@ -515,6 +524,7 @@ class TestAutoWrap(TestCase):
         except FileNotFoundError:
             pass
 
+    @skip_if_lt_x_gpu(2)
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_always_wrap_with_ignored_modules(self, wrap_method: WrapMethod):
         sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
@@ -539,6 +549,7 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[2].module[0], nn.Linear))
         self.assertTrue(isinstance(model.module[2].module[1], FSDP))
 
+    @skip_if_lt_x_gpu(2)
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_auto_wrap_with_ignored_modules(self, wrap_method: WrapMethod):
         sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)

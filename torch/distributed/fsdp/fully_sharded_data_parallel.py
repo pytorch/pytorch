@@ -640,10 +640,12 @@ class FullyShardedDataParallel(nn.Module):
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
         if device_id is not None:
+            print(f"type of device_id {type(device_id)}")
             self.device_id = (
                 device_id if isinstance(device_id, torch.device)
-                else torch.device(self.device_id)
+                else torch.device(device_id)
             )
+            assert isinstance(self.device_id, torch.device)
         else:
             self.device_id = None
 
@@ -680,8 +682,20 @@ class FullyShardedDataParallel(nn.Module):
                 deferred_init.materialize_module(module, check_fn=check_fn)
 
         # Check that module was placed onto a single device.
-        module_devices = {p.device for p in module.parameters()}
-        if len(module_devices) != 1:
+        # Note that we need to check unwrapped module children, but exclude
+        # FSDP and ignored modules.
+        unwrapped_modules = set()
+        for mod in module.modules():
+            if (
+                mod not in ignored_modules
+                and not isinstance(mod, FullyShardedDataParallel)
+                and not isinstance(mod, FlattenParamsWrapper)
+            ):
+                unwrapped_modules.add(mod)
+
+        module_devices = {p.device for x in unwrapped_modules for p in x.parameters()}
+
+        if len(module_devices) > 1:
             raise RuntimeError(
                 f"FSDP only supports single device modules, but got params on {module_devices}"
             )
@@ -690,18 +704,20 @@ class FullyShardedDataParallel(nn.Module):
         # setting compute_device to ensure that they align.
         needs_move_back_to_cpu = False
         if self.device_id is not None:
+            param = None
             try:
                 param = next(module.parameters())
                 if param.device == torch.device("cpu"):
                     module = module.to(self.device_id)
             except StopIteration:
                 # this FSDP instance manages no parameters.
-                param = None
+                pass
 
             # For GPU modules, module device should match device_id.
-            if param.device != self.device_id:
+            print(f"{type(param.device) if param is not None else param}, {type(self.device_id)}")
+            if param is not None and param.device != self.device_id:
                 raise RuntimeError(
-                    f"Module on rank {self.rank} is expected to be on "
+                    f"Module on rank {self.rank} is given device_id argument "
                     f"{self.device_id}, but is on {param.device}. "
                     " Either move module before FSDP init or omit device_id argument."
                 )
@@ -732,7 +748,7 @@ class FullyShardedDataParallel(nn.Module):
 
         # if device_id is specified, ensure it is the same
         assert (
-            not self.device_id or self.compute_device == self.device_id
+            self.device_id is None or self.compute_device == self.device_id
         ), f"Inconsistent compute_device and device_id: {self.compute_device} vs {self.device_id}"
 
         # Enum to indicate if we're in the forward/backward pass, idle, etc.
@@ -2019,9 +2035,12 @@ class FullyShardedDataParallel(nn.Module):
                 # device_id == self.compute_device is guaranteed.
                 # TODO: for mixed precision, move inputs to right device + cast might
                 # be done in one go for performance.
-                args, kwargs = _to_kwargs(
-                    args, kwargs, self.compute_device, use_side_stream_for_tensor_copies=False
-                )
+                args, kwargs = _to_kwargs(args, kwargs, self.compute_device.index, False)
+                args = args[0]
+                kwargs = kwargs[0]
+                # args, kwargs = _to_kwargs(
+                #     args, kwargs, self.compute_device.index, use_side_stream_for_tensor_copies=False
+                # )
 
             # Cast inputs to their mixed precision type.
             if (
@@ -3608,7 +3627,7 @@ def _get_default_cuda_device(module: nn.Module) -> torch.device:
     except StopIteration:
         pass
     # Fall back to current CUDA device
-    return torch.device("cuda")
+    return torch.device("cuda", torch.cuda.current_device())
 
 
 def _free_storage(data: torch.Tensor) -> None:
