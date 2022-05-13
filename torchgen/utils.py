@@ -365,7 +365,7 @@ def _format_dict(
 
 
 def _format_list(
-    attr: Union[List[Any], Set[Any], Tuple[Any, Any]],
+    attr: Union[List[Any], Set[Any], Tuple[Any, ...]],
     indent: int,
     width: int,
     curr_indent: int,
