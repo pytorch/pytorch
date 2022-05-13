@@ -16045,7 +16045,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_msort,
            skips=(
                DecorateInfo(unittest.skip("segfaults on some systems"), 'TestCommon',
-                            'test_non_standard_bool_values', device_type='cpu')
+                            'test_non_standard_bool_values', device_type='cpu'),
            )),
     OpInfo('movedim',
            aliases=('moveaxis',),
