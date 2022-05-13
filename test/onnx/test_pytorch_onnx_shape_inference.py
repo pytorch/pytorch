@@ -198,6 +198,15 @@ class TestONNXShapeInference(unittest.TestCase):
         expand = g.op("Expand", constant, shape)
         self.run_test(g, expand.node(), expect_tensor("Float", shape=(None, None)))
 
+    def test_pad(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([3, 320, 100]))
+        constant = self.insert_tensor_constant(g, torch.ones(6, dtype=torch.long))
+        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        pad = g.op("Pad", input, constant, none, mode_s="constant")
+        self.run_test(g, pad.node(), expect_tensor("Float", shape=(None, None, None)))
+
 
 if __name__ == "__main__":
     unittest.main()
