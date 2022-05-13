@@ -14743,9 +14743,6 @@ op_db: List[OpInfo] = [
                    supports_sparse_csr=True,
                    supports_complex_to_float=True,
                    skips=(
-                       # The complex formula might be wrong
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
-                                    dtypes=complex_types()),
                        # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_zero_to_zero_correspondence_unary',
                                     dtypes=(torch.chalf,),),
