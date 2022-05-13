@@ -159,8 +159,8 @@ jobs:
     uses: ./.github/workflows/_mac-build.yml
     with:
       build-environment: macos-11-py3-x86-64
-      xcode-version: "12.4"
-      runner-type: macos-11
+      xcode-version: "13.3.1"
+      runner-type: macos-12
       build-generates-artifacts: true
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
