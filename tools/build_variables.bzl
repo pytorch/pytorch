@@ -1166,7 +1166,7 @@ aten_native_source_codegen_list = [
 aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ao_sparse/library.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.cpp",
-    "aten/src/ATen/native/ao_sparse/quantized/cpu/Linear.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/LinearDynamic.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/LinearPrepack.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_unpack.cpp",
