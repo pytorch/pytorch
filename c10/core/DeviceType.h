@@ -32,11 +32,12 @@ enum class DeviceType : int8_t {
   VE = 16, // SX-Aurora / NEC
   Lazy = 17, // Lazy Tensors
   IPU = 18, // Graphcore IPU
+  PrivateUse1 = 19, // PrivateUse1 device
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 19,
+  COMPILE_TIME_MAX_DEVICE_TYPES = 20,
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;
@@ -54,18 +55,19 @@ constexpr DeviceType kHPU = DeviceType::HPU;
 constexpr DeviceType kVE = DeviceType::VE;
 constexpr DeviceType kLazy = DeviceType::Lazy;
 constexpr DeviceType kIPU = DeviceType::IPU;
+constexpr DeviceType kPrivateUse1 = DeviceType::PrivateUse1;
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =
     static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
 
 static_assert(
-    COMPILE_TIME_MAX_DEVICE_TYPES <= 19,
+    COMPILE_TIME_MAX_DEVICE_TYPES <= 20,
     "Hey!  You seem to be adding a lot of new DeviceTypes.  The intent was "
     "for this constant to reflect the actual number of DeviceTypes we support "
     "in PyTorch; it's important that this number is not too large as we "
     "use this to allocate stack arrays in some places in our code.  If you "
-    "are indeed just adding the 19th device type, feel free to change "
+    "are indeed just adding the 20th device type, feel free to change "
     "the check to 32; but if you are adding some sort of extensible device "
     "types registration, please be aware that you are affecting code that "
     "this number is small.  Try auditing uses of this constant.");
