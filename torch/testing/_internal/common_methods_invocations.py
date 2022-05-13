@@ -14743,7 +14743,7 @@ op_db: List[OpInfo] = [
                    supports_out=False,
                    supports_autograd=False,
                    skips=(
-                       # NotImplementedError: 
+                       # NotImplementedError:
                        # Could not run 'aten::view_as_real' with arguments from the 'Meta' backend.
                        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta", dtypes=(torch.chalf,)),
                    )),
