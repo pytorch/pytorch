@@ -93,8 +93,7 @@ _SKIP_PYTHON_BINDINGS = [
     ".*_forward_out",
     "_unsafe_view",
     "tensor",
-    "_?sparse_coo_tensor.*",
-    "_?sparse_csr_tensor.*",
+    "_?sparse_(coo|compressed|csr|csc|bsr|bsc)_tensor.*",
     "_arange.*",
     "_range.*",
     "linspace.*",
@@ -154,6 +153,7 @@ _SKIP_PYTHON_BINDINGS = [
     "copy",  # only used by the functionalization pass
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
+    "lift",
 ]
 
 SKIP_PYTHON_BINDINGS = list(
@@ -233,10 +233,16 @@ def is_py_special_function(f: NativeFunction) -> bool:
 
 
 def gen(
-    out: str, native_yaml_path: str, deprecated_yaml_path: str, template_path: str
+    out: str,
+    native_yaml_path: str,
+    tags_yaml_path: str,
+    deprecated_yaml_path: str,
+    template_path: str,
 ) -> None:
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = parse_native_yaml(
+        native_yaml_path, tags_yaml_path
+    ).native_functions
     native_functions = list(filter(should_generate_py_binding, native_functions))
 
     methods = load_signatures(native_functions, deprecated_yaml_path, method=True)
@@ -1095,6 +1101,8 @@ def sort_overloads(
         return (
             str(t1) == "Scalar"
             and str(t2) == "Tensor"
+            or str(t1) == "Scalar?"
+            and str(t2) == "Tensor?"
             or "Dimname" in str(t1)
             and "Dimname" not in str(t2)
             or

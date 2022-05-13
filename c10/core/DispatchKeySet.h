@@ -724,7 +724,7 @@ constexpr auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
 constexpr auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
 constexpr auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
 constexpr auto autograd_lazy_ks = DispatchKeySet(DispatchKey::AutogradLazy);
-constexpr auto autograd_mlc_ks = DispatchKeySet(DispatchKey::AutogradMLC);
+constexpr auto autograd_mps_ks = DispatchKeySet(DispatchKey::AutogradMPS);
 constexpr auto autograd_hpu_ks = DispatchKeySet(DispatchKey::AutogradHPU);
 constexpr auto autograd_privateuse1_ks =
     DispatchKeySet(DispatchKey::AutogradPrivateUse1);
@@ -799,8 +799,8 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
       return inplace_or_view_ks | autograd_xla_ks;
     case BackendComponent::LazyBit:
       return inplace_or_view_ks | autograd_lazy_ks;
-    case BackendComponent::MLCBit:
-      return inplace_or_view_ks | autograd_mlc_ks;
+    case BackendComponent::MPSBit:
+      return inplace_or_view_ks | autograd_mps_ks;
     case BackendComponent::HPUBit:
       return inplace_or_view_ks | autograd_hpu_ks;
     case BackendComponent::PrivateUse1Bit:
