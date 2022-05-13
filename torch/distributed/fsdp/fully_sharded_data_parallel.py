@@ -640,7 +640,6 @@ class FullyShardedDataParallel(nn.Module):
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
         if device_id is not None:
-            print(f"type of device_id {type(device_id)}")
             self.device_id = (
                 device_id if isinstance(device_id, torch.device)
                 else torch.device(device_id)
@@ -705,7 +704,6 @@ class FullyShardedDataParallel(nn.Module):
                 pass
 
             # For GPU modules, module device should match device_id.
-            print(f"{type(param.device) if param is not None else param}, {type(self.device_id)}")
             if param is not None and param.device != self.device_id:
                 raise RuntimeError(
                     f"Module on rank {self.rank} is given device_id argument "

@@ -82,6 +82,10 @@ class TestFSDPMisc(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_module_device_mismatches_device_id(self):
+        """
+        FSDP raises errors when module is on a GPU that does
+        not match device_id.
+        """
         context = (
             self.assertRaisesRegex(
                 RuntimeError,
@@ -103,6 +107,9 @@ class TestFSDPMisc(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_multi_device_not_supported(self):
+        """
+        FSDP throws appropriate error when we wrap multi-device module.
+        """
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()

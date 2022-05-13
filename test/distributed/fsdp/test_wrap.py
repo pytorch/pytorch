@@ -477,7 +477,8 @@ class TestAutoWrap(TestCase):
         "cpu_offload",
         [CPUOffload(offload_params=False), CPUOffload(offload_params=True)]
     )
-    def test_auto_wrap_smoke_test(self, fsdp_init_mode, cpu_offload):
+    @parametrize("use_device_id", [True, False])
+    def test_auto_wrap_smoke_test(self, fsdp_init_mode, cpu_offload, use_device_id):
         # CPU offload and CUDA after don't work together as expected.
         if (
             cpu_offload.offload_params and fsdp_init_mode == FSDPInitMode.CUDA_AFTER
@@ -486,6 +487,9 @@ class TestAutoWrap(TestCase):
 
         device = torch.device("cuda")
         torch.cuda.set_device(0)
+        device_id = (
+            torch.device("cuda", torch.cuda.current_device()) if use_device_id else None
+        )
 
         # Random port in case the next test run quickly, same port would cause conflict.
         os.environ["MASTER_ADDR"] = "localhost"
@@ -507,7 +511,9 @@ class TestAutoWrap(TestCase):
             my_auto_wrap_policy = functools.partial(
                 size_based_auto_wrap_policy, min_num_params=40
             )
-            model = FSDP(sequential, cpu_offload=cpu_offload, auto_wrap_policy=my_auto_wrap_policy)
+            model = FSDP(
+                sequential, cpu_offload=cpu_offload, auto_wrap_policy=my_auto_wrap_policy, device_id=device_id
+            )
             TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
             if cuda_after_init:
                 model = model.cuda()
