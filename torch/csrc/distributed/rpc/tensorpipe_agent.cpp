@@ -41,7 +41,7 @@ std::vector<c10::Device> getDevicesForTensors(
     const std::string& remoteName) {
   // If the deviceMap is overridden, use that instead.
   const auto errStr = c10::str(
-      "TensorPipe RPC backend only supports CPU tensors by default, please "
+      "TensorPipe RPC backend only supports CPU and Meta tensors by default, please "
       "move your tensors to CPU before sending them over RPC, or call "
       "`set_device_map` on `TensorPipeRpcBackendOptions` to explicitly "
       "configure device mapping. ",
@@ -51,7 +51,9 @@ std::vector<c10::Device> getDevicesForTensors(
   devices.reserve(tensors.size());
   bool hasMappedDevice = false;
   for (const auto& t : tensors) {
-    if (t.device().is_cpu()) {
+    if (t.device().is_meta()) {
+      devices.emplace_back(c10::kMeta);
+    } else if (t.device().is_cpu()) {
       const auto deviceIter = deviceMap.find(c10::kCPU);
       if (deviceIter == deviceMap.end()) {
         devices.emplace_back(c10::kCPU);
@@ -1411,7 +1413,7 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   }
 
   const auto errStr = c10::str(
-      "TensorPipe RPC backend only supports CPU tensors by default, please "
+      "TensorPipe RPC backend only supports CPU and Meta tensors by default, please "
       "move your tensors to CPU before sending them over RPC, or call "
       "`set_device_map` on `TensorPipeRpcBackendOptions` to explicitly "
       "configure device mapping. ",
