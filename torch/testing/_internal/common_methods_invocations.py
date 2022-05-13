@@ -18159,6 +18159,15 @@ python_ref_db = [
         "_refs.isfinite",
         torch_opinfo_name="isfinite",
         supports_out=True,
+        skips=(
+            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
+            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,)),
+            # Same reason as `test_python_reference_consistency`
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                         dtypes=(torch.chalf,)), 
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.isnan",
