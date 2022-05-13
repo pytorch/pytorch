@@ -729,7 +729,7 @@ class TestSparseCSR(TestCase):
         t = self.genSparseCSRTensor((m * blocksize, k * blocksize), nnz, dtype=dtype,
                                     device=device, index_dtype=index_dtype)
         st = sp.csr_matrix((t.values().cpu(), t.col_indices().cpu(), t.crow_indices().cpu()), shape=tuple(t.size()))
-        block_t = torch.sparse._csr_to_block_csr(t, (blocksize, blocksize))
+        block_t = t.to_sparse_bsr((blocksize, blocksize))
         self.assertEqual(block_t.values().dim(), 3)
         self.assertTrue(block_t.layout == torch.sparse_bsr)
         block_st = st.tobsr(blocksize=(blocksize, blocksize))
