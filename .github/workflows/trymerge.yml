@@ -6,6 +6,7 @@ on:
 
 jobs:
   do_merge:
+    name: try_merge_pr_${{ github.event.client_payload.pr_num }}
     runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
@@ -38,3 +39,7 @@ jobs:
           else
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi
+
+# TODO: Separate merge on green merges from regular merges to not hold up try-merge workflows overall concurrency
+# NOTE: force pushes are also put in their concurrency group to put them higher than regular merges
+concurrency: try-merge-${{ github.event.client_payload.force}}-${{ github.event.client_payload.on_green }}
