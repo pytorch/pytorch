@@ -1898,6 +1898,7 @@ class FullyShardedDataParallel(nn.Module):
         # TODO: Reduce the communication by using only one _all_gather_base to
         # gather all the parameters in this layer. This can be achieved by
         # concatenated all the local shards and then append the padding.
+        # https://github.com/pytorch/pytorch/issues/77461
         for module_name, _, param_name in self.module.flat_param._param_infos:
             module_name = module_name.replace(f"{FPW_MODULE}.", "")
             module_name = module_name.replace(f"{FPW_MODULE}", "")
