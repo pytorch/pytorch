@@ -323,6 +323,10 @@ int64_t ignore_index,
 const Tensor& total_weight,
 bool is2D)
 {
+    // Empty output
+    if(grad_input.numel() == 0)
+        return;
+
     MPSStream* stream = getCurrentMPSStream();
 
     struct CachedGraph : public MPSCachedGraph
@@ -491,6 +495,10 @@ void nllnd_loss_forward_impl
         output.resize_({});
 
     TORCH_CHECK(output.is_mps());
+
+    // Empty output
+    if(output.numel() == 0)
+        return;
 
     struct CachedGraph : public MPSCachedGraph
     {

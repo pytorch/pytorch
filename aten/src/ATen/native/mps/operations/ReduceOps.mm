@@ -138,7 +138,7 @@ void reduction_out_mps
                       input_shape,
                       axes);
 
-  if (output_t.numel() == 0) {
+  if (output_t.numel() == 0 || input_t.numel() == 0) {
     return;
   }
 
