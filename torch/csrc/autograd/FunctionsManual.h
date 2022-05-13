@@ -241,6 +241,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     std::array<bool, 2> output_mask);
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
+                                                       IntArrayRef sumdim, std::array<bool, 3> grad_mask);
 std::tuple<Tensor, Tensor> linalg_qr_jvp(const Tensor& dA, const Tensor& Q, const Tensor& R,
                                          const c10::string_view mode);
 Tensor linalg_qr_backward(const Tensor& gQ, const Tensor& gR, const Tensor& Q, const Tensor& R, const c10::string_view mode);
