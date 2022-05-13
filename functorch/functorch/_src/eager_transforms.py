@@ -929,6 +929,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False):
         >>> assert torch.allclose(jacobian[1], expectedY)
 
     """
+    @wraps(func)
     def wrapper_fn(*args):
         f_wrapper, primals = _argnums_partial(func, args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
