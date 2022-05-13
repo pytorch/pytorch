@@ -13980,7 +13980,7 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('float_power',
                     ref=np.float_power,
-                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool, torch.chalf),
+                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
                     promotes_int_to_float=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
@@ -14741,14 +14741,27 @@ op_db: List[OpInfo] = [
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                    supports_out=False,
-                   supports_autograd=False),
+                   supports_autograd=False,
+                   skips=(
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta", dtypes=(torch.chalf,)),
+                   )),
     UnaryUfuncInfo('isinf',
                    ref=np.isinf,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                    supports_out=False,
                    supports_sparse=True,
                    supports_sparse_csr=True,
-                   supports_autograd=False),
+                   supports_autograd=False,
+                   skips=(
+                       # Could not run 'aten::view_as_real' with arguments from the 'Meta' backend.
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta", dtypes=(torch.chalf,)),
+                       # "nonzero_count_cpu" not implemented for 'ComplexHalf'
+                       # "nonzero_cuda" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, "TestSparseCSR", "test_sparse_csr_consistency", dtypes=(torch.chalf,)),
+                       # "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, "TestSparseCSR", "test_zero_to_zero_correspondence_unary", dtypes=(torch.chalf,)),
+
+                   )),
     UnaryUfuncInfo('isposinf',
                    ref=np.isposinf,
                    dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
@@ -14765,7 +14778,10 @@ op_db: List[OpInfo] = [
                    ref=np.isreal,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                    supports_out=False,
-                   supports_autograd=False),
+                   supports_autograd=False,
+                   skips=(
+                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta", dtypes=(torch.chalf,)),
+                   )),
     UnaryUfuncInfo('isnan',
                    ref=np.isnan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
