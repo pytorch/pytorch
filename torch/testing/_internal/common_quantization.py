@@ -236,7 +236,7 @@ def _make_conv_test_input(
     # qconv implementation and if there is no overflow.
     # In reference we can't exactly match the results with reference.
     # Please see the comment in qconv implementation file
-    #   aten/src/ATen/native/quantized/cpu/qconv.cpp for more details.
+    #   aten/src/ATen/native/quantized/cpu/Convolution.cpp for more details.
     (W_value_min, W_value_max) = (-5, 5)
     # The operator expects them in the format
     # (out_channels, in_channels/groups,) + kernel_size

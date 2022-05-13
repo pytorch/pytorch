@@ -4,8 +4,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/packed_params.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/FbgemmUtils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -312,7 +312,7 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
 // uses the new fbgemm_linear_dynamic API, which doesn't require the explicit
 // scale and zero point parameters. These quantization parameters are
 // encapsulated in the `PackedLinearWeight` struct in
-// aten/src/ATen/native/quantized/cpu/fbgemm_utils.h.
+// aten/src/ATen/native/quantized/cpu/FbgemmUtils.h.
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
     c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed,

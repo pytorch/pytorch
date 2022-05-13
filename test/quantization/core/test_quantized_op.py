@@ -4250,7 +4250,7 @@ class TestQuantizedConv(TestCase):
         # overflow
         # In reference we can't exactly match the results with reference.
         # Please see the comment in qconv implementation file
-        # aten/src/ATen/native/quantized/cpu/qconv.cpp for more details.
+        # aten/src/ATen/native/quantized/cpu/Convolution.cpp for more details.
         (W_value_min, W_value_max) = (-5, 5)
         # the operator expects them in the format
         # (output_channels, input_channels/groups, kernel_d, kernel_h, kernel_w)

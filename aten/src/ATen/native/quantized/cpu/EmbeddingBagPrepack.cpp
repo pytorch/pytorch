@@ -1,9 +1,9 @@
-#include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
+#include <ATen/native/quantized/cpu/EmbeddingBagPrepack.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
+#include <ATen/native/quantized/cpu/FbgemmUtils.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
 

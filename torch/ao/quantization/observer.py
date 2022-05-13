@@ -416,7 +416,7 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
         # observers that reduces the quantized range to (0,127) or (-64, 63).
-        # For more details see aten/src/ATen/native/quantized/cpu/qconv.cpp
+        # For more details see aten/src/ATen/native/quantized/cpu/Convolution.cpp
         # This is not an optimal choice for non x86 backends as it loses a bit
         # of precision for activations.
         super(MinMaxObserver, self).__init__(

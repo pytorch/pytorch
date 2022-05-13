@@ -3,11 +3,11 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/packed_params.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/FbgemmUtils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/onednn_utils.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/library.h>
 
@@ -279,7 +279,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   std::tie(w_zero_points, w_scales) =
       make_zero_points_and_scales_tensor(weight_contig, transpose, groups);
   // We set the pre-packed conv weights to nullptr below as we call pre-pack
-  // during the first invocation of operator run. Refer to qconv.cpp for more
+  // during the first invocation of operator run. Refer to Convolution.cpp for more
   // details. TODO Update to actually call pre-pack here once bias is removed
   // from pre-packing step.
   auto ret_ptr = c10::intrusive_ptr<PackedConvWeightsQnnp<kSpatialDim>>::make(

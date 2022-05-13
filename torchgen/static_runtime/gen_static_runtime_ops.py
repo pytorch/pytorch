@@ -66,9 +66,9 @@ def write_cpp(cpp_ops: Sequence[str], file_path: str) -> None:
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/layer_norm.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qembeddingbag.h>
-#include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
+#include <ATen/native/quantized/cpu/FbgemmUtils.h>
+#include <ATen/native/quantized/cpu/EmbeddingBag.h>
+#include <ATen/native/quantized/cpu/EmbeddingBagPrepack.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/ScalarType.h>

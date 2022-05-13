@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qembeddingbag.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
+#include <ATen/native/quantized/cpu/FbgemmUtils.h>
+#include <ATen/native/quantized/cpu/EmbeddingBag.h>
 #include <torch/library.h>
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
