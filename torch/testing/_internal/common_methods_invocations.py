@@ -16,7 +16,7 @@ import collections.abc
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, Iterable
 from dataclasses import dataclass, asdict
-from torch._utils import dataclass_repr
+from torchgen.utils import dataclass_repr
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
