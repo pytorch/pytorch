@@ -709,7 +709,7 @@ class FullyShardedDataParallel(nn.Module):
             )
 
         # Move module appropriately depending on device_id and whether module is on CPU.
-        needs_move_back_to_cpu = self._move_module_if_needed()
+        needs_move_back_to_cpu = self._move_module_if_needed(module)
 
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
@@ -819,7 +819,7 @@ class FullyShardedDataParallel(nn.Module):
         # For validating execution order across ranks
         self._exec_order_data = _ExecOrderData()
 
-    def _move_module_if_needed(self) -> bool:
+    def _move_module_if_needed(self, module) -> bool:
         """
         Moves module appropriately depending on device_id and
         whether module is on CPU. Returns a ``bool`` indicating
