@@ -5806,6 +5806,7 @@
 - func: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
   variants: method
   dispatch:
+    CPU, CUDA: dense_to_sparse_bsr
     SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_bsr
 
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
