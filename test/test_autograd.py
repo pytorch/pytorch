@@ -32,14 +32,15 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoLapack, slowTest, IS_WINDOWS, IS_MACOS,
-    disable_gc, gradcheck, gradgradcheck, parametrize, instantiate_parametrized_tests)
+    disable_gc, gradcheck, gradgradcheck, parametrize,
+    instantiate_parametrized_tests, skipIfMps)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
 from torch.testing._internal.common_methods_invocations import mask_not_all_zeros
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
-                                                        deviceCountAtLeast, skipMeta)
+                                                        deviceCountAtLeast, skipMeta, dtypesIfMPS)
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.logging_tensor import no_dispatch
 
@@ -7081,6 +7082,7 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Double backward is unsupported for src when"):
             gradgradcheck(fn, [input, src])
 
+    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_parameter_resize(self, device):
         asd = torch.nn.Parameter(torch.ones(16, dtype=torch.double, device=device))
 
@@ -7092,6 +7094,7 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
+    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_ctor_getter_backward(self, device, dtype):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
@@ -7128,6 +7131,7 @@ class TestAutogradDeviceType(TestCase):
             _test(sparse_size + dense_size, len(sparse_size), nnz, device)
 
     @skipMeta
+    @skipIfMps
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_backward(self, device, dtype):
         class FixedGradientFunction(Function):
@@ -7173,6 +7177,7 @@ class TestAutogradDeviceType(TestCase):
     # autograd tests via common_method_invocations don't allow input tensors to
     # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
     # check_sparse_nnz is set to False.)
+    @skipIfMps
     def test_sparse_mask_autograd(self, device):
         tensor = torch.randn(3, requires_grad=True, device=device)
         mask = torch.ones(3, device=device)
@@ -7182,6 +7187,7 @@ class TestAutogradDeviceType(TestCase):
         converted.sum().backward()
         self.assertEqual(tensor.grad, mask.to_dense())
 
+    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_pyscalar_conversions(self, device):
         def _test_pyscalar_conversions(t, integral_conv):
             # integral -> integral
@@ -7236,6 +7242,7 @@ class TestAutogradDeviceType(TestCase):
 
         _test_pyscalar_conversions(lambda x: x.to(device), lambda x: int(x))
 
+    @dtypesIfMPS(torch.float32)
     @dtypesIfCUDA(torch.half, torch.float, torch.double, torch.int8, torch.int16, torch.int32, torch.int64)
     @dtypes(torch.float, torch.double, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_set_requires_grad_only_for_floats(self, device, dtype):
@@ -7341,6 +7348,7 @@ class TestAutogradDeviceType(TestCase):
 
         self.assertEqual(before, after)
 
+    @skipIfMps  # the test doesn't work on MPS
     # TODO: see if these tests can be ported to OpInfos or moved to where's test suite
     def test_where_functional(self, device):
         x = torch.randn(5, 5, dtype=torch.double, device=device, requires_grad=True)
@@ -7358,6 +7366,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(where, [cond, x, y], raise_exception=True)
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
 
+    @skipIfMps  # the test doesn't work on MPS
     def test_where_scalar(self, device):
         x = torch.randn(5, 5, dtype=torch.double, device=device, requires_grad=True)
         scalar = 4.
@@ -7423,6 +7432,7 @@ class TestAutogradDeviceType(TestCase):
         out.sum().backward()
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
+    @skipIfMps  # the test doesn't work as randn is not supported with type long
     @deviceCountAtLeast(1)
     def test_grad_assignment(self, devices):
         x = torch.randn(5, 5, device=devices[0])
@@ -7460,6 +7470,7 @@ class TestAutogradDeviceType(TestCase):
             with self.assertRaises(RuntimeError):
                 x.grad = torch.randn(5, 5, device=devices[1])
 
+    @dtypesIfMPS(torch.float32)
     @deviceCountAtLeast(1)
     @dtypes(torch.float, torch.double)
     def test_requires_grad_factory(self, devices, dtype):
@@ -7624,12 +7635,14 @@ class TestAutogradDeviceType(TestCase):
         # modify view-of-view and backprop through base
         root = torch.randn(2, 2, device=device, requires_grad=True)
         x = root.clone()
+
         v1 = x.narrow(0, 0, 1)
         v2 = v1.narrow(1, 1, 1)
         v2.mul_(2)
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1]])
 
+    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_inplace_on_view_then_no_grad(self, device):
         # Perform an in-place operation on a view of a non-leaf variable.
         a = torch.ones(3, 1, dtype=torch.double, device=device, requires_grad=True)
@@ -7643,6 +7656,7 @@ class TestAutogradDeviceType(TestCase):
 
         c.sum().backward()
 
+    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_inplace_on_view_gradcheck(self, device):
         # gradcheck modifications to views
         a = torch.randn(4, 4, dtype=torch.double, device=device, requires_grad=True)
@@ -7665,6 +7679,7 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             v1[0].mul_(2)
 
+    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_inplace_on_view_of_multiple_output_view(self, device):
         a = torch.rand(10, dtype=torch.double, device=device, requires_grad=True).clone()
         b = a.unbind(0)
@@ -7672,6 +7687,7 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             c.mul_(2)
 
+    @skipIfMps  # MPS backend doesn't support double types
     def test_inplace_multiple_output_view_of_view(self, device):
         a = torch.rand(10, dtype=torch.double, device=device, requires_grad=True).clone()
         b = a.view_as(a)
@@ -7679,6 +7695,7 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             c[0].mul_(2)
 
+    @skipIfMps  # MPS backend doesn't support double types
     def test_inplace_on_view_makes_base_require_grad(self, device):
         # in-place modification to view makes base require grad
         a = torch.randn(4, 4, dtype=torch.double, device=device, requires_grad=False)
@@ -7704,6 +7721,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(b.grad.tolist(), [5])
         self.assertIsNone(a.grad)
 
+    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_inplace_on_view_modify_base(self, device):
         # Test that an in-place operation on a base that forced it to require
         # grad also forces any previous views to require grad and backprop
@@ -7722,6 +7740,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(fn, [r])
         gradgradcheck(fn, [r])
 
+    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_inplace_on_view_python(self, device):
         # in-place modifications of Python-autograd created view
         a = torch.randn(4, 4, dtype=torch.double, device=device, requires_grad=True)
@@ -7778,6 +7797,7 @@ class TestAutogradDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 s1.mul_(s2)
 
+    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_mv_grad_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
         mat = torch.randn(2, 2, dtype=torch.double, device=device)
@@ -7832,6 +7852,7 @@ class TestAutogradDeviceType(TestCase):
         (c * d).sum().backward()
         self.assertEqual(c.grad.stride(), (2, 1))
 
+    @skipIfMps
     def test_copy_r_to_c(self, device):
         out_c = torch.empty(3, 2, dtype=torch.cdouble, device=device)
         inp_r = torch.randn(3, 2, dtype=torch.double, device=device,
