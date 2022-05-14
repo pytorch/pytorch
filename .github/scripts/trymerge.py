@@ -384,6 +384,14 @@ def parse_args() -> Any:
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
+def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -> bool:
+    if comment_id is None:
+        return False
+    comment = pr.get_comment_by_id(comment_id)
+    if comment.editor_login is not None:
+        return False
+    return comment.author_login == "facebook-github-bot"
+
 
 @dataclass
 class GitHubComment:
@@ -640,7 +648,7 @@ class GitHubPR:
             return False
         return checks[checkrun_name] != "SUCCESS"
 
-    def merge_ghstack_into(self, repo: GitRepo, force: bool) -> None:
+    def merge_ghstack_into(self, repo: GitRepo, force: bool, comment_id: Optional[int] = None) -> None:
         assert self.is_ghstack_pr()
         approved_by = self.get_approved_by()
         # For ghstack, cherry-pick commits based from origin
@@ -661,7 +669,7 @@ class GitHubPR:
                     continue
                 approved_by = pr.get_approved_by()
                 # Raises exception if matching rule is not found
-                find_matching_merge_rule(pr, repo, force=force)
+                find_matching_merge_rule(pr, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
 
             # Adding the url here makes it clickable within the Github UI
             approved_by_urls = ', '.join(prefix_with_github_url(login) for login in approved_by)
@@ -670,11 +678,9 @@ class GitHubPR:
             msg += f"\nApproved by: {approved_by_urls}\n"
             repo.amend_commit_message(msg)
 
-    def merge_into(self, repo: GitRepo, *, force: bool = False, dry_run: bool = False) -> None:
+    def merge_into(self, repo: GitRepo, *, force: bool = False, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
         # Raises exception if matching rule is not found
-        find_matching_merge_rule(self, repo, force=force)
-        if self.has_internal_changes():
-            raise RuntimeError("This PR must be landed via phabricator")
+        find_matching_merge_rule(self, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
@@ -688,7 +694,7 @@ class GitHubPR:
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f"--author=\"{self.get_author()}\"", "-m", msg)
         else:
-            self.merge_ghstack_into(repo, force)
+            self.merge_ghstack_into(repo, force, comment_id=comment_id)
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
@@ -823,9 +829,10 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id
     expected_association = "CONTRIBUTOR" if pr.is_base_repo_private() else "MEMBER"
     if author_association != expected_association and author_association != "OWNER":
         return post_comment(f"Will not revert as @{author_login} is not a {expected_association}, but {author_association}")
+    skip_internal_checks = can_skip_internal_checks(pr, comment_id)
 
     # Raises exception if matching rule is not found, but ignores all status checks
-    find_matching_merge_rule(pr, repo, force=True)
+    find_matching_merge_rule(pr, repo, force=True, skip_internal_checks=skip_internal_checks)
     commit_sha = pr.get_merge_commit()
     if commit_sha is None:
         commits = repo.commits_resolving_gh_pr(pr.pr_num)
@@ -834,7 +841,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id
         commit_sha = commits[0]
     msg = repo.commit_message(commit_sha)
     rc = RE_DIFF_REV.search(msg)
-    if rc is not None:
+    if rc is not None and not can_skip_internal_checks:
         raise RuntimeError(f"Can't revert PR that was landed via phabricator as {rc.group(1)}")
     repo.checkout(pr.default_branch())
     repo.revert(commit_sha)
@@ -913,7 +920,7 @@ def main() -> None:
             handle_exception(e)
     else:
         try:
-            pr.merge_into(repo, dry_run=args.dry_run, force=args.force)
+            pr.merge_into(repo, dry_run=args.dry_run, force=args.force, comment_id=args.comment_id)
         except Exception as e:
             handle_exception(e)
 
