@@ -16,7 +16,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch._decomp import decomposition_table
 
 import functools
 import re
