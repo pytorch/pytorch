@@ -17,6 +17,7 @@ from torch._prims.executor import make_traced
 
 class TestPrims(TestCase):
     @onlyCUDA
+    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
         # nvfuser is not currently capable of realizing a broadcasted tensor
