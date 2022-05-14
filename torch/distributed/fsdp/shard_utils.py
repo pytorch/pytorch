@@ -1,16 +1,19 @@
 import bisect
 import itertools
 import math
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, cast, Dict, List, Tuple, Optional
 
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
+from torch.distributed import distributed_c10d
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
     EnumerableShardingSpec,
     ShardingSpec,
 )
+
 
 def _sharding_spec_to_offsets(
     sharding_spec: ShardingSpec, tensor_numel: int, world_size: int
@@ -140,8 +143,28 @@ def _reshard_flatten_tensor(
     return local_shard
 
 
+def _all_gather_sharded_tensor(
+    sharded_tensor: ShardedTensor, pg: Optional[dist.ProcessGroup] = None
+) -> torch.Tensor:
+    if pg is None:
+        pg = distributed_c10d._get_default_group()
+    world_size = dist.get_world_size(pg)
+    shards = sharded_tensor.local_shards()
+    local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
+    dim_0_size = sharded_tensor.size()[0]
+    tensor_numel = sharded_tensor.size().numel()
+    chunk_size = math.ceil(dim_0_size / world_size) * tensor_numel // dim_0_size
+    num_padding = chunk_size - local_tensor.numel()
+    if num_padding > 0:
+        local_tensor = F.pad(local_tensor, [0, num_padding])
+    tensor = torch.empty(chunk_size * world_size, dtype=local_tensor.dtype).cuda()
+    dist._all_gather_base(tensor, local_tensor, group=pg)
+    return tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
+
+
 def _gather_state_dict(
-    state_dict: Dict[str, Any], curr_rank: int, output_rank: int = 0
+    state_dict: Dict[str, Any],
+    pg: Optional[dist.ProcessGroup] = None,
 ) -> Dict[str, Any]:
     """
     Given a state_dict, this API gathers all the ShardedTensor in the state_dict
@@ -151,10 +174,15 @@ def _gather_state_dict(
     new_state_dict = {}
     for key, tensor in state_dict.items():
         if isinstance(tensor, ShardedTensor):
+            """
             output_tensor = (
-                torch.empty(tensor.shape).cuda() if curr_rank == output_rank else None
+                torch.empty(tensor.shape, dtype=tensor.dtype).cuda()
+                if curr_rank == output_rank
+                else None
             )
-            tensor.gather(0, output_tensor)
+            tensor.gather(output_rank, output_tensor)
+            """
+            output_tensor = _all_gather_sharded_tensor(tensor, pg)
             tensor = output_tensor
         new_state_dict[key] = tensor
     return new_state_dict
