@@ -405,7 +405,7 @@ class TestFSDPStateDict(FSDPTest):
             with torch.no_grad():
                 param.zero_()
 
-        fsdp_state_dict = _gather_state_dict(fsdp_state_dict, self.rank)
+        fsdp_state_dict = _gather_state_dict(fsdp_state_dict)
 
         # Load fsdp's full state dict into the local and verify params are as
         # expected.
@@ -489,7 +489,7 @@ class TestFSDPStateDict(FSDPTest):
 
         if state_dict_type == "local_state_dict":
             return
-        state_dict = _gather_state_dict(state_dict, self.rank)
+        state_dict = _gather_state_dict(state_dict)
         with fsdp.summon_full_params(fsdp):
             if self.rank == 0:
                 local.load_state_dict(state_dict)
