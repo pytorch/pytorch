@@ -609,7 +609,8 @@ resize_out(out, sizes, strides, options);"""
         elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.MPS:
-            guard_field = "c10::OptionalMPSGuard guard_;"
+            # TODO: Move to OptionalMPSGuard.
+            guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""
 
