@@ -8,7 +8,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/Copy.h>
 
-#define MPS_ERROR_NOT_COMPILED "PyTorch code as not compiled with MPS enabled"
+#define MPS_ERROR_NOT_COMPILED "PyTorch code is not compiled with MPS enabled"
 #define MPS_ERROR_RUNTIME_TOO_LOW \
   "The MPS backend is supported on MacOS 12.3+.", \
   "Current OS version can be queried using `sw_vers`"
