@@ -140,10 +140,10 @@ class TestSparseCSRSampler(TestCase):
 
 def all_sparse_compressed_layouts(test_name='layout'):
     return parametrize(test_name, [
-    subtest(torch.sparse_csr, name='SparseCSR'),
-    subtest(torch.sparse_csc, name='SparseCSC'),
-    subtest(torch.sparse_bsr, name='SparseBSR'),
-    subtest(torch.sparse_bsc, name='SparseBSC')])
+        subtest(torch.sparse_csr, name='SparseCSR'),
+        subtest(torch.sparse_csc, name='SparseCSC'),
+        subtest(torch.sparse_bsr, name='SparseBSR'),
+        subtest(torch.sparse_bsc, name='SparseBSC')])
 
 
 class TestSparseCompressed(TestCase):
