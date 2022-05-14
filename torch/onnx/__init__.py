@@ -534,6 +534,7 @@ __all__ = [
     # Modules
     "symbolic_helper",
     "symbolic_registry",
+    "utils",
     # All opsets
     "symbolic_opset7",
     "symbolic_opset8",
