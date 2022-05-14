@@ -1,3 +1,5 @@
+"""ONNX exporter."""
+
 from typing import (
     Any,
     BinaryIO,
@@ -14,7 +16,7 @@ from typing import (
 import torch
 from torch import _C
 from torch.onnx import symbolic_helper, symbolic_registry
-from torch.onnx.symbolic_opsets import (
+from torch.onnx._symbolic_opsets import (
     symbolic_opset7,
     symbolic_opset8,
     symbolic_opset9,
