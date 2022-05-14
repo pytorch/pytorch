@@ -42,7 +42,7 @@ def celu(
                 )
             )
             raise ValueError(msg)
-        rhs = refs.mul(alpha, refs.expm1(refs.mul(a, refs.reciprocal(alpha))))
+        rhs = refs.mul(alpha, refs.expm1(refs.mul(a, (1.0 / alpha))))
     else:
         rhs = refs.expm1(a)
 
