@@ -1259,6 +1259,7 @@ class TestBinaryUfuncs(TestCase):
         t -= 1
         t *= 1
         t /= 1
+        t **= 1
         with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
             t //= 1
         t %= 1
