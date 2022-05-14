@@ -1287,22 +1287,29 @@ Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor
               result.scalar_type());
   {
     NoNamesGuard guard;
-    logsumexp_out_impl(result, self, dims, keepdim);
+    if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+      // for integral inputs, promote input to default floating type.
+      auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+      logsumexp_out_impl(result, self.to(default_dtype), dims, keepdim);
+    } else {
+      logsumexp_out_impl(result, self, dims, keepdim);
+    }
   }
   namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
   return result;
 }
 
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  Tensor result;
-  auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+  TensorOptions result_options;
   if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    result = at::empty({0}, self.options().dtype(default_dtype));
-    return at::native::logsumexp_out(self.to(default_dtype), dims, keepdim, result);
+    // even for integral inputs, result is floating dtype
+    auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+    result_options = self.options().dtype(default_dtype);
   } else {
-    result = at::empty({0}, self.options());
-    return at::native::logsumexp_out(self, dims, keepdim, result);
+    result_options = self.options();
   }
+  auto result = at::empty({0}, result_options);
+  return at::native::logsumexp_out(self, dims, keepdim, result);
 }
 
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
