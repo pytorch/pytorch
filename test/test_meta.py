@@ -365,6 +365,7 @@ meta_function_expected_failures = {
     torch.histogramdd: {f32, f64},  # aten::_histogramdd_bin_edges, aten::_histogramdd_from_bin_tensors
     torch.imag: {c32},  # aten::view_as_real
     torch.kthvalue: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::kthvalue.values
+    torch.linalg.qr: {f32, f64},  # aten::_linalg_qr_helper
     torch.linalg.vector_norm: {bf16, f16, f32, f64},  # aten::linalg_vector_norm
     torch.logcumsumexp: {f32, f64},  # aten::_logcumsumexp, aten::_logcumsumexp.out
     torch.masked_select: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::masked_select, aten::masked_select.out
@@ -391,7 +392,6 @@ meta_function_expected_failures = {
     torch.nn.functional.group_norm: {f32, f64},  # aten::var_mean.correction
     torch.nn.functional.instance_norm: {f32, f64},  # aten::var_mean.correction
     torch.nn.functional.layer_norm: {bf16, f32, f64},
-    torch.nn.functional.logsigmoid: {bf16, f32, f64},  # aten::log_sigmoid_forward, aten::log_sigmoid_forward.output
     torch.nn.functional.max_pool3d: {f32, f64},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {f32, f64},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_unpool1d: {f32, f64},  # aten::max_unpool2d
@@ -399,7 +399,6 @@ meta_function_expected_failures = {
     torch.nn.functional.max_unpool3d: {f32, f64},  # aten::max_unpool3d
     torch.nn.functional.multi_margin_loss: {f32, f64},  # aten::multi_margin_loss
     torch.nn.functional.multilabel_margin_loss: {f32, f64},  # aten::multilabel_margin_loss_forward
-    torch.nn.functional.multilabel_soft_margin_loss: {bf16, f32, f64},  # aten::log_sigmoid_forward
     torch.nn.functional.one_hot: {i64},  # aten::_local_scalar_dense
     torch.nn.functional.pdist: {f32, f64},  # aten::_pdist_forward
     torch.nn.functional.prelu: {bf16, f32, f64},  # aten::prelu
@@ -450,10 +449,14 @@ meta_function_skips = {
     torch.prod: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.square: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.tensor_split: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
+    torch.nn.functional.logsigmoid: {bf16, f16, f32, f64},  # logsigmoid.output
 }
 
 meta_function_device_expected_failures = defaultdict(dict)
 meta_function_device_skips = defaultdict(dict)
+
+meta_function_device_expected_failures['cpu'] = {
+}
 
 meta_function_device_expected_failures['cuda'] = {
     torch.addbmm: {f16},  # aten::addbmm, aten::addbmm.out
@@ -492,7 +495,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.linalg.ldl_factor: {f32, f64},  # aten::_local_scalar_dense
     torch.linalg.lu_factor: {f32, f64},  # aten::_local_scalar_dense
     torch.linalg.norm: {bf16, f16, f32, f64},  # aten::linalg_vector_norm
-    torch.linalg.qr: {f32, f64},  # aten::_linalg_qr_helper
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular, aten::linalg_solve_triangular.out
     torch.linalg.tensorinv: {f32, f64},  # aten::_local_scalar_dense
     torch.logcumsumexp: {bf16, f16},  # aten::_logcumsumexp, aten::_logcumsumexp.out
@@ -548,7 +550,6 @@ meta_function_device_skips['cuda'] = {
     torch.nn.functional.batch_norm: {bf16, f16},
     torch.nn.functional.cross_entropy: {f16},
     torch.nn.functional.interpolate: {f16},
-    torch.nn.functional.logsigmoid: {f16},
     torch.nn.functional.nll_loss: {f16},
     torch.nn.functional.pad: {f16},
     torch.prod: {bf16, c32, f16},
@@ -651,7 +652,6 @@ meta_dispatch_expected_failures = {
     aten.kthvalue.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.linalg_matrix_exp.default: {bf16, f64, f32},
     aten.linalg_vector_norm.default: {bf16, f16, f64, f32},
-    aten.log_sigmoid_forward.default: {bf16, f64, f32},
     aten.log_sigmoid_forward.output: {bf16, f64, f32},
     aten.logcumsumexp.default: {f64, f32},
     aten.logcumsumexp.out: {f64, f32},
@@ -814,7 +814,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.linalg_qr.default: {f32, f64},  # aten::_linalg_qr_helper
     aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
     aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
-    aten.log_sigmoid_forward.default: {f16},
+    aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
     aten.log_sigmoid_forward.output: {f16},  # aten::log_sigmoid_forward.output
     aten.logcumsumexp.default: {bf16, f16},  # aten::_logcumsumexp
     aten.logcumsumexp.out: {bf16, f16},  # aten::_logcumsumexp.out
