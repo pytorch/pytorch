@@ -88,6 +88,6 @@ TEST(StridePropertiesTest, SlicedStrideIndicesTest) {
 
   auto index_iter = stride_indices.begin();
   for (const auto& opt_stride : *temp->stride_properties().sizes()) {
-    EXPECT_TRUE(*index_iter++ != opt_stride->stride_index_.value());
+    EXPECT_TRUE(*index_iter++ == opt_stride->stride_index_.value());
   }
 }
