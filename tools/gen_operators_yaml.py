@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+@lint-ignore MYPY
 import argparse
 import json
 import sys
