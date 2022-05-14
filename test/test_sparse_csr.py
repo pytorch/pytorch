@@ -1990,8 +1990,25 @@ class TestSparseCSR(TestCase):
         This test performs a smoke test for covered conversion and verifies
         that an exception is thrown for unsupported conversions.
         """
-        pass
 
+        def _convert_to_layout(a, target_layout):
+            if target_layout is torch.sparse_csr:
+                return a.to_sparse_csr()
+            if target_layout is torch.sparse_csc:
+                return a.to_sparse_csc()
+            if target_layout is torch.sparse_bsr:
+                return a.to_sparse_bsr((2, 2))
+            if target_layout is torch.sparse_bsr:
+                return a.to_sparse_bsc((2, 2))
+        def _to_from_layout(layout_a, layout_b):
+            a = torch.randn(6, 10).relu()
+            b = _convert_to_layout(a, layout_a)
+            _convert_to_layout(b, layout_b)
+
+        compressed_layouts = [torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc]
+        for layout_a, layout_b in itertools.product(compressed_layouts, compressed_layouts):
+            print("(la, lb): ", (layout_a, layout_b))
+            _to_from_layout(layout_a, layout_b)
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA

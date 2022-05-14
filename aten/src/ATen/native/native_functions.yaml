@@ -5802,10 +5802,20 @@
     SparseCPU, SparseCUDA: coo_to_sparse_csr
     SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_csr
 
+- func: to_sparse_csc(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    SparsecscCPU, SparsecscCUDA: csr_to_sparse_csc
+
 - func: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
   variants: method
   dispatch:
     SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_bsr
+
+- func: to_sparse_bsc(Tensor self, int[2] blocksize) -> Tensor
+  variants: method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_bsc
 
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
