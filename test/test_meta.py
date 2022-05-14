@@ -423,7 +423,7 @@ meta_function_expected_failures = {
 meta_function_skips = {
     torch.Tensor.__getitem__: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.Tensor.__rmatmul__: {bf16, f32, f64, i16, i32, i64, i8, u8},
-    torch._index_reduce: {bf16, f16, f32, f64},
+    torch.index_reduce: {bf16, f16, f32, f64},
     torch.addr: {b8},
     torch.aminmax: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.bernoulli: {bf16, f32, f64},
@@ -450,6 +450,109 @@ meta_function_skips = {
     torch.prod: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.square: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.tensor_split: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
+}
+
+meta_function_device_expected_failures = defaultdict(dict)
+meta_function_device_skips = defaultdict(dict)
+
+meta_function_device_expected_failures['cuda'] = {
+    torch.addbmm: {f16},  # aten::addbmm, aten::addbmm.out
+    torch.corrcoef: {bf16, f16},  # aten::_local_scalar_dense
+    torch.cov: {f16},  # aten::_local_scalar_dense
+    torch.diag: {bf16, f16},  # aten::diag.out
+    torch.diagflat: {bf16, f16},  # aten::diag.out
+    torch.dot: {f16},  # aten::dot
+    torch.fft.fft2: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
+    torch.fft.fft: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
+    torch.fft.fftn: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
+    torch.fft.hfft2: {c32, f16},  # aten::_fft_c2c
+    torch.fft.hfft: {c32, f16},
+    torch.fft.hfftn: {c32, f16},  # aten::_fft_c2c
+    torch.fft.ifft2: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
+    torch.fft.ifft: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
+    torch.fft.ifftn: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
+    torch.fft.ihfft2: {f16},
+    torch.fft.ihfft: {f16},
+    torch.fft.ihfftn: {f16},
+    torch.fft.irfft2: {c32, f16},  # aten::_fft_c2r, aten::_fft_c2r.out
+    torch.fft.irfft: {c32, f16},  # aten::_fft_c2r, aten::_fft_c2r.out
+    torch.fft.irfftn: {c32, f16},  # aten::_fft_c2r, aten::_fft_c2r.out
+    torch.fft.rfft2: {f16},
+    torch.fft.rfft: {f16},
+    torch.fft.rfftn: {f16},
+    torch.functional.unique: {f16},  # aten::_unique2, aten::unique_dim
+    torch.functional.unique_consecutive: {f16},  # aten::unique_consecutive
+    torch.geqrf: {f32, f64},  # aten::geqrf
+    torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
+    torch.kthvalue: {f16},  # aten::kthvalue.values
+    torch.linalg.cholesky: {f32, f64},  # aten::linalg_cholesky_ex, aten::linalg_cholesky_ex.L
+    torch.linalg.cholesky_ex: {f32, f64},  # aten::linalg_cholesky_ex
+    torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product, aten::linalg_householder_product.out
+    torch.linalg.inv: {f32, f64},  # aten::_local_scalar_dense
+    torch.linalg.ldl_factor: {f32, f64},  # aten::_local_scalar_dense
+    torch.linalg.lu_factor: {f32, f64},  # aten::_local_scalar_dense
+    torch.linalg.norm: {bf16, f16, f32, f64},  # aten::linalg_vector_norm
+    torch.linalg.qr: {f32, f64},  # aten::_linalg_qr_helper
+    torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular, aten::linalg_solve_triangular.out
+    torch.linalg.tensorinv: {f32, f64},  # aten::_local_scalar_dense
+    torch.logcumsumexp: {bf16, f16},  # aten::_logcumsumexp, aten::_logcumsumexp.out
+    torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
+    torch.median: {f16},  # aten::median, aten::median.dim_values
+    torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
+    torch.mvlgamma: {f16},  # aten::_local_scalar_dense, aten::mvlgamma.out
+    torch.nanmedian: {f16},  # aten::nanmedian, aten::nanmedian.dim_values
+    torch.nn.functional.adaptive_avg_pool2d: {f16},  # aten::_adaptive_avg_pool2d
+    torch.nn.functional.conv1d: {f16},
+    torch.nn.functional.conv2d: {f16},
+    torch.nn.functional.conv_transpose1d: {bf16, f16},
+    torch.nn.functional.conv_transpose2d: {bf16, f16},
+    torch.nn.functional.conv_transpose3d: {bf16, f16},
+    torch.nn.functional.embedding_bag: {bf16},  # aten::_embedding_bag_forward_only
+    torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
+    torch.nn.functional.grid_sample: {f16},  # aten::grid_sampler_2d, aten::grid_sampler_3d
+    torch.nn.functional.group_norm: {bf16, f16},  # aten::var_mean.correction
+    torch.nn.functional.instance_norm: {bf16, f16},  # aten::var_mean.correction
+    torch.nn.functional.layer_norm: {f16},
+    torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
+    torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
+    torch.nn.functional.max_unpool1d: {f16},  # aten::max_unpool2d
+    torch.nn.functional.max_unpool2d: {f16},  # aten::max_unpool2d
+    torch.nn.functional.max_unpool3d: {f16},  # aten::max_unpool3d
+    torch.nn.functional.multi_margin_loss: {bf16, f16},  # aten::multi_margin_loss
+    torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
+    torch.nn.functional.prelu: {f16},  # aten::prelu
+    torch.nn.functional.relu: {f16},  # aten::relu
+    torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
+    torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
+    torch.qr: {f32, f64},  # aten::_linalg_qr_helper
+    torch.trace: {b8, bf16, f16},  # aten::diag.out
+    torch.vdot: {f16},  # aten::vdot
+}
+
+meta_function_device_skips['cuda'] = {
+    torch.Tensor.__getitem__: {c32},
+    torch.Tensor.__rmatmul__: {f16},
+    torch.bernoulli: {f16},
+    torch.cummax: {f16},
+    torch.cummin: {f16},
+    torch.functional.tensordot: {f16},
+    torch.inner: {f16},
+    torch.inverse: {f32, f64},
+    torch.linalg.matrix_power: {f32, f64},
+    torch.linalg.matrix_rank: {f32, f64},
+    torch.linalg.svd: {f32, f64},
+    torch.logit: {f16},
+    torch.matmul: {f16},
+    torch.nn.functional.adaptive_avg_pool1d: {f16},
+    torch.nn.functional.adaptive_avg_pool3d: {bf16},
+    torch.nn.functional.batch_norm: {bf16, f16},
+    torch.nn.functional.cross_entropy: {f16},
+    torch.nn.functional.interpolate: {f16},
+    torch.nn.functional.logsigmoid: {f16},
+    torch.nn.functional.nll_loss: {f16},
+    torch.nn.functional.pad: {f16},
+    torch.prod: {bf16, c32, f16},
+    torch.svd: {f32, f64},
 }
 
 # This is a __torch_function__ mode that, when enabled, interposes every
@@ -483,7 +586,11 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 
         if self.dtype in meta_function_skips.get(func, set()):
             test_expect = TestExpect.SKIP
+        elif self.dtype in meta_function_device_skips[self.device].get(func, set()):
+            test_expect = TestExpect.SKIP
         elif self.dtype in meta_function_expected_failures.get(func, set()):
+            test_expect = TestExpect.FAILURE
+        elif self.dtype in meta_function_device_expected_failures[self.device].get(func, set()):
             test_expect = TestExpect.FAILURE
         else:
             test_expect = TestExpect.SUCCESS
@@ -606,12 +713,44 @@ meta_dispatch_expected_failures = {
     aten.vdot.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.view_as_complex.default: {c64, f64, c128, f16, f32},
     aten.view_as_real.default: {c32},
+    aten._det_lu_based_helper.default: {f32, f64},  # aten::_det_lu_based_helper
+    aten._linalg_check_errors.default: {c128, c64, f32, f64},  # aten::_local_scalar_dense
+    aten.cholesky.default: {f32, f64},  # aten::cholesky
+    aten.cholesky.out: {f32, f64},  # aten::cholesky.out
+    aten.cholesky_inverse.default: {f32, f64},  # aten::cholesky_inverse
+    aten.cholesky_inverse.out: {f32, f64},  # aten::cholesky_inverse.out
+    aten.cholesky_solve.default: {f32, f64},  # aten::_cholesky_solve_helper
+    aten.cholesky_solve.out: {f32, f64},  # aten::_cholesky_solve_helper
+    aten.eig.default: {f32, f64},  # aten::_local_scalar_dense
+    aten.geqrf.default: {f32, f64},  # aten::geqrf
+    aten.inverse.out: {f32, f64},  # aten::_local_scalar_dense
+    aten.linalg_cholesky_ex.L: {f32, f64},  # aten::linalg_cholesky_ex.L
+    aten.linalg_cholesky_ex.default: {f32, f64},  # aten::linalg_cholesky_ex
+    aten.linalg_eig.default: {f32, f64},  # aten::linalg_eig
+    aten.linalg_eigh.default: {f32, f64},
+    aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
+    aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
+    aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
+    aten.linalg_lstsq.default: {f32, f64},  # aten::linalg_lstsq.out
+    aten.linalg_qr.default: {f32, f64},  # aten::_linalg_qr_helper
+    aten.linalg_slogdet.default: {f32, f64},  # aten::linalg_slogdet
+    aten.linalg_solve.default: {f32, f64},  # aten::linalg_solve
+    aten.linalg_solve.out: {f32, f64},  # aten::linalg_solve.out
+    aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
+    aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
+    aten.linalg_vector_norm.out: {bf16, f16, f32, f64},  # aten::linalg_vector_norm.out
+    aten.logdet.default: {f32, f64},  # aten::_local_scalar_dense, aten::nonzero
+    aten.lu_solve.default: {f32, f64},  # aten::lu_solve
+    aten.lu_solve.out: {f32, f64},  # aten::lu_solve.out
+    aten.ormqr.default: {f32, f64},  # aten::ormqr
+    aten.ormqr.out: {f32, f64},  # aten::ormqr.out
+    aten.symeig.default: {f32, f64},  # aten::_symeig_helper
 }
 
 # these sometimes pass and sometimes fail
 meta_dispatch_skips = {
-    aten._index_reduce.default: {bf16, f16, f64, f32},
-    aten._index_reduce.out: {bf16, f16, f64, f32},
+    aten.index_reduce.default: {bf16, f16, f64, f32},
+    aten.index_reduce.out: {bf16, f16, f64, f32},
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.addr.default: {b8},
     aten.addr.out: {b8},
@@ -626,6 +765,102 @@ meta_dispatch_skips = {
     aten.native_batch_norm.default: {f64, f32},
     aten.native_layer_norm.default: {bf16, f64, f32},
     aten.slice.Tensor: {c32},
+    aten.inverse.default: {f32, f64},
+    aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
+    aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
+}
+
+meta_dispatch_device_expected_failures = defaultdict(dict)
+meta_dispatch_device_skips = defaultdict(dict)
+
+meta_dispatch_device_expected_failures['cuda'] = {
+    aten._adaptive_avg_pool2d.default: {f16},  # aten::_adaptive_avg_pool2d
+    aten._adaptive_avg_pool3d.default: {bf16},  # aten::_adaptive_avg_pool3d
+    aten._conj_physical.default: {f16},  # aten::conj_physical.out
+    aten._convolution.default: {f16},
+    aten._embedding_bag_forward_only.default: {bf16},  # aten::_embedding_bag_forward_only
+    aten._fft_c2c.default: {c32, f16},  # aten::_fft_c2c
+    aten._fft_c2c.out: {c32, f16},  # aten::_fft_c2c.out
+    aten._fft_c2r.default: {c32, f16},  # aten::_fft_c2r
+    aten._fft_c2r.out: {c32, f16},  # aten::_fft_c2r.out
+    aten._fft_r2c.default: {f16},  # aten::_fft_r2c
+    aten._fft_r2c.out: {f16},  # aten::_fft_r2c.out
+    aten._linalg_check_errors.default: {c128, c64, f32, f64},  # aten::_local_scalar_dense
+    aten._unique2.default: {f16},  # aten::_unique2
+    aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
+    aten.addbmm.default: {f16},  # aten::addbmm
+    aten.addbmm.out: {f16},  # aten::addbmm.out
+    aten.bernoulli.out: {f16},  # aten::bernoulli.out
+    aten.convolution.default: {f16},
+    aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
+    aten.diag.default: {bf16, f16},  # aten::diag.out
+    aten.diag.out: {bf16, f16},  # aten::diag.out
+    aten.dot.default: {f16},  # aten::dot
+    aten.dot.out: {f16},  # aten::dot
+    aten.geqrf.default: {f32, f64},  # aten::geqrf
+    aten.grid_sampler_2d.default: {f16},  # aten::grid_sampler_2d
+    aten.grid_sampler_3d.default: {f16},  # aten::grid_sampler_3d
+    aten.histc.default: {i16, i32, i64, i8},  # aten::histc
+    aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
+    aten.index.Tensor: {c32},  # aten::index.Tensor
+    aten.inverse.out: {f32, f64},  # aten::_local_scalar_dense
+    aten.kthvalue.default: {f16},  # aten::kthvalue.values
+    aten.linalg_cholesky_ex.L: {f32, f64},  # aten::linalg_cholesky_ex.L
+    aten.linalg_cholesky_ex.default: {f32, f64},  # aten::linalg_cholesky_ex
+    aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
+    aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
+    aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
+    aten.linalg_matrix_exp.default: {f16},  # aten::linalg_matrix_exp
+    aten.linalg_qr.default: {f32, f64},  # aten::_linalg_qr_helper
+    aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
+    aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
+    aten.log_sigmoid_forward.default: {f16},
+    aten.log_sigmoid_forward.output: {f16},  # aten::log_sigmoid_forward.output
+    aten.logcumsumexp.default: {bf16, f16},  # aten::_logcumsumexp
+    aten.logcumsumexp.out: {bf16, f16},  # aten::_logcumsumexp.out
+    aten.logit.out: {f16},
+    aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices
+    aten.max_unpool2d.default: {f16},  # aten::max_unpool2d
+    aten.max_unpool3d.default: {f16},  # aten::max_unpool3d
+    aten.median.default: {f16},  # aten::median
+    aten.median.dim: {f16},  # aten::median.dim_values
+    aten.multi_margin_loss.default: {bf16, f16},  # aten::multi_margin_loss
+    aten.multilabel_margin_loss_forward.default: {bf16, f16},  # aten::multilabel_margin_loss_forward
+    aten.multinomial.default: {f16},  # aten::multinomial
+    aten.multinomial.out: {f16},  # aten::multinomial.out
+    aten.mvlgamma.default: {f16},  # aten::_local_scalar_dense
+    aten.mvlgamma.out: {f16},  # aten::mvlgamma.out
+    aten.nanmedian.default: {f16},  # aten::nanmedian
+    aten.nanmedian.dim: {f16},  # aten::nanmedian.dim_values
+    aten.native_batch_norm.default: {bf16, f16},  # aten::var_mean.correction
+    aten.native_dropout.default: {bf16, f16, f32, f64},
+    aten.native_group_norm.default: {bf16, f16},  # aten::var_mean.correction
+    aten.native_layer_norm.default: {f16},  # aten::var_mean.correction
+    aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
+    aten.ormqr.default: {f32, f64},  # aten::ormqr
+    aten.ormqr.out: {f32, f64},  # aten::ormqr.out
+    aten.prelu.default: {f16},  # aten::prelu
+    aten.prod.default: {bf16, c32, f16},  # aten::prod
+    aten.reflection_pad2d.default: {f16},  # aten::reflection_pad2d
+    aten.relu.default: {f16},  # aten::relu
+    aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
+    aten.tensordot.out: {f16},  # aten::tensordot.out
+    aten.trace.default: {b8, bf16, f16},  # aten::diag.out
+    aten.unique_consecutive.default: {f16},  # aten::unique_consecutive
+    aten.unique_dim.default: {f16},  # aten::unique_dim
+    aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
+    aten.vdot.default: {f16},  # aten::vdot
+    aten.vdot.out: {f16},  # aten::vdot
+}
+
+meta_dispatch_device_skips['cuda'] = {
+    aten._conj.default: {c32, f16},
+    aten._linalg_svd.default: {f32, f64},
+    aten.cudnn_batch_norm.default: {f32, f64},
+    aten.cummax.default: {f16},
+    aten.cummin.default: {f16},
+    aten.inverse.default: {f32, f64},
+    aten.slice.Tensor: {f16},
 }
 
 class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
@@ -649,7 +884,11 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 
         if self.dtype in meta_dispatch_skips.get(func, set()):
             test_expect = TestExpect.SKIP
+        elif self.dtype in meta_dispatch_device_skips[self.device].get(func, set()):
+            test_expect = TestExpect.SKIP
         elif self.dtype in meta_dispatch_expected_failures.get(func, set()):
+            test_expect = TestExpect.FAILURE
+        elif self.dtype in meta_dispatch_device_expected_failures[self.device].get(func, set()):
             test_expect = TestExpect.FAILURE
         else:
             test_expect = TestExpect.SUCCESS

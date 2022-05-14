@@ -624,7 +624,7 @@ Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, in
 
   // Reference: https://github.com/tensorflow/tensorflow/blob/
   // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
-  return AT_DISPATCH_FLOATING_TYPES(
+  return AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
       [grad, self, result, dim]() {
@@ -5525,7 +5525,7 @@ Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_opt
   return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
 }
 
-std::tuple<Tensor, Tensor> _index_reduce_backward(
+std::tuple<Tensor, Tensor> index_reduce_backward(
   const Tensor& grad,
   const Tensor& self,
   int dim,

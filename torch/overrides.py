@@ -265,6 +265,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.unflatten,
         Tensor.to_sparse_coo,
         Tensor.to_sparse_csr,
+        Tensor.to_sparse_bsr,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
         Tensor._make_wrapper_subclass,
@@ -586,7 +587,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.index_put: lambda input, indices, values, accumulate=False: -1,
         torch.index_select: lambda input, dim, index, out=None: -1,
         torch.index_fill: lambda input, dim, index, value: -1,
-        torch._index_reduce: lambda input, dim, index, source, reduce, include_input=True: -1,
+        torch.index_reduce: lambda input, dim, index, source, reduce, include_input=True: -1,
         torch.isfinite: lambda tensor: -1,
         torch.isin: lambda e, te, assume_unique=False, invert=False: -1,
         torch.isinf: lambda tensor: -1,
@@ -1651,6 +1652,8 @@ def resolve_name(f):
         Name of the function; if eval'ed it should give back the input
         function.
     """
+    if isinstance(f, torch._ops.OpOverload):
+        return str(f)
     return _get_overridable_functions()[1].get(f)
 
 @functools.lru_cache(None)
