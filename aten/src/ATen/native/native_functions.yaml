@@ -8982,13 +8982,11 @@
 
 - func: soft_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: soft_margin_loss_out
+  composite: neg.out, mul_.Tensor, exp_, add_.Scalar, log_, mean, sum, resize_, copy_
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: soft_margin_loss
+  composite: empty.memory_format, soft_margin_loss.out
 
 - func: soft_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn

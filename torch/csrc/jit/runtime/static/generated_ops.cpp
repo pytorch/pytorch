@@ -3556,12 +3556,12 @@ REGISTER_OPERATOR_FUNCTOR(
           const auto reduction = p_node->Input(2).toInt();
           if (p_node->Output(0).isNone()) {
             p_node->Output(0) =
-                at::native::soft_margin_loss(self, target, reduction);
+                at::cpu::soft_margin_loss(self, target, reduction);
             return;
           }
           auto& out = p_node->Output(0).toTensor();
           fastResizeToZero(out);
-          at::native::soft_margin_loss_out(self, target, reduction, out);
+          at::cpu::soft_margin_loss_outf(self, target, reduction, out);
         };
       }
       LogAndDumpSchema(n);

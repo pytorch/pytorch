@@ -414,29 +414,6 @@ Tensor soft_margin_loss_backward(const Tensor& grad_output, const Tensor& input,
   return grad_input;
 }
 
-Tensor& soft_margin_loss_out(const Tensor& input,
-    const Tensor& target,
-    int64_t reduction,
-    Tensor& output) {
-  // compute inplace variant of: output = at::log(1. + at::exp(-input * target));
-  at::neg_out(output, input).mul_(target).exp_().add_(1.).log_();
-  if (reduction != Reduction::None) {
-    auto tmp = apply_loss_reduction(output, reduction);
-    output.resize_({});
-    output.copy_(tmp);
-  }
-  return output;
-}
-
-Tensor soft_margin_loss(
-    const Tensor& input,
-    const Tensor& target,
-    int64_t reduction) {
-  auto output = at::empty({0}, input.options());
-  at::soft_margin_loss_out(output, input, target, reduction);
-  return output;
-}
-
 Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta, Tensor& grad_input) {
   if (beta <= 0)
     return at::native::l1_loss_backward_out(
