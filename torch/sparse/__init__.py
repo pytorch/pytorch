@@ -22,7 +22,6 @@ __all__ = [
     'sum',
     'softmax',
     'log_softmax',
-    '_csr_to_block_csr',
 ]
 
 
