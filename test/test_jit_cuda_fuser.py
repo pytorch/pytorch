@@ -2300,6 +2300,26 @@ class TestCudaFuser(JitTestCase):
         repro_jit = torch.jit.script(repro)
         self._run_helper(repro_jit, repro, x, 0.6)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_rand_like(self):
+        dtype = torch.float
+        device = "cuda"
+
+        def t(x: torch.Tensor, alpha: float):
+            o = torch.rand_like(x)
+            o = torch.add(o, alpha)
+            return o
+
+        # disabling cache so new inputs would generate new graph
+        t.__disable_jit_function_caching__ = True
+
+        for m_format in [torch.contiguous_format, torch.channels_last]:
+            x = torch.randn(4, 5, 6, 7, dtype=dtype, device=device).to(memory_format=m_format)
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, x, 0.6, check_stride=True)
+
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -2535,30 +2555,32 @@ class TestCudaFuser(JitTestCase):
     def test_dropout_training_fusion(self):
         dtype = torch.float
         device = "cuda"
-        x = torch.randn([10, 4, 8], dtype=dtype, device=device, requires_grad=True)
-        grads = torch.randn([10, 4, 8], dtype=dtype, device=device)
+        sizes = [2, 3, 4, 5]
 
         def t(x: torch.Tensor, p: float, train: bool):
             o = torch.nn.functional.dropout(x, p, training=train)
             o = o * 2.0
             return o
 
-        t_jit = torch.jit.script(t)
-
-        # The drop probability needs to be set to zero given that the order of picking random
-        # numbers between eager mode and the jit is different
-        self._run_training_helper(t_jit, t, grads, x, 0.0, True)
-
         def t2(x: torch.Tensor, p: float, train: bool):
             o = torch.nn.functional.softmax(x, dim=-1)
             o = torch.nn.functional.dropout(o, p, training=train)
             return o
 
-        t2_jit = torch.jit.script(t2)
+        # disabling cache so new inputs would generate new graph
+        t.__disable_jit_function_caching__ = True
+        t2.__disable_jit_function_caching__ = True
 
-        # The drop probability needs to be set to zero given that the order of picking random
-        # numbers between eager mode and the jit is different
-        self._run_training_helper(t2_jit, t2, grads, x, 0.0, True)
+        for fn in [t, t2]:
+            for m_format in [torch.contiguous_format, torch.channels_last]:
+                fn_jit = torch.jit.script(fn)
+                x = torch.randn(sizes, dtype=dtype, device=device, requires_grad=True).to(memory_format=m_format)
+                grads = torch.randn(sizes, dtype=dtype, device=device).to(memory_format=m_format)
+
+                # The drop probability needs to be set to zero given that the order of picking random
+                # numbers between eager mode and the jit is different
+                self._run_training_helper(fn_jit, fn, grads, x, 0.0, True)
+
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

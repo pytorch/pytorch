@@ -1250,8 +1250,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
-                value_map[node->inputs()[0]->unique()]);
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
             auto operand = list_val.front();
             list_val.pop_front();
 
@@ -1277,9 +1276,23 @@ class IrParser {
             }
 
             auto out = randlike(operand);
-            value_map.emplace(node->output()->unique(), out);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (!node->input(1)->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get())) ||
+                !node->input(2)->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get())) ||
+                !node->input(5)->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -1487,7 +1500,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
+                c10::nullopt,
                 value_map[node->inputs()[0]->unique()],
                 value_map[node->inputs()[1]->unique()]);
             auto input = list_val.front();
@@ -1502,8 +1515,11 @@ class IrParser {
             if (train.value()) {
               auto result = dropout(input->as<TensorView>(), prob);
 
-              value_map.emplace(node->output(0)->unique(), result.output);
-              value_map.emplace(node->output(1)->unique(), result.mask);
+              value_map.emplace(
+                  node->output(0)->unique(),
+                  ValueHolder(result.output, format));
+              value_map.emplace(
+                  node->output(1)->unique(), ValueHolder(result.mask, format));
             } else {
               value_map.emplace(node->output(0)->unique(), input);
               value_map.emplace(
@@ -1532,7 +1548,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
+                c10::nullopt,
                 value_map[node->inputs()[0]->unique()],
                 value_map[node->inputs()[1]->unique()]);
             auto input = list_val.front();
@@ -1547,9 +1563,11 @@ class IrParser {
             if (train.value()) {
               auto result = dropout(input->as<TensorView>(), prob);
 
-              value_map.emplace(node->output()->unique(), result.output);
+              value_map.emplace(
+                  node->output()->unique(), ValueHolder(result.output, format));
             } else {
-              value_map.emplace(node->output()->unique(), input);
+              value_map.emplace(
+                  node->output()->unique(), ValueHolder(input, format));
             }
           },
           [](const Node* node) -> bool {
@@ -1573,7 +1591,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getPWFormatValues(
-                MemoryFormat::Contiguous(),
+                c10::nullopt,
                 value_map[node->inputs()[0]->unique()],
                 value_map[node->inputs()[1]->unique()],
                 value_map[node->inputs()[2]->unique()]);
@@ -1586,7 +1604,8 @@ class IrParser {
 
             auto output = dropout_backward(
                 grad->as<TensorView>(), mask->as<TensorView>(), scale);
-            value_map.emplace(node->output()->unique(), output);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
           },
           isInputNonSizeZeroTensor,
           nullptr);
@@ -2343,11 +2362,19 @@ class IrParser {
         REGISTER_PARSE_RULE(
             ptr_op,
             {
-              auto grad_output =
-                  value_map[node->input(0)->unique()]->as<TensorView>();
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(),
+                  value_map[node->inputs()[0]->unique()],
+                  value_map[node->inputs()[1]->unique()]);
+              auto grad_output_t = list_val.front();
+              list_val.pop_front();
+              auto grad_output = grad_output_t->as<TensorView>();
 
-              auto output =
-                  value_map[node->input(1)->unique()]->as<TensorView>();
+              auto output_t = list_val.front();
+              list_val.pop_front();
+              auto output = output_t->as<TensorView>();
 
               auto dim_value = constant_as<int>(node->input(2));
               TORCH_INTERNAL_ASSERT(
