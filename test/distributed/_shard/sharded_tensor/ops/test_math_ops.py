@@ -51,10 +51,9 @@ class TestMathOps(ShardedTensorTestBase):
         sharded_lhs.gather(dst=0, out=global_lhs)
         sharded_rhs.gather(dst=0, out=global_rhs)
 
-        res = sharded_lhs * 3
         for op in ops:
             binary_op = gen_binary_op_func(op)
-
+            binary_op_ = gen_binary_op_func(op, inplace=True)
             # test basic math ops between ShardedTensors
             sharded_output = binary_op(sharded_lhs, sharded_rhs)
             output = torch.empty((12, 3)) if current_rank == 0 else None
@@ -69,6 +68,9 @@ class TestMathOps(ShardedTensorTestBase):
             scalars = [3, 1.8]
             for scalar in scalars:
                 sharded_output_lhs = binary_op(sharded_lhs, scalar)
+
+                sharded_output_lhs_ = binary_op_(sharded_lhs, scalar)
+                self.assertTrue(torch.allclose(sharded_output_lhs, sharded_output_lhs_))
                 output_lhs = torch.empty((12, 3)) if current_rank == 0 else None
                 sharded_output_lhs.gather(dst=0, out=output_lhs)
 
@@ -144,9 +146,6 @@ class TestMathOps(ShardedTensorTestBase):
             st_lhs = _shard_tensor(lhs, spec)
             st_rhs = _shard_tensor(rhs, spec)
             st_expected = _shard_tensor(tensor, spec)
-            st_expected._metadata.shards_metadata.sort(
-                key=lambda x: x.shard_offsets[0],
-            )
             self.assertTrue(torch.allclose(torch.bmm(st_lhs, st_rhs), st_expected))
             self.assertTrue(torch.allclose(st_lhs.bmm(st_rhs), st_expected))
 

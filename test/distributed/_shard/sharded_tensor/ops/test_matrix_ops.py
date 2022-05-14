@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import itertools
 import sys
 
 import torch
@@ -77,9 +78,6 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             if spec_n.dim in (0, 1):
                 spec_n.dim = 1 - spec_n.dim
             st_expected = _shard_tensor(tensor_t, spec_n)
-            st_expected._metadata.shards_metadata.sort(
-                key=lambda x: x.shard_offsets[0],
-            )
             self.assertTrue(
                 torch.allclose(
                     torch.transpose(_shard_tensor(tensor, spec), 0, 1), st_expected
@@ -90,9 +88,6 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             if spec_n.dim in (1, 2):
                 spec_n.dim = 3 - spec_n.dim
             st_expected = _shard_tensor(tensor_t, spec_n)
-            st_expected._metadata.shards_metadata.sort(
-                key=lambda x: x.shard_offsets[0],
-            )
             self.assertTrue(
                 torch.allclose(_shard_tensor(tensor, spec).transpose(1, 2), st_expected)
             )
@@ -120,9 +115,6 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             tensor = torch.rand(15, 27, 16).cuda(self.rank)
             tensor_n = torch.nn.functional.softmax(tensor, dim=1, dtype=torch.float32)
             st_expected = _shard_tensor(tensor_n, spec)
-            st_expected._metadata.shards_metadata.sort(
-                key=lambda x: x.shard_offsets[0],
-            )
             self.assertTrue(
                 torch.allclose(
                     torch.nn.functional.softmax(
@@ -131,23 +123,6 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                     st_expected,
                 )
             )
-
-    @with_comms(init_rpc=True)
-    @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_nccl()
-    def test_sharded_tensor_softmax_error(self):
-        specs = _chunk_sharding_specs_list_for_test([0, 2], seed=17)
-        for spec in specs:
-            st = sharded_tensor.rand(
-                spec, 16, 30, 5, init_rrefs=True, dtype=torch.double
-            )
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "Only support performing softmax on non-sharding dim now.",
-            ):
-                torch.nn.functional.softmax(
-                    st, dim=st.sharding_spec().dim, dtype=torch.float32
-                )
 
     def _test_masked_fill_with_sizes(self, mask_size, broadcast_style=False):
         specs = _chunk_sharding_specs_list_for_test([0, 1, 2], seed=7)
@@ -158,9 +133,6 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 mask = mask.unsqueeze(1)
             tensor_m = tensor.masked_fill(mask, 25.0)
             st_expected = _shard_tensor(tensor_m, spec)
-            st_expected._metadata.shards_metadata.sort(
-                key=lambda x: x.shard_offsets[0],
-            )
             self.assertTrue(
                 torch.allclose(
                     _shard_tensor(tensor, spec).masked_fill(mask, 25.0),
@@ -213,9 +185,6 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             tensor = torch.rand(16, 35, 26).cuda(self.rank)
             tensor_v = tensor.view(16, 35, 26).view(4, 4, 35, 26)
             st_expected = _shard_tensor(tensor_v, spec)
-            st_expected._metadata.shards_metadata.sort(
-                key=lambda x: x.shard_offsets[0],
-            )
             self.assertTrue(
                 torch.allclose(
                     _shard_tensor(tensor, spec).view(4, 4, 35, 26),
@@ -223,9 +192,6 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 )
             )
             st_expected = _shard_tensor(tensor, spec)
-            st_expected._metadata.shards_metadata.sort(
-                key=lambda x: x.shard_offsets[0],
-            )
             self.assertTrue(
                 torch.allclose(
                     _shard_tensor(tensor_v, spec).view(16, 35, 26),
@@ -257,6 +223,68 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 "Only one dimension can be inferred for sharded view op.",
             ):
                 st.view(5, 7, -1, -1)
+
+    @with_comms(init_rpc=True)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_sharded_tensor_layer_norm(self):
+        specs = _chunk_sharding_specs_list_for_test([1, 2], seed=10)
+        flags = [True, False]
+        for spec, flag in itertools.product(specs, flags):
+            tensor = torch.rand(16, 35, 26).cuda(self.rank)
+            layer_norm = torch.nn.LayerNorm((35, 26), elementwise_affine=flag).cuda(
+                self.rank
+            )
+            st = layer_norm(_shard_tensor(tensor, spec))
+            with torch.no_grad():
+                tensor_normed = layer_norm(tensor)
+            st_expected = _shard_tensor(tensor_normed, spec)
+            self.assertEqual(
+                st.local_tensor(),
+                st_expected.local_tensor(),
+            )
+            self.assertTrue(
+                torch.allclose(
+                    st,
+                    st_expected,
+                    atol=1e-6,
+                )
+            )
+            st_expected = torch.nn.functional.layer_norm(
+                _shard_tensor(tensor, spec),
+                (35, 26),
+                weight=layer_norm.weight,
+                bias=layer_norm.bias,
+            )
+            self.assertTrue(
+                torch.allclose(
+                    st,
+                    st_expected,
+                    atol=1e-6,
+                )
+            )
+
+    @with_comms(init_rpc=True)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_sharded_tensor_layer_norm_error(self):
+        specs = _chunk_sharding_specs_list_for_test([2], seed=10)
+        for spec in specs:
+            tensor = torch.rand(16, 35, 26).cuda(self.rank)
+            with self.assertRaisesRegex(
+                ValueError,
+                "normalized_shape dim must not be greater "
+                "than the dim of the sharded tensor.",
+            ):
+                layer_norm = torch.nn.LayerNorm((14, 55, 35, 26)).cuda(self.rank)
+                layer_norm(_shard_tensor(tensor, spec))
+            with self.assertRaisesRegex(
+                ValueError,
+                r"Given normalized_shape=\[35\], expected input with shape "
+                r"\[\*, 35\], but got input of size \[16, 35, 26\].",
+            ):
+                layer_norm = torch.nn.LayerNorm((35)).cuda(self.rank)
+                layer_norm(_shard_tensor(tensor, spec))
 
 
 if __name__ == "__main__":

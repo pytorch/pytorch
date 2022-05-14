@@ -6,11 +6,18 @@ import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
+from torch.distributed._shard.sharding_spec._internals import (
+    get_chunk_sharding_params,
+)
+from torch.distributed.nn.functional import (
+    all_reduce,
+)
 
 from ._common import (
     _chunk_sharding_spec_check,
     _register_sharded_op_on_local_tensor,
 )
+
 
 def transpose_same_dim(*args, **kwargs):
     """
@@ -240,6 +247,7 @@ _register_sharded_op_on_local_tensor(
     customized_func=sharded_view,
 )
 
+
 def sharded_bmm_check(*args, **kwargs):
     """
     Perform extra checks for the sharded_bmm op, for example, st2 needs to
@@ -270,6 +278,7 @@ def sharded_bmm_check(*args, **kwargs):
         raise NotImplementedError(
             "Both st and st2 need to have same placements for bmm."
         )
+
 
 def sharded_bmm(args, kwargs, pg):
     """
@@ -303,4 +312,101 @@ _register_sharded_op_on_local_tensor(
     torch.bmm,
     extra_check=sharded_bmm_check,
     customized_func=sharded_bmm,
+)
+
+
+def sharded_layer_norm_check(*args, **kwargs):
+    """
+    Perform extra checks for the ``nn.LayerNorm`` op.
+    Ensure the normalized shape is compatible with
+    the size of the sharded tensor.
+
+    Args: same as ``torch.nn.LayerNorm``.
+
+    Return: None
+    """
+    st = args[0]
+    normalized_shape = args[1]
+    if st.dim() < len(normalized_shape):
+        raise ValueError(
+            "normalized_shape dim must not be greater than "
+            "the dim of the sharded tensor."
+        )
+    for idx in range(-1, -len(normalized_shape) - 1, -1):
+        if normalized_shape[idx] != st.size(idx):
+            raise ValueError(
+                f"Given normalized_shape=[{normalized_shape[idx]}], expected input with shape "
+                f"[*, {normalized_shape[idx]}], but got input of size {list(st.size())}."
+            )
+
+
+def sharded_layer_norm(args, kwargs, pg):
+    """
+    Handles ``__torch_function__`` dispatch for the ``torch.nn.LayerNorm`` op.
+    We gather all shards from local shards and perform a global normalization.
+    We then scatter the result back to each rank.
+
+    Args: same as ``torch.nn.LayerNorm``.
+
+    Return:
+        local_tensor (Tensor): New local tensor to build the sharded tensor.
+        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`):
+            sharding spec of the new sharded tensor.
+        new_st_size (torch.Size): Size of the new sharded tensor.
+    """
+    st = args[0]
+    normalized_shape = args[1]
+    sharding_dim = st.sharding_spec().dim  # type: ignore[attr-defined]
+    sharding_dim = sharding_dim if sharding_dim >= 0 else st.dim() + sharding_dim
+    local_tensor = st.local_tensor()
+    # If sharding dim is smaller than shape start, we just perform a local norm.
+    shape_start = st.dim() - len(normalized_shape)
+    if shape_start > sharding_dim:
+        args = (local_tensor, *args[1:])
+        local_tensor = torch.nn.functional.layer_norm(*args, **kwargs)
+        return local_tensor, st.sharding_spec(), st.size()
+
+    elementwise_affine = kwargs.get("elementwise_affine", False)
+    eps = kwargs.get("eps", 1e-05)
+
+    norm_dims = tuple(i for i in range(-1, -len(normalized_shape) - 1, -1))
+    local_size = math.prod(local_tensor.size()[shape_start:])  # type: ignore[attr-defined]
+    st_size = math.prod(st.size()[shape_start:])  # type: ignore[attr-defined]
+    local_mean = torch.mul(local_tensor.mean(norm_dims, keepdim=True), local_size)
+    global_mean = torch.div(all_reduce(local_mean), st_size)
+    local_variant_sq = torch.square(local_tensor - global_mean).sum(
+        norm_dims, keepdim=True
+    )
+    global_variant = torch.div(all_reduce(local_variant_sq), st_size)
+
+    denom = torch.rsqrt(global_variant + eps)
+    local_tensor = torch.mul(local_tensor - global_mean, denom)
+
+    if elementwise_affine:
+        weight = kwargs["weight"]
+        bias = kwargs["bias"]
+        current_rank = dist.get_rank(pg)  # type: ignore[attr-defined]
+        world_size = dist.get_world_size(pg)
+        (start_pos, chunk_size) = get_chunk_sharding_params(
+            bias.size(0), world_size, st.sharding_spec(), current_rank
+        )
+        local_tensor = torch.addmm(
+            torch.narrow(bias, 0, start_pos, chunk_size),
+            local_tensor,
+            torch.narrow(weight, sharding_dim - shape_start, start_pos, chunk_size),
+        )
+
+    return local_tensor, st.sharding_spec(), st.size()
+
+
+_register_sharded_op_on_local_tensor(
+    torch.nn.LayerNorm,
+    extra_check=sharded_layer_norm_check,
+    customized_func=sharded_layer_norm,
+)
+
+_register_sharded_op_on_local_tensor(
+    torch.nn.functional.layer_norm,
+    extra_check=sharded_layer_norm_check,
+    customized_func=sharded_layer_norm,
 )
