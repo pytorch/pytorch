@@ -4748,7 +4748,7 @@ def index_add(g, self, dim, index, other, alpha=None):
         "Warning: ONNX export does not support duplicated values in 'index' field, "
         + "this will cause the ONNX model to be incorrect."
     )
-    from torch.onnx.symbolic_opsets.symbolic_opset9 import scatter_add
+    from torch.onnx._symbolic_opsets.symbolic_opset9 import scatter_add
 
     # ONNX does not support "alpha" argument, unlike aten index_add
     # See: https://github.com/pytorch/pytorch/pull/65993#issuecomment-953151102 for more context

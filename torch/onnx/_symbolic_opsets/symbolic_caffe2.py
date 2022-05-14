@@ -138,7 +138,7 @@ def add(g, input_a, input_b, scale, zero_point):
 @parse_args("v")
 def relu(g, input):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opsets.symbolic_opset9 import relu
+        from torch.onnx._symbolic_opsets.symbolic_opset9 import relu
 
         return relu(g, input)
     kwargs = {
@@ -177,7 +177,7 @@ def upsample_nearest2d(
     g, input, output_size, align_corners=None, scales_h=None, scales_w=None
 ):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opsets.symbolic_opset9 import (
+        from torch.onnx._symbolic_opsets.symbolic_opset9 import (
             upsample_nearest2d as upsample_nearest2d_impl,
         )
 
@@ -199,7 +199,7 @@ def upsample_nearest2d(
 @parse_args("v", "is", "is", "is", "is", "i")
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opsets.symbolic_opset9 import max_pool2d
+        from torch.onnx._symbolic_opsets.symbolic_opset9 import max_pool2d
 
         return max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode)
     kwargs = {
@@ -229,7 +229,7 @@ def avg_pool2d(
     divisor_override=None,
 ):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opsets.symbolic_opset9 import avg_pool2d
+        from torch.onnx._symbolic_opsets.symbolic_opset9 import avg_pool2d
 
         return avg_pool2d(
             g,
@@ -258,7 +258,7 @@ def avg_pool2d(
 
 def reshape(g, input, shape):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opsets.symbolic_opset9 import reshape
+        from torch.onnx._symbolic_opsets.symbolic_opset9 import reshape
 
         return reshape(g, input, shape)
 
@@ -274,7 +274,7 @@ def reshape(g, input, shape):
 @parse_args("v", "v", "v", "v", "i")
 def slice(g, input, dim, start, end, step):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opsets.symbolic_opset9 import slice
+        from torch.onnx._symbolic_opsets.symbolic_opset9 import slice
 
         return slice(g, input, dim, start, end, step)
 
@@ -300,7 +300,7 @@ def cat(g, tensor_list, dim, scale=None, zero_point=None):
     tensors = symbolic_helper._unpack_list(tensor_list)
     input = tensors[0]
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opsets.symbolic_opset9 import cat
+        from torch.onnx._symbolic_opsets.symbolic_opset9 import cat
 
         return cat(g, tensor_list, dim)
 
@@ -317,7 +317,7 @@ def cat(g, tensor_list, dim, scale=None, zero_point=None):
 @parse_args("v")
 def sigmoid(g, input):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opsets.symbolic_opset9 import sigmoid
+        from torch.onnx._symbolic_opsets.symbolic_opset9 import sigmoid
 
         return sigmoid(g, input)
     # Caffe2 expects the output scale to be 1/2^8

@@ -12,7 +12,7 @@ from torch.nn.modules.utils import _pair, _single, _triple
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import parse_args, quantized_args
-from torch.onnx.symbolic_opsets.symbolic_opset9 import (
+from torch.onnx._symbolic_opsets.symbolic_opset9 import (
     add,
     conv2d,
     hardswish,
@@ -116,7 +116,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                 strides_i=[1 for _ in range(ndims)],
             )
             # convert indices to have non-flattened indices values
-            from torch.onnx.symbolic_opsets.symbolic_opset9 import sub
+            from torch.onnx._symbolic_opsets.symbolic_opset9 import sub
 
             s = sym_help._slice_helper(
                 g,
@@ -335,7 +335,7 @@ def embedding_bag(
     if padding_idx is not None and padding_idx >= 0:
         raise RuntimeError("embedding_bag with padding_idx")
 
-    from torch.onnx.symbolic_opsets.symbolic_opset9 import select
+    from torch.onnx._symbolic_opsets.symbolic_opset9 import select
 
     warnings.warn(
         "Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
@@ -438,13 +438,13 @@ def fake_quantize_per_tensor_affine(
 
 
 def isinf(g, input):
-    from torch.onnx.symbolic_opsets.symbolic_opset9 import _cast_Double  # type: ignore[attr-defined]
+    from torch.onnx._symbolic_opsets.symbolic_opset9 import _cast_Double  # type: ignore[attr-defined]
 
     return g.op("IsInf", _cast_Double(g, input, False))
 
 
 def isfinite(g, input):
-    from torch.onnx.symbolic_opsets.symbolic_opset9 import __not_, __or_, isnan
+    from torch.onnx._symbolic_opsets.symbolic_opset9 import __not_, __or_, isnan
 
     inf_node = isinf(g, input)
     nan_node = isnan(g, input)
@@ -464,7 +464,7 @@ def dequantize(g, input):
 
 @parse_args("v", "f", "f", "f")
 def nan_to_num(g, input, nan, posinf, neginf):
-    from torch.onnx.symbolic_opsets.symbolic_opset9 import gt, isnan, logical_and, lt
+    from torch.onnx._symbolic_opsets.symbolic_opset9 import gt, isnan, logical_and, lt
 
     # Cannot create a int type tensor with inf/nan values, so we simply
     # return the original tensor

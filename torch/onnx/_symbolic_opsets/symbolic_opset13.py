@@ -6,7 +6,7 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.utils
 from torch.onnx.symbolic_helper import _unimplemented, parse_args
-from torch.onnx.symbolic_opsets.symbolic_opset9 import (
+from torch.onnx._symbolic_opsets.symbolic_opset9 import (
     _maybe_cast_reduce_op_input,
     conv2d,
     expand,
@@ -19,7 +19,7 @@ from torch.onnx.symbolic_opsets.symbolic_opset9 import (
     unused,
     zeros,
 )
-from torch.onnx.symbolic_opsets.symbolic_opset11 import unsqueeze
+from torch.onnx._symbolic_opsets.symbolic_opset11 import unsqueeze
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
