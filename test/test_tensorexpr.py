@@ -2,9 +2,11 @@
 
 import numpy as np
 import torch
+from torch._C import memory_format
 import torch.nn.functional as F
 from torch import nn
 import unittest
+import itertools
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
 
@@ -1587,92 +1589,23 @@ class TestTensorExprFuser(BaseTestClass):
             exp = traced_contiguous(a, b, c)
             self.assertEqual(ref, exp)
 
+        mem_layouts = list(itertools.product([torch.contiguous_format, torch.channels_last], repeat=3))
+        shapes = [(2, 3, 4, 5), (2, 1, 1, 5), (1, 1, 1, 1)]
+        permutes = [(0, 3, 2, 1), (0, 3, 1, 2)]
+        funcs = [foo, foo_multi_outputs, foo_multi_outputs_i_nhwc_o_nchw]
+        configs = itertools.product(funcs, shapes, mem_layouts, permutes)
         for strategy in ["STATIC", "DYNAMIC"]:
             old_strategy = torch.jit.set_fusion_strategy([(strategy, 10)])
+            for _func, _shape, _mem_layouts, _permute in configs:
+                a = torch.rand(_shape, dtype=torch.float32).to(memory_format=_mem_layouts[0])
+                b = torch.rand(_shape, dtype=torch.float32).to(memory_format=_mem_layouts[1])
+                c = torch.rand(_shape, dtype=torch.float32).to(memory_format=_mem_layouts[2])
+                run_foo_case(_func, a, b, c)
 
-            # The memory layouts of the inputs are
-            #     (contiguous, contiguous, contiguous)
-            a = torch.rand(2, 3, 4, 5, dtype=torch.float32)
-            b = torch.rand(2, 3, 4, 5, dtype=torch.float32)
-            c = torch.rand(2, 3, 4, 5, dtype=torch.float32)
-            # The memory layout of the imperative mode output is
-            #     (contiguous)
-            # propagation memory layout is contiguous
-            run_foo_case(foo, a, b, c)
-            # The memory layouts of the imperative mode outputs are
-            #     (contiguous, contiguous, contiguous)
-            # propagation memory layout is contiguous
-            run_foo_case(foo_multi_outputs, a, b, c)
-
-            # The memory layouts of the inputs are
-            #     (contiguous, channels-last, contiguous)
-            a = torch.rand(2, 3, 4, 5, dtype=torch.float32)
-            b = torch.rand(2, 3, 4, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
-            c = torch.rand(2, 3, 4, 5, dtype=torch.float32)
-            # The memory layout of the imperative mode output is
-            #     (contiguous)
-            # propagation memory layout is contiguous
-            run_foo_case(foo, a, b, c)
-            # The memory layouts of the imperative mode outputs are
-            #     (contiguous, channels-last, contiguous)
-            # propagation memory layout is contiguous
-            run_foo_case(foo_multi_outputs, a, b, c)
-
-            # The memory layouts of the inputs are
-            #     (channels-last, contiguous, contiguous)
-            a = torch.rand(2, 3, 4, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
-            b = torch.rand(2, 3, 4, 5, dtype=torch.float32)
-            c = torch.rand(2, 3, 4, 5, dtype=torch.float32)
-            # The memory layout of the imperative mode output is
-            #     (channels-last)
-            # propagation memory layout is contiguous
-            run_foo_case(foo, a, b, c)
-            # The memory layout of the imperative mode outputs are
-            #     (channels-last, contiguous, contiguous)
-            # propagation memory layout is contiguous
-            run_foo_case(foo_multi_outputs_i_nhwc_o_nchw, a, b, c)
-
-            # The memory layouts of the inputs are
-            #     (channels-last, channels-last, channels-last)
-            a = torch.rand(2, 3, 4, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
-            b = torch.rand(2, 3, 4, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
-            c = torch.rand(2, 3, 4, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
-            # The memory layout of the imperative mode output is
-            #     (channels-last)
-            # propagation memory layout is channels-last
-            run_foo_case(foo, a, b, c)
-            # The memory layout of the imperative mode outputs are
-            #     (channels-last, channels-last, channels-last)
-            # propagation memory layout is channels-last
-            run_foo_case(foo_multi_outputs, a, b, c)
-            # The memory layout of the imperative mode outputs are
-            #     (contiguous, channels-last, channels-last, channels-last)
-            # propagation memory layout is contiguous
-            run_foo_case(foo_multi_outputs_i_nhwc_o_nchw, a, b, c)
-
-            # Test special dimension - 1
-            a = torch.rand(2, 1, 1, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
-            b = torch.rand(2, 1, 1, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
-            c = torch.rand(2, 1, 1, 5, dtype=torch.float32).to(memory_format=torch.channels_last)
-            run_foo_case(foo, a, b, c)
-            run_foo_case(foo_multi_outputs, a, b, c)
-            run_foo_case(foo_multi_outputs_i_nhwc_o_nchw, a, b, c)
-
-            # Test permute and special dimension
-            a = torch.rand(2, 1, 1, 5, dtype=torch.float32).permute(dims=[0, 3, 2, 1])
-            b = torch.rand(2, 1, 1, 5, dtype=torch.float32).permute(dims=[0, 3, 2, 1])
-            c = torch.rand(2, 1, 1, 5, dtype=torch.float32).permute(dims=[0, 3, 1, 2])
-            run_foo_case(foo, a, b, c)
-            run_foo_case(foo_multi_outputs, a, b, c)
-            run_foo_case(foo_multi_outputs_i_nhwc_o_nchw, a, b, c)
-
-            # Test permute - Non-contiguous tensor
-            a = torch.rand(2, 3, 4, 5, dtype=torch.float32).permute(dims=[0, 3, 2, 1])
-            b = torch.rand(2, 3, 4, 5, dtype=torch.float32).permute(dims=[0, 3, 2, 1])
-            c = torch.rand(2, 4, 3, 5, dtype=torch.float32).permute(dims=[0, 3, 1, 2])
-            run_foo_case(foo, a, b, c)
-            run_foo_case(foo_multi_outputs, a, b, c)
-            run_foo_case(foo_multi_outputs_i_nhwc_o_nchw, a, b, c)
+                a = a.permute(dims=_permute)
+                b = b.permute(dims=_permute)
+                c = c.permute(dims=_permute)
+                run_foo_case(_func, a, b, c)
 
             torch.jit.set_fusion_strategy(old_strategy)
 

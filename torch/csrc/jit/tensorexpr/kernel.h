@@ -292,9 +292,7 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> getInputStrides(
       const torch::jit::Value* input,
       const std::vector<ExprHandle>& inputTensorDims);
-  std::vector<torch::jit::StrideInput>& getSymbolicInputStrideDesc(
-      const torch::jit::Value* value);
-  torch::jit::StrideInput getSymbolicOutputStrideDesc(
+  std::vector<torch::jit::StrideInput>& getSymbolicStrideDesc(
       const torch::jit::Value* value);
 
   int64_t nInputs_ = 0;
@@ -347,6 +345,10 @@ class TORCH_API TensorExprKernel {
   std::unordered_map<size_t, std::vector<torch::jit::StrideInput>>
       sym_stride_inputs_;
   std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs_;
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides_;
 
   // Memory layout to be propagated with fusion group
   MemoryLayoutPolicy memory_layout_policy_ = MemoryLayoutPolicy::kContiguous;
