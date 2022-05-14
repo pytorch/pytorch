@@ -842,7 +842,14 @@ class TestMeta(TestCase):
 
         if func in overload_exclude_set:
             self.skipTest('permanently excluded')
-        elif func in meta_exclude_set and dtype not in (torch.complex128, torch.complex64):
+        elif (
+                func in meta_exclude_set
+                and dtype not in (torch.complex128, torch.complex64)
+
+                # It is inside 'meta_exclude_set' due to use use frequency, but it
+                # does work with Meta tensors.
+                and func != torch.Tensor.__getitem__
+        ):
             try:
                 do_test(run_excludes_anyway=True)
             except Exception:
