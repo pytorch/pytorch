@@ -5,7 +5,7 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.utils
 from torch.onnx.symbolic_helper import _parse_arg, _unimplemented, parse_args
-from torch.onnx.symbolic_opset9 import _reshape_from_tensor, permute
+from torch.onnx.symbolic_opsets.symbolic_opset9 import _reshape_from_tensor, permute
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -143,7 +143,7 @@ def cross_entropy_loss(
 
 @parse_args("v", "v", "v", "v", "i")
 def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduction):
-    from torch.onnx.symbolic_opset9 import add, log, mul, neg, sigmoid, sub
+    from torch.onnx.symbolic_opsets.symbolic_opset9 import add, log, mul, neg, sigmoid, sub
 
     p = g.op("Constant", value_t=torch.tensor([1]))
     sig_x = sigmoid(g, input)
@@ -239,7 +239,7 @@ def unfold(g, input, dimension, size, step):
     const_size = sym_help._maybe_get_const(size, "i")
     const_step = sym_help._maybe_get_const(step, "i")
     if not sym_help._is_value(const_size) and not sym_help._is_value(const_step):
-        from torch.onnx.symbolic_opset9 import unfold as _unfold
+        from torch.onnx.symbolic_opsets.symbolic_opset9 import unfold as _unfold
 
         return _unfold(g, input, dimension, const_size, const_step)
     if sym_help.is_caffe2_aten_fallback():

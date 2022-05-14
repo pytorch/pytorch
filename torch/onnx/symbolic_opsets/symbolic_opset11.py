@@ -13,9 +13,9 @@ from torch.onnx.symbolic_helper import (
     parse_args,
     quantized_args,
 )
-from torch.onnx.symbolic_opset9 import _pad_circular, expand
-from torch.onnx.symbolic_opset9 import linalg_vector_norm as lvn
-from torch.onnx.symbolic_opset9 import mul, op_with_optional_float_cast, unused
+from torch.onnx.symbolic_opsets.symbolic_opset9 import _pad_circular, expand
+from torch.onnx.symbolic_opsets.symbolic_opset9 import linalg_vector_norm as lvn
+from torch.onnx.symbolic_opsets.symbolic_opset9 import mul, op_with_optional_float_cast, unused
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -128,7 +128,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         args = [self] + indices_list + [values, accumulate]
         return g.at("index_put", *args)
 
-    from torch.onnx.symbolic_opset9 import add, expand
+    from torch.onnx.symbolic_opsets.symbolic_opset9 import add, expand
 
     accumulate = sym_help._parse_arg(accumulate, "b")
 
@@ -195,7 +195,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":
             rank = sym_help._get_tensor_rank(values)
             if rank is not None and rank == 0:
-                from torch.onnx.symbolic_opset9 import masked_fill
+                from torch.onnx.symbolic_opsets.symbolic_opset9 import masked_fill
 
                 return masked_fill(g, self, bool_inp, values)
             return masked_scatter(g, self, bool_inp, values)
@@ -271,7 +271,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 @parse_args("v", "i", "v", "v")
 def scatter(g, self, dim, index, src):
-    from torch.onnx.symbolic_opset9 import expand_as
+    from torch.onnx.symbolic_opsets.symbolic_opset9 import expand_as
 
     if sym_help.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
@@ -306,14 +306,14 @@ def cumsum(g, self, dim, dtype=None):
 
 
 def masked_select(g, self, mask):
-    from torch.onnx.symbolic_opset9 import expand_as, nonzero
+    from torch.onnx.symbolic_opsets.symbolic_opset9 import expand_as, nonzero
 
     index = nonzero(g, expand_as(g, mask, self))
     return g.op("GatherND", self, index)
 
 
 def masked_scatter(g, self, mask, source):
-    from torch.onnx.symbolic_opset9 import expand_as, nonzero, size
+    from torch.onnx.symbolic_opsets.symbolic_opset9 import expand_as, nonzero, size
 
     index = nonzero(g, expand_as(g, mask, self))
     # NOTE: source can have more elements than needed.
@@ -343,7 +343,7 @@ def __getitem_(g, self, i):
         # SequenceAt requires that the input be a List of Tensors
         return g.op("SequenceAt", self, i)
     else:
-        from torch.onnx.symbolic_opset9 import __getitem_ as getitem
+        from torch.onnx.symbolic_opsets.symbolic_opset9 import __getitem_ as getitem
 
         return getitem(g, self, i)
 
@@ -387,7 +387,7 @@ def Delete(g, tensor_list, dim):
 
 def cat(g, tensor_list, dim):
     if sym_help._is_packed_list(tensor_list):
-        from torch.onnx.symbolic_opset9 import cat as cat_opset9
+        from torch.onnx.symbolic_opsets.symbolic_opset9 import cat as cat_opset9
 
         return cat_opset9(g, tensor_list, dim)
     else:
@@ -397,7 +397,7 @@ def cat(g, tensor_list, dim):
 
 def stack(g, tensor_list, dim):
     if sym_help._is_packed_list(tensor_list):
-        from torch.onnx.symbolic_opset9 import stack as stack_opset9
+        from torch.onnx.symbolic_opsets.symbolic_opset9 import stack as stack_opset9
 
         return stack_opset9(g, tensor_list, dim)
     else:
@@ -482,7 +482,7 @@ def round(g, self):
 
 def remainder(g, input, other):
     if sym_help._is_fp(input) or sym_help._is_fp(other):
-        from torch.onnx.symbolic_opset9 import remainder as _remainder_9
+        from torch.onnx.symbolic_opsets.symbolic_opset9 import remainder as _remainder_9
 
         return _remainder_9(g, input, other)
     return g.op("Mod", input, other, fmod_i=0)
@@ -652,7 +652,7 @@ def linalg_det(g, self):
 
 
 def logdet(g, input):
-    from torch.onnx.symbolic_opset9 import log
+    from torch.onnx.symbolic_opsets.symbolic_opset9 import log
 
     return log(g, linalg_det(g, input))
 
@@ -804,11 +804,11 @@ def index(g, self, index):
         if not sym_help._is_none(index) and (
             index.type().scalarType() == "Bool" or index.type().scalarType() == "Byte"
         ):
-            from torch.onnx.symbolic_opset9 import nonzero
+            from torch.onnx.symbolic_opsets.symbolic_opset9 import nonzero
 
             index = nonzero(g, index)
             return g.op("GatherND", self, index)
-    from torch.onnx.symbolic_opset9 import index as index_opset9
+    from torch.onnx.symbolic_opsets.symbolic_opset9 import index as index_opset9
 
     return index_opset9(g, self, index)
 
