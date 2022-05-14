@@ -183,6 +183,7 @@ class TestCommon(TestCase):
 
         # Checks that dtypes are listed correctly and generates an informative
         #   error message
+
         supported_forward = supported_dtypes - unsupported_dtypes
         partially_supported_forward = supported_dtypes & unsupported_dtypes
         unsupported_forward = unsupported_dtypes - supported_dtypes
@@ -334,7 +335,11 @@ class TestCommon(TestCase):
 
             meta_sample = sample.transform(_to_tensormeta)
             meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
-            prims.utils.compare_tensor_meta(result, meta_result)
+            if isinstance(result, torch.Tensor):
+                prims.utils.compare_tensor_meta(result, meta_result)
+            elif isinstance(result, Sequence):
+                for a, b in zip(result, meta_result):
+                    prims.utils.compare_tensor_meta(a, b)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference.
@@ -349,15 +354,28 @@ class TestCommon(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                exact_stride=True,
+                exact_stride=False,
                 exact_device=True,
                 exact_layout=True,
                 exact_is_coalesced=True,
             )
 
+            if isinstance(actual, torch.Tensor):
+                assert isinstance(expected, torch.Tensor)
+                prims.utils.compare_significant_strides(actual, expected)
+                if getattr(op, 'validate_view_consistency', True):
+                    self.assertEqual(actual._is_view(), expected._is_view())
+            if isinstance(actual, Sequence):
+                assert isinstance(expected, Sequence)
+                for a, b in zip(actual, expected):
+                    prims.utils.compare_significant_strides(a, b)
+                    if getattr(op, 'validate_view_consistency', True):
+                        self.assertEqual(a._is_view(), b._is_view())
+
+
     @skipMeta
     @onlyNativeDeviceTypes
-    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    @ops([op for op in ops_and_refs if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
         for ei in error_inputs:
@@ -663,7 +681,6 @@ class TestCommon(TestCase):
                 op_out(out=out)
                 final_strides = _extract_strides(out)
                 final_ptrs = _extract_data_ptrs(out)
-
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
@@ -684,6 +701,7 @@ class TestCommon(TestCase):
                 except TypeError as te:
                     # for non-integer types fills with NaN
                     return torch.full_like(t, float("nan"))
+
 
             _compare_out(_case_zero_transform)
 
@@ -944,7 +962,10 @@ class TestCommon(TestCase):
 
         for sample in op.sample_inputs(device, dtype):
             actual = op(sample.input, *sample.args, **sample.kwargs)
-            transformed_sample = sample.transform(lambda x: x.to(torch.complex64))
+            # sample.transform applies the lambda to torch.Tensor and torch.dtype.
+            # However, we only want to apply it to Tensors with dtype `torch.complex32`..
+            transformed_sample = sample.transform(lambda x: x.to(torch.complex64) if isinstance(
+                x, torch.Tensor) and x.dtype is torch.complex32 else x)
             expected = op(
                 transformed_sample.input,
                 *transformed_sample.args,
@@ -1114,7 +1135,7 @@ class TestMathBits(TestCase):
 
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
-    @ops(op_db, allowed_dtypes=(torch.cfloat,))
+    @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
             self.skipTest("Operation doesn't support conjugated inputs.")
@@ -1136,7 +1157,7 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
-    @ops(op_db, allowed_dtypes=(torch.double,))
+    @ops(ops_and_refs, allowed_dtypes=(torch.double,))
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
@@ -1155,7 +1176,7 @@ class TestMathBits(TestCase):
             lambda x: True,
         )
 
-    @ops(op_db, allowed_dtypes=(torch.cdouble,))
+    @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")

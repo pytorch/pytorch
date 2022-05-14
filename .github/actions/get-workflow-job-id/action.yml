@@ -22,7 +22,8 @@ runs:
       with:
         shell: bash
         timeout_minutes: 10
-        max_attempts: 3
+        max_attempts: 5
+        retry_wait_seconds: 30
         command: |
           set -x
           python3 -m pip install requests==2.26.0
