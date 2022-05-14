@@ -243,7 +243,7 @@ class TestFSDPStateDict(FSDPTest):
                     fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
 
             model_new.load_state_dict(fsdp_state_dict)
-            self._compare_models(model, model_new, self.assertEqual, check_fp16=True)
+            self._compare_models(model, model_new, self.assertEqual, check_fp16=fp16)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
