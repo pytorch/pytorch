@@ -6,6 +6,7 @@ from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
     is_namedtuple as _is_namedtuple
 )
+from typing import List
 
 def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     r"""
@@ -85,7 +86,7 @@ def _to_kwargs(inputs, kwargs, device_id, use_side_stream_for_tensor_copies):
 def _verify_param_shape_across_processes(process_group, tensors, logger=None):
     return dist._verify_params_across_processes(process_group, tensors, logger)
 
-def _sync_params_and_buffers(
+def _sync_module_states(
     module,
     process_group,
     broadcast_bucket_size,
@@ -107,6 +108,19 @@ def _sync_params_and_buffers(
         if name not in params_and_buffers_to_ignore:
             module_states.append(buffer.detach())
 
+    _sync_params_and_buffers(
+        process_group,
+        module_states,
+        broadcast_bucket_size,
+        src
+    )
+
+def _sync_params_and_buffers(
+    process_group: dist.ProcessGroup,
+    module_states: List[torch.Tensor],
+    broadcast_bucket_size: int,
+    src: int,
+):
     if len(module_states) > 0:
         dist._broadcast_coalesced(
             process_group, module_states, broadcast_bucket_size, src

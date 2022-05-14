@@ -567,6 +567,12 @@ class FullyShardedDataParallel(nn.Module):
             Note that if ``device_id`` is specified but ``module`` is already
             on a different CUDA device, an error will be thrown. (Default: ``None``)
 
+        sync_module_states (bool): If ``True``, each individually wrapped FSDP unit will broadcast
+            module parameters from rank 0 to ensure they are the same across all ranks after
+            initialization. This helps ensure model parameters are the same across ranks before starting
+            training, but adds communication overhead to ``__init__``, as at least one broadcast is triggered
+            per individually wrapped FSDP unit. (Default: ``False``)
+
     """
 
     def __init__(
@@ -581,6 +587,7 @@ class FullyShardedDataParallel(nn.Module):
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
         device_id: Optional[Union[int, torch.device]] = None,
+        sync_module_states: bool = False,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -644,6 +651,7 @@ class FullyShardedDataParallel(nn.Module):
                 mixed_precision=mixed_precision,
                 param_init_fn=param_init_fn,
                 device_id=device_id,
+                sync_module_states=sync_module_states,
             )
 
         self.process_group = process_group or _get_default_group()
@@ -750,6 +758,16 @@ class FullyShardedDataParallel(nn.Module):
             p for p in module.parameters()
             if p not in ignored_params and not isinstance(p, FlatParameter)
         ]
+
+        if sync_module_states:
+            _sync_params_and_buffers(
+                process_group=self.process_group,
+                # TODO: FSDP should sync buffers as well
+                module_states=[param.detach() for param in params],
+                # Same bucket size as DDP
+                broadcast_bucket_size=int(250 * 1024 * 1024),
+                src=0,
+            )
 
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
             module, param_list=params
