@@ -360,15 +360,18 @@ class TestCommon(TestCase):
                 exact_is_coalesced=True,
             )
 
-            # TODO: move Sequence case into utils.compare_significant_strides
             if isinstance(actual, torch.Tensor):
+                assert isinstance(expected, torch.Tensor)
                 prims.utils.compare_significant_strides(actual, expected)
+                if getattr(op, 'validate_view_consistency', True):
+                    self.assertEqual(actual._is_view(), expected._is_view())
             if isinstance(actual, Sequence):
+                assert isinstance(expected, Sequence)
                 for a, b in zip(actual, expected):
                     prims.utils.compare_significant_strides(a, b)
+                    if getattr(op, 'validate_view_consistency', True):
+                        self.assertEqual(a._is_view(), b._is_view())
 
-            # TODO: FIXME: enable view consistency testing
-            # self.assertEqual(actual._is_view(), expected._is_view())
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -959,7 +962,10 @@ class TestCommon(TestCase):
 
         for sample in op.sample_inputs(device, dtype):
             actual = op(sample.input, *sample.args, **sample.kwargs)
-            transformed_sample = sample.transform(lambda x: x.to(torch.complex64))
+            # sample.transform applies the lambda to torch.Tensor and torch.dtype.
+            # However, we only want to apply it to Tensors with dtype `torch.complex32`..
+            transformed_sample = sample.transform(lambda x: x.to(torch.complex64) if isinstance(
+                x, torch.Tensor) and x.dtype is torch.complex32 else x)
             expected = op(
                 transformed_sample.input,
                 *transformed_sample.args,
