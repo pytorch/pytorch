@@ -54,7 +54,7 @@ void div_true_kernel_cuda(TensorIteratorBase& iter) {
       opmath_jitted_gpu_kernel_with_scalars<div_name, scalar_t, scalar_t>(iter, div_string);
     #else
       using opmath_t = at::opmath_type<scalar_t>;
-      gpu_kernel_with_scalars<scalar_t>(iter, DivFunctor<opmath_t>());
+      opmath_gpu_kernel_with_scalars<scalar_t>(iter, DivFunctor<opmath_t>());
     #endif
     return;
   }

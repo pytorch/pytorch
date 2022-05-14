@@ -492,7 +492,7 @@ void eq_kernel(TensorIteratorBase& iter) {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
-          return scalar_t{a == b};
+          return static_cast<scalar_t>(a == b);
         },
         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
           return a.eq(b);
