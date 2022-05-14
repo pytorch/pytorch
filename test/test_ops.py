@@ -47,7 +47,6 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 import torch._prims as prims
-from torch.utils._pytree import tree_map
 
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
