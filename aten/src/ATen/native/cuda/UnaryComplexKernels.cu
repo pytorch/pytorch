@@ -21,14 +21,13 @@ __host__ __device__ static inline scalar_t angle_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> angle_wrapper(c10::complex<T> v) {
-  return T{ std::arg(v) };
+  return c10::complex<T>({ std::arg(v) });
 }
 
 const char angle_name[] = "angle_kernel";
 void angle_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
-  if(at::isComplexType(dtype)) {
-    using scalar_t = c10::complex<at::Half>;
+  if (at::isComplexType(dtype)) {
 #if AT_USE_JITERATOR()
     static const auto angle_string = jiterator_stringify(
         template <typename T>
