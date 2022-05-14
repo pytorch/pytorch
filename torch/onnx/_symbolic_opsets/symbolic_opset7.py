@@ -1,17 +1,19 @@
+"""
+Note [ONNX operators that are added/updated from opset 7 to opset 8]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+New operators:
+  Expand
+
+Updated operators:
+  Min, Max, Sum, Mean: supports multidirectional broadcasting.
+  MaxPool: added optional indices output.
+  Scan
+"""
+
 import warnings
 
 from torch.onnx.symbolic_helper import _block_list_in_opset
 from torch.onnx._symbolic_opsets import symbolic_opset9
-
-# Note [ONNX operators that are added/updated from opset 7 to opset 8]
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# New operators:
-#   Expand
-#
-# Updated operators:
-#   Min, Max, Sum, Mean: supports multidirectional broadcasting.
-#   MaxPool: added optional indices output.
-#   Scan
 
 block_listed_operators = [
     "scan",

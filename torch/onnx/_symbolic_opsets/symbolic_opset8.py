@@ -1,39 +1,42 @@
+"""
+Note [ONNX operators that are added/updated from opset 8 to opset 9]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+New operators:
+      Compress
+      ConstantOfShape
+      EyeLike
+      MaxUnpool
+      OneHot
+      Sinh
+      Cosh
+      Asinh
+      Acosh
+      Atanh
+      Shrink
+      IsNaN
+      Sign
+      Erf
+      Scatter
+      Where
+      NonZero
+      TfIdfVectorizer
+      MeanVarianceNormalization
+
+Updated operators:
+      BatchNormalization: removed spatial attribute.
+      Greater, Less, Constant, MatMul, PRelu, Gemm, Flatten: more data types{integers} supported.
+      Cast: more data types{string} supported.
+      Upsample: moved scales from attribute to input.
+      Scan
+"""
+
 import warnings
 
 import torch
 from torch.onnx import symbolic_helper
 from torch.onnx.symbolic_helper import parse_args
-from torch.onnx._symbolic_opsets import symbolic_opset9
+from torch.onnx._symbolic_opsets import symbolic_opset9 as opset9
 
-# Note [ONNX operators that are added/updated from opset 8 to opset 9]
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# New operators:
-#   Compress
-#   ConstantOfShape
-#   EyeLike
-#   MaxUnpool
-#   OneHot
-#   Sinh
-#   Cosh
-#   Asinh
-#   Acosh
-#   Atanh
-#   Shrink
-#   IsNaN
-#   Sign
-#   Erf
-#   Scatter
-#   Where
-#   NonZero
-#   TfIdfVectorizer
-#   MeanVarianceNormalization
-#
-# Updated operators:
-#   BatchNormalization: removed spatial attribute.
-#   Greater, Less, Constant, MatMul, PRelu, Gemm, Flatten: more data types{integers} supported.
-#   Cast: more data types{string} supported.
-#   Upsample: moved scales from attribute to input.
-#   Scan
 
 block_listed_operators = [
     "nonzero",
@@ -69,7 +72,9 @@ def _interpolate(name, dim, interpolate_mode):
             return symbolic_helper._unimplemented(name, "align_corners == True")
         output_size = symbolic_helper._maybe_get_const(output_size, "is")
         if symbolic_helper._is_value(output_size):
-            return symbolic_helper._unimplemented(name, "torch._C.Value (output_size) indexing")
+            return symbolic_helper._unimplemented(
+                name, "torch._C.Value (output_size) indexing"
+            )
         if scales is None:
             scales = [
                 1.0
@@ -98,8 +103,12 @@ def __interpolate(
     if not symbolic_helper._is_none(align_corners) and align_corners:
         return symbolic_helper._unimplemented("interpolate", "align_corners == True")
 
-    if not symbolic_helper._is_none(scale_factor) and symbolic_helper._is_value(scale_factor):
-        return symbolic_helper._unimplemented("interpolate", "dynamic scales in opset 8")
+    if not symbolic_helper._is_none(scale_factor) and symbolic_helper._is_value(
+        scale_factor
+    ):
+        return symbolic_helper._unimplemented(
+            "interpolate", "dynamic scales in opset 8"
+        )
 
     if not symbolic_helper._is_none(size) and symbolic_helper._is_value(size):
         return symbolic_helper._unimplemented("interpolate", "dynamic size in opset 8")
@@ -126,7 +135,7 @@ def _try_cast_integer_to_float(g, *args):
             # properly defined.
             # NOTE: _cast_Float is generated programmatically so we need to make the
             # type checker happy with ignore[attr-defined].
-            args = tuple(symbolic_opset9._cast_Float(g, arg, False) for arg in args)  # type: ignore[attr-defined]
+            args = tuple(opset9._cast_Float(g, arg, False) for arg in args)  # type: ignore[attr-defined]
         else:
             return (None,) + args
     else:
@@ -141,7 +150,7 @@ def _try_cast_integer_to_float(g, *args):
 def _cast_to_type(g, input, to_type):
     if to_type is None:
         return input
-    return getattr(symbolic_opset9, "_cast_{}".format(to_type))(g, input, False)
+    return getattr(opset9, "_cast_{}".format(to_type))(g, input, False)
 
 
 def _comparison_operator(g, input, other, op_name):
@@ -187,7 +196,7 @@ def prelu(g, self, weight):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = symbolic_helper.symbolic_helper._try_get_scalar_type(self, other).lower()
+    ty = symbolic_helper._try_get_scalar_type(self, other).lower()
     C = g.constant(0, [1], ty)
     if symbolic_helper._try_get_scalar_type(self):
         old_type, self, other, C = _try_cast_integer_to_float(g, self, other, C)
@@ -250,7 +259,7 @@ def flatten(g, input, start_dim, end_dim):
         else:
             return g.op("Flatten", input, axis_i=end_dim_i + 1)
 
-    return symbolic_opset9.flatten(g, input, start_dim, end_dim)
+    return opset9.flatten(g, input, start_dim, end_dim)
 
 
 def _constant_fill(g, sizes, dtype, const_value):
@@ -314,9 +323,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = symbolic_helper._maybe_get_const(value, "t")
     if symbolic_helper._is_value(const_value):
         tmp = zeros(g, sizes, dtype, layout, device)
-        return symbolic_opset9.add(
-            g, tmp, value, g.op("Constant", value_t=torch.tensor(1))
-        )
+        return opset9.add(g, tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         return _constant_fill(g, sizes, dtype, const_value)
@@ -342,7 +349,7 @@ def repeat(g, self, repeats):
         sizes = self.type().sizes()
         diff_dims = repeat_size_len - len(sizes)
         if diff_dims > 0:
-            self = symbolic_opset9.view(
+            self = opset9.view(
                 g, self, g.op("Constant", value_t=torch.tensor([1] * diff_dims + sizes))
             )
     return g.op("Tile", self, repeats)

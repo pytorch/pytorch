@@ -160,7 +160,7 @@ def export(
     f: Union[str, BinaryIO],
     export_params: bool = True,
     verbose: bool = False,
-    training = None,
+    training=None,
     input_names: Optional[Sequence[str]] = None,
     output_names: Optional[Sequence[str]] = None,
     operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX,

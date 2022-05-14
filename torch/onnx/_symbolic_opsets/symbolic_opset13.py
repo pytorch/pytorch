@@ -9,17 +9,6 @@ from torch.onnx.symbolic_helper import _unimplemented, parse_args
 from torch.onnx._symbolic_opsets import symbolic_opset9 as opset9
 from torch.onnx._symbolic_opsets import symbolic_opset11 as opset11
 
-from torch.onnx._symbolic_opsets.symbolic_opset9 import (
-    size,
-    unused,
-    zeros,
-)
-
-# EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
-
-# This file exports ONNX ops for opset 13
-
 
 @parse_args("v", "i", "none")
 def softmax(g, input, dim, dtype=None):
@@ -178,7 +167,7 @@ def fake_quantize_per_channel_affine(
         quantized = g.op(
             "Clip",
             quantized,
-            unused(g),
+            opset9.unused(g),
             g.op("Constant", value_t=torch.tensor(127, dtype=torch.uint8)),
         )
     return g.op("DequantizeLinear", quantized, scale, zero_point, axis_i=axis)
@@ -206,7 +195,7 @@ def fake_quantize_per_tensor_affine(
         quantized = g.op(
             "Clip",
             quantized,
-            unused(g),
+            opset9.unused(g),
             g.op("Constant", value_t=torch.tensor(127, dtype=torch.uint8)),
         )
     return g.op("DequantizeLinear", quantized, scale, zero_point)
@@ -414,12 +403,16 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
 
 @parse_args("v", "i", "i", "i")
 def diagonal(g, self, offset, dim1, dim2):
-    dim1_size = size(g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim1])))
-    dim2_size = size(g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim2])))
+    dim1_size = opset9.size(
+        g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim1]))
+    )
+    dim2_size = opset9.size(
+        g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim2]))
+    )
 
     # Create appropriate mask
     mask_shape = g.op("Concat", dim1_size, dim2_size, axis_i=0)
-    mask = zeros(g, mask_shape, None, None, None)
+    mask = opset9.zeros(g, mask_shape, None, None, None)
     mask = g.op("EyeLike", mask, k_i=offset)
 
     # dim1 and dim2 appended as a dimension at the end of the shape
@@ -480,12 +473,12 @@ def diagonal(g, self, offset, dim1, dim2):
     )
 
     gather_shape = [
-        size(g, result, dim=g.op("Constant", value_t=torch.LongTensor([axis])))
+        opset9.size(g, result, dim=g.op("Constant", value_t=torch.LongTensor([axis])))
         for axis in list(range(rank))[:-2]
     ]
     gather_shape.append(diag_size)
     gather_shape = g.op("Concat", *gather_shape, axis_i=0)
-    gather_indices = zeros(g, gather_shape, 4, None, None)
+    gather_indices = opset9.zeros(g, gather_shape, 4, None, None)
 
     # There might be cases where offset value is greater than number of rows/columns
     # and might cause the diagonal to overrun and as a result of this, diag_size would be zero.
@@ -519,7 +512,7 @@ def diagonal(g, self, offset, dim1, dim2):
     torch.onnx.utils._add_output_to_block(if_block, final_non_overrun_)
 
     else_block = torch.onnx.utils._add_block(if_node)
-    final_overrun_ = zeros(else_block, gather_shape, 6, None, None)
+    final_overrun_ = opset9.zeros(else_block, gather_shape, 6, None, None)
     torch.onnx.utils._add_output_to_block(else_block, final_overrun_)
     return if_op
 
@@ -564,7 +557,9 @@ class Quantized:
         )
         bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
 
-        output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+        output = opset9.conv2d(
+            g, input, weight, bias, stride, padding, dilation, groups
+        )
 
         return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
 
@@ -588,7 +583,9 @@ class Quantized:
         )
         bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
 
-        output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+        output = opset9.conv2d(
+            g, input, weight, bias, stride, padding, dilation, groups
+        )
         output = opset9.relu(g, output)
 
         return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
