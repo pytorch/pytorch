@@ -2170,6 +2170,7 @@
     "avg_pool1d",
     "avg_pool2d",
     "avg_pool3d",
+    "bias",
     "bilinear",
     "boolean_dispatch",
     "celu_",

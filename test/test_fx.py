@@ -3807,6 +3807,7 @@ class TestFunctionalTracing(JitTestCase):
         "hardshrink": BUILT_IN_FUNC,
         "hardtanh_": BUILT_IN_FUNC,
         "leaky_relu_": BUILT_IN_FUNC,
+        "bias": BUILT_IN_FUNC,
         "linear": BUILT_IN_FUNC,
         "logsigmoid": BUILT_IN_FUNC,
         "one_hot": BUILT_IN_FUNC,
