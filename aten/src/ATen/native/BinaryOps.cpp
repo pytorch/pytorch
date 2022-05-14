@@ -771,17 +771,6 @@ Tensor rsub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return at::sub(other, self, alpha); // redispatch!
 }
 
-// TODO: Make this structured to undo the perf regression from native:: removal
-// in call here
-
-Tensor add(const Tensor& self, const Scalar& other, const Scalar& alpha) {
-  return at::add(self, wrapped_scalar_tensor(other), alpha);
-}
-
-Tensor& add_(Tensor& self, const Scalar& other, const Scalar& alpha) {
-  return self.add_(wrapped_scalar_tensor(other), alpha);
-}
-
 Tensor remainder(const Tensor& self, const Scalar& other) {
   // redispatch
   return at::remainder(self, wrapped_scalar_tensor(other));

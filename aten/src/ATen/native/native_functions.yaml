@@ -507,14 +507,12 @@
 - func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: add
+  composite: add.Tensor
 
 - func: add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
-  dispatch:
-    CompositeExplicitAutograd: add_
+  composite: add_.Tensor
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   structured_delegate: addmv.out
