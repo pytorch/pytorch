@@ -5358,7 +5358,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     # target.index_fill(dim, idx, value)
     fill = op_info.name == "index_fill"
     # target._index_reduce(dim, idx, source, reduce, *, include_self=True)
-    reduce_op = op_info.name == "_index_reduce"
+    reduce_op = op_info.name == "index_reduce"
 
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -12305,10 +12305,6 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestCompositeCompliance',
                                      'test_operator'),
-                        # MISSING 'aten::isnan'
-                        DecorateInfo(unittest.expectedFailure,
-                                     'TestMeta', 'test_meta',
-                                     dtypes=floating_types_and(torch.half, torch.bfloat16)),
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -12708,7 +12704,7 @@ op_db: List[OpInfo] = [
            aten_name='group_norm',
            aliases=('group_norm',),
            ref=reference_group_norm,
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -12722,7 +12718,7 @@ op_db: List[OpInfo] = [
            supports_expanded_weight=True,),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -13706,7 +13702,7 @@ op_db: List[OpInfo] = [
     # See https://github.com/pytorch/pytorch/pull/63218#discussion_r688549391 for more details
     OpInfo('nn.functional.batch_norm',
            aten_name='batch_norm',
-           dtypes=floating_types(),
+           dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -15500,7 +15496,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
-    OpInfo('_index_reduce',
+    OpInfo('index_reduce',
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=True,
            sample_inputs_func=sample_inputs_index),

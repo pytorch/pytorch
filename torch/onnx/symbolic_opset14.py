@@ -4,8 +4,7 @@
 # This file exports ONNX ops for opset 14
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx._globals import GLOBALS
-from torch.onnx.symbolic_helper import parse_args
+from torch.onnx.symbolic_helper import args_have_same_dtype, parse_args
 
 # Note [ONNX operators that are added/updated in opset 14]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -59,10 +58,8 @@ def batch_norm(
 
     if (
         torch.is_autocast_enabled()
-        and not sym_help.args_have_same_dtype(
-            [input, weight, bias, running_mean, running_var]
-        )
-        and GLOBALS.export_onnx_opset_version < 15
+        and not args_have_same_dtype([input, weight, bias, running_mean, running_var])
+        and sym_help._export_onnx_opset_version < 15
     ):
         return sym_help._onnx_opset_unsupported_detailed(
             "BatchNormalization",

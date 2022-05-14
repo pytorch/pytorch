@@ -22,16 +22,15 @@ NodePtr ReuseNode(Args&&... args) {
   return nullptr;
 }
 
-// Caching an IR node into TrieCache
-static inline void CacheNode(NodePtr node) {
-  if (FLAGS_torch_lazy_reuse_ir) {
-    TrieCache::Get()->Insert(std::move(node));
-  }
-}
-
+// TODO(alanwaketan): Support r-value reference argument type.
 template <typename T, typename... Args>
 NodePtr MakeNode(Args&&... args) {
-  return std::make_shared<T>(std::forward<Args>(args)...);
+  NodePtr node = std::make_shared<T>(std::forward<Args>(args)...);
+  if (FLAGS_torch_lazy_reuse_ir) {
+    // If ir caching is enabled, we need to record all new nodes
+    TrieCache::Get()->Insert(node);
+  }
+  return node;
 }
 
 // op is passed in for a more efficient node casting, see the implementation of NodeCast
@@ -40,7 +39,6 @@ NodePtr ReuseOrMakeNode(Args&&... args) {
   NodePtr node = ReuseNode<T>(std::forward<Args>(args)...);
   if (!node) {
     node = MakeNode<T>(std::forward<Args>(args)...);
-    CacheNode(node);
   }
   return node;
 }
