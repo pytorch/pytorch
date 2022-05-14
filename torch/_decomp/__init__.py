@@ -1,7 +1,7 @@
 import torch
 import torch._ops
 import torch.library
-from typing import Callable, Union, Dict, Sequence, List
+from typing import Callable, Union, Dict, Sequence
 from torch.utils._pytree import tree_map
 from collections import defaultdict
 
@@ -15,7 +15,7 @@ decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
 
-def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False):
+def register_decomposition(aten_op, registry=None, *, register_meta: bool = False):
     """
     A decorator to register a function as a decomposition to the Python
     decomposition table.  Use it like this::
@@ -32,9 +32,9 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
     autograd) and not just backend tracing, where we then need to know if a
     decomposition can be used to simulate a transform.
 
-    By default, if the decomposition is for an operator that doesn't have
-    a Meta implementation, we will register it to the dispatcher.  Use
-    `disable_meta` to disable this behavior.
+    If `register_meta` is True, we will also register this function to the
+    Meta key in the dispatcher, so that it will be used to compute meta
+    tensors.
     """
     def decomposition_decorator(f):
         nonlocal registry
@@ -53,11 +53,7 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                 if op_overload in registry:
                     raise RuntimeError(f"duplicate registrations for {op_overload}")
                 registry[op_overload] = f
-                # TODO: factor this logic into OpOverload or Library API
-                name = op_overload._schema.name
-                if op_overload._schema.overload_name:
-                    name += "." + op_overload._schema.overload_name
-                if not disable_meta and not torch._C._dispatch_has_kernel_for_dispatch_key(name, 'Meta'):
+                if register_meta:
                     meta_lib.impl(op_overload, f)
 
         # To handle allowing multiple aten_ops at once
