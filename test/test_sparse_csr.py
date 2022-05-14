@@ -2004,7 +2004,10 @@ class TestSparseCSR(TestCase):
                 return a.to_sparse_bsc((2, 2))
         def _to_from_layout(layout_a, layout_b):
             a = make_tensor((6, 10), dtype=torch.float, device=device)
-            if layout_a in [torch.sparse_csc, torch.sparse_bsc] or layout_b in [torch.sparse_csc, torch.sparse_bsc]:
+            expect_error = (layout_a in [torch.sparse_csc, torch.sparse_bsc] or layout_b in [torch.sparse_csc, torch.sparse_bsc])
+            expect_error = expect_error or (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_bsr)
+            expect_error = expect_error or (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_csr)
+            if expect_error:
                 with self.assertRaises(RuntimeError):
                     b = _convert_to_layout(a, layout_a)
                     _convert_to_layout(b, layout_b)

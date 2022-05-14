@@ -840,12 +840,12 @@ Tensor csr_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
 }
 
 Tensor csr_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
-  TORCH_CHECK("Conversion from ", self.layout(), " to BSC is currently not supported.");
+  AT_ERROR("Conversion from ", self.layout(), " to BSC is currently not supported.");
   return self;
 }
 
 Tensor csr_to_sparse_csc(const Tensor& self) {
-  TORCH_CHECK("Conversion from ", self.layout(), " to CSC is currently not supported.");
+  AT_ERROR("Conversion from ", self.layout(), " to CSC is currently not supported.");
   return self;
 }
 
