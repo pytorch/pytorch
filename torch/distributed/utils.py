@@ -2,11 +2,11 @@ import collections
 
 import torch
 import torch.distributed as dist
-<<<<<<< HEAD
 from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
     is_namedtuple as _is_namedtuple
 )
+from typing import Dict, Any
 
 def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     r"""
@@ -82,9 +82,7 @@ def _to_kwargs(inputs, kwargs, device_id, use_side_stream_for_tensor_copies):
     inputs = tuple(inputs)
     kwargs = tuple(kwargs)
     return inputs, kwargs
-=======
-from typing import Dict, Any
->>>>>>> Checkpoint wrapper state dict
+
 
 def _verify_param_shape_across_processes(process_group, tensors, logger=None):
     return dist._verify_params_across_processes(process_group, tensors, logger)
