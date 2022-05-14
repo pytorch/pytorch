@@ -83,7 +83,6 @@ def _to_kwargs(inputs, kwargs, device_id, use_side_stream_for_tensor_copies):
     kwargs = tuple(kwargs)
     return inputs, kwargs
 
-
 def _verify_param_shape_across_processes(process_group, tensors, logger=None):
     return dist._verify_params_across_processes(process_group, tensors, logger)
 
