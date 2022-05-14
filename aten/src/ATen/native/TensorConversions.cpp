@@ -461,7 +461,7 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   return new_tensor;
 }
 
-// Sparse layout conversions
+// Sparse layout conversions Start
 
 Tensor dense_to_sparse_csr(const Tensor& self) {
   return self.to_sparse().to_sparse_csr();
@@ -504,6 +504,36 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
 Tensor csr_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   TORCH_CHECK(self.is_sparse_csr(), "Can only convert CSR to BSR, but got ", self.layout(), " instead.");
   return _csr_to_block_csr(self, blocksize);
+}
+
+namespace {
+template <typename input_t, typename output_t>
+void convert_indices_from_csr_to_coo_cpu(
+    const Tensor& indices,
+    const Tensor& crow_indices,
+    const Tensor& col_indices,
+    const bool transpose = false) {
+  int64_t nrows = crow_indices.numel() - 1;
+  if (nrows == 0) {
+    indices.zero_();
+    return;
+  }
+  auto crow_indices_ = crow_indices.expect_contiguous();
+  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
+  TORCH_INTERNAL_ASSERT(indices.is_contiguous());
+  auto row0 = indices.select(0, transpose ? 1 : 0);
+  auto row1 = indices.select(0, transpose ? 0 : 1);
+  output_t* data_out = row0.data_ptr<output_t>();
+  row1.copy_(*col_indices.expect_contiguous());
+  at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
+    for (const auto i : c10::irange(start, end)) {
+      std::fill(
+          &data_out[crow_indices_data_in[i]],
+          &data_out[crow_indices_data_in[i + 1]],
+          static_cast<output_t>(i));
+    }
+  });
+}
 }
 
 TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu)
@@ -750,5 +780,7 @@ Tensor _csr_to_block_csr(const Tensor& self, IntArrayRef blocksize) {
       c10::kSparseBsr,
       result_values.device());
 }
+
+// Sparse layout conversions End
 
 }} // namespace at::native
