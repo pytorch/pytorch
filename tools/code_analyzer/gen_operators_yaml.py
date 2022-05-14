@@ -10,7 +10,10 @@ from gen_op_registration_allowlist import (
     gen_transitive_closure,
     load_op_dep_graph,
 )
-from torchgen.selective_build.operator import SelectiveBuildOperator, merge_operator_dicts
+from torchgen.selective_build.operator import (
+    SelectiveBuildOperator,
+    merge_operator_dicts,
+)
 from torchgen.selective_build.selector import merge_kernel_metadata
 
 # Generate YAML file containing the operators used for a specific PyTorch model.
