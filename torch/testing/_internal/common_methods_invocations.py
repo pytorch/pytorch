@@ -13868,7 +13868,8 @@ op_db: List[OpInfo] = [
                    # TODO: Add complex32 backward dtype support. Currently, we get:
                    # AssertionError: The supported dtypes for rsqrt on device type cuda are incorrect!
                    backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-                   assert_autodiffed=True, supports_forward_ad=True,
+                   assert_autodiffed=True,
+                   supports_forward_ad=True,
                    supports_sparse_csr=True,
                    supports_fwgrad_bwgrad=True,
                    decorators=(precisionOverride({torch.bfloat16: 7e-2}),),
