@@ -18,7 +18,7 @@ void logical_and_kernel_cuda(TensorIterator& iter) {
 #if AT_USE_JITERATOR()
     static const auto logical_and_string = jiterator_stringify(
         template <typename T>
-        T logical_and_kernel(T a, T b) {
+        bool logical_and_kernel(T a, T b) {
           return a && b;
         }
     ); // logical_and_string
@@ -53,7 +53,7 @@ void logical_or_kernel_cuda(TensorIterator& iter) {
 #if AT_USE_JITERATOR()
     static const auto logical_or_string = jiterator_stringify(
       template <typename T>
-      T logical_or_kernel(T a, T b) {
+      bool logical_or_kernel(T a, T b) {
         return a || b;
       }
     ); // logical_or_string
@@ -88,7 +88,7 @@ void logical_xor_kernel_cuda(TensorIterator& iter) {
 #if AT_USE_JITERATOR()
     static const auto logical_xor_string = jiterator_stringify(
         template <typename T>
-        T logical_xor_kernel(T a, T b) {
+        bool logical_xor_kernel(T a, T b) {
           return (a.real() || a.imag()) != (b.real() || b.imag());
         }
     );
