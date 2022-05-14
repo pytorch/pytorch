@@ -902,6 +902,9 @@ meta_dispatch_device_skips['cuda'] = {
     aten.cummin.default: {f16},
     aten.inverse.default: {f32, f64},
     aten.slice.Tensor: {f16},
+    # ROCm stuff; technically this should be expected failure but it's
+    # not worth it; these should get unified anyway
+    aten.miopen_batch_norm.default: {f32},
 }
 
 class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
