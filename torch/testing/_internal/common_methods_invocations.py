@@ -5358,7 +5358,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     # target.index_fill(dim, idx, value)
     fill = op_info.name == "index_fill"
     # target._index_reduce(dim, idx, source, reduce, *, include_self=True)
-    reduce_op = op_info.name == "_index_reduce"
+    reduce_op = op_info.name == "index_reduce"
 
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -15518,7 +15518,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
-    OpInfo('_index_reduce',
+    OpInfo('index_reduce',
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=True,
            sample_inputs_func=sample_inputs_index),
