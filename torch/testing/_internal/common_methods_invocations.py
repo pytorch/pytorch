@@ -18624,6 +18624,14 @@ python_ref_db = [
         skips=(
             # https://github.com/pytorch/pytorch/issues/76944
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
+            # complex("-501.-501.j")/complex("-501.-infj")
+            # PyTorch jiterated Path : 0
+            # Python : 0
+            # PyTorch non-jiterated path : nan + nanj
+            # See also: https://github.com/pytorch/pytorch/issues/52332
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,), device_type='cuda',
+                         active_if=not TEST_WITH_ROCM)
         ),
     ),
     #
