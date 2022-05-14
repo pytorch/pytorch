@@ -10,6 +10,10 @@ import torchgen.api.structured as structured
 
 @with_native_function_and_index
 def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional[str]:
+    # Dispatch-less composite kernels native function is a templated function found in
+    # aten/src/ATen/native/composite folder. No need to re-declare them here.
+    if backend_index.should_gen_dispatchless_composite(f):
+        return None
     sig = kernel_signature(f, backend_index)
     metadata = backend_index.get_kernel(f)
     if metadata is None:

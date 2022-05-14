@@ -139,7 +139,15 @@ class DispatchKey(Enum):
         raise AssertionError(f"unknown dispatch key {value}")
 
 
+# Dependency information for dispatch-less composite kernels.
+# Maps the overloaded operator name to a list of operations it depends on.
+# We need to store both the 'NativeFunction' it depends on, as well as the
+# 'NativeFunctionsGroup' it belongs to in order to find out whether the
+# operation has a kernel registered for a given dispatch key.
+CompositeGraph = Dict["OperatorName", List[Tuple["NativeFunction", Optional["NativeFunctionsGroup"]]]]
+
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
+COMPOSITE_DISPATCH_KEYS = {DispatchKey.Meta, DispatchKey.CUDA, DispatchKey.CPU, DispatchKey.CompositeExplicitAutograd}
 
 # Set of supported dispatch keys
 dispatch_keys = [
@@ -403,6 +411,10 @@ class NativeFunction:
     # That aren't easily inferrable directly from the operator's schema.
     tags: Set[str]
 
+    # Kernel names (+ overloads) that this NativeFunction depends on.
+    # This set will be used for generating struct methods for by-passing the dispatcher.
+    composite: Set["OperatorName"]
+
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
@@ -511,6 +523,11 @@ class NativeFunction:
                     raise AssertionError(f"illegal tag {t}")
         assert isinstance(tags, set)
 
+        composite_s = e.pop("composite", None)
+        assert composite_s is None or isinstance(composite_s, str)
+        composite = set(OperatorName.parse(c.strip()) for c in composite_s.split(",")) \
+            if composite_s is not None else set()
+
         from torchgen.api import cpp
 
         raw_dispatch = e.pop("dispatch", None)
@@ -559,7 +576,7 @@ class NativeFunction:
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
                 "name, then delete the dispatch table"
             )
-        elif not structured and structured_delegate is None:
+        elif not structured and structured_delegate is None and len(composite) == 0:
             dispatch[DispatchKey.CompositeImplicitAutograd] = BackendMetadata(
                 cpp.name(func), structured=False
             )
@@ -656,6 +673,7 @@ class NativeFunction:
                 has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
                 has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
                 tags=tags,
+                composite=composite,
             ),
             backend_metadata,
         )
@@ -728,6 +746,7 @@ class NativeFunction:
         return (
             self.has_composite_implicit_autograd_kernel
             or self.has_composite_explicit_autograd_kernel
+            or len(self.composite) > 0
         )
 
     @property
@@ -933,7 +952,10 @@ class BackendIndex:
             f = self.primary(g)
         else:
             assert_never(f)
-        if f.func.name not in self.index:
+        if self.should_gen_dispatchless_composite(f):
+            # Generate a 'BackendMetadata' for dispatch-less composite kernels.
+            return BackendMetadata(self.dispatchless_composite_kernel(f), False)
+        elif f.func.name not in self.index:
             return None
         return self.index[f.func.name]
 
@@ -946,6 +968,38 @@ class BackendIndex:
             # updating every kernel definition + callsite of every in-tree aten kernel.
             return None
 
+    def should_gen_dispatchless_composite(self, f: NativeFunction) -> bool:
+        if f.func.name in self.index:
+            return False
+        return (
+            len(f.composite) > 0
+            and self.dispatch_key in COMPOSITE_DISPATCH_KEYS
+        )
+
+    def dispatchless_composite_struct(self, f: NativeFunction) -> str:
+        name = f.func.name.unambiguous_name()
+        return f"{name}_{self.dispatch_key.lower()}"
+
+    def dispatchless_composite_kernel(self, f: NativeFunction) -> str:
+        struct_name = self.dispatchless_composite_struct(f)
+
+        # Similar to cpp.name().
+        # Couldn't use it due to circular dependency issues.
+        name = str(f.func.name.name)
+        if f.func.is_out_fn():
+            name += "_out"
+
+        return f"{name}<{struct_name}>"
+
+    def has_registered_kernel(
+            self, f: NativeFunction, g: Optional[NativeFunctionsGroup]
+    ) -> bool:
+        if (
+                g is not None
+                and g.structured
+        ):
+            return self.has_kernel(g) or self.dispatch_key == DispatchKey.Meta
+        return self.has_kernel(f)
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,

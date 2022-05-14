@@ -49,7 +49,7 @@ $extra_cuda_headers
 $external_backend_headers
 $dispatch_headers
 $ops_headers
-
+$composite_headers
 
 namespace at {
 

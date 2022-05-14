@@ -7,6 +7,7 @@ import textwrap
 from torchgen.context import method_with_native_function, native_function_manager
 from torchgen.utils import Target, mapMaybe, assert_never
 from torchgen.model import (
+    CompositeGraph,
     DispatchKey,
     NativeFunction,
     NativeFunctionsGroup,
@@ -14,6 +15,7 @@ from torchgen.model import (
     TensorOptionsArguments,
     DeviceCheckType,
     Argument,
+    Variant,
     is_cuda_dispatch_key,
     BackendIndex,
     gets_generated_out_inplace_wrapper,
@@ -213,6 +215,10 @@ class RegisterDispatchKey:
     # operators into JIT op registry, thus we need to avoid generating code to register into the dispatcher.
     skip_dispatcher_op_registration: bool
 
+    # Graph for composite kernels.
+    # It maps composite kernels with a list of kernels they depend on.
+    composite_graph: CompositeGraph
+
     @staticmethod
     def gen_device_check(
         type: DeviceCheckType, args: List[Argument], method_name: str
@@ -318,6 +324,7 @@ class RegisterDispatchKey:
             self.cpp_namespace,
             self.class_method_name,
             self.skip_dispatcher_op_registration,
+            self.composite_graph,
             g,
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
@@ -409,6 +416,72 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
                     return None
+
+                # define the struct for dispatch-less composite kernels.
+                impl_struct = ""
+                if self.backend_index.should_gen_dispatchless_composite(f):
+                    # define the native function as a wrapper static method, redirecting the call to
+                    # the appropriate function (e.g. on CPU, on CUDA, or as a CompositeExplicitAutograd).
+                    def dispatchless_function_defn(f: NativeFunction, g: Optional[NativeFunctionsGroup]) -> str:
+                        dispatch_key = self.backend_index.dispatch_key
+
+                        # the declaration signature is a static method (not a Tensor method).
+                        decl_sig = CppSignatureGroup.from_native_function(
+                            f, method=False, fallback_binding=False
+                        ).signature
+
+                        # decide 2 things:
+                        #     1. where is the redirect function? (i.e. its namespace)
+                        #     2. is it a Tensor method? (some operations are only available as methods)
+                        if self.backend_index.has_registered_kernel(f, g):
+                            prefix = f"at::{dispatch_key.lower()}::"
+                            is_method = False
+                        else:
+                            # give preference to function variants instead of method.
+                            is_method = {Variant.method} == f.variants
+                            if Variant.function in f.variants:
+                                if dispatch_key == DispatchKey.CompositeExplicitAutograd:
+                                    prefix = "at::"
+                                else:
+                                    # dependent dispatch-less composite kernel headers are not included
+                                    # for CPU or CUDA. However, we shouldn't hit this point, since they
+                                    # should have a dispatch-less kernel generated at this dispatch key.
+                                    prefix = "at::native::"
+                            else:
+                                assert f.func.arguments.self_arg is not None
+                                prefix = f"{f.func.arguments.self_arg.argument.name}."
+
+                        # the call-site signature depends on whether we are calling it as
+                        # a method or not.
+                        call_sig = CppSignatureGroup.from_native_function(
+                            f, method=is_method, fallback_binding=False
+                        ).signature
+
+                        # this ensures we match the C++ API.
+                        # needed because of 'use_const_ref_for_mutable_tensors'.
+                        with native_function_manager(f):
+                            name = cpp.name(f.func)
+                            args_str = ", ".join(a.name for a in call_sig.arguments())
+                            return f"""
+  static {decl_sig.decl()} {{
+    return {prefix}{name}({args_str});
+  }}"""
+
+                    assert f.func.name in self.composite_graph, (
+                        f"composite graph not generated for {f.func.name}."
+                    )
+
+                    composite_signatures_s = "\n".join(
+                        dispatchless_function_defn(cf, cg)
+                        for cf, cg in self.composite_graph[f.func.name]
+                    )
+
+                    impl_struct = f"""
+struct {self.backend_index.dispatchless_composite_struct(f)} {{
+{composite_signatures_s}
+}};
+"""
+
                 if self.class_method_name is None:
                     impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
                 else:
@@ -472,6 +545,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
                 return f"""\
 namespace {{
+
+{impl_struct}
 
 {returns_type} {name}({args_str}) {{
   {device_check}
