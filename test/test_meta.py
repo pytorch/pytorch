@@ -328,11 +328,11 @@ meta_function_expected_failures = {
     torch.combinations: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::masked_select
     torch.complex: {f16, f32, f64},  # aten::complex.out
     torch.conj_physical: {c32},  # aten::conj_physical.out
-    torch.corrcoef: {f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
+    torch.corrcoef: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.count_nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::count_nonzero.dim_IntList
     torch.cov: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
-    torch.diag: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
-    torch.diagflat: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
+    torch.diag: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
+    torch.diagflat: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
     torch.dot: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::dot
     torch.fft.fft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.fft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
@@ -360,14 +360,14 @@ meta_function_expected_failures = {
     torch.functional.stft: {f32, f64},  # aten::_fft_r2c
     torch.functional.unique: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_unique2, aten::unique_dim
     torch.functional.unique_consecutive: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::unique_consecutive
-    torch.histc: {f32, f64},  # aten::histc, aten::histc.out
+    torch.histc: {bf16, f32, f64},  # aten::histc, aten::histc.out
     torch.histogram: {f32, f64},  # aten::histogram.bin_ct, aten::histogram.bins_tensor
     torch.histogramdd: {f32, f64},  # aten::_histogramdd_bin_edges, aten::_histogramdd_from_bin_tensors
     torch.imag: {c32},  # aten::view_as_real
     torch.kthvalue: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::kthvalue.values
     torch.linalg.qr: {f32, f64},  # aten::_linalg_qr_helper
     torch.linalg.vector_norm: {bf16, f16, f32, f64},  # aten::linalg_vector_norm
-    torch.logcumsumexp: {f32, f64},  # aten::_logcumsumexp, aten::_logcumsumexp.out
+    torch.logcumsumexp: {bf16, f32, f64},  # aten::_logcumsumexp, aten::_logcumsumexp.out
     torch.masked_select: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::masked_select, aten::masked_select.out
     torch.matrix_exp: {bf16, f32, f64},  # aten::linalg_matrix_exp
     torch.median: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::median, aten::median.dim_values
@@ -424,12 +424,8 @@ meta_function_expected_failures = {
     torch.cholesky: {f32, f64},  # aten::cholesky, aten::cholesky.out
     torch.cholesky_inverse: {f32, f64},  # aten::cholesky_inverse, aten::cholesky_inverse.out
     torch.cholesky_solve: {f32, f64},  # aten::_cholesky_solve_helper
-    torch.corrcoef: {bf16},  # aten::_local_scalar_dense
-    torch.diag: {bf16},  # aten::diag.out
-    torch.diagflat: {bf16},  # aten::diag.out
     torch.eig: {f32, f64},  # aten::_local_scalar_dense
     torch.geqrf: {f32, f64},  # aten::geqrf
-    torch.histc: {bf16},  # aten::histc, aten::histc.out
     torch.linalg.cholesky: {f32, f64},  # aten::linalg_cholesky_ex, aten::linalg_cholesky_ex.L
     torch.linalg.cholesky_ex: {f32, f64},  # aten::linalg_cholesky_ex
     torch.linalg.det: {f32, f64},  # aten::_det_lu_based_helper
@@ -448,9 +444,17 @@ meta_function_expected_failures = {
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular
     torch.linalg.tensorinv: {f32, f64},  # aten::_local_scalar_dense
     torch.linalg.tensorsolve: {f32, f64},  # aten::linalg_solve
-    torch.logcumsumexp: {bf16},  # aten::_logcumsumexp, aten::_logcumsumexp.out
     torch.logdet: {f32, f64},  # aten::_local_scalar_dense, aten::nonzero
 }
+
+"""
+import yaml
+print(yaml.dump({"boof":
+  {resolve_name(k): [dtype_abbrs[d] for d in v]
+   for k, v in meta_function_expected_failures.items()}}, default_flow_style=None))
+import sys
+sys.exit()
+"""
 
 meta_function_skips = {
     torch.Tensor.__getitem__: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32},
