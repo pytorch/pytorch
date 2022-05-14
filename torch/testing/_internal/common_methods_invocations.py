@@ -9756,7 +9756,6 @@ op_db: List[OpInfo] = [
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                             dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', dtypes=(torch.bool,)),
            ),
            sample_inputs_func=sample_inputs_addr,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -11085,8 +11084,6 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Skip since real and imag don't have out variants.
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
-                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
-                                    dtypes=(torch.complex32,)),
                    )),
     OpInfo('gradient',
            dtypes=floating_and_complex_types_and(torch.int8, torch.int16,
@@ -12188,7 +12185,6 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Resizing an out= argument with no elements threw a resize warning!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cpu'),
            )),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
@@ -12914,9 +12910,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cpu'),
-               # RuntimeError: "max_pool1d_impl" not implemented for 'BFloat16'
-               DecorateInfo(unittest.skip("Works on some configs"), 'TestMeta',
-                            'test_meta', dtypes=(torch.bfloat16,)),
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.bfloat16,)),
                DecorateInfo(unittest.skip("Works on some conifgs"), 'TestCudaFuserOpInfo',
@@ -13958,8 +13951,6 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Skip since real and imag don't have out variants.
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
-                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
-                                    dtypes=(torch.complex32,)),
                    )),
     OpInfo('roll',
            ref=np.roll,
@@ -14741,6 +14732,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_pinv,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # errors with "leaked XXXX bytes CUDA memory on device 0"
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),)
@@ -14838,6 +14830,8 @@ op_db: List[OpInfo] = [
                # stride mismatch
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda',
                             dtypes=(torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta', device_type='cuda',
+                            dtypes=(torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('linalg.svd',
            op=torch.linalg.svd,
@@ -14858,6 +14852,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # stride mismatch
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda',
+                            dtypes=(torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta', device_type='cuda',
                             dtypes=(torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('linalg.svdvals',
@@ -14899,6 +14895,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # stride mismatch
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda', active_if=not TEST_WITH_ROCM),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta', device_type='cuda', active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('pca_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -14925,6 +14922,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # stride mismatch
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda', active_if=not TEST_WITH_ROCM),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta', device_type='cuda', active_if=not TEST_WITH_ROCM),
            )),
     BinaryUfuncInfo('polar',
                     dtypes=floating_types(),
@@ -16084,6 +16082,8 @@ op_db: List[OpInfo] = [
                # RuntimeError: "abs_cpu" not implemented for 'Bool'
                # RuntimeError: value cannot be converted to type int without overflow
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
+                            dtypes=integral_types_and(torch.bool)),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta',
                             dtypes=integral_types_and(torch.bool)),
            )),
     OpInfo('trace',
