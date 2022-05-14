@@ -94,7 +94,7 @@ class TestDistributedCheckpoint(FSDPTest):
             new_params = list(new_model.parameters())
             self.assertEqual(params, new_params)
 
-        #TODO: add resharding test case.
+        # TODO: add resharding test case.
 
 
 instantiate_parametrized_tests(TestDistributedCheckpoint)
