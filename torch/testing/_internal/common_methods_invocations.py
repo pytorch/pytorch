@@ -14729,7 +14729,7 @@ op_db: List[OpInfo] = [
            )),
     UnaryUfuncInfo('angle',
                    ref=np.angle,
-                   dtypes=all_types_and_complex_and(torch.chalf, torch.bool, torch.bfloat16, torch.float16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),

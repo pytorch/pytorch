@@ -295,7 +295,7 @@ public:
   Vectorized<T> angle() const {
     // complex_t_angle is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_angle, T>::value, "complex_t_angle must be T");
-    return map([](T x) { return T{std::arg(x), 0}; });
+    return map([](T x) { return static_cast<T>(std::arg(x)); });
   }
   template <typename other_t_real = T,
             typename std::enable_if<!c10::is_complex<other_t_real>::value, int>::type = 0>

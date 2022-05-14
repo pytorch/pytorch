@@ -68,16 +68,6 @@ inline double angle_impl <c10::complex<double>, double> (c10::complex<double> z)
   return std::arg(z);
 }
 
-template<>
-inline c10::complex<Half> angle_impl <c10::complex<Half>> (c10::complex<Half> z) {
-  return c10::complex<Half>(std::arg(z), 0.0);
-}
-
-template<>
-inline Half angle_impl <c10::complex<Half>, Half> (c10::complex<Half> z) {
-  return std::arg(z);
-}
-
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 constexpr VALUE_TYPE real_impl (SCALAR_TYPE z) {
   return z; //No-Op
