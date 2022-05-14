@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/Parallel.h>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -501,11 +502,6 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
       coalesced_self.device());
 }
 
-Tensor csr_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
-  TORCH_CHECK(self.is_sparse_csr(), "Can only convert CSR to BSR, but got ", self.layout(), " instead.");
-  return _csr_to_block_csr(self, blocksize);
-}
-
 namespace {
 template <typename input_t, typename output_t>
 void convert_indices_from_coo_to_csr_cpu(
@@ -556,7 +552,7 @@ void convert_indices_from_csr_to_coo_cpu(
   auto row1 = indices.select(0, transpose ? 0 : 1);
   output_t* data_out = row0.data_ptr<output_t>();
   row1.copy_(*col_indices.expect_contiguous());
-  at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, nrows, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
     for (const auto i : c10::irange(start, end)) {
       std::fill(
           &data_out[crow_indices_data_in[i]],
@@ -786,7 +782,8 @@ Tensor _csr_to_block_csr_cpu(const Tensor& self, IntArrayRef blocksize) {
       result_values.device());
 }
 
-Tensor _csr_to_block_csr(const Tensor& self, IntArrayRef blocksize) {
+Tensor csr_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
+  TORCH_CHECK(self.is_sparse_csr(), "Can only convert CSR to BSR, but got ", self.layout(), " instead.");
   Tensor self_values = self.values();
   Tensor self_crow_indices = self.crow_indices();
   Tensor self_col_indices = self.col_indices();
