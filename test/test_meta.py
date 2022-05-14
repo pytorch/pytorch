@@ -244,7 +244,7 @@ def run_meta_crossref(
     kwargs,
     *,
     dtype,
-    device,
+    device_type,
 ):
     to_meta = MetaConverter()
     do_meta = test_expect is not TestExpect.SKIP
@@ -570,12 +570,12 @@ meta_function_device_skips['cuda'] = {
 # A LOT more efficient that torch dispatch mode (at the cost of less coverage)
 class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
     test_case: TestCase
-    device: torch.device
+    device_type: str
     dtype: torch.dtype
 
     def __init__(self, test_case, *, device, dtype):
         self.test_case = test_case
-        self.device = device
+        self.device_type = torch.device(device).type
         self.dtype = dtype
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -586,18 +586,18 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 
         if self.dtype in meta_function_skips.get(func, set()):
             test_expect = TestExpect.SKIP
-        elif self.dtype in meta_function_device_skips[self.device].get(func, set()):
+        elif self.dtype in meta_function_device_skips[self.device_type].get(func, set()):
             test_expect = TestExpect.SKIP
         elif self.dtype in meta_function_expected_failures.get(func, set()):
             test_expect = TestExpect.FAILURE
-        elif self.dtype in meta_function_device_expected_failures[self.device].get(func, set()):
+        elif self.dtype in meta_function_device_expected_failures[self.device_type].get(func, set()):
             test_expect = TestExpect.FAILURE
         else:
             test_expect = TestExpect.SUCCESS
 
         return run_meta_crossref(
             self.test_case, test_expect, func, args,
-            kwargs, dtype=self.dtype, device=self.device
+            kwargs, dtype=self.dtype, device_type=self.device_type
         )
 
 aten = torch.ops.aten
@@ -873,7 +873,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
         # save TLS
         self.precision = test_case.precision
         self.rel_tol = test_case.rel_tol
-        self.device = device
+        self.device_type = torch.device(device).type
         self.dtype = dtype
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -884,11 +884,11 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 
         if self.dtype in meta_dispatch_skips.get(func, set()):
             test_expect = TestExpect.SKIP
-        elif self.dtype in meta_dispatch_device_skips[self.device].get(func, set()):
+        elif self.dtype in meta_dispatch_device_skips[self.device_type].get(func, set()):
             test_expect = TestExpect.SKIP
         elif self.dtype in meta_dispatch_expected_failures.get(func, set()):
             test_expect = TestExpect.FAILURE
-        elif self.dtype in meta_dispatch_device_expected_failures[self.device].get(func, set()):
+        elif self.dtype in meta_dispatch_device_expected_failures[self.device_type].get(func, set()):
             test_expect = TestExpect.FAILURE
         else:
             test_expect = TestExpect.SUCCESS
@@ -900,7 +900,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
             args,
             kwargs,
             dtype=self.dtype,
-            device=self.device,
+            device_type=self.device_type,
         )
 
 
