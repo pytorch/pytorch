@@ -5805,7 +5805,7 @@
 - func: to_sparse_csc(Tensor self) -> Tensor
   variants: method
   dispatch:
-    SparsecscCPU, SparsecscCUDA: csr_to_sparse_csc
+    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_csc
 
 - func: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
   variants: method
