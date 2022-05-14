@@ -1,5 +1,6 @@
-#include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
+#include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
 namespace at {
@@ -39,6 +40,8 @@ Tensor upsample_nearest2d(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::upsample_nearest2d");
+
     if C10_LIKELY(v_input.has_image()) {
       const struct Block final {
         uvec3 extents;
@@ -74,16 +77,20 @@ Tensor upsample_nearest2d(
           VK_KERNEL(upsample_nearest2d),
           v_output.extents(),
           adaptive_work_group_size(v_output.extents()),
-          // Shader parameters
-          block,
-          // Textures
+          // Write-only access bypasses synchronization but inserts appropriate
+          // barriers if necessary.
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
           v_input.image(
               command_buffer,
-              vTensor::Stage::Compute));
+              vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     }
     else {
       TORCH_CHECK(false, "Not implemented!");

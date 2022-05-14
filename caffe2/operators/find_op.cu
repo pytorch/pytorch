@@ -1,6 +1,7 @@
 #include <cub/block/block_reduce.cuh>
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/find_op.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 

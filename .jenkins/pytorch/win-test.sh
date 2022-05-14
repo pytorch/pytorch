@@ -26,7 +26,6 @@ export TEST_DIR_WIN
 export PYTORCH_FINAL_PACKAGE_DIR="${PYTORCH_FINAL_PACKAGE_DIR:-/c/users/circleci/workspace/build-results}"
 PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR_WIN
-export PYTORCH_TEST_SKIP_NOARCH=1
 
 mkdir -p "$TMP_DIR"/build/torch
 
@@ -42,15 +41,6 @@ fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-# Try to pull value from CIRCLE_PULL_REQUEST
-# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
-#       see https://github.com/pytorch/pytorch/issues/60111
-IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
-if [ -n "$IN_PULL_REQUEST" ]; then
-  DETERMINE_FROM="${TMP_DIR}/determine_from"
-  file_diff_from_base "$DETERMINE_FROM"
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
@@ -58,8 +48,13 @@ fi
 if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
   # run the full test suite for force_on_cpu test
   export USE_CUDA=0
-elif [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
-  export RUN_SMOKE_TESTS_ONLY=1
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # Used so that only cuda/rocm specific versions of tests are generated
+  # mainly used so that we're not spending extra cycles testing cpu
+  # devices on expensive gpu machines
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
 run_tests() {
@@ -71,32 +66,20 @@ run_tests() {
         fi
     done
 
+    "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
     if [[ ( -z "${JOB_BASE_NAME}" || "${JOB_BASE_NAME}" == *-test ) && $NUM_TEST_SHARDS -eq 1 ]]; then
-        "$SCRIPT_HELPERS_DIR"/test_python.bat "$DETERMINE_FROM"
-
-        if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
-          "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
-          "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-          "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
-        fi
+        "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+        "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+        "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
-        if [[ "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
-            "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
-
-            if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
-              "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
-              if [[ "${USE_CUDA}" == "1" ]]; then
-                "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat "$DETERMINE_FROM"
-              fi
+        if [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+            "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+            if [[ "${USE_CUDA}" == "1" ]]; then
+              "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
             fi
-
-        elif [[ "${JOB_BASE_NAME}" == *-test2 || ("${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1) ]]; then
-            "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat "$DETERMINE_FROM"
-
-            if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
-              "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-              "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
-            fi
+        elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+            "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+            "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         fi
     fi
 }

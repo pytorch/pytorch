@@ -11,10 +11,6 @@ namespace {
 
 using at::Tensor;
 
-struct MyString : public c10::intrusive_ptr_target, public std::string {
-  using std::string::string;
-};
-
 template <typename T>
 class ExclusivelyOwnedTest : public ::testing::Test {
  public:
@@ -32,27 +28,12 @@ template <typename T>
 T getSampleValue();
 
 template <>
-c10::intrusive_ptr<MyString> getSampleValue() {
-  return c10::make_intrusive<MyString>("hello");
-}
-
-template <>
 Tensor getSampleValue() {
   return at::native::zeros({2, 2}).to(at::kCPU);
 }
 
 template <typename T>
 void assertIsSampleObject(const T& eo);
-
-template <>
-void assertIsSampleObject<MyString>(const MyString& s) {
-  EXPECT_STREQ(s.c_str(), "hello");
-}
-
-template <>
-void assertIsSampleObject<c10::intrusive_ptr<MyString>>(const c10::intrusive_ptr<MyString>& s) {
-  assertIsSampleObject(*s);
-}
 
 template <>
 void assertIsSampleObject<Tensor>(const Tensor& t) {
@@ -71,7 +52,6 @@ void ExclusivelyOwnedTest<T>::SetUp() {
 }
 
 using ExclusivelyOwnedTypes = ::testing::Types<
-  c10::intrusive_ptr<MyString>,
   Tensor
   >;
 
@@ -115,17 +95,4 @@ extern "C" void inspectTensor() {
 
 extern "C" void inspectExclusivelyOwnedTensor() {
   c10::ExclusivelyOwned<Tensor> t(getSampleValue<at::Tensor>());
-}
-
-
-extern "C" void inspectIntrusivePtr() {
-  auto p = getSampleValue<c10::intrusive_ptr<MyString>>();
-}
-
-extern "C" void inspectExclusivelyOwnedIntrusivePtr() {
-  c10::ExclusivelyOwned<c10::intrusive_ptr<MyString>> p(getSampleValue<c10::intrusive_ptr<MyString>>());
-}
-
-extern "C" void inspectUniquePtr() {
-  std::unique_ptr<MyString> p(getSampleValue<c10::intrusive_ptr<MyString>>().release());
 }

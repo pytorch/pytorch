@@ -15,8 +15,7 @@ const uint64_t _default_mobile_module_load_options =
 namespace mobile {
 
 TORCH_API void parseOperators(
-    const std::vector<IValue>& ops_list,
-    const int64_t& model_version,
+    c10::ivalue::TupleElements&& ops_list,
     const uint64_t& module_load_options,
     mobile::Function* function);
 } // namespace mobile

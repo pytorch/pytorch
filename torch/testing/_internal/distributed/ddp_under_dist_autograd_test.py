@@ -517,7 +517,8 @@ class DdpComparisonTest(CommonDdpComparisonTest):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            # Postfix file_name with "pg" since file_name is also used by RPC agent
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=f"{self.file_name}_pg"),
             world_size=self.world_size,
             rank=self.rank,
         )

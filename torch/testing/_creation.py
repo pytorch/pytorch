@@ -5,16 +5,18 @@ This module contains tensor creation utilities.
 import torch
 from typing import Optional, List, Tuple, Union, cast
 import math
+import collections.abc
 
-__all__ = [
-    "make_tensor",
-]
+# Used by make_tensor for generating complex tensor.
+complex_to_corresponding_float_type_map = {torch.complex32: torch.float16,
+                                           torch.complex64: torch.float32,
+                                           torch.complex128: torch.float64}
+float_to_corresponding_complex_type_map = {v: k for k, v in complex_to_corresponding_float_type_map.items()}
 
 def make_tensor(
-    shape: Union[torch.Size, List[int], Tuple[int, ...]],
-    device: Union[str, torch.device],
+    *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
     dtype: torch.dtype,
-    *,
+    device: Union[str, torch.device],
     low: Optional[float] = None,
     high: Optional[float] = None,
     requires_grad: bool = False,
@@ -44,9 +46,9 @@ def make_tensor(
     +---------------------------+------------+----------+
 
     Args:
-        shape (Tuple[int, ...]): A sequence of integers defining the shape of the output tensor.
-        device (Union[str, torch.device]): The device of the returned tensor.
+        shape (Tuple[int, ...]): Single integer or a sequence of integers defining the shape of the output tensor.
         dtype (:class:`torch.dtype`): The data type of the returned tensor.
+        device (Union[str, torch.device]): The device of the returned tensor.
         low (Optional[Number]): Sets the lower limit (inclusive) of the given range. If a number is provided it is
             clamped to the least representable finite value of the given dtype. When ``None`` (default),
             this value is determined based on the :attr:`dtype` (see the table above). Default: ``None``.
@@ -64,6 +66,7 @@ def make_tensor(
             type. Default ``False``.
 
     Raises:
+        ValueError: if ``requires_grad=True`` is passed for integral `dtype`
         ValueError: If ``low > high``.
         ValueError: If either :attr:`low` or :attr:`high` is ``nan``.
         TypeError: If :attr:`dtype` isn't supported by this function.
@@ -102,16 +105,22 @@ def make_tensor(
 
         return low, high
 
+    if len(shape) == 1 and isinstance(shape[0], collections.abc.Sequence):
+        shape = shape[0]  # type: ignore[assignment]
+    shape = cast(Tuple[int, ...], tuple(shape))
+
     _integral_types = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
     _floating_types = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
-    _complex_types = [torch.cfloat, torch.cdouble]
+    _complex_types = [torch.complex32, torch.complex64, torch.complex128]
+    if requires_grad and dtype not in _floating_types and dtype not in _complex_types:
+        raise ValueError("make_tensor: requires_grad must be False for integral dtype")
 
     if dtype is torch.bool:
-        result = torch.randint(0, 2, shape, device=device, dtype=dtype)
+        result = torch.randint(0, 2, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = cast(Tuple[int, int], _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype))
-        result = torch.randint(low, high, shape, device=device, dtype=dtype)
+        result = torch.randint(low, high, shape, device=device, dtype=dtype)   # type: ignore[call-overload]
     elif dtype in _integral_types:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 10, dtype)
@@ -122,7 +131,7 @@ def make_tensor(
         rand_val = torch.rand(shape, device=device, dtype=dtype)
         result = high * rand_val + low * (1 - rand_val)
     elif dtype in _complex_types:
-        float_dtype = torch.float if dtype is torch.cfloat else torch.double
+        float_dtype = complex_to_corresponding_float_type_map[dtype]
         ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
         low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
         real_rand_val = torch.rand(shape, device=device, dtype=float_dtype)

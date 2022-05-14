@@ -59,14 +59,8 @@ bool validateDomain(TensorView* tv, TensorDomain* new_td) {
 unsigned int getReplayablePosPasC(
     TensorView* producer,
     TensorView* consumer,
-    const ComputeAtRootDomainMap& root_map_,
+    const std::unordered_set<IterDomain*>& unmappable_producer_dims,
     ComputeAtMode mode) {
-  // Grab dimensions in producer and consumer that are mappable to eachother
-  // based on the computeAtRootDomainMap. This will tell us which dimensions
-  // can be inlined based on avoiding trying to inline reduction structures.
-  auto mappable_roots =
-      root_map_.getMappableDims(producer->domain(), consumer->domain());
-
   // Check if any consumer dimensions are marked as vectorize as producer can
   // not be inlined to vectorized dimensions in consumer.
   auto c_dom = consumer->domain()->domain();
@@ -124,9 +118,14 @@ unsigned int getReplayablePosPasC(
     if (std::any_of(
             consumer_root_dim_ids.begin(),
             consumer_root_dim_ids.end(),
-            [&mappable_roots, &c2p_root_map](IterDomain* root_id) {
-              return mappable_roots.find(root_id) == mappable_roots.end() &&
-                  c2p_root_map.find(root_id) != c2p_root_map.end();
+            [&unmappable_producer_dims, &c2p_root_map](IterDomain* c_root_id) {
+              auto p_root_id_it = c2p_root_map.find(c_root_id);
+              if (p_root_id_it == c2p_root_map.end()) {
+                return false;
+              }
+              auto p_id = p_root_id_it->second;
+              return unmappable_producer_dims.find(p_id) !=
+                  unmappable_producer_dims.end();
             })) {
       continue;
     }
@@ -146,14 +145,8 @@ unsigned int getReplayablePosPasC(
 unsigned int getReplayablePosCasP(
     TensorView* consumer,
     TensorView* producer,
-    const ComputeAtRootDomainMap& root_map_,
+    const std::unordered_set<IterDomain*>& unmappable_producer_dims,
     ComputeAtMode mode) {
-  // Grab dimensions in producer and consumer that are mappable to eachother
-  // based on the computeAtRootDomainMap. This will tell us which dimensions
-  // can be inlined based on avoiding trying to inline reduction structures.
-  auto mappable_roots =
-      root_map_.getMappableDims(producer->domain(), consumer->domain());
-
   auto p_dom = producer->domain()->domain();
   auto first_reduction =
       std::find_if(p_dom.begin(), p_dom.end(), [](IterDomain* id) {
@@ -208,10 +201,11 @@ unsigned int getReplayablePosCasP(
     if (std::any_of(
             producer->getMaybeRFactorDomain().begin(),
             producer->getMaybeRFactorDomain().end(),
-            [&mappable_roots, &all_vals](IterDomain* root_id) {
-              return std::find(all_vals.begin(), all_vals.end(), root_id) !=
+            [&unmappable_producer_dims, &all_vals](IterDomain* p_root_id) {
+              return std::find(all_vals.begin(), all_vals.end(), p_root_id) !=
                   all_vals.end() &&
-                  mappable_roots.find(root_id) == mappable_roots.end();
+                  unmappable_producer_dims.find(p_root_id) !=
+                  unmappable_producer_dims.end();
             })) {
       continue;
     }
@@ -348,6 +342,96 @@ void ComputeAt::runWith(
   ca.runPass();
 }
 
+namespace {
+
+// Checks if producer and consumer are transformed consistently so that to
+// satisfy the provided compute at position. This means no replay is actually
+// necessary for the compute at requested. If consumer_pos then
+// consumer_or_producer_pos is relative to the consumer and skipReplay returns
+// the associated position in producer.
+//
+// If producer and consumer are not transformed consistently with provided
+// postition, returns -1.
+int skipReplay(
+    const TensorView* producer,
+    const TensorView* consumer,
+    int consumer_or_producer_pos,
+    bool consumer_pos = true) {
+  FUSER_PERF_SCOPE("transform_replay.cpp::skipReplay");
+
+  const auto c2p_root_map =
+      PairwiseRootDomainMap(producer, consumer)
+          .mapConsumerToProducer(consumer->domain(), producer->domain());
+
+  // IterDomains in consumer root also in producer root
+  std::unordered_set<Val*> mapped_consumer_roots;
+  for (auto entry : c2p_root_map) {
+    mapped_consumer_roots.emplace(entry.first);
+  }
+
+  const auto consumer_domain = consumer->domain()->domain();
+
+  auto mapped_consumer_domain_ids_vec = DependencyCheck::getAllValsBetween(
+      mapped_consumer_roots, {consumer_domain.begin(), consumer_domain.end()});
+
+  std::unordered_set<Val*> mapped_consumer_domain_ids(
+      mapped_consumer_domain_ids_vec.begin(),
+      mapped_consumer_domain_ids_vec.end());
+
+  const auto producer_domain = producer->domain()->domain();
+
+  auto it_consumer = consumer_domain.begin();
+  auto it_producer = producer_domain.begin();
+
+  auto best_effort_PasC = BestEffortReplay::replayPasC(
+      producer, consumer, -1, PairwiseRootDomainMap(producer, consumer));
+
+  auto c2p_map = best_effort_PasC.getReplay();
+
+  int mismatched_consumer_pos = 0;
+  int mismatched_producer_pos = 0;
+  while (it_consumer != consumer_domain.end()) {
+    auto consumer_id = *it_consumer;
+    if (!mapped_consumer_domain_ids.count(consumer_id)) {
+      ++it_consumer;
+      mismatched_consumer_pos++;
+      continue;
+    }
+
+    auto c2p_it = c2p_map.find(consumer_id);
+    if (c2p_it == c2p_map.end()) {
+      break;
+    }
+
+    if (it_producer == producer_domain.end()) {
+      break;
+    }
+
+    auto producer_id = *it_producer;
+
+    if (c2p_it->second == producer_id) {
+      ++mismatched_consumer_pos;
+      ++mismatched_producer_pos;
+      ++it_consumer;
+      ++it_producer;
+      if (consumer_pos) {
+        if (consumer_or_producer_pos == mismatched_consumer_pos) {
+          return mismatched_producer_pos;
+        }
+      } else {
+        if (consumer_or_producer_pos == mismatched_producer_pos) {
+          return mismatched_consumer_pos;
+        }
+      }
+    } else {
+      break;
+    }
+  }
+  return -1;
+}
+
+} // namespace
+
 // Actually applies transformation
 unsigned int ComputeAt::backwardComputeAt_impl(
     TensorView* producer,
@@ -356,7 +440,8 @@ unsigned int ComputeAt::backwardComputeAt_impl(
   FUSER_PERF_SCOPE("backwardComputeAt_impl");
 
   auto max_consumer_compute_at_pos =
-      getReplayablePosPasC(producer, consumer, root_map_, mode_);
+      getReplayablePosPasC(producer, consumer, unmappable_dims_, mode_);
+
   if (mode_ == ComputeAtMode::BestEffort) {
     consumer_compute_at_pos =
         std::min(consumer_compute_at_pos, max_consumer_compute_at_pos);
@@ -373,6 +458,17 @@ unsigned int ComputeAt::backwardComputeAt_impl(
         consumer_compute_at_pos,
         " but max position that's allowed is ",
         max_consumer_compute_at_pos);
+  }
+
+  // Short cut if no replay is necessary
+  auto maybe_producer_pos =
+      skipReplay(producer, consumer, (int)consumer_compute_at_pos, true);
+  if (maybe_producer_pos >= 0) {
+    if (!producer->isFusionInput()) {
+      producer->setComputeAt((unsigned int)maybe_producer_pos);
+    }
+    consumer->setMaxProducer(consumer_compute_at_pos);
+    return (unsigned int)maybe_producer_pos;
   }
 
   auto replay_producer_pair = TransformReplay::replayPasC(
@@ -400,13 +496,6 @@ unsigned int ComputeAt::backwardComputeAt_impl(
     }
 
     consumer->setMaxProducer(consumer_compute_at_pos);
-    for (auto other_consumer : ir_utils::consumerTvsOf(producer)) {
-      if (other_consumer != consumer) {
-        auto max_consumer_pos =
-            getConsumerPosAlignedToProducerCA(other_consumer, producer);
-        other_consumer->setMaxProducer(max_consumer_pos);
-      }
-    }
     root_map_.setAlias(current_domain, new_domain);
   }
 
@@ -423,7 +512,7 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   FUSER_PERF_SCOPE("forwardComputeAt_impl");
 
   auto max_producer_compute_at_pos =
-      getReplayablePosCasP(consumer, producer, root_map_, mode_);
+      getReplayablePosCasP(consumer, producer, unmappable_dims_, mode_);
 
   if (mode_ == ComputeAtMode::BestEffort) {
     producer_compute_at_pos =
@@ -441,6 +530,17 @@ unsigned int ComputeAt::forwardComputeAt_impl(
         producer_compute_at_pos,
         " but max position that's allowed is ",
         max_producer_compute_at_pos);
+  }
+
+  // Short cut if no replay is necessary
+  auto maybe_consumer_pos =
+      skipReplay(producer, consumer, (int)producer_compute_at_pos, false);
+  if (maybe_consumer_pos > -1) {
+    if (!producer->isFusionInput()) {
+      producer->setComputeAt(producer_compute_at_pos);
+    }
+    consumer->setMaxProducer((unsigned int)maybe_consumer_pos);
+    return (unsigned int)maybe_consumer_pos;
   }
 
   auto replay_consumer_pair = TransformReplay::replayCasP(
@@ -466,13 +566,6 @@ unsigned int ComputeAt::forwardComputeAt_impl(
 
     consumer->setDomain(new_domain);
     consumer->setMaxProducer(replay_consumer_pair.second);
-    for (auto other_consumer : ir_utils::consumerTvsOf(producer)) {
-      if (other_consumer != consumer) {
-        auto max_consumer_pos =
-            getConsumerPosAlignedToProducerCA(other_consumer, producer);
-        other_consumer->setMaxProducer(max_consumer_pos);
-      }
-    }
     root_map_.setAlias(current_domain, new_domain);
   }
 
@@ -654,12 +747,6 @@ void ComputeAt::hoistInnermostBroadcast() {
       consumers_to_update.insert(tv_consumers.begin(), tv_consumers.end());
     }
   }
-
-  // Update the produce positions of all affected consumers
-  for (auto running_consumer : consumers_to_update) {
-    TORCH_INTERNAL_ASSERT(running_consumer->definition() != nullptr);
-    resetMaxProducerPos(running_consumer);
-  }
 }
 
 void ComputeAt::updateSiblings() {
@@ -686,7 +773,7 @@ void ComputeAt::updateSiblings() {
             "Error replaying multiple output expressions in computeAt.");
 
         // Propagate any root parallelization as fullSelfReplay expects it.
-        for (size_t i = 0; i < sibling_tv->getRootDomain().size(); i++) {
+        for (const auto i : c10::irange(sibling_tv->getRootDomain().size())) {
           auto id = tv->getRootDomain()[i];
           auto sibling_id = sibling_tv->getRootDomain()[i];
           if (id->getParallelType() != ParallelType::Serial &&
@@ -698,18 +785,18 @@ void ComputeAt::updateSiblings() {
             id->parallelize(sibling_id->getParallelType());
           }
         }
-        if (tv->getComputeAtPosition() > sibling_tv->getComputeAtPosition()) {
-          auto sibling_domain = TransformReplay::fullSelfReplay(
-              sibling_tv->domain(), tv->domain());
-          validateDomain(sibling_tv, sibling_domain);
-          sibling_tv->setDomain(sibling_domain);
-          sibling_tv->setComputeAt(tv->getComputeAtPosition());
-          sibling_tv->setMaxProducer(tv->getMaxProducerPosition());
-          auto consumer_tvs = ir_utils::consumerTvsOf(sibling_tv);
-          consumers_to_update.insert(consumer_tvs.begin(), consumer_tvs.end());
-        }
+        auto sibling_domain =
+            TransformReplay::fullSelfReplay(sibling_tv->domain(), tv->domain());
+        validateDomain(sibling_tv, sibling_domain);
+        sibling_tv->setDomain(sibling_domain);
+        sibling_tv->setComputeAt(tv->getComputeAtPosition());
+        sibling_tv->setMaxProducer(tv->getMaxProducerPosition());
+        auto consumer_tvs = ir_utils::consumerTvsOf(sibling_tv);
+        consumers_to_update.insert(consumer_tvs.begin(), consumer_tvs.end());
       }
     }
+
+    // Update sibling consumer tv's max producer position
     for (auto consumer : consumers_to_update) {
       this->resetMaxProducerPos(consumer);
     }
@@ -732,27 +819,6 @@ void ComputeAt::updateSiblings() {
   }
 }
 
-void ComputeAt::updateInputProduceAts() {
-  std::unordered_set<TensorView*> consumers_to_check;
-
-  // Find all tensor views that may have been modified
-  auto chains = producer_use_chains_;
-  if (common_consumer_ != nullptr) {
-    chains = tvChains(
-        DependencyCheck::getAllDependencyChains(producer_, common_consumer_));
-  }
-
-  for (auto chain : chains) {
-    if (chain.size() > 1 && chain[0]->isFusionInput()) {
-      consumers_to_check.emplace(chain[1]);
-    }
-  }
-
-  for (auto tv : consumers_to_check) {
-    resetMaxProducerPos(tv);
-  }
-}
-
 void ComputeAt::runPass() {
   FUSER_PERF_SCOPE("ComputeAt::runPass");
 
@@ -765,11 +831,50 @@ void ComputeAt::runPass() {
   // Back off on inlining the inner broadcast axes
   hoistInnermostBroadcast();
 
-  // Clear max producer position of consumers from fusion inputs.
-  updateInputProduceAts();
-
   // Update siblings of multi output expressions
   updateSiblings();
+
+  // Update the compute at position of all consumers, this used to be done
+  // during the compute at pass itself, but its cleaner to do this as a cleanup
+  // pass similar to hoistInnermostBroadcast and updateSiblings.
+  std::unordered_set<TensorView*> all_consumers;
+
+  // Find all tensor views that may have been modified
+  auto chains = producer_use_chains_;
+  if (common_consumer_ != nullptr) {
+    chains = tvChains(
+        DependencyCheck::getAllDependencyChains(producer_, common_consumer_));
+  }
+
+  for (const auto& chain : chains) {
+    for (auto tv : chain) {
+      all_consumers.emplace(tv);
+    }
+  }
+
+  // Reset max producer position of all tensor views.
+  for (auto tv : all_consumers) {
+    resetMaxProducerPos(tv);
+  }
+}
+
+void ComputeAt::buildUnmappableDims() {
+  auto all_tvs = ir_utils::allTvs(producer_->fusion());
+  for (auto tv : all_tvs) {
+    auto consumers = ir_utils::consumerTvsOf(tv);
+    for (auto consumer : consumers) {
+      // Grab dimensions in producer and consumer that are mappable to eachother
+      // based on the computeAtRootDomainMap. This will tell us which dimensions
+      // can be inlined based on avoiding trying to inline reduction structures.
+      auto mappable_roots =
+          root_map_.getMappableDims(tv->domain(), consumer->domain());
+      for (auto tv_root_id : tv->getMaybeRFactorDomain()) {
+        if (mappable_roots.find(tv_root_id) == mappable_roots.end()) {
+          unmappable_dims_.emplace(tv_root_id);
+        }
+      }
+    }
+  }
 }
 
 ComputeAt::ComputeAt(
@@ -810,6 +915,8 @@ ComputeAt::ComputeAt(
   setCommonConsumer();
 
   root_map_.build();
+
+  buildUnmappableDims();
 }
 
 } // namespace cuda

@@ -1,4 +1,8 @@
+// aten_interned_strings.h includes the names of all operators
+#undef TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <ATen/core/interned_strings_class.h>
+#include <ATen/core/interned_strings.h>
 
 namespace c10 {
 

@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
@@ -63,7 +64,7 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
     if (type->kind() == TypeKind::ListType) {
       const auto& elem_type =
           reinterpret_cast<ListType*>(type.get())->getElementType();
-      if (elem_type->isSubtypeOf(TensorType::get())) {
+      if (elem_type->isSubtypeOf(*TensorType::get())) {
         AT_ASSERTM(
             !has_tensor_list,
             "ONNX export supports at most one TensorList as input.");
@@ -97,7 +98,7 @@ void preprocessCaffe2Ops(Block* block) {
             origin_input->mustBeNone()) {
           continue;
         }
-        if (type->isSubtypeOf(TensorType::get())) {
+        if (type->isSubtypeOf(*TensorType::get())) {
           it->addInput(origin_input);
         } else if (
             type->kind() == TypeKind::BoolType ||
@@ -119,7 +120,7 @@ void preprocessCaffe2Ops(Block* block) {
           AT_ASSERT(
               list_node->kind() == prim::ListConstruct ||
               list_node->kind() == prim::Constant);
-          if (elem_type->isSubtypeOf(TensorType::get())) {
+          if (elem_type->isSubtypeOf(*TensorType::get())) {
             AT_ASSERT(list_node->kind(), prim::ListConstruct);
             const auto& tensor_list = origin_input->node()->inputs();
             for (const auto& t : tensor_list) {
@@ -167,8 +168,16 @@ std::shared_ptr<Graph> ToONNX(
   ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
-  BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
+  try {
+    BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
+  } catch (std::runtime_error& ex) {
+    ONNX_LOG(
+        "ONNX graph being constructed during exception:\n",
+        new_graph->toString());
+    throw;
+  }
   GRAPH_DUMP("after ToONNX: ", new_graph);
+  ConstantValueMap::ClearMaps();
   return new_graph;
 }
 
@@ -269,6 +278,30 @@ void NodeToONNX(
     for (const auto i : c10::irange(num_old_outputs)) {
       auto old = old_outputs[i];
       if (outputs[i]) {
+        bool exist_in_env =
+            (env.end() !=
+             std::find_if(
+                 env.begin(), env.end(), [&outputs, i](const auto& vt) {
+                   return vt.second == outputs[i];
+                 }));
+        // Update ONNX value debug name with ATen value debug name if existed.
+        // Skip if ONNX value already exist in environment.
+        // This implies the op is a noop, and the value is owned by
+        // other node created elsewhere.
+        if (old->hasDebugName() && !exist_in_env) {
+          auto old_name = outputs[i]->debugName();
+          auto new_name = old->debugNameBase();
+          auto debug_names = new_block->owningGraph()->debugNames();
+          auto exist_name = debug_names.find(new_name);
+          outputs[i]->setDebugName(new_name);
+          if (exist_name != debug_names.end()) {
+            // setDebugName changes name of existing value with same name.
+            // Set again to revert the changes, but update name for new value
+            // with suffix.
+            exist_name->second->setDebugName(new_name);
+          }
+          ConstantValueMap::UpdateValueName(old_name, outputs[i]->debugName());
+        }
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
@@ -287,8 +320,7 @@ void NodeToONNX(
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic
-          const_node->output()->node()->setSourceRange(node->sourceRange());
-          const_node->output()->node()->setScope(node->scope());
+          const_node->copyMetadata(node);
           new_block->appendNode(const_node);
           ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
           env[old] = const_node->output();
@@ -300,8 +332,10 @@ void NodeToONNX(
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic
-          outputs[i]->node()->setSourceRange(node->sourceRange());
-          outputs[i]->node()->setScope(node->scope());
+          // Do not set metadata if outputs[i] is already in env.
+          if (!exist_in_env) {
+            outputs[i]->node()->copyMetadata(node);
+          }
           env[old] = outputs[i];
         }
       } else {
@@ -368,20 +402,29 @@ void NodeToONNX(
       py_inputs[input_nr++] = py::cast(envFn(input));
     }
 
+    Graph* g = new_block->owningGraph();
+    std::unordered_set<Node*> nodes_before;
+    for (auto node : g->nodes()) {
+      nodes_before.emplace(node);
+    }
+
     WithInsertPoint insert_point_guard(new_block);
-    WithCurrentScope scope_guard(*new_block->owningGraph(), n->scope());
+    WithCurrentScope scope_guard(*g, n->scope());
     py::object raw_output = onnx.attr("_run_symbolic_function")(
-        new_block->owningGraph(),
-        new_block,
-        n,
-        py_inputs,
-        env,
-        operator_export_type);
+        g, new_block, n, py_inputs, env, operator_export_type);
+
+    // Find new nodes that have been created by _run_symbolic_function and
+    // propagate metadata
+    for (auto node : g->nodes()) {
+      if (nodes_before.find(node) == nodes_before.end()) {
+        node->copyMetadata(n);
+      }
+    }
 
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
     processSymbolicOutput(n->kind().toUnqualString(), n, raw_output);
-    GRAPH_DUMP("after processSymbolicOutput: ", new_block->owningGraph());
+    GRAPH_DUMP("after processSymbolicOutput: ", g);
   };
 
   auto callPySymbolicMethod = [&](ConcretePythonOp* op) {
@@ -394,7 +437,7 @@ void NodeToONNX(
 
     py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
     py::object is_registered_op = onnx_registry.attr("is_registered_op")(
-        "prim_PythonOp", "", opset_version);
+        "PythonOp", "prim", opset_version);
     if (!py::hasattr(pyobj, "symbolic") &&
         (!PyObject_IsTrue(is_registered_op.ptr()))) {
       // Simply clone the node, unless either

@@ -263,4 +263,4 @@ bool PatternNetTransform::ReplaceRule(
   return true;
 }
 
-} // namespace Caffe2
+} // namespace caffe2

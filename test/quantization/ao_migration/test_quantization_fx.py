@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 from .common import AOMigrationTestCase
 
 class TestAOMigrationQuantizationFx(AOMigrationTestCase):
@@ -30,7 +32,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         function_list = [
             'prepare',
             'convert',
-            'Fuser',
+            'fuse',
         ]
         self._test_function_import('fx', function_list)
 
@@ -153,9 +155,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         self._test_package_import('fx.fuse')
 
     def test_function_import_fx_fuse(self):
-        function_list = [
-            'Fuser'
-        ]
+        function_list = ['fuse']
         self._test_function_import('fx.fuse', function_list)
 
     def test_package_import_fx_fusion_patterns(self):
@@ -164,27 +164,20 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
     def test_function_import_fx_fusion_patterns(self):
         function_list = [
             'FuseHandler',
-            'ConvBNReLUFusion',
-            'ModuleReLUFusion'
+            'DefaultFuseHandler'
         ]
         self._test_function_import('fx.fusion_patterns', function_list)
 
-    def test_package_import_fx_quantization_types(self):
-        self._test_package_import('fx.quantization_types')
-
-    def test_function_import_fx_quantization_types(self):
-        function_list = [
-            'Pattern',
-            'QuantizerCls'
-        ]
-        self._test_function_import('fx.quantization_types', function_list)
+    # we removed matching test for torch.quantization.fx.quantization_types
+    # old: torch.quantization.fx.quantization_types
+    # new: torch.ao.quantization.quantization_types
+    # both are valid, but we'll deprecate the old path in the future
 
     def test_package_import_fx_utils(self):
         self._test_package_import('fx.utils')
 
     def test_function_import_fx_utils(self):
         function_list = [
-            '_parent_name',
             'graph_pretty_str',
             'get_per_tensor_qparams',
             'quantize_node',
@@ -199,7 +192,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
             'create_qparam_nodes',
             'all_node_args_have_no_tensors',
             'node_return_type_is_int',
-            'node_bool_tensor_arg_indexes',
+            'get_non_observable_arg_indexes_and_types',
             'is_get_tensor_info_node',
             'maybe_get_next_module'
         ]

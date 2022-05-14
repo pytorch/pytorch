@@ -1,7 +1,8 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/ResizeCommon.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/TensorUtils.h>
 
 #include <c10/core/CPUAllocator.h>
@@ -30,21 +31,15 @@ TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 
-static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size) {
+static inline void maybe_resize_storage_cpu(TensorImpl* self, size_t new_size_bytes) {
   // It does not make sense to try to resize a storage
   // to hold 0 elements, and this can break
   // if storage_offset is positive but
   // new_size is 0, so just bail in that case
-  // (same comment is in Resize.cuh)
-  if (new_size == 0) {
+  // (same comment is in cuda/Resize.h)
+  if (self->numel() == 0) {
     return;
   }
-
-  const auto new_size_bytes_i =
-      (new_size + self->storage_offset()) * self->dtype().itemsize();
-  TORCH_CHECK(!overflows<size_t>(new_size_bytes_i), "Requested storage size (",
-              new_size_bytes_i, ") cannot be represented as a size_t");
-  const auto new_size_bytes = static_cast<size_t>(new_size_bytes_i);
 
   const Storage& storage = self->unsafe_storage();
   if (!storage) {
@@ -62,21 +57,25 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size)
 inline TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
     IntArrayRef size,
-    c10::optional<IntArrayRef> stride,
+    at::OptionalIntArrayRef stride,
     bool resize_storage = true) {
-  if (self->sizes() == size && (!stride || self->strides() == stride)) {
+  if (self->sizes() == size && (!stride || self->strides() == stride.value())) {
     return self;
   }
 
-  int64_t storage_size = 1;
+  const auto itemsize = self->dtype().itemsize();
+  const auto storage_offset = self->storage_offset();
+  size_t storage_size = 1;
   if (stride) {
     self->set_sizes_and_strides(size, *stride);
-    // NB: storage size can be different from numel.
-    storage_size = storage_size_for(size, *stride);
+    storage_size = at::detail::computeStorageNbytes(
+        size, *stride, itemsize, storage_offset);
   } else {
     self->set_sizes_contiguous(size);
-    storage_size = self->numel();
+    storage_size = at::detail::computeStorageNbytesContiguous(
+        size, itemsize, storage_offset);
   }
+
   if (resize_storage) {
     maybe_resize_storage_cpu(self, storage_size);
   }
@@ -158,6 +157,12 @@ inline void setStrided(
     IntArrayRef stride,
     int64_t storage_offset) {
   TORCH_CHECK(size.size() == stride.size(), "mismatch in length of strides and shape");
+  for (auto val : stride) {
+    TORCH_CHECK(val >= 0,
+                "as_strided: Negative strides are not supported at the moment, "
+                "got strides: ", stride);
+  }
+
   auto* self_ = self.unsafeGetTensorImpl();
   checkInBoundsForStorage(
       size, stride, storage_offset, self_->dtype(), self_->storage());
@@ -169,11 +174,6 @@ inline void setStrided(
   /* size and stride */
   if (self_->sizes() == size && self_->strides() == stride) {
     return;
-  }
-  for (auto val : stride) {
-    TORCH_CHECK(val >= 0,
-                "as_strided: Negative strides are not supported at the moment, "
-                "got strides: ", stride);
   }
   self_->set_sizes_and_strides(size, stride);
 }

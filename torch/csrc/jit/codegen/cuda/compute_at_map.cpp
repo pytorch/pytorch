@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -153,7 +152,12 @@ void ComputeAtMap::mapIds(IterDomain* id0, IterDomain* id1) {
       if (id0->isParallelized() && id1->isParallelized()) {
         // Both are parallelized, make sure they're the same, set entry for
         // parallel map
-        TORCH_INTERNAL_ASSERT(id0->getParallelType() == id1->getParallelType());
+        TORCH_INTERNAL_ASSERT(
+            id0->getParallelType() == id1->getParallelType(),
+            "Parallel type of ",
+            id0,
+            " should match ",
+            id1);
         parallel_type_map_[new_set] = id0->getParallelType();
       } else if (id0->isParallelized() || id1->isParallelized()) {
         // Only one is parallelized, set entry for parallel map
@@ -252,10 +256,15 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
       if (first_output_tv == nullptr) {
         first_output_tv = c_tv;
       } else {
-        // Map multi outputs of an expression to eachother. c is current output,
-        // and f as first output. Keep consistent with the later section of
-        // producer and consumers. Which here producer is now "first output",
-        // and consumer is still consumer.
+        // Map multi outputs of an expression to each other. c is current
+        // output, and f as first output. Keep consistent with the later section
+        // of producer and consumers. Which here producer is now "first output",
+        // and consumer is still consumer. One exception is how the
+        // domains left of CA positions are handled in the Parallel
+        // map. Those domains are not mapped in producer and consumer
+        // mappings as they do not share loops, but are mapped in the
+        // case of mapping multiple outputs since they do share the
+        // same loops.
 
         TORCH_INTERNAL_ASSERT(
             c_tv->getRootDomain().size() ==
@@ -264,7 +273,8 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
             "Only supported case is welford op where all outputs tvs have idential domains.");
         // p->f, c->c
         std::unordered_map<IterDomain*, IterDomain*> c2f_root_map;
-        for (size_t i = 0; i < first_output_tv->getRootDomain().size(); i++) {
+        for (const auto i :
+             c10::irange(first_output_tv->getRootDomain().size())) {
           c2f_root_map.insert(std::make_pair(
               c_tv->getRootDomain()[i], first_output_tv->getRootDomain()[i]));
         }
@@ -277,35 +287,14 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
 
         auto c2f_map = replay_FasC.getReplay();
 
-        // If we're creating parallel map, only map the leaf
-        // axes. Also, the producer axis must be left of the CA
-        // point.
-        // Otherwise, map the entire replay map.
-        if (mapping_mode_ == MappingMode::PARALLEL) {
-          // Mark axes left of compute at point for parallel type tracking
-          std::unordered_set<IterDomain*> producer_axes_to_map(
-              first_output_tv->domain()->domain().begin(),
-              first_output_tv->domain()->domain().begin() +
-                  first_output_tv->getComputeAtPosition());
-
-          for (auto c_id : c_tv->domain()->domain()) {
-            auto it = c2f_map.find(c_id);
-            if (it == c2f_map.end()) {
-              continue;
-            }
-            auto f_id = it->second;
-            if (producer_axes_to_map.find(f_id) == producer_axes_to_map.end()) {
-              continue;
-            }
-            mapIds(f_id, c_id);
-          }
-        } else {
-          for (auto entry : c2f_map) {
-            auto c_id = entry.first;
-            auto f_id = entry.second;
-            // Map the id's together
-            mapIds(f_id, c_id);
-          }
+        // Map the entire replay map between the multiple
+        // consumers even for the Parallel map as they share the same
+        // loop.
+        for (auto entry : c2f_map) {
+          auto c_id = entry.first;
+          auto f_id = entry.second;
+          // Map the id's together
+          mapIds(f_id, c_id);
         }
       }
 
@@ -318,6 +307,21 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
         auto pairwise_map = PairwiseRootDomainMap(p_tv, c_tv);
         auto c2p_root_map =
             pairwise_map.mapConsumerToProducer(c_tv->domain(), p_tv->domain());
+
+        // For index map do not map any broadcast dimensions to non-broadcast
+        // dimensions
+        if (mapping_mode_ == MappingMode::INDEX) {
+          // Prevent any broadcasted axes being mapped to non-broadcasted axes.
+          for (auto it = c2p_root_map.begin(); it != c2p_root_map.end();) {
+            auto c_id = it->first;
+            auto p_id = it->second;
+            if (p_id->isBroadcast() != c_id->isBroadcast()) {
+              it = c2p_root_map.erase(it);
+            } else {
+              ++it;
+            }
+          }
+        }
 
         // Look for matching ID transformations in producer and consumer, replay
         // producer as consumer. We want to replay producer as consumer instead
@@ -364,6 +368,17 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
             auto p_id = entry.second;
             // Map the id's together
             mapIds(p_id, c_id);
+          }
+
+          // Make sure we always get root mapping for the loop map. Because of
+          // forwarding we could otherwise miss some root mappings.
+          if (mapping_mode_ == MappingMode::LOOP) {
+            for (auto entry : c2p_root_map) {
+              auto c_id = entry.first;
+              auto p_id = entry.second;
+              // Map the id's together
+              mapIds(p_id, c_id);
+            }
           }
         }
       }
@@ -426,16 +441,42 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
     int max_concrete_count = -1;
     int max_broadcast_count = -1;
     IterDomain* concrete_id = nullptr;
+
+    // Prefer domains appearing after rfactor domains. This matters
+    // when view merges domains to create a new domain, which becomes
+    // an rfactor domain. Suppose a broadcast follows the view
+    // operation and the broadcast domain is merged with the domain
+    // matching with the rfactor domain, that domain should be chosen
+    // as the concrete domain as it has the broadcast domain and the
+    // domain matching with the rfactor domain. The concrete domain
+    // does not have a history of merge/shift further up from the
+    // rfactor domain in pre-view tensors, but that should be fine as
+    // IndexCompute with those pre-view tensors should be able to
+    // compute indices from their leaf domains.
+    // See issue #1493
+
+    // Indicate if the previous ID was an rfactor domain
+    bool rf_detected = false;
     for (auto id : *set) {
-      int concrete_count = n_concrete_ids_.at(id);
-      if (concrete_count >= max_concrete_count) {
-        int broadcast_count = n_broadcast_ids_.at(id);
-        if (concrete_count > max_concrete_count ||
-            broadcast_count > max_broadcast_count) {
-          max_concrete_count = concrete_count;
-          max_broadcast_count = broadcast_count;
-          concrete_id = id;
+      // If the previous ID is an rfactor, reset the concrete ID with
+      // this ID no matter how many IDs the previous concrete ID has.
+      if (rf_detected) {
+        concrete_id = id;
+        max_concrete_count = n_concrete_ids_.at(id);
+        max_broadcast_count = n_broadcast_ids_.at(id);
+        rf_detected = id->isRFactorProduct();
+      } else {
+        int concrete_count = n_concrete_ids_.at(id);
+        if (concrete_count >= max_concrete_count) {
+          int broadcast_count = n_broadcast_ids_.at(id);
+          if (concrete_count > max_concrete_count ||
+              broadcast_count > max_broadcast_count) {
+            max_concrete_count = concrete_count;
+            max_broadcast_count = broadcast_count;
+            concrete_id = id;
+          }
         }
+        rf_detected = id->isRFactorProduct();
       }
     }
 
@@ -456,71 +497,6 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
       }
     }
   }
-
-  if (gpu_lower != nullptr) {
-    convertToKir(fusion, gpu_lower);
-  }
-}
-
-void ComputeAtMap::convertToKir(Fusion* fusion, GpuLower* gpu_lower) {
-  TORCH_INTERNAL_ASSERT(fusion != nullptr);
-  TORCH_INTERNAL_ASSERT(gpu_lower != nullptr);
-
-  has_lowered_kir_ = true;
-
-  std::unordered_map<
-      std::shared_ptr<std::deque<IterDomain*>>,
-      std::shared_ptr<std::deque<kir::IterDomain*>>>
-      disjoint_set_2_kir;
-
-  for (const auto& disjoint_iter_set : disjoint_iter_set_maps_) {
-    auto fusion_set = disjoint_iter_set.second;
-    auto kir_set_it = disjoint_set_2_kir.find(fusion_set);
-    std::shared_ptr<std::deque<kir::IterDomain*>> kir_set;
-    if (kir_set_it == disjoint_set_2_kir.end()) {
-      kir_set = std::make_shared<std::deque<kir::IterDomain*>>();
-      std::transform(
-          fusion_set->begin(),
-          fusion_set->end(),
-          std::inserter(*kir_set, kir_set->begin()),
-          [&gpu_lower](IterDomain* id) {
-            return gpu_lower->lowerValue(id)->as<kir::IterDomain>();
-          });
-      disjoint_set_2_kir.emplace(std::make_pair(fusion_set, kir_set));
-    } else {
-      kir_set = kir_set_it->second;
-    }
-    kir_disjoint_iter_set_maps_.emplace(std::make_pair(
-        gpu_lower->lowerValue(disjoint_iter_set.first)->as<kir::IterDomain>(),
-        kir_set));
-  }
-
-  for (auto entry : concrete_id_map_) {
-    kir_concrete_id_map_.emplace(std::make_pair(
-        gpu_lower->lowerValue(entry.first)->as<kir::IterDomain>(),
-        gpu_lower->lowerValue(entry.second)->as<kir::IterDomain>()));
-  }
-
-  for (const auto& entry : disjoint_iter_set_maps_) {
-    kir_2_fusion_[gpu_lower->lowerValue(entry.first)->as<kir::IterDomain>()] =
-        entry.first;
-  }
-
-  // Make sure we have all IterDomains that could be used to generate a ForLoop
-  for (auto expr : fusion->exprs()) {
-    if (!expr->outputs()[0]->isA<TensorView>()) {
-      continue;
-    }
-
-    auto tv_outputs = ir_utils::filterByType<TensorView>(expr->outputs());
-
-    for (auto out : tv_outputs) {
-      for (auto entry : out->domain()->domain()) {
-        kir_2_fusion_[gpu_lower->lowerValue(entry)->as<kir::IterDomain>()] =
-            entry;
-      }
-    }
-  }
 }
 
 bool ComputeAtMap::areMapped(IterDomain* id0, IterDomain* id1) const {
@@ -536,45 +512,12 @@ bool ComputeAtMap::areMapped(IterDomain* id0, IterDomain* id1) const {
   return (set0_it->second.get() == set1_it->second.get());
 }
 
-bool ComputeAtMap::areMapped(kir::IterDomain* id0, kir::IterDomain* id1) const {
-  assertLowered(has_lowered_kir_);
-  if (id0 == id1) {
-    return true;
-  }
-  auto set0_it = kir_disjoint_iter_set_maps_.find(id0);
-  auto set1_it = kir_disjoint_iter_set_maps_.find(id1);
-  if (set0_it == kir_disjoint_iter_set_maps_.end() ||
-      set1_it == kir_disjoint_iter_set_maps_.end()) {
-    return false;
-  }
-  return (set0_it->second.get() == set1_it->second.get());
-}
-
 IterDomain* ComputeAtMap::getConcreteMappedID(IterDomain* id) const {
   auto it = concrete_id_map_.find(id);
   if (it != concrete_id_map_.end()) {
     return it->second;
   }
   return id;
-}
-
-kir::IterDomain* ComputeAtMap::getConcreteMappedID(kir::IterDomain* id) const {
-  assertLowered(has_lowered_kir_);
-  auto it = kir_concrete_id_map_.find(id);
-  if (it != kir_concrete_id_map_.end()) {
-    return it->second;
-  }
-  return id;
-}
-
-IterDomain* ComputeAtMap::toFusion(kir::IterDomain* kir) const {
-  assertLowered(has_lowered_kir_);
-  auto kir_2_fusion_it = kir_2_fusion_.find(kir);
-  TORCH_INTERNAL_ASSERT(
-      kir_2_fusion_it != kir_2_fusion_.end(),
-      "Kernel ir is not guarneteed to be reversible into fusion ir, could not find fusion entry. ",
-      kir::toString(kir, false));
-  return kir_2_fusion_it->second;
 }
 
 std::string ComputeAtMap::toString() const {

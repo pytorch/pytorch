@@ -13,7 +13,7 @@ namespace native {
 /// Else, return a new tensor containing the elementwise sums.
 Tensor _test_optional_intlist(
     const Tensor& values,
-    c10::optional<IntArrayRef> addends) {
+    at::OptionalIntArrayRef addends) {
   if (!addends) {
     return values;
   }
@@ -68,6 +68,10 @@ Tensor _test_ambiguous_defaults(const Tensor& dummy, int64_t a, c10::string_view
   TORCH_CHECK(a == 2);
   TORCH_CHECK(b == "2");
   return c10::scalar_to_tensor(2);
+}
+
+Tensor _test_warn_in_autograd(const Tensor &self) {
+  return self.clone();
 }
 
 } // namespace native

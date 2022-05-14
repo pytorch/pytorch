@@ -26,24 +26,6 @@ pytorch_params: &pytorch_params
     CI_MASTER: << pipeline.parameters.run_master_build >>
   resource_class: << parameters.resource_class >>
 
-pytorch_android_params: &pytorch_android_params
-  parameters:
-    build_environment:
-      type: string
-      default: ""
-    op_list:
-      type: string
-      default: ""
-    lite_interpreter:
-      type: string
-      default: "1"
-  environment:
-    BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
-    DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
-    PYTHON_VERSION: "3.6"
-    SELECTED_OP_LIST: << parameters.op_list >>
-    BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
-
 pytorch_ios_params: &pytorch_ios_params
   parameters:
     build_environment:

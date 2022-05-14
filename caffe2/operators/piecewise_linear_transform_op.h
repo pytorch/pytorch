@@ -3,6 +3,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/operator.h"
 
 C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(PiecewiseLinearTransform);
@@ -61,7 +62,8 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
       const int64_t num_bounds_per_group,
       const int64_t num_group) {
     const T* start = bounds;
-    for (int64_t i = 0; i < num_group; i++) {
+    for (const auto i : c10::irange(num_group)) {
+      (void)i; // CUDA-10.2 on Windows crashes when C10_UNUSED macro is used
       if (!std::is_sorted(start, start + num_bounds_per_group)) {
         return false;
       }
@@ -153,11 +155,11 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
         &bounds, &slopes, &intercepts, &num_func_per_group, &num_group);
     CAFFE_ENFORCE_EQ(num_group, M);
 
-    for (int64_t j = 0; j < M; ++j) {
+    for (const auto j : c10::irange(M)) {
       const T* bounds_group = bounds + j * (num_func_per_group + 1);
       const T* slopes_group = slopes + j * num_func_per_group;
       const T* intercepts_group = intercepts + j * num_func_per_group;
-      for (int64_t i = 0; i < N; ++i) {
+      for (const auto i : c10::irange(N)) {
         Ydata[i * M + j] = PiecewiseLinearTransform(
             Xdata[i * M + j],
             bounds_group,
@@ -192,12 +194,12 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(num_group, 1);
 
     if (M == 1) {
-      for (int64_t i = 0; i < N; ++i) {
+      for (const auto i : c10::irange(N)) {
         Ydata[i] = PiecewiseLinearTransform(
             Xdata[i], bounds, slopes, intercepts, num_func_per_group);
       }
     } else {
-      for (int64_t i = 0; i < N; ++i) {
+      for (const auto i : c10::irange(N)) {
         Ydata[i * M + 1] = PiecewiseLinearTransform(
             Xdata[i * M + 1], bounds, slopes, intercepts, num_func_per_group);
         Ydata[i * M] = 1.0f - Ydata[i * M + 1];

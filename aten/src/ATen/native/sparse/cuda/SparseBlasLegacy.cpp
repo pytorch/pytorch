@@ -2,9 +2,10 @@
 Functions here use deprecated cuSPARSE API that was removed in CUDA 11.
 This file will be removed eventually.
 */
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 
@@ -32,7 +33,7 @@ void s_addmm_out_csr_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n,
           r__ = r_.transpose(0, 1).clone(at::MemoryFormat::Contiguous);
           r__.transpose_(0, 1);
         }
-        TORCH_INTERNAL_ASSERT(r__.transpose(-1, -2).is_contiguous());
+        TORCH_INTERNAL_ASSERT(r__.mT().is_contiguous());
         Tensor dense_;
         char transpose_dense;
         if (dense.stride(0) == 1 && dense.stride(1) == dense.size(0)) {

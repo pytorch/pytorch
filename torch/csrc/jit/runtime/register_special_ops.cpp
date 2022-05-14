@@ -32,13 +32,13 @@ c10::AliasAnalysisKind aliasAnalysisConservative() {
 }
 
 void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
-  if (!elem_type->isSubtypeOf(NumberType::get()) &&
+  if (!elem_type->isSubtypeOf(*NumberType::get()) &&
       elem_type != BoolType::get()) {
     std::stringstream error;
     error << "Input must be of ints, floats, or bools, "
           << "got " << elem_type->repr_str();
     // special case empty list torch.tensor([])
-    if (elem_type->isSubtypeOf(TensorType::get())) {
+    if (elem_type->isSubtypeOf(*TensorType::get())) {
       if (empty_list) {
         error << "\nEmpty lists default to List[Tensor]. Add a variable "
                  "annotation to the assignment to create an empty list "
@@ -198,12 +198,12 @@ void createTensorFromList(Stack& stack) {
     pop(stack, data, dtype, device);
   }
   auto elem_type = data.type();
-  while (auto list_type = elem_type->cast<ListType>()) {
-    elem_type = list_type->getElementType();
+  while (elem_type->isSubtypeOf(AnyListType::get())) {
+    elem_type = elem_type->containedType(0);
   }
   auto sizes = compute_sizes(data);
   checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
-  at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
+  at::ScalarType initial_scalar_type = scalarTypeFromJitType(*elem_type);
   if (initial_scalar_type == at::ScalarType::Double) {
     initial_scalar_type = typeMetaToScalarType(c10::get_default_dtype());
   }
@@ -245,13 +245,13 @@ void createTensorFromList(Stack& stack) {
 RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::split(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]"),
+            "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]"),
         [](Stack& stack) {
           RECORD_FUNCTION("split_with_sizes", last(stack, 3));
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              (std::move(peek(stack, 1, 3))).toIntVector(),
+              (std::move(peek(stack, 1, 3))).toDimVector(),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
           pack(stack, std::move(result));
@@ -322,7 +322,7 @@ RegisterOperators reg({
         [](Stack& stack) {
           auto a = pop(stack);
           auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
+          push(stack, at::infer_size(a.toDimVector(), b.toDimVector()));
         },
         aliasAnalysisFromSchema()),
     OperatorGenerator(

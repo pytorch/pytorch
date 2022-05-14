@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 namespace torch {
@@ -31,21 +32,98 @@ void remove_visited(
   }
 }
 
+// Return all dependencies of a node including members of the node.
+class RecursiveDependencies : public OptInDispatch {
+ public:
+  static std::vector<Statement*> next(Statement* stmt) {
+    RecursiveDependencies find_next(stmt);
+    return find_next.next_stmts_;
+  }
+
+ private:
+  RecursiveDependencies() = default;
+
+  RecursiveDependencies(Statement* stmt) {
+    handle(stmt);
+  }
+
+  using OptInDispatch::handle;
+
+  void handle(Expr* expr) final {
+    FusionGuard::getCurFusion()->assertInContainer(
+        expr,
+        "IterVisitor.cpp::RecursiveDependencies::handle(Expr*) Cannot traverse expr, ");
+    next_stmts_.insert(
+        next_stmts_.end(), expr->inputs().begin(), expr->inputs().end());
+  }
+
+  void handle(Val* val) final {
+    FusionGuard::getCurFusion()->assertInContainer(
+        val,
+        "IterVisitor.cpp::RecursiveDependencies::handle(Val*) Cannot traverse val, ");
+    OptInDispatch::handle(val);
+  }
+
+  void simpleVal(Val* val) {
+    if (val->definition() == nullptr) {
+      return;
+    }
+    next_stmts_.push_back(val->definition());
+  }
+
+  void handle(Bool* stmt) final {
+    simpleVal(stmt);
+  }
+
+  void handle(Double* stmt) final {
+    simpleVal(stmt);
+  }
+
+  void handle(Int* stmt) final {
+    simpleVal(stmt);
+  }
+
+  void handle(ComplexDouble* stmt) final {
+    simpleVal(stmt);
+  }
+
+  void handle(NamedScalar* stmt) final {
+    simpleVal(stmt);
+  }
+
+  void handle(IterDomain* stmt) final {
+    next_stmts_.push_back(stmt->start());
+    next_stmts_.push_back(stmt->extent());
+    next_stmts_.push_back(stmt->stopOffset());
+    simpleVal(stmt);
+  }
+
+  void handle(TensorDomain* stmt) final {
+    next_stmts_.insert(
+        next_stmts_.end(), stmt->domain().begin(), stmt->domain().end());
+    simpleVal(stmt);
+  }
+
+  void handle(TensorView* tv) final {
+    next_stmts_.push_back(tv->domain());
+    simpleVal(tv);
+  }
+
+  std::vector<Statement*> next_stmts_;
+};
+
 } // namespace
 
 std::vector<Statement*> IterVisitor::next(Statement* stmt) {
   if (stmt->isVal()) {
     return next(stmt->as<Val>());
-  } else if (stmt->isExpr()) {
-    return next(stmt->as<Expr>());
   } else {
-    TORCH_INTERNAL_ASSERT(
-        false, "IterVisitor could not detect type in next_dispatch.");
+    return next(stmt->as<Expr>());
   }
 }
 
 std::vector<Statement*> IterVisitor::next(Val* v) {
-  FusionGuard::getCurFusion()->assertInFusion(v, "Cannot traverse val, ");
+  FusionGuard::getCurFusion()->assertInContainer(v, "Cannot traverse val, ");
   if (v->definition() != nullptr) {
     return {v->definition()};
   }
@@ -53,7 +131,8 @@ std::vector<Statement*> IterVisitor::next(Val* v) {
 }
 
 std::vector<Statement*> IterVisitor::next(Expr* expr) {
-  FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
+  FusionGuard::getCurFusion()->assertInContainer(
+      expr, "Cannot traverse expr, ");
   std::vector<Statement*> next_stmts{
       expr->inputs().begin(), expr->inputs().end()};
   return next_stmts;
@@ -93,7 +172,8 @@ void IterVisitor::handle(Val* v) {
 void IterVisitor::traverseFrom(
     Fusion* fusion,
     const std::vector<Val*>& from,
-    bool traverseAllPaths) {
+    bool traverseAllPaths,
+    bool traverseIntoMembers) {
   FusionGuard fg(fusion);
 
   std::unordered_set<Statement*> visited;
@@ -137,7 +217,8 @@ void IterVisitor::traverseFrom(
     } else {
       // We're not ready to process this node, so add all its inputs to be
       // checked Visit input nodes.
-      auto next_stmts = next(stmt);
+      auto next_stmts =
+          traverseIntoMembers ? RecursiveDependencies::next(stmt) : next(stmt);
       // We may want to retraverse nodes, in that case revisit everything!
       if (!traverseAllPaths) {
         // If we don't want to retraverse, remove nodes we already visisted.
@@ -180,10 +261,17 @@ namespace {
 // expressions.
 class Inputs : public IterVisitor {
  private:
+  //! Optional list of all input vals. If empty, vals with no defining
+  //! expression are considered as inputs.
+  const std::vector<Val*>& all_inputs_;
   std::vector<Val*> inputs_;
 
+  Inputs(const std::vector<Val*>& all_inputs) : all_inputs_(all_inputs) {}
+
   void handle(Val* val) override {
-    if (val->definition() == nullptr) {
+    if ((all_inputs_.empty() && val->definition() == nullptr) ||
+        std::find(all_inputs_.begin(), all_inputs_.end(), val) !=
+            all_inputs_.end()) {
       if (std::find(inputs_.begin(), inputs_.end(), val) == inputs_.end()) {
         inputs_.push_back(val);
       }
@@ -191,11 +279,13 @@ class Inputs : public IterVisitor {
   }
 
  public:
-  static std::vector<Val*> getInputs(const std::vector<Val*>& of) {
+  static std::vector<Val*> getInputs(
+      const std::vector<Val*>& of,
+      const std::vector<Val*>& all_inputs) {
     if (of.empty()) {
       return {};
     }
-    Inputs inps;
+    Inputs inps(all_inputs);
     inps.traverseFrom(of[0]->fusion(), of);
     return inps.inputs_;
   }
@@ -203,8 +293,10 @@ class Inputs : public IterVisitor {
 
 } // namespace
 
-std::vector<Val*> IterVisitor::getInputsTo(const std::vector<Val*>& vals) {
-  return Inputs::getInputs(vals);
+std::vector<Val*> IterVisitor::getInputsTo(
+    const std::vector<Val*>& vals,
+    const std::vector<Val*>& inputs) {
+  return Inputs::getInputs(vals, inputs);
 }
 
 namespace {
@@ -297,7 +389,7 @@ void BackwardVisitor::traverseFrom(
 
   auto vals = AllVals::get(fusion, from);
 
-  auto exprs = ExprSort::getExprs(fusion, from);
+  auto exprs = StmtSort::getExprs(fusion, from);
 
   {
     size_t pos = 0;
@@ -505,6 +597,9 @@ class DependentVals : public IterVisitor {
   std::unordered_set<Val*> outs_;
 
   // Boundary where we want to stop searching beyond
+  // TODO: Based on the todo below, shouldn't we stop just at the definition of?
+  // If we really wanted to make this traverse left, wouldn't we first check
+  // which outputs are outputs dependent on of?
   std::unordered_set<Val*> boundary_;
 
   std::vector<Statement*> next(Val* v) override {
@@ -528,6 +623,11 @@ class DependentVals : public IterVisitor {
   }
 
   // optimization to limit search path
+  // TODO: Is this valid? Couldn't something like:
+  // out0 = of + val0
+  // out1 = out0 + val1
+  // out2 = TernaryOp(out1, val0, of)
+  // Hide the dep of out1 on of?
   void createBoundary() {
     for (auto v_of : of_) {
       for (auto v_expr : v_of->uses()) {
@@ -693,22 +793,41 @@ std::unordered_set<Val*> DependencyCheck::getAllDependentVals(
   return DependentVals::getAllDependentVals(of);
 }
 
-void ExprSort::handle(Expr* expr) {
-  exprs.push_back(expr);
+void StmtSort::handle(Statement* stmt) {
+  stmts.push_back(stmt);
 }
 
-std::vector<Expr*> ExprSort::getExprs(Fusion* fusion) {
-  ExprSort es;
-  es.traverse(fusion);
-  return es.exprs;
+std::vector<Expr*> StmtSort::getExprs(Fusion* fusion, bool traverse_members) {
+  auto terminating_outputs = fusion->getTerminatingOutputs();
+  return StmtSort::getExprs(fusion, terminating_outputs, traverse_members);
 }
 
-std::vector<Expr*> ExprSort::getExprs(
+std::vector<Expr*> StmtSort::getExprs(
     Fusion* fusion,
-    const std::vector<Val*>& from) {
-  ExprSort es;
-  es.traverseFrom(fusion, from, false);
-  return es.exprs;
+    const std::vector<Val*>& from,
+    bool traverse_members) {
+  StmtSort es;
+  es.traverseFrom(fusion, from, false, traverse_members);
+  auto stmts = StmtSort::getStmts(fusion, from, traverse_members);
+  auto filter = ir_utils::filterByType<Expr>(stmts.begin(), stmts.end());
+  std::vector<Expr*> exprs(filter.begin(), filter.end());
+  return exprs;
+}
+
+std::vector<Statement*> StmtSort::getStmts(
+    Fusion* fusion,
+    bool traverse_members) {
+  auto terminating_outputs = fusion->getTerminatingOutputs();
+  return StmtSort::getStmts(fusion, terminating_outputs, traverse_members);
+}
+
+std::vector<Statement*> StmtSort::getStmts(
+    Fusion* fusion,
+    const std::vector<Val*>& from,
+    bool traverse_members) {
+  StmtSort es;
+  es.traverseFrom(fusion, from, false, traverse_members);
+  return es.stmts;
 }
 
 void InputsOf::handle(Val* v) {

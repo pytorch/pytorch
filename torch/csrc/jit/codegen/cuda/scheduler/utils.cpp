@@ -1,14 +1,12 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 namespace torch {
@@ -16,6 +14,125 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 namespace scheduler_utils {
+
+// Returns number of "valid" dimensions. e.g. if tv has
+// [I1, R2, I3, I4, R3{1}]
+// where R3{1} is in dont_merge, resulting domain should be:
+// [I1, I3*I4, R2, R3{1}] with return value 3
+//
+// if tv has
+// [R1, I2, R3, I4, R4, R5{1}, R6{1}]
+//  where R5{1} and R6{1} are in dont_merge, resulting domain should be:
+// [I2*I4, R1*R3, R4, R5{1}, R6{1}]
+// with return value 3
+size_t merge_3d(
+    TensorView* tv,
+    const std::unordered_set<IterDomain*>& dont_merge) {
+  bool active_is_reduction = false;
+  bool first_dim = true;
+  int prev_i = -1;
+
+  for (int i = static_cast<int>(tv->nDims()) - 1; i >= 0; i--) {
+    if (dont_merge.count(tv->axis(i))) {
+      continue;
+    }
+
+    if (first_dim) {
+      active_is_reduction = tv->axis(i)->isReduction();
+      prev_i = i;
+      first_dim = false;
+    } else {
+      if (tv->axis(i)->isReduction() != active_is_reduction) {
+        break;
+      }
+      tv->merge(i, prev_i);
+      prev_i = i;
+    }
+  }
+
+  if (prev_i == -1) {
+    // Zero dimensional
+    return 0;
+  }
+
+  // put inner most dimension as last dimension
+  tv->reorder({{prev_i, -1}});
+  active_is_reduction = false;
+  first_dim = true;
+  prev_i = -1;
+
+  for (int i = static_cast<int>(tv->nDims()) - 2; i >= 0; i--) {
+    auto id = tv->axis(i);
+    if (dont_merge.count(id)) {
+      continue;
+    }
+
+    if (first_dim) {
+      active_is_reduction = id->isReduction();
+      prev_i = i;
+      first_dim = false;
+    } else if (id->isReduction() == active_is_reduction) {
+      tv->merge(i, prev_i);
+      prev_i = i;
+    }
+  }
+
+  // put second dimension as second to last dimension
+  if (prev_i == -1) {
+    // One dimensional, put merged dimension as first
+    tv->reorder({{-1, 0}});
+    return 1;
+  } else {
+    // put new dimension as second to last
+    tv->reorder({{prev_i, -2}});
+  }
+
+  active_is_reduction = false;
+  first_dim = true;
+  prev_i = -1;
+
+  for (int i = static_cast<int>(tv->nDims()) - 3; i >= 0; i--) {
+    if (dont_merge.count(tv->axis(i))) {
+      continue;
+    }
+
+    if (first_dim) {
+      active_is_reduction = tv->axis(i)->isReduction();
+      prev_i = i;
+      first_dim = false;
+    } else if (tv->axis(i)->isReduction() == active_is_reduction) {
+      tv->merge(i, prev_i);
+      prev_i = i;
+    }
+  }
+
+  // put third dimension as second to last dimension
+  if (prev_i == -1) {
+    // Two dimensional, put merged dimensions first
+    tv->reorder({{-1, 0}, {-2, 1}});
+    // [outer, inner, dont_merge...]
+    if (tv->axis(0)->isReduction()) {
+      // put reductions as second axis
+      tv->reorder({{0, 1}, {1, 0}});
+    }
+    return 2;
+  } else {
+    // put new dimension as third to last
+    tv->reorder({{prev_i, -3}});
+    // Stable sort to have iteration domains first, then reduction
+    if (tv->axis(0)->isReduction() && !tv->axis(1)->isReduction()) {
+      tv->reorder({{0, 1}, {1, 0}});
+    }
+    if (tv->axis(1)->isReduction() && !tv->axis(2)->isReduction()) {
+      tv->reorder({{1, 2}, {2, 1}});
+    }
+    if (tv->axis(0)->isReduction() && !tv->axis(1)->isReduction()) {
+      tv->reorder({{0, 1}, {1, 0}});
+    }
+    return 3;
+  }
+}
+
 size_t mergeReduction(
     TensorView* tv,
     const std::unordered_set<IterDomain*>& dont_merge) {
@@ -60,7 +177,7 @@ size_t mergeNonReduction(
       num_merged++;
     }
   }
-  if (prev_i != 0) {
+  if (prev_i != -1) {
     tv->reorder({{prev_i, 0}});
   }
 
@@ -72,19 +189,27 @@ void parallelizeAllLike(
     const std::vector<TensorView*>& all_tvs) {
   FusionGuard fg(reference_tv->fusion());
 
+  // Use loop map as that is the most permissive.
   auto ca_loop_map = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
   ca_loop_map.build(FusionGuard::getCurFusion());
   for (auto id : reference_tv->domain()->domain()) {
     ca_loop_map.getConcreteMappedID(id)->parallelize(id->getParallelType());
+    if (id->hasPaddingToMultipleOfWarp()) {
+      ca_loop_map.getConcreteMappedID(id)->padToMultipleOfWarp(
+          id->getMaybeSizeAfterPadding());
+    }
   }
 
   for (auto tv : all_tvs) {
     if (tv->isFusionInput()) {
       continue;
     }
-    for (size_t i = 0; i < tv->domain()->domain().size(); i++) {
-      tv->axis(i)->parallelize(
-          ca_loop_map.getConcreteMappedID(tv->axis(i))->getParallelType());
+    for (const auto i : c10::irange(tv->domain()->domain().size())) {
+      auto ca_id = ca_loop_map.getConcreteMappedID(tv->axis(i));
+      tv->axis(i)->parallelize(ca_id->getParallelType());
+      if (ca_id->hasPaddingToMultipleOfWarp()) {
+        tv->axis(i)->padToMultipleOfWarp(ca_id->getMaybeSizeAfterPadding());
+      }
     }
   }
 }
@@ -97,14 +222,167 @@ void computeAtInputs(TensorView* consumer, int pos, ComputeAtMode mode) {
 
 void computeWithOutputs(TensorView* producer, int pos, ComputeAtMode mode) {
   for (auto out_tv : ir_utils::outputTvsOf(producer)) {
+    if (out_tv == producer) {
+      continue;
+    }
     producer->computeWith(out_tv, pos, mode);
   }
 }
 
+namespace {
+
+// Find the resolution points of the persistent buffers in the provided
+// persistent_buffer_info. Resolution points are identified by tracking if a
+// tensor view is dependent on a reduction, or a persistent buffer. When an
+// expression has inputs that are on both a reduction and persistent buffer
+// path, that's a point where we may be resolving the persistent buffer. In
+// other words, we know the persistent buffer has to be live at that point, but
+// don't know if it has to be live after it.
+//
+// For example if we have:
+//
+// t0 = makeSymbolicTensor(2)
+// t1 = set(t0)
+// t2 = sum(t1, 1)
+// t3 = broadcast(t2, {false, true})
+// t4 = set(t1)
+// t5 = add(t4, t3)
+//
+// In this case, t1 is the persistent buffer, that buffer is resolved at t5, so
+// it needs to exist in full until t5 is "resolved". This class assumes all
+// reduction patterns in the fusion are matching.
+class PersistentBufferResolution : public IterVisitor {
+ public:
+  static std::vector<TensorView*> getResolutionPointsOf(
+      Fusion* fusion,
+      TensorView* persistent_buffer) {
+    PersistentBufferResolution resolution(fusion, persistent_buffer);
+
+    TORCH_INTERNAL_ASSERT(
+        !resolution.resolution_points_.empty(),
+        "Could not resolve persistent buffer: ",
+        persistent_buffer);
+
+    return resolution.resolution_points_;
+  }
+
+  PersistentBufferResolution() = delete;
+
+ private:
+  PersistentBufferResolution(Fusion* fusion, TensorView* persistent_buffer)
+      : persistent_buffer_(persistent_buffer) {
+    traverse(fusion);
+  }
+
+ private:
+  void handle(Val* val) final {
+    if (!val->isA<TensorView>()) {
+      return;
+    }
+    auto tv = val->as<TensorView>();
+    if (tv == persistent_buffer_) {
+      persistent_buffer_hit = true;
+      on_persitent_buffer_path_.emplace(tv);
+      return;
+    }
+
+    if (!persistent_buffer_hit) {
+      return;
+    }
+
+    if (tv->hasReduction()) {
+      if (std::any_of(
+              resolution_points_.begin(),
+              resolution_points_.end(),
+              [&tv](TensorView* resolution_point) {
+                return DependencyCheck::isDependencyOf(resolution_point, tv);
+              })) {
+        // If already resolved, don't start a new reduction path.
+        return;
+      }
+      on_reduction_path_.emplace(tv);
+    }
+  }
+
+  void handle(Expr* expr) final {
+    if (!persistent_buffer_hit) {
+      return;
+    }
+
+    bool output_is_reduction =
+        std::any_of(expr->outputs().begin(), expr->outputs().end(), [](Val* v) {
+          if (!v->isA<TensorView>()) {
+            return false;
+          }
+          return v->as<TensorView>()->hasReduction();
+        });
+
+    // Persistent buffers cannot be resolved on a reduction expression
+    if (output_is_reduction) {
+      return;
+    }
+
+    bool input_on_reduction_path = std::any_of(
+        expr->inputs().begin(), expr->inputs().end(), [&](Val* inp) {
+          return on_reduction_path_.count(inp);
+        });
+
+    auto input_on_persitent_buffer_path_it = std::find_if(
+        expr->inputs().begin(), expr->inputs().end(), [&](Val* inp) {
+          return on_persitent_buffer_path_.count(inp);
+        });
+
+    bool input_on_persistent_buffer_path =
+        input_on_persitent_buffer_path_it != expr->inputs().end();
+
+    if (input_on_reduction_path && input_on_persistent_buffer_path) {
+      // Expression has inputs on both a reduction and persistent buffer path,
+      // this is a resolution.
+      auto out_tvs = ir_utils::filterByType<TensorView>(expr->outputs());
+
+      // Add resolution point
+      resolution_points_.insert(
+          resolution_points_.end(), out_tvs.begin(), out_tvs.end());
+
+      // Outputs are still on a persistent path
+      for (auto out : expr->outputs()) {
+        on_persitent_buffer_path_.emplace(out);
+      }
+    } else if (input_on_reduction_path) {
+      // Propagate forward the reduction path
+      on_reduction_path_.insert(expr->outputs().begin(), expr->outputs().end());
+    } else if (input_on_persistent_buffer_path) {
+      // Propagate forward the persistent path
+      for (auto out : expr->outputs()) {
+        on_persitent_buffer_path_.emplace(out);
+      }
+    }
+  }
+
+  // Don't do processing until we see the buffer we're looking for
+  bool persistent_buffer_hit = false;
+
+  // Track if key is dependent on a persistent reduction, resolves if
+  // encountering a persistent buffer. For this analysis doesn't matter which
+  // reduction the path is based on.
+  std::unordered_set<Val*> on_reduction_path_;
+
+  // Track if key is dependent on a persistent buffer, resolves if encountering
+  // a persistent reduction or changes path if encountering another persistent
+  // buffer
+  std::unordered_set<Val*> on_persitent_buffer_path_;
+
+  // Tracks where the persistent buffer (key) is resolved (values)
+  std::vector<TensorView*> resolution_points_;
+
+  const TensorView* persistent_buffer_;
+};
+
+} // namespace
+
 PersistentBufferInfo persistentBuffers(Fusion* fusion) {
   FusionGuard fg(fusion);
-
-  PersistentBufferInfo info;
+  PersistentBufferInfo persistent_buffer_info;
 
   ComputeAtRootDomainMap root_map;
   root_map.build();
@@ -112,82 +390,182 @@ PersistentBufferInfo persistentBuffers(Fusion* fusion) {
   auto all_tvs = ir_utils::allTvs(fusion);
 
   for (auto producer : all_tvs) {
+    // Are all producer ids mappable to all consumers
     bool mappable = true;
     auto consumers = ir_utils::consumerTvsOf(producer);
     if (consumers.empty()) {
       continue;
     }
 
-    auto mappable_roots =
-        root_map.getMappableDims(producer->domain(), consumers[0]->domain());
+    // Track which consumers have unmappable dims from producer
+    std::vector<TensorView*> unmappable_consumers;
 
-    auto p_root = producer->getMaybeRFactorDomain();
+    for (auto consumer : consumers) {
+      bool consumer_mappable = true;
+      auto mappable_roots =
+          root_map.getMappableDims(producer->domain(), consumer->domain());
 
-    for (auto p_root_id : p_root) {
-      if (p_root_id->isReduction()) {
-        continue;
+      auto p_root = producer->getMaybeRFactorDomain();
+
+      for (auto p_root_id : p_root) {
+        if (p_root_id->isReduction() || p_root_id->isBroadcast()) {
+          continue;
+        }
+        if (!mappable_roots.count(p_root_id)) {
+          mappable = false;
+          consumer_mappable = false;
+          persistent_buffer_info.unmappable_dims.emplace(p_root_id);
+        }
       }
-      if (!mappable_roots.count(p_root_id)) {
-        mappable = false;
-        info.unmappable_dims.emplace(p_root_id);
+
+      if (!consumer_mappable) {
+        unmappable_consumers.emplace_back(consumer);
       }
     }
 
     if (!mappable) {
-      info.buffers.push_back(producer);
+      // If there's unmappable dims from producer to consumer, producer is a
+      // persistent buffer.
+      persistent_buffer_info.persistent_buffers.emplace_back(producer);
     }
   }
-  return info;
+
+  // Set the persistent buffer resolution points
+  persistent_buffer_info.persistent_buffer_resolution_points = {};
+  for (auto buffer : persistent_buffer_info.persistent_buffers) {
+    persistent_buffer_info.persistent_buffer_resolution_points.emplace_back(
+        PersistentBufferResolution::getResolutionPointsOf(fusion, buffer));
+  }
+
+  // Find projectable persistent buffers
+  auto reduction_tvs = getReductionTvs(fusion /*, ignore_trivial=true */);
+  for (auto persistent_buffer : persistent_buffer_info.persistent_buffers) {
+    // Inputs marked as persistent buffers can't be projected any further back
+    if (persistent_buffer->isFusionInput()) {
+      continue;
+    }
+    auto dep_vals = DependencyCheck::getAllValsBetween(
+        {reduction_tvs.begin(), reduction_tvs.end()}, {persistent_buffer});
+
+    // If there's a reduction between a persistent buffer and the inputs, it
+    // can't be projected backwards.
+    if (dep_vals.empty()) {
+      persistent_buffer_info.projectable_persistent_buffers.push_back(
+          persistent_buffer);
+    }
+  }
+
+  // Get a list of inputs of the projectable buffers
+  auto all_inputs = ir_utils::inputTvsOf(
+      persistent_buffer_info.projectable_persistent_buffers);
+
+  // Map unmappable dims to inputs, doesn't matter which compute at map used
+  auto ca_index_map = ComputeAtMap(ComputeAtMap::MappingMode::INDEX);
+  ca_index_map.build(fusion);
+
+  std::unordered_set<IterDomain*> unmappable_concrete_ids;
+  for (auto id : persistent_buffer_info.unmappable_dims) {
+    unmappable_concrete_ids.emplace(ca_index_map.getConcreteMappedID(id));
+  }
+
+  for (auto input : all_inputs) {
+    bool has_unmappable_dim = false;
+    for (auto input_id : input->getMaybeRFactorDomain()) {
+      auto concrete_input_id = ca_index_map.getConcreteMappedID(input_id);
+      if (unmappable_concrete_ids.find(concrete_input_id) !=
+          unmappable_concrete_ids.end()) {
+        persistent_buffer_info.unamppable_dims_projected_to_inputs.emplace(
+            input_id);
+        has_unmappable_dim = true;
+      }
+    }
+    if (has_unmappable_dim) {
+      persistent_buffer_info.projectable_buffer_inputs.emplace_back(input);
+    }
+  }
+
+  return persistent_buffer_info;
 }
 
 TvProperties getProperties(
     Fusion* fusion,
     SchedulerRuntimeInfo& runtime_info,
     TensorView* tv) {
-  TvProperties properties;
   FusionGuard fg(fusion);
 
-  auto red_root_dom = tv->getRootDomain();
-  for (size_t i = red_root_dom.size(); i > 0; i--) {
-    if (red_root_dom[i - 1]->isBroadcast()) {
+  TORCH_INTERNAL_ASSERT(tv != nullptr);
+
+  auto root_dom = tv->getRootDomain();
+  bool fastest_dim_reduction = true;
+
+  // Is there a non trivial reduction on the inner most dimension or is there an
+  // iteration domain.
+  for (size_t i = root_dom.size(); i > 0; i--) {
+    if (root_dom[i - 1]->isBroadcast() ||
+        root_dom[i - 1]->isTrivialReduction()) {
       continue;
-    } else if (red_root_dom[i - 1]->isReduction()) {
+    } else if (root_dom[i - 1]->isReduction()) {
+      fastest_dim_reduction = true;
       break;
     } else {
-      properties.fastest_dim_reduction = false;
+      fastest_dim_reduction = false;
       break;
     }
   }
 
-  bool hit_reduction = false;
-  auto root_dom = tv->getMaybeRFactorDomain();
-  for (auto it = root_dom.rbegin(); it != root_dom.rend(); ++it) {
-    auto id = *it;
+  // Tracks the dimensionality of the problem starts on inner most dim and works
+  // outward
+  int64_t dimensionality = 1;
+  // Initialize for dimensionality analysis
+  bool cur_dim_is_reduction = fastest_dim_reduction;
+  // Compute the size of the inner most dimension
+  int64_t inner_most_dimension_numel = 1;
 
+  // Start from the inner most dimension, and work outwards. If this is a 3D
+  // pattern, i.e. theres a pattern like [r0, r1, i2, r3] or [i0, r1, r2, i3,
+  // i4] then compute the inner most dimension to compute separately.
+  for (size_t i = root_dom.size(); i > 0; i--) {
+    auto id = root_dom[i - 1];
+    if (id->isBroadcast() || id->isTrivialReduction()) {
+      continue;
+    }
+    if (id->isReduction() != cur_dim_is_reduction) {
+      dimensionality++;
+      cur_dim_is_reduction = !cur_dim_is_reduction;
+    } else if (dimensionality == 1) {
+      auto inferred_val =
+          runtime_info.expressionEvaluator().evaluate(id->extent());
+      TORCH_INTERNAL_ASSERT(
+          inferred_val.has_value(), "Error inferring reduction size.");
+      inner_most_dimension_numel =
+          inner_most_dimension_numel * inferred_val.value();
+    }
+  }
+
+  // Non reduction element count
+  int64_t total_iteration_numel = 1;
+  // Reduction element count
+  int64_t total_reduction_numel = 1;
+
+  for (auto id : tv->getRootDomain()) {
     auto inferred_val =
         runtime_info.expressionEvaluator().evaluate(id->extent());
     TORCH_INTERNAL_ASSERT(
-        inferred_val.has_value(), "Error inferring reduction size.");
+        inferred_val.has_value(),
+        "Error inferring dimensions of reduction fusion.");
     if (id->isReduction()) {
-      hit_reduction = true;
-      properties.reduction_numel *= inferred_val.value();
+      total_reduction_numel *= inferred_val.value();
     } else {
-      auto dim_size = inferred_val.value();
-      properties.iteration_numel *= dim_size;
-      if (hit_reduction) {
-        properties.iter_outside_red *= dim_size;
-      } else {
-        properties.iter_inside_red *= dim_size;
-      }
+      total_iteration_numel *= inferred_val.value();
     }
   }
 
-  if (properties.reduction_numel == 1) {
-    properties.iter_outside_red =
-        properties.iter_outside_red * properties.iter_inside_red;
-    properties.iter_inside_red = 1;
-    properties.fastest_dim_reduction = true;
-  }
+  TvProperties properties;
+  properties.total_reduction_numel = total_reduction_numel;
+  properties.total_iteration_numel = total_iteration_numel;
+  properties.fastest_dim_reduction = fastest_dim_reduction;
+  properties.inner_most_dimension_numel = inner_most_dimension_numel;
+  properties.dimensionality = dimensionality;
 
   return properties;
 }
@@ -222,7 +600,7 @@ void computeAtBetween(
               return mapped_to_trivial_reduction.count(id);
             });
 
-        pos = pos_it == consumer->domain()->domain().end()
+        auto consumer_pos = pos_it == consumer->domain()->domain().end()
             ? pos
             : std::min(
                   (int)std::distance(
@@ -231,165 +609,268 @@ void computeAtBetween(
                   (pos < 0 ? pos + (int)consumer->nDims() : pos));
         // Assume we don't want to reset computeAt on tensors that have already
         // performed it.
-        producer->computeAt(consumer, pos, mode);
+        producer->computeAt(consumer, consumer_pos, mode);
       }
     }
   }
 }
 
-int64_t persistentBufferSize(
-    Fusion* fusion,
-    SchedulerRuntimeInfo& runtime_info,
-    PersistentBufferInfo& persistent_buffers,
-    HeuristicSummary* data_cache) {
-  FUSER_PERF_SCOPE("scheduler_utils::persistentBufferSize");
+namespace {
 
-  if (persistent_buffers.buffers.empty()) {
-    return 0;
+// Figure out which persistent buffers are active at the generation of values in
+// the fusion. This will be used at runtime to compute the size and max size of
+// the persistent buffers.
+std::unique_ptr<HeuristicCompileTime::ScopedPersistenceBufferMap>
+getScopePersistenceFactors(
+    Fusion* fusion,
+    PersistentBufferInfo& persistent_buffer_info) {
+  auto new_persistent_factor_map_ptr =
+      std::make_unique<HeuristicCompileTime::ScopedPersistenceBufferMap>();
+  auto& new_persistent_factor_map = *new_persistent_factor_map_ptr;
+
+  // Convenience accessors
+  const auto& persistent_buffers = persistent_buffer_info.persistent_buffers;
+  const auto& projectable_buffer_inputs =
+      persistent_buffer_info.projectable_buffer_inputs;
+  const auto& projectable_persistent_buffers =
+      persistent_buffer_info.projectable_persistent_buffers;
+  const auto& persistent_buffer_resolution_points =
+      persistent_buffer_info.persistent_buffer_resolution_points;
+
+  // Append projectable buffer inputs, going to compute size of those as well.
+  auto persistent_buffers_and_inputs = persistent_buffers;
+  persistent_buffers_and_inputs.insert(
+      persistent_buffers_and_inputs.end(),
+      projectable_buffer_inputs.begin(),
+      projectable_buffer_inputs.end());
+
+  for (auto persistent_buffer_i : c10::irange(persistent_buffers.size())) {
+    auto persistent_buffer = persistent_buffers[persistent_buffer_i];
+    // All expressions between tv and its resolution points must have tv's
+    // persistent buffer allocated. This is an optimistic view on how many
+    // registers we need allocated in the kernel, since if we ordered two
+    // persistent buffers that are completely independent to somehow overlap
+    // with eachothers loop nests both persistent buffers would have to be
+    // allocated at the same time even though this function would assume they
+    // don't.
+    //
+    // Unfortunately this limitation is hard to work around as we would have
+    // to actually generate the kernel before we know if it would fit
+    // persistently in registers. In practice, though, this should not happen
+    // as inlining loop structures where the persistent buffer is used should
+    // prevent muiltiple persistent buffers from being merged togther if not
+    // necessary.
+    auto resolution_points =
+        persistent_buffer_resolution_points[persistent_buffer_i];
+    for (auto val : DependencyCheck::getAllValsBetween(
+             {persistent_buffer},
+             {resolution_points.begin(), resolution_points.end()})) {
+      // Persistent normalization kernels imply that all persistent buffers
+      // have the same dimensionality. Assume if a persistent buffer is
+      // consumed by another we can alias and reuse the memory.
+      if (val == persistent_buffer) {
+        continue;
+      }
+
+      // All vals between resolution point and the corresponding buffer have
+      // that buffer live during their generation.
+      if (new_persistent_factor_map.find(val) ==
+          new_persistent_factor_map.end()) {
+        new_persistent_factor_map[val] =
+            std::vector<bool>(persistent_buffers_and_inputs.size(), false);
+      }
+      new_persistent_factor_map.at(val)[persistent_buffer_i] = true;
+    }
   }
 
-  int64_t persistent_buffer_size = 0;
+  // Processing projectable persistent buffers is a little more complex, simply
+  // because we have to line up inputs with their persistent buffers.
 
-  using ValToFactorMap = std::unordered_map<Val*, int>;
-  using ValToFactorMapPtr = std::unique_ptr<ValToFactorMap>;
-  using ScopedPersistenceFactorMap =
-      std::unordered_map<Val*, ValToFactorMapPtr>;
+  // Offset into the bool vector
+  size_t bool_vector_offset = persistent_buffers.size();
+  for (auto projectable_persistent_buffer_i :
+       c10::irange(projectable_persistent_buffers.size())) {
+    auto projectable_persistent_buffer =
+        projectable_persistent_buffers[projectable_persistent_buffer_i];
+    auto inputs = ir_utils::inputTvsOf(projectable_persistent_buffer);
 
-  HeuristicCacheAccessor<ScopedPersistenceFactorMap>
-      scoped_persistent_factor_data;
-  // TODO: move all these boilerplate code into the accessor class
-  // (follow up)
+    for (auto input : inputs) {
+      auto input_it = std::find(
+          projectable_buffer_inputs.begin(),
+          projectable_buffer_inputs.end(),
+          input);
+      // If input wasn't recorded as a projectable buffer input, then it doesn't
+      // have any persistent dims, so ignore it.
+      if (input_it == projectable_buffer_inputs.end()) {
+        continue;
+      }
 
-  // Caching traversal result in this case.
-  //  This one is slightly more involving. The end result we want is all the
-  //  concrete
-  //   int values in scoped_persistence. Essentially:
-  //     scoped_persistence [val] = sum_over_all_persistent_tv (
-  //     contrubution_from_tv_to_val * persistent_size_of_tv  )
-  //  Here contrubution_from_tv_to_val can be determined at compile time.
-  //  persistent_size_of_tv is a runtime value but
-  //   doesn't require heavy graph traversal.
-  //  So in this cache entry we try to save a matrix of contribution factors,
-  //  i.e.
-  //
-  //   new_persistent_factor_map[tv][val] = contribution_from_tv_to_val, from
-  //   compile time and we combine the factor
-  //
-  //   with runtime persistent buffer sizes at runtime.
-  if (data_cache && !data_cache->isRecording()) {
-    scoped_persistent_factor_data.writeTemporary(
-        data_cache->getScopedPersistenceFactorMap());
-  } else {
-    // Compute new scoped persisitence factor:
-    auto new_persistent_factor_map_ptr =
-        std::make_unique<ScopedPersistenceFactorMap>();
-    auto& new_persistent_factor_map = *new_persistent_factor_map_ptr;
+      // get inuput index entry in the buffer inputs vector
+      auto input_i = std::distance(projectable_buffer_inputs.begin(), input_it);
 
-    for (auto tv : persistent_buffers.buffers) {
-      auto& consumer_tv_to_factor_map_ptr = new_persistent_factor_map[tv];
-      consumer_tv_to_factor_map_ptr = std::make_unique<ValToFactorMap>();
-      auto& consumer_tv_to_factor_map = *consumer_tv_to_factor_map_ptr;
+      // Get the offset in the bool vector for this input
+      input_i += bool_vector_offset;
 
-      // All expressions between tv and its consumers must have tv's persistent
-      // buffer allocated. This is an optimistic view on how many registers we
-      // need allocated in the kernel, since if we ordered two persistent
-      // buffers that are completely independent to somehow overlap with
-      // eachother we would assume we wouldn't need those two buffers active at
-      // the same time, even though they would be.
-      //
-      // Unfortunately this limitation is hard to work around as we would have
-      // to actually generate the kernel before we know if it would fit
-      // persistently in registers. In practice, though, this should not happen
-      // as inlining loop structures where the persistent buffer is used should
-      // prevent muiltiple persistent buffers from being merged togther if not
-      // necessary.
-      auto consumers_of_tv = ir_utils::consumerTvsOf(tv);
+      // If we project persistence from the persistent buffers to the inputs,
+      // then it would have to be active from the resolution points of the
+      // persistent buffer all the way back to the projected inputs.
+      auto resolution_points =
+          persistent_buffer_resolution_points[projectable_persistent_buffer_i];
+
       for (auto val : DependencyCheck::getAllValsBetween(
-               {tv}, {consumers_of_tv.begin(), consumers_of_tv.end()})) {
+               {input}, {resolution_points.begin(), resolution_points.end()})) {
         // Persistent normalization kernels imply that all persistent buffers
         // have the same dimensionality. Assume if a persistent buffer is
         // consumed by another we can alias and reuse the memory.
-        if (val == tv) {
+        if (val == input) {
           continue;
         }
 
-        if (consumer_tv_to_factor_map.count(val)) {
-          consumer_tv_to_factor_map.at(val) += 1;
-        } else {
-          consumer_tv_to_factor_map[val] = 1;
+        if (new_persistent_factor_map.find(val) ==
+            new_persistent_factor_map.end()) {
+          new_persistent_factor_map[val] =
+              std::vector<bool>(persistent_buffers_and_inputs.size(), false);
         }
+        new_persistent_factor_map.at(val)[input_i] = true;
       }
     }
+  }
+  return new_persistent_factor_map_ptr;
+}
 
-    // Caching boilerplate (TO be cleaned up in a follow up)
-    scoped_persistent_factor_data.takeNew(new_persistent_factor_map_ptr);
-    if (data_cache && data_cache->isRecording()) {
-      data_cache->setScopedPersistenceFactorMap(
-          scoped_persistent_factor_data.read());
-    }
+} // namespace
+
+PersistentBufferSizeReturn persistentBufferSize(
+    Fusion* fusion,
+    SchedulerRuntimeInfo& runtime_info,
+    PersistentBufferInfo& persistent_buffer_info,
+    HeuristicSummary* data_cache) {
+  FUSER_PERF_SCOPE("scheduler_utils::persistentBufferSize");
+
+  if (persistent_buffer_info.persistent_buffers.empty()) {
+    PersistentBufferSizeReturn empty_sizes;
+    return empty_sizes;
   }
 
-  auto& scoped_persistence_factor = scoped_persistent_factor_data.read();
+  // Compute size of all the buffers
+  const auto& persistent_buffers = persistent_buffer_info.persistent_buffers;
+  const auto& projectable_buffers =
+      persistent_buffer_info.projectable_persistent_buffers;
+  const auto& projectable_buffers_inputs =
+      persistent_buffer_info.projectable_buffer_inputs;
+  const auto& unmappable_dims = persistent_buffer_info.unmappable_dims;
+  const auto& input_unmappable_dims =
+      persistent_buffer_info.unamppable_dims_projected_to_inputs;
 
-  // Runtime: convert the persistent factor to actual values
-  std::unordered_map<Val*, int64_t> scoped_persistence;
+  std::vector<TensorView*> all_buffers = persistent_buffers;
+  all_buffers.insert(
+      all_buffers.end(),
+      projectable_buffers_inputs.begin(),
+      projectable_buffers_inputs.end());
 
-  for (auto tv : persistent_buffers.buffers) {
-    int64_t tv_persistent_numel = -1;
-    for (auto id : tv->getMaybeRFactorDomain()) {
+  std::vector<int64_t> persistent_buffer_sizes(all_buffers.size(), -1);
+
+  for (auto buffer_i : c10::irange(all_buffers.size())) {
+    bool is_input = buffer_i >= persistent_buffers.size();
+    auto buffer = all_buffers[buffer_i];
+
+    for (auto id : buffer->getMaybeRFactorDomain()) {
       if (id->isReduction() || id->isBroadcast()) {
         continue;
       }
       // Unmappable dimensions are those that we cannot inline into other
       // tensor views. So they're the ones that need to be persistent.
-      if (!persistent_buffers.unmappable_dims.count(id)) {
+      if (!is_input && !unmappable_dims.count(id)) {
+        continue;
+      }
+
+      if (is_input && !input_unmappable_dims.count(id)) {
         continue;
       }
 
       auto id_size = runtime_info.expressionEvaluator().evaluate(id->extent());
       TORCH_INTERNAL_ASSERT(
-          id_size.has_value(),
-          "Cannot generate heuristics if we don't have input information.");
-      if (tv_persistent_numel == -1) {
-        tv_persistent_numel = id_size.value();
+          id_size.has_value(), "Could not infer persistent buffer size.");
+      if (persistent_buffer_sizes[buffer_i] == -1) {
+        persistent_buffer_sizes[buffer_i] = id_size.value();
       } else {
-        tv_persistent_numel *= id_size.value();
+        persistent_buffer_sizes[buffer_i] *= id_size.value();
       }
     }
 
-    persistent_buffer_size =
-        tv_persistent_numel * dataTypeSize(tv->getDataType().value());
+    persistent_buffer_sizes[buffer_i] = persistent_buffer_sizes[buffer_i] == -1
+        ? 0
+        : persistent_buffer_sizes[buffer_i] *
+            dataTypeSize(buffer->getDataType().value());
+  }
 
-    // Look up the contribution part from the cached matrix:
-    auto scoped_factor_it = scoped_persistence_factor.find(tv);
-    if (scoped_factor_it != scoped_persistence_factor.end()) {
-      // now looking at scoped_persistence_factor[tv]
-      for (auto val_to_factor_it : *(scoped_factor_it->second)) {
-        // (val_to_factor_it) is (val, factor)
-        int64_t persistent_buffer_size_contribution =
-            persistent_buffer_size * val_to_factor_it.second;
+  // Buffers involved in normal persistence
+  std::vector<bool> persistent_mask(all_buffers.size(), false);
 
-        //  try to write factor * persistent_buffer_size into
-        //  scoped_persistence[val]
-        auto val_it = scoped_persistence.find(val_to_factor_it.first);
-        if (val_it == scoped_persistence.end()) {
-          scoped_persistence[val_to_factor_it.first] =
-              persistent_buffer_size_contribution;
-        } else {
-          val_it->second += persistent_buffer_size_contribution;
-        }
-      }
+  for (auto buffer_i : c10::irange(persistent_buffers.size())) {
+    persistent_mask[buffer_i] = true;
+  }
+
+  // Buffers involved in projected to inputs
+  std::vector<bool> projected_mask(all_buffers.size(), true);
+
+  for (auto buffer_i : c10::irange(persistent_buffers.size())) {
+    auto buffer = persistent_buffers[buffer_i];
+    // Not a projectable buffer, or an input of a projectable buffer
+    if (std::find(
+            projectable_buffers.begin(), projectable_buffers.end(), buffer) !=
+        projectable_buffers.end()) {
+      projected_mask[buffer_i] = false;
     }
   }
 
-  // Find the maximum persistent buffer use
+  // Function to take the mask of active buffers at a val, the mask (for if this
+  // is a normal persistent calculation, or a calculation projected on to the
+  // input buffers), and sizes, and returns total persistent buffer size.
+  auto masked_dot_product = [](const std::vector<bool>& mask0,
+                               const std::vector<bool>& mask1,
+                               const std::vector<int64_t>& sizes) {
+    int64_t buffer_size = 0;
+    TORCH_INTERNAL_ASSERT(
+        mask0.size() == mask1.size() && mask0.size() == sizes.size());
+    for (auto buffer_i : c10::irange(sizes.size())) {
+      if (mask0[buffer_i] && mask1[buffer_i]) {
+        buffer_size += sizes[buffer_i];
+      }
+    }
+    return buffer_size;
+  };
+
+  auto persistent_buffer_info_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::ScopePersistentFactorInfo>(
+          data_cache, [&fusion, &persistent_buffer_info]() {
+            return getScopePersistenceFactors(fusion, persistent_buffer_info);
+          });
+
+  auto& scoped_persistence_factor = persistent_buffer_info_entry.get();
+
+  // Go through all values, compute the size of the active persistent buffers,
+  // do both without and with projection
   int64_t max_persistence_size = 0;
-  for (auto persistent_entry : scoped_persistence) {
+  int64_t max_proj_persistence_size = 0;
+  for (const auto& entry : scoped_persistence_factor) {
+    auto active_buffers = entry.second;
+    auto persistent_buffer_size = masked_dot_product(
+        persistent_mask, active_buffers, persistent_buffer_sizes);
     max_persistence_size =
-        std::max(max_persistence_size, persistent_entry.second);
+        std::max(max_persistence_size, persistent_buffer_size);
+
+    auto projected_buffer_size = masked_dot_product(
+        projected_mask, active_buffers, persistent_buffer_sizes);
+    max_proj_persistence_size =
+        std::max(max_proj_persistence_size, projected_buffer_size);
   }
 
-  return max_persistence_size;
+  PersistentBufferSizeReturn persistent_buffer_size;
+  persistent_buffer_size.persistent_buffer_size = max_persistence_size;
+  persistent_buffer_size.projected_persistent_buffer_size =
+      max_proj_persistence_size;
+  return persistent_buffer_size;
 }
 
 std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
@@ -406,9 +887,9 @@ std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
   }
 
   if (!mapped_to_trivial_reduction.empty()) {
-    // Shouldn't matter which compute at map we use
-    auto ca_index_map = ComputeAtMap(ComputeAtMap::MappingMode::INDEX);
-    ca_index_map.build(fusion);
+    // Use the loop map as that is the most permissive
+    auto ca_loop_map = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
+    ca_loop_map.build(fusion);
     // Make a copy we need to check mappings of all
     auto trivial_ids = mapped_to_trivial_reduction;
     for (auto tv : all_tvs) {
@@ -419,8 +900,8 @@ std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
         if (std::any_of(
                 trivial_ids.begin(),
                 trivial_ids.end(),
-                [&ca_index_map, &id](IterDomain* trivial_id) {
-                  return ca_index_map.areMapped(id, trivial_id);
+                [&ca_loop_map, &id](IterDomain* trivial_id) {
+                  return ca_loop_map.areMapped(id, trivial_id);
                 })) {
           mapped_to_trivial_reduction.emplace(id);
         }
@@ -430,20 +911,30 @@ std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
   return mapped_to_trivial_reduction;
 }
 
-std::pair<bool, bool> canonicalDimReduction(Fusion* fusion, TensorView* tv) {
+std::pair<bool, bool> canonicalDimReduction(
+    Fusion* fusion,
+    TensorView* tv,
+    bool schedule_3D) {
   std::unordered_set<IterDomain*> mapped_to_trivial_reduction =
       getTrivialReductionMap(fusion);
 
   TORCH_INTERNAL_ASSERT(tv != nullptr);
 
-  // We coalesce all reduction axes to the right;
-  bool has_red_axis = mergeReduction(tv, mapped_to_trivial_reduction) > 0;
+  if (!schedule_3D) {
+    // We coalesce all reduction axes to the right;
+    bool has_red_axis = mergeReduction(tv, mapped_to_trivial_reduction) > 0;
 
-  bool has_iter_axis = mergeNonReduction(tv, mapped_to_trivial_reduction) > 0;
-  return {has_iter_axis, has_red_axis};
+    bool has_iter_axis = mergeNonReduction(tv, mapped_to_trivial_reduction) > 0;
+    return {has_iter_axis, has_red_axis};
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        merge_3d(tv, mapped_to_trivial_reduction) == 3,
+        "Tried 3D merge, but result is not 3D.");
+    return {true, true};
+  }
 }
 
-std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
+std::vector<TensorView*> getReductionTvs(Fusion* fusion, bool ignore_trivial) {
   auto all_tvs = ir_utils::allTvs(fusion);
   std::vector<TensorView*> reduction_tvs;
   for (auto tv : all_tvs) {
@@ -451,8 +942,9 @@ std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
         std::any_of(
             tv->domain()->domain().begin(),
             tv->domain()->domain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && !id->isTrivialReduction();
+            [&ignore_trivial](IterDomain* id) {
+              return id->isReduction() &&
+                  !(ignore_trivial && id->isTrivialReduction());
             })) {
       reduction_tvs.emplace_back(tv);
     }
@@ -477,629 +969,18 @@ std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
   return reduction_tvs;
 }
 
-TensorView* scheduleReductionTV(
-    const ReductionParams& rparams,
-    TensorView* reduction_tv,
-    bool has_iter_axis) {
-  TensorView* reference_tv = nullptr;
-  if (rparams.fastest_dim) {
-    const int iter_axis = 0;
-    const int reduce_axis = has_iter_axis ? 1 : 0;
-
-    // Do multiple reductions per block
-    if (rparams.multiple_reds_per_blk) {
-      if (rparams.reduction_unroll) {
-        // Fastest dim, multiple reductions per block
-        // Output Dimensions
-        // [x-BIDx, x-TIDy
-        //  0       1
-        //
-        //  Reduction Dimensions
-        //  rF-Remain, rf-Unswitch, rf-Unroll, X-TIDx]
-        //  2(r)          3(r+1)     4(r+2)    5(r+3)
-        //  Reduction Dimensions
-        //  rF-Remain, rf-Unswitch, X-TIDx, rf-Vectorize]
-        //  2(r)          3(r+1)     4(r+2)    5(r+3)
-
-        //  X-TIDx, rF-Remain, rf-Unswitch, rf-Unroll/Vect]
-        //   2(r)     3(r+1)       4(r+2)      5(r+3)
-
-        if (!rparams.persistent_kernel) {
-          if (rparams.vectorize) {
-            reduction_tv->split(reduce_axis, rparams.loop_unroll);
-            reduction_tv->split(
-                reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-          } else {
-            reduction_tv->split(
-                reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-            reduction_tv->split(reduce_axis, rparams.loop_unroll);
-          }
-          // Unswitch axis which gives us finer control on allocations with
-          // unrolling
-          reduction_tv->split(reduce_axis, 1);
-        } else {
-          if (rparams.vectorize) {
-            reduction_tv->split(reduce_axis, rparams.batches_per_block, false);
-            reduction_tv->split(reduce_axis + 1, rparams.loop_unroll);
-          } else {
-            reduction_tv->split(
-                reduce_axis,
-                rparams.batches_per_block * rparams.loop_unroll,
-                false);
-            reduction_tv->split(reduce_axis, rparams.loop_unroll);
-          }
-          // Unswitch axis which gives us finer control on allocations with
-          // unrolling
-          reduction_tv->split(reduce_axis, 1);
-        }
-
-        if (rparams.vectorize) {
-          reduction_tv->reorder(
-              {{reduce_axis, reduce_axis + 1},
-               {reduce_axis + 1, reduce_axis + 2},
-               {reduce_axis + 2, reduce_axis}});
-        } else {
-          reduction_tv->reorder(
-              {{reduce_axis + 3, reduce_axis},
-               {reduce_axis, reduce_axis + 1},
-               {reduce_axis + 1, reduce_axis + 2},
-               {reduce_axis + 2, reduce_axis + 3}});
-        }
-
-        reference_tv = ir_utils::rfactorHelper(
-            reduction_tv, {reduce_axis + 1, reduce_axis + 2, reduce_axis + 3});
-
-        reference_tv->axis(reduce_axis)->parallelize(ParallelType::TIDx);
-
-        if (rparams.vectorize) {
-          reference_tv->axis(reduce_axis + 3)
-              ->parallelize(ParallelType::Vectorize);
-        } else {
-          reference_tv->axis(reduce_axis + 3)
-              ->parallelize(ParallelType::Unroll);
-        }
-        reference_tv->axis(reduce_axis + 2)
-            ->parallelize(ParallelType::Unswitch);
-
-        if (has_iter_axis) {
-          reference_tv->split(
-              iter_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
-          reference_tv->axis(iter_axis + 1)->parallelize(ParallelType::TIDy);
-          if (rparams.split_grid_dim) {
-            reference_tv->split(iter_axis, x_grid_limit);
-            reference_tv->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
-          } else {
-            reference_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
-          }
-        }
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            has_iter_axis,
-            "This scheduler requires an outer dim to the reduction.");
-        // Fastest dim, Multiple reductions per block iter unroll
-        // Output Dimensions
-        // [x-BIDx, x-Unswitch, x-Unroll, x-TIDy
-        //  0       1           2         3
-        //
-        //  Reduction Dimensions
-        //  rF-Remain, r-TIDx]
-        //  4(r)     5(r+1)
-        if (!rparams.persistent_kernel) {
-          reduction_tv->split(
-              1, NamedScalar::getParallelDim(ParallelType::TIDx));
-        } else {
-          reduction_tv->split(1, rparams.batches_per_block, false);
-        }
-
-        reference_tv = ir_utils::rfactorHelper(reduction_tv, {1});
-
-        reference_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDy));
-        reference_tv->split(0, rparams.loop_unroll);
-        // Unswitch axis which gives us finer control on allocations with
-        // unrolling
-        reference_tv->split(0, 1);
-
-        // [x-BIDx, x-Unswitch, x-Unroll, x-TIDy, rF-Remain, r-TIDx]
-        //     0         1          2        3        4         5
-        // -> [x-BIDx, x-TIDy, rF-Remain, x-Unswitch, x-Unroll, r-TIDx]
-        //       0        1         2           3          4       5
-
-        reference_tv->reorder({{1, 3}, {2, 4}, {3, 1}, {4, 2}});
-
-        reference_tv->axis(1)->parallelize(ParallelType::TIDy);
-        reference_tv->axis(3)->parallelize(ParallelType::Unswitch);
-        reference_tv->axis(4)->parallelize(ParallelType::Unroll);
-        reference_tv->axis(5)->parallelize(ParallelType::TIDx);
-
-        if (rparams.split_grid_dim) {
-          reference_tv->split(0, x_grid_limit);
-          reference_tv->axis(1)->parallelize(ParallelType::BIDx);
-        } else {
-          reference_tv->axis(0)->parallelize(ParallelType::BIDx);
-        }
-      }
-    } else {
-      // Not multiple reductions per block
-      if (rparams.cross_grid) {
-        TORCH_INTERNAL_ASSERT(
-            rparams.reduction_unroll,
-            "Unrolling on iter domain not supported in this scheduler.");
-
-        TORCH_INTERNAL_ASSERT(
-            !rparams.persistent_kernel,
-            "Grid reductions not implemented yet for persistent kernels.");
-
-        // Fastest dim, cross grid, cross block
-        //      [outputs,
-        // Idx:     0
-        //   | rf-Remain, r-BIDx, r-TIDy, rf-Unswitch, rf-Unroll, r-TIDx]
-        //       1(r)     2(r+1)  3(r+2)     4(r+3)      5(r+4)   6(r+5)|
-        //   | rf-Remain, r-BIDx, r-TIDy, rf-Unswitch, r-TIDx, r-Vectorize]
-        //       1(r)     2(r+1)  3(r+2)     4(r+3)    5(r+4)    6(r+5)|
-        //                Reduction Dimensions
-
-        //   | r-BIDx, r-TIDy, r-TIDx, rf-Remain, rf-Unswitch, rf-Unroll/Vect]
-        //       1(r)  2(r+1)  3(r+2)   4(r+3)       5(r+4)     6(r+5)  |
-        //                Reduction Dimensions
-
-        if (rparams.vectorize) {
-          reduction_tv->split(reduce_axis, rparams.loop_unroll);
-          reduction_tv->split(
-              reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-        } else {
-          reduction_tv->split(
-              reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-          reduction_tv->split(reduce_axis, rparams.loop_unroll);
-        }
-        reduction_tv->split(reduce_axis, 1);
-        // Unswitch axis which gives us finer control on allocations with
-        // unrolling
-        reduction_tv->split(
-            reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
-        reduction_tv->split(
-            reduce_axis, NamedScalar::getParallelDim(ParallelType::BIDx));
-
-        if (rparams.vectorize) {
-          reduction_tv->reorder(
-              {{reduce_axis, reduce_axis + 3},
-               {reduce_axis + 1, reduce_axis},
-               {reduce_axis + 2, reduce_axis + 1},
-               {reduce_axis + 3, reduce_axis + 4},
-               {reduce_axis + 4, reduce_axis + 2}});
-        } else {
-          reduction_tv->reorder(
-              {{reduce_axis, reduce_axis + 3},
-               {reduce_axis + 1, reduce_axis},
-               {reduce_axis + 2, reduce_axis + 1},
-               {reduce_axis + 3, reduce_axis + 4},
-               {reduce_axis + 4, reduce_axis + 5},
-               {reduce_axis + 5, reduce_axis + 2}});
-        }
-
-        reference_tv = ir_utils::rfactorHelper(
-            reduction_tv, {reduce_axis + 3, reduce_axis + 4, reduce_axis + 5});
-
-        if (rparams.vectorize) {
-          reference_tv->axis(reduce_axis + 5)
-              ->parallelize(ParallelType::Vectorize);
-        } else {
-          reference_tv->axis(reduce_axis + 5)
-              ->parallelize(ParallelType::Unroll);
-        }
-        reference_tv->axis(reduce_axis + 4)
-            ->parallelize(ParallelType::Unswitch);
-
-        reference_tv->axis(reduce_axis + 2)->parallelize(ParallelType::TIDx);
-        reference_tv->axis(reduce_axis + 1)->parallelize(ParallelType::TIDy);
-        reference_tv->axis(reduce_axis)->parallelize(ParallelType::BIDx);
-
-        if (has_iter_axis) {
-          if (rparams.split_grid_dim) {
-            reference_tv->split(iter_axis, y_grid_limit);
-            reference_tv->axis(iter_axis + 1)->parallelize(ParallelType::BIDy);
-          } else {
-            reference_tv->axis(iter_axis)->parallelize(ParallelType::BIDy);
-          }
-        }
-
-      } else {
-        // Not cross grid
-        if (rparams.reduction_unroll) {
-          // Fastest dim, Reduction unroll
-          // Output Dimensions
-          // [BIDx
-          //  0
-          //
-          // Reduction Dimensions
-          // rF-Remain, rf-Unswitch, rf-Unroll, r-TIDx]
-          // 1(r)      2(r+1)        3(r+2)      4(r+3)
-          // rF-Remain, rf-Unswitch, r-TIDx, rf-Vectorize]
-          // 1(r)      2(r+1)        3(r+2)      4(r+3)
-
-          //  r-TIDx, rF-Leftover, rf-Unswitch, rf-Unroll]
-          //  1(r)       2(r+1)      3(r+2)       4(r+3)
-
-          if (!rparams.persistent_kernel) {
-            if (rparams.vectorize) {
-              reduction_tv->split(reduce_axis, rparams.loop_unroll);
-              reduction_tv->split(
-                  reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-            } else {
-              reduction_tv->split(
-                  reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-              reduction_tv->split(reduce_axis, rparams.loop_unroll);
-            }
-            // Unswitch axis which gives us finer control on allocations with
-            // unrolling
-            reduction_tv->split(reduce_axis, 1);
-          } else {
-            if (rparams.vectorize) {
-              reduction_tv->split(
-                  reduce_axis, rparams.batches_per_block, false);
-              reduction_tv->split(reduce_axis + 1, rparams.loop_unroll);
-            } else {
-              reduction_tv->split(
-                  reduce_axis,
-                  rparams.batches_per_block * rparams.loop_unroll,
-                  false);
-              reduction_tv->split(reduce_axis, rparams.loop_unroll);
-            }
-            // Unswitch axis which gives us finer control on allocations with
-            // unrolling
-            reduction_tv->split(reduce_axis, 1);
-          }
-
-          if (rparams.vectorize) {
-            reduction_tv->reorder(
-                {{reduce_axis + 2, reduce_axis},
-                 {reduce_axis, reduce_axis + 1},
-                 {reduce_axis + 1, reduce_axis + 2}});
-          } else {
-            reduction_tv->reorder(
-                {{reduce_axis + 3, reduce_axis},
-                 {reduce_axis, reduce_axis + 1},
-                 {reduce_axis + 1, reduce_axis + 2},
-                 {reduce_axis + 2, reduce_axis + 3}});
-          }
-
-          reference_tv = ir_utils::rfactorHelper(
-              reduction_tv,
-              {reduce_axis + 1, reduce_axis + 2, reduce_axis + 3});
-
-          reference_tv->axis(reduce_axis)->parallelize(ParallelType::TIDx);
-          if (rparams.vectorize) {
-            reference_tv->axis(reduce_axis + 3)
-                ->parallelize(ParallelType::Vectorize);
-          } else {
-            reference_tv->axis(reduce_axis + 3)
-                ->parallelize(ParallelType::Unroll);
-          }
-          reference_tv->axis(reduce_axis + 2)
-              ->parallelize(ParallelType::Unswitch);
-
-          if (has_iter_axis) {
-            if (rparams.split_grid_dim) {
-              reference_tv->split(iter_axis, x_grid_limit);
-              reference_tv->axis(iter_axis + 1)
-                  ->parallelize(ParallelType::BIDx);
-            } else {
-              reference_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
-            }
-          }
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              has_iter_axis, "Need iteration axis for iteration unroll.");
-          // Fastest dim, Reduction Splits
-          // Output Dimensions
-          // [BIDx, x-Unswitch, x-Unroll
-          //  0
-          //
-          // Reduction Dimensions
-          // rF-Remain, r-TIDx]
-          // 1(r)       2(r+1)
-
-          if (!rparams.persistent_kernel) {
-            reduction_tv->split(
-                reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-          } else {
-            reduction_tv->split(reduce_axis, rparams.batches_per_block, false);
-          }
-
-          reduction_tv->split(iter_axis, rparams.loop_unroll);
-          // Unswitch axis which gives us finer control on allocations with
-          // unrolling
-          reduction_tv->split(iter_axis, 1);
-
-          // [x-BIDx, x-Unswitch, x-Unroll, rF-Remain, r-TIDx]
-          //     0         1          2        3        4
-          // -> [x-BIDx, rF-Remain, x-Unswitch, x-Unroll, r-TIDx]
-          //       0        1          2           3          4
-
-          reduction_tv->reorder({{1, 2}, {2, 3}, {3, 1}});
-
-          reference_tv = ir_utils::rfactorHelper(reduction_tv, {1});
-
-          reference_tv->axis(4)->parallelize(ParallelType::TIDx);
-          reference_tv->axis(3)->parallelize(ParallelType::Unroll);
-          reference_tv->axis(2)->parallelize(ParallelType::Unswitch);
-
-          if (rparams.split_grid_dim) {
-            reference_tv->split(0, x_grid_limit);
-            reference_tv->axis(1)->parallelize(ParallelType::BIDx);
-          } else {
-            reference_tv->axis(0)->parallelize(ParallelType::BIDx);
-          }
-        }
-      }
-    }
-  } else {
-    if (rparams.cross_block) {
-      if (rparams.cross_grid) {
-        TORCH_INTERNAL_ASSERT(
-            rparams.reduction_unroll,
-            "Unrolling on iter domain not supported in this scheduler.");
-
-        TORCH_INTERNAL_ASSERT(
-            !rparams.persistent_kernel,
-            "Grid reductions not implemented yet for persistent kernels.");
-
-        // Outer Dim, cross grid, cross block
-
-        // Unrolling in this case can only be applied to the reduction
-        // dimension since currently, grid reductions cannot be called
-        // multiple times
-        //
-        // Output Dimensions
-        // [x-BIDx, x-TIDx,
-        //  0         1
-        //
-        // Reduction Dimensions
-        // rF-Leftover, r-BIDy, r-TIDy, rf-Unswitch, rf-Unroll]
-        // 2(-5)        3(-4)   4(-3)   5(-2)        6(-1)
-
-        // r-BIDy, r-TIDy, rF-Leftover, rf-Unswitch, rf-Unroll]
-        // 2(-5)    3(-4)      4(-3)       5(-2)        6(-1)
-
-        reduction_tv->split(1, rparams.loop_unroll);
-        // Unswitch axis which gives us finer control on allocations with
-        // unrolling
-        reduction_tv->split(1, 1);
-        reduction_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDy));
-        reduction_tv->split(1, NamedScalar::getParallelDim(ParallelType::BIDy));
-
-        reduction_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
-
-        reduction_tv->reorder({{2, 4}, {3, 2}, {4, 3}});
-
-        reference_tv = ir_utils::rfactorHelper(
-            reduction_tv,
-            {4, 5, 6}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-
-        reference_tv->axis(6)->parallelize(ParallelType::Unroll);
-        reference_tv->axis(5)->parallelize(ParallelType::Unswitch);
-        reference_tv->axis(3)->parallelize(ParallelType::TIDy);
-        reference_tv->axis(2)->parallelize(ParallelType::BIDy);
-        reference_tv->axis(1)->parallelize(ParallelType::TIDx);
-        reference_tv->axis(0)->parallelize(ParallelType::BIDx);
-      } else {
-        if (rparams.reduction_unroll || rparams.loop_unroll == 1) {
-          // Outer Dim, cross block, unroll reduction dimension
-
-          // Reduction Splits
-          // Output Dimensions
-          // [x-BIDx, x-TIDx
-          //  0       1
-          //
-          // Reduction Dimensions
-          // rF-Leftover, r-TIDy, rf-Unswitch, rf-Unroll]
-          // 2(-4)        3(-3)   4(-2)       5(-1)
-
-          // r-TIDy, rF-Leftover, rf-Unswitch, rf-Unroll]
-          // 2(-4)      3(-3)       4(-2)       5(-1)
-          if (!rparams.persistent_kernel) {
-            reduction_tv->split(1, rparams.loop_unroll);
-            // Unswitch axis which gives us finer control on allocations with
-            // unrolling
-            reduction_tv->split(1, 1);
-            reduction_tv->split(
-                1, NamedScalar::getParallelDim(ParallelType::TIDy));
-          } else {
-            reduction_tv->split(1, rparams.batches_per_block, false);
-            reduction_tv->split(2, rparams.loop_unroll);
-            reduction_tv->split(2, 1);
-          }
-
-          reduction_tv->split(
-              0, NamedScalar::getParallelDim(ParallelType::TIDx));
-
-          reduction_tv->reorder({{2, 3}, {3, 2}});
-
-          reference_tv = ir_utils::rfactorHelper(
-              reduction_tv,
-              {3, 4, 5}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-
-          reference_tv->axis(5)->parallelize(ParallelType::Unroll);
-          reference_tv->axis(4)->parallelize(ParallelType::Unswitch);
-          reference_tv->axis(2)->parallelize(ParallelType::TIDy);
-          reference_tv->axis(1)->parallelize(ParallelType::TIDx);
-          reference_tv->axis(0)->parallelize(ParallelType::BIDx);
-        } else {
-          // Outer Dim, cross block, unroll iter dimension
-
-          // Output Dimensions
-          // [x-BIDx, x-Unswitch, x-Unroll, x-TIDx
-          //  0       1           2         3
-          // [x-BIDx, x-Unswitch, x-TIDx, x-Vectorize
-          //  0       1           2         3
-          //
-          // Reduction Dimensions
-          // rF-Leftover, r-TIDy]
-          // 4(-2)        5(-1)
-
-          // The unroll/unswitch dimension needs to be within the rF-Leftover
-          // dimension
-          //    [x-BIDx, x-Unswitch, x-Unroll, x-TIDx, rF-Leftover, r-TIDy]
-          //      0(-6)     1(-5)      2(-4)    3(-3)     4(-2)      5(-1)
-          //    [x-BIDx, x-Unswitch, x-TIDx, x-Vectorize, rF-Leftover, r-TIDy]
-          //      0(-6)     1(-5)      2(-4)    3(-3)     4(-2)      5(-1)
-          // -> [x-BIDx, x-TIDx, rF-Leftover, x-Unswitch, x-Unroll/Vect,
-          // r-TIDy]
-          //      0(-6)   1(-5)     2(-4)        3(-3)      4(-2)        5(-1)
-
-          if (!rparams.persistent_kernel) {
-            reduction_tv->split(
-                1, NamedScalar::getParallelDim(ParallelType::TIDy));
-          } else {
-            reduction_tv->split(1, rparams.batches_per_block, false);
-          }
-          if (rparams.vectorize) {
-            reduction_tv->split(0, rparams.loop_unroll);
-            reduction_tv->split(
-                0, NamedScalar::getParallelDim(ParallelType::TIDx));
-
-          } else {
-            reduction_tv->split(
-                0, NamedScalar::getParallelDim(ParallelType::TIDx));
-            reduction_tv->split(0, rparams.loop_unroll);
-          }
-          // Unswitch axis which gives us finer control on allocations with
-          // unrolling
-          reduction_tv->split(0, 1);
-
-          if (rparams.vectorize) {
-            reduction_tv->reorder({{1, 3}, {2, 1}, {3, 4}, {4, 2}});
-          } else {
-            reduction_tv->reorder({{1, 3}, {2, 4}, {3, 1}, {4, 2}});
-          }
-
-          reference_tv = ir_utils::rfactorHelper(
-              reduction_tv,
-              {2}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-
-          reference_tv->axis(5)->parallelize(ParallelType::TIDy);
-          reference_tv->axis(1)->parallelize(ParallelType::TIDx);
-          if (rparams.vectorize) {
-            reference_tv->axis(4)->parallelize(ParallelType::Vectorize);
-          } else {
-            reference_tv->axis(4)->parallelize(ParallelType::Unroll);
-          }
-          reference_tv->axis(3)->parallelize(ParallelType::Unswitch);
-          reference_tv->axis(0)->parallelize(ParallelType::BIDx);
-        }
-      }
-    } else {
-      if (rparams.reduction_unroll) {
-        // Outer Dim, no parallelization on reduction, unroll reduction axis
-        // Output Dimensions
-        // [x-BIDx, x-TIDx
-        //  0       1
-        //
-        // Reduction Dimensions
-        // rf-Leftover, rf-Unswitch, r-Unroll]
-        //       2            3         4
-        if (rparams.persistent_kernel) {
-          reduction_tv->split(1, rparams.batches_per_block, false);
-          reduction_tv->split(2, rparams.loop_unroll);
-          // Reduction Dimensions
-          // rf-Leftover, r-TIDy, rf-Unroll]
-          //       2         3         4
-        } else {
-          reduction_tv->split(1, rparams.loop_unroll);
-          // Unswitch axis which gives us finer control on allocations with
-          // unrolling
-          reduction_tv->split(1, 1);
-        }
-
-        reduction_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
-
-        if (rparams.persistent_kernel) {
-          // [x-BIDx, x-TIDx, rf-Leftover, r-TIDy, rf-Unroll]
-          //     0       1         2         3         4
-          reduction_tv->reorder({{3, 2}, {2, 3}});
-          // [x-BIDx, x-TIDx, r-TIDy, rf-Leftover, rf-Unroll]
-          //     0       1       2           3         4
-          reference_tv = ir_utils::rfactorHelper(
-              reduction_tv,
-              {3, 4}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-          reference_tv->axis(0)->parallelize(ParallelType::BIDx);
-          reference_tv->axis(1)->parallelize(ParallelType::TIDx);
-          reference_tv->axis(2)->parallelize(ParallelType::TIDy);
-          reference_tv->axis(3)->parallelize(ParallelType::Unswitch);
-          reference_tv->axis(4)->parallelize(ParallelType::Unroll);
-        } else {
-          reference_tv = ir_utils::rfactorHelper(
-              reduction_tv,
-              {2, 3}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-          reference_tv->axis(0)->parallelize(ParallelType::BIDx);
-          reference_tv->axis(1)->parallelize(ParallelType::TIDx);
-          reference_tv->axis(3)->parallelize(ParallelType::Unswitch);
-          reference_tv->axis(4)->parallelize(ParallelType::Unroll);
-        }
-      } else {
-        // No parallelization on reduction, unroll iter axis
-        // Output Dimensions
-        // [x-BIDx, x-Unswitch, x-Unroll, x-TIDx
-        //  0       1           2         3
-        // [x-BIDx, x-Unswitch, x-TIDx, x-Vectorize
-        //  0       1           2         3
-        //
-        // Reduction Dimensions
-        // rf-Leftover, r-{1}]
-        // 4(-1)
-        //
-        // Fake an rfactor to make scheduling more consistent.
-        //
-        // The unroll/unswitch dimension needs to be within the rF-Leftover
-        // dimension
-        if (rparams.persistent_kernel) {
-          reduction_tv->split(1, rparams.batches_per_block, false);
-        } else {
-          reduction_tv->split(1, 1);
-        }
-
-        if (rparams.vectorize) {
-          reduction_tv->split(0, rparams.loop_unroll);
-          reduction_tv->split(
-              0, NamedScalar::getParallelDim(ParallelType::TIDx));
-        } else {
-          reduction_tv->split(
-              0, NamedScalar::getParallelDim(ParallelType::TIDx));
-          reduction_tv->split(0, rparams.loop_unroll);
-        }
-
-        reduction_tv->split(0, 1);
-
-        // [x-BIDx, x-Unswitch, x-Unroll, x-TIDx, rf-Leftover, r-1]
-        //   0         1          2        3            4       5
-        // [x-BIDx, x-Unswitch, x-TIDx, x-Vectorize, rf-Leftover, r-1]
-        //   0         1          2        3              4        5
-
-        if (rparams.vectorize) {
-          reduction_tv->reorder({{1, 3}, {2, 1}, {3, 4}, {4, 2}});
-        } else {
-          reduction_tv->reorder({{1, 3}, {2, 4}, {3, 1}, {4, 2}});
-        }
-
-        // [x-BIDx, x-TIDx, rf-Leftover, x-Unswitch, x-Unroll, r-1(TIDy)]
-        //   0       1            2           3          4      5
-
-        reference_tv = ir_utils::rfactorHelper(reduction_tv, {2});
-        if (rparams.persistent_kernel) {
-          reference_tv->axis(5)->parallelize(ParallelType::TIDy);
-        }
-
-        reference_tv->axis(0)->parallelize(ParallelType::BIDx);
-        reference_tv->axis(1)->parallelize(ParallelType::TIDx);
-        reference_tv->axis(3)->parallelize(ParallelType::Unswitch);
-        if (rparams.vectorize) {
-          reference_tv->axis(4)->parallelize(ParallelType::Vectorize);
-        } else {
-          reference_tv->axis(4)->parallelize(ParallelType::Unroll);
-        }
+std::vector<TensorView*> getViewTVs(Fusion* fusion) {
+  std::vector<TensorView*> view_tvs;
+  auto fusion_vals = fusion->usedMathVals();
+  for (auto producer_tv : ir_utils::filterByType<TensorView>(fusion_vals)) {
+    auto consumer_tvs = ir_utils::consumerTvsOf(producer_tv);
+    for (auto consumer_tv : consumer_tvs) {
+      if (consumer_tv->isDefinitionType(ExprType::ViewOp)) {
+        view_tvs.push_back(consumer_tv);
       }
     }
   }
-  return reference_tv;
+  return view_tvs;
 }
 
 // Reset inputs and outputs to global memory, everything else to local.
@@ -1124,7 +1005,7 @@ std::vector<TensorView*> cacheInputs(Fusion* fusion, bool unroll) {
   // If we're going to unroll, make a cache of the inputs
   auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
   for (auto tv : in_tvs) {
-    if (tv->uses().empty()) {
+    if (tv->uses().empty() || tv->isFusionOutput()) {
       continue;
     }
     auto cached_tv = tv->cache_after();
@@ -1146,274 +1027,111 @@ std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
       continue;
     }
     if (!output->uses().empty()) {
-      auto cached_output = output->as<TensorView>()->cache_fork();
+      auto cached_output = output->cache_fork();
       cached_outputs.emplace_back(std::make_pair(output, cached_output));
     } else if (unroll) {
-      auto cached_output = output->as<TensorView>()->cache_before();
+      auto cached_output = output->cache_before();
       cached_outputs.emplace_back(std::make_pair(cached_output, output));
     }
   }
   return cached_outputs;
 }
 
-void multiReductionInliner(
-    Fusion* fusion,
-    const ReductionParams& rparams,
-    TensorView* reduction_tv,
-    TensorView* reference_tv,
-    std::vector<TensorView*> reduction_tvs,
-    std::vector<TensorView*> cached_inputs,
-    std::vector<std::pair<TensorView*, TensorView*>> cached_outputs) {
-  TransformPropagator::from(reference_tv);
-
-  // Apply rfactor to all reductions if applicable
-  std::vector<TensorView*> rfactor_tvs;
-
-  if (reference_tv != reduction_tv) {
-    std::vector<int> rfactor_axes;
-    for (size_t i = 0; i < reference_tv->nDims(); i++) {
-      if (reference_tv->axis((int)i)->isReduction() &&
-          reference_tv->axis((int)i)->isRFactorProduct()) {
-        rfactor_axes.push_back((int)i);
-      }
-    }
-
-    for (auto reduction_tv_ : reduction_tvs) {
-      if (reduction_tv_ == reduction_tv) {
-        // The reduction tv
-        rfactor_tvs.push_back(reference_tv);
-        continue;
-      } else {
-        rfactor_tvs.push_back(
-            ir_utils::rfactorHelper(reduction_tv_, rfactor_axes));
-      }
-    }
-
-    TORCH_INTERNAL_ASSERT(
-        reduction_tvs.size() == rfactor_tvs.size(),
-        "Expected all reductions to contain rfactor.");
+namespace {
+// If this is an rfactored reduction domain, actually check the root domain,
+// this is because the rfactored reduction tensorview has the vectorized
+// dimension, but that means the rfactor domain could have reordered what we
+// consider the "inner most" allocated position on it if we consider the rfactor
+// dimension.
+IterDomain* innerMostRootDim(TensorView* tv) {
+  if (tv->nDims() == 0) {
+    return nullptr;
   }
 
-  // Propagate parallelization
-  parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
+  IterDomain* inner_most_id = nullptr;
+  auto root_domain = tv->hasReduction() && tv->hasRFactor()
+      ? tv->getRootDomain()
+      : tv->getMaybeRFactorDomain();
 
-  // Find iter domains that are mapped to a trivial reduction, these should
-  // never be inlined.
-  std::unordered_set<IterDomain*> mapped_to_trivial_reduction =
-      getTrivialReductionMap(fusion);
-
-  if (rparams.loop_unroll > 1) {
-    // Inline Input caches to their consumers outside unswitched/vectorization
-    // position Inline consumers of input caches to rfactor tensors
-
-    // Mark which tensor views are actual input caches to leave vectorization on
-    // them
-    std::unordered_set<TensorView*> keep_unrolled;
-
-    std::vector<TensorView*> compute_from;
-
-    // Grab all tensor views that should be vectorized
-    auto vecotrizable_inputs_outputs =
-        getVectorizableInputsOutputs(reference_tv);
-
-    // Inputs to cache
-    for (auto cached_input : cached_inputs) {
-      auto consumers_of_input_cache = ir_utils::consumerTvsOf(cached_input);
-      for (auto consumer : consumers_of_input_cache) {
-        auto unswitch_it = std::find_if(
-            consumer->domain()->domain().begin(),
-            consumer->domain()->domain().end(),
-            [&mapped_to_trivial_reduction](IterDomain* id) {
-              return id->getParallelType() == ParallelType::Unswitch ||
-                  id->getParallelType() == ParallelType::Unroll ||
-                  id->getParallelType() == ParallelType::Vectorize ||
-                  id->getParallelType() == ParallelType::MisalignedVectorize ||
-                  mapped_to_trivial_reduction.count(id);
-            });
-        auto unswitch_pos = unswitch_it == consumer->domain()->domain().end()
-            ? -1
-            : std::distance(consumer->domain()->domain().begin(), unswitch_it) +
-                1;
-
-        cached_input->computeAt(
-            consumer, unswitch_pos, ComputeAtMode::BestEffort);
-        compute_from.push_back(consumer);
-
-        if (rparams.vectorize) {
-          auto producer_tvs = ir_utils::producerTvsOf(cached_input);
-          if (producer_tvs.size() == 1 &&
-              std::find(
-                  vecotrizable_inputs_outputs.begin(),
-                  vecotrizable_inputs_outputs.end(),
-                  producer_tvs[0]) != vecotrizable_inputs_outputs.end()) {
-            keep_unrolled.emplace(cached_input);
-          }
-        } else {
-          keep_unrolled.emplace(cached_input);
-        }
+  for (auto it = root_domain.rbegin(); it != root_domain.rend(); it++) {
+    if ((*it)->isReduction() && tv->isFusionInput()) {
+      continue;
+    }
+    if ((*it)->isBroadcast()) {
+      if (inner_most_id == nullptr) {
+        inner_most_id = *it;
       }
+      continue;
     }
-
-    // Inline output caches into outputs
-    std::vector<TensorView*> compute_to;
-    for (auto cached_output_pair : cached_outputs) {
-      auto cached_output = cached_output_pair.first;
-      auto output = cached_output_pair.second;
-
-      // If an output has multiple consumers don't process here, we want only
-      // terminating outputs
-      if (cached_output->uses().size() > 1) {
-        continue;
+    if ((*it)->isTrivialReduction()) {
+      if (inner_most_id == nullptr) {
+        inner_most_id = *it;
       }
-
-      auto pos_it = std::find_if(
-          output->domain()->domain().begin(),
-          output->domain()->domain().end(),
-          [&mapped_to_trivial_reduction](IterDomain* id) {
-            return id->getParallelType() == ParallelType::Unswitch ||
-                id->getParallelType() == ParallelType::Unroll ||
-                id->getParallelType() == ParallelType::Vectorize ||
-                id->getParallelType() == ParallelType::MisalignedVectorize ||
-                mapped_to_trivial_reduction.count(id);
-          });
-      auto pos = pos_it == output->domain()->domain().end()
-          ? -1
-          : std::distance(output->domain()->domain().begin(), pos_it) + 1;
-
-      cached_output->computeAt(output, pos, ComputeAtMode::BestEffort);
-
-      compute_to.push_back(cached_output);
-      if (rparams.vectorize) {
-        if (std::find(
-                vecotrizable_inputs_outputs.begin(),
-                vecotrizable_inputs_outputs.end(),
-                output) != vecotrizable_inputs_outputs.end()) {
-          keep_unrolled.emplace(output);
-        }
-      } else {
-        keep_unrolled.emplace(output);
-      }
+      continue;
     }
-
-    // Before compute at-ing the internal structure, remove vectorization
-    // anywhere it doesn't belong. Otherwise it will mess up our inlining. Clear
-    // explicit unroll or vectorization when not for input or output GMEM
-    // transfers.
-    for (auto tv : ir_utils::allTvs(fusion)) {
-      if (!keep_unrolled.count(tv)) {
-        for (size_t i = 0; i < tv->nDims(); i++) {
-          auto id = tv->axis((int)i);
-          if (id->getParallelType() == ParallelType::Unroll ||
-              id->getParallelType() == ParallelType::Vectorize ||
-              id->getParallelType() == ParallelType::MisalignedVectorize) {
-            tv->axis((int)i)->parallelize(ParallelType::Serial);
-          }
-        }
-      }
-    }
-
-    // Make sure not to completely inline if there's trivial reductions in the
-    // fusion
-    auto pos_it = std::find_if(
-        reference_tv->domain()->domain().begin(),
-        reference_tv->domain()->domain().end(),
-        [&mapped_to_trivial_reduction](IterDomain* id) {
-          return mapped_to_trivial_reduction.count(id);
-        });
-
-    auto pos = pos_it == reference_tv->domain()->domain().end()
-        ? -1
-        : std::distance(reference_tv->domain()->domain().begin(), pos_it) + 1;
-
-    // Compute at inputs to rfactor dimensions
-    computeAtBetween(
-        compute_from, rfactor_tvs, pos, ComputeAtMode::MostInlined);
-
-    // Inline rfactor into reduction
-    if (reference_tv != reduction_tv) {
-      // Compute at rfactor into following reduction, keep outside first
-      // reduction iter domain in the rfactor tensor view
-      for (size_t i = 0; i < rfactor_tvs.size(); i++) {
-        if (!rparams.reduction_unroll) {
-          auto rfactor_tv = rfactor_tvs[i];
-          auto rfactor_tv_dom = rfactor_tv->domain()->domain();
-          auto reduction_it = std::find_if(
-              rfactor_tv_dom.begin(), rfactor_tv_dom.end(), [](IterDomain* id) {
-                return id->isReduction();
-              });
-          TORCH_INTERNAL_ASSERT(
-              reduction_it != rfactor_tv_dom.end(),
-              "Expected reduction axis in ",
-              rfactor_tv);
-          auto pos = std::distance(rfactor_tv_dom.begin(), reduction_it);
-          rfactor_tv->computeWith(
-              reduction_tvs[i], pos, ComputeAtMode::Standard);
-        } else {
-          rfactor_tvs[i]->computeWith(
-              reduction_tvs[i], -1, ComputeAtMode::BestEffort);
-        }
-      }
-    }
-
-    // Remove anything before a reduction from compute_from
-    {
-      auto producers_of_reductions = DependencyCheck::getAllValsBetween(
-          {fusion->inputs().begin(), fusion->inputs().end()},
-          {reduction_tvs.begin(), reduction_tvs.end()});
-
-      auto producer_tvs_of_reductions =
-          ir_utils::filterByType<TensorView>(producers_of_reductions);
-      compute_from.erase(
-          std::remove_if(
-              compute_from.begin(),
-              compute_from.end(),
-              [&producer_tvs_of_reductions](TensorView* compute_from_tv) {
-                return std::find(
-                           producer_tvs_of_reductions.begin(),
-                           producer_tvs_of_reductions.end(),
-                           compute_from_tv) != producer_tvs_of_reductions.end();
-              }),
-          compute_from.end());
-    }
-
-    // Add reduction tensor views to compute from
-    compute_from.insert(
-        compute_from.end(), reduction_tvs.begin(), reduction_tvs.end());
-
-    // Compute between reductions and output caches
-    computeAtBetween(
-        compute_from,
-        compute_to,
-        -1,
-        ComputeAtMode::BestEffort,
-        mapped_to_trivial_reduction);
-
-  } else {
-    // Want to inline, especially backwards based on reduction_tv, otherwise
-    // rfactor tv may not be inlined correctly
-    auto ref_tvs = rfactor_tvs.size() ? rfactor_tvs : reduction_tvs;
-    for (auto red_tv : ref_tvs) {
-      auto pos_it = std::find_if(
-          red_tv->domain()->domain().begin(),
-          red_tv->domain()->domain().end(),
-          [&mapped_to_trivial_reduction](IterDomain* id) {
-            return id->getParallelType() == ParallelType::Unswitch ||
-                id->getParallelType() == ParallelType::Unroll ||
-                id->getParallelType() == ParallelType::Vectorize ||
-                id->getParallelType() == ParallelType::MisalignedVectorize ||
-                mapped_to_trivial_reduction.count(id);
-          });
-      auto pos = pos_it == red_tv->domain()->domain().end()
-          ? -1
-          : std::distance(red_tv->domain()->domain().begin(), pos_it) + 1;
-
-      computeAtInputs(red_tv, pos, ComputeAtMode::MostInlined);
-      computeWithOutputs(red_tv, pos, ComputeAtMode::BestEffort);
-    }
+    inner_most_id = *it;
+    break;
   }
+
+  return inner_most_id;
 }
 
-FindAllMappedDims::FindAllMappedDims(TensorView* from, IterDomain* id)
+// Take the inner most rfactor id from innerMostRootDim and project it to the
+// root domain if the provided domain is on the rfactor domain. If vectorize,
+// will not project if not following the inner most path.
+IterDomain* projectIdToRoot(
+    TensorView* tv,
+    IterDomain* reference_id,
+    bool vectorize) {
+  if (reference_id == nullptr) {
+    return nullptr;
+  }
+
+  if (!tv->hasRFactor()) {
+    return reference_id;
+  }
+
+  auto replay_exprs = StmtSort::getExprs(tv->fusion(), {reference_id}, false);
+  if (replay_exprs.empty()) {
+    return reference_id;
+  }
+
+  IterDomain* projected_id = reference_id;
+  for (auto expr_it = replay_exprs.rbegin(); expr_it != replay_exprs.rend();
+       ++expr_it) {
+    auto expr = *expr_it;
+    if (expr->isA<Merge>()) {
+      auto merge = expr->as<Merge>();
+      if (merge->out() == projected_id) {
+        projected_id = merge->inner();
+      }
+    } else if (expr->isA<Split>()) {
+      auto split = expr->as<Split>();
+      if (split->inner() == projected_id) {
+        projected_id = split->in();
+      } else if (split->outer() == projected_id) {
+        if (vectorize) {
+          projected_id = nullptr;
+        } else {
+          projected_id = split->in();
+        }
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "Didn't recognize the iterdomain expression: ", expr);
+    }
+    if (projected_id == nullptr) {
+      break;
+    }
+  }
+  return projected_id;
+}
+} // namespace
+
+FindAllMappedDims::FindAllMappedDims(
+    TensorView* from,
+    IterDomain* id,
+    bool vectorize_pass)
     : starting_tv(from), starting_id(id) {
   std::deque<TensorView*> to_visit{starting_tv};
   std::unordered_set<TensorView*> visited;
@@ -1450,6 +1168,13 @@ FindAllMappedDims::FindAllMappedDims(TensorView* from, IterDomain* id)
       }
     }
 
+    // For producers, project to root
+    tv_id = projectIdToRoot(tv, tv_id, vectorize_pass);
+    // If projection fails, don't map to producers
+    if (tv_id == nullptr) {
+      continue;
+    }
+
     for (auto producer_tv : ir_utils::producerTvsOf(tv)) {
       if (visited.find(producer_tv) != visited.end()) {
         continue;
@@ -1473,20 +1198,25 @@ FindAllMappedDims::FindAllMappedDims(TensorView* from, IterDomain* id)
 
 std::unordered_set<IterDomain*> FindAllMappedDims::from(
     TensorView* tv,
-    IterDomain* id) {
+    IterDomain* id,
+    bool vectorize_pass) {
+  auto root_domain = tv->hasReduction() && tv->hasRFactor()
+      ? tv->getRootDomain()
+      : tv->getMaybeRFactorDomain();
+
   TORCH_INTERNAL_ASSERT(
       std::find_if(
-          tv->getRootDomain().begin(),
-          tv->getRootDomain().end(),
+          root_domain.begin(),
+          root_domain.end(),
           [&id](IterDomain* root_id) { return root_id == id; }) !=
-          tv->getRootDomain().end(),
+          root_domain.end(),
       "Tried to map out ",
       id,
       " from TV ",
       tv,
       " to the rest of the fusion, but id does not belong to this tv.");
 
-  FindAllMappedDims mapped_dims(tv, id);
+  FindAllMappedDims mapped_dims(tv, id, vectorize_pass);
 
   std::unordered_set<IterDomain*> mapped_id_set;
   for (auto entry : mapped_dims.mapped_ids) {
@@ -1495,36 +1225,37 @@ std::unordered_set<IterDomain*> FindAllMappedDims::from(
   return mapped_id_set;
 }
 
-bool shouldVectorize(
+bool hasInnerDim(
     TensorView* tv,
-    std::unordered_set<IterDomain*> vector_dims) {
-  const auto& root_dom = TensorDomain::noBroadcasts(
-      TensorDomain::noReductions(tv->getRootDomain()));
-
-  // Don't vectorize 0-dim tensors
-  if (root_dom.size() == 0) {
+    std::unordered_set<IterDomain*> vector_dims,
+    bool should_vectorize) {
+  const auto& inner_most_dim = innerMostRootDim(tv);
+  if (inner_most_dim == nullptr || inner_most_dim->isReduction()) {
     return false;
   }
-
-  auto inner_most_dim = root_dom[root_dom.size() - 1];
 
   // Make sure inner most dimension is in the vector_dim set
   if (vector_dims.count(inner_most_dim) == 0) {
     return false;
   }
 
+  if (!should_vectorize) {
+    return true;
+  }
+
   auto root_pos_it = std::find_if(
-      tv->getRootDomain().begin(),
-      tv->getRootDomain().end(),
+      tv->getMaybeRFactorDomain().begin(),
+      tv->getMaybeRFactorDomain().end(),
       [&inner_most_dim](IterDomain* id) { return inner_most_dim == id; });
 
-  TORCH_INTERNAL_ASSERT(root_pos_it != tv->getRootDomain().end());
+  TORCH_INTERNAL_ASSERT(root_pos_it != tv->getMaybeRFactorDomain().end());
   auto inner_most_dim_pos =
-      std::distance(tv->getRootDomain().begin(), root_pos_it);
+      std::distance(tv->getMaybeRFactorDomain().begin(), root_pos_it);
 
   const auto& contiguity = tv->domain()->contiguity();
 
-  TORCH_INTERNAL_ASSERT(contiguity.size() == tv->getRootDomain().size());
+  TORCH_INTERNAL_ASSERT(
+      contiguity.size() == tv->getMaybeRFactorDomain().size());
 
   // Don't vectorize if inner most dimension is not contiguous
   if (!contiguity[inner_most_dim_pos]) {
@@ -1534,44 +1265,30 @@ bool shouldVectorize(
   return true;
 }
 
-std::vector<TensorView*> getVectorizableInputsOutputs(
-    TensorView* reference_tv) {
-  if (reference_tv->nDims() == 0) {
-    return {};
-  }
-
-  IterDomain* inner_most_id = nullptr;
-  for (auto it = reference_tv->getRootDomain().rbegin();
-       it != reference_tv->getRootDomain().rend();
-       it++) {
-    if ((*it)->isReduction() && reference_tv->isFusionInput()) {
-      continue;
-    }
-    if ((*it)->isBroadcast() && inner_most_id == nullptr) {
-      inner_most_id = *it;
-    }
-    inner_most_id = *it;
-    break;
-  }
+std::vector<TensorView*> getInputsOutputsWithInnerDim(
+    TensorView* reference_tv,
+    bool vectorize_pass) {
+  auto inner_most_id = innerMostRootDim(reference_tv);
 
   if (inner_most_id == nullptr) {
     return {};
   }
 
-  auto vectorizable_dims = FindAllMappedDims::from(reference_tv, inner_most_id);
+  auto vectorizable_dims =
+      FindAllMappedDims::from(reference_tv, inner_most_id, vectorize_pass);
 
   std::vector<TensorView*> vectorizable_tensors;
 
   for (auto input_tv :
        ir_utils::filterByType<TensorView>(reference_tv->fusion()->inputs())) {
-    if (shouldVectorize(input_tv, vectorizable_dims)) {
+    if (hasInnerDim(input_tv, vectorizable_dims, vectorize_pass)) {
       vectorizable_tensors.push_back(input_tv);
     }
   }
 
   for (auto output_tv :
        ir_utils::filterByType<TensorView>(reference_tv->fusion()->outputs())) {
-    if (shouldVectorize(output_tv, vectorizable_dims)) {
+    if (hasInnerDim(output_tv, vectorizable_dims, vectorize_pass)) {
       vectorizable_tensors.push_back(output_tv);
     }
   }
@@ -1579,9 +1296,12 @@ std::vector<TensorView*> getVectorizableInputsOutputs(
   return vectorizable_tensors;
 }
 
-std::vector<int64_t> mappedInputsOutputs(TensorView* reference_tv) {
+std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv) {
   auto fusion = reference_tv->fusion();
   FusionGuard fg(fusion);
+
+  std::vector<BroadcastMultiple> multiples(
+      reference_tv->getMaybeRFactorDomain().size());
 
   // All input or output tensor views
   std::vector<TensorView*> in_out_tvs;
@@ -1597,16 +1317,16 @@ std::vector<int64_t> mappedInputsOutputs(TensorView* reference_tv) {
   ca_index_map.build(fusion);
 
   auto ref_root_domain = reference_tv->getMaybeRFactorDomain();
-  std::vector<int64_t> mapping_count(ref_root_domain.size(), 0);
 
   // Map all inputs and output domains to reference tv domains
   for (auto in_out_tv : in_out_tvs) {
+    std::vector<bool> mapped_axes(ref_root_domain.size(), false);
+
     auto in_out_tv_domain = in_out_tv->getRootDomain();
     auto in_out_tv_domain_list = std::list<IterDomain*>(
         in_out_tv_domain.begin(), in_out_tv_domain.end());
-    auto in_out_dtype_size = dataTypeSize(in_out_tv->getDataType().value());
 
-    for (size_t ref_i = 0; ref_i < ref_root_domain.size(); ref_i++) {
+    for (const auto ref_i : c10::irange(ref_root_domain.size())) {
       auto ref_id = ref_root_domain[ref_i];
 
       // If reference id is broadcast or reduction
@@ -1629,12 +1349,128 @@ std::vector<int64_t> mappedInputsOutputs(TensorView* reference_tv) {
         continue;
       }
 
-      mapping_count[ref_i] = mapping_count[ref_i] + (int64_t)in_out_dtype_size;
+      mapped_axes[ref_i] = true;
       in_out_tv_domain_list.erase(map_it);
     }
+
+    // For each break point position if there an lhs or rhs multiple based on
+    // this tensor add it to the global multiplier
+    {
+      bool rhs = false;
+      bool lhs = false;
+      auto dtype_size = dataTypeSize(in_out_tv->getDataType().value());
+      for (size_t mapped_axes_i = 0; mapped_axes_i < mapped_axes.size();
+           mapped_axes_i++) {
+        auto lhs_i = mapped_axes_i;
+        auto rhs_i = mapped_axes.size() - 1 - mapped_axes_i;
+
+        if (lhs) {
+          multiples[lhs_i].lhs_multiple += dtype_size;
+        } else if (mapped_axes[lhs_i]) {
+          lhs = true;
+        }
+
+        if (rhs || mapped_axes[rhs_i]) {
+          multiples[rhs_i].rhs_multiple += dtype_size;
+          rhs = true;
+        }
+      }
+    }
   }
-  return mapping_count;
+
+  return multiples;
 }
+
+namespace matmul_utils {
+
+void scheduleWarpTileWithReduction(TensorView* tv, MatMulTileOptions tile) {
+  // Assumes
+  // [M, N, K]
+  auto cta_tile = tile.cta_tile;
+  auto warp_tile = tile.warp_tile;
+  auto instruction_tile = tile.instruction_tile;
+
+  TORCH_CHECK(
+      warp_tile.k == cta_tile.k,
+      "schedule warp tile: currently no support for splitting k dimension to different warps");
+
+  mma_util::checkDimSize(
+      tv, {-3, -2, -1}, {cta_tile.m, cta_tile.n, cta_tile.k});
+
+  //       -3   -2  -1
+  //[...    M,   N,  K]
+
+  // Distribute warp tile:
+  tv->split(-3, warp_tile.m);
+  tv->split(-2, warp_tile.n);
+
+  //  -5   -4   -3   -2   -1
+  // [Mwo  Mw  Nwo   Nw   K]
+  tv->split(-4, instruction_tile.m);
+  tv->split(-2, instruction_tile.n);
+  tv->split(-1, instruction_tile.k);
+
+  //   -8  -7 -6 -5 -4 -3 -2 -1
+  // [Mwo Mw Mi Nwo Nw Ni Ko Ki]
+
+  tv->reorder({{-7, -5}, {-6, -3}, {-5, -7}, {-3, -2}, {-2, -6}});
+
+  //   -8  -7  -6 -5 -4 -3 -2 -1
+  // [Mwo  Nwo Ko Mw Nw Mi Ni Ki]
+}
+
+void scheduleWarpTileWithNoReduction(TensorView* tv, MatMulTileOptions tile) {
+  // Assumes
+  // [M, N, K]
+  auto cta_tile = tile.cta_tile;
+  auto warp_tile = tile.warp_tile;
+  auto instruction_tile = tile.instruction_tile;
+
+  mma_util::checkDimSize(tv, {-2, -1}, {cta_tile.m, cta_tile.n});
+
+  //        -2  -1
+  //[...    M,   N]
+
+  // Distribute warp tile:
+  tv->split(-2, warp_tile.m);
+  tv->split(-1, warp_tile.n);
+
+  //  -4   -3   -2   -1
+  // [Mwo  Mw  Nwo   Nw ]
+  tv->split(-3, instruction_tile.m);
+  tv->split(-1, instruction_tile.n);
+
+  //  -6 -5  -4 -3 -2 -1
+  // [Mwo Mw Mi Nwo Nw Ni]
+
+  tv->reorder({{-5, -4}, {-4, -2}, {-3, -5}, {-2, -3}});
+
+  //  -6   -5  -4 -3 -2 -1
+  // [Mwo  Nwo Mw Nw Mi Ni]
+}
+
+//! Split the innermost dim to a vectorized load
+void scheduleContiguousVectorLoad(
+    TensorView* tv,
+    MatMulTileOptions tile,
+    int vector_word) {
+  auto warp_dims = tile.cta_tile / tile.warp_tile;
+  int num_of_thread = warp_dims.m * warp_dims.n * warp_dims.k * 32;
+
+  tv->split(-1, num_of_thread * vector_word);
+  tv->split(-1, vector_word);
+  // [..., thread, vec]
+  // distribute to warp:
+  tv->split(-2, 32);
+  tv->split(-3, warp_dims.n * warp_dims.k);
+
+  tv->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv->axis(-2)->parallelize(ParallelType::TIDx);
+  tv->axis(-3)->parallelize(ParallelType::TIDy);
+  tv->axis(-4)->parallelize(ParallelType::TIDz);
+}
+
+} // namespace matmul_utils
 
 } // namespace scheduler_utils
 } // namespace cuda

@@ -5,6 +5,7 @@
 #include <ATen/Functions.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 using namespace at;
@@ -51,7 +52,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
   // Unwrap all arguments
   auto args = torch::jit::pop(*stack, num_arguments);
-  for (size_t i = 0; i < num_arguments; i++) {
+  for (const auto i : c10::irange(num_arguments)) {
     // TODO: Handle tensor list
     if (args[i].isTensor()) {
       auto* impl = args[i].unsafeToTensorImpl();
@@ -70,7 +71,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
   // Rewrap outputs
   auto rets = torch::jit::pop(*stack, num_returns);
-  for (size_t i = 0; i < num_returns; i++) {
+  for (const auto i : c10::irange(num_returns)) {
     // TODO: Handle tensor list
     if (rets[i].isTensor()) {
       torch::jit::push(*stack, at::detail::make_tensor<GenericWrapperTensorImpl>(std::move(rets[i]).toTensor()));  // yes move!

@@ -4,7 +4,10 @@
 
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/env.h>
 
+#include <algorithm>
+#include <cctype>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -20,9 +23,7 @@
 
 namespace at {
 
-Context::Context()
-    : thc_state(nullptr, [](THCState* p) { /* no-op */ }),
-      thh_state(nullptr, [](THHState* p) { /* no-op */ }) {}
+Context::Context() = default;
 
 // TODO: This could be bad juju if someone calls globalContext() in the
 // destructor of an object with static lifetime.
@@ -62,18 +63,32 @@ bool Context::deterministicAlgorithms() const {
   return _deterministic_algorithms;
 }
 
-void Context::setDeterministicAlgorithms(bool b) {
+bool Context::deterministicAlgorithmsWarnOnly() const {
+  return _deterministic_algorithms_warn_only;
+}
+
+void Context::setDeterministicAlgorithms(bool b, bool warn_only=false) {
   _deterministic_algorithms = b;
+  _deterministic_algorithms_warn_only = warn_only;
 }
 
 void Context::alertNotDeterministic(c10::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
-    TORCH_CHECK(false,
-      caller, " does not have a deterministic implementation, but you set "
-      "'torch.use_deterministic_algorithms(True)'. You can turn off determinism ",
-      "just for this operation if that's acceptable for your application. You "
-      "can also file an issue at https://github.com/pytorch/pytorch/issues "
-      "to help us prioritize adding deterministic support for this operation.");
+    if (globalContext().deterministicAlgorithmsWarnOnly()) {
+      TORCH_WARN(
+        caller, " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True, warn_only=True)'. "
+        "You can file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
+    } else {
+      TORCH_CHECK(false,
+        caller, " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True)'. You can turn off "
+        "determinism just for this operation, or you can use the "
+        "'warn_only=True' option, if that's acceptable for your application. "
+        "You can also file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
+    }
   }
 }
 
@@ -126,11 +141,71 @@ void Context::setBenchmarkCuDNN(bool b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-  return allow_tf32_cublas;
+  static bool allow_tf32_cublas_override = c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true;
+  return allow_tf32_cublas_override || float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
-  allow_tf32_cublas = b;
+  float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
+}
+
+Float32MatmulPrecision Context::float32MatmulPrecision() const {
+  return float32_matmul_precision;
+}
+
+void Context::setFloat32MatmulPrecision(Float32MatmulPrecision p) {
+  float32_matmul_precision = p;
+}
+
+void Context::setFloat32MatmulPrecision(const std::string &s) {
+  auto match = [this](const std::string & s_) {
+    // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
+    if (s_ == "highest") {
+      float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
+      return true;
+    } else if (s_ == "high") {
+      float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
+      return true;
+    } else if (s_ == "medium") {
+      float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
+      return true;
+    }
+    return false;
+  };
+  if (match(s)) { return; }
+  std::string sl;
+  std::transform(s.begin(), s.end(), sl.begin(),
+                 [](unsigned char c) -> unsigned char { return std::tolower(c); });
+  if (match(sl)) { return; }
+  TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
+    "setFloat32MatmulPrecision call has no effect.");
+}
+
+at::LinalgBackend Context::linalgPreferredBackend() const {
+  return linalg_preferred_backend;
+}
+
+void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
+  linalg_preferred_backend = b;
+  TORCH_CHECK((b != at::LinalgBackend::Cusolver) || hasCuSOLVER(),
+      "Cannot set preferred backend to cuSOLVER if PyTorch has not been compiled with cuSOLVER.");
+  TORCH_CHECK((b != at::LinalgBackend::Magma) || hasMAGMA(),
+      "Cannot set preferred backend to MAGMA if PyTorch has not been compiled with MAGMA.");
+  if (b != at::LinalgBackend::Default) {
+    TORCH_WARN_ONCE(
+      "torch.backends.cuda.preferred_linalg_library is an experimental feature. "
+      "If you see any error or unexpected behavior when this flag is set "
+      "please file an issue on GitHub."
+    );
+  }
+}
+
+bool Context::allowFP16ReductionCuBLAS() const {
+  return allow_fp16_reduction_cublas;
+}
+
+void Context::setAllowFP16ReductionCuBLAS(bool b) {
+  allow_fp16_reduction_cublas = b;
 }
 
 bool Context::hasMKL() {
@@ -147,6 +222,22 @@ bool Context::hasMKLDNN() {
 #else
   return false;
 #endif
+}
+
+bool Context::hasMPS() {
+#if defined(__APPLE__)
+#if __is_target_os(macOS)
+  if (__builtin_available(macOS 12.3, *)) {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MPS);
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+#else
+   return false;
+ #endif
 }
 
 bool Context::hasOpenMP() {
@@ -196,6 +287,10 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 #endif
     engines.push_back(at::kNoQEngine);
 #endif // C10_MOBILE
+
+#if AT_MKLDNN_ENABLED()
+    engines.push_back(at::kONEDNN);
+#endif
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {

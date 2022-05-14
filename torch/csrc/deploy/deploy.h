@@ -1,7 +1,9 @@
 #pragma once
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/imethod.h>
+#include <torch/csrc/deploy/interpreter/Optional.hpp>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
+#include <torch/csrc/deploy/noop_environment.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <cassert>
 #include <fstream>
@@ -32,13 +34,13 @@ struct TORCH_API InterpreterSession {
     return impl_->global(module, name);
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
-  Obj from_ivalue(at::IValue ivalue) {
+  Obj fromIValue(at::IValue ivalue) {
     TORCH_DEPLOY_TRY
-    return impl_->from_ivalue(std::move(ivalue));
+    return impl_->fromIValue(std::move(ivalue));
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
-  ReplicatedObj create_movable(Obj obj);
-  Obj from_movable(const ReplicatedObj& obj);
+  ReplicatedObj createMovable(Obj obj);
+  Obj fromMovable(const ReplicatedObj& obj);
 
  private:
   friend struct ReplicatedObj;
@@ -47,27 +49,28 @@ struct TORCH_API InterpreterSession {
   friend struct ReplicatedObjImpl;
   std::unique_ptr<InterpreterSessionImpl> impl_;
   InterpreterManager* manager_; // if created from one
-  int64_t notify_idx_ = -1;
+  int64_t notifyIdx_ = -1;
 };
 
 class TORCH_API Interpreter {
  private:
-  std::string library_name_;
+  std::string libraryName_;
   void* handle_;
   std::unique_ptr<InterpreterImpl> pImpl_;
-  bool custom_loader_ = false;
+  bool customLoader_ = false;
   InterpreterManager* manager_; // optional if managed by one
+  std::shared_ptr<Environment> env_;
 
  public:
-  Interpreter(InterpreterManager* manager);
-  InterpreterSession acquire_session() const {
+  Interpreter(InterpreterManager* manager, std::shared_ptr<Environment> env);
+  InterpreterSession acquireSession() const {
     TORCH_DEPLOY_TRY
-    return InterpreterSession(pImpl_->acquire_session(), manager_);
+    return InterpreterSession(pImpl_->acquireSession(), manager_);
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
   ~Interpreter();
   Interpreter(Interpreter&& rhs) noexcept
-      : library_name_(std::move(rhs.library_name_)),
+      : libraryName_(std::move(rhs.libraryName_)),
         handle_(rhs.handle_),
         pImpl_(std::move(rhs.pImpl_)),
         manager_(rhs.manager_) {
@@ -92,7 +95,7 @@ struct TORCH_API LoadBalancer {
   }
   void setResourceLimit(size_t n) {
     TORCH_DEPLOY_TRY
-    TORCH_INTERNAL_ASSERT(n <= allocated_);
+    MULTIPY_INTERNAL_ASSERT(n <= allocated_);
     n_ = n;
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
@@ -108,22 +111,24 @@ struct TORCH_API LoadBalancer {
 };
 
 struct TORCH_API InterpreterManager {
-  explicit InterpreterManager(size_t n_interp = 2);
+  explicit InterpreterManager(
+      size_t nInterp = 2,
+      std::shared_ptr<Environment> env = std::make_shared<NoopEnvironment>());
 
-  // get a free model, guarenteed that no other user of acquire_one has the same
+  // get a free model, guarenteed that no other user of acquireOne has the same
   // model. It _is_ possible that other users will be using the interpreter.
-  InterpreterSession acquire_one() {
+  InterpreterSession acquireOne() {
     TORCH_DEPLOY_TRY
     int where = resources_.acquire();
-    InterpreterSession I = instances_[where].acquire_session();
-    I.notify_idx_ = where;
+    InterpreterSession I = instances_[where].acquireSession();
+    I.notifyIdx_ = where;
     return I;
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
   // use to make sure something gets run on all interpreters, such as loading or
   // unloading a model eagerly
-  at::ArrayRef<Interpreter> all_instances() {
+  at::ArrayRef<Interpreter> allInstances() {
     TORCH_DEPLOY_TRY
     return instances_;
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
@@ -134,8 +139,8 @@ struct TORCH_API InterpreterManager {
     resources_.setResourceLimit(N);
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
-  Package load_package(const std::string& uri);
-  Package load_package(
+  Package loadPackage(const std::string& uri);
+  Package loadPackage(
       std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader);
 
   // convience function for loading some python source code as a module across
@@ -143,8 +148,8 @@ struct TORCH_API InterpreterManager {
   // execute python code, or for small amounts of application logic that are
   // best written in Python. For larger amounts of code, prefer creating and
   // loading them as packages.
-  void register_module_source(std::string name, std::string src) {
-    registered_module_sources_[std::move(name)] = std::move(src);
+  void registerModuleSource(std::string name, std::string src) {
+    registeredModuleSource_[std::move(name)] = std::move(src);
   }
 
   InterpreterManager(const InterpreterManager&) = delete;
@@ -154,10 +159,10 @@ struct TORCH_API InterpreterManager {
  private:
   friend struct Package;
   friend struct InterpreterSession;
-  size_t next_object_id_ = 0;
+  size_t nextObjectId_ = 0;
   std::vector<Interpreter> instances_;
   LoadBalancer resources_;
-  std::unordered_map<std::string, std::string> registered_module_sources_;
+  std::unordered_map<std::string, std::string> registeredModuleSource_;
 };
 
 struct TORCH_API ReplicatedObjImpl {
@@ -166,51 +171,51 @@ struct TORCH_API ReplicatedObjImpl {
       // NOLINTNEXTLINE(modernize-pass-by-value)
       PickledObject data,
       InterpreterManager* manager)
-      : object_id_(object_id), data_(data), manager_(manager) {}
+      : objectId_(object_id), data_(data), manager_(manager) {}
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~ReplicatedObjImpl();
-  void unload(const Interpreter* on_this_interpreter);
-  int64_t object_id_;
+  void unload(const Interpreter* onThisInterpreter);
+  int64_t objectId_;
   PickledObject data_;
   InterpreterManager* manager_;
 };
 
 struct TORCH_API ReplicatedObj {
   ReplicatedObj() : pImpl_(nullptr) {}
-  InterpreterSession acquire_session(
-      const Interpreter* on_this_interpreter = nullptr) const;
+  InterpreterSession acquireSession(
+      const Interpreter* onThisInterpreter = nullptr) const;
   at::IValue operator()(at::ArrayRef<at::IValue> args) const {
     TORCH_DEPLOY_TRY
-    auto I = acquire_session();
+    auto I = acquireSession();
     return I.self(args).toIValue();
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
-  [[nodiscard]] at::IValue call_kwargs(
+  [[nodiscard]] at::IValue callKwargs(
       std::vector<at::IValue> args,
       std::unordered_map<std::string, c10::IValue> kwargs) const {
     TORCH_DEPLOY_TRY
-    auto I = acquire_session();
-    return I.self.call_kwargs(std::move(args), std::move(kwargs)).toIValue();
+    auto I = acquireSession();
+    return I.self.callKwargs(std::move(args), std::move(kwargs)).toIValue();
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
-  [[nodiscard]] at::IValue call_kwargs(
+  [[nodiscard]] at::IValue callKwargs(
       std::unordered_map<std::string, c10::IValue> kwargs) const {
     TORCH_DEPLOY_TRY
-    auto I = acquire_session();
-    return I.self.call_kwargs(std::move(kwargs)).toIValue();
+    auto I = acquireSession();
+    return I.self.callKwargs(std::move(kwargs)).toIValue();
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
   [[nodiscard]] bool hasattr(const char* name) const {
     TORCH_DEPLOY_TRY
-    auto I = acquire_session();
+    auto I = acquireSession();
     return I.self.hasattr(name);
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
-  void unload(const Interpreter* on_this_interpreter = nullptr);
+  void unload(const Interpreter* onThisInterpreter = nullptr);
 
  private:
   ReplicatedObj(std::shared_ptr<ReplicatedObjImpl> pImpl)
@@ -229,11 +234,11 @@ class PythonMethodWrapper : public torch::IMethod {
   // TODO(whc) make bound method pickleable, then directly construct from that
   PythonMethodWrapper(
       torch::deploy::ReplicatedObj model,
-      std::string method_name)
-      : model_(std::move(model)), method_name_(std::move(method_name)) {}
+      std::string methodName)
+      : model_(std::move(model)), methodName_(std::move(methodName)) {}
 
   const std::string& name() const override {
-    return method_name_;
+    return methodName_;
   }
 
   c10::IValue operator()(
@@ -241,35 +246,33 @@ class PythonMethodWrapper : public torch::IMethod {
       const IValueMap& kwargs = IValueMap()) const override {
     // TODO(whc) ideally, pickle the method itself as replicatedobj, to skip
     // this lookup each time
-    auto model_session = model_.acquire_session();
-    auto method = model_session.self.attr(method_name_.c_str());
-    return method.call_kwargs(args, kwargs).toIValue();
+    auto modelSession = model_.acquireSession();
+    auto method = modelSession.self.attr(methodName_.c_str());
+    return method.callKwargs(args, kwargs).toIValue();
   }
 
  private:
   void setArgumentNames(std::vector<std::string>&) const override;
 
   torch::deploy::ReplicatedObj model_;
-  std::string method_name_;
+  std::string methodName_;
 };
 
 struct TORCH_API Package {
   // shorthand for getting the object as a pickle resource in the package
-  ReplicatedObj load_pickle(
-      const std::string& module,
-      const std::string& file) {
+  ReplicatedObj loadPickle(const std::string& module, const std::string& file) {
     TORCH_DEPLOY_TRY
-    auto I = acquire_session();
+    auto I = acquireSession();
     auto loaded = I.self.attr("load_pickle")({module, file});
-    return I.create_movable(loaded);
+    return I.createMovable(loaded);
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
-  InterpreterSession acquire_session() {
+  InterpreterSession acquireSession() {
     TORCH_DEPLOY_TRY
-    auto I = manager_->acquire_one();
-    I.self = I.impl_->create_or_get_package_importer_from_container_file(
-        container_file_);
+    auto I = manager_->acquireOne();
+    I.self =
+        I.impl_->createOrGetPackageImporterFromContainerFile(containerFile_);
     return I;
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
@@ -280,19 +283,19 @@ struct TORCH_API Package {
       InterpreterManager*
           pm) // or really any of the constructors to our zip file format
       : manager_(pm),
-        container_file_(
+        containerFile_(
             std::make_shared<caffe2::serialize::PyTorchStreamReader>(uri)) {}
   Package(
       std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader,
       InterpreterManager*
           pm) // or really any of the constructors to our zip file format
       : manager_(pm),
-        container_file_(
+        containerFile_(
             std::make_shared<caffe2::serialize::PyTorchStreamReader>(reader)) {}
   friend struct ReplicatedObj;
   friend struct InterpreterManager;
   InterpreterManager* manager_;
-  std::shared_ptr<caffe2::serialize::PyTorchStreamReader> container_file_;
+  std::shared_ptr<caffe2::serialize::PyTorchStreamReader> containerFile_;
 };
 
 } // namespace deploy

@@ -2,7 +2,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 namespace torch {
@@ -12,11 +12,11 @@ namespace cuda {
 
 namespace {
 
-class MagicZeroInserter : public kir::MutableIrVisitor {
+class MagicZeroInserter : public kir::ExprMutator {
  public:
-  static std::vector<kir::Expr*> insert(const std::vector<kir::Expr*>& exprs) {
+  static std::vector<Expr*> insert(const std::vector<Expr*>& exprs) {
     MagicZeroInserter inserter(exprs);
-    return inserter.loop_nests_;
+    return inserter.exprs_;
   }
 
  private:
@@ -25,106 +25,67 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
     kir::ForLoop* fl = nullptr;
   };
 
-  MagicZeroInserter(const std::vector<kir::Expr*>& exprs)
-      : loop_nests_(exprs), ir_builder(GpuLower::current()->kernel()) {
-    loop_nests_.insert(
-        loop_nests_.begin(), ir_builder.create<kir::InitMagicZero>());
-    for (auto expr : exprs) {
-      handle(expr);
-    }
-    insertAll();
+  MagicZeroInserter(const std::vector<Expr*>& exprs) {
+    TORCH_INTERNAL_ASSERT(exprs.size());
+    kir::ExprMutator::registerInsertBefore(
+        exprs.front(), IrBuilder::create<kir::InitMagicZero>(), nullptr);
+    kir::ExprMutator::traverseAndInsert(exprs);
   }
 
-  void handle(kir::Expr* expr) {
-    if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-      handle(ite);
-    } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-      handle(for_loop);
-    }
-  }
-
-  void handle(kir::IfThenElse* ite) {
-    scope_nest_.push_back(&ite->thenBody());
-    for (auto expr : ite->thenBody().exprs()) {
-      handle(expr);
-    }
-    scope_nest_.pop_back();
-    scope_nest_.push_back(&ite->elseBody());
-    for (auto expr : ite->elseBody().exprs()) {
-      handle(expr);
-    }
-    scope_nest_.pop_back();
-  }
-
-  void handle(kir::ForLoop* fl) {
-    if (fl->isUnrollable()) {
-      kir::Scope* scope = nullptr;
-      if (!scope_nest_.empty()) {
-        scope = scope_nest_.back();
-      }
-      insertion_list_.push_back({scope, fl});
-    } else {
-      scope_nest_.push_back(&fl->body());
-      for (auto expr : fl->body().exprs()) {
-        handle(expr);
-      }
-      scope_nest_.pop_back();
-    }
-  }
-
-  void insertAll() {
-    for (const auto& info : insertion_list_) {
-      auto fl = info.fl;
-      auto scope = info.scope;
-      if (scope == nullptr) {
-        // place in global scope
-        auto loop_it = std::find(loop_nests_.begin(), loop_nests_.end(), fl);
-        TORCH_INTERNAL_ASSERT(loop_it != loop_nests_.end());
-        // Place after the loop
-        loop_it++;
-        loop_nests_.insert(loop_it, ir_builder.create<kir::UpdateMagicZero>());
+  void handle(kir::ForLoop* fl) final {
+    if (fl->isUnrolled()) {
+      if (scope_.empty()) {
+        kir::ExprMutator::registerInsertAfter(
+            fl, IrBuilder::create<kir::UpdateMagicZero>());
       } else {
-        scope->insert_after(fl, ir_builder.create<kir::UpdateMagicZero>());
+        TORCH_INTERNAL_ASSERT(
+            scope_.back()->exprs().size(), "Not expecting an empty loop.");
+        kir::ExprMutator::registerInsertAfter(
+            fl, IrBuilder::create<kir::UpdateMagicZero>(), scope_.back());
       }
+    } else {
+      kir::ExprMutator::handle(fl);
     }
   }
-
-  //! Keep track for loop structure
-  std::vector<kir::Scope*> scope_nest_;
-
-  // Keep a copy of the expressions provided
-  std::vector<kir::Expr*> loop_nests_;
-
-  kir::IrBuilder ir_builder;
 
   std::vector<InsertionInfo> insertion_list_;
 };
 
 } // namespace
 
-std::vector<kir::Expr*> insertMagicZero(const std::vector<kir::Expr*>& exprs) {
+std::vector<Expr*> insertMagicZero(const std::vector<Expr*>& exprs) {
   FUSER_PERF_SCOPE("GpuLower::Lower::insertMagicZero");
   // Check if magic zero was even used, if not we don't have to define it or
   // update it.
-  bool has_magic_zero = false;
   const auto gpu_lower = GpuLower::current();
   auto kernel = gpu_lower->kernel();
-  for (auto& val : kernel->irNodes()) {
-    if (val->isA<kir::NamedScalar>()) {
-      auto named_scalar = val->as<kir::NamedScalar>();
-      if (named_scalar->dtype() == DataType::Int &&
-          named_scalar->name() == "nvfuser_zero") {
-        has_magic_zero = true;
-        break;
-      }
-    }
-  }
+  const bool has_magic_zero =
+      std::any_of(kernel->vals().begin(), kernel->vals().end(), [](Val* val) {
+        return isMagicZero(val);
+      });
 
   if (!has_magic_zero) {
     return exprs;
   }
 
   return MagicZeroInserter::insert(exprs);
+}
+
+bool isMagicZero(const Val* val) {
+  if (!val->isA<NamedScalar>()) {
+    return false;
+  }
+  auto ns = val->as<NamedScalar>();
+  return ns->dtype() == DataType::Int &&
+      ns->name() == std::string(kMagicZeroName);
+}
+
+bool isProtectedWithMagicZero(const Val* val) {
+  if (val->definition() == nullptr || !val->definition()->isA<BinaryOp>()) {
+    return false;
+  }
+  auto bop = val->definition()->as<BinaryOp>();
+  return bop->getBinaryOpType() == BinaryOpType::Add && isMagicZero(bop->rhs());
 }
 
 } // namespace cuda

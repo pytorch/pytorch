@@ -4,7 +4,7 @@
 #include <unordered_map>
 
 #include <ATen/core/functional.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
@@ -21,6 +21,10 @@ bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
   // and we dont want to coalesce mkldnn tensors bc they do layout
   // transformations based on usage
   if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
+    return false;
+  }
+  // If device is not equal, lhs.equal(rhs) would throw an error.
+  if (lhs.device() != rhs.device()) {
     return false;
   }
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
@@ -103,8 +107,8 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
     return attributesEqual(a1.toListRef(), a2.toListRef());
   }
   if (a1.isTuple()) {
-    at::ArrayRef<IValue> a1_elem = a1.toTuple()->elements();
-    at::ArrayRef<IValue> a2_elem = a2.toTuple()->elements();
+    at::ArrayRef<IValue> a1_elem = a1.toTupleRef().elements();
+    at::ArrayRef<IValue> a2_elem = a2.toTupleRef().elements();
     return attributesEqual(a1_elem, a2_elem);
   }
   if (a1.isGenericDict()) {
@@ -204,23 +208,25 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 
 } // anonymous namespace
 
+// Makes a hash that hashes the input Value, the output type
+// as well as the node attributes
 size_t HashNode::operator()(const Node* k) const {
   AT_ASSERT(k != nullptr);
   size_t constant_hash = 0;
   if (k->kind() == prim::Constant) {
     TypePtr type = k->output()->type();
-    if (type->isSubtypeOf(NumberType::get()) &&
+    if (type->isSubtypeOf(*NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::i) {
       constant_hash = std::hash<int64_t>{}(k->i(attr::value));
     } else if (
-        type->isSubtypeOf(NumberType::get()) &&
+        type->isSubtypeOf(*NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::f) {
       constant_hash = std::hash<double>{}(k->f(attr::value));
     } else if (
-        type->isSubtypeOf(NumberType::get()) &&
+        type->isSubtypeOf(*NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::c) {
       constant_hash = c10::hash<c10::complex<double>>{}(k->c(attr::value));
-    } else if (type->isSubtypeOf(BoolType::get())) {
+    } else if (type->isSubtypeOf(*BoolType::get())) {
       constant_hash = std::hash<bool>{}(k->i(attr::value));
     }
   }
@@ -231,6 +237,8 @@ size_t HashNode::operator()(const Node* k) const {
       constant_hash);
 };
 
+// Checks that two nodes have the same inputs, output types
+// and node attributes.
 bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   if (lhs == nullptr && rhs == nullptr)
     return true;
@@ -262,6 +270,16 @@ bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
 
   if (!attributesEqualCSE(lhs, rhs))
     return false;
+
+  // Check if the blocks contained in a op are the same
+  if (lhs->blocks().size() != rhs->blocks().size()) {
+    return false;
+  }
+  for (size_t i = 0; i < lhs->blocks().size(); ++i) {
+    if (lhs->blocks()[i] != rhs->blocks()[i]) {
+      return false;
+    }
+  }
 
   return true;
 };

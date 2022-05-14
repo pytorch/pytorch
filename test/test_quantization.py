@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: quantization"]
 
 from torch.testing._internal.common_utils import run_tests
 
@@ -15,11 +16,10 @@ from quantization.core.test_quantized_op import TestQuantizedOps  # noqa: F401
 from quantization.core.test_quantized_op import TestQNNPackOps  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedLinear  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedConv  # noqa: F401
-from quantization.core.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
+from quantization.core.test_quantized_op import TestDynamicQuantizedOps  # noqa: F401
 from quantization.core.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.core.test_quantized_op import TestPadding  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
-from quantization.core.test_quantized_op import TestDynamicQuantizedRNNOp  # noqa: F401
 # 2. Quantized Functional/Workflow Ops
 from quantization.core.test_quantized_functional import TestQuantizedFunctionalOps  # noqa: F401
 from quantization.core.test_workflow_ops import TestFakeQuantizeOps  # noqa: F401
@@ -31,6 +31,7 @@ from quantization.core.test_workflow_module import TestFakeQuantize  # noqa: F40
 from quantization.core.test_workflow_module import TestObserver  # noqa: F401
 from quantization.core.test_quantized_module import TestStaticQuantizedModule  # noqa: F401
 from quantization.core.test_quantized_module import TestDynamicQuantizedModule  # noqa: F401
+from quantization.core.test_quantized_module import TestReferenceQuantizedModule  # noqa: F401
 from quantization.core.test_workflow_module import TestRecordHistogramObserver  # noqa: F401
 from quantization.core.test_workflow_module import TestHistogramObserver  # noqa: F401
 from quantization.core.test_workflow_module import TestDistributed  # noqa: F401
@@ -41,24 +42,22 @@ from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  
 # using eager mode.
 
 # 1. Eager mode post training quantization
-from quantization.eager.test_quantize_eager_ptq import TestPostTrainingStatic  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestPostTrainingDynamic  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestEagerModeActivationOps  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestFunctionalModule  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestQuantizeONNXExport  # noqa: F401
+from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerPTQStatic  # noqa: F401
+from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerPTQDynamic  # noqa: F401
+from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerOps  # noqa: F401
+from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerONNXExport  # noqa: F401
 # 2. Eager mode quantization aware training
-from quantization.eager.test_quantize_eager_qat import TestQuantizationAwareTraining  # noqa: F401
-from quantization.eager.test_quantize_eager_qat import TestQATActivationOps  # noqa: F401
-from quantization.eager.test_quantize_eager_qat import TestConvBNQATModule  # noqa: F401
+from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQAT  # noqa: F401
+from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQATNumerics  # noqa: F401
 # 3. Eager mode fusion passes
-from quantization.eager.test_fusion import TestFusion  # noqa: F401
+from quantization.eager.test_fuse_eager import TestFuseEager  # noqa: F401
 # 4. Testing model numerics between quanitzed and FP32 models
 from quantization.eager.test_model_numerics import TestModelNumericsEager  # noqa: F401
 # 5. Tooling: numeric_suite
-from quantization.eager.test_numeric_suite_eager import TestEagerModeNumericSuite  # noqa: F401
+from quantization.eager.test_numeric_suite_eager import TestNumericSuiteEager  # noqa: F401
 # 6. Equalization and Bias Correction
 from quantization.eager.test_equalize_eager import TestEqualizeEager  # noqa: F401
-from quantization.eager.test_bias_correction_eager import TestBiasCorrection  # noqa: F401
+from quantization.eager.test_bias_correction_eager import TestBiasCorrectionEager  # noqa: F401
 
 
 # FX GraphModule Graph Mode Quantization. Tests for the functionality of APIs and different features implemented
@@ -68,6 +67,7 @@ try:
     from quantization.fx.test_quantize_fx import TestQuantizeFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
+    from quantization.fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 except ImportError:
     # In FBCode we separate FX out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_fx`
@@ -88,7 +88,10 @@ except ImportError:
     pass
 
 # Backward Compatibility. Tests serialization and BC for quantized modules.
-from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
+try:
+    from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
+except ImportError:
+    pass
 
 # JIT Graph Mode Quantization
 from quantization.jit.test_quantize_jit import TestQuantizeJit  # noqa: F401
@@ -104,6 +107,14 @@ from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantize
 from quantization.ao_migration.test_quantization import TestAOMigrationQuantization  # noqa: F401
 try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
+except ImportError:
+    pass
+
+try:
+    from quantization.dbr.test_quantize_dbr import TestQuantizeDBR  # noqa: F401
+    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRIndividualOps  # noqa: F401
+    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRMultipleOps  # noqa: F401
+    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRModels  # noqa: F401
 except ImportError:
     pass
 

@@ -1,8 +1,10 @@
 #pragma once
 
+#include "caffe2/core/operator.h"
+#include "c10/util/irange.h"
+
 #include <cmath>
 #include <limits>
-#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
@@ -19,7 +21,7 @@ class HistogramOp final : public Operator<Context> {
         2,
         "Number of bin edges must be greater than or equal to 2.");
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 1; i < bin_edges_.size(); i++) {
+    for (const auto i : c10::irange(1, bin_edges_.size())) {
       CAFFE_ENFORCE_GT(
           bin_edges_[i],
           bin_edges_[i - 1],
@@ -41,11 +43,11 @@ class HistogramOp final : public Operator<Context> {
     math::Set<int64_t, Context>(
         bin_edges_.size() - 1, 0, histogram_data, &context_);
 
-    for (int input_idx = 0; input_idx < InputSize(); input_idx++) {
+    for (const auto input_idx : c10::irange(InputSize())) {
       const auto& x = Input(input_idx);
       const int64_t N = x.numel();
       const auto* x_data = x.template data<T>();
-      for (int64_t data_idx = 0; data_idx < N; data_idx++) {
+      for (const auto data_idx : c10::irange(N)) {
         const auto bisection_it = std::upper_bound(
             bin_edges_.begin(), bin_edges_.end(), x_data[data_idx]);
         const int bisection_idx = bisection_it - bin_edges_.begin();
@@ -67,7 +69,7 @@ class HistogramOp final : public Operator<Context> {
 
   void CheckInputs() {
     const auto& input_zero = Input(0);
-    for (int i = 1; i < InputSize(); i++) {
+    for (const auto i : c10::irange(1, InputSize())) {
       CAFFE_ENFORCE_EQ(
           Input(i).dtype(),
           input_zero.dtype(),

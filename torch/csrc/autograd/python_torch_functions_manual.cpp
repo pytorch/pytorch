@@ -17,6 +17,7 @@
 #include <torch/csrc/utils/cuda_lazy_init.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FunctionalTensorWrapper.h>
 
 #include <fmt/format.h>
 #include <Python.h>
@@ -358,8 +359,21 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "as_tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None)",
+  });
+
+  ParsedArgs<3> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.has_torch_function()) {
+    return handle_torch_function(
+        r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
   jit::tracer::warn("torch.as_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::as_tensor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::as_tensor(
+      torch::tensors::get_default_dispatch_key(),
+      torch::tensors::get_default_scalar_type(),
+      r));
   END_HANDLE_TH_ERRORS
 }
 
@@ -393,35 +407,90 @@ static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
 
 static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs);
 
-static PyObject * THPVariable_sparse_csr_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  jit::tracer::warn("torch.sparse_csr_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::sparse_csr_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
-  END_HANDLE_TH_ERRORS
+#define THPVARIABLE_SPARSE_COMPRESSED_CTOR(NAME, NARGS, SIGNATURES)      \
+static PyObject * THPVariable_ ## NAME(PyObject* self, PyObject* args, PyObject* kwargs) \
+{                                                                       \
+  HANDLE_TH_ERRORS                                                      \
+  static PythonArgParser parser SIGNATURES ;                          \
+  ParsedArgs<NARGS> parsed_args;                                        \
+  auto r = parser.parse(args, kwargs, parsed_args);                     \
+  if (r.has_torch_function()) {                                         \
+    return handle_torch_function(r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch"); \
+  }                                                                     \
+  jit::tracer::warn("torch."  # NAME, jit::tracer::WARN_CONSTRUCTOR);   \
+  return THPVariable_Wrap(torch::utils::NAME ## _ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), r)); \
+  END_HANDLE_TH_ERRORS                                                  \
 }
 
-static PyObject * THPVariable__sparse_csr_tensor_unsafe(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  jit::tracer::warn("torch._sparse_csr_tensor_unsafe", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::_sparse_csr_tensor_unsafe_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
-  END_HANDLE_TH_ERRORS
-}
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(sparse_compressed_tensor, 9,
+    ({"sparse_compressed_tensor(PyObject* compressed_indices, PyObject* plain_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+     "sparse_compressed_tensor(PyObject* compressed_indices, PyObject* plain_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(sparse_csr_tensor, 9,
+    ({"sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+      "sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(sparse_csc_tensor, 9,
+    ({"sparse_csc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+      "sparse_csc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(sparse_bsr_tensor, 9,
+    ({"sparse_bsr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+      "sparse_bsr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(sparse_bsc_tensor, 9,
+    ({"sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+      "sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+
+
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(_sparse_compressed_tensor_unsafe, 8,
+    ({"_sparse_compressed_tensor_unsafe(PyObject* compressed_indices, PyObject* plain_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(_sparse_csr_tensor_unsafe, 7,
+    ({"_sparse_csr_tensor_unsafe(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(_sparse_csc_tensor_unsafe, 7,
+    ({"_sparse_csc_tensor_unsafe(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(_sparse_bsr_tensor_unsafe, 7,
+    ({"_sparse_bsr_tensor_unsafe(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(_sparse_bsc_tensor_unsafe, 7,
+    ({"_sparse_bsc_tensor_unsafe(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
 
 static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+      "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+      "sparse_coo_tensor(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+  });
+
+  ParsedArgs<6> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.has_torch_function()) {
+    return handle_torch_function(
+        r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
   jit::tracer::warn("torch.sparse_coo_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(
+      torch::tensors::get_default_dispatch_key(),
+      torch::tensors::get_default_scalar_type(),
+      r));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable__sparse_coo_tensor_unsafe(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "_sparse_coo_tensor_unsafe(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+  });
+
+  ParsedArgs<6> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.has_torch_function()) {
+    return handle_torch_function(
+        r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
   jit::tracer::warn("torch._sparse_coo_tensor_unsafe", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::_sparse_coo_tensor_unsafe_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::_sparse_coo_tensor_unsafe_ctor(
+      torch::tensors::get_default_dispatch_key(),
+      torch::tensors::get_default_scalar_type(),
+      r));
   END_HANDLE_TH_ERRORS
 }
 
@@ -430,8 +499,22 @@ static PyObject * THPVariable__sparse_coo_tensor_unsafe(PyObject* self, PyObject
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
+  });
+
+  constexpr int ctor_num_args = 6;
+  ParsedArgs<ctor_num_args> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.has_torch_function()) {
+    return handle_torch_function(
+        r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
   jit::tracer::warn("torch.tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::tensor_ctor(
+      torch::tensors::get_default_dispatch_key(),
+      torch::tensors::get_default_scalar_type(),
+      r));
   END_HANDLE_TH_ERRORS
 }
 
@@ -450,14 +533,15 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
-}static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObject* kwargs)
+}
+
+static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     "frombuffer(PyObject* buffer, *, ScalarType dtype, int64_t count=-1, int64_t offset=0, bool requires_grad=False)",
   }, /*traceable=*/false);
 
-  PyObject* ret = nullptr;
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
@@ -468,76 +552,35 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
     auto offset = r.toInt64(3);
     auto requires_grad = r.toBool(4);
 
-    auto elsize = at::elementSize(dtype);
-    size_t actual_count = 0;
-    Py_buffer view;
-
     TORCH_CHECK_VALUE(
         PyObject_CheckBuffer(buffer) != 0,
         "object does not implement Python buffer protocol.");
-
-    if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
-      TORCH_CHECK(
-          PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
-          "could not retrieve buffer from object");
-      TORCH_WARN_ONCE(
-          "The given buffer is not writable, and PyTorch does "
-          "not support non-writable tensors. This means you can write to the "
-          "underlying (supposedly non-writable) buffer using the tensor. "
-          "You may want to copy the buffer to protect its data or make it writable "
-          "before converting it to a tensor. This type of warning will be "
-          "suppressed for the rest of this program.");
-      PyErr_Clear();
-    }
-
-    Py_INCREF(view.obj);
-    THPObjectPtr obj(view.obj);
-
-    auto len = view.len;
-    auto buf = view.buf;
-    PyBuffer_Release(&view);
-
-    TORCH_CHECK_VALUE(
-        len > 0 && count != 0,
-        "both buffer length (", len, ") and count (", count, ") must not be 0");
-    TORCH_CHECK_VALUE(
-        offset >= 0 && offset < len,
-        "offset (", offset, " bytes) must be non-negative and no greater than "
-        "buffer length (", len, " bytes) minus 1");
-    TORCH_CHECK_VALUE(
-        count > 0 || (len - offset) % elsize == 0,
-        "buffer length (", len - offset, " bytes) after offset (", offset, " bytes) "
-        "must be a multiple of element size (", elsize, ")");
-
-    if (count < 0) {
-      actual_count = (len - offset) / elsize;
-    } else {
-      actual_count = static_cast<size_t>(count);
-    }
-
-    TORCH_CHECK_VALUE(
-        static_cast<size_t>(offset) + actual_count * elsize <= len,
-        "requested buffer length (", actual_count, " * ", elsize, " bytes) "
-        "after offset (", offset, " bytes) must not be greater than actual "
-        "buffer length (", len, " bytes)");
-
-    auto offset_buf = static_cast<char*>(buf) + offset;
-    auto options = TensorOptions()
-        .dtype(dtype)
-        .device(c10::kCPU);
-
-    auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
-                      .options(options)
-                      .deleter([obj = obj.release()](void*) {
-                        pybind11::gil_scoped_acquire gil;
-                        Py_DECREF(obj);
-                      })
-                      .make_tensor();
-    tensor.set_requires_grad(requires_grad);
-    ret = wrap(tensor);
+    return wrap(torch::utils::tensor_frombuffer(
+        buffer, dtype, count, offset, requires_grad));
   }
 
-  return ret;
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_asarray(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "asarray(PyObject* obj, *, ScalarType? dtype=None, Device? device=None, bool? copy=None, bool requires_grad=False)",
+  }, /*traceable=*/false);
+
+  ParsedArgs<5> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+    auto obj = r.pyobject(0);
+    auto dtype = r.scalartypeOptional(1);
+    auto device = r.deviceOptional(2);
+    auto copy = r.toBoolOptional(3);
+    auto requires_grad = r.toBool(4);
+    return wrap(torch::utils::asarray(obj, dtype, device, copy, requires_grad));
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -550,7 +593,7 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "linspace(Scalar start, Scalar end, int64_t? steps=None, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "linspace(Scalar start, Scalar end, int64_t steps, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<9> parsed_args;
@@ -559,7 +602,7 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
     return handle_torch_function(_r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
   }
   if (_r.isNone(3)) {
-    // aten::linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+    // aten::linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
     // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
     // This leads to problem in the operator argument checks,
@@ -572,22 +615,22 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
         .pinned_memory(_r.toBool(7));
     torch::utils::maybe_initialize_cuda(options);
 
-    auto dispatch_linspace = [](Scalar start, Scalar end, c10::optional<int64_t> steps, TensorOptions options) -> Tensor {
+    auto dispatch_linspace = [](Scalar start, Scalar end, int64_t steps, TensorOptions options) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return torch::linspace(start, end, steps, options);
     };
-    return wrap(dispatch_linspace(_r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), options));
+    return wrap(dispatch_linspace(_r.scalar(0), _r.scalar(1), _r.toInt64(2), options));
   } else {
     // aten::linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)
     check_out_type_matches(_r.tensor(3), _r.scalartype(4),
                            _r.isNone(4), _r.layoutOptional(5),
                            _r.device(6), _r.isNone(6));
 
-    auto dispatch_linspace_out = [](Tensor out, Scalar start, Scalar end, c10::optional<int64_t> steps) -> Tensor {
+    auto dispatch_linspace_out = [](Tensor out, Scalar start, Scalar end, int64_t steps) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return at::linspace_out(out, start, end, steps);
     };
-    return wrap(dispatch_linspace_out(_r.tensor(3), _r.scalar(0), _r.scalar(1), _r.toInt64Optional(2)).set_requires_grad(_r.toBool(8)));
+    return wrap(dispatch_linspace_out(_r.tensor(3), _r.scalar(0), _r.scalar(1), _r.toInt64(2)).set_requires_grad(_r.toBool(8)));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -598,7 +641,7 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "logspace(Scalar start, Scalar end, int64_t? steps=None, double base=10.0, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "logspace(Scalar start, Scalar end, int64_t steps, double base=10.0, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<10> parsed_args;
@@ -607,7 +650,7 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
     return handle_torch_function(_r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
   }
   if (_r.isNone(4)) {
-    // aten::logspace(Scalar start, Scalar end, int? steps=None, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+    // aten::logspace(Scalar start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
     // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
     // This leads to problem in the operator argument checks,
@@ -620,23 +663,108 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
         .pinned_memory(_r.toBool(8));
     torch::utils::maybe_initialize_cuda(options);
 
-    auto dispatch_logspace = [](Scalar start, Scalar end, c10::optional<int64_t> steps, double base, TensorOptions options) -> Tensor {
+    auto dispatch_logspace = [](Scalar start, Scalar end, int64_t steps, double base, TensorOptions options) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return torch::logspace(start, end, steps, base, options);
     };
-    return wrap(dispatch_logspace(_r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), _r.toDouble(3), options));
+    return wrap(dispatch_logspace(_r.scalar(0), _r.scalar(1), _r.toInt64(2), _r.toDouble(3), options));
   } else {
-    // aten::logspace.out(Scalar start, Scalar end, int? steps=None, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+    // aten::logspace.out(Scalar start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
     check_out_type_matches(_r.tensor(4), _r.scalartype(5),
                            _r.isNone(5), _r.layoutOptional(6),
                            _r.device(7), _r.isNone(7));
 
-    auto dispatch_logspace_out = [](Tensor out, Scalar start, Scalar end, c10::optional<int64_t> steps, double base) -> Tensor {
+    auto dispatch_logspace_out = [](Tensor out, Scalar start, Scalar end, int64_t steps, double base) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return at::logspace_out(out, start, end, steps, base);
     };
-    return wrap(dispatch_logspace_out(_r.tensor(4), _r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), _r.toDouble(3)).set_requires_grad(_r.toBool(9)));
+    return wrap(dispatch_logspace_out(_r.tensor(4), _r.scalar(0), _r.scalar(1), _r.toInt64(2), _r.toDouble(3)).set_requires_grad(_r.toBool(9)));
   }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__to_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_to_functional_tensor(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  auto wrapped = at::functionalization::impl::to_functional_tensor(self_);
+  return wrap(wrapped);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__from_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_from_functional_tensor(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  auto unwrapped = at::functionalization::impl::from_functional_tensor(self_);
+  return wrap(unwrapped);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__is_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_is_functional_tensor(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  if (at::functionalization::impl::isFunctionalTensor(self_)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__sync(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_sync(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  at::functionalization::impl::sync(self_);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__enable_functionalization(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_enable_functionalization(*, bool reapply_views=False)"}, /*traceable=*/true);
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  const auto reapply_views = r.toBool(0);
+
+  if (c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Functionalize)) {
+    TORCH_INTERNAL_ASSERT(false, "multiple layers of mode-style functionalization nesting is not"
+     " currently supported, outside of the functionalize() transform");
+  }
+  c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Functionalize, true);
+  if (reapply_views) {
+      at::functionalization::impl::setFunctionalizationReapplyViewsTLS(true);
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__disable_functionalization(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Functionalize, false);
+  at::functionalization::impl::setFunctionalizationReapplyViewsTLS(false);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -648,6 +776,8 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
 static PyMethodDef torch_functions_manual[] = {
   {"arange", castPyCFunctionWithKeywords(THPVariable_arange),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"asarray", castPyCFunctionWithKeywords(THPVariable_asarray),
+    METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"as_tensor", castPyCFunctionWithKeywords(THPVariable_as_tensor),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"from_numpy", THPVariable_from_numpy, METH_STATIC | METH_O, nullptr},
@@ -655,13 +785,27 @@ static PyMethodDef torch_functions_manual[] = {
   {"full", castPyCFunctionWithKeywords(THPVariable_full), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"linspace", castPyCFunctionWithKeywords(THPVariable_linspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"logspace", castPyCFunctionWithKeywords(THPVariable_logspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_is_functional_tensor", castPyCFunctionWithKeywords(THPVariable__is_functional_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_to_functional_tensor", castPyCFunctionWithKeywords(THPVariable__to_functional_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_from_functional_tensor", castPyCFunctionWithKeywords(THPVariable__from_functional_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sync", castPyCFunctionWithKeywords(THPVariable__sync), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_enable_functionalization", castPyCFunctionWithKeywords(THPVariable__enable_functionalization), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_disable_functionalization", castPyCFunctionWithKeywords(THPVariable__disable_functionalization), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"randint", castPyCFunctionWithKeywords(THPVariable_randint), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"range", castPyCFunctionWithKeywords(THPVariable_range), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"sparse_coo_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_coo_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"_sparse_coo_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_coo_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sparse_compressed_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_compressed_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"sparse_compressed_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_compressed_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"sparse_csr_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_csr_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"sparse_csc_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_csc_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"sparse_bsr_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_bsr_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"sparse_bsc_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_bsc_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"_sparse_csr_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_csr_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sparse_csc_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_csc_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sparse_bsr_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_bsr_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sparse_bsc_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_bsc_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"tensor", castPyCFunctionWithKeywords(THPVariable_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"get_device", castPyCFunctionWithKeywords(THPVariable_get_device), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"numel", castPyCFunctionWithKeywords(THPVariable_numel), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},

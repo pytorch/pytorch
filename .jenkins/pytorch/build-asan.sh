@@ -15,7 +15,7 @@ clang --version
 
 # detect_leaks=0: Python is very leaky, so we need suppress it
 # symbolize=1: Gives us much better errors when things go wrong
-export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_odr_violation=0
+export ASAN_OPTIONS=detect_leaks=0:detect_stack_use_after_return=1:symbolize=1:detect_odr_violation=0
 if [ -n "$(which conda)" ]; then
   export CMAKE_PREFIX_PATH=/opt/conda
 fi
@@ -35,10 +35,11 @@ fi
 #
 # TODO: Make the ASAN flags a centralized env var and unify with USE_ASAN option
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
-  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan -pthread" \
+  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fsanitize-address-use-after-scope -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
   USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
-  python setup.py install
+  python setup.py bdist_wheel
+  python -mpip install dist/*.whl
 
 # Test building via the sdist source tarball
 python setup.py sdist

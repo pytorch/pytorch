@@ -1,6 +1,6 @@
 #pragma once
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
-#include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/mobile/register_ops_common_utils.h>
 
 namespace torch {
 namespace jit {
@@ -38,6 +38,10 @@ void numToTensorScalar(Stack& stack);
 void isCuda(Stack& stack);
 
 void numToTensorBool(Stack& stack);
+
+void dictIndex(Stack& stack);
+
+void raiseExceptionWithMessage(Stack& stack);
 
 } // namespace jit
 } // namespace torch

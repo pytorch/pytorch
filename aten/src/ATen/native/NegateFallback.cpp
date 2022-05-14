@@ -2,20 +2,11 @@
 #include <ATen/native/MathBitFallThroughLists.h>
 
 namespace at {
-
+namespace native {
 struct NegFallback : MathOpFallback {
   NegFallback() : MathOpFallback(DispatchKey::Negative, "negation") {}
   bool is_bit_set(const Tensor& tensor) override {
     return tensor.is_neg();
-  }
-  void _set_bit(const Tensor& tensor, bool value) override {
-    return tensor._set_neg(value);
-  }
-  Tensor resolve_bit(const Tensor& tensor) override {
-    return at::resolve_neg(tensor);
-  }
-  Tensor& math_op_(Tensor& tensor) override {
-    return tensor.neg_();
   }
 };
 
@@ -37,9 +28,23 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("neg_", torch::CppFunction::makeFallthrough());
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
+  m.impl("repeat_interleave.Tensor", torch::CppFunction::makeFallthrough());
+  m.impl("repeat_interleave.self_Tensor", torch::CppFunction::makeFallthrough());
+  m.impl("repeat_interleave.self_int", torch::CppFunction::makeFallthrough());
+
+  // See test_metadata_check_when_primal_has_neg_bit in test_autograd.py
+  m.impl("_has_same_storage_numel", torch::CppFunction::makeFallthrough());
+
+  // linear algebra functions
+  m.impl("linalg_solve_triangular", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_solve_triangular.out", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_svd", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_svd.U", torch::CppFunction::makeFallthrough());
 
   TORCH_VIEW_FNS(m)
   TENSOR_UTILITIES_AND_CONSTRUCTORS(m)
+  TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m)
 }
 
+}
 } // namespace at

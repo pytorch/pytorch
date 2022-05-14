@@ -1,9 +1,9 @@
-ir_version: 7
+ir_version: 6
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "1"
+    output: "onnx::CumSum_1"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -16,15 +16,15 @@ graph {
     }
   }
   node {
-    input: "0"
-    input: "1"
+    input: "onnx::CumSum_0"
+    input: "onnx::CumSum_1"
     output: "2"
     name: "CumSum_1"
     op_type: "CumSum"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::CumSum_0"
     type {
       tensor_type {
         elem_type: 1

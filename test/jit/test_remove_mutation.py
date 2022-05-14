@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 
@@ -144,16 +146,16 @@ class TestRemoveMutation(JitTestCase):
 
         # full_like is not implemented for a tensor fill value
 
-        def test_unsuccessful():
+        def test_successful():
             x = torch.tensor([2, 2])
             y = torch.tensor([2, 4])
             x.fill_(y)
             return x + x
 
-        fn = torch.jit.script(test_unsuccessful)
+        fn = torch.jit.script(test_successful)
         graph = fn.graph
         self.run_pass('remove_mutation', graph)
-        FileCheck().check('aten::fill_').run(graph)
+        FileCheck().check_not('aten::fill_').run(graph)
 
         def normal():
             return torch.rand(2, 1, 3, 4).normal_()
@@ -241,6 +243,26 @@ class TestRemoveMutation(JitTestCase):
         FileCheck().check_not("set_item").run(scripted_fn.graph)
         self.checkScript(successful, ())
 
+        def successful():
+            x = [1, 2, 3]
+            x[0] = 4
+            x[-1] = 0
+            return x
+
+        scripted_fn = torch.jit.script(successful)
+        torch._C._jit_pass_remove_mutation(scripted_fn.graph)
+        FileCheck().check_not("set_item").run(scripted_fn.graph)
+        self.checkScript(successful, ())
+
+        def successful():
+            x = [1]
+            x[-1] = 3
+            return x
+
+        scripted_fn = torch.jit.script(successful)
+        torch._C._jit_pass_remove_mutation(scripted_fn.graph)
+        FileCheck().check_not("set_item").run(scripted_fn.graph)
+        self.checkScript(successful, ())
 
     def test_common_pytorch_list_ops(self):
         for op in ["cat", "stack", "vstack", "hstack", "dstack"]:

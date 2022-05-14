@@ -3,12 +3,12 @@
 #  binary_linux_libtorch_3.6m_cpu_test:
 #    environment:
 #      BUILD_ENVIRONMENT: "libtorch 3.6m cpu"
-#    resource_class: gpu.medium
+#    resource_class: gpu.nvidia.small
 #    <<: *binary_linux_test
 #
 #  binary_linux_libtorch_3.6m_cu90_test:
 #    environment:
 #      BUILD_ENVIRONMENT: "libtorch 3.6m cu90"
-#    resource_class: gpu.medium
+#    resource_class: gpu.nvidia.small
 #    <<: *binary_linux_test
 #

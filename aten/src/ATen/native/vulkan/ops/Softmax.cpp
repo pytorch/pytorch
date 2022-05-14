@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
@@ -14,7 +15,8 @@ Tensor softmax_internal(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   TORCH_CHECK(
       input_arg.dim() == 4,
       "Vulkan softmax expects 4-dimensional input!");
@@ -56,6 +58,8 @@ Tensor softmax_internal(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY(v_input.has_image()) {
       const struct Block final {
         uvec3 iextents;
@@ -77,16 +81,20 @@ Tensor softmax_internal(
           shader_descriptor,
           global_work_group_size,
           local_work_group_size,
-          // Shader parameters
-          block,
-          // Textures
+          // Write-only access bypasses synchronization but inserts appropriate
+          // barriers if necessary.
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
           v_input.image(
               command_buffer,
-              vTensor::Stage::Compute));
+              vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -101,14 +109,14 @@ Tensor softmax(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float) {
-  return softmax_internal(input_arg, dim, half_to_float, VK_KERNEL(softmax));
+  return softmax_internal(input_arg, dim, half_to_float, VK_KERNEL(softmax), "_softmax");
 }
 
 Tensor log_softmax(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float) {
-  return softmax_internal(input_arg, dim, half_to_float, VK_KERNEL(log_softmax));
+  return softmax_internal(input_arg, dim, half_to_float, VK_KERNEL(log_softmax), "_log_softmax");
 }
 
 #ifdef USE_VULKAN_API

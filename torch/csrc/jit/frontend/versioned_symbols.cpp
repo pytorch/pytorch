@@ -1,12 +1,12 @@
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
 
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/api/include/torch/jit.h>
 
 #include <unordered_map>
 
 namespace torch {
 namespace jit {
-
 // Note [Versioned Symbols]
 // When the schema or behavior of a symbol changes, serialized Torchscript
 // programs using that symbol are likely to break. To prevent those breaks,

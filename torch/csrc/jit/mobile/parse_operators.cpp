@@ -21,14 +21,13 @@ std::string operator_str(
  * by the current runtime.
  */
 std::unordered_set<std::string> load_and_find_unsupported_operator_names(
-    const std::vector<IValue>& ops_list,
-    mobile::Function* function,
-    int64_t model_version) {
+    c10::ivalue::TupleElements&& ops_list,
+    mobile::Function* function) {
   std::unordered_set<std::string> unsupported_op_names;
   // ops_list is the list of operator names that were read in from
   // bytecode.plk for the method that is currently being processed.
-  for (const auto& op : ops_list) {
-    auto op_item = op.toTuple()->elements();
+  for (auto& op : std::move(ops_list)) {
+    auto op_item = std::move(*std::move(op).toTuple()).elements();
     TORCH_CHECK(
         op_item.size() >= 2,
         "There should be either two parts (name and overload name), ",
@@ -41,8 +40,7 @@ std::unordered_set<std::string> load_and_find_unsupported_operator_names(
     auto op_found = function->append_operator(
         op_item[0].toString()->string(),
         op_item[1].toString()->string(),
-        num_args,
-        model_version);
+        num_args);
     if (!op_found) {
       unsupported_op_names.emplace(operator_str(
           op_item[0].toString()->string(), op_item[1].toString()->string()));
@@ -60,19 +58,16 @@ void print_unsupported_ops_and_throw(
   error_message += "}";
   TORCH_CHECK(
       false,
-      "Following ops cannot be found. ",
-      "Check fburl.com/missing_ops for the fix.",
+      "Following ops cannot be found. Please check if the operator library is included in the build. If built with selected ops, check if these ops are in the list. If you are a Meta employee, please see fburl.com/missing_ops for a fix. Or post it in https://discuss.pytorch.org/",
       error_message);
 }
 
 void parseOperators(
-    const std::vector<IValue>& ops_list,
-    const int64_t& model_version,
+    c10::ivalue::TupleElements&& ops_list,
     const uint64_t& module_load_options,
     mobile::Function* function) {
   std::unordered_set<std::string> unsupported_op_names =
-      load_and_find_unsupported_operator_names(
-          ops_list, function, model_version);
+      load_and_find_unsupported_operator_names(std::move(ops_list), function);
   if ((module_load_options & MobileModuleLoadOptions::OPERATOR_CHECK) &&
       !unsupported_op_names.empty()) {
     print_unsupported_ops_and_throw(unsupported_op_names);

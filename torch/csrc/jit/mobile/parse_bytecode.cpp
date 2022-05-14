@@ -1,6 +1,8 @@
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
@@ -12,7 +14,7 @@ OpCode parseOpCode(const char* str);
 using c10::IValue;
 
 IValue expect_field(
-    std::vector<IValue>& elements,
+    c10::ivalue::TupleElements& elements,
     const std::string& expected_name,
     size_t entry) {
   auto row = std::move(elements.at(entry)).toTuple();
@@ -66,10 +68,58 @@ class OpCodeCache {
 };
 } // namespace
 
+void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
+  Code& code = function->get_code();
+  auto& operator_version_map = getOperatorVersionMapForMobile();
+  for (size_t i = 0; i < code.instructions_.size(); i++) {
+    Instruction& inst = code.instructions_[i];
+    if (inst.op == OpCode::OP) {
+      std::string op_name = code.op_names_[inst.X].name;
+      std::string operator_name = code.op_names_[inst.X].name +
+          (code.op_names_[inst.X].overload_name.empty()
+               ? ""
+               : "." + code.op_names_[inst.X].overload_name);
+
+      auto it = operator_version_map.find(operator_name);
+      // Find out if there is an upgrader for this operator
+      if (it != operator_version_map.end()) {
+        auto upgrader_list = it->second;
+        // Loop all upgraders for this operator, and find out if there exists a
+        // valid upgrader. Use iteration here instead of other faster search
+        // algorithm, because the number of upgrader per operator will be just a
+        // few and tend to keep the code light-weight from binary size concern.
+        for (const auto& upgrader : upgrader_list) {
+          if (operator_version <= upgrader.max_version &&
+              operator_version >= upgrader.min_version) {
+            // If there exists a valid upgrader, change the instruction OP to
+            // CALL, and the index will point to the according upgrader
+            // function. All upgrader function are available in
+            // function->get_code().functions_. It's a vector of function
+            // pointer and they are initialized in the same order as the global
+            // vector kUpgraderBytecode.
+            // Instruction new_inst = inst;
+            // new_inst.op = OpCode::CALL;
+            // new_inst.X = upgrader.index;
+            // code->instructions_[i] = new_inst;
+            TORCH_CHECK(
+                upgrader.index < code.functions_.size(),
+                "upgrader index is, ",
+                upgrader.index,
+                " and it's larger than the upgrader function list length ",
+                code.functions_.size());
+            inst.op = OpCode::CALL;
+            inst.X = upgrader.index;
+          }
+        }
+      }
+    }
+  }
+}
+
 void parseInstructions(
     const std::string& function_name,
-    const std::vector<IValue>& ins_list,
-    std::vector<IValue>& debug_handles_m_tuple,
+    c10::ivalue::TupleElements&& ins_list,
+    c10::ivalue::TupleElements& debug_handles_m_tuple,
     mobile::Function* function) {
   c10::List<int64_t> debug_handles_list;
   if (!debug_handles_m_tuple.empty()) {
@@ -79,14 +129,15 @@ void parseInstructions(
         debug_info_function_name == function_name,
         "The function names in the bytecode table and the debug info table do not match.");
     IValue& debug_handles_table = debug_handles_m_tuple[1];
-    debug_handles_list =
-        (expect_field(
-             std::move(debug_handles_table).toTuple()->elements(),
-             "function_debug_handles",
-             BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
-             .toTuple()
-             ->elements())[0]
-            .toIntList();
+    auto debugHandlesTableElements =
+        std::move(*std::move(debug_handles_table).toTuple()).elements();
+    debug_handles_list = (expect_field(
+                              debugHandlesTableElements,
+                              "function_debug_handles",
+                              BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
+                              .toTupleRef()
+                              .elements())[0]
+                             .toIntList();
     TORCH_CHECK(
         debug_handles_list.size() == ins_list.size(),
         "The numbers of instructions and debug handles strings do not match.");
@@ -98,8 +149,8 @@ void parseInstructions(
   // becomes an important use case.
   OpCodeCache opCodeCache;
   for (const auto j : c10::irange(ins_list.size())) {
-    std::vector<IValue> ins_item =
-        std::move(*std::move(ins_list[j]).toTuple()).elements();
+    auto ins_tuple = std::move(ins_list[j]).toTuple();
+    c10::ArrayRef<IValue> ins_item = ins_tuple->elements();
     TORCH_CHECK(
         ins_item.size() == 3,
         "There should be three parts in an instruction. The function name is ",
@@ -107,6 +158,7 @@ void parseInstructions(
     OpCode op_code = opCodeCache.parse(*ins_item[0].toString());
     int X = ins_item[1].toInt();
     int N = ins_item[2].toInt();
+
     if (!debug_handles_list.empty()) {
       int64_t debug_handle = debug_handles_list[j];
       function->append_instruction(op_code, X, N, debug_handle);
@@ -117,30 +169,24 @@ void parseInstructions(
 }
 
 void parseConstants(
-    const std::vector<IValue>& consts_list,
+    const c10::ivalue::TupleElements& consts_list,
     mobile::Function* function) {
   for (const auto& constant : consts_list) {
     function->append_constant(constant);
   }
 }
-
 void parseTypes(
-    const std::vector<IValue>& types_list,
+    const c10::ivalue::TupleElements& types_list,
     mobile::Function* function) {
-  static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
-  for (const auto& t : types_list) {
-    c10::QualifiedName qn(t.toStringRef());
-    if (classPrefix.isPrefixOf(qn)) {
-      auto classType = getCustomClass(qn.qualifiedName());
-      TORCH_CHECK(
-          classType,
-          "The implementation of class ",
-          qn.qualifiedName(),
-          " cannot be found.");
-      function->append_type(classType);
-    } else {
-      function->append_type(c10::parseType(t.toStringRef()));
-    }
+  std::vector<std::string> types_string_list;
+  types_string_list.resize(types_list.size());
+  for (size_t i = 0; i < types_list.size(); i++) {
+    types_string_list[i] = types_list[i].toString()->string();
+  }
+
+  std::vector<c10::TypePtr> types_ptr_list = c10::parseType(types_string_list);
+  for (auto& type_ptr : types_ptr_list) {
+    function->append_type(type_ptr);
   }
 }
 

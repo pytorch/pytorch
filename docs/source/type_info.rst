@@ -15,7 +15,7 @@ torch.finfo
 .. class:: torch.finfo
 
 A :class:`torch.finfo` is an object that represents the numerical properties of a floating point
-:class:`torch.dtype`, (i.e. ``torch.float32``, ``torch.float64``, and ``torch.float16``). This is similar to `numpy.finfo <https://docs.scipy.org/doc/numpy/reference/generated/numpy.finfo.html>`_.
+:class:`torch.dtype`, (i.e. ``torch.float32``, ``torch.float64``, ``torch.float16``, and ``torch.bfloat16``). This is similar to `numpy.finfo <https://docs.scipy.org/doc/numpy/reference/generated/numpy.finfo.html>`_.
 
 A :class:`torch.finfo` provides the following attributes:
 

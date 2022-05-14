@@ -56,7 +56,6 @@ const std::string leaky_relu_model = R"JIT(
       return torch.leaky_relu(x, neg_slope)
 )JIT";
 
-
 void import_libs(
     std::shared_ptr<at::CompilationUnit> cu,
     const std::string& class_name,
@@ -65,9 +64,8 @@ void import_libs(
   torch::jit::SourceImporter si(
       cu,
       &tensor_table,
-      [&](const std::string& /* unused */) -> std::shared_ptr<torch::jit::Source> {
-        return src;
-      },
+      [&](const std::string& /* unused */)
+          -> std::shared_ptr<torch::jit::Source> { return src; },
       /*version=*/2);
   si.loadType(c10::QualifiedName(class_name));
 }

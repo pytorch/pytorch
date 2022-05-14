@@ -12,7 +12,7 @@ import torch.nn.intrinsic.qat as nniqat
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.quantized.modules.utils import _quantize_weight, WeightedQuantizedModule
 from torch.nn.utils import fuse_conv_bn_weights
 
 _SUPPORTED_PADDING = {
@@ -29,7 +29,7 @@ def _reverse_repeat_padding(padding: List[int]) -> List[int]:
             _reversed_padding_repeated_twice.append(padding[N - idx - 1])
     return _reversed_padding_repeated_twice
 
-class _ConvNd(nn.Module):
+class _ConvNd(WeightedQuantizedModule):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
@@ -195,7 +195,6 @@ class _ConvNd(nn.Module):
         if weight_post_process is None:
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        act_scale, act_zp = activation_post_process.calculate_qparams()
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
@@ -204,9 +203,13 @@ class _ConvNd(nn.Module):
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
-        return qconv
+        if activation_post_process is None or activation_post_process.dtype == torch.float:
+            return qconv  # dynamic quantization doesn't need scale/zero_point
+        else:
+            act_scale, act_zp = activation_post_process.calculate_qparams()
+            qconv.scale = float(act_scale)
+            qconv.zero_point = int(act_zp)
+            return qconv
 
     @staticmethod
     def from_float(cls, mod):
@@ -227,11 +230,39 @@ class _ConvNd(nn.Module):
                 cls._FLOAT_MODULE.__name__ + " but got:" + str(type(mod))
             assert hasattr(mod, "qconfig"), \
                 "Input float module must have qconfig defined."
-            activation_post_process = mod.activation_post_process
+            activation_post_process = None if not hasattr(
+                mod, "activation_post_process") else mod.activation_post_process
             if type(mod) == cls._NNI_CONV_RELU_MODULE:
                 mod = mod[0]
             weight_post_process = mod.qconfig.weight()
         return cls.get_qconv(mod, activation_post_process, weight_post_process)
+
+    @classmethod
+    def from_reference(cls, ref_qconv, output_scale, output_zero_point):
+        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
+        Args:
+            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+                          utilities or provided by the user
+            output_scale (float): scale for output Tensor
+            output_zero_point (int): zero point for output Tensor
+        """
+        qconv = cls(
+            ref_qconv.in_channels,
+            ref_qconv.out_channels,
+            ref_qconv.kernel_size,  # type: ignore[arg-type]
+            ref_qconv.stride,  # type: ignore[arg-type]
+            ref_qconv.padding,  # type: ignore[arg-type]
+            ref_qconv.dilation,  # type: ignore[arg-type]
+            ref_qconv.groups,
+            ref_qconv.bias is not None,  # type: ignore[arg-type]
+            ref_qconv.padding_mode,
+            device=ref_qconv.weight.device,
+            dtype=ref_qconv.weight.dtype)
+        qweight = ref_qconv.get_quantized_weight()
+        qconv.set_weight_bias(qweight, ref_qconv.bias)
+        qconv.scale = float(output_scale)
+        qconv.zero_point = int(output_zero_point)
+        return qconv
 
 class Conv1d(_ConvNd):
     r"""Applies a 1D convolution over a quantized input signal composed of
@@ -333,7 +364,7 @@ class Conv1d(_ConvNd):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
         return _ConvNd.from_float(cls, mod)
@@ -430,7 +461,7 @@ class Conv2d(_ConvNd):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
         return _ConvNd.from_float(cls, mod)
@@ -528,7 +559,7 @@ class Conv3d(_ConvNd):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
         return _ConvNd.from_float(cls, mod)
@@ -564,7 +595,7 @@ class _ConvTransposeNd(_ConvNd):
     def from_float(cls, mod):
         r"""Creates a quantized module from a float module or qparams_dict.
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
         # derived classes override cls._FLOAT_MODULE attribute
@@ -575,7 +606,6 @@ class _ConvTransposeNd(_ConvNd):
             'Input float module must have qconfig defined.'
         weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        act_scale, act_zp = mod.activation_post_process.calculate_qparams()
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
@@ -584,11 +614,41 @@ class _ConvTransposeNd(_ConvNd):
                     mod.stride, mod.padding, mod.output_padding, mod.groups,
                     mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
+        if not hasattr(mod, "activation_post_process") or mod.activation_post_process.dtype == torch.float:
+            return qconv  # dynamic quantization doesn't need scale/zero_point
+        else:
+            act_scale, act_zp = mod.activation_post_process.calculate_qparams()
+            qconv.scale = float(act_scale)
+            qconv.zero_point = int(act_zp)
+            return qconv
 
+    @staticmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
+        Args:
+            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+                          utilities or provided by the user
+            output_scale (float): scale for output Tensor
+            output_zero_point (int): zero point for output Tensor
+        """
+        qconv = cls(
+            ref_qconvt.in_channels,
+            ref_qconvt.out_channels,
+            ref_qconvt.kernel_size,  # type: ignore[arg-type]
+            ref_qconvt.stride,  # type: ignore[arg-type]
+            ref_qconvt.padding,  # type: ignore[arg-type]
+            ref_qconvt.output_padding,  # type: ignore[arg-type]
+            ref_qconvt.groups,
+            ref_qconvt.bias is not None,  # type: ignore[arg-type]
+            ref_qconvt.dilation,  # type: ignore[arg-type]
+            ref_qconvt.padding_mode,
+            device=ref_qconvt.weight.device,
+            dtype=ref_qconvt.weight.dtype)
+        qweight = ref_qconvt.get_quantized_weight()
+        qconv.set_weight_bias(qweight, ref_qconvt.bias)
+        qconv.scale = float(output_scale)
+        qconv.zero_point = int(output_zero_point)
         return qconv
-
 
 class ConvTranspose1d(_ConvTransposeNd):
     r"""Applies a 1D transposed convolution operator over an input image
@@ -637,11 +697,11 @@ class ConvTranspose1d(_ConvTransposeNd):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        output_padding = _pair(output_padding)
+        kernel_size = _single(kernel_size)
+        stride = _single(stride)
+        padding = _single(padding)
+        dilation = _single(dilation)
+        output_padding = _single(output_padding)
 
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -674,6 +734,10 @@ class ConvTranspose1d(_ConvTransposeNd):
             raise ValueError("Input shape must be `(N, C, L)`!")
         return torch.ops.quantized.conv_transpose1d(
             input, self._packed_params, self.scale, self.zero_point)
+
+    @classmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        return _ConvTransposeNd.from_reference(cls, ref_qconvt, output_scale, output_zero_point)
 
 
 class ConvTranspose2d(_ConvTransposeNd):
@@ -759,6 +823,10 @@ class ConvTranspose2d(_ConvTransposeNd):
         return ops.quantized.conv_transpose2d(
             input, self._packed_params, self.scale, self.zero_point)
 
+    @classmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        return _ConvTransposeNd.from_reference(cls, ref_qconvt, output_scale, output_zero_point)
+
 class ConvTranspose3d(_ConvTransposeNd):
     r"""Applies a 3D transposed convolution operator over an input image
     composed of several input planes.
@@ -806,11 +874,11 @@ class ConvTranspose3d(_ConvTransposeNd):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        output_padding = _pair(output_padding)
+        kernel_size = _triple(kernel_size)
+        stride = _triple(stride)
+        padding = _triple(padding)
+        dilation = _triple(dilation)
+        output_padding = _triple(output_padding)
 
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -843,3 +911,7 @@ class ConvTranspose3d(_ConvTransposeNd):
             raise ValueError("Input shape must be `(N, C, T, H, W)`!")
         return ops.quantized.conv_transpose3d(
             input, self._packed_params, self.scale, self.zero_point)
+
+    @classmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        return _ConvTransposeNd.from_reference(cls, ref_qconvt, output_scale, output_zero_point)

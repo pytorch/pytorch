@@ -9,6 +9,7 @@
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 namespace {
@@ -64,7 +65,7 @@ struct Index : IndexBase {
     }
     std::lock_guard<std::mutex> lock(dictMutex_);
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 0; i < numKeys; ++i) {
+    for (const auto i : c10::irange(numKeys)) {
       auto it = dict_.find(keys[i]);
       if (it != dict_.end()) {
         values[i] = it->second;
@@ -84,7 +85,7 @@ struct Index : IndexBase {
         numKeys <= maxElements_,
         "Cannot load index: Tensor is larger than max_elements.");
     decltype(dict_) dict;
-    for (auto i = 0U; i < numKeys; ++i) {
+    for (const auto i : c10::irange(0U, numKeys)) {
       CAFFE_ENFORCE(
           dict.insert({keys[i], i + 1}).second,
           "Repeated elements found: cannot load into dictionary.");
@@ -111,7 +112,7 @@ struct Index : IndexBase {
 
  private:
   void FrozenGet(const T* keys, int64_tValue* values, size_t numKeys) {
-    for (auto i = 0U; i < numKeys; ++i) {
+    for (const auto i : c10::irange(0U, numKeys)) {
       auto it = dict_.find(keys[i]);
       values[i] = it != dict_.end() ? it->second : 0;
     }

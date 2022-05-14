@@ -25,11 +25,10 @@ float compress_uniform_simplified_(
   float inverse_scale = 1.0f / scale;
 
   float norm = 0.0f;
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  constexpr int VLEN = 8;
   int i = 0;
 
 #ifdef __AVX__
+  constexpr int VLEN = 8;
   // vectorized loop
   __m256 norm_v = _mm256_setzero_ps();
   for (; i < N / VLEN * VLEN; i += VLEN) {

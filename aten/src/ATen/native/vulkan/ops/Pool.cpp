@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/Pool.h>
 #include <torch/library.h>
@@ -36,6 +37,8 @@ Tensor adaptive_avg_pool2d(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::_adaptive_avg_pool2d");
+
     if C10_LIKELY(v_self.has_image()) {
       const uvec3 v_output_size = v_output.extents();
       const uvec3 v_self_size = v_self.extents();
@@ -70,16 +73,20 @@ Tensor adaptive_avg_pool2d(
           VK_KERNEL(adaptive_avg_pool2d),
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
-          // Shader parameters
-          block,
-          // Textures
+          // Write-only access bypasses synchronization but inserts appropriate
+          // barriers if necessary.
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute));
+              vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -97,7 +104,8 @@ Tensor pool2d(
     const IntArrayRef padding_arg,
     const IntArrayRef dilation_arg,
     const bool ceil_mode,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   if (stride_arg.empty()) {
     stride_arg = kernel_arg;
   }
@@ -171,6 +179,8 @@ Tensor pool2d(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY(v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
@@ -214,16 +224,20 @@ Tensor pool2d(
           shader_descriptor,
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
-          // Shader parameters
-          block,
-          // Textures
+          // Write-only access bypasses synchronization but inserts appropriate
+          // barriers if necessary.
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute));
+              vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -249,7 +263,8 @@ Tensor avg_pool2d(
     padding_arg,
     {1,1},
     ceil_mode,
-    VK_KERNEL(avg_pool2d)
+    VK_KERNEL(avg_pool2d),
+    "aten::avg_pool2d"
   );
 }
 
@@ -267,7 +282,8 @@ Tensor max_pool2d(
     padding_arg,
     dilation_arg,
     ceil_mode,
-    VK_KERNEL(max_pool2d)
+    VK_KERNEL(max_pool2d),
+    "aten::max_pool2d"
   );
 }
 

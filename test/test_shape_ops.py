@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 import numpy as np
 
@@ -11,9 +13,9 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyOnCPUAndCUDA,
-    dtypesIfCPU, dtypesIfCUDA, largeTensorTest)
-from torch.testing._internal.common_dtype import get_all_dtypes
+    instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyNativeDeviceTypes,
+    dtypesIfCUDA, largeTensorTest)
+from torch.testing._internal.common_dtype import all_types_and_complex_and, all_types, all_types_and
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -224,13 +226,12 @@ class TestShapeOps(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    @onlyOnCPUAndCUDA
-    @dtypesIfCPU(*get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
-                                 include_bfloat16=False))
-    @dtypesIfCUDA(*get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
+    @onlyNativeDeviceTypes
+    @dtypes(*all_types())
+    @dtypesIfCUDA(*all_types_and(torch.half))
     def test_trace(self, device, dtype):
         def test(shape):
-            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
+            tensor = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
             expected_dtype = tensor.sum().dtype
             expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
 
@@ -339,7 +340,7 @@ class TestShapeOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, error_msg):
             torch.clamp(X)
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)
@@ -438,7 +439,7 @@ class TestShapeOps(TestCase):
         for dims in test_dims:
             self.assertEqual(size, list(data.flip(dims).size()))
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_flip_errors(self, device, dtype):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
         data = make_arg((2, 2, 2))
@@ -456,7 +457,7 @@ class TestShapeOps(TestCase):
     def _rand_shape(self, dim, min_size, max_size):
         return tuple(torch.randint(min_size, max_size + 1, (dim,)))
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_flip_numpy(self, device, dtype):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
 
@@ -565,7 +566,7 @@ class TestShapeOps(TestCase):
             t.nonzero()
             self.assertEqual(len(w), 0)
 
-    @dtypes(*get_all_dtypes(include_complex=False))
+    @dtypes(*all_types_and(torch.half, torch.bool, torch.bfloat16))
     def test_nonzero(self, device, dtype):
 
         shapes = [
@@ -646,7 +647,7 @@ class TestShapeOps(TestCase):
         self.assertEqual(traced_nontuple, expected_nontuple)
         self.assertEqual(traced_out, expected_nontuple)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_nonzero_discontiguous(self, device):
         shape = (4, 4)
         tensor = torch.randint(2, shape, device=device)

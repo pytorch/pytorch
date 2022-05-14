@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace jit {

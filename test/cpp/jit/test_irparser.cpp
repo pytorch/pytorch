@@ -145,7 +145,7 @@ TEST(IRParserTest, InferredTypeIsTensor) {
 graph(%a):
   return (%a))IR",
       &*graph);
-  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
+  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
 }
 
 TEST(IRParserTest, ValueReuse) {
@@ -260,7 +260,7 @@ TEST(IRParserTest, FileCheck) {
       return (%a))IR";
 
   parseIR(text, &*graph);
-  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
+  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
   torch::jit::testing::FileCheck().run(text, *graph);
 }
 

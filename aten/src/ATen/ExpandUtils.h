@@ -1,9 +1,16 @@
 #pragma once
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/view_copy.h>
+#endif
+
 #include <ATen/core/DimVector.h>
 #include <ATen/Tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/MaybeOwned.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 #include <sstream>
@@ -266,7 +273,7 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   // expands a list of Tensors; ignores undefined (null) tensors
   bool first = true;
   DimVector sizes;
-  for (size_t i = 0; i < to_expand.size(); ++i) {
+  for (const auto i : c10::irange(to_expand.size())) {
     if (!to_expand[i].defined()) {
       continue;
     } else if (first) {
@@ -278,7 +285,7 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   }
 
   std::vector<Tensor> result(to_expand.size());
-  for (size_t i = 0; i < to_expand.size(); ++i) {
+  for (const auto i : c10::irange(to_expand.size())) {
     if (!to_expand[i].defined()) {
       continue;
     } else if (to_expand[i].sizes().equals(sizes)) {
@@ -292,14 +299,14 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
 
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
 // Precondition: is_expandable_to(shape, tensor.sizes()) must be true
-static inline Tensor sum_to(Tensor tensor, const IntArrayRef shape) {
+static inline Tensor sum_to(Tensor tensor, const IntArrayRef shape, bool always_return_non_view=false) {
   if (shape.size() == 0) {
     return tensor.sum();
   }
   c10::SmallVector<int64_t, 8> reduce_dims;
   const at::IntArrayRef sizes = tensor.sizes();
   const int64_t leading_dims = sizes.size() - shape.size();
-  for (int64_t i = 0; i < leading_dims; ++i) {
+  for (const auto i : c10::irange(leading_dims)) {
     reduce_dims.push_back(i);
   }
   for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
@@ -310,7 +317,13 @@ static inline Tensor sum_to(Tensor tensor, const IntArrayRef shape) {
   if (!reduce_dims.empty()) {
     tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
   }
-  return leading_dims > 0 ? tensor.view(shape) : tensor;
+  if (always_return_non_view) {
+    // This is only actually used by the functionalization pass.
+    // We want to be able to guarantee that this function doesn't return a view of the input.
+    return leading_dims > 0 ? at::view_copy(tensor, shape) : tensor.clone();
+  } else {
+    return leading_dims > 0 ? tensor.view(shape) : tensor;
+  }
 }
 
 // True if `shape` can be broadcasted to `desired`
@@ -320,7 +333,7 @@ static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
   if (ndim > target_dim) {
     return false;
   }
-  for (size_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     int64_t size = shape[ndim - i - 1];
     int64_t target = desired[target_dim - i - 1];
     if (size != target && size != 1) {

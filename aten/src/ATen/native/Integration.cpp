@@ -3,6 +3,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/DimVector.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>
 
@@ -59,11 +60,13 @@ Tensor do_cumulative_trapezoid(const Tensor& y, double dx, int64_t dim) {
 // Note that no padding will be added if the current shape has the greater than or equal
 // number of dimensions than the target numbers of dimensions.
 DimVector add_padding_to_shape(IntArrayRef curr_shape, int64_t target_n_dim) {
-    if (curr_shape.size() >= target_n_dim)
-        target_n_dim = curr_shape.size();
+    const auto curr_size = static_cast<int64_t>(curr_shape.size());
+    if (curr_size >= target_n_dim){
+        target_n_dim = curr_size;
+    }
     DimVector new_shape(target_n_dim, 1);
-    for (decltype(curr_shape.size()) i = 0; i < curr_shape.size(); i++) {
-        new_shape[target_n_dim-i-1] = curr_shape[curr_shape.size()-i-1];
+    for (const auto i : c10::irange(curr_size)) {
+        new_shape[target_n_dim-i-1] = curr_shape[curr_size-i-1];
     }
     return new_shape;
 }

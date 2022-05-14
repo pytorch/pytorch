@@ -6,10 +6,10 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
-from torch.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSNodeTargetType
-from torch.quantization.fx.pattern_utils import get_default_quant_patterns
-from torch.quantization import (
+from torch.ao.quantization.fx.backend_config_utils import get_native_quant_patterns
+from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
 )
@@ -66,9 +66,18 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
     # * multiple ops: (torch.nn.ReLU, torch.nn.Conv2d)
     # For fusions, we only care about patterns composed of multiple ops.
     # TODO(future PR): allow customizations from default patterns.
-    all_quant_patterns = get_default_quant_patterns()
+    all_quant_patterns = get_native_quant_patterns()
+
     default_base_op_idx = 0
     for quant_pattern, _quant_handler in all_quant_patterns.items():
+        # TODO: this is a temporary hack to flatten the patterns from quantization so
+        # that it works with the ns matcher function, maybe we should use `is_match`
+        # in torch.ao.quantization.fx.match_utils to match the patterns
+        if isinstance(quant_pattern, tuple) and len(quant_pattern) == 2 and \
+           isinstance(quant_pattern[1], tuple) and len(quant_pattern[1]) == 2:
+            # flatten the pattern with form (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d))
+            quant_pattern = (quant_pattern[0], quant_pattern[1][0], quant_pattern[1][1])
+
         # Only patterns of multiple ops are fusions, ignore
         # patterns which contain a single ops (they get matched
         # without caring about fusions).
@@ -118,6 +127,7 @@ def end_node_matches_reversed_fusion(
     end_node: Node,
     reversed_fusion: NSFusionType,
     gm: GraphModule,
+    seen_nodes: Set[Node],
 ) -> bool:
     """
     Returns true if a pattern ending with `end_node` matches
@@ -125,6 +135,10 @@ def end_node_matches_reversed_fusion(
     """
     cur_node = end_node
     for fusion_idx in range(len(reversed_fusion)):
+        # each node can only belong to one matched pattern
+        if cur_node in seen_nodes:
+            return False
+
         cur_fusion_el = reversed_fusion[fusion_idx]
 
         if cur_node.op == 'call_function':

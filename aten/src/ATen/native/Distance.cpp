@@ -41,7 +41,7 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
   Tensor x2_pad = at::ones_like(x2_norm, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor x1_ = at::cat({x1.mul(-2), x1_norm, x1_pad}, -1);
   Tensor x2_ = at::cat({x2, x2_pad, x2_norm}, -1);
-  Tensor result = x1_.matmul(x2_.transpose(-2, -1));
+  Tensor result = x1_.matmul(x2_.mT());
   result.clamp_min_(0).sqrt_();
   return result;
 }
@@ -49,7 +49,7 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
 static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.device().type();
-  TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
+  TORCH_CHECK(at::isFloatingType(x2.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
   auto device2 = x2.device().type();
   TORCH_CHECK(p >= 0, "cdist only supports non-negative p values");
   TORCH_CHECK(device1 == device2, "X1 and X2 must have the same device type. X1: ", device1, " X2: ", device2);
@@ -156,7 +156,7 @@ Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, c10::o
   return result;
 }
 
-Tensor _cdist_backward(const Tensor& grad, const Tensor& _x1, const Tensor& _x2, const double p, const Tensor& cdist) {
+Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2, const double p, const Tensor& _cdist) {
   // Broadcasting might generate non-contiguous Tensors, so handle it before doing checks
   int64_t c1 = _x1.size(-1);
   int64_t c2 = _x2.size(-1);
@@ -182,17 +182,17 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& _x1, const Tensor& _x2,
 
   Tensor x1 = _x1;
   if (tensor1_expand_size != x1.sizes()) {
-    x1 = x1.expand(tensor1_expand_size).contiguous();
+    x1 = x1.expand(tensor1_expand_size);
   }
   Tensor x2 = _x2;
   if (tensor2_expand_size != x2.sizes()) {
-    x2 = x2.expand(tensor2_expand_size).contiguous();
+    x2 = x2.expand(tensor2_expand_size);
   }
 
-  TORCH_CHECK(x1.is_contiguous(), "_cdist_backward requires X1 to be contiguous");
-  TORCH_CHECK(x2.is_contiguous(), "_cdist_backward requires X2 to be contiguous");
-  TORCH_CHECK(cdist.is_contiguous(), "_cdist_backward requires dist to be contiguous");
-  TORCH_CHECK(grad.is_contiguous(), "_cdist_backward requires grad to be contiguous");
+  x1 = x1.contiguous();
+  x2 = x2.contiguous();
+  auto cdist = _cdist.contiguous();
+  auto grad = _grad.contiguous();
   int64_t n = x1.size(-2);
   int64_t m = x1.size(-1);
   auto device1 = x1.device().type();
@@ -239,22 +239,72 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   return result;
 }
 
-Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
-  TORCH_CHECK(x1.ndimension() == x2.ndimension(), "cosine_similarity requires both inputs to have the same number of dimensions, but x1 has ",
-              x1.ndimension(), " and x2 has ", x2.ndimension());
-  TORCH_CHECK(x1.ndimension() == 0 || x1.size(dim) == x2.size(dim), "cosine_similarity requires both inputs to have the same size at dimension ", dim, "but x1 has ",
-  x1.size(dim), " and x2 has ", x2.size(dim));
-  auto commonDtype = at::result_type(x1, x2);
+Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, double eps) {
+  /*
+   * cosine_similarity(x1, x2) = <x1, x2> / (||x1|| * ||x2||)
+   *
+   * The current implementation is an improvement over the previous version.
+   *
+   * Previous implementation:
+   * 1. Compute num = <x1, x2>,
+   * 2. Compute denom = ||x1|| * ||x2||,
+   * 3. Compute denom = max(denom, eps) to avoid division by zero,
+   * 4. Return num / denom.
+   *
+   * Previous implementation has the following issues:
+   * 1. Chance of losing precision in <x1, x2> when ||x1|| and ||x2|| are large.
+   * 2. Chance of losing precision in ||x1|| * ||x2|| when ||x1|| and ||x2|| are large.
+   * 3. Losing precision may cause |cosing_similarity(x1, x2)| > 1.0.
+   *
+   * Current implementation:
+   * 1. Compute x1_normalized = x1 / max(||x1||, eps),
+   *            x2_normalized = x2 / max(||x2||, eps),
+   * 2. Return <x1_normalized, x2_normalized>.
+   *
+   * The current implementation improves over the previous one by:
+   * 1. Making sure that <x1, x2> and ||x1|| * ||x2|| are not computed explicitly,
+   *    hence avoiding floating point overflows.
+   * 2. Both methods might have issues with computing ||x1|| and ||x2||, but for
+   *    the current method this is the only source of the floating point imprecision.
+   * 3. Makes sure |cosing_similarity(x1, x2)| <= 1.0.
+   *
+   */
+  auto commonDtype = at::result_type(x1_, x2_);
   TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
-  Tensor x1_ = x1.to(commonDtype);
-  Tensor x2_ = x2.to(commonDtype);
-  // Follow scipy impl to improve numerical precision
-  // Use x / sqrt(x * x) instead of x / (sqrt(x) * sqrt(x))
-  Tensor w12 = at::sum(x1_ * x2_, dim);
-  Tensor w1 = at::sum(x1_ * x1_, dim);
-  Tensor w2 = at::sum(x2_ * x2_, dim);
-  Tensor n12 = (w1 * w2).clamp_min_(eps * eps).sqrt_();
-  return w12.div_(n12);
+
+  auto common_size = at::infer_size_dimvector(x1_.sizes(), x2_.sizes());
+  auto x1 = x1_.to(commonDtype).expand(common_size);
+  auto x2 = x2_.to(commonDtype).expand(common_size);
+
+  auto x1_squared_norm = at::pow(x1, 2).sum(dim, /*keepdim=*/true);
+  auto x2_squared_norm = at::pow(x2, 2).sum(dim, /*keepdim=*/true);
+
+  {
+    at::NoGradGuard guard;
+    x1_squared_norm.clamp_min_(eps * eps);
+    x2_squared_norm.clamp_min_(eps * eps);
+  }
+
+  auto x1_norm = x1_squared_norm.sqrt_();
+  auto x2_norm = x2_squared_norm.sqrt_();
+
+  auto x1_normalized = x1.div(x1_norm);
+  auto x2_normalized = x2.div(x2_norm);
+
+  Tensor cos_sim_value = at::sum(x1_normalized * x2_normalized, dim);
+
+  // The code above is resistant to over +/-1 overshoots.
+  // However, if this happens and if it is critical, uncommenting
+  // the lines below will solve the issue.
+  // We keep these lines commented as to reduce the number of kernel
+  // launches for better runtime performance.
+  //{
+  //  at::NoGradGuard guard;
+  //  cos_sim_value.clamp_min_(-1.0);
+  //  cos_sim_value.clamp_max_(1.0);
+  //}
+
+  return cos_sim_value;
 }
 
 }}  // namespace at::native

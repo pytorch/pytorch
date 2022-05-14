@@ -22,20 +22,20 @@
 #include "caffe2/utils/math.h"
 #ifdef CAFFE2_USE_MKL
 #include <mkl.h>
-#endif  // CAFFE2_USE_MKL
+#endif // CAFFE2_USE_MKL
 
 namespace caffe2 {
 
 namespace {
 
-template<int N>
+template <int N>
 using Shape = std::array<int, N>;
 
-template<int N>
+template <int N>
 const std::vector<int64_t>& shape(Shape<N> vs) {
   static thread_local std::vector<int64_t> cache;
   cache.resize(vs.size());
-  for (auto i = 0; i < vs.size(); ++i) {
+  for (const auto i : c10::irange(vs.size())) {
     cache[i] = vs[i];
   }
   return cache;
@@ -50,10 +50,18 @@ inline const std::vector<int64_t>& shape(int i, int j) {
 }
 
 template <typename T, class Context>
-void Sparse_mm(const T* acsr, const int* ia, const int* ja,
-              int m, int k, int n, const T* b, T* c, Context* context);
+void Sparse_mm(
+    const T* acsr,
+    const int* ia,
+    const int* ja,
+    int m,
+    int k,
+    int n,
+    const T* b,
+    T* c,
+    Context* context);
 
-template<typename T, class Context>
+template <typename T, class Context>
 void trans_mat(const T* o, T* t, int m, int n, Context* context);
 
 template <>
@@ -63,9 +71,9 @@ void trans_mat<float, CPUContext>(
     int m,
     int n,
     CPUContext* /*context*/) {
-  for(int i = 0; i < m; ++i){
-    for(int j = 0; j < n; ++j){
-      t[j*m+i]=o[i*n+j];
+  for (const auto i : c10::irange(m)) {
+    for (const auto j : c10::irange(n)) {
+      t[j * m + i] = o[i * n + j];
     }
   }
 }
@@ -83,22 +91,35 @@ void Sparse_mm<float, CPUContext>(
     const float* b,
     float* c,
     CPUContext* /*context*/) {
-
-  #ifdef CAFFE2_USE_MKL
+#ifdef CAFFE2_USE_MKL
 
   float alpha = 1.0, beta = 0.;
-  mkl_scsrmm("N", &m, &n, &k, &alpha, "GLNC",
-             acsr, ja, ia, ia+1, b, &n, &beta, c, &n);
+  mkl_scsrmm(
+      "N",
+      &m,
+      &n,
+      &k,
+      &alpha,
+      "GLNC",
+      acsr,
+      ja,
+      ia,
+      ia + 1,
+      b,
+      &n,
+      &beta,
+      c,
+      &n);
 
-  #else
+#else
   throw std::runtime_error("Not compiled with MKL");
-  #endif
+#endif
 }
 
-}
+} // namespace
 
 // This is Caffe's InnerProductOp, with a name that fits its purpose better.
-template <typename T, class Context, class Engine=DefaultEngine>
+template <typename T, class Context, class Engine = DefaultEngine>
 class FullyConnectedOp_SPARSE final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -122,27 +143,43 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
     // Feature dimension
     int M = Xt.numel() / K;
     // number of outputs.
-    int N = iw.dim32(0)-1;
+    int N = iw.dim32(0) - 1;
     CAFFE_ENFORCE_EQ(N, b.dim32(0));
     auto* Yt = Output(0, shape(N, M), at::dtype<T>());
 
     // Y' = W * X';
     Sparse_mm<T, Context>(
-      Wcsr.template data<T>(), iw.template data<int>(),
-      jw.template data<int>(), N, K, M, Xt.template data<T>(),
-      Yt->template mutable_data<T>(), &context_);
+        Wcsr.template data<T>(),
+        iw.template data<int>(),
+        jw.template data<int>(),
+        N,
+        K,
+        M,
+        Xt.template data<T>(),
+        Yt->template mutable_data<T>(),
+        &context_);
     // Add bias term
     if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(shape(M));
       math::Set<T, Context>(
-          M, static_cast<T>(1), bias_multiplier_.template mutable_data<T>(),
+          M,
+          static_cast<T>(1),
+          bias_multiplier_.template mutable_data<T>(),
           &context_);
     }
     math::Gemm<T, Context, Engine>(
-        CblasNoTrans, CblasNoTrans, N, M, 1, 1,
-        b.template data<T>(), bias_multiplier_.template data<T>(), 1,
-        Yt->template mutable_data<T>(), &context_);
+        CblasNoTrans,
+        CblasNoTrans,
+        N,
+        M,
+        1,
+        1,
+        b.template data<T>(),
+        bias_multiplier_.template data<T>(),
+        1,
+        Yt->template mutable_data<T>(),
+        &context_);
     return true;
   }
 
@@ -150,7 +187,6 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
   Tensor bias_multiplier_{Context::GetDeviceType()};
 };
 
+} // namespace caffe2
 
-}  // namespace caffe2
-
-#endif  // CAFFE2_OPERATORS_FULLY_CONNECTED_OP_H_
+#endif // CAFFE2_OPERATORS_FULLY_CONNECTED_OP_H_

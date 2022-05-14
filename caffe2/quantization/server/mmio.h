@@ -36,8 +36,8 @@ void StoreMatrixInMatrixMarketFormat(
     }
     fprintf(fp, "%d %d\n", m, n);
     // matrix market array format uses column-major order
-    for (int j = 0; j < n; ++j) {
-      for (int i = 0; i < m; ++i) {
+    for (const auto j : c10::irange(n)) {
+      for (const auto i : c10::irange(m)) {
         if (is_integral<T>::value) {
           // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
           fprintf(fp, "%d\n", static_cast<int>(a[j * m + i]));

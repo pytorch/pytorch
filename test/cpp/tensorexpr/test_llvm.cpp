@@ -3,6 +3,7 @@
 
 #include <test/cpp/tensorexpr/test_base.h>
 
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <test/cpp/tensorexpr/test_utils.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -242,14 +243,14 @@ TEST(LLVM, fastLogFloat) {
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
 
-  for (int i = 0; i < kTotalSize; ++i) {
+  for (const auto i : c10::irange(kTotalSize)) {
     a_v(i) = at::randn({1}).item().to<float>();
   }
 
   LLVMCodeGen ir_eval(stmt, {a_buf, b_buf});
   ir_eval.call({a_v, b_v});
 
-  for (int i = 0; i < kTotalSize; ++i) {
+  for (const auto i : c10::irange(kTotalSize)) {
     auto test = b_v(i);
     auto ref = std::log(a_v(i));
     if (std::isnan(ref)) {
@@ -516,7 +517,7 @@ TEST(LLVM, VecLoadStoreTest) {
     LLVMCodeGen cg(store, {a, b});                                           \
     std::vector<void*> args({a_buffer.data(), b_buffer.data()});             \
     ASSERT_EQ(cg.value<int>(args), 0);                                       \
-    for (int i = 0; i < Lanes; i++) {                                        \
+    for (const auto i : c10::irange(Lanes)) {                                \
       ASSERT_FLOAT_EQ(a_buffer[i], val);                                     \
     }                                                                        \
   } // namespace jit
@@ -554,7 +555,7 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
     LLVMCodeGen cg(store, {a, b});                                           \
     std::vector<void*> args({a_buffer.data(), b_buffer.data()});             \
     ASSERT_EQ(cg.value<int>(args), 0);                                       \
-    for (int i = 0; i < Lanes; i++) {                                        \
+    for (const auto i : c10::irange(Lanes)) {                                \
       ASSERT_FLOAT_EQ(a_buffer[i], val);                                     \
     }                                                                        \
   } // namespace jit
@@ -583,8 +584,7 @@ DOUBLE_INTRINSICS_TEST(lgamma, 4)
 TEST(LLVM, VectorizerLoadStoreTest) {
   BufHandle a("A", {1}, kInt);
 
-  Tensor c =
-      Compute("c", {{4, "i"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor c = Compute("c", {4}, [&](const VarHandle& i) { return a.load(i); });
 
   BufHandle c_buf(c.buf());
   LoopNest l({c});
@@ -605,7 +605,7 @@ TEST(LLVM, VectorizerLoadStoreTest) {
 TEST(LLVM, VectorizeBitCast) {
   BufHandle a("A", {128}, kInt);
 
-  Tensor c = Compute("c", {{128, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute("c", {128}, [&](const VarHandle& i) {
     return bitcast<float>(a.load(i));
   });
 
@@ -619,7 +619,7 @@ TEST(LLVM, VectorizeBitCast) {
 
   std::vector<int> a_vec(128);
   std::vector<float> c_vec(128);
-  for (auto i = 0; i < 128; ++i) {
+  for (const auto i : c10::irange(128)) {
     a_vec[i] = raw_bitcast<int>(1337.f);
   }
   std::vector<void*> args({a_vec.data(), c_vec.data()});
@@ -985,7 +985,7 @@ TEST(LLVM, CompareSelectIntEQ) {
   ASSERT_EQ(c_buffer.size(), N);
 
   assertAllEqual(a_buffer, 1);
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     ASSERT_EQ(c_ref[i], c_buffer[i]);
   }
 }
@@ -1058,7 +1058,7 @@ TEST(LLVM, CompareSelectByteGT) {
   ASSERT_EQ(c_buffer.size(), N);
 
   assertAllEqual(b_buffer, uint8_t(0));
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     ASSERT_EQ(c_ref[i], c_buffer[i]);
   }
 }
@@ -1093,7 +1093,7 @@ TEST(LLVM, CompareSelectByteGE) {
   ASSERT_EQ(c_buffer.size(), N);
 
   assertAllEqual(b_buffer, uint8_t(0));
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     ASSERT_EQ(c_ref[i], c_buffer[i]);
   }
 }
@@ -1133,7 +1133,7 @@ TEST(LLVM, CompareSelectByteLT) {
   ASSERT_EQ(c_buffer.size(), N);
 
   assertAllEqual(b_buffer, uint8_t(128));
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     ASSERT_EQ(c_ref[i], c_buffer[i]);
   }
 }
@@ -1168,7 +1168,7 @@ TEST(LLVM, CompareSelectByteLE) {
   ASSERT_EQ(c_buffer.size(), N);
 
   assertAllEqual(b_buffer, uint8_t(128));
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     ASSERT_EQ(c_ref[i], c_buffer[i]);
   }
 }
@@ -1185,9 +1185,8 @@ TEST(LLVM, StoreFloat) {
 
 TEST(LLVM, SimpleMath01) {
   const int N = 1024;
-  Tensor tensor = Compute("f", {{N, "i"}}, [](const VarHandle& i) {
-    return cast<float>(i * i + 1);
-  });
+  Tensor tensor = Compute(
+      "f", {N}, [](const VarHandle& i) { return cast<float>(i * i + 1); });
   LoopNest l({tensor});
   StmtPtr stmt = l.root_stmt();
   BufHandle f_buf(tensor.buf());
@@ -1198,7 +1197,7 @@ TEST(LLVM, SimpleMath01) {
   int value = cg.value<int>(args);
   ASSERT_EQ(value, 0);
   PaddedBuffer<float> f_ref(N, "f_ref");
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     f_ref(i) = i * i + 1;
   }
   ExpectAllNear(f_v, f_ref, 1e-5);
@@ -1208,9 +1207,8 @@ TEST(LLVM, ComputeMul) {
   const int N = 1024;
   BufHandle a("a", {N}, kFloat);
   BufHandle b("b", {N}, kFloat);
-  Tensor c = Compute("c", {{N, "i"}}, [&](const VarHandle& i) {
-    return a.load(i) * b.load(i);
-  });
+  Tensor c = Compute(
+      "c", {N}, [&](const VarHandle& i) { return a.load(i) * b.load(i); });
 
   BufHandle c_buf(c.buf());
   LoopNest l({c});
@@ -1231,10 +1229,9 @@ TEST(LLVM, BroadcastAdd) {
   const int N = 1024;
   BufHandle a("a", {M, N}, kFloat);
   BufHandle b("b", {N}, kFloat);
-  Tensor c = Compute(
-      "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return a.load(i, j) + b.load(j);
-      });
+  Tensor c = Compute("c", {M, N}, [&](const VarHandle& i, const VarHandle& j) {
+    return a.load(i, j) + b.load(j);
+  });
 
   BufHandle c_buf(c.buf());
   LoopNest l({c});
@@ -1251,8 +1248,8 @@ TEST(LLVM, BroadcastAdd) {
   std::vector<void*> args({av.data(), bv.data(), cv.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
 
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       ASSERT_EQ(cv[i * N + j], av[i * N + j] + bv[j]);
     }
   }
@@ -1332,9 +1329,8 @@ TEST(LLVM, TensorDynamicShapeAdd) {
     VarHandle n("n", kInt);
     BufHandle a("a", {n}, kFloat);
     BufHandle b("b", {n}, kFloat);
-    Tensor c = Compute("c", {{n, "n"}}, [&](const VarHandle& i) {
-      return a.load(i) + b.load(i);
-    });
+    Tensor c = Compute(
+        "c", {n}, [&](const VarHandle& i) { return a.load(i) + b.load(i); });
     LoopNest l({c});
     StmtPtr s = l.root_stmt();
     LLVMCodeGen cg(s, {a, b, c, n});
@@ -1355,8 +1351,8 @@ TEST(LLVM, DynamicShape2D) {
     VarHandle n("n", kInt);
     BufHandle a("a", {m, n}, kFloat);
     BufHandle b("b", {m, n}, kFloat);
-    Tensor c = Compute(
-        "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
+    Tensor c =
+        Compute("c", {m, n}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
         });
     LoopNest l({c});
@@ -1385,7 +1381,7 @@ TEST(LLVM, EmptyStmt) {
 TEST(LLVM, EliminatedStmt) {
   BufHandle a("a", {1}, kFloat);
 
-  Tensor c = Compute("c", {{0, "m"}}, [&](const VarHandle& m) { return m; });
+  Tensor c = Compute("c", {0}, [&](const VarHandle& m) { return m; });
 
   LoopNest l({c});
   l.prepareForCodegen();
@@ -1404,10 +1400,7 @@ TEST(LLVM, SimpleReduction) {
 
   BufHandle a("a", {1, M, N}, kFloat);
 
-  // TODO: why doesn't implicit vector<DimArg> work?
-  std::vector<DimArg> axis = {DimArg(1)};
-  std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
-  Tensor b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  Tensor b = Reduce("sum", {1}, Sum(), a, {M, N});
   LoopNest loop({b});
 
   loop.prepareForCodegen();
@@ -1421,8 +1414,8 @@ TEST(LLVM, SimpleReduction) {
   PaddedBuffer<float> b_ref(1, "b_ref");
 
   b_ref(0) = 0;
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       int v = i + j;
       a_v(0, i, j) = v;
       b_ref(0) += v;
@@ -1441,10 +1434,7 @@ TEST(LLVM, RFactorReduction) {
 
   BufHandle a("a", {1, M, N}, kFloat);
 
-  // TODO: why doesn't implicit vector<DimArg> work?
-  std::vector<DimArg> axis = {DimArg(1)};
-  std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
-  Tensor b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  Tensor b = Reduce("sum", {1}, Sum(), a, {M, N});
   LoopNest loop({b});
 
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(b);
@@ -1469,8 +1459,8 @@ TEST(LLVM, RFactorReduction) {
   PaddedBuffer<float> b_ref(1, "b_ref");
 
   b_ref(0) = 0;
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       int v = i + j;
       a_v(0, i, j) = v;
       b_ref(0) += v;
@@ -1489,7 +1479,7 @@ TEST(LLVM, RFactorVectorizedReduction) {
 
   BufHandle a("a", {1, M, N}, kFloat);
 
-  Tensor b = Reduce("sum", {{1, "K"}}, Sum(), a, {{M, "M"}, {N, "N"}});
+  Tensor b = Reduce("sum", {1}, Sum(), a, {M, N});
   LoopNest loopnest({b});
   std::vector<ForPtr> loops = loopnest.getLoopStmtsFor(b);
   // Reorder n and m loops
@@ -1516,8 +1506,8 @@ TEST(LLVM, RFactorVectorizedReduction) {
   PaddedBuffer<float> b_ref(1, "b_ref");
 
   b_ref(0) = 0;
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       int v = i + j;
       a_v(0, i, j) = v;
       b_ref(0) += v;
@@ -1535,10 +1525,9 @@ static void testSimpleParallel() {
   // parallel or sequential.
   const int M = 4;
   const int N = 6;
-  Tensor f = Compute(
-      "f", {{M, "m"}, {N, "n"}}, [](const VarHandle& m, const VarHandle& n) {
-        return cast<float>(m + n);
-      });
+  Tensor f = Compute("f", {M, N}, [](const VarHandle& m, const VarHandle& n) {
+    return cast<float>(m + n);
+  });
   LoopNest loop_nest({f});
   auto const& loops = loop_nest.getLoopStmtsFor(f);
   ForPtr m = loops[0];
@@ -1558,8 +1547,8 @@ static void testSimpleParallel() {
   int value = cg.value<int>(args);
   ASSERT_EQ(value, 0);
   PaddedBuffer<float> f_ref(M, N, "f_ref");
-  for (int m = 0; m < M; m++) {
-    for (int n = 0; n < N; n++) {
+  for (const auto m : c10::irange(M)) {
+    for (const auto n : c10::irange(N)) {
       f_ref(m, n) = m + n;
     }
   }
@@ -1584,23 +1573,17 @@ TEST(LLVM, CompositeParallel) {
   int test_count = 1 << loop_count;
   // Compute a composite operation, and try all loop-axis combination to be
   // parallel or sequential.
-  for (int test_cfg = 0; test_cfg < test_count; test_cfg++) {
+  for (const auto test_cfg : c10::irange(test_count)) {
     int M = 5;
     int N = 7;
-    Tensor t1 =
-        Compute("t1", {{M, "M"}}, [](const VarHandle& m) { return m + 1.f; });
-    Tensor t2 =
-        Compute("t2", {{N, "N"}}, [](const VarHandle& n) { return n + 2.f; });
-    Tensor t3 = Compute(
-        "t3",
-        {{M, "M"}, {N, "N"}},
-        [=](const VarHandle& m, const VarHandle& n) {
+    Tensor t1 = Compute("t1", {M}, [](const VarHandle& m) { return m + 1.f; });
+    Tensor t2 = Compute("t2", {N}, [](const VarHandle& n) { return n + 2.f; });
+    Tensor t3 =
+        Compute("t3", {M, N}, [=](const VarHandle& m, const VarHandle& n) {
           return t1.load(m) * t2.load(n);
         });
-    Tensor t4 = Compute(
-        "t4",
-        {{M, "M"}, {N, "N"}},
-        [=](const VarHandle& m, const VarHandle& n) {
+    Tensor t4 =
+        Compute("t4", {M, N}, [=](const VarHandle& m, const VarHandle& n) {
           return t3.load(m, n) + m + n;
         });
     LoopNest loop_nest({t4}, {t1, t2, t3, t4});
@@ -1624,7 +1607,7 @@ TEST(LLVM, CompositeParallel) {
       loop_list.push_back(loops[1]);
     }
     ASSERT_EQ(loop_list.size(), loop_count);
-    for (int i = 0; i < loop_count; i++) {
+    for (const auto i : c10::irange(loop_count)) {
       if (test_cfg & (1 << i)) {
         loop_list[i]->set_parallel();
       }
@@ -1638,8 +1621,8 @@ TEST(LLVM, CompositeParallel) {
     int value = cg.value<int>(args);
     ASSERT_EQ(value, 0);
     PaddedBuffer<float> t4_ref(M, N, "t4_ref");
-    for (int m = 0; m < M; m++) {
-      for (int n = 0; n < N; n++) {
+    for (const auto m : c10::irange(M)) {
+      for (const auto n : c10::irange(N)) {
         t4_ref(m, n) = (m + 1) * (n + 2) + m + n;
       }
     }
@@ -1656,12 +1639,12 @@ TEST(LLVM, VectorizedGEMM) {
   BufHandle BP("B", {K, N}, kFloat);
   Tensor CT = Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       Sum(),
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
         return AP.load(m, k) * BP.load(k, n);
       },
-      {{K, "K"}});
+      {K});
   LoopNest loop({CT});
 
   {
@@ -1715,10 +1698,10 @@ TEST(LLVM, VectorizedGEMM) {
   PaddedBuffer<float> c_v(M, N, "c_v");
   PaddedBuffer<float> c_ref(M, N, "c_ref");
 
-  for (int m = 0; m < M; m++) {
-    for (int n = 0; n < N; n++) {
+  for (const auto m : c10::irange(M)) {
+    for (const auto n : c10::irange(N)) {
       c_ref(m, n) = 0.f;
-      for (int k = 0; k < K; k++) {
+      for (const auto k : c10::irange(K)) {
         c_ref(m, n) += a_v(m, k) * b_v(k, n);
       }
     }
@@ -1734,10 +1717,9 @@ TEST(LLVM, CallRaw) {
   VarHandle N("N", kInt);
   BufHandle a("a", {M, N}, kFloat);
   BufHandle b("b", {N}, kFloat);
-  Tensor c = Compute(
-      "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return a.load(i, j) + b.load(j);
-      });
+  Tensor c = Compute("c", {M, N}, [&](const VarHandle& i, const VarHandle& j) {
+    return a.load(i, j) + b.load(j);
+  });
 
   LoopNest l({c});
   l.prepareForCodegen();
@@ -1754,8 +1736,8 @@ TEST(LLVM, CallRaw) {
   LLVMCodeGen cg(s, {a, b, BufHandle(c.buf()), N});
   cg.call_raw(args);
 
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N_value; j++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N_value)) {
       ASSERT_EQ(cv[i * N_value + j], av[i * N_value + j] + bv[j]);
     }
   }
@@ -1763,8 +1745,8 @@ TEST(LLVM, CallRaw) {
   SimpleIREvaluator eval(s, {a, b, BufHandle(c.buf()), N});
   eval.call_raw(args);
 
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N_value; j++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N_value)) {
       ASSERT_EQ(cv[i * N_value + j], av[i * N_value + j] + bv[j]);
     }
   }
@@ -1775,7 +1757,7 @@ TEST(LLVM, CustomTarget) {
   BufHandle a("a", {M}, kFloat);
   BufHandle b("b", {M}, kFloat);
   BufHandle c("c", {M}, kFloat);
-  Tensor d = Compute("d", {{M, "m"}}, [&](const VarHandle& m) {
+  Tensor d = Compute("d", {M}, [&](const VarHandle& m) {
     return a.load(m) * b.load(m) + c.load(m);
   });
   LoopNest nest({d});
@@ -1791,6 +1773,28 @@ TEST(LLVM, CustomTarget) {
       ->check("fmuls")
       ->check_not("vfmadd")
       ->run(ss.str());
+}
+
+TEST(LLVM, CodeGenKernelFuncName) {
+  BufHandle a("A", {1}, kInt);
+  BufHandle b("B", {1}, kInt);
+  std::vector<int32_t> a_buffer = {42};
+  std::vector<int32_t> b_buffer = {-11};
+  auto store = b.store({0}, a.load(0));
+
+  {
+    LLVMCodeGen cg(store, {a, b});
+    // Check that the kernel function name used by LLVMCodeGen
+    // is not empty.
+    ASSERT_NE(cg.kernel_func_name(), "");
+  }
+
+  {
+    LLVMCodeGen cg(store, {a, b}, at::kCPU, "new_func");
+    // Check that the kernel function name used by LLVMCodeGen
+    // is the one that was given above.
+    ASSERT_EQ(cg.kernel_func_name(), "new_func");
+  }
 }
 
 } // namespace jit

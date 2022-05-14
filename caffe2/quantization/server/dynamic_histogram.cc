@@ -64,12 +64,12 @@ void RemapHistograms(Histogram& src_hist, Histogram& dst_hist) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     float dst_bin_begin = dst_hist.Min() + dst_bin_width * dst_bin;
     float dst_bin_end = dst_bin_begin + dst_bin_width;
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
     int dst_bin2 =
         // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         dst_bin_width == 0 ? 0 : (src_bin_end - dst_hist.Min()) / dst_bin_width;
     // 1 src_bin is mapped to at most 2 dst bin
     assert(dst_bin2 <= dst_bin + 2);
+    (void)dst_bin2;
 
     // dst_bin_cnt is the count from src_bin that should go to dst_bin
     // The remainder should go to dst_bin2

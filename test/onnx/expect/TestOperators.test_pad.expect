@@ -3,31 +3,190 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "input"
-    output: "1"
-    name: "Pad_0"
+    input: "onnx::ConstantOfShape_27"
+    output: "onnx::Concat_10"
+    name: "ConstantOfShape_0"
+    op_type: "ConstantOfShape"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Concat_28"
+    input: "onnx::Concat_10"
+    output: "onnx::Reshape_11"
+    name: "Concat_1"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    output: "onnx::Reshape_12"
+    name: "Constant_2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 2
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\377\002\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Reshape_11"
+    input: "onnx::Reshape_12"
+    output: "onnx::Slice_13"
+    name: "Reshape_3"
+    op_type: "Reshape"
+  }
+  node {
+    output: "onnx::Slice_14"
+    name: "Constant_4"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Slice_15"
+    name: "Constant_5"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\377"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Slice_16"
+    name: "Constant_6"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\200"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Slice_17"
+    name: "Constant_7"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\377"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Slice_13"
+    input: "onnx::Slice_15"
+    input: "onnx::Slice_16"
+    input: "onnx::Slice_14"
+    input: "onnx::Slice_17"
+    output: "onnx::Transpose_18"
+    name: "Slice_8"
+    op_type: "Slice"
+  }
+  node {
+    input: "onnx::Transpose_18"
+    output: "onnx::Reshape_19"
+    name: "Transpose_9"
+    op_type: "Transpose"
+    attribute {
+      name: "perm"
+      ints: 1
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    output: "onnx::Reshape_20"
+    name: "Constant_10"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\377"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Reshape_19"
+    input: "onnx::Reshape_20"
+    output: "onnx::Cast_21"
+    name: "Reshape_11"
+    op_type: "Reshape"
+  }
+  node {
+    input: "onnx::Cast_21"
+    output: "onnx::Pad_22"
+    name: "Cast_12"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 7
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::Pad_0"
+    input: "onnx::Pad_22"
+    output: "23"
+    name: "Pad_13"
     op_type: "Pad"
     attribute {
       name: "mode"
       s: "reflect"
       type: STRING
     }
-    attribute {
-      name: "pads"
-      ints: 0
-      ints: 0
-      ints: 0
-      ints: 2
-      ints: 0
-      ints: 0
-      ints: 1
-      ints: 3
-      type: INTS
-    }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
+  initializer {
+    dims: 1
+    data_type: 7
+    name: "onnx::ConstantOfShape_27"
+    raw_data: "\004\000\000\000\000\000\000\000"
+  }
+  initializer {
+    dims: 4
+    data_type: 7
+    name: "onnx::Concat_28"
+    raw_data: "\002\000\000\000\000\000\000\000\003\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000"
+  }
   input {
-    name: "input"
+    name: "onnx::Pad_0"
     type {
       tensor_type {
         elem_type: 1
@@ -49,22 +208,22 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "23"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
-            dim_value: 1
+            dim_param: "Pad23_dim_0"
           }
           dim {
-            dim_value: 1
+            dim_param: "Pad23_dim_1"
           }
           dim {
-            dim_value: 3
+            dim_param: "Pad23_dim_2"
           }
           dim {
-            dim_value: 9
+            dim_param: "Pad23_dim_3"
           }
         }
       }
@@ -72,5 +231,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

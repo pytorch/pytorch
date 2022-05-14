@@ -9,10 +9,6 @@ COMMON_TESTS = [
         "import torch",
     ),
     (
-        "Checking that caffe2.python is available",
-        "from caffe2.python import core",
-    ),
-    (
         "Checking that MKL is available",
         "import torch; exit(0 if torch.backends.mkl.is_available() else 1)",
     ),

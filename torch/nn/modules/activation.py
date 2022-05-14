@@ -168,19 +168,16 @@ class RReLU(Module):
 
 
 class Hardtanh(Module):
-    r"""Applies the HardTanh function element-wise
+    r"""Applies the HardTanh function element-wise.
 
     HardTanh is defined as:
 
     .. math::
         \text{HardTanh}(x) = \begin{cases}
-            1 & \text{ if } x > 1 \\
-            -1 & \text{ if } x < -1 \\
+            \text{max\_val} & \text{ if } x > \text{ max\_val } \\
+            \text{min\_val} & \text{ if } x < \text{ min\_val } \\
             x & \text{ otherwise } \\
         \end{cases}
-
-    The range of the linear region :math:`[-1, 1]` can be adjusted using
-    :attr:`min_val` and :attr:`max_val`.
 
     Args:
         min_val: minimum value of the linear region range. Default: -1
@@ -294,7 +291,9 @@ class Sigmoid(Module):
 
 
 class Hardsigmoid(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Hardsigmoid function element-wise.
+
+    Hardsigmoid is defined as:
 
     .. math::
         \text{Hardsigmoid}(x) = \begin{cases}
@@ -331,7 +330,9 @@ class Hardsigmoid(Module):
 
 
 class Tanh(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Hyperbolic Tangent (Tanh) function element-wise.
+
+    Tanh is defined as:
 
     .. math::
         \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
@@ -472,7 +473,11 @@ class Hardswish(Module):
 
 
 class ELU(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the Exponential Linear Unit (ELU) function, element-wise, as described
+    in the paper: `Fast and Accurate Deep Network Learning by Exponential Linear
+    Units (ELUs) <https://arxiv.org/abs/1511.07289>`__.
+
+    ELU is defined as:
 
     .. math::
         \text{ELU}(x) = \begin{cases}
@@ -646,6 +651,13 @@ class GELU(Module):
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
+    When the approximate argument is 'tanh', Gelu is estimated with:
+        :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+
+    Args:
+        approximate (string, optional): the gelu approximation algorithm to use:
+            ``'none'`` | ``'tanh'``. Default: ``'none'``
+
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
@@ -658,12 +670,24 @@ class GELU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['approximate']
+    approximate: str
+
+    def __init__(self, approximate: str = 'none') -> None:
+        super(GELU, self).__init__()
+        self.approximate = approximate
+
     def forward(self, input: Tensor) -> Tensor:
-        return F.gelu(input)
+        return F.gelu(input, approximate=self.approximate)
+
+    def extra_repr(self) -> str:
+        return 'approximate={}'.format(self.approximate)
 
 
 class Hardshrink(Module):
-    r"""Applies the hard shrinkage function element-wise:
+    r"""Applies the Hard Shrinkage (Hardshrink) function element-wise.
+
+    Hardshrink is defined as:
 
     .. math::
         \text{HardShrink}(x) =
@@ -776,10 +800,8 @@ class LogSigmoid(Module):
 
 
 class Softplus(Module):
-    r"""Applies the element-wise function:
-
-    .. math::
-        \text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))
+    r"""Applies the Softplus function :math:`\text{Softplus}(x) = \frac{1}{\beta} *
+    \log(1 + \exp(\beta * x))` element-wise.
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
@@ -861,13 +883,38 @@ class Softshrink(Module):
 
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
-    from different representation subspaces.
-    See `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    from different representation subspaces as described in the paper:
+    `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+
+    Multi-Head Attention is defined as:
 
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
+
+    ``forward()`` will use a special optimized implementation if all of the following
+    conditions are met:
+
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This
+      restriction will be loosened in the future.)
+    - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
+    - training is disabled (using ``.eval()``)
+    - dropout is 0
+    - ``add_bias_kv`` is ``False``
+    - ``add_zero_attn`` is ``False``
+    - ``batch_first`` is ``True`` and the input is batched
+    - ``kdim`` and ``vdim`` are equal to ``embed_dim``
+    - at most one of ``key_padding_mask`` or ``attn_mask`` is passed
+    - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither ``key_padding_mask``
+      nor ``attn_mask`` is passed
+
+    If the optimized implementation is in use, a
+    `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
+    ``query``/``key``/``value`` to represent padding more efficiently than using a
+    padding mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_
+    will be returned, and an additional speedup proportional to the fraction of the input
+    that is padding can be expected.
 
     Args:
         embed_dim: Total dimension of the model.
@@ -887,6 +934,7 @@ class MultiheadAttention(Module):
 
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
+
     """
     __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
@@ -958,21 +1006,26 @@ class MultiheadAttention(Module):
         super(MultiheadAttention, self).__setstate__(state)
 
     def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
-                need_weights: bool = True, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+                need_weights: bool = True, attn_mask: Optional[Tensor] = None,
+                average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
-        query: Query embeddings of shape :math:`(L, N, E_q)` when ``batch_first=False`` or :math:`(N, L, E_q)`
-            when ``batch_first=True``, where :math:`L` is the target sequence length, :math:`N` is the batch size,
-            and :math:`E_q` is the query embedding dimension ``embed_dim``. Queries are compared against
-            key-value pairs to produce the output. See "Attention Is All You Need" for more details.
-        key: Key embeddings of shape :math:`(S, N, E_k)` when ``batch_first=False`` or :math:`(N, S, E_k)` when
-            ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size, and
-            :math:`E_k` is the key embedding dimension ``kdim``. See "Attention Is All You Need" for more details.
-        value: Value embeddings of shape :math:`(S, N, E_v)` when ``batch_first=False`` or :math:`(N, S, E_v)` when
-            ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size, and
-            :math:`E_v` is the value embedding dimension ``vdim``. See "Attention Is All You Need" for more details.
+        query: Query embeddings of shape :math:`(L, E_q)` for unbatched input, :math:`(L, N, E_q)` when ``batch_first=False``
+            or :math:`(N, L, E_q)` when ``batch_first=True``, where :math:`L` is the target sequence length,
+            :math:`N` is the batch size, and :math:`E_q` is the query embedding dimension ``embed_dim``.
+            Queries are compared against key-value pairs to produce the output.
+            See "Attention Is All You Need" for more details.
+        key: Key embeddings of shape :math:`(S, E_k)` for unbatched input, :math:`(S, N, E_k)` when ``batch_first=False``
+            or :math:`(N, S, E_k)` when ``batch_first=True``, where :math:`S` is the source sequence length,
+            :math:`N` is the batch size, and :math:`E_k` is the key embedding dimension ``kdim``.
+            See "Attention Is All You Need" for more details.
+        value: Value embeddings of shape :math:`(S, E_v)` for unbatched input, :math:`(S, N, E_v)` when
+            ``batch_first=False`` or :math:`(N, S, E_v)` when ``batch_first=True``, where :math:`S` is the source
+            sequence length, :math:`N` is the batch size, and :math:`E_v` is the value embedding dimension ``vdim``.
+            See "Attention Is All You Need" for more details.
         key_padding_mask: If specified, a mask of shape :math:`(N, S)` indicating which elements within ``key``
-            to ignore for the purpose of attention (i.e. treat as "padding"). Binary and byte masks are supported.
+            to ignore for the purpose of attention (i.e. treat as "padding"). For unbatched `query`, shape should be :math:`(S)`.
+            Binary and byte masks are supported.
             For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
             the purpose of attention. For a byte mask, a non-zero value indicates that the corresponding ``key``
             value will be ignored.
@@ -986,17 +1039,104 @@ class MultiheadAttention(Module):
             corresponding position is not allowed to attend. For a byte mask, a non-zero value indicates that the
             corresponding position is not allowed to attend. For a float mask, the mask values will be added to
             the attention weight.
+        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
+            heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
+            effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
 
     Outputs:
-        - **attn_output** - Attention outputs of shape :math:`(L, N, E)` when ``batch_first=False`` or
-          :math:`(N, L, E)` when ``batch_first=True``, where :math:`L` is the target sequence length, :math:`N` is
-          the batch size, and :math:`E` is the embedding dimension ``embed_dim``.
-        - **attn_output_weights** - Attention output weights of shape :math:`(N, L, S)`, where :math:`N` is the batch
-          size, :math:`L` is the target sequence length, and :math:`S` is the source sequence length. Only returned
-          when ``need_weights=True``.
+        - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
+          :math:`(L, N, E)` when ``batch_first=False`` or :math:`(N, L, E)` when ``batch_first=True``,
+          where :math:`L` is the target sequence length, :math:`N` is the batch size, and :math:`E` is the
+          embedding dimension ``embed_dim``.
+        - **attn_output_weights** - Only returned when ``need_weights=True``. If ``average_attn_weights=True``,
+          returns attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
+          :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
+          :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
+          head of shape :math:`(\text{num\_heads}, L, S)` when input is unbatched or :math:`(N, \text{num\_heads}, L, S)`.
+
+        .. note::
+            `batch_first` argument is ignored for unbatched inputs.
         """
-        if self.batch_first:
-            query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
+        is_batched = query.dim() == 3
+        why_not_fast_path = ''
+        if not is_batched:
+            why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
+        elif query is not key or key is not value:
+            # When lifting this restriction, don't forget to either
+            # enforce that the dtypes all match or test cases where
+            # they don't!
+            why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
+        elif query.dtype != self.in_proj_bias.dtype:
+            why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
+        elif query.dtype != self.in_proj_weight.dtype:
+            # this case will fail anyway, but at least they'll get a useful error message.
+            why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
+        elif self.training:
+            why_not_fast_path = "training is enabled"
+        elif not self.batch_first:
+            why_not_fast_path = "batch_first was not True"
+        elif self.bias_k is not None:
+            why_not_fast_path = "self.bias_k was not None"
+        elif self.bias_v is not None:
+            why_not_fast_path = "self.bias_v was not None"
+        elif self.dropout:
+            why_not_fast_path = f"dropout was {self.dropout}, required zero"
+        elif self.add_zero_attn:
+            why_not_fast_path = "add_zero_attn was enabled"
+        elif not self._qkv_same_embed_dim:
+            why_not_fast_path = "_qkv_same_embed_dim was not True"
+        elif query.is_nested and (key_padding_mask is not None or attn_mask is not None):
+            why_not_fast_path = "key_padding_mask and attn_mask are not supported with NestedTensor input"
+        elif not query.is_nested and key_padding_mask is not None and attn_mask is not None:
+            why_not_fast_path = "key_padding_mask and attn_mask were both supplied"
+
+        if not why_not_fast_path:
+            tensor_args = (
+                query,
+                key,
+                value,
+                self.in_proj_weight,
+                self.in_proj_bias,
+                self.out_proj.weight,
+                self.out_proj.bias,
+            )
+            # We have to use list comprehensions below because TorchScript does not support
+            # generator expressions.
+            if torch.overrides.has_torch_function(tensor_args):
+                why_not_fast_path = "some Tensor argument has_torch_function"
+            elif not all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
+                why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
+            elif torch.is_grad_enabled() and any([x.requires_grad for x in tensor_args]):
+                why_not_fast_path = ("grad is enabled and at least one of query or the "
+                                     "input/output projection weights or biases requires_grad")
+            if not why_not_fast_path:
+                return torch._native_multi_head_attention(
+                    query,
+                    key,
+                    value,
+                    self.embed_dim,
+                    self.num_heads,
+                    self.in_proj_weight,
+                    self.in_proj_bias,
+                    self.out_proj.weight,
+                    self.out_proj.bias,
+                    key_padding_mask if key_padding_mask is not None else attn_mask,
+                    need_weights,
+                    average_attn_weights)
+        any_nested = query.is_nested or key.is_nested or value.is_nested
+        assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
+                                f"The fast path was not hit because {why_not_fast_path}")
+
+        if self.batch_first and is_batched:
+            # make sure that the transpose op does not affect the "is" property
+            if key is value:
+                if query is key:
+                    query = key = value = query.transpose(1, 0)
+                else:
+                    query, key = [x.transpose(1, 0) for x in (query, key)]
+                    value = key
+            else:
+                query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
 
         if not self._qkv_same_embed_dim:
             attn_output, attn_output_weights = F.multi_head_attention_forward(
@@ -1008,7 +1148,7 @@ class MultiheadAttention(Module):
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask, use_separate_proj_weight=True,
                 q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
-                v_proj_weight=self.v_proj_weight)
+                v_proj_weight=self.v_proj_weight, average_attn_weights=average_attn_weights)
         else:
             attn_output, attn_output_weights = F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
@@ -1017,8 +1157,8 @@ class MultiheadAttention(Module):
                 self.dropout, self.out_proj.weight, self.out_proj.bias,
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
-                attn_mask=attn_mask)
-        if self.batch_first:
+                attn_mask=attn_mask, average_attn_weights=average_attn_weights)
+        if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:
             return attn_output, attn_output_weights

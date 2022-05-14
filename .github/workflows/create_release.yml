@@ -3,7 +3,10 @@ name: Create Release
 on:
   push:
     tags: ['v*']
-    branches: [master]
+    branches:
+      - master
+      - main
+      - nightly
   release:
     types: [published]
   pull_request:
@@ -18,6 +21,7 @@ jobs:
       - uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: 'recursive'
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - name: Fake name for PRs
         if: ${{ github.event_name == 'pull_request' }}
         run: echo "PT_GITHUB_REF=refs/tags/pr-tag" >> "$GITHUB_ENV"
@@ -37,7 +41,7 @@ jobs:
             cp -r "$PWD" "/tmp/$PT_RELEASE_NAME"
             mv "/tmp/$PT_RELEASE_NAME" .
             # Cleanup
-            rm -r "$PT_RELEASE_NAME"/{.azure_pipelines,.circleci,.jenkins}
+            rm -rf "$PT_RELEASE_NAME"/{.circleci,.jenkins}
             find "$PT_RELEASE_NAME" -name '.git*' -exec rm -rv {} \; || true
             # Create archive
             tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"
@@ -49,5 +53,5 @@ jobs:
           files: ${{env.PT_RELEASE_FILE}}
 
 concurrency:
-  group: create-release-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

@@ -9,9 +9,6 @@
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
-#include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/jit/ir/constants.h>
-#include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/utils/variadic.h>
 #include <torch/csrc/autograd/functions/utils.h>

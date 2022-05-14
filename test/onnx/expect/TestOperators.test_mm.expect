@@ -3,25 +3,10 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
+    input: "onnx::Gemm_0"
+    input: "onnx::Gemm_1"
     output: "2"
-    name: "Constant_0"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 1
-        data_type: 1
-        raw_data: "\000\000\200?"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "0"
-    input: "1"
-    input: "2"
-    output: "3"
-    name: "Gemm_1"
+    name: "Gemm_0"
     op_type: "Gemm"
     attribute {
       name: "alpha"
@@ -34,9 +19,9 @@ graph {
       type: FLOAT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Gemm_0"
     type {
       tensor_type {
         elem_type: 1
@@ -52,7 +37,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "onnx::Gemm_1"
     type {
       tensor_type {
         elem_type: 1
@@ -68,7 +53,7 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
@@ -85,5 +70,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

@@ -1,11 +1,10 @@
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <sstream>
@@ -39,31 +38,27 @@ void ParallelDimensionMap::build(Fusion* fusion) {
       populateDimensionMapWithMultipleCASet(pt, concrete_dom_set);
     }
   }
+
+  adjustMappingsForWarpPadding();
 }
 
 void ParallelDimensionMap::registerConstantExtent(IterDomain* id) {
-  ExpressionEvaluator ee(id->fusion());
-  auto extent_int = ee.evaluate(id->extent());
-  if (!extent_int.has_value()) {
+  if (!id->extent()->isConstScalar()) {
     // Nothing to do if not constant
     return;
   }
 
+  ExpressionEvaluator ee(id->fusion());
+  auto extent_int = ee.evaluate(id->extent());
+  TORCH_INTERNAL_ASSERT(
+      extent_int.has_value(),
+      "Extent of ",
+      id->toString(),
+      " should have been constant, but could not be evaluated at compile time.");
+
   auto const_extent = extent_int.value();
 
-  // Ignore if this is derived from a size-1 domain as it is likely a
-  // size-1 broadcast domain and that does not represent the actual
-  // dimension even if it's constant. Being size-1 may not always mean
-  // it's a broadcast domain, but it'd be safe to assume it is mostly
-  // the case. If it is not a broadcast, ignoring this domain does not
-  // impact the correctness.
-  auto extent_inputs = InputsOf::output(id->fusion(), id->extent());
-  if (std::any_of(extent_inputs.begin(), extent_inputs.end(), [](Val* input) {
-        return input->isOneInt();
-      })) {
-    return;
-  }
-
+  // Uses index map
   auto concrete_id = getCAMappedConcreteDomain(id);
 
   auto existing_it = constant_extent_map_.find(id);
@@ -98,25 +93,21 @@ void ParallelDimensionMap::populateDimensionMapWithSingleCASet(
     const std::unordered_set<IterDomain*>& dom_set) {
   TORCH_INTERNAL_ASSERT(dom_set.size() == 1);
 
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   // pt is used by only one concrete domain
   auto id = *dom_set.begin();
   auto it = constant_extent_map_.find(id);
 
   if (it != constant_extent_map_.end()) {
-    if (it->second.size() == 1) {
-      dim_map_.insert({pt, ir_builder.create<kir::Int>(*(it->second.begin()))});
-      exact_types_.insert(pt);
-    } else {
-      // Multiple constant dimensions found; Use the corresponding
-      // symbolic parallel dim
-      dim_map_.insert({pt, kir::NamedScalar::getParallelDim(pt)});
-    }
+    TORCH_INTERNAL_ASSERT(
+        it->second.size() == 1,
+        "Only one value found mapped to parallel type ",
+        stringifyThread(pt),
+        " yet its bound to multiple extents.");
+    dim_map_.insert({pt, IrBuilder::create<Int>(*(it->second.begin()))});
+    exact_types_.insert(pt);
   } else {
     // Prefer to use blockDim/gridDim if not constant
-    dim_map_.insert({pt, kir::NamedScalar::getParallelDim(pt)});
+    dim_map_.insert({pt, NamedScalar::getParallelDim(pt)});
     exact_types_.insert(pt);
   }
 }
@@ -126,17 +117,18 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
     const std::unordered_set<IterDomain*>& dom_set) {
   TORCH_INTERNAL_ASSERT(dom_set.size() > 1);
 
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   bool all_equal = true;
-  kir::Val* known_dimension =
-      gpu_lower->lowerValue((*dom_set.begin())->extent());
-  // Set it -1 to signal it's not initialied yet
+  // Use nullptr to signal it's not initialied yet
+  Val* known_dimension = nullptr;
+  // Use -1 to signal it's not initialied yet
   int64_t known_const = -1;
 
   // Check all of concrete domains to see if they match all together.
   for (auto concrete_id : dom_set) {
+    if (concrete_id->isBroadcast()) {
+      // Broadcasted concrete id's don't specify anything about shape
+      continue;
+    }
     // If this concrete domain has a constant extent, check if it
     // matches with the known constant extent.
     auto it = constant_extent_map_.find(concrete_id);
@@ -165,10 +157,15 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
     // At this point, it still remains undetermined whether this id
     // matches with those previously looked at. Constant check failed,
     // but symbolic matching may succeed.
-    if (!equalDim(
-            known_dimension, gpu_lower->lowerValue(concrete_id->extent()))) {
-      all_equal = false;
-      break;
+    auto this_dimension = concrete_id->extent();
+    if (known_dimension == nullptr) {
+      // No previous dimension found yet
+      known_dimension = this_dimension;
+    } else {
+      if (!equalDim(known_dimension, this_dimension)) {
+        all_equal = false;
+        break;
+      }
     }
   }
 
@@ -179,13 +176,69 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
   }
   // Use the const value, if found, as its dimension
   if (all_equal && known_const != -1) {
-    dim_map_.insert({pt, ir_builder.create<kir::Int>(known_const)});
+    dim_map_.insert({pt, IrBuilder::create<Int>(known_const)});
   } else {
-    dim_map_.insert({pt, kir::NamedScalar::getParallelDim(pt)});
+    dim_map_.insert({pt, NamedScalar::getParallelDim(pt)});
   }
 }
 
-kir::Val* ParallelDimensionMap::get(ParallelType pt) const {
+void ParallelDimensionMap::adjustMappingsForWarpPadding() {
+  const auto gpu_lower = GpuLower::current();
+
+  // If TIDx is padded to a multiple of the warp size, mark it as
+  // non-exact.
+
+  auto& warp_info = gpu_lower->getWarpPaddedParallelInfo();
+  // TIDx isn't really padded if there isn't a warp reduction (this could
+  // change)
+  if (!(warp_info.is_tidx_padded && warp_info.has_warp_reduction)) {
+    return;
+  }
+
+  const auto tidx_pt = ParallelType::TIDx;
+  auto warp_size = at::cuda::warp_size();
+
+  // If the dimension of TIDx is actually a multple of the warp size
+  // before padding, it can be left as exact
+  if (isExact(tidx_pt)) {
+    auto tidx_dim = dynamic_cast<Int*>(get(tidx_pt));
+    if (tidx_dim && tidx_dim->isConst()) {
+      auto tidx_dim_val = tidx_dim->value().value();
+      if (tidx_dim_val % warp_size == 0) {
+        // Dimension of TIDx is a multiple of the warp size
+        return;
+      }
+    }
+    // If tidx is strictly defined as blockDim.x then it must be set to a
+    // multiple of the warp and can be considered exact
+    bool tidx_def_trivial = true;
+    for (auto entry : concrete_dom_map_.at(tidx_pt)) {
+      if (!entry->isA<NamedScalar>() ||
+          !entry->as<NamedScalar>()->sameAs(
+              NamedScalar::getParallelDim(tidx_pt))) {
+        tidx_def_trivial = false;
+      }
+    }
+    if (tidx_def_trivial) {
+      return;
+    }
+  }
+
+  // TIDx is padded to a multiple of warp. If it's known to be a
+  // single warp, use the constant warp size as the dimension of
+  // TIDx. Otherwise, just use blockDim.x.
+  if (warp_info.is_tidx_single_warp) {
+    dim_map_.at(ParallelType::TIDx) = IrBuilder::create<Int>(warp_size);
+  } else {
+    dim_map_.at(ParallelType::TIDx) =
+        NamedScalar::getParallelDim(ParallelType::TIDx);
+  }
+
+  // TIDx is no longer exact
+  exact_types_.erase(ParallelType::TIDx);
+}
+
+Val* ParallelDimensionMap::get(ParallelType pt) const {
   TORCH_INTERNAL_ASSERT(isParallelTypeThread(pt), "Invalid ParallelType: ", pt);
   auto it = dim_map_.find(pt);
   if (it == dim_map_.end()) {
@@ -207,7 +260,7 @@ IterDomain* ParallelDimensionMap::getCAMappedConcreteDomain(IterDomain* id) {
 
 // Symbolically compares equality of two KIR vals. Comparison is done
 // conservatively, so returning false does not guarantee non-equality.
-bool ParallelDimensionMap::equalDim(kir::Val* dim1, kir::Val* dim2) {
+bool ParallelDimensionMap::equalDim(Val* dim1, Val* dim2) {
   TORCH_INTERNAL_ASSERT(dim1 != nullptr && dim2 != nullptr);
 
   if (dim1 == dim2) {
@@ -215,8 +268,8 @@ bool ParallelDimensionMap::equalDim(kir::Val* dim1, kir::Val* dim2) {
   }
 
   // When Both are Int, they are same if both have the same constant
-  auto dim1_int = dynamic_cast<kir::Int*>(dim1);
-  auto dim2_int = dynamic_cast<kir::Int*>(dim2);
+  auto dim1_int = dynamic_cast<Int*>(dim1);
+  auto dim2_int = dynamic_cast<Int*>(dim2);
   if (dim1_int && dim2_int) {
     if (dim1_int->isConst() && dim2_int->isConst()) {
       return dim1_int->value() == dim2_int->value();
@@ -225,8 +278,8 @@ bool ParallelDimensionMap::equalDim(kir::Val* dim1, kir::Val* dim2) {
 
   // When both are NamedScalar, they are same if Both have the same
   // name
-  auto dim1_ns = dynamic_cast<kir::NamedScalar*>(dim1);
-  auto dim2_ns = dynamic_cast<kir::NamedScalar*>(dim2);
+  auto dim1_ns = dynamic_cast<NamedScalar*>(dim1);
+  auto dim2_ns = dynamic_cast<NamedScalar*>(dim2);
   if (dim1_ns && dim2_ns) {
     return dim1_ns->name() == dim2_ns->name();
   }
@@ -243,13 +296,21 @@ bool ParallelDimensionMap::equalDim(kir::Val* dim1, kir::Val* dim2) {
   // If both are BinaryOp or UnaryOp, check their inputs. Since these
   // Vals are IterDomain extents, UnaryOp should not occur, but
   // checking shouldn't be harmful.
-  if ((dim1_def->isA<kir::BinaryOp>() && dim2_def->isA<kir::BinaryOp>() &&
-       (dim1_def->as<kir::BinaryOp>()->operation() ==
-        dim2_def->as<kir::BinaryOp>()->operation())) ||
-      (dim1_def->isA<kir::UnaryOp>() && dim2_def->isA<kir::UnaryOp>() &&
-       (dim1_def->as<kir::UnaryOp>()->operation() ==
-        dim2_def->as<kir::UnaryOp>()->operation()))) {
-    for (size_t i = 0; i < dim1_def->inputs().size(); ++i) {
+  // TODO:
+  //   We might be able to replace this with dim1->toInlineString() ==
+  //   dim2->toInlineString()
+  //   If we want this less conservative we could make an "exact map" which
+  //   could be another mode in compute at that maps all iter domains, but not
+  //   concretized broadcast axes and only forwards through non-concretized
+  //   broadcast axes.
+  if ((dim1_def->isA<BinaryOp>() && dim2_def->isA<BinaryOp>() &&
+       (dim1_def->as<BinaryOp>()->getBinaryOpType() ==
+        dim2_def->as<BinaryOp>()->getBinaryOpType())) ||
+      (dim1_def->isA<UnaryOp>() && dim2_def->isA<UnaryOp>() &&
+       (dim1_def->as<UnaryOp>()->getUnaryOpType() ==
+        dim2_def->as<UnaryOp>()->getUnaryOpType()))) {
+    for (const auto i : c10::irange(dim1_def->inputs().size())) {
+      (void)i; // Suppress unused variable warning
       if (!equalDim(dim1_def->inputs()[0], dim2_def->inputs()[0])) {
         return false;
       }
@@ -262,20 +323,11 @@ bool ParallelDimensionMap::equalDim(kir::Val* dim1, kir::Val* dim2) {
 
 std::string ParallelDimensionMap::toString() const {
   std::stringstream ss;
-
-  const std::array<ParallelType, 6> ptypes{
-      ParallelType::BIDx,
-      ParallelType::BIDy,
-      ParallelType::BIDz,
-      ParallelType::TIDx,
-      ParallelType::TIDy,
-      ParallelType::TIDz};
-
-  for (auto pt : ptypes) {
+  for (auto pt : kParallelTypeThreads) {
     ss << pt << ": ";
     auto dim = get(pt);
     if (dim != nullptr) {
-      ss << kir::toString(dim);
+      ss << dim->toString();
       if (isExact(pt)) {
         ss << ", exact";
       } else {

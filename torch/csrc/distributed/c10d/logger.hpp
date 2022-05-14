@@ -1,6 +1,8 @@
 #include <c10/util/Logging.h>
 #include <c10d/reducer.hpp>
 
+#include <mutex>
+
 namespace c10d {
 
 class TORCH_API Logger {
@@ -12,7 +14,10 @@ class TORCH_API Logger {
       const std::string& module_name,
       const std::vector<int>& device_ids,
       int output_device,
-      bool broadcast_buffers);
+      bool broadcast_buffers,
+      bool has_sync_bn,
+      bool static_graph
+  );
 
   void set_static_graph();
 
@@ -36,9 +41,7 @@ class TORCH_API Logger {
   // Set parameters stats.
   void set_parameter_stats();
   // Get size of each bucket (Bytes).
-  std::vector<int> get_bucket_sizes();
-  // Get bucket size limits specified during DDP construction.
-  std::vector<int> get_bucket_size_limits();
+  std::vector<int64_t> get_bucket_sizes();
   // Get variable indices for each bucket.
   std::vector<std::vector<size_t>> get_per_bucket_variable_indices();
   // Set comm. hook, if used
@@ -83,16 +86,16 @@ class TORCH_API Logger {
     ddp_logging_data_->ints_map["has_error"] = 1;
     auto err = c10::str(ddp_error, args...);
     ddp_logging_data_->strs_map["error"] = err;
+    // Report the iteration we are erroring at so user knows how many examples
+    // successfully processed before this error was hit.
+    ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
     at::LogPyTorchDDPUsage(*ddp_logging_data_);
   }
 
   // When running without static graph, called when reducer is destroyed to log
   // if graph was actually static and is a candidate for static graph
   // optimization.
-  void log_if_graph_static(bool is_static) {
-    ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
-    at::LogPyTorchDDPUsage(*ddp_logging_data_);
-  }
+  void log_if_graph_static(bool is_static);
 
 
  private:

@@ -1,9 +1,12 @@
+#include <chrono>
 #include <iostream>
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
+#include "c10d/Types.hpp"
+#include "c10d/ProcessGroup.hpp"
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
@@ -19,7 +22,10 @@ using c10d::ProcessGroup;
 
 class NCCLTestBase {
  public:
-  NCCLTestBase(const std::string& path) : path_(path) {}
+  NCCLTestBase(
+          const std::string& path,
+          const std::chrono::milliseconds pgTimeout = kProcessGroupDefaultTimeout
+  ) : path_(path), pgTimeout_(pgTimeout) {}
 
   NCCLTestBase(NCCLTestBase&& other) {
     path_ = std::move(other.path_);
@@ -33,23 +39,27 @@ class NCCLTestBase {
   void initialize(int rank, int size) {
     auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
+    c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts = c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
+    opts->timeout = pgTimeout_;
+    setenv("ENABLE_NCCL_HEALTH_CHECK", "1", /* overwrite */ 1);
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
-        new ::c10d::ProcessGroupNCCL(store, rank, size));
+        new ::c10d::ProcessGroupNCCL(store, rank, size, std::move(opts)));
   }
 
  protected:
   std::string path_;
   std::unique_ptr<::c10d::ProcessGroupNCCL> pg_;
+  std::chrono::milliseconds pgTimeout_;
 };
 
 class NCCLTest : public NCCLTestBase {
  public:
-  NCCLTest(const std::string& path, int worldSize)
-      : NCCLTestBase(path),
+  NCCLTest(const std::string& path, int worldSize, std::chrono::milliseconds pgTimeout = kProcessGroupDefaultTimeout)
+      : NCCLTestBase(path, pgTimeout),
         numDevices_(cudaNumDevices()),
-        state_(::at::globalContext().lazyInitCUDA()),
         worldSize_(worldSize) {
     // Each device has a single tensor to perf the NCCL op
+    ::at::globalContext().lazyInitCUDA();
     tensors_.resize(numDevices_);
     inputs_.resize(numDevices_);
     outputs_.resize(numDevices_);
@@ -153,7 +163,6 @@ class NCCLTest : public NCCLTestBase {
   }
 
   const int numDevices_;
-  THCState* state_;
   int worldSize_;
   std::vector<at::Tensor> tensors_;
   std::vector<std::vector<at::Tensor>> inputs_;
@@ -303,8 +312,7 @@ class ReduceScatterBaseNCCLTest : public NCCLTest {
       : NCCLTest(path, worldSize) {
         output_tensor_ = at::empty({1}, at::kCUDA);
         input_tensor_ = at::empty({worldSize}, at::kCUDA);
-        for(int i = 0; i < worldSize; i++)
-        {
+        for (const auto i : c10::irange(worldSize)) {
           input_tensor_[i] = i;
         }
       }
@@ -497,10 +505,49 @@ void testReduceScatter(const std::string& path, int rank, int size) {
   }
 }
 
+void testProcessGroupNCCLHealthCheckFailHelper(const std::string& path, bool timeout) {
+  // simulate world_size > 1 here via threads.
+  const int worldSize = 4;
+  std::unordered_set<uint64_t> nums;
+  auto runTest = [&](int i) {
+    NCCLTest test(path, worldSize, std::chrono::milliseconds(3000));
+    // Catch error relating to health check failure
+    bool error_caught = false;
+    try {
+      test.initialize(timeout ? 0 : -1, worldSize);
+    } catch (const std::exception &e) {
+      std::string errMsg = e.what();
+      const std::string kTimeoutErr = "Failed to initialize NCCL communicator on rank";
+      const std::string kInvalidRankErr = "Invalid rank";
+      std::string expectedSubstr = timeout ? kTimeoutErr : kInvalidRankErr;
+      bool cond = errMsg.find(expectedSubstr) != std::string::npos;
+      EXPECT_TRUE(cond);
+      error_caught = true;
+    }
+    EXPECT_TRUE(error_caught);
+  };
+  std::vector<std::thread> threads;
+  threads.reserve(worldSize);
+  for (const auto r : c10::irange(worldSize)) {
+    threads.emplace_back(std::thread([=]() { runTest(r); }));
+  }
+  for (auto& t : threads) {
+    t.join();
+  }
+}
+
+void testProcessGroupNCCLHealthCheckFailException(const std::string& path, int /* unused */, int /* unused */) {
+  testProcessGroupNCCLHealthCheckFailHelper(path, /* timeout */ false);
+}
+
+void testProcessGroupNCCLHealthCheckFailTimeout(const std::string& path, int /* unused */, int /* unused */) {
+  testProcessGroupNCCLHealthCheckFailHelper(path, /* timeout */ true);
+}
+
 void testSequenceNumInit(const std::string& path, int /* unused */, int /* unused */) {
   // Note: ProcessGroupNCCLTest doesn't support multiprocess testing. So we
   // simulate world_size > 1 here via threads.
-  const int worldSize = 4;
+  const int worldSize = 2;
   std::mutex m;
   std::unordered_set<uint64_t> nums;
   auto runTest = [&](int i) {
@@ -623,6 +670,26 @@ TEST_F(ProcessGroupNCCLTest, testSequenceNumInit) {
     TemporaryFile file;
     testSequenceNumInit(file.path, rank_, size_);
   }
+}
+
+TEST_F(ProcessGroupNCCLTest, testProcessGroupNCCLHealthCheckFailTimeout) {
+    if (skipTest()) {
+        return;
+    }
+    {
+        TemporaryFile file;
+        testProcessGroupNCCLHealthCheckFailTimeout(file.path, rank_, size_);
+    }
+}
+
+TEST_F(ProcessGroupNCCLTest, testProcessGroupNCCLHealthCheckFailException) {
+    if (skipTest()) {
+        return;
+    }
+    {
+        TemporaryFile file;
+        testProcessGroupNCCLHealthCheckFailException(file.path, rank_, size_);
+    }
 }
 
 TEST_F(ProcessGroupNCCLTest, testReduceScatterBase) {

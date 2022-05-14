@@ -1,4 +1,5 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 
 namespace at {
@@ -105,6 +106,17 @@ static inline void col2im_shape_check(
         input_length,
         ".");
   }
+
+  TORCH_CHECK(
+    n_blocks_height >= 1 && n_blocks_width >= 1,
+    "Given output_size=(", output_height, ", ", output_width, "), ",
+    "kernel_size=(", kernel_height, ", ", kernel_width, "), ",
+    "dilation=(", dilation_height, ", ", dilation_width, "), ",
+    "padding=(", pad_height, ", ", pad_width, "), ",
+    "stride=(", stride_height, ", ", stride_width, "), ",
+    "calculated shape of the array of sliding blocks as ",
+    "(", n_blocks_height, ", ", n_blocks_width, "), ",
+    "which is too small (non-positive)");
 
   if (output_width < 1 || output_height < 1) {
     AT_ERROR(

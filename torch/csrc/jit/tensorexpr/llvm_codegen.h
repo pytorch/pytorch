@@ -1,7 +1,7 @@
 #pragma once
 
 #ifdef TORCH_ENABLE_LLVM
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -17,6 +17,7 @@ namespace jit {
 namespace tensorexpr {
 
 class LLVMCodeGenImpl;
+class LLVMCodeGenCallee;
 
 class TORCH_API LLVMCodeGen : public CodeGen {
  public:
@@ -34,8 +35,15 @@ class TORCH_API LLVMCodeGen : public CodeGen {
   LLVMCodeGen() = delete;
   ~LLVMCodeGen() override;
 
+  // Cleans up all the memory used during LLVM code generation pass except
+  // the generated kernel. After calling this method, users should not call
+  // methods like `getCodeText` that require the LLVMCodeGenImpl data. However,
+  // users can continue to call this kernel using `call` and `call_raw`.
+  void cleanup_memory();
+
   TORCH_API void call(const std::vector<CallArg>& args) override;
   TORCH_API void call_raw(const std::vector<void*>& args) override;
+  TORCH_API void call_with_numel(void** args, int64_t numel) override;
 
   at::Tensor empty_strided(
       c10::IntArrayRef size,
@@ -57,7 +65,7 @@ class TORCH_API LLVMCodeGen : public CodeGen {
 
   template <typename T>
   T value(void** args) {
-    T (*fp)(void**) = (T(*)(void**))getKernelAddress(impl_.get());
+    T (*fp)(void**) = (T(*)(void**))getKernelAddress(callee_.get());
     T rv = fp(args);
     return rv;
   }
@@ -65,8 +73,9 @@ class TORCH_API LLVMCodeGen : public CodeGen {
   std::string getCodeText(const std::string& attr = "") override;
 
  private:
-  void* getKernelAddress(LLVMCodeGenImpl* impl);
+  void* getKernelAddress(LLVMCodeGenCallee* callee);
 
+  std::unique_ptr<LLVMCodeGenCallee> callee_;
   std::unique_ptr<LLVMCodeGenImpl> impl_;
 };
 
@@ -121,6 +130,11 @@ struct TORCH_API LLVMCodeGenBuilder {
   c10::optional<std::string> cpu_ = c10::nullopt;
   c10::optional<std::string> attrs_ = c10::nullopt;
 };
+
+TORCH_API c10::optional<std::string>& LLVMTargetTriple();
+TORCH_API c10::optional<std::string>& LLVMTargetCPU();
+TORCH_API c10::optional<std::string>& LLVMTargetAttrs();
+TORCH_API bool& LLVMAOTWorkflow();
 
 } // namespace tensorexpr
 } // namespace jit

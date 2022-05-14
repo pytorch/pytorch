@@ -202,7 +202,7 @@ bool RebatchingQueue::enqueue(
 
       do {
         queue_[head_++ % capacity()] = std::move(splittedInputs[idx++]);
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       } while (canWrite() && idx < splittedInputs.size());
     }
 
@@ -234,4 +234,4 @@ void RebatchingQueue::close() {
   cvEmpty_.notify_all();
   cvOverflow_.notify_all();
 }
-} // caffe2
+} // namespace caffe2

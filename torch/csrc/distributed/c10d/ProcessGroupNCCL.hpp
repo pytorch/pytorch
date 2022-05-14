@@ -12,7 +12,9 @@
 #include <c10d/NCCLUtils.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
+#include <c10d/UCCForNCCL.hpp>
 
+#include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Stream.h>
@@ -24,6 +26,9 @@
 #include <torch/custom_class.h>
 
 namespace c10d {
+// Environment variable which controls whether we perform a NCCL healt check
+// which ensures communicators are healthy at the beginning of init.
+constexpr const char* ENABLE_NCCL_HEALTH_CHECK = "ENABLE_NCCL_HEALTH_CHECK";
 
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
@@ -32,6 +37,10 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 // Environment variable which controls whether or not we perform Async Error
 // Handling with NCCL.
 constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
+
+// Environment Variable to control whether Desync Debug is enabled.
+// This variable must be set together with NCCL_ASYNC_ERROR_HANDLING.
+constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -76,13 +85,23 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
-    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType, const char* profilingTitle = nullptr, const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
+    WorkNCCL(
+        const std::vector<at::Device>& devices,
+        int rank,
+        OpType opType,
+        uint64_t seq,
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
+        bool desyncDebug = false);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
     WorkNCCL(const WorkNCCL& w);
 
     virtual ~WorkNCCL();
+
+    // Checks if the NCCL kernel has started to execute.
+    bool isStarted();
 
     // Checks if request has completed. In this specific case of NCCL, it checks
     // if the NCCL operation has completed on the GPU in its own NCCL stream.
@@ -128,8 +147,14 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     // The cached list of CUDA devices to operate on
     std::vector<at::Device> devices_;
 
-    // The CUDA events tracking this work item on multiple CUDA devices
-    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
+    // The start CUDA events of NCCL operator tracking this work item on
+    // multiple CUDA devices. These start CUDA events are needed by desync
+    // debugging if enabled.
+    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> ncclStartEvents_;
+
+    // The end CUDA events of NCCL operator tracking this work item on
+    // multiple CUDA devices.
+    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> ncclEndEvents_;
 
     // The NCCL communicators used for this work item.
     std::vector<std::shared_ptr<NCCLComm>> ncclComms_;
@@ -145,6 +170,13 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
     // Time point representing when the work started.
     std::chrono::time_point<std::chrono::steady_clock> workStartTime_;
+
+    // Record the collective sequential number.
+    uint64_t seq_;
+
+    // Indicates if the nccl start event has been updated to the store trace.
+    // This will be used by desync debug.
+    bool startTraceUpdated_{false};
 
     // Wrapper method for the static checkForNCCLErrors which can be overridden
     // for tests.
@@ -163,6 +195,10 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
     // Checks for NCCL errors and throws an appropriate exception.
     void checkAndThrowException();
+
+    // Just checks whether GPU execution has started, without modifying
+    // exception_ptr.
+    bool startedGPUExecutionInternal() const;
 
     // Just checks whether GPU execution has completed, without modifying
     // exception_ptr.
@@ -334,11 +370,14 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
+  // Tests if the UCC fallback path is available
+  bool isUCCAvailable() const;
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
       ncclUniqueId* ncclID,
-      OpType opType,
+      bool isSingleP2POp,
       const std::string& devicesKey,
       int p2pRank);
 
@@ -406,6 +445,10 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       PostProcess post,
       const char* profilingTitle);
 
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_impl(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions());
+
   // Checks for NCCL errors on each of the communicators and returns an
   // appropriate exception_ptr (nullptr if no errors).
   static std::exception_ptr checkForNCCLErrorsInternal(
@@ -430,6 +473,18 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   void abortTimedOutCollectives(
       std::unordered_set<std::string>& abortedCommIds);
 
+  // Performs a health check by initializing dummy NCCL communicators and then
+  // destroying them. This will help indicate and signal any NCCL-related issues
+  // prior to the first collective. The actual initialization and subsequent
+  // destruction is ran on a separate thread and the main thread is signalled
+  // about timeouts/errors to report to the application.
+  void runHealthCheck();
+
+  // Destroys initialized NCCL communicators in devNCCLComMap_ given by input
+  // key. Throws if there are no communicators to destroy. Also removes
+  // communicators from the cache and clears used device indices.
+  void destroyNCCLComms(const std::string& devNCCLCommMapKey);
+
   void workCleanupLoop();
 
  protected:
@@ -439,12 +494,20 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // The store is used to broadcast the NCCL unique ID of rank 0.
   c10::intrusive_ptr<Store> store_;
 
+  bool storeError_{false};
+
   const c10::intrusive_ptr<Options> options_;
 
   // The number of NCCL communicators that have been created during
   // the lifetime of this process group. This sequence number is
   // used to scope keys used in the store.
   uint64_t ncclCommCounter_{0};
+
+  // The store keys to trace the last NCCL collective kernel CUDA events - start
+  // event and end event respectively. These are used to do desync root cause
+  // analysis.
+  const std::string traceKeyStart_;
+  const std::string traceKeyEnd_;
 
   // The NCCL communicator that the process group has cached.
   //
@@ -545,9 +608,12 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // for the operation to complete.
   bool blockingWait_ = false;
 
-  // Whether ot not the workCleanupThread is used to perform async error
+  // Whether or not the workCleanupThread is used to perform async error
   // handling.
   bool asyncErrorHandling_ = false;
+
+  // Whether or not to enable timeout root cause analysis.
+  bool desyncDebug_;
 
   // Set of communicators that this process group has aborted and their
   // ncclUniqueId has been written to the store. We don't need a lock
@@ -559,6 +625,15 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
   // is called.
   static thread_local uint64_t ncclActiveGroupCounter_;
+
+  // Counting for the sequential number of NCCL collective call.
+  uint64_t seq_{0};
+
+#ifdef USE_NCCL_WITH_UCC
+  // ProcessGroupUCC shared library handle and ProcessGroup pointer
+  static std::shared_ptr<at::DynamicLibrary> uccLib_;
+  c10::intrusive_ptr<ProcessGroup> uccPG_;
+#endif
 };
 
 } // namespace c10d

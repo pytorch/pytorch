@@ -2,6 +2,13 @@
 
 // ${generated_comment}
 
+#ifdef TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#error This change adds a dependency on all pytorch operators, meaning the     \
+  file will need to be re-compiled every time an operator is changed or added. \
+  Consider using the at::_ops::{name}::redispatch() interface by including     \
+  the specific operator from <ATen/ops/{my_operator}_ops.h>
+#endif
+
 #include <c10/core/Scalar.h>
 #include <ATen/Tensor.h>
 #include <c10/core/Storage.h>
@@ -14,6 +21,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Context.h>
 #include <ATen/TracerMode.h>
+#include <ATen/Operators.h>
 
 namespace at {
 

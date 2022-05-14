@@ -19,7 +19,7 @@ struct OpsValue : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) override {
     return std::make_shared<BuiltinModule>(field, version_);
   }
@@ -42,7 +42,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& name) override;
   std::string kind() const override {
     return "Class Namespace";
@@ -65,7 +65,7 @@ struct ConstantTableValue : public SugaredValue {
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) override {
     const char* field_s = field.c_str();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -78,7 +78,20 @@ struct ConstantTableValue : public SugaredValue {
                              << " is out of bounds (constant table has "
                              << constants_->size() << " entries)";
     }
-    Value* value = m.graph()->insertConstant(constants_->at(offset), loc);
+    auto ivalue = constants_->at(offset);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Value* value;
+
+    // see [Constant Object Weak CompilationUnit Reference]
+    if (ivalue.isObject() && !ivalue.toObject()->is_weak_compilation_ref()) {
+      auto obj = ivalue.toObject();
+      if (!non_holding_object_cache.count(obj)) {
+        non_holding_object_cache[obj] = obj->copy_to_weak_compilation_ref();
+      }
+      value = m.graph()->insertConstant(non_holding_object_cache[obj], loc);
+    } else {
+      value = m.graph()->insertConstant(constants_->at(offset), loc);
+    }
 
     // specializing tensor type on compilation messes up typing relations
     value->setType(unshapedType(value->type()));
@@ -87,6 +100,10 @@ struct ConstantTableValue : public SugaredValue {
   }
 
  private:
+  std::unordered_map<
+      c10::intrusive_ptr<at::ivalue::Object>,
+      c10::intrusive_ptr<at::ivalue::Object>>
+      non_holding_object_cache;
   const std::vector<at::IValue>* constants_;
 };
 
@@ -95,7 +112,9 @@ SourceImporterImpl::SourceImporterImpl(
     const std::vector<at::IValue>* constant_table,
     SourceLoader source_loader,
     size_t version)
-    : cu_(std::move(cu)), source_loader_(std::move(source_loader)) {
+    : cu_(std::move(cu)),
+      source_loader_(std::move(source_loader)),
+      version_(version) {
   env_ = {
       {"torch", std::make_shared<BuiltinModule>("aten", version)},
       {"ops", std::make_shared<OpsValue>(version)},
@@ -116,7 +135,7 @@ TypePtr SourceImporterImpl::findNamedType(const QualifiedName& name) {
   parseSourceIfNeeded(name.prefix());
   auto it = to_be_defined_.find(name);
   if (it != to_be_defined_.end() && it->second->kind() == TK_CLASS_DEF) {
-    ClassDef cd(it->second);
+    ClassDef cd(std::move(it->second));
     to_be_defined_.erase(it);
     importNamedType(name.prefix(), cd);
   }
@@ -205,7 +224,7 @@ void SourceImporterImpl::LEGACY_import_methods(
 
 std::shared_ptr<SugaredValue> SourceImporterImpl::resolveValue(
     const std::string& name,
-    Function& m,
+    GraphFunction& m,
     const SourceRange& loc) {
   auto it = env_.find(name);
   if (it != env_.end()) {
@@ -551,13 +570,16 @@ void SourceImporterImpl::importClass(
 
   cu_->register_type(class_type);
   const auto self = SimpleSelf(class_type);
+  // TODO (this will include the version number later)
   cu_->define(
       qualified_classname,
       /*properties=*/{},
       /*propResolvers=*/{},
       methods,
       method_resolvers,
-      &self);
+      &self,
+      /*shouldMangle=*/false,
+      /*operator_set_version=*/version_);
   cu_->define_hooks(
       qualified_classname,
       hooks,
@@ -703,7 +725,7 @@ void SourceImporterImpl::parseImports(Lexer& L) {
 
 std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& name) {
   auto fullName = c10::QualifiedName(basename_, name);
   // Could be a ClassType or NamedTuple constructor

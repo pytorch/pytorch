@@ -16,7 +16,9 @@ struct MetalDeviceInfo {
 
 static inline MetalDeviceInfo createDeviceInfo(id<MTLDevice> device) {
   MetalDeviceInfo device_info;
-  device_info.name = device.name.UTF8String;
+  if (device.name != nil) {
+    device_info.name = device.name.UTF8String;
+  }
   if (@available(macOS 11.0, iOS 14.0, *)) {
     device_info.languageVersion = MTLLanguageVersion2_3;
   } else if (@available(macOS 10.15, iOS 13.0, *)) {

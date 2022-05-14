@@ -30,6 +30,10 @@ bool is_signed(const Tensor &self) {
   return self.is_signed();
 }
 
+bool _is_zerotensor(const Tensor& self) {
+  return self._is_zerotensor();
+}
+
 bool is_conj(const Tensor& self) {
   return self.is_conj();
 }
@@ -129,7 +133,7 @@ ScalarType result_type(const ResultTypeState& in_state) {
   return combine_categories(in_state.dimResult, combine_categories(in_state.zeroResult, in_state.wrappedResult));
 }
 
-ScalarType result_type(TensorList tensors) {
+ScalarType result_type(ITensorListRef tensors) {
   ResultTypeState state = {};
   for (const Tensor& tensor : tensors) {
     state = update_result_type_state(tensor, state);

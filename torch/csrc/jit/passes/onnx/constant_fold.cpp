@@ -1,9 +1,10 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
-
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
+#include <ATen/Functions.h>
+
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <algorithm>
@@ -146,7 +147,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
       return c10::nullopt;
     }
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
-    axes.reserve(inputTensorValues[3].sizes()[0]);
+    axes.resize(inputTensorValues[3].sizes()[0]);
     // ONNX slice accepts negative axis, fix this for aten op
     for (const auto i : c10::irange(inputTensorValues[3].sizes()[0])) {
       axes[i] = axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].sizes().size()
@@ -328,9 +329,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         updated_val = at::unsqueeze(updated_val, axes[i]);
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else if (
-        opset_version == ONNX_OPSET_9 || opset_version == ONNX_OPSET_10 ||
-        opset_version == ONNX_OPSET_11 || opset_version == ONNX_OPSET_12) {
+    } else if (opset_version >= ONNX_OPSET_9) {
       assert(inputTensorValues.size() == 1);
       if (!node->hasAttributeS("axes")) {
         return c10::nullopt;
@@ -374,9 +373,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         }
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else if (
-        opset_version == ONNX_OPSET_9 || opset_version == ONNX_OPSET_10 ||
-        opset_version == ONNX_OPSET_11 || opset_version == ONNX_OPSET_12) {
+    } else if (opset_version >= ONNX_OPSET_9) {
       assert(inputTensorValues.size() == 1);
       updated_val = inputTensorValues[0];
       if (node->hasAttributeS("axes")) {
@@ -451,6 +448,26 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     updated_val = at::norm(
         inputTensorValues[0], p, node->is(attr::axes), node->i(attr::keepdims));
     return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::ReduceProd) {
+    int64_t rank = inputTensorValues[0].sizes().size();
+    std::vector<int64_t> axes;
+    if (!node->hasAttributeS("axes")) {
+      axes = std::vector<int64_t>(rank);
+      std::iota(axes.rbegin(), axes.rend(), 0);
+    } else {
+      for (const auto& axis : node->is(attr::axes)) {
+        axes.emplace_back(axis < 0 ? axis + rank : axis);
+      }
+      std::sort(axes.begin(), axes.end(), std::greater<>());
+    }
+
+    bool keepdims =
+        node->hasAttributeS("keepdims") ? node->i(attr::keepdims) : true;
+    updated_val = inputTensorValues[0];
+    for (const auto& axis : axes) {
+      updated_val = at::prod(updated_val, axis, keepdims);
+    }
+    return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Gather) {
     assert(inputTensorValues.size() == 2);
     // default axis = 0
@@ -462,21 +479,22 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     // It needs to be adjusted (+= dim sizes) for aten op
     axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
     at::Tensor indices = inputTensorValues[1];
+    auto q = indices.dim();
+    // at::index_select only supports indices with rank <= 1.
+    // See https://pytorch.org/docs/master/generated/torch.index_select.html
+    if (q > 1) {
+      return c10::nullopt;
+    }
     // If indices input for onnx::Gather has a value less than 0,
     // It needs to be adjusted (+= dim value) for aten op
     auto less_mask = at::lt(indices, 0);
     auto indices_corr = at::add(indices, inputTensorValues[0].sizes()[axis]);
     auto indices_masked = at::where(less_mask, indices_corr, indices);
     updated_val = at::index_select(inputTensorValues[0], axis, indices_masked);
-    auto q = indices.dim();
-    // Cases where rank of indices > 1 are not currently supported.
-    if (q > 1) {
-      return c10::nullopt;
-    }
     // If rank of indices is 0, rank of output tensor should be
     // rank_of_input - 1.
     if (q < 1) {
-      updated_val = updated_val.squeeze();
+      updated_val = updated_val.squeeze(axis);
     }
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Range) {

@@ -119,6 +119,18 @@ if(BLAS_FOUND)
     endif()
   endif()
 
+  # FlexiBLAS
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "flexi"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" FLEXIBLAS_LAPACK_WORKS)
+    set(CMAKE_REQUIRED_LIBRARIES)
+    if(FLEXIBLAS_LAPACK_WORKS)
+      SET(LAPACK_INFO "flexi")
+    else()
+      message(STATUS "Strangely, this FlexiBLAS library does not support Lapack?!")
+    endif()
+  endif()
+
   # OpenBlas
   IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "open"))
     SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})

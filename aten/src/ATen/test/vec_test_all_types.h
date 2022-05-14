@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
+#include <c10/util/irange.h>
 #include <gtest/gtest.h>
 #include <chrono>
 #include <exception>
@@ -32,7 +33,7 @@ CACHE_ALIGN #define
 #endif
 #if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
 #define TEST_AGAINST_DEFAULT 1
-#elif !defined(CPU_CAPABILITY_AVX512) && !defined(CPU_CAPABILITY_AVX2) && !defined(CPU_CAPABILITY_VSX)
+#elif !defined(CPU_CAPABILITY_AVX512) && !defined(CPU_CAPABILITY_AVX2) && !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_ZVECTOR)
 #define TEST_AGAINST_DEFAULT 1
 #else
 #undef TEST_AGAINST_DEFAULT
@@ -47,7 +48,7 @@ CACHE_ALIGN #define
     return __VA_ARGS__(std::forward<decltype(args)>(args)...); \
   }
 
-#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_AVX2) || \
+#if defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_AVX2) || \
   defined(CPU_CAPABILITY_AVX512) && (defined(__GNUC__) || defined(__GNUG__))
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #define CHECK_WITH_FMA 1
@@ -869,8 +870,7 @@ public:
         act.store(actArr);
         if (bitwise)
         {
-            for (int i = 0; i < sizeX; i++)
-            {
+            for (const auto i : c10::irange(sizeX)) {
                 BVT b_exp = bit_cast<BVT>(expArr[i]);
                 BVT b_act = bit_cast<BVT>(actArr[i]);
                 EXPECT_EQ(b_exp, b_act) << getDetail(i / unitStorageCount);
@@ -880,8 +880,7 @@ public:
         }
         else if (checkWithTolerance)
         {
-            for (int i = 0; i < sizeX; i++)
-            {
+            for (const auto i : c10::irange(sizeX)) {
                 EXPECT_EQ(nearlyEqual<UVT>(expArr[i], actArr[i], absErr), true) << expArr[i] << "!=" << actArr[i] << "\n" << getDetail(i / unitStorageCount);
                 if (::testing::Test::HasFailure())
                     return true;
@@ -889,8 +888,7 @@ public:
         }
         else
         {
-            for (int i = 0; i < sizeX; i++)
-            {
+            for (const auto i : c10::irange(sizeX)) {
                 if (std::is_same<UVT, float>::value)
                 {
                     if (!check_both_nan(expArr[i], actArr[i])) {
@@ -952,8 +950,9 @@ void test_unary(
         UVT start = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
         UVT end = dmn_argc > 0 ? dmn.ArgsDomain[0].end : default_end;
         ValueGen<VT> generator(start, end, seed.add(changeSeedBy));
-        for (int trial = 0; trial < trialCount; trial++) {
-            for (int k = 0; k < el_count; k++) {
+        for (const auto trial : c10::irange(trialCount)) {
+            (void)trial; // Suppress unused variable warning
+            for (const auto k : c10::irange(el_count)) {
                 vals[k] = generator.get();
                 call_filter(filter, vals[k]);
                 //map operator
@@ -1011,8 +1010,9 @@ void test_binary(
         UVT end1 = dmn_argc > 1 ? dmn.ArgsDomain[1].end : default_end;
         ValueGen<VT> generator0(start0, end0, seed.add(changeSeedBy));
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
-        for (int trial = 0; trial < trialCount; trial++) {
-            for (int k = 0; k < el_count; k++) {
+        for (const auto trial : c10::irange(trialCount)) {
+            (void)trial; // Suppress unused variable warning
+            for (const auto k : c10::irange(el_count)) {
                 vals0[k] = generator0.get();
                 vals1[k] = generator1.get();
                 call_filter(filter, vals0[k], vals1[k]);
@@ -1076,8 +1076,9 @@ void test_ternary(
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
         ValueGen<VT> generator2(start2, end2, seed.add(changeSeedBy + 2));
 
-        for (int trial = 0; trial < trialCount; trial++) {
-            for (int k = 0; k < el_count; k++) {
+        for (const auto trial : c10::irange(trialCount)) {
+            (void)trial; // Suppress unused variable warning
+            for (const auto k : c10::irange(el_count)) {
                 vals0[k] = generator0.get();
                 vals1[k] = generator1.get();
                 vals2[k] = generator2.get();
@@ -1174,7 +1175,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Compl
     T x_imag = x.imag();
     T y_real = y.real();
     T y_imag = y.imag();
-#if defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
     //check multiplication considerin swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
@@ -1214,7 +1215,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
     T y_real = y.real();
     T y_imag = y.imag();
     PreventFma noFma;
-#if defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
     //check multiplication considerin swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;

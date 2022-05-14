@@ -46,6 +46,56 @@ struct CollectiveFingerPrint {
       std::ostream& output,
       const CollectiveFingerPrint& collective_fingerprint);
 
+  // Executes and verifies the collective fingerprint.
+  void verify(c10::intrusive_ptr<ProcessGroup> pg) {
+    at::Tensor serialized_tensor = serialize_fingerprint();
+    std::vector<at::Tensor> inp{serialized_tensor};
+    // First verify tensor shapes. This is needed because if e.g. tensor dim
+    // does not match across processes, directly verifying tensors will result
+    // in a crash during allgather, but we'd actually like to report a
+    // description about the inconsistency. Since the input is just a 1D tensor
+    // the shape will be a single int k_i and we need to make sure k_i is
+    // consistent across the whole world.
+    std::vector<at::Tensor> sp = c10d::getTensorShapes(inp);
+    verify_tensors(sp, pg);
+    // Now verify consistency for the actual tensor.
+    verify_tensors(inp, pg);
+  }
+
+ private:
+  void verify_tensors(
+      std::vector<at::Tensor>& tensors_to_verify,
+      c10::intrusive_ptr<ProcessGroup>& pg) {
+    // Create output tensor data structure to pass into allgather.
+    std::vector<std::vector<at::Tensor>> output_tensors;
+    output_tensors.reserve(tensors_to_verify.size());
+    for (const auto& tensor_shape : tensors_to_verify) {
+      std::vector<at::Tensor> outputs;
+      outputs.reserve(pg->getSize());
+      for (const auto i : c10::irange(pg->getSize())) {
+        (void)i;  // Suppress unused variable warning
+        outputs.emplace_back(at::zeros_like(tensor_shape));
+      }
+      output_tensors.emplace_back(outputs);
+    }
+    // Allgather tensor shapes.
+    pg->allgather(output_tensors, tensors_to_verify)->wait();
+    // Verify equivalence
+    for (const auto i : c10::irange(output_tensors.size())) {
+      const std::vector<at::Tensor> gathered_tensors = output_tensors[i];
+      const at::Tensor reference_tensor = tensors_to_verify[i];
+      for (const auto& rank_tensor : gathered_tensors) {
+        if (!rank_tensor.equal(reference_tensor)) {
+          std::stringstream ss;
+          ss << "Detected mismatch between collectives on ranks. Rank "
+             << pg->getRank()
+             << " is running inconsistent collective: " << *this;
+          TORCH_CHECK(false, ss.str());
+        }
+      }
+    }
+  }
+
   at::Tensor serialize_fingerprint() {
     auto data = std::make_unique<std::vector<int64_t>>();
     // std::vector<int64_t> data;
@@ -82,54 +132,6 @@ struct CollectiveFingerPrint {
             .make_tensor();
     return serialized_tensor;
   }
-
-  void verify_tensors(
-      std::vector<at::Tensor>& tensors_to_verify,
-      c10::intrusive_ptr<ProcessGroup>& pg) {
-    // Create output tensor data structure to pass into allgather.
-    std::vector<std::vector<at::Tensor>> output_tensors;
-    output_tensors.reserve(tensors_to_verify.size());
-    for (auto& tensor_shape : tensors_to_verify) {
-      std::vector<at::Tensor> outputs;
-      outputs.reserve(pg->getSize());
-      for (int i = 0; i < pg->getSize(); ++i) {
-        outputs.emplace_back(at::zeros_like(tensor_shape));
-      }
-      output_tensors.emplace_back(outputs);
-    }
-    // Allgather tensor shapes.
-    pg->allgather(output_tensors, tensors_to_verify)->wait();
-    // Verify equivalence
-    for (const auto i : c10::irange(output_tensors.size())) {
-      const std::vector<at::Tensor> gathered_tensors = output_tensors[i];
-      const at::Tensor reference_tensor = tensors_to_verify[i];
-      for (const auto& rank_tensor : gathered_tensors) {
-        if (!rank_tensor.equal(reference_tensor)) {
-          std::stringstream ss;
-          ss << "Detected mismatch between collectives on ranks. Rank "
-             << pg->getRank()
-             << " is running inconsistent collective: " << *this;
-          TORCH_CHECK(false, ss.str());
-        }
-      }
-    }
-  }
-
-  // Executes and verifies the collective fingerprint.
-  void verify(c10::intrusive_ptr<ProcessGroup> pg) {
-    at::Tensor serialized_tensor = serialize_fingerprint();
-    std::vector<at::Tensor> inp{serialized_tensor};
-    // First verify tensor shapes. This is needed because if e.g. tensor dim
-    // does not match across processes, directly verifying tensors will result
-    // in a crash during allgather, but we'd actually like to report a
-    // description about the inconsistency. Since the input is just a 1D tensor
-    // the shape will be a single int k_i and we need to make sure k_i is
-    // consistent across the whole world.
-    std::vector<at::Tensor> sp = c10d::getTensorShapes(inp);
-    verify_tensors(sp, pg);
-    // Now verify consistency for the actual tensor.
-    verify_tensors(inp, pg);
-  }
 };
 
 std::ostream& operator<<(
@@ -141,12 +143,12 @@ std::ostream& operator<<(
     std::vector<std::string> dtype_strs;
     std::vector<std::string> device_type_strs;
     for (const auto& tensor_dtype : collective_fingerprint.tensor_dtypes_) {
-      dtype_strs.push_back(
+      dtype_strs.emplace_back(
           c10::toString(static_cast<at::ScalarType>(tensor_dtype)));
     }
     for (const auto& tensor_device_type :
          collective_fingerprint.tensor_device_types_) {
-      device_type_strs.push_back(
+      device_type_strs.emplace_back(
           c10::toString(static_cast<at::DeviceType>(tensor_device_type)));
     }
 
@@ -333,6 +335,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::barrier(
   return pg_->barrier(opts);
 }
 
+c10::intrusive_ptr<ProcessGroup> ProcessGroupWrapper::getWrappedPg() const {
+  return pg_;
+}
+
 void ProcessGroupWrapper::runCollectiveChecks(
     OpType op_type,
     const std::vector<at::Tensor>& tensors) const {
@@ -340,8 +346,21 @@ void ProcessGroupWrapper::runCollectiveChecks(
   c10d::BarrierOptions options;
   // TODO: we should use wrapped pg_'s timeout here, but C++ ProcessGroup API
   // does not expose timeout.
-  glooPg_->monitoredBarrier(options, /* waitAllRanks */ true);
   auto finger_print = CollectiveFingerPrint(op_type, tensors);
+  try {
+    glooPg_->monitoredBarrier(options, /* waitAllRanks */ true);
+  } catch (const std::runtime_error& e) {
+    // Attach collective info to the exception and re-raise.
+    std::stringstream ss;
+    ss << finger_print;
+    auto collective_info = ss.str();
+    auto err_msg = c10::str(
+        "ProcessGroupWrapper: Monitored Barrier encountered error running collective: ",
+        collective_info,
+        ". Error: \n",
+        e.what());
+    TORCH_CHECK(false, err_msg);
+  }
   // Will throw if an ill-formed collective is detected.
   finger_print.verify(glooPg_);
 }

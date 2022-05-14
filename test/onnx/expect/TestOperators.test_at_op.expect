@@ -13,8 +13,14 @@ graph {
       s: "add"
       type: STRING
     }
+    attribute {
+      name: "overload_name"
+      s: ""
+      type: STRING
+    }
+    domain: "org.pytorch.aten"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "x"
     type {
@@ -49,5 +55,9 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
+}
+opset_import {
+  domain: "org.pytorch.aten"
+  version: 1
 }

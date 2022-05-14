@@ -1,3 +1,5 @@
+# Owner(s): ["module: nn"]
+
 import inspect
 import torch
 from unittest import mock
@@ -6,7 +8,6 @@ from torch.testing import floating_types
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_utils import TestCase, run_tests
-
 
 # Returns a database of args & kwargs that can be used to construct each module.
 # Each entry is in class -> (args, kwargs) format.
@@ -165,20 +166,30 @@ def build_constructor_arg_db():
         torch.nn.UpsamplingBilinear2d: ((), {}),
         torch.nn.UpsamplingNearest2d: ((), {}),
         torch.nn.ZeroPad2d: ((0,), {}),
+        torch.nn.qat.Conv1d: ((3, 3, 3), {
+            'qconfig': torch.ao.quantization.default_qconfig,
+        }),
         torch.nn.qat.Conv2d: ((3, 3, 3), {
-            'qconfig': torch.quantization.default_qconfig,
+            'qconfig': torch.ao.quantization.default_qconfig,
         }),
         torch.nn.qat.Conv3d: ((3, 3, 3), {
-            'qconfig': torch.quantization.default_qconfig,
+            'qconfig': torch.ao.quantization.default_qconfig,
         }),
         torch.nn.qat.Linear: ((5, 2), {
-            'qconfig': torch.quantization.default_qconfig,
+            'qconfig': torch.ao.quantization.default_qconfig,
+        }),
+        torch.nn.qat.Embedding: ((10, 12), {
+            'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
+        }),
+        torch.nn.qat.EmbeddingBag: ((10, 12), {
+            'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
         }),
         torch.nn.quantizable.LSTM: ((5, 6), {}),
         torch.nn.quantizable.LSTMCell: ((5, 6), {}),
         torch.nn.quantizable.MultiheadAttention: ((10, 2), {}),
         torch.nn.quantized.BatchNorm2d: ((2,), {}),
         torch.nn.quantized.BatchNorm3d: ((2,), {}),
+        torch.nn.quantized.Dropout: ((), {}),
         torch.nn.quantized.Conv1d: ((3, 3, 3), {}),
         torch.nn.quantized.Conv2d: ((3, 3, 3), {}),
         torch.nn.quantized.Conv3d: ((3, 3, 3), {}),
@@ -198,7 +209,7 @@ def build_constructor_arg_db():
         torch.nn.quantized.EmbeddingBag: ((10, 3), {
             'factory_kwargs': {},
         }),
-        torch.nn.quantized.GroupNorm: ((2, 3, torch.nn.Parameter(torch.tensor(2.)),
+        torch.nn.quantized.GroupNorm: ((2, 4, torch.nn.Parameter(torch.tensor(2.)),
                                         torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
         torch.nn.quantized.Hardswish: ((0.1, 0,), {}),
         torch.nn.quantized.InstanceNorm1d: ((2, torch.nn.Parameter(torch.tensor(2.)),
@@ -220,6 +231,7 @@ def build_constructor_arg_db():
         }),
         torch.nn.quantized.ReLU6: ((), {}),
         torch.nn.quantized.Sigmoid: ((0.1, 0), {}),
+        torch.nn.quantized.Softmax: ((), {}),
         torch.nn.quantized.FloatFunctional: ((), {}),
         torch.nn.quantized.FXFloatFunctional: ((), {}),
         torch.nn.quantized.QFunctional: ((), {}),

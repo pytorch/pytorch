@@ -100,16 +100,22 @@ class AtomicAdd;
 class Block;
 class Cond;
 class ExternalCall;
+class ExternalCallWithAlloc;
 class For;
 class Free;
+class FreeExt;
+class PlacementAllocate;
 class SyncThreads;
 using AllocatePtr = NodePtr<Allocate>;
 using AtomicAddPtr = NodePtr<AtomicAdd>;
 using BlockPtr = NodePtr<Block>;
 using CondPtr = NodePtr<Cond>;
 using ExternalCallPtr = NodePtr<ExternalCall>;
+using ExternalCallWithAllocPtr = NodePtr<ExternalCallWithAlloc>;
 using ForPtr = NodePtr<For>;
 using FreePtr = NodePtr<Free>;
+using FreeExtPtr = NodePtr<FreeExt>;
+using PlacementAllocatePtr = NodePtr<PlacementAllocate>;
 using SyncThreadsPtr = NodePtr<SyncThreads>;
 
 #define IMM_DECLARE(Type, Name) \

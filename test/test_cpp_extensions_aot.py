@@ -1,3 +1,5 @@
+# Owner(s): ["module: cpp-extensions"]
+
 import os
 import unittest
 
@@ -80,6 +82,26 @@ class TestCppExtensionAOT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
+    @common.skipIfRocm
+    @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cublas_extension(self):
+        from torch_test_cpp_extension import cublas_extension
+
+        x = torch.zeros(100, device="cuda", dtype=torch.float32)
+        z = cublas_extension.noop_cublas_function(x)
+        self.assertEqual(z, x)
+
+    @common.skipIfRocm
+    @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cusolver_extension(self):
+        from torch_test_cpp_extension import cusolver_extension
+
+        x = torch.zeros(100, device="cuda", dtype=torch.float32)
+        z = cusolver_extension.noop_cusolver_function(x)
+        self.assertEqual(z, x)
+
     @unittest.skipIf(IS_WINDOWS, "Not available on Windows")
     def test_no_python_abi_suffix_sets_the_correct_library_name(self):
         # For this test, run_test.py will call `python setup.py install` in the
@@ -137,7 +159,7 @@ class TestORTTensor(common.TestCase):
         bias = torch.empty(6, device='ort')
 
         # Make sure forward is overriden
-        out = torch.nn.functional.conv1d(input, weight, bias, 2, 0, 1, 1)
+        out = torch.nn.functional.conv2d(input, weight, bias, 2, 0, 1, 1)
         self.assertEqual(ort_extension.get_test_int(), 2)
         self.assertEqual(out.shape[0], input.shape[0])
         self.assertEqual(out.shape[1], weight.shape[0])

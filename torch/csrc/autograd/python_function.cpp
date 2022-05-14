@@ -23,6 +23,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <ATen/FuncTorchTLS.h>
 
 #include <exception>
 #include <functional>
@@ -166,10 +167,16 @@ auto PyNode::is_traceable() -> bool {
 }
 
 auto PyNode::release_variables() -> void {
-  pybind11::gil_scoped_acquire gil;
-  auto f = (THPFunction*) obj;
-  f->saved_variables.clear();
-  f->has_freed_buffers = 1;
+  // This function is called as part of the Node destructor!
+  // Since this object might be kept alive by C++, it is possible
+  // that the python interpreter is already dead here. In that case
+  // we just leak the saved objects.
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    auto f = (THPFunction*) obj;
+    f->saved_variables.clear();
+    f->has_freed_buffers = 1;
+  }
 }
 
 auto PyNode::name() const -> std::string {
@@ -204,6 +211,7 @@ static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
   Py_VISIT(self->to_save);
   Py_VISIT(self->non_differentiable);
   Py_VISIT(self->dirty_tensors);
+  Py_VISIT(self->saved_for_forward);
   return 0;
 }
 
@@ -218,6 +226,7 @@ static int THPFunction_clear(THPFunction *self)
   Py_CLEAR(self->to_save);
   Py_CLEAR(self->non_differentiable);
   Py_CLEAR(self->dirty_tensors);
+  Py_CLEAR(self->saved_for_forward);
 
   self->output_info.clear();
   self->input_info.clear();
@@ -348,17 +357,19 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     auto num_inputs = self->is_variable_input.size();
     THPObjectPtr pyInputs(PyTuple_New(num_inputs));
     if (!pyInputs) throw_python_error();
-    auto var_input_idx = 0;
+    int64_t variable_idx = 0;
     for (const auto i : c10::irange(num_inputs)) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      PyObject* input;
+      PyObject* input = nullptr;
       if (self->is_variable_input[i]) {
-        if (grad_inputs[i].defined() || !self->materialize_grads) {
-          input = THPVariable_Wrap(grad_inputs[i]);
+        if (grad_inputs[variable_idx].defined() || !self->materialize_grads) {
+          input = THPVariable_Wrap(grad_inputs[variable_idx]);
         } else {
-          input = THPVariable_Wrap(at::zeros_like(inputs[i]));
+          input = THPVariable_Wrap(at::zeros_like(inputs[variable_idx]));
         }
-        if (!input) throw_python_error();
+        if (!input) {
+          throw_python_error();
+        }
+        variable_idx++;
       } else {
         Py_INCREF(Py_None);
         input = Py_None;
@@ -378,7 +389,7 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     const int num_outputs = PyTuple_GET_SIZE(r.get());
     variable_list results;
     results.reserve(num_outputs);
-    for (int i = 0; i != num_outputs; ++i) {
+    for(const auto i : c10::irange(num_outputs)) {
       PyObject* output = PyTuple_GET_ITEM(r.get(), i);
       if (output == Py_None) {
         results.emplace_back();
@@ -559,6 +570,11 @@ static void _trace_post_record(
   }
 
   node->i_(jit::attr::inplace, is_inplace);
+  if (PyObject* module_name = PyDict_GetItemString(((PyTypeObject*)op_obj)->tp_dict, "__module__")) {
+    if (auto ptr = PyUnicode_AsUTF8(module_name)) {
+        node->s_(jit::attr::module, std::string(ptr));
+    }
+  }
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
@@ -589,7 +605,7 @@ static void _trace_post_record(
   // to the original tuple type.
   if (!unpack_output) {
     std::vector<TypePtr> new_tuple_values;
-    for (int i = 0; i < num_outputs; ++i) {
+    for (const auto i : c10::irange(num_outputs)) {
       TypePtr ptr = node->outputs()[i]->type();
       new_tuple_values.push_back(ptr);
     }
@@ -637,6 +653,9 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
     grad_fn->non_differentiable = nullptr;
   }
 
+  Py_XDECREF(grad_fn->saved_for_forward);
+  grad_fn->saved_for_forward = nullptr;
+
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
     PyObject *output = PyTuple_GET_ITEM(outputs.get(), 0);
@@ -663,10 +682,25 @@ PyObject* THPFunction_name(PyObject *self, PyObject* noargs) {
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
+
+  // save a local copy of seq_id before it gets incremented
+  int seq_id = at::sequence_number::peek();
+  auto info_pair = unpack_input<false>(inputs);
+  UnpackedInput& unpacked_input = info_pair.first;
+  InputFlags& input_info = info_pair.second;
+
+  // Call record function after all the inputs have been decoded, but
+  // before context has been allocated.
   RECORD_FUNCTION(
     ((PyTypeObject*)cls)->tp_name,
-    std::vector<c10::IValue>(),
-    at::sequence_number::peek());
+    std::vector<c10::IValue>(unpacked_input.input_vars.begin(), unpacked_input.input_vars.end()),
+    seq_id);
+
+  // Temporary hack to improve functorch UX. We'll find a better solution.
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    functorch_tls->checkSupportsAutogradFunction();
+  }
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
@@ -677,11 +711,6 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   auto cdata = std::shared_ptr<PyNode>(new PyNode(std::move(ctx_obj)), deleteNode);
   ctx->cdata = cdata;
 
-  // Prepare inputs and allocate context (grad fn)
-  auto info_pair = unpack_input<false>(inputs);
-  UnpackedInput& unpacked_input = info_pair.first;
-  InputFlags& input_info = info_pair.second;
-
   // Record input nodes if tracing
   auto* node = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
 
@@ -690,6 +719,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   cdata->set_next_edges(std::move(input_info.next_edges));
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
+
 
   // Prepend ctx to input_tuple, in preparation for static method call
   auto num_args = PyTuple_GET_SIZE(inputs);
@@ -811,9 +841,14 @@ static PyObject *unpack_saved_variables(
 PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
-  return unpack_saved_variables(self, [](const Variable& var) {
-    return THPVariable_Wrap(var);
-  });
+  if (self->saved_for_forward) {
+    Py_INCREF(self->saved_for_forward);
+    return self->saved_for_forward;
+  } else {
+    return unpack_saved_variables(self, [](const Variable& var) {
+      return THPVariable_Wrap(var);
+    });
+  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -957,6 +992,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"to_save", &getObject<&THPFunction::to_save>, &setObject<&THPFunction::to_save>, nullptr, nullptr},
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, nullptr, nullptr},
   {"dirty_tensors", &getObject<&THPFunction::dirty_tensors>, &setObject<&THPFunction::dirty_tensors>, nullptr, nullptr},
+  {"saved_for_forward", &getObject<&THPFunction::saved_for_forward>, &setObject<&THPFunction::saved_for_forward>, nullptr, nullptr},
   {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, nullptr, nullptr, nullptr},
   {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
   {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},

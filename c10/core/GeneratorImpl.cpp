@@ -43,7 +43,7 @@ namespace detail {
  * Note this is a legacy method (from THRandom.cpp)
  * FIXME: use std::random_device with entropy information
  */
-#ifndef _WIN32
+#if !defined(_WIN32)
 static uint64_t readURandomLong() {
   int randDev = open("/dev/urandom", O_RDONLY);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

@@ -1,4 +1,4 @@
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -19,10 +19,14 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_cache.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/utils/memory.h>
+#include <algorithm>
 #include <memory>
+#include <numeric>
 #include <unordered_map>
 #include <vector>
 
@@ -85,11 +89,11 @@ struct ShapeArg
     }
   }
 
-  c10::optional<int64_t> asConstantInt() {
+  c10::optional<int64_t> asConstantInt() const {
     return this->second;
   }
 
-  c10::optional<c10::ShapeSymbol> asShapeSymbol() {
+  c10::optional<c10::ShapeSymbol> asShapeSymbol() const {
     return this->first;
   }
 
@@ -100,30 +104,66 @@ struct ShapeArg
   }
 };
 
+std::ostream& operator<<(std::ostream& out, const ShapeArg& sa) {
+  if (auto val = sa.asConstantInt()) {
+    out << *val;
+  } else if (auto ss = sa.asShapeSymbol()) {
+    out << *ss;
+  } else {
+    out << "UNK";
+  }
+  return out;
+}
+
 struct ShapeArguments {
+  // Superset of SymbolicShape, with additional support for unknown, nonsymbolic
+  // vals
+ public:
   ShapeArguments(const c10::SymbolicShape& ss) {
-    TORCH_INTERNAL_ASSERT(ss.rank())
-    for (size_t i = 0; i < *ss.rank(); ++i) {
-      maybe_shape_symbols_.push_back(ShapeArg(ss.at(i)));
+    has_dim_ = ss.rank().has_value();
+    if (has_dim_) {
+      for (size_t i = 0; i < *ss.rank(); ++i) {
+        maybe_shape_symbols_.emplace_back(ss.at(i));
+      }
     }
   }
 
-  ShapeArguments(std::vector<ShapeArg> ss) {
-    maybe_shape_symbols_ = std::move(ss);
+  ShapeArguments(std::vector<ShapeArg> ss)
+      : has_dim_(true), maybe_shape_symbols_(std::move(ss)) {}
+
+  bool has_dim() const {
+    return has_dim_;
   }
 
-  int64_t len() {
-    return maybe_shape_symbols_.size();
+  int64_t len() const {
+    TORCH_INTERNAL_ASSERT(has_dim_, "ShapeArguments has no known dim")
+    return (int64_t)maybe_shape_symbols_.size();
   }
 
-  ShapeArg at(size_t i) {
+  const ShapeArg at(size_t i) const {
+    TORCH_INTERNAL_ASSERT(has_dim_, "ShapeArguments has no known dim")
     return maybe_shape_symbols_.at(i);
   }
 
  private:
+  bool has_dim_;
   std::vector<ShapeArg> maybe_shape_symbols_;
-  ;
 };
+
+std::ostream& operator<<(std::ostream& os, const ShapeArguments& sa) {
+  if (!sa.has_dim()) {
+    os << "(UNKNOWN DIM)";
+    return os;
+  }
+
+  os << "(";
+  for (size_t i = 0; i < sa.len(); i++) {
+    os << sa.at(i);
+  }
+  os << ")";
+
+  return os;
+}
 
 bool setSymbolicShapeAnalysisTestMode(bool value) {
   bool old_value = symbolic_shape_analysis_test_mode;
@@ -135,11 +175,27 @@ bool symbolicShapeAnalysisTestModeEnabled() {
   return symbolic_shape_analysis_test_mode;
 }
 
+using SSArgument = c10::variant<ShapeArguments, IValue>;
+
+std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
+  if (const IValue* iv = c10::get_if<IValue>(&sa)) {
+    out << *iv;
+  } else {
+    out << c10::get<ShapeArguments>(sa);
+  }
+  return out;
+}
+
 namespace {
 
 bool isListOfInts(const TypePtr& type) {
   return type->cast<ListType>() &&
       type->cast<ListType>()->getElementType()->cast<IntType>();
+}
+
+bool isListOfTensors(const TypePtr& type) {
+  return type->cast<ListType>() &&
+      type->cast<ListType>()->getElementType()->cast<TensorType>();
 }
 
 c10::optional<size_t> normIndex(int64_t index, size_t len) {
@@ -153,12 +209,52 @@ c10::optional<size_t> normIndex(int64_t index, size_t len) {
   }
 }
 
+bool shapeGraphCleanupPasses(std::shared_ptr<Graph> graph) {
+  // TODO: lower simple tuples ?
+  bool made_change = RemoveListMutation(graph);
+  made_change |= UnrollConstantLoops(graph);
+  made_change |= ConstantPropagation(graph);
+  made_change |= PeepholeOptimizeNonTensor(graph);
+  made_change |= PeepholeOptimizeListIdioms(graph, /*refine_list_len*/ true);
+  made_change |= RefineIntegerValues(graph);
+  made_change |= ConstantPropagation(graph);
+  // todo add return change for constant pooling
+  ConstantPooling(graph);
+  made_change |= EliminateCommonSubexpression(graph);
+  EliminateDeadCode(graph);
+  return made_change;
+}
+
 void replaceWithIValue(Value* v, IValue val) {
   WithInsertPoint guard(*v->node()->owningBlock()->nodes().begin());
   v->replaceAllUsesWith(v->owningGraph()->insertConstant(val));
 }
 
-} // namespace
+c10::SymbolicShape extractListShape(
+    Value* list,
+    std::unordered_map<Value*, int64_t>& symbolic_shape_values,
+    const AliasDb& db) {
+  if (list->node()->kind() == prim::Constant) {
+    auto int_list = toIValue(list)->toIntVector();
+    return c10::SymbolicShape(int_list);
+  }
+  // We need a list construct or a constant output
+  // that is not written to in order to analyze the output shape
+  if (list->node()->kind() != prim::ListConstruct || db.hasWriters(list)) {
+    GRAPH_DEBUG("Could not extract shape");
+    return c10::SymbolicShape();
+  }
+  Node* list_construct = list->node();
+  std::vector<c10::optional<int64_t>> output_shape;
+  for (Value* input : list_construct->inputs()) {
+    if (symbolic_shape_values.count(input)) {
+      output_shape.emplace_back(symbolic_shape_values[input]);
+    } else {
+      output_shape.push_back(constant_as<int64_t>(input));
+    }
+  }
+  return c10::SymbolicShape(output_shape);
+}
 
 // Symbolic Shape Analysis works through iteratively partially evaluating
 // a TorchScript shape compute graph by inputing properties from input
@@ -174,146 +270,96 @@ void replaceWithIValue(Value* v, IValue val) {
 // means that we do know its concrete value statically but we can asssign sets
 // of tensor dimensions which must be equal at runtime.
 
-struct SymbolicShapeAnalyzer {
-  SymbolicShapeAnalyzer(
-      Node* n,
-      std::shared_ptr<Graph> shape_compute_graph,
-      const AliasDb& db)
-      : graph_(shape_compute_graph->copy()), node_(n) {
-    // NB: shape compute graphs may have less inputs than their node
-    // counterparts to allow e.g. sharing one single unary definition
-    for (size_t i = 0; i < graph_->inputs().size(); i++) {
-      auto type = node_->input(i)->type();
+struct SymbolicShapeOpAnalyzer {
+  std::shared_ptr<Graph> shape_compute_graph_;
+  const FunctionSchema* schema_;
+  std::vector<SSArgument> inputs_;
 
-      if (auto opt_type =
-              graph_->inputs().at(i)->type()->cast<OptionalType>()) {
+  // For the case where we have a JIT graph,
+  // subsititute optional types for their component types
+  // if the type is known. This doesn't need to be done
+  // for known IValues.
+  void refineInputUnionTypes(const Node* parent_graph_node) {
+    for (size_t op_in_index = 0;
+         op_in_index < shape_compute_graph_->inputs().size();
+         op_in_index++) {
+      auto type = parent_graph_node->input(op_in_index)->type();
+      if (auto opt_type = shape_compute_graph_->inputs()
+                              .at(op_in_index)
+                              ->type()
+                              ->cast<OptionalType>()) {
         // None will get handled with constant substitution later
         if (!type->cast<OptionalType>() &&
-            !NoneType::get()->isSubtypeOf(type)) {
-          graph_->inputs().at(i)->setType(opt_type->getElementType());
+            !NoneType::get()->isSubtypeOf(*type)) {
+          shape_compute_graph_->inputs()
+              .at(op_in_index)
+              ->setType(opt_type->getElementType());
         }
-      } else if (graph_->inputs().at(i)->type()->cast<NumberType>()) {
-        graph_->inputs().at(i)->setType(type);
+      } else if (shape_compute_graph_->inputs()
+                     .at(op_in_index)
+                     ->type()
+                     ->cast<NumberType>()) {
+        shape_compute_graph_->inputs().at(op_in_index)->setType(type);
       }
+    }
+  }
 
-      if (auto tt = type->castRaw<TensorType>()) {
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-        c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
+  // We handle non-constant values in the shape propagation step
+  void substituteConstantInputs() {
+    if (schema_->name() == "aten::cat") {
+      // Modifying the graph where _node is part of to not use the tensor
+      // construct
 
-        // for testing, we don't insert complete tensor shapes and rely on our
-        // partial evaluation pipeline to propagate information.
-        // this is a good proxy for our ability to propagate non-complete shape
-        // information.
+      // When we have partially evaluate a list of Tensors like cat(tensor[])
+      // We have a few problems:
+      // - optimizing out calls to the length of the list: len(tensors)
+      // - resolving accesses of the list to the tensor symbolic sizes the
+      // corresponding list element We can solve both of these problems by
+      // replacing the partial evaluation of cat([x, y]) def cat(tensors:
+      // List[List[int]], dim: int)
+      //    body
+      // with
+      // def cat(x, y, dim: int)
+      //     tensors = [x, y]
+      //     body
+      uint64_t li_length = inputs_.size() - (schema_->arguments().size() - 1);
+      std::vector<Value*> li_inputs;
+      Value* graph_input = shape_compute_graph_->inputs().at(0);
+      for (size_t j = 0; j < li_length; ++j) {
+        auto new_inp = shape_compute_graph_->insertInput(j);
+        new_inp->setType(ListType::ofInts());
+        li_inputs.push_back(new_inp);
+      }
+      WithInsertPoint guard(*shape_compute_graph_->block()->nodes().begin());
+      auto new_li = shape_compute_graph_->insertNode(
+          shape_compute_graph_->createList(ListType::ofInts(), li_inputs));
+      graph_input->replaceAllUsesWith(new_li->output());
 
-        if (symbolic_shapes.isComplete() &&
-            !symbolic_shape_analysis_test_mode) {
-          replaceWithIValue(
-              graph_->inputs().at(i), *tt->sizes().concrete_sizes());
-          continue;
-        }
-        // TODO: remove, all constant tensors should have typed sizes
-        if (toIValue(node_->input(i))) {
-          auto size = constant_as<at::Tensor>(node_->input(i))->sizes();
-          if (!symbolic_shape_analysis_test_mode) {
-            replaceWithIValue(graph_->inputs().at(i), size);
-          } else {
-            node_symbolic_input_indices_.emplace_back(
-                i, c10::SymbolicShape(size));
-          }
-          continue;
-        }
+      shape_compute_graph_->eraseInput(li_length);
+    }
 
-        // we can't optimize a tensor without fixed rank
-        if (symbolic_shapes.rank()) {
-          node_symbolic_input_indices_.emplace_back(i, symbolic_shapes);
-        }
-      } else if (
-          type->cast<ListType>() &&
-          type->cast<ListType>()->getElementType()->cast<TensorType>()) {
-        TORCH_INTERNAL_ASSERT(false); // not handled yet
-      } else if (auto ival = toIValue(node_->input(i))) {
-        replaceWithIValue(graph_->inputs().at(i), *ival);
-      } else if (
-          type->cast<ListType>() &&
-          type->cast<ListType>()->getElementType()->cast<IntType>()) {
-        if (node_->input(i)->node()->kind() == prim::ListConstruct &&
-            !db.hasWriters(node_->input(i))) {
-          // it is a very common in graphs to see patterns like:
-          // z = x.view(y.size())
-          // or:
-          // z = x.view(1, 10, y.size(0), y.size(1))
-          // We want to propagate symbolic dimensions and concrete sizes
-          // from y to z. To do this we try to associate symbolic dimensions
-          // or concrete sizes with the integer list inputs that have a
-          // constructor taken from constants or y.size() or y.size(0)
-          auto list_construct = node_->input(i)->node();
-          std::vector<ShapeArg> shape;
-          for (Value* v : list_construct->inputs()) {
-            if (auto constant = constant_as<int64_t>(v)) {
-              shape.emplace_back(*constant);
-            } else if (v->node()->kind() == aten::size) {
-              auto const_index = constant_as<int64_t>(v->node()->input(1));
-              auto tt = v->node()->input(0)->type()->expect<TensorType>();
-              auto ss = tt->symbolic_sizes();
-              if (!ss.rank() || !const_index) {
-                // if we are getting a size of a tensor, it is an unknown
-                // symbolic dimension instead of an unknown integer (must be
-                // >=0)
-                shape.emplace_back(at::ShapeSymbol::newSymbol());
-                continue;
-              }
-              auto norm_index = normIndex(*const_index, *ss.rank());
-              if (!norm_index) {
-                shape.emplace_back(at::ShapeSymbol::newSymbol());
-                continue;
-              }
-              shape.emplace_back(ss[*norm_index]);
-            } else {
-              shape.emplace_back(ShapeArg::unknownInteger());
-            }
-          }
-          node_symbolic_input_indices_.emplace_back(i, std::move(shape));
-        } else if (
-            node_->input(i)->node()->kind() == aten::size &&
-            !db.hasWriters(node_->input(i))) {
-          auto ten_inp = node_->input(i)->node()->input();
-          auto ss = ten_inp->type()->expect<TensorType>()->symbolic_sizes();
-          node_symbolic_input_indices_.emplace_back(i, ss);
+    TORCH_INTERNAL_ASSERT(
+        shape_compute_graph_->inputs().size() <= inputs_.size(),
+        "Shape Compute Graph expected to have less inputs than actual inputs"); //?
+    for (size_t op_in_index = 0;
+         op_in_index < shape_compute_graph_->inputs().size();
+         op_in_index++) {
+      SSArgument& argument = inputs_[op_in_index];
+      Value* graph_in_var = shape_compute_graph_->inputs().at(op_in_index);
+
+      if (IValue* cur_val = c10::get_if<IValue>(&argument)) {
+        GRAPH_DEBUG("Substituting constant input ", *cur_val);
+        replaceWithIValue(graph_in_var, *cur_val);
+      } else {
+        auto cur_arg = c10::get<ShapeArguments>(argument);
+        if (cur_arg.has_dim()) {
+          graph_in_var->setType(ListType::ofInts());
         }
       }
     }
   }
 
-  void run() {
-    bool made_change = true;
-    constexpr size_t MAX_ATTEMPTS = 8;
-    size_t curr_attempt = 0;
-    while (made_change && curr_attempt < MAX_ATTEMPTS) {
-      curr_attempt++;
-      made_change = false;
-      // symbolic shape concrete values are only used in final shape extraction
-      substituteInputTensorProperties(/*symbolic_shape_values*/ nullptr);
-      // TODO: lower simple tuples ?
-      made_change |= RemoveListMutation(graph_);
-      made_change |= UnrollConstantLoops(graph_);
-      made_change |= ConstantPropagation(graph_);
-      made_change |= PeepholeOptimizeNonTensor(graph_);
-      made_change |=
-          PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
-      made_change |= RefineIntegerValues(graph_);
-      made_change |= ConstantPropagation(graph_);
-      made_change |= EliminateCommonSubexpression(graph_);
-      EliminateDeadCode(graph_);
-    }
-    std::unordered_map<Value*, int64_t> symbolic_shape_values;
-    substituteInputTensorProperties(&symbolic_shape_values);
-    GRAPH_DUMP("Done with partial evaluation", graph_);
-
-    extractOutputShape(symbolic_shape_values);
-  }
-
- private:
-  void substituteInputTensorProperties(
+  void substituteSymbolicProperties(
       std::unordered_map<Value*, int64_t>* symbolic_shape_values) {
     // clang-format off
     // here we iteratively substitute properties of the node's input tensors
@@ -342,15 +388,22 @@ struct SymbolicShapeAnalyzer {
 
     std::unordered_map<int64_t, std::vector<Value*>> symbolic_shape_map;
 
-    for (const auto& index_symbolic_shape : node_symbolic_input_indices_) {
-      auto index = index_symbolic_shape.first;
-      auto shape_arguments = index_symbolic_shape.second;
+    TORCH_INTERNAL_ASSERT(
+        inputs_.size() >= shape_compute_graph_->inputs().size(),
+        "Missing Arg for Shape Graph");
+    for (int64_t index = 0; index < shape_compute_graph_->inputs().size();
+         index++) {
+      auto shape_arguments = c10::get_if<ShapeArguments>(&inputs_[index]);
+      if (!shape_arguments || !shape_arguments->has_dim()) {
+        continue;
+      }
+      // Add support for testing symbolic shapes with dynamic dims
 
-      for (const auto& use : graph_->inputs().at(index)->uses()) {
+      for (const Use& use : shape_compute_graph_->inputs().at(index)->uses()) {
         // TODO: either decompose composite ops like slice or add handling here
         switch (use.user->kind()) {
           case aten::len: {
-            size_t len = shape_arguments.len();
+            size_t len = shape_arguments->len();
             replaceWithIValue(use.user->output(), static_cast<int64_t>(len));
           } break;
           case aten::__getitem__: {
@@ -358,11 +411,11 @@ struct SymbolicShapeAnalyzer {
             if (!index) {
               continue;
             }
-            auto norm_index = normIndex(*index, shape_arguments.len());
+            auto norm_index = normIndex(*index, shape_arguments->len());
             if (!norm_index) {
               continue;
             }
-            auto shape_arg = shape_arguments.at(*norm_index);
+            auto shape_arg = shape_arguments->at(*norm_index);
             if (auto const_int = shape_arg.asConstantInt()) {
               replaceWithIValue(use.user->output(), const_int);
               continue;
@@ -464,67 +517,527 @@ struct SymbolicShapeAnalyzer {
     }
   }
 
-  c10::SymbolicShape extractListShape(
-      Value* list,
-      std::unordered_map<Value*, int64_t>& symbolic_shape_values,
-      const AliasDb& db) {
-    if (list->node()->kind() == prim::Constant) {
-      auto int_list = toIValue(list)->toIntVector();
-      return c10::SymbolicShape(int_list);
+  std::vector<c10::SymbolicShape> propagateShapesInGraph() {
+    bool made_change = true;
+    constexpr size_t MAX_ATTEMPTS = 8;
+    for (int attempt_num = 0; made_change && attempt_num < MAX_ATTEMPTS;
+         attempt_num++) {
+      // symbolic shape concrete values are only used in final shape extraction
+      GRAPH_DUMP("Before substitution: ", shape_compute_graph_);
+      substituteSymbolicProperties(/*symbolic_shape_values*/ nullptr);
+      GRAPH_DUMP("Before Opt: ", shape_compute_graph_);
+      made_change = shapeGraphCleanupPasses(shape_compute_graph_);
     }
-    // We need a list construct or a constant output
-    // that is not written to in order to analyze the output shape
-    if (list->node()->kind() != prim::ListConstruct || db.hasWriters(list)) {
-      GRAPH_DEBUG("Could not extract shape ", getHeader(node_));
-      return c10::SymbolicShape();
-    }
-    Node* list_construct = list->node();
-    std::vector<c10::optional<int64_t>> output_shape;
-    for (Value* input : list_construct->inputs()) {
-      if (symbolic_shape_values.count(input)) {
-        output_shape.push_back(symbolic_shape_values[input]);
-      } else {
-        output_shape.push_back(constant_as<int64_t>(input));
-      }
-    }
-    return c10::SymbolicShape(output_shape);
+    std::unordered_map<Value*, int64_t> symbolic_shape_values;
+    substituteSymbolicProperties(&symbolic_shape_values);
+    GRAPH_DUMP("Done with partial evaluation", shape_compute_graph_);
+
+    return extractOutputShape(symbolic_shape_values);
   }
 
-  void extractOutputShape(
+  std::vector<c10::SymbolicShape> extractOutputShape(
       std::unordered_map<Value*, int64_t>& symbolic_shape_values) {
-    TORCH_INTERNAL_ASSERT(graph_->outputs().size() == node_->outputs().size());
+    TORCH_INTERNAL_ASSERT(
+        shape_compute_graph_->outputs().size() == schema_->returns().size());
     // TODO: would be nice if there were easy facility to look at uses and see
     // if they are all pure instead of instanting db.
-    AliasDb db(graph_);
-    for (size_t i = 0; i < graph_->outputs().size(); ++i) {
-      auto output = graph_->outputs().at(i);
+    auto res = std::vector<c10::SymbolicShape>();
+    AliasDb db(shape_compute_graph_);
+    for (size_t i = 0; i < shape_compute_graph_->outputs().size(); ++i) {
+      auto output = shape_compute_graph_->outputs().at(i);
       auto type = output->type();
       TORCH_INTERNAL_ASSERT(isListOfInts(type));
-      auto ss = extractListShape(output, symbolic_shape_values, db);
-      node_->output(i)->setType(
-          node_->output(i)->type()->expect<TensorType>()->withSymbolicShapes(
-              ss));
+      c10::SymbolicShape ss =
+          extractListShape(output, symbolic_shape_values, db);
+      GRAPH_DEBUG("Extracted Output: ", ss);
+      res.push_back(ss);
+    }
+    return res;
+  }
+
+ public:
+  SymbolicShapeOpAnalyzer(const FunctionSchema* schema) : schema_(schema) {
+    shape_compute_graph_ = nullptr;
+    if (!schema_) {
+      return;
+    }
+    auto maybe_graph = shapeComputeGraphForSchema(*schema_);
+    if (!maybe_graph) {
+      return;
+    }
+    shape_compute_graph_ = (*maybe_graph)->copy();
+  }
+
+  c10::optional<std::vector<c10::SymbolicShape>> run(
+      std::vector<SSArgument>& inputs) {
+    if (!shape_compute_graph_) {
+      return c10::nullopt;
+    }
+    inputs_ = inputs;
+    substituteConstantInputs();
+    GRAPH_DEBUG(inputs_)
+    return propagateShapesInGraph();
+  }
+
+  std::shared_ptr<Graph> getShapeComputeGraph() {
+    return shape_compute_graph_;
+  }
+};
+
+SSArgument tensorShapeArg(Value* tensor_v) {
+  auto tt = tensor_v->type()->expect<TensorType>();
+  c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
+
+  // for testing, we don't insert complete tensor shapes and rely on our
+  // partial evaluation pipeline to propagate information.
+  // this is a good proxy for our ability to propagate non-complete shape
+  // information.
+  if (symbolic_shapes.isComplete() && !symbolic_shape_analysis_test_mode) {
+    return IValue(tt->sizes().concrete_sizes());
+  }
+  if (toIValue(tensor_v)) {
+    auto size = constant_as<at::Tensor>(tensor_v)->sizes();
+    if (!symbolic_shape_analysis_test_mode) {
+      return IValue(size);
+    } else {
+      return c10::SymbolicShape(size);
+    }
+  }
+  return symbolic_shapes;
+}
+
+std::vector<SSArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
+  // TODO: fix the List of integers implementation, and
+  // extract out the shape changes, otherwise this is complete
+  // NB: shape compute graphs may have less inputs than their node
+  // counterparts to allow e.g. sharing one single unary definition
+  // so iterate on # of shape inputs
+  // We make lists of Tensor inputs variadic, which results in
+  // offset between a node index and its corresponding graph index
+  std::vector<SSArgument> input_shapes = std::vector<SSArgument>();
+
+  for (size_t node_index = 0; node_index < n->inputs().size(); ++node_index) {
+    auto type = n->input(node_index)->type();
+
+    if (type->castRaw<TensorType>()) {
+      input_shapes.push_back(tensorShapeArg(n->input(node_index)));
+      continue;
+    }
+    if (isListOfTensors(type)) {
+      // waiting for more use cases to decide on best generalization
+      TORCH_INTERNAL_ASSERT(n->kind() == aten::cat, "TODO: generalize logic");
+      if (n->input(node_index)->node()->kind() == prim::Constant) {
+        auto ival = toIValue(n->input(node_index));
+        for (const auto& ten : ival->toTensorVector()) {
+          input_shapes.emplace_back(c10::List<int64_t>(ten.sizes()));
+        }
+      } else if (
+          n->input(node_index)->node()->kind() == prim::ListConstruct &&
+          !db.hasWriters(n->input(node_index))) {
+        auto li_construct_node = n->input(node_index)->node();
+        for (size_t j = 0; j < li_construct_node->inputs().size(); ++j) {
+          input_shapes.push_back(tensorShapeArg(li_construct_node->input(j)));
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Unhandled List, we shouldn't get here");
+      }
+      continue;
+    }
+    if (auto ival = toIValue(n->input(node_index))) {
+      input_shapes.emplace_back(*ival);
+      continue;
+    }
+    if (type->cast<ListType>() &&
+        type->cast<ListType>()->getElementType()->cast<IntType>()) {
+      auto input_src_node = n->input(node_index)->node();
+      if (input_src_node->kind() == prim::ListConstruct &&
+          !db.hasWriters(n->input(node_index))) {
+        // it is a very common in graphs to see patterns like:
+        // z = x.view(y.size())
+        // or:
+        // z = x.view(1, 10, y.size(0), y.size(1))
+        // We want to propagate symbolic dimensions and concrete sizes
+        // from y to z. To do this we try to associate symbolic dimensions
+        // or concrete sizes with the integer list inputs that have a
+        // constructor taken from constants or y.size() or y.size(0)
+        auto list_construct = n->input(node_index)->node();
+        std::vector<ShapeArg> shape;
+        for (Value* v : list_construct->inputs()) {
+          if (auto constant = constant_as<int64_t>(v)) {
+            shape.emplace_back(*constant);
+          } else if (v->node()->kind() == aten::size) {
+            auto const_index = constant_as<int64_t>(v->node()->input(1));
+            auto tt = v->node()->input(0)->type()->expect<TensorType>();
+            auto ss = tt->symbolic_sizes();
+            if (!ss.rank() || !const_index) {
+              // if we are getting a size of a tensor, it is an unknown
+              // symbolic dimension instead of an unknown integer (must be
+              // >=0)
+              shape.emplace_back(at::ShapeSymbol::newSymbol());
+              continue;
+            }
+            auto norm_index = normIndex(*const_index, *ss.rank());
+            if (!norm_index) {
+              shape.emplace_back(at::ShapeSymbol::newSymbol());
+              continue;
+            }
+            shape.emplace_back(ss[*norm_index]);
+          } else {
+            shape.emplace_back(ShapeArg::unknownInteger());
+          }
+        }
+        input_shapes.emplace_back(ShapeArguments(shape));
+        continue;
+      }
+      if (input_src_node->kind() == aten::size &&
+          !db.hasWriters(n->input(node_index))) {
+        auto ten_inp = input_src_node->input();
+        auto ss = ten_inp->type()->expect<TensorType>()->symbolic_sizes();
+        input_shapes.emplace_back(ss);
+        continue;
+      }
+    }
+    GRAPH_DEBUG(
+        "Unhandled input: ",
+        n->kind().toDisplayString(),
+        " arg num: ",
+        node_index);
+    input_shapes.emplace_back(c10::SymbolicShape());
+  }
+  TORCH_INTERNAL_ASSERT(
+      input_shapes.size() >= n->inputs().size(),
+      "input_shapes size: ",
+      input_shapes.size(),
+      " n inputs size: ",
+      n->inputs().size());
+  return input_shapes;
+}
+
+void applyOutputShapeToGraph(
+    Node* node,
+    const std::vector<c10::SymbolicShape>& output_shapes) {
+  TORCH_INTERNAL_ASSERT(
+      node->outputs().size() == output_shapes.size(),
+      "Output shape size mismatch");
+  for (size_t i = 0; i < output_shapes.size(); ++i) {
+    auto& ss = output_shapes.at(i);
+    node->output(i)->setType(
+        node->output(i)->type()->expect<TensorType>()->withSymbolicShapes(ss));
+  }
+}
+
+std::shared_ptr<Graph> PropagateShapesWithShapeFunction(
+    Node* n,
+    const AliasDb& db) {
+  const FunctionSchema* func_schema = n->maybeSchema();
+  if (!func_schema) {
+    return nullptr;
+  }
+  auto op_analyzer = SymbolicShapeOpAnalyzer(func_schema);
+  if (!op_analyzer.getShapeComputeGraph()) {
+    return nullptr;
+  }
+  auto input_shapes = getNodeInputShapes(n, db);
+  op_analyzer.refineInputUnionTypes(n);
+
+  if (auto output_shapes = op_analyzer.run(input_shapes)) {
+    applyOutputShapeToGraph(n, *output_shapes);
+  }
+
+  return op_analyzer.getShapeComputeGraph();
+}
+
+struct SymbolicShapeGraphAnalyzer {
+  SymbolicShapeGraphAnalyzer(
+      std::shared_ptr<Graph>& graph,
+      Node* beg,
+      Node* end)
+      : graph_(graph), beg_(beg), end_(end) {
+    TORCH_INTERNAL_ASSERT(
+        beg_->owningBlock() == end_->owningBlock() && end_->isAfter(beg_));
+  }
+
+  c10::optional<ShapeComputeGraphMapping> run() {
+    AliasDb db(graph_);
+    std::unordered_map<Node*, std::shared_ptr<Graph>> partial_evaluated_graphs =
+        propagateShapesAndGatherPartialEvalShapeGraphs(db);
+
+    auto stitched_shape_compute_graph = std::make_shared<Graph>();
+    // We want to build up a computational graph which computes all shapes
+    // we dont know statically - that is, all symbolic shapes within
+    // the region [beg, end). it must be executable before beg.
+    // TODO: dont require dimensions of tensors to be set AOT ?
+
+    for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
+      auto curr = *it;
+      if (curr->kind() == prim::Constant) {
+        continue;
+      }
+      // TODO: generalize logic to for other tensor input ops when they are
+      // added
+      if (curr->kind() == prim::ListConstruct) {
+        auto uses = curr->output()->uses();
+        if (!std::all_of(uses.begin(), uses.end(), [](const Use& use) {
+              return use.user->kind() == aten::cat;
+            })) {
+          GRAPH_DEBUG("Non cat list use ", getHeader(curr));
+          return c10::nullopt;
+        }
+        continue;
+      }
+
+      if (!partial_evaluated_graphs.count(curr)) {
+        GRAPH_DEBUG("No graph ", getHeader(curr));
+        return c10::nullopt;
+      }
+
+      auto outputs = curr->outputs();
+      for (Value* v : outputs) {
+        auto tt = v->type()->cast<TensorType>();
+        if (!tt) {
+          GRAPH_DEBUG("Non tensor node", getHeader(curr));
+          return c10::nullopt;
+        }
+        auto symbolic_sizes = tt->symbolic_sizes();
+        // TODO: dont require # of dimensions of tensors set ?
+        if (!symbolic_sizes.rank()) {
+          GRAPH_DEBUG("No rank on output ", getHeader(curr));
+          return c10::nullopt;
+        }
+      }
+      auto partial_eval_graph = partial_evaluated_graphs[curr];
+      joinPartialEvaluatedShapeGraphToLargeShapeGraph(
+          curr, partial_eval_graph, stitched_shape_compute_graph);
+    }
+
+    size_t MAX_ITER = 8;
+    bool made_change = true;
+    size_t i = 0;
+    while (i < MAX_ITER && made_change) {
+      i++;
+      made_change = shapeGraphCleanupPasses(stitched_shape_compute_graph);
+    }
+
+    // for any output that is duplicated, the symbolic shape must be equal
+    // take the symbolic shape that is generated first and get equivalent ones
+    std::unordered_map<int64_t, int64_t> discovered_sym_shape_equalities;
+    std::unordered_map<Value*, int64_t> graph_output_to_symbolic_shape_dim;
+    std::vector<size_t> erase_indices;
+
+    for (size_t i = 0; i < stitched_shape_compute_graph->outputs().size();
+         ++i) {
+      Value* output = stitched_shape_compute_graph->outputs().at(i);
+      // this Value is already contained, so the symbolic shape for i must be
+      // equal to the symbolic shape at the existing index
+      if (graph_output_to_symbolic_shape_dim.count(output)) {
+        auto curr_sym_shape = output_index_to_symbolic_shape_[i];
+        auto existing_sym_shape = graph_output_to_symbolic_shape_dim[output];
+        discovered_sym_shape_equalities[curr_sym_shape] = existing_sym_shape;
+        erase_indices.push_back(i);
+      } else {
+        graph_output_to_symbolic_shape_dim[output] =
+            output_index_to_symbolic_shape_[i];
+      }
+    }
+    for (int64_t i = erase_indices.size() - 1; i >= 0; i--) {
+      stitched_shape_compute_graph->eraseOutput(erase_indices[i]);
+    }
+    for (size_t i = 0; i < stitched_shape_compute_graph->inputs().size();) {
+      if (!stitched_shape_compute_graph->inputs().at(i)->hasUses()) {
+        enclosing_graph_value_to_shape_graph_input_.erase(
+            stitched_shape_compute_graph->inputs().at(i));
+        stitched_shape_compute_graph->eraseInput(i);
+      } else {
+        ++i;
+      }
+    }
+
+    updateGraphWithSymbolicShapeEqualities(discovered_sym_shape_equalities);
+    return ShapeComputeGraphMapping(
+        stitched_shape_compute_graph,
+        enclosing_graph_value_to_shape_graph_input_,
+        graph_output_to_symbolic_shape_dim);
+  }
+
+  void updateGraphWithSymbolicShapeEqualities(
+      std::unordered_map<int64_t, int64_t>& sym_shape_equalities) {
+    for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
+      auto curr = *it;
+      for (size_t i = 0; i < curr->outputs().size(); ++i) {
+        auto output = curr->output(i);
+        auto tt = output->type()->cast<TensorType>();
+        if (!tt || !tt->symbolic_sizes().rank()) {
+          continue;
+        }
+        bool changed = false;
+        std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
+        auto new_sizes =
+            c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
+              auto value = shape.value();
+              if (sym_shape_equalities.count(value)) {
+                changed = true;
+                return sym_shape_equalities[value];
+              }
+              return value;
+            });
+        if (changed) {
+          output->setType(
+              tt->withSymbolicShapes(c10::SymbolicShape(new_sizes)));
+        }
+      }
     }
   }
 
-  // node input indices that are TensorType and we need to iteratively
-  // substitute properties of. We only substitute properties
-  // of TensorTypes with a fixed dimension but not a complete shape,
-  // because a complete shape we can completely replace with a constant
-  // and non-fixed dimensions we cannot reason about at all
-  // TODO: might be cleaner to store as a pair of index -> symbolic shape
-  // but there were weird lifetime issues
-  std::vector<std::pair<int64_t, ShapeArguments>> node_symbolic_input_indices_;
-  std::shared_ptr<Graph> graph_;
-  Node* node_;
-};
+  void registerStitchedComputeOutput(
+      std::shared_ptr<Graph> stitched_shape_compute_graph,
+      Value* output,
+      int64_t symbolic_shape) {
+    stitched_shape_compute_graph->registerOutput(output);
+    output_index_to_symbolic_shape_
+        [stitched_shape_compute_graph->outputs().size() - 1] = symbolic_shape;
+    symbolic_shape_value_to_graph_output_[symbolic_shape] =
+        stitched_shape_compute_graph->outputs().at(
+            stitched_shape_compute_graph->outputs().size() - 1);
+  }
 
-void PropagateShapesWithShapeFunction(
-    Node* n,
-    std::shared_ptr<Graph>& shape_compute_graph,
-    const AliasDb& db) {
-  SymbolicShapeAnalyzer(n, shape_compute_graph, db).run();
-}
+  void joinPartialEvaluatedShapeGraphToLargeShapeGraph(
+      Node* curr,
+      std::shared_ptr<Graph> partial_eval_graph,
+      std::shared_ptr<Graph> stitched_shape_compute_graph) {
+    // we are building up the large shape compute graph by iteratively
+    // combining partially evaluated individual node shape graphs.
+
+    // We need to maintain two mappings, one from non-Tensor inputs in the
+    // enclosing graph to their equivalent mappings within the large shape
+    // compute graph, and one from symbolic shape dimension to new node output
+
+    // When we add a new tensor node, we do two things:
+    // 1: record a mapping from the tensor node output to its shape in the
+    // partial eval graph 2: add each symbolic shape dimension that we have
+    // not already added as a output to the large shape compute graph
+
+    // Once we are done stitching together all partial eval'd graphs, we can
+    // cleanup the graph and remove the unneeded complete shapes as outputs,
+    // leaving us only compute for calculating the runtime value of symbolic
+    // dimensions
+    // leaving us only compute for calculating the runtime value of symbolic
+    // dimensions
+
+    std::vector<Value*> node_inputs;
+    // TODO: generalize logic
+    if (curr->kind() == aten::cat) {
+      TORCH_INTERNAL_ASSERT(
+          curr->input(0)->node()->kind() == prim::ListConstruct);
+      for (Value* v : curr->input(0)->node()->inputs()) {
+        node_inputs.push_back(v);
+      }
+      node_inputs.push_back(curr->namedInput("dim"));
+    } else {
+      for (size_t i = 0; i < partial_eval_graph->inputs().size(); ++i) {
+        node_inputs.push_back(curr->input(i));
+      }
+    }
+
+    std::vector<Value*> partial_eval_inputs;
+    for (size_t i = 0; i < node_inputs.size(); ++i) {
+      auto node_input = node_inputs[i];
+      auto existing_graph_mapping =
+          enclosing_graph_value_to_shape_graph_input_.find(node_input);
+      if (existing_graph_mapping !=
+          enclosing_graph_value_to_shape_graph_input_.end()) {
+        partial_eval_inputs.push_back(existing_graph_mapping->second);
+      } else {
+        Value* shape_graph_input =
+            stitched_shape_compute_graph->addInput()->copyMetadata(
+                partial_eval_graph->inputs().at(i));
+        enclosing_graph_value_to_shape_graph_input_[node_input] =
+            shape_graph_input;
+        partial_eval_inputs.push_back(shape_graph_input);
+      }
+      // make sure all symbolic dimensions in the graph we are creating are
+      // computed in the partial eval graph
+      if (auto tt = node_input->type()->cast<TensorType>()) {
+        if (!tt->symbolic_sizes().rank()) {
+          continue;
+        }
+        auto rank = *tt->symbolic_sizes().rank();
+        for (size_t j = 0; j < rank; ++j) {
+          auto shape = tt->symbolic_sizes()[j];
+          if (shape.is_static() ||
+              symbolic_shape_value_to_graph_output_.count(shape.value())) {
+            continue;
+          }
+          auto input = enclosing_graph_value_to_shape_graph_input_[node_input];
+          WithInsertPoint guard(stitched_shape_compute_graph->block());
+          auto index = stitched_shape_compute_graph->insertConstant(
+              static_cast<int64_t>(j));
+          auto li_index = stitched_shape_compute_graph->insert(
+              aten::__getitem__, {input, index});
+          registerStitchedComputeOutput(
+              stitched_shape_compute_graph, li_index, shape.value());
+        }
+      }
+    }
+
+    WithInsertPoint guard(stitched_shape_compute_graph->block());
+    std::unordered_map<Value*, Value*> value_map;
+    insertGraph(
+        *stitched_shape_compute_graph,
+        *partial_eval_graph,
+        partial_eval_inputs,
+        value_map);
+
+    for (size_t i = 0; i < curr->outputs().size(); ++i) {
+      Value* new_list_output = value_map[partial_eval_graph->outputs().at(i)];
+      enclosing_graph_value_to_shape_graph_input_[curr->output(i)] =
+          new_list_output;
+
+      TORCH_INTERNAL_ASSERT(
+          new_list_output->node()->kind() == prim::ListConstruct ||
+          new_list_output->node()->kind() == prim::Constant);
+      TORCH_INTERNAL_ASSERT(!new_list_output->node()->hasUses());
+
+      auto symbolic_sizes =
+          curr->output(i)->type()->expect<TensorType>()->symbolic_sizes();
+      TORCH_INTERNAL_ASSERT(symbolic_sizes.rank());
+
+      for (size_t i = 0; i < *symbolic_sizes.rank(); i++) {
+        if (symbolic_sizes[i].is_static()) {
+          continue;
+        }
+        int64_t symbolic_shape = symbolic_sizes[i].value();
+        if (symbolic_shape_value_to_graph_output_.count(symbolic_shape)) {
+          continue;
+        }
+        registerStitchedComputeOutput(
+            stitched_shape_compute_graph,
+            new_list_output->node()->input(i),
+            symbolic_shape);
+      }
+    }
+  }
+
+  std::unordered_map<Node*, std::shared_ptr<Graph>>
+  propagateShapesAndGatherPartialEvalShapeGraphs(AliasDb& db) {
+    std::unordered_map<Node*, std::shared_ptr<Graph>> partial_evaluated_graphs;
+    for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
+      auto curr = *it;
+      if (auto maybe_graph = PropagateShapesWithShapeFunction(curr, db)) {
+        partial_evaluated_graphs[curr] = maybe_graph;
+      }
+    }
+    return partial_evaluated_graphs;
+  }
+
+  std::unordered_map<Value*, Value*>
+      enclosing_graph_value_to_shape_graph_input_;
+  std::unordered_map<int64_t, Value*> symbolic_shape_value_to_graph_output_;
+  std::unordered_map<size_t, int64_t> output_index_to_symbolic_shape_;
+
+  std::shared_ptr<Graph>& graph_;
+  Node* beg_;
+  Node* end_;
+};
 
 void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
   for (Node* n : b->nodes()) {
@@ -535,9 +1048,7 @@ void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
       PropagateShapesOnBlock(if_v.elseBlock(), db);
       mergeTypes(if_v.thenOutputs(), if_v.elseOutputs(), if_v.outputs());
     } else if (n->maybeSchema()) {
-      if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
-        PropagateShapesWithShapeFunction(n, *maybe_graph, db);
-      }
+      PropagateShapesWithShapeFunction(n, db);
     } else if (n->kind() == prim::TupleConstruct) {
       auto orig_type = n->output()->type()->expect<TupleType>();
       auto new_types = fmap(n->inputs(), [](Value* v) { return v->type(); });
@@ -546,10 +1057,51 @@ void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
     }
   }
 }
+} // namespace
 
 void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
   AliasDb db(graph);
   PropagateShapesOnBlock(graph->block(), db);
+}
+
+c10::optional<ShapeComputeGraphMapping>
+PropagateShapesAndBuildLargeShapeComputeGraph(
+    std::shared_ptr<Graph>& graph,
+    Node* beg,
+    Node* end) {
+  return SymbolicShapeGraphAnalyzer(graph, beg, end).run();
+}
+
+TORCH_API c10::optional<std::vector<c10::SymbolicShape>>
+calculateSymbolicShapesOnOp(
+    const FunctionSchema* schema,
+    const std::vector<SSAInput>& inputs) {
+  if (shapeComputeGraphForSchema(*schema) == c10::nullopt) {
+    // Avoid doing all this work for functions that don't have a
+    // supported schema
+    return c10::nullopt;
+  }
+
+  if (auto cached_ret_vec = get_cached_shape_function(schema, inputs)) {
+    return cached_ret_vec;
+  }
+
+  std::vector<SSArgument> ssa_args;
+  for (auto& arg : inputs) {
+    if (const IValue* ival = c10::get_if<IValue>(&arg)) {
+      ssa_args.emplace_back(*ival);
+    } else {
+      const c10::SymbolicShape* ss = c10::get_if<c10::SymbolicShape>(&arg);
+      ssa_args.emplace_back(ShapeArguments(*ss));
+    }
+  }
+
+  auto op_analyzer = SymbolicShapeOpAnalyzer(schema);
+  auto res = op_analyzer.run(ssa_args);
+  if (res.has_value()) {
+    cache_shape_function(schema, inputs, res.value());
+  }
+  return res;
 }
 
 } // namespace jit

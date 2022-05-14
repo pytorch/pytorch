@@ -110,8 +110,10 @@ class _LRScheduler(object):
                 print('Adjusting learning rate'
                       ' of group {} to {:.4e}.'.format(group, lr))
             else:
-                print('Epoch {:5d}: adjusting learning rate'
-                      ' of group {} to {:.4e}.'.format(epoch, group, lr))
+                epoch_str = ("%.2f" if isinstance(epoch, float) else
+                             "%.5d") % epoch
+                print('Epoch {}: adjusting learning rate'
+                      ' of group {} to {:.4e}.'.format(epoch_str, group, lr))
 
 
     def step(self, epoch=None):
@@ -509,7 +511,7 @@ class LinearLR(_LRScheduler):
         >>> # lr = 0.03125  if epoch == 1
         >>> # lr = 0.0375   if epoch == 2
         >>> # lr = 0.04375  if epoch == 3
-        >>> # lr = 0.005    if epoch >= 4
+        >>> # lr = 0.05    if epoch >= 4
         >>> scheduler = LinearLR(self.opt, start_factor=0.5, total_iters=4)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -588,8 +590,11 @@ class SequentialLR(_LRScheduler):
     which scheduler is supposed to be called at a given epoch.
 
     Args:
+        optimizer (Optimizer): Wrapped optimizer.
         schedulers (list): List of chained schedulers.
         milestones (list): List of integers that reflects milestone points.
+        last_epoch (int): The index of last epoch. Default: -1.
+        verbose (bool): Does nothing.
 
     Example:
         >>> # Assuming optimizer uses lr = 1. for all groups
@@ -608,11 +613,17 @@ class SequentialLR(_LRScheduler):
     """
 
     def __init__(self, optimizer, schedulers, milestones, last_epoch=-1, verbose=False):
-        for scheduler_idx in range(1, len(schedulers)):
+        for scheduler_idx in range(len(schedulers)):
+            if schedulers[scheduler_idx].optimizer != optimizer:
+                raise ValueError(
+                    "Sequential Schedulers expects all schedulers to belong to the same optimizer, but "
+                    f"got schedulers at index {scheduler_idx} to be different than the optimizer passed in."
+                )
+
             if (schedulers[scheduler_idx].optimizer != schedulers[0].optimizer):
                 raise ValueError(
                     "Sequential Schedulers expects all schedulers to belong to the same optimizer, but "
-                    "got schedulers at index {} and {} to be different".format(0, scheduler_idx)
+                    f"got schedulers at index {0} and {scheduler_idx} to be different."
                 )
         if (len(milestones) != len(schedulers) - 1):
             raise ValueError(
@@ -623,6 +634,8 @@ class SequentialLR(_LRScheduler):
         self._schedulers = schedulers
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
+        self.optimizer = optimizer
+        self._last_lr = schedulers[0].get_last_lr()
 
     def step(self):
         self.last_epoch += 1
@@ -631,6 +644,7 @@ class SequentialLR(_LRScheduler):
             self._schedulers[idx].step(0)
         else:
             self._schedulers[idx].step()
+        self._last_lr = self._schedulers[idx].get_last_lr()
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -716,6 +730,11 @@ class CosineAnnealingLR(_LRScheduler):
 
         if self.last_epoch == 0:
             return [group['lr'] for group in self.optimizer.param_groups]
+        elif self._step_count == 1 and self.last_epoch > 0:
+            return [self.eta_min + (base_lr - self.eta_min) *
+                    (1 + math.cos((self.last_epoch) * math.pi / self.T_max)) / 2
+                    for base_lr, group in
+                    zip(self.base_lrs, self.optimizer.param_groups)]
         elif (self.last_epoch - 1 - self.T_max) % (2 * self.T_max) == 0:
             return [group['lr'] + (base_lr - self.eta_min) *
                     (1 - math.cos(math.pi / self.T_max)) / 2
@@ -764,10 +783,13 @@ class ChainedScheduler(_LRScheduler):
                     "got schedulers at index {} and {} to be different".format(0, scheduler_idx)
                 )
         self._schedulers = list(schedulers)
+        self.optimizer = schedulers[0].optimizer
+        self._last_lr = [group['lr'] for group in self._schedulers[-1].optimizer.param_groups]
 
     def step(self):
         for scheduler in self._schedulers:
             scheduler.step()
+        self._last_lr = [group['lr'] for group in self._schedulers[-1].optimizer.param_groups]
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -927,8 +949,10 @@ class ReduceLROnPlateau(object):
             if old_lr - new_lr > self.eps:
                 param_group['lr'] = new_lr
                 if self.verbose:
-                    print('Epoch {:5d}: reducing learning rate'
-                          ' of group {} to {:.4e}.'.format(epoch, i, new_lr))
+                    epoch_str = ("%.2f" if isinstance(epoch, float) else
+                                 "%.5d") % epoch
+                    print('Epoch {}: reducing learning rate'
+                          ' of group {} to {:.4e}.'.format(epoch_str, i, new_lr))
 
     @property
     def in_cooldown(self):

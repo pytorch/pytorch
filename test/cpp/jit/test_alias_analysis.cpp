@@ -4,8 +4,12 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/utils/memory.h>
+
+#include <ATen/TensorOperators.h>
 
 namespace torch {
 namespace jit {
@@ -481,6 +485,135 @@ TEST(AliasAnalysisTest, SafeToChangeAliasingRelationship) {
   EXPECT_TRUE(aliasDb.safeToChangeAliasingRelationship(vmap["d"], vmap["c"]));
 }
 
+class BatchAndInstanceNormFixture
+    : public ::testing::TestWithParam<std::tuple<std::string, NodeKind, bool>> {
+};
+
+TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNorm) {
+  auto param = GetParam();
+  auto fnName = std::get<0>(param);
+  auto nodeKind = std::get<1>(param);
+  auto isTraining = std::get<2>(param);
+  std::string isTrainingStr = std::to_string((int)isTraining);
+
+  auto graph = std::make_shared<Graph>();
+
+  parseIR(
+      R"IR(
+  graph(%input : Tensor, %running_mean : Tensor, %running_var : Tensor):
+      %none : NoneType = prim::Constant()
+      %training : bool = prim::Constant[value=)IR" +
+          isTrainingStr + R"IR(]()
+      %momentum : float = prim::Constant[value=1.0]()
+      %eps : float = prim::Constant[value=1.0e-9]()
+      %cudnn_enabled : bool = prim::Constant[value=0]()
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %running_mean, %running_var, %training, %momentum, %eps, %cudnn_enabled)
+      return (%res)
+    )IR",
+      &*graph);
+
+  graph->lint();
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == nodeKind) {
+      break;
+    }
+  }
+  EXPECT_TRUE(n != nullptr);
+
+  AliasDb aliasDb(graph);
+  EXPECT_TRUE(aliasDb.hasWriters(n) == isTraining);
+}
+
+TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNormTrainingUnknown) {
+  auto param = GetParam();
+  auto fnName = std::get<0>(param);
+  auto nodeKind = std::get<1>(param);
+
+  auto graph = std::make_shared<Graph>();
+
+  parseIR(
+      R"IR(
+  graph(%input : Tensor, %running_mean : Tensor, %running_var : Tensor, %training : bool):
+      %none : NoneType = prim::Constant()
+      %momentum : float = prim::Constant[value=1.0]()
+      %eps : float = prim::Constant[value=1.0e-9]()
+      %cudnn_enabled : bool = prim::Constant[value=0]()
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %running_mean, %running_var, %training, %momentum, %eps, %cudnn_enabled)
+      return (%res)
+    )IR",
+      &*graph);
+
+  graph->lint();
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == nodeKind) {
+      break;
+    }
+  }
+  EXPECT_TRUE(n != nullptr);
+
+  AliasDb aliasDb(graph);
+  EXPECT_TRUE(aliasDb.hasWriters(n));
+}
+
+TEST_P(BatchAndInstanceNormFixture, BatchNormTrainingWithNoMeanOrVar) {
+  auto param = GetParam();
+  auto fnName = std::get<0>(param);
+  auto nodeKind = std::get<1>(param);
+  auto isTraining = std::get<2>(param);
+  std::string isTrainingStr = std::to_string((int)isTraining);
+
+  auto graph = std::make_shared<Graph>();
+
+  parseIR(
+      R"IR(
+  graph(%input : Tensor):
+      %none : NoneType = prim::Constant()
+      %training : bool = prim::Constant[value=)IR" +
+          isTrainingStr + R"IR(]()
+      %momentum : float = prim::Constant[value=1.0]()
+      %eps : float = prim::Constant[value=1.0e-9]()
+      %cudnn_enabled : bool = prim::Constant[value=0]()
+      %res : Tensor = )IR" +
+          fnName +
+          R"IR((%input, %none, %none, %none, %none, %training, %momentum, %eps, %cudnn_enabled)
+      return (%res)
+    )IR",
+      &*graph);
+
+  graph->lint();
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == nodeKind) {
+      break;
+    }
+  }
+  EXPECT_TRUE(n != nullptr);
+
+  AliasDb aliasDb(graph);
+  EXPECT_FALSE(aliasDb.hasWriters(n));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AliasAnalysisTest,
+    BatchAndInstanceNormFixture,
+    ::testing::Values(
+        std::make_tuple("aten::batch_norm", aten::batch_norm, false),
+        std::make_tuple("aten::instance_norm", aten::instance_norm, false),
+        std::make_tuple("aten::batch_norm", aten::batch_norm, true),
+        std::make_tuple("aten::instance_norm", aten::instance_norm, true)));
+
 TEST(WriteTrackingTest, Basic) {
   RegisterOperators reg({Operator(
       "prim::creates_alias(Tensor(a) x) -> Tensor(a)",
@@ -595,7 +728,9 @@ TEST(ContainerAliasingTest, MayContainAlias) {
   EXPECT_TRUE(aliasDb.mayContainAlias(ten_output, graph->inputs()));
   EXPECT_FALSE(aliasDb.mayContainAlias(local_var, graph->inputs()));
 
-  EXPECT_TRUE(aliasDb.mayContainAlias({ten_output}, graph->outputs()));
+  EXPECT_TRUE(aliasDb.mayContainAlias(ten_output, graph->outputs()));
+  EXPECT_TRUE(aliasDb.mayContainAlias(
+      at::ArrayRef<Value*>{ten_output}, graph->outputs()));
   EXPECT_FALSE(aliasDb.mayContainAlias(str_output, graph->outputs()));
 }
 
@@ -630,7 +765,9 @@ TEST(ContainerAliasingTest, MayContainAlias_cast) {
   EXPECT_TRUE(aliasDb.mayContainAlias(a, b));
   EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->inputs()));
 
-  EXPECT_TRUE(aliasDb.mayContainAlias({c}, graph->outputs()));
+  EXPECT_TRUE(aliasDb.mayContainAlias(c, graph->outputs()));
+  EXPECT_TRUE(
+      aliasDb.mayContainAlias(at::ArrayRef<Value*>{c}, graph->outputs()));
   EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->outputs()));
 }
 
@@ -1328,6 +1465,129 @@ TEST(AliasRegistrationTest, AliasMoveAtenListOp) {
   // write to contained element should prevent move
   EXPECT_TRUE(!aliasDb.moveBeforeTopologicallyValid(
       vmap["y"]->node(), vmap["9"]->node()));
+}
+
+TEST(
+    AliasRegistrationTest,
+    AliasMoveForTupleConstructWithSingleUseAsGraphOutput) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %y : Tensor = prim::MakeTestTensor()
+    %z : (Tensor) = prim::TupleConstruct(%x, %y)
+    return (%z))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
+
+  EXPECT_TRUE(!aliasDb.mayAlias(vmap["x"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["z"], vmap["y"]));
+}
+
+TEST(AliasRegistrationTest, RecursiveSubgraphTupleContainment) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %y : Tensor = prim::MakeTestTensor()
+    %z : (Tensor, Tensor) = prim::TupleConstruct(%x, %y)
+    return (%z))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  auto node = vmap["z"]->node();
+  auto subgraph =
+      SubgraphUtils::createSingletonSubgraph(node, prim::FunctionalGraph);
+  AliasDb aliasDb(graph);
+
+  EXPECT_TRUE(aliasDb.mayContainAlias(subgraph->output(), vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(subgraph->output(), vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
+}
+
+TEST(AliasRegistrationTest, WildcardAliasForTupleConstructWithUses) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %y : Tensor = prim::MakeTestTensor()
+    %z : Tensor = prim::MakeTestTensor()
+    %0 : int = prim::Constant[value=0]()
+    %a : (Tensor) = prim::TupleConstruct(%x, %y)
+    %b : (Tensor) = prim::TupleConstruct(%z)
+    %c : Tensor = prim::TupleIndex(%a, %0)
+    %d : Tensor = prim::TupleIndex(%b, %0)
+    return (%c, %d))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
+
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["x"], vmap["z"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["z"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["a"], vmap["z"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["x"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["y"]));
+  EXPECT_TRUE(aliasDb.mayContainAlias(vmap["b"], vmap["z"]));
+}
+
+TEST(AliasRegistrationTest, ATenSplitIntListAliasCheck) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %0 : int = prim::Constant[value=0]()
+    %1 : int = prim::Constant[value=1]()
+    %2 : int = prim::Constant[value=2]()
+    %y : Tensor = aten::add(%x, %x, %0)
+    %lengths_list : int[] = prim::tolist(%1, %2)
+    %a : Tensor[] = aten::split(%y, %lengths_list, %0)
+    %b : Tensor, %c : Tensor = prim::ListUnpack(%a)
+    %b1 : Tensor = aten::flatten(%b, %0, %1)
+    %c1 : Tensor = aten::flatten(%c, %0, %1)
+    %d : Tensor = aten::add(%b1, %c1, %0)
+    return (%d))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
+
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b1"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c1"]));
+}
+
+TEST(AliasRegistrationTest, ATenSplitIntAliasCheck) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %0 : int = prim::Constant[value=0]()
+    %1 : int = prim::Constant[value=1]()
+    %2 : int = prim::Constant[value=2]()
+    %y : Tensor = aten::add(%x, %x, %0)
+    %a : Tensor[] = aten::split(%y, %2, %0)
+    %b : Tensor, %c : Tensor = prim::ListUnpack(%a)
+    %b1 : Tensor = aten::flatten(%b, %0, %1)
+    %c1 : Tensor = aten::flatten(%c, %0, %1)
+    %d : Tensor = aten::add(%b1, %c1, %0)
+    return (%d))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph, /*isFrozen=*/false);
+
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["b1"]));
+  EXPECT_TRUE(aliasDb.mayAlias(vmap["y"], vmap["c1"]));
 }
 
 TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {

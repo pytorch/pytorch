@@ -39,17 +39,12 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
     const auto& W = Inputs()[1]->template Get<Int8TensorCPU>();
     const auto& B = Inputs()[2]->template Get<Int8TensorCPU>();
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
-    const auto X_offset = -X.zero_point;
-    const auto W_offset = -W.zero_point;
     const int32_t Y_offset =
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     double Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
 
-    const auto N = X.t.size(0);
-    const auto IH = X.t.size(1);
-    const auto IW = X.t.size(2);
     const auto IC = X.t.size(3);
 
     CHECK_EQ(IC, W.t.size(0));
@@ -64,8 +59,10 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();
 
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
       pthreadpool_t threadpool =
           reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
+#endif
 
       if (this->qnnpackObject_ == nullptr) {
         const qnnp_status createStatus = qnnp_create_deconvolution2d_nhwc_q8(

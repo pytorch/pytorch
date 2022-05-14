@@ -47,7 +47,7 @@ inline int32_t GetDimFromOrderString(const std::string& str) {
 inline constexpr char NameScopeSeparator() { return '/'; }
 
 // From TypeMeta to caffe2::DataType protobuffer enum.
-TORCH_API TensorProto::DataType TypeMetaToDataType(const TypeMeta meta);
+TORCH_API TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta);
 
 // From caffe2::DataType protobuffer enum to TypeMeta
 TORCH_API const TypeMeta DataTypeToTypeMeta(const TensorProto::DataType& dt);

@@ -215,12 +215,38 @@ inline Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dim
   return torch::special_logsumexp_out(result, self, dims, keepdim);
 }
 
+/// Computes the argument, x, for which the area under the Gaussian probability density
+/// function (integrated from minus infinity to x) is equal to input, elementwise.
+/// See https://pytorch.org/docs/master/special.html#torch.special.ndtri
+///
+/// Example:
+/// ```
+/// auto t = torch::rand(128, dtype=kDouble);
+/// torch::special::ndtri(t);
+/// ```
 inline Tensor ndtri(const Tensor& self) {
   return torch::special_ndtri(self);
 }
 
 inline Tensor& ndtri_out(Tensor& result, const Tensor& self) {
   return torch::special_ndtri_out(result, self);
+}
+
+/// Computes the log of area under the standard Gaussian probability density function,
+/// integrated from minus infinity to :attr:`input`, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.log_ndtr
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::log_ndtr(t);
+/// ```
+inline Tensor log_ndtr(const Tensor& self) {
+  return torch::special_log_ndtr(self);
+}
+
+inline Tensor& log_ndtr_out(Tensor& result, const Tensor& self) {
+  return torch::special_log_ndtr_out(result, self);
 }
 
 /// Computes the logit of input, elementwise.
@@ -525,6 +551,18 @@ inline Tensor& log1p_out(Tensor& result, const Tensor& self) {
 /// ```
 inline Tensor log_softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   return torch::special_log_softmax(self, dim, dtype);
+}
+
+/// Computes softmax of the input along a given dimension
+/// See https://pytorch.org/docs/master/special.html#torch.special.softmax.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, 128, dtype=kDouble);
+/// torch::special::softmax(t, 0);
+/// ```
+inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  return torch::special_softmax(self, dim, dtype);
 }
 
 }} // torch::special

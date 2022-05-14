@@ -4,7 +4,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/functional/padding.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace nn {

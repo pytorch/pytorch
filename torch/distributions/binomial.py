@@ -76,6 +76,10 @@ class Binomial(Distribution):
         return self.total_count * self.probs
 
     @property
+    def mode(self):
+        return ((self.total_count + 1) * self.probs).floor().clamp(max=self.total_count)
+
+    @property
     def variance(self):
         return self.total_count * self.probs * (1 - self.probs)
 
@@ -111,6 +115,14 @@ class Binomial(Distribution):
                           + self.total_count * torch.log1p(torch.exp(-torch.abs(self.logits)))
                           - log_factorial_n)
         return value * self.logits - log_factorial_k - log_factorial_nmk - normalize_term
+
+    def entropy(self):
+        total_count = int(self.total_count.max())
+        if not self.total_count.min() == total_count:
+            raise NotImplementedError("Inhomogeneous total count not supported by `entropy`.")
+
+        log_prob = self.log_prob(self.enumerate_support(False))
+        return -(torch.exp(log_prob) * log_prob).sum(0)
 
     def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())

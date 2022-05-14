@@ -18,6 +18,10 @@ using c10::weak_intrusive_ptr;
 #pragma GCC diagnostic ignored "-Wself-move"
 #endif
 
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wself-assign-overloaded"
+#endif
+
 namespace {
 class SomeClass0Parameters : public intrusive_ptr_target {};
 class SomeClass1Parameter : public intrusive_ptr_target {

@@ -698,9 +698,8 @@ TypeIdentifier Int8ConvDNNLowpPackedWeightBlobShapeFunctions::GetTypeMetaId() {
 
 TypeMeta Int8FCDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
     const void* c) {
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  const Int8FCDNNLowPPackedWeightBlob* int8_tensor =
-      reinterpret_cast<const Int8FCDNNLowPPackedWeightBlob*>(c);
+  // const Int8FCDNNLowPPackedWeightBlob* int8_tensor =
+  //     reinterpret_cast<const Int8FCDNNLowPPackedWeightBlob*>(c);
   // We forced the output type to be uint8_t since we know it always is.
   // If it is going to be implemented elsewhere, we might need to change here.
   // return (int8_tensor->original_tensor).dtype();
@@ -709,9 +708,8 @@ TypeMeta Int8FCDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
 
 TypeMeta Int8ConvDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
     const void* c) {
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
-      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
+  // const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+  //     reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
   // return (int8_tensor->original_tensor).dtype();
   return TypeMeta::Make<uint8_t>();
 }

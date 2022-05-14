@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <c10/util/irange.h>
 
 #include <set>
 #include <tuple>
@@ -51,25 +52,25 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
     int64_t* inverse_indices_data = inverse_indices.data_ptr<int64_t>();
     std::unordered_map<scalar_t, int64_t> inverse_map;
     inverse_map.reserve(output.numel());
-    for (int64_t i = 0; i < output.numel(); ++i) {
+    for (const auto i : c10::irange(output.numel())) {
       inverse_map[output_data[i]] = i;
     }
-    for(int64_t i = 0; i < numel; ++i) {
+    for (const auto i : c10::irange(numel)) {
       inverse_indices_data[i] = inverse_map[input_data[i]];
     }
     if (return_counts) {
       std::unordered_map<scalar_t, int64_t> counts_map;
       counts_map.reserve(output.numel());
-      for (int64_t i = 0; i < output.numel(); ++i) {
+      for (const auto i : c10::irange(output.numel())) {
         counts_map[output_data[i]] = 0;
       }
-      for(int64_t i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         counts_map[input_data[i]] += 1;
       }
       counts.resize_(output.sizes());
       counts.fill_(0);
       int64_t *counts_data = counts.data_ptr<int64_t>();
-      for(int64_t i = 0; i < output.numel(); i++) {
+      for (const auto i : c10::irange(output.numel())) {
         counts_data[i] = counts_map[output_data[i]];
       }
     }
@@ -106,7 +107,10 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     scalar_t *p = output_data;
     int64_t *q = counts_data;
     int64_t last = 0;
-    for (int64_t i = 0; i < numel; i++) {
+    if (return_inverse) {
+      inverse_data[0] = 0;
+    }
+    for (const auto i : c10::irange(1, numel)) {
       if (input_data[i] != *p) {
         *(++p) = input_data[i];
         if (return_counts) {
@@ -148,7 +152,8 @@ ForwardIt _unique_dim_cpu_impl(ForwardIt first, ForwardIt last,
     ForwardIt result = first;
     ForwardIt previous = first;
     int64_t *current_counts = counts_data;
-    for (ForwardIt current = first; current != last; current++) {
+    inverse_data[*(indices_data++)] = 0;
+    for (ForwardIt current = std::next(first); current != last; current++) {
       if (!at::equal(*current, *result)) {
         *(++result) = std::move(*current);
         *(current_counts++) = std::distance(previous, current);
@@ -177,7 +182,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
       TORCH_CHECK(
           num_zero_dims == 1,
           "Number of zero sized dimensions is more than one, so unique cannot be applied ")
-      Tensor output = at::empty({0}, self.options());
+      Tensor output = at::empty(sizes, self.options());
       Tensor inverse_indices =
           at::empty({0}, self.options().dtype(kLong));
       Tensor counts = at::empty({0}, self.options().dtype(kLong));
@@ -202,7 +207,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   if (!consecutive) {
     std::sort(indices.begin(), indices.end(),
       [&](int64_t a, int64_t b) -> bool {
-        for (int64_t i = 0; i < numel; ++i) {
+        for (const auto i : c10::irange(numel)) {
           scalar_t lhs = input_flat_ptr[i + a * numel];
           scalar_t rhs = input_flat_ptr[i + b * numel];
           if (lhs < rhs) {
@@ -218,7 +223,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   Tensor input_sorted;
   if (!consecutive) {
     input_sorted = at::empty(input_flat.sizes(), input_flat.options());
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(indices.size())) {
       input_sorted[i] = input_flat[indices[i]];
     }
   } else {

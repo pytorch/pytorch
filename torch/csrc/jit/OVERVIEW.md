@@ -1273,11 +1273,16 @@ add_(Tensor(a!) self, Tensor other) -> Tensor(a!)
 ```
 The `!` annotation means that this operator writes to the specified alias set (in this case `a`).
 
-Finally, sometimes we don't have enough information to provide an exact alias annotation. For example, here is the operator to extract an element from a list:
+Sometimes we don't have enough information to provide an exact alias annotation. For example, here is the operator to extract an element from a list:
 ```
 list_select(Tensor[] list, int idx) -> Tensor(*)
 ```
-Note the alias set `*`. This is the **wildcard set**. Optimization passes must assume that values in the wildcard set may alias any other value in the graph. This behavior is conservative and will disallow optimizations, but is guaranteed to be safe. In most cases, people shouldn't be writing operators with wildcard annotations. They are used as temporary workaround for when our alias analysis isn't sophisticated enough to understand something yet but we don't want to block feature development.
+Note the alias set `*`. This is the **wildcard set**. These are values which we conservatively analyze. Containers, such as lists and dictionaries, Graph inputs, and class attributes are conservatively analyzed to all alias. In most cases, people shouldn't be writing operators with wildcard annotations. They are used as temporary workaround for when our alias analysis isn't sophisticated enough to understand something yet but we don't want to block feature development.
+
+Similarly, we have operators which result in Tensors being contained in a list. In this case, to preserve the relationship between output list and input, we annotate that the input enters the wildcard set with the `(a -> *)` syntax.
+```
+func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
+```
 
 This annotation language is consumed by the `FunctionSchema` parser, which produces `AliasInfo` objects summarizing the aliasing relationships for each schema `Argument`.
 

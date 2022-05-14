@@ -1,21 +1,132 @@
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Adapter.h>
 
-#include <sstream>
-
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
+
 namespace {
 
-struct Configuration final {
-#ifdef DEBUG
-  static constexpr Runtime::Type kRuntime = Runtime::Type::Debug;
-#else
-  static constexpr Runtime::Type kRuntime = Runtime::Type::Release;
+
+void find_requested_layers_and_extensions(
+    std::vector<const char*>& enabled_layers,
+    std::vector<const char*>& enabled_extensions,
+    const std::vector<const char*>& requested_layers,
+    const std::vector<const char*>& requested_extensions) {
+
+  // Get supported instance layers
+  uint32_t layer_count = 0;
+  VK_CHECK(vkEnumerateInstanceLayerProperties(&layer_count, nullptr));
+
+  std::vector<VkLayerProperties> layer_properties(layer_count);
+  VK_CHECK(vkEnumerateInstanceLayerProperties(
+      &layer_count, layer_properties.data()));
+
+  // Search for requested layers
+  for (const auto& requested_layer : requested_layers) {
+    for (const auto& layer : layer_properties) {
+      if (strcmp(requested_layer, layer.layerName) == 0) {
+        enabled_layers.push_back(requested_layer);
+        break;
+      }
+    }
+  }
+
+  // Get supported instance extensions
+  uint32_t extension_count = 0;
+  VK_CHECK(vkEnumerateInstanceExtensionProperties(
+      nullptr, &extension_count, nullptr));
+
+  std::vector<VkExtensionProperties> extension_properties(extension_count);
+  VK_CHECK(vkEnumerateInstanceExtensionProperties(
+      nullptr, &extension_count, extension_properties.data()));
+
+  // Search for requested extensions
+  for (const auto& requested_extension : requested_extensions) {
+    for (const auto& extension : extension_properties) {
+      if (strcmp(requested_extension, extension.extensionName) == 0) {
+        enabled_extensions.push_back(requested_extension);
+        break;
+      }
+    }
+  }
+}
+
+VkInstance create_instance(const RuntimeConfiguration& config) {
+  const VkApplicationInfo application_info{
+    VK_STRUCTURE_TYPE_APPLICATION_INFO,  // sType
+    nullptr,  // pNext
+    "PyTorch Vulkan Backend",  // pApplicationName
+    0,  // applicationVersion
+    nullptr, // pEngineName
+    0,  // engineVersion
+    VK_API_VERSION_1_0,  // apiVersion
+  };
+
+  std::vector<const char*> enabled_layers;
+  std::vector<const char*> enabled_extensions;
+
+  if (config.enableValidationMessages) {
+    std::vector<const char*> requested_layers {
+      // "VK_LAYER_LUNARG_api_dump",
+      "VK_LAYER_KHRONOS_validation",
+    };
+    std::vector<const char*> requested_extensions {
+      #ifdef VK_EXT_debug_report
+      VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+      #endif
+    };
+
+    find_requested_layers_and_extensions(
+        enabled_layers,
+        enabled_extensions,
+        requested_layers,
+        requested_extensions);
+  }
+
+  const VkInstanceCreateInfo instance_create_info{
+    VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,  // sType
+    nullptr,  // pNext
+    0u,  // flags
+    &application_info,  // pApplicationInfo
+    static_cast<uint32_t>(enabled_layers.size()),  // enabledLayerCount
+    enabled_layers.data(),  // ppEnabledLayerNames
+    static_cast<uint32_t>(enabled_extensions.size()),  // enabledExtensionCount
+    enabled_extensions.data(),  // ppEnabledExtensionNames
+  };
+
+  VkInstance instance{};
+  VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &instance));
+  TORCH_CHECK(instance, "Invalid Vulkan instance!");
+
+#ifdef USE_VULKAN_VOLK
+  volkLoadInstance(instance);
 #endif
-};
+
+  return instance;
+}
+
+std::vector<Adapter> create_adapters(const VkInstance instance,
+                                        const uint32_t num_queues) {
+  if (VK_NULL_HANDLE == instance) {
+    return std::vector<Adapter>();
+  }
+
+  uint32_t device_count = 0;
+  VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, nullptr));
+
+  std::vector<VkPhysicalDevice> devices(device_count);
+  VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, devices.data()));
+
+  std::vector<Adapter> adapters;
+  adapters.reserve(device_count);
+  for (const VkPhysicalDevice physical_device : devices) {
+    adapters.emplace_back(physical_device, num_queues);
+  }
+
+  return adapters;
+}
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_report_callback_fn(
     const VkDebugReportFlagsEXT flags,
@@ -45,113 +156,22 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_report_callback_fn(
   return VK_FALSE;
 }
 
-VkInstance create_instance(const Runtime::Type type) {
-  std::vector<const char*> enabled_instance_layers;
-  std::vector<const char*> enabled_instance_extensions;
-
-  if (Runtime::Type::Debug == type) {
-    uint32_t instance_layers_count = 0;
-    VK_CHECK(vkEnumerateInstanceLayerProperties(
-        &instance_layers_count, nullptr));
-
-    std::vector<VkLayerProperties> instance_layer_properties(
-        instance_layers_count);
-
-    VK_CHECK(vkEnumerateInstanceLayerProperties(
-        &instance_layers_count,
-        instance_layer_properties.data()));
-
-    constexpr const char* const requested_instance_layers[]{
-        // "VK_LAYER_LUNARG_api_dump",
-        "VK_LAYER_KHRONOS_validation",
-    };
-
-    for (const auto& requested_instance_layer : requested_instance_layers) {
-      for (const auto& layer : instance_layer_properties) {
-        if (strcmp(requested_instance_layer, layer.layerName) == 0) {
-          enabled_instance_layers.push_back(requested_instance_layer);
-          break;
-        }
-      }
-    }
-
-    uint32_t instance_extension_count = 0;
-    VK_CHECK(vkEnumerateInstanceExtensionProperties(
-        nullptr, &instance_extension_count, nullptr));
-
-    std::vector<VkExtensionProperties> instance_extension_properties(
-        instance_extension_count);
-
-    VK_CHECK(vkEnumerateInstanceExtensionProperties(
-        nullptr, &instance_extension_count, instance_extension_properties.data()));
-
-    constexpr const char* const requested_instance_extensions[]{
-    #ifdef VK_EXT_debug_report
-      VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
-    #endif
-    };
-
-    for (const auto& requested_instance_extension : requested_instance_extensions) {
-      for (const auto& extension : instance_extension_properties) {
-        if (strcmp(requested_instance_extension, extension.extensionName) == 0) {
-          enabled_instance_extensions.push_back(requested_instance_extension);
-          break;
-        }
-      }
-    }
-  }
-
-  constexpr VkApplicationInfo application_info{
-    VK_STRUCTURE_TYPE_APPLICATION_INFO,
-    nullptr,
-    "PyTorch",
-    0,
-    "PyTorch",
-    0,
-    VK_API_VERSION_1_0,
-  };
-
-  const VkInstanceCreateInfo instance_create_info{
-    VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-    nullptr,
-    0u,
-    &application_info,
-    static_cast<uint32_t>(enabled_instance_layers.size()),
-    enabled_instance_layers.data(),
-    static_cast<uint32_t>(enabled_instance_extensions.size()),
-    enabled_instance_extensions.data(),
-  };
-
-  VkInstance instance{};
-  VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &instance));
-  TORCH_CHECK(instance, "Invalid Vulkan instance!");
-
-#ifdef USE_VULKAN_WRAPPER
-#ifdef USE_VULKAN_VOLK
-  volkLoadInstance(instance);
-#endif
-#endif
-
-  return instance;
-}
-
 VkDebugReportCallbackEXT create_debug_report_callback(
-    const VkInstance instance,
-    const Runtime::Type type) {
-  if (Runtime::Type::Debug != type) {
+    const VkInstance instance, const RuntimeConfiguration config) {
+  if (VK_NULL_HANDLE == instance || !config.enableValidationMessages) {
     return VkDebugReportCallbackEXT{};
   }
 
   const VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfo{
-    VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
-    nullptr,
+    VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,  // sType
+    nullptr,  // pNext
     VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
       VK_DEBUG_REPORT_WARNING_BIT_EXT |
       VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT |
       VK_DEBUG_REPORT_ERROR_BIT_EXT |
-      VK_DEBUG_REPORT_DEBUG_BIT_EXT,
-    debug_report_callback_fn,
-    nullptr,
+      VK_DEBUG_REPORT_DEBUG_BIT_EXT,  // flags
+    debug_report_callback_fn,  // pfnCallback
+    nullptr,  // pUserData
   };
 
   const auto vkCreateDebugReportCallbackEXT =
@@ -176,179 +196,177 @@ VkDebugReportCallbackEXT create_debug_report_callback(
   return debug_report_callback;
 }
 
-std::vector<VkPhysicalDevice> acquire_physical_devices(
-    const VkInstance instance) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      instance,
-      "Invalid Vulkan instance!");
+//
+// Adapter selection methods
+//
 
-  uint32_t device_count = 0;
-  VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, nullptr));
+uint32_t select_first(const std::vector<Adapter>& adapters) {
+  if (adapters.size() == 0) {
+    TORCH_WARN("Pytorch Vulkan Runtime: no device adapters are available for selection!");
+    return adapters.size() + 1; // return out of range to signal invalidity
+  }
 
-  TORCH_CHECK(
-      device_count > 0,
-      "Vulkan: Could not find a device with Vulkan support!");
-
-  std::vector<VkPhysicalDevice> devices(device_count);
-  VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, devices.data()));
-
-  return devices;
-}
-
-VkPhysicalDeviceProperties query_physical_device_properties(
-    const VkPhysicalDevice physical_device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      physical_device,
-      "Invalid Vulkan physical device!");
-
-  VkPhysicalDeviceProperties physical_device_properties{};
-  vkGetPhysicalDeviceProperties(
-      physical_device,
-      &physical_device_properties);
-
-  return physical_device_properties;
-}
-
-VkPhysicalDeviceMemoryProperties query_physical_device_memory_properties(
-    const VkPhysicalDevice physical_device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      physical_device,
-      "Invalid Vulkan physical device!");
-
-  VkPhysicalDeviceMemoryProperties physical_device_memory_properties{};
-  vkGetPhysicalDeviceMemoryProperties(
-      physical_device,
-      &physical_device_memory_properties);
-
-  return physical_device_memory_properties;
-}
-
-uint32_t query_compute_queue_family_index(const VkPhysicalDevice physical_device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      physical_device,
-      "Invalid Vulkan physical device!");
-
-  uint32_t queue_family_count = 0;
-  vkGetPhysicalDeviceQueueFamilyProperties(
-      physical_device, &queue_family_count, nullptr);
-
-  TORCH_CHECK(
-      queue_family_count > 0,
-      "Vulkan: Invalid number of queue families!");
-
-  std::vector<VkQueueFamilyProperties>
-      queue_families_properties(queue_family_count);
-
-  vkGetPhysicalDeviceQueueFamilyProperties(
-      physical_device,
-      &queue_family_count,
-      queue_families_properties.data());
-
-  for (uint32_t i = 0; i < queue_families_properties.size(); ++i) {
-    const VkQueueFamilyProperties& properties = queue_families_properties[i];
-    if (properties.queueCount > 0 && (properties.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
+  // Select the first adapter that has compute capability
+  for (const uint32_t i : c10::irange(adapters.size())) {
+    if (adapters[i].num_compute_queues() > 0) {
       return i;
     }
   }
 
-  TORCH_CHECK(
-      false,
-      "Vulkan: Could not find a queue family that supports compute operations!");
+  TORCH_WARN("Pytorch Vulkan Runtime: no device adapters support compute!");
+  return adapters.size() + 1;
+}
+
+//
+// Global runtime initialization
+//
+
+std::unique_ptr<Runtime> init_global_vulkan_runtime() {
+  // Load Vulkan drivers
+#if defined(USE_VULKAN_VOLK)
+  if (VK_SUCCESS != volkInitialize()) {
+    TORCH_WARN(
+        "Pytorch Vulkan Runtime: Failed to load Vulkan driver using volkInitialize()! "
+        "The global vulkan runtime is invalid.");
+    return std::unique_ptr<Runtime>(nullptr);
+  }
+#elif defined(USE_VULKAN_WRAPPER)
+  if (!InitVulkan()) {
+    TORCH_WARN(
+        "Pytorch Vulkan Runtime: Failed to load Vulkan driver using initVulkan()! "
+        "The global vulkan runtime is invalid.");
+    return std::unique_ptr<Runtime>(nullptr);
+  }
+#endif /* USE_VULKAN_VOLK, USE_VULKAN_WRAPPER */
+
+  const bool enableValidationMessages =
+#if defined(DEBUG)
+    true;
+#else
+    false;
+#endif /* DEBUG */
+  const bool initDefaultDevice = true;
+  const uint32_t numRequestedQueues = 1; // TODO: raise this value
+
+  const RuntimeConfiguration default_config {
+    enableValidationMessages,
+    initDefaultDevice,
+    AdapterSelector::First,
+    numRequestedQueues,
+  };
+
+  try {
+    return std::make_unique<Runtime>(Runtime(default_config));
+  }
+  catch (const std::exception& e) {
+    TORCH_WARN(
+        "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
+        "The global vulkan runtime is invalid. Error: ",
+        e.what());
+  }
+  catch (...) {
+    TORCH_WARN(
+        "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
+        "The global vulkan runtime is invalid. "
+        "Error: Unknown");
+  }
+
+  return std::unique_ptr<Runtime>(nullptr);
 }
 
 } // namespace
 
-Runtime::Debug::Debug(const VkInstance instance)
-  : instance_(instance) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        instance,
-        "Invalid Vulkan instance!");
+Runtime::Runtime(const RuntimeConfiguration config)
+  : instance_(create_instance(config)),
+    adapters_(create_adapters(instance_, config.numRequestedQueues)),
+    default_adapter_i_{},
+    debug_report_callback_(create_debug_report_callback(instance_, config)) {
+  if (config.initDefaultDevice) {
+    try {
+      switch(config.defaultSelector) {
+        case AdapterSelector::First:
+          default_adapter_i_ = init_adapter(select_first);
+      }
+    }
+    catch (const std::exception& e) {
+      TORCH_WARN(
+          "Pytorch Vulkan Runtime: Could not initialize default device! Error: ",
+          e.what());
+    }
+    catch (...) {
+      TORCH_WARN(
+          "Pytorch Vulkan Runtime: Could not initialize default device! Error: "
+          "Unknown.");
+    }
+  }
 }
 
-void Runtime::Debug::operator()(
-    const VkDebugReportCallbackEXT debug_report_callback) const {
-  if (debug_report_callback) {
+Runtime::~Runtime() {
+  if C10_LIKELY(VK_NULL_HANDLE == instance_) {
+    return;
+  }
+
+  // Clear adapters list to trigger device destruction before destroying VkInstance
+  adapters_.clear();
+
+  // Instance must be destroyed last as its used to destroy the debug report callback.
+  if (debug_report_callback_) {
     const auto vkDestroyDebugReportCallbackEXT =
       (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
           instance_, "vkDestroyDebugReportCallbackEXT");
 
       TORCH_CHECK(
           vkDestroyDebugReportCallbackEXT,
-          "Could not load vkDestroyDebugReportCallbackEXT");
+          "Pytorch Vulkan Runtime: Could not load vkDestroyDebugReportCallbackEXT "
+          "when destroying debug_report_callback_");
 
       vkDestroyDebugReportCallbackEXT(
-          instance_, debug_report_callback, nullptr);
-  }
-}
+          instance_, debug_report_callback_, nullptr);
 
-Runtime::Runtime(const Type type)
-    : instance_(create_instance(type), &VK_DELETER(Instance)),
-      debug_report_callback_(
-          create_debug_report_callback(instance(), type),
-          Debug(instance())) {
-}
-
-Adapter Runtime::select(const Selector& selector) {
-  const std::vector<VkPhysicalDevice> physical_devices =
-      acquire_physical_devices(instance());
-
-  for (const VkPhysicalDevice physical_device : physical_devices) {
-    const Adapter adapter{
-      this,
-      physical_device,
-      query_physical_device_properties(physical_device),
-      query_physical_device_memory_properties(physical_device),
-      query_compute_queue_family_index(physical_device),
-    };
-
-    if (selector(adapter)) {
-      return adapter;
-    }
+    debug_report_callback_ = {};
   }
 
+  vkDestroyInstance(instance_, nullptr);
+  instance_ = VK_NULL_HANDLE;
+}
+
+Runtime::Runtime(Runtime&& other) noexcept
+  : instance_(other.instance_),
+    adapters_(std::move(other.adapters_)),
+    default_adapter_i_(other.default_adapter_i_),
+    debug_report_callback_(other.debug_report_callback_) {
+  other.instance_ = VK_NULL_HANDLE;
+  other.debug_report_callback_ = {};
+}
+
+uint32_t Runtime::init_adapter(const Selector& selector) {
   TORCH_CHECK(
-      false,
-      "Vulkan: no adapter was selected as part of device enumeration!");
+      adapters_.size() > 0,
+      "Pytorch Vulkan Runtime: Could not initialize adapter because no "
+      "devices were found by the Vulkan instance.");
+
+  uint32_t i = selector(adapters_);
+  TORCH_CHECK(
+      i < adapters_.size(),
+      "Pytorch Vulkan Runtime: no suitable device adapter was selected! "
+      "Device could not be initialized");
+
+  adapters_[i].init_device();
+
+  return i;
 }
 
 Runtime* runtime() {
-  static const std::unique_ptr<Runtime> runtime([]() -> Runtime* {
-#ifdef USE_VULKAN_WRAPPER
-#ifdef USE_VULKAN_VOLK
-    if (VK_SUCCESS != volkInitialize()) {
-      TORCH_WARN("Vulkan: Failed to initialize Volk!");
-      return nullptr;
-    }
-#else
- if (!InitVulkan()) {
-      TORCH_WARN("Vulkan: Failed to initialize Vulkan Wrapper!");
-      return nullptr;
-    }
-#endif /* USE_VULKAN_VOLK */
-#endif /* USE_VULKAN_WRAPPER */
-
-    try {
-      return new Runtime(Configuration::kRuntime);
-    }
-    catch (const std::exception& e) {
-      TORCH_WARN(
-          "Vulkan: Failed to initialize runtime! Error: ",
-          e.what());
-    }
-    catch (...) {
-      TORCH_WARN(
-          "Vulkan: Failed to initialize runtime! "
-          "Error: Unknown");
-    }
-
-    return nullptr;
-  }());
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      runtime,
-      "Invalid Vulkan runtime!");
-
-  return runtime.get();
+  // The global vulkan runtime is declared as a static local variable within a
+  // non-static function to ensure it has external linkage. If it were a global
+  // static variable there would be one copy per translation unit that includes
+  // Runtime.h as it would have internal linkage.
+  static const std::unique_ptr<Runtime> p_runtime = init_global_vulkan_runtime();
+  TORCH_CHECK(
+      p_runtime,
+      "Pytorch Vulkan Runtime: The global runtime could not be retrieved "
+      "because it failed to initialize.");
+  return p_runtime.get();
 }
 
 } // namespace api

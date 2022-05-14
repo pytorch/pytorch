@@ -77,7 +77,7 @@ void prepare_and_call_rpc_op(
   userCallableStack.reserve(functionSchema.arguments().size());
 
   // Move args from Tuple IValue to Stack.
-  for (auto& elem : argsTupleIValue.toTuple()->elements()) {
+  for (auto& elem : argsTupleIValue.toTupleRef().elements()) {
     push(userCallableStack, std::move(elem));
   }
 

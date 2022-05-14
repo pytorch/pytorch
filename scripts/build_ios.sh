@@ -83,6 +83,18 @@ if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
 else
   CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
 fi
+if [ "${TRACING_BASED}" == 1 ]; then
+  CMAKE_ARGS+=("-DTRACING_BASED=ON")
+else
+  CMAKE_ARGS+=("-DTRACING_BASED=OFF")
+fi
+if [ "${USE_LIGHTWEIGHT_DISPATCH}" == 1 ]; then
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=ON")
+  CMAKE_ARGS+=("-DSTATIC_DISPATCH_BACKEND=CPU")
+else
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=OFF")
+fi
+
 CMAKE_ARGS+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
 
 # Don't build binaries or tests (only the library)
@@ -120,6 +132,9 @@ CMAKE_ARGS+=("-DCMAKE_USE_PTHREADS_INIT=1")
 if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
 fi
+
+# enable ARC
+CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fobjc-arc")
 
 # Now, actually build the iOS target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_ios"}

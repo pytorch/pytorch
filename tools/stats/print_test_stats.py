@@ -12,15 +12,41 @@ import subprocess
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
-                    Set, Tuple, cast)
+from typing import (
+    Any,
+    DefaultDict,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    cast,
+)
 from xml.dom import minidom
 
 from typing_extensions import TypedDict
-from tools.stats.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
-                                        Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
-                                        Version1Report, Version2Report, ReportMetaMeta)
-from tools.stats.scribe import send_to_scribe
+from tools.stats.s3_stat_parser import (
+    newify_case,
+    get_S3_object_from_bucket,
+    get_test_stats_summaries_for_job,
+    Report,
+    Status,
+    Commit,
+    HAVE_BOTO3,
+    Version2Case,
+    VersionedReport,
+    Version1Report,
+    Version2Report,
+    ReportMetaMeta,
+)
+from tools.stats.scribe import (
+    send_to_scribe,
+    rds_write,
+    register_rds_schema,
+    schema_from_sample,
+)
 
 
 SimplerSuite = Dict[str, Version2Case]
@@ -61,12 +87,12 @@ class SuiteDiff(TypedDict):
 # share a name (for version 2 reports) or using a list of cases rather
 # than a dict.
 def simplify(report: Report) -> SimplerReport:
-    if 'format_version' not in report:  # version 1 implicitly
+    if "format_version" not in report:  # version 1 implicitly
         v1report = cast(Version1Report, report)
         return {
             # we just don't have test filename information sadly, so we
             # just make one fake filename that is the empty string
-            '': {
+            "": {
                 suite_name: {
                     # This clobbers some cases that have duplicate names
                     # because in version 1, we would merge together all
@@ -80,35 +106,41 @@ def simplify(report: Report) -> SimplerReport:
                     # we're only uploading in the new format (where
                     # everything is also keyed by filename) going
                     # forward, it shouldn't matter too much.
-                    case['name']: newify_case(case)
-                    for case in suite['cases']
+                    case["name"]: newify_case(case)
+                    for case in suite["cases"]
                 }
-                for suite_name, suite in v1report['suites'].items()
+                for suite_name, suite in v1report["suites"].items()
             }
         }
     else:
         v_report = cast(VersionedReport, report)
-        version = v_report['format_version']
+        version = v_report["format_version"]
         if version == 2:
             v2report = cast(Version2Report, v_report)
             return {
                 filename: {
-                    suite_name: suite['cases']
-                    for suite_name, suite in file_data['suites'].items()
+                    suite_name: suite["cases"]
+                    for suite_name, suite in file_data["suites"].items()
                 }
-                for filename, file_data in v2report['files'].items()
+                for filename, file_data in v2report["files"].items()
             }
         else:
-            raise RuntimeError(f'Unknown format version: {version}')
+            raise RuntimeError(f"Unknown format version: {version}")
 
 
 def plural(n: int) -> str:
-    return '' if n == 1 else 's'
+    return "" if n == 1 else "s"
 
 
 def get_base_commit(sha1: str) -> str:
+    default_branch = os.environ.get("GIT_DEFAULT_BRANCH")
+    # capture None and "" cases
+    if not default_branch:
+        default_branch = "master"
+
+    default_remote = f"origin/{default_branch}"
     return subprocess.check_output(
-        ["git", "merge-base", sha1, "origin/master"],
+        ["git", "merge-base", sha1, default_remote],
         encoding="ascii",
     ).strip()
 
@@ -118,28 +150,28 @@ def display_stat(
     format: Tuple[Tuple[int, int], Tuple[int, int]],
 ) -> str:
     spread_len = format[1][0] + 1 + format[1][1]
-    spread = x['spread']
+    spread = x["spread"]
     if spread is not None:
-        spread_str = f' ± {spread:{spread_len}.{format[1][1]}f}s'
+        spread_str = f" ± {spread:{spread_len}.{format[1][1]}f}s"
     else:
-        spread_str = ' ' * (3 + spread_len + 1)
+        spread_str = " " * (3 + spread_len + 1)
     mean_len = format[0][0] + 1 + format[0][1]
     return f'{x["center"]:{mean_len}.{format[0][1]}f}s{spread_str}'
 
 
 def list_stat(l: List[float]) -> Stat:
     return {
-        'center': statistics.mean(l),
-        'spread': statistics.stdev(l) if len(l) > 1 else None
+        "center": statistics.mean(l),
+        "spread": statistics.stdev(l) if len(l) > 1 else None,
     }
 
 
 def zero_stat() -> Stat:
-    return {'center': 0, 'spread': None}
+    return {"center": 0, "spread": None}
 
 
 def recenter(was: Stat, now: float) -> Stat:
-    return {'center': now - was['center'], 'spread': was['spread']}
+    return {"center": now - was["center"], "spread": was["spread"]}
 
 
 def sum_normals(stats: Iterable[Stat]) -> Stat:
@@ -151,29 +183,29 @@ def sum_normals(stats: Iterable[Stat]) -> Stat:
     """
     l = list(stats)
     spread: Optional[float]
-    if any(stat['spread'] is not None for stat in l):
-        spread = math.sqrt(sum((stat['spread'] or 0)**2 for stat in l))
+    if any(stat["spread"] is not None for stat in l):
+        spread = math.sqrt(sum((stat["spread"] or 0) ** 2 for stat in l))
     else:
         spread = None
     return {
-        'center': sum(stat['center'] for stat in l),
-        'spread': spread,
+        "center": sum(stat["center"] for stat in l),
+        "spread": spread,
     }
 
 
 def format_seconds(seconds: List[float]) -> str:
     if len(seconds) > 0:
         x = list_stat(seconds)
-        return f'total time {display_stat(x, ((5, 2), (4, 2)))}'.strip()
-    return ''
+        return f"total time {display_stat(x, ((5, 2), (4, 2)))}".strip()
+    return ""
 
 
 def show_ancestors(num_commits: int) -> str:
-    return f'    | : ({num_commits} commit{plural(num_commits)})'
+    return f"    | : ({num_commits} commit{plural(num_commits)})"
 
 
 def unlines(lines: List[str]) -> str:
-    return ''.join(f'{line}\n' for line in lines)
+    return "".join(f"{line}\n" for line in lines)
 
 
 def matching_test_times(
@@ -193,8 +225,8 @@ def matching_test_times(
                 if suite:
                     case = suite.get(case_name)
                     if case:
-                        t = case['seconds']
-                        s = case['status']
+                        t = case["seconds"]
+                        s = case["status"]
                         if s == status:
                             times.append(t)
     return times
@@ -206,7 +238,7 @@ def analyze(
     base_reports: Dict[Commit, List[SimplerReport]],
 ) -> List[SuiteDiff]:
     nonempty_shas = [sha for sha, reports in base_reports.items() if reports]
-    # most recent master ancestor with at least one S3 report,
+    # most recent main ancestor with at least one S3 report,
     # or empty list if there are none (will show all tests as added)
     base_report = base_reports[nonempty_shas[0]] if nonempty_shas else []
 
@@ -226,37 +258,49 @@ def analyze(
     for filename, suite_name in sorted(all_suites):
         case_diffs: List[CaseDiff] = []
         head_suite = head_report.get(filename, {}).get(suite_name)
-        base_cases: Dict[str, Status] = dict(sorted(set.intersection(*[
-            {
-                (n, case['status'])
-                for n, case
-                in report.get(filename, {}).get(suite_name, {}).items()
-            }
-            for report in base_report
-        ] or [set()])))
+        base_cases: Dict[str, Status] = dict(
+            sorted(
+                set.intersection(
+                    *[
+                        {
+                            (n, case["status"])
+                            for n, case in report.get(filename, {})
+                            .get(suite_name, {})
+                            .items()
+                        }
+                        for report in base_report
+                    ]
+                    or [set()]
+                )
+            )
+        )
         case_stats: Dict[str, Stat] = {}
         if head_suite:
-            now = sum(case['seconds'] for case in head_suite.values())
+            now = sum(case["seconds"] for case in head_suite.values())
             if any(
                 filename in report and suite_name in report[filename]
                 for report in base_report
             ):
                 removed_cases: List[CaseDiff] = []
                 for case_name, case_status in base_cases.items():
-                    case_stats[case_name] = list_stat(matching_test_times(
-                        base_reports=base_reports,
-                        filename=filename,
-                        suite_name=suite_name,
-                        case_name=case_name,
-                        status=case_status,
-                    ))
+                    case_stats[case_name] = list_stat(
+                        matching_test_times(
+                            base_reports=base_reports,
+                            filename=filename,
+                            suite_name=suite_name,
+                            case_name=case_name,
+                            status=case_status,
+                        )
+                    )
                     if case_name not in head_suite:
-                        removed_cases.append({
-                            'margin': '-',
-                            'name': case_name,
-                            'was': (case_stats[case_name], case_status),
-                            'now': None,
-                        })
+                        removed_cases.append(
+                            {
+                                "margin": "-",
+                                "name": case_name,
+                                "was": (case_stats[case_name], case_status),
+                                "now": None,
+                            }
+                        )
                 modified_cases: List[CaseDiff] = []
                 added_cases: List[CaseDiff] = []
                 for head_case_name in sorted(head_suite):
@@ -264,70 +308,86 @@ def analyze(
                     if head_case_name in base_cases:
                         stat = case_stats[head_case_name]
                         base_status = base_cases[head_case_name]
-                        if head_case['status'] != base_status:
-                            modified_cases.append({
-                                'margin': '!',
-                                'name': head_case_name,
-                                'was': (stat, base_status),
-                                'now': head_case,
-                            })
+                        if head_case["status"] != base_status:
+                            modified_cases.append(
+                                {
+                                    "margin": "!",
+                                    "name": head_case_name,
+                                    "was": (stat, base_status),
+                                    "now": head_case,
+                                }
+                            )
                     else:
-                        added_cases.append({
-                            'margin': '+',
-                            'name': head_case_name,
-                            'was': None,
-                            'now': head_case,
-                        })
+                        added_cases.append(
+                            {
+                                "margin": "+",
+                                "name": head_case_name,
+                                "was": None,
+                                "now": head_case,
+                            }
+                        )
                 # there might be a bug calculating this stdev, not sure
                 was = sum_normals(case_stats.values())
                 case_diffs = removed_cases + modified_cases + added_cases
                 if case_diffs:
-                    modified_suites.append({
-                        'margin': ' ',
-                        'name': suite_name,
-                        'was': was,
-                        'now': now,
-                        'cases': case_diffs,
-                    })
+                    modified_suites.append(
+                        {
+                            "margin": " ",
+                            "name": suite_name,
+                            "was": was,
+                            "now": now,
+                            "cases": case_diffs,
+                        }
+                    )
             else:
                 for head_case_name in sorted(head_suite):
                     head_case = head_suite[head_case_name]
-                    case_diffs.append({
-                        'margin': ' ',
-                        'name': head_case_name,
-                        'was': None,
-                        'now': head_case,
-                    })
-                added_suites.append({
-                    'margin': '+',
-                    'name': suite_name,
-                    'was': None,
-                    'now': now,
-                    'cases': case_diffs,
-                })
+                    case_diffs.append(
+                        {
+                            "margin": " ",
+                            "name": head_case_name,
+                            "was": None,
+                            "now": head_case,
+                        }
+                    )
+                added_suites.append(
+                    {
+                        "margin": "+",
+                        "name": suite_name,
+                        "was": None,
+                        "now": now,
+                        "cases": case_diffs,
+                    }
+                )
         else:
             for case_name, case_status in base_cases.items():
-                case_stats[case_name] = list_stat(matching_test_times(
-                    base_reports=base_reports,
-                    filename=filename,
-                    suite_name=suite_name,
-                    case_name=case_name,
-                    status=case_status,
-                ))
-                case_diffs.append({
-                    'margin': ' ',
-                    'name': case_name,
-                    'was': (case_stats[case_name], case_status),
-                    'now': None,
-                })
-            removed_suites.append({
-                'margin': '-',
-                'name': suite_name,
-                # there might be a bug calculating this stdev, not sure
-                'was': sum_normals(case_stats.values()),
-                'now': None,
-                'cases': case_diffs,
-            })
+                case_stats[case_name] = list_stat(
+                    matching_test_times(
+                        base_reports=base_reports,
+                        filename=filename,
+                        suite_name=suite_name,
+                        case_name=case_name,
+                        status=case_status,
+                    )
+                )
+                case_diffs.append(
+                    {
+                        "margin": " ",
+                        "name": case_name,
+                        "was": (case_stats[case_name], case_status),
+                        "now": None,
+                    }
+                )
+            removed_suites.append(
+                {
+                    "margin": "-",
+                    "name": suite_name,
+                    # there might be a bug calculating this stdev, not sure
+                    "was": sum_normals(case_stats.values()),
+                    "now": None,
+                    "cases": case_diffs,
+                }
+            )
 
     return removed_suites + modified_suites + added_suites
 
@@ -337,24 +397,24 @@ def case_diff_lines(diff: CaseDiff) -> List[str]:
 
     case_fmt = ((3, 3), (2, 3))
 
-    was = diff['was']
+    was = diff["was"]
     if was:
-        was_line = f'    # was {display_stat(was[0], case_fmt)}'
+        was_line = f"    # was {display_stat(was[0], case_fmt)}"
         was_status = was[1]
         if was_status:
-            was_line += f' ({was_status})'
+            was_line += f" ({was_status})"
         lines.append(was_line)
 
-    now = diff['now']
+    now = diff["now"]
     if now:
-        now_stat: Stat = {'center': now['seconds'], 'spread': None}
-        now_line = f'    # now {display_stat(now_stat, case_fmt)}'
-        now_status = now['status']
+        now_stat: Stat = {"center": now["seconds"], "spread": None}
+        now_line = f"    # now {display_stat(now_stat, case_fmt)}"
+        now_status = now["status"]
         if now_status:
-            now_line += f' ({now_status})'
+            now_line += f" ({now_status})"
         lines.append(now_line)
 
-    return [''] + [f'{diff["margin"]} {l}' for l in lines]
+    return [""] + [f'{diff["margin"]} {l}' for l in lines]
 
 
 def display_suite_diff(diff: SuiteDiff) -> str:
@@ -362,23 +422,23 @@ def display_suite_diff(diff: SuiteDiff) -> str:
 
     suite_fmt = ((4, 2), (3, 2))
 
-    was = diff['was']
+    was = diff["was"]
     if was:
-        lines.append(f'    # was {display_stat(was, suite_fmt)}')
+        lines.append(f"    # was {display_stat(was, suite_fmt)}")
 
-    now = diff['now']
+    now = diff["now"]
     if now is not None:
-        now_stat: Stat = {'center': now, 'spread': None}
-        lines.append(f'    # now {display_stat(now_stat, suite_fmt)}')
+        now_stat: Stat = {"center": now, "spread": None}
+        lines.append(f"    # now {display_stat(now_stat, suite_fmt)}")
 
-    for case_diff in diff['cases']:
-        lines.extend([f'  {l}' for l in case_diff_lines(case_diff)])
+    for case_diff in diff["cases"]:
+        lines.extend([f"  {l}" for l in case_diff_lines(case_diff)])
 
-    return unlines([''] + [f'{diff["margin"]} {l}'.rstrip() for l in lines] + [''])
+    return unlines([""] + [f'{diff["margin"]} {l}'.rstrip() for l in lines] + [""])
 
 
 def anomalies(diffs: List[SuiteDiff]) -> str:
-    return ''.join(map(display_suite_diff, diffs))
+    return "".join(map(display_suite_diff, diffs))
 
 
 def graph(
@@ -391,89 +451,91 @@ def graph(
     other_ancestors: int = 0,
 ) -> str:
     lines = [
-        'Commit graph (base is most recent master ancestor with at least one S3 report):',
-        '',
-        '    : (master)',
-        '    |',
+        "Commit graph (base is most recent master ancestor with at least one S3 report):",
+        "",
+        "    : (master)",
+        "    |",
     ]
 
-    head_time_str = f'           {format_seconds([head_seconds])}'
+    head_time_str = f"           {format_seconds([head_seconds])}"
     if on_master:
-        lines.append(f'    * {head_sha[:10]} (HEAD)   {head_time_str}')
+        lines.append(f"    * {head_sha[:10]} (HEAD)   {head_time_str}")
     else:
-        lines.append(f'    | * {head_sha[:10]} (HEAD) {head_time_str}')
+        lines.append(f"    | * {head_sha[:10]} (HEAD) {head_time_str}")
 
         if ancestry_path > 0:
             lines += [
-                '    | |',
+                "    | |",
                 show_ancestors(ancestry_path),
             ]
 
         if other_ancestors > 0:
             lines += [
-                '    |/|',
+                "    |/|",
                 show_ancestors(other_ancestors),
-                '    |',
+                "    |",
             ]
         else:
-            lines.append('    |/')
+            lines.append("    |/")
 
     is_first = True
     for sha, seconds in base_seconds.items():
         num_runs = len(seconds)
         prefix = str(num_runs).rjust(3)
-        base = '(base)' if is_first and num_runs > 0 else '      '
+        base = "(base)" if is_first and num_runs > 0 else "      "
         if num_runs > 0:
             is_first = False
         t = format_seconds(seconds)
         p = plural(num_runs)
         if t:
-            p = f'{p}, '.ljust(3)
-        lines.append(f'    * {sha[:10]} {base} {prefix} report{p}{t}')
+            p = f"{p}, ".ljust(3)
+        lines.append(f"    * {sha[:10]} {base} {prefix} report{p}{t}")
 
-    lines.extend(['    |', '    :'])
+    lines.extend(["    |", "    :"])
 
     return unlines(lines)
 
 
 def case_delta(case: CaseDiff) -> Stat:
-    was = case['was']
-    now = case['now']
+    was = case["was"]
+    now = case["now"]
     return recenter(
         was[0] if was else zero_stat(),
-        now['seconds'] if now else 0,
+        now["seconds"] if now else 0,
     )
 
 
 def display_final_stat(stat: Stat) -> str:
-    center = stat['center']
-    spread = stat['spread']
+    center = stat["center"]
+    spread = stat["spread"]
     displayed = display_stat(
-        {'center': abs(center), 'spread': spread},
+        {"center": abs(center), "spread": spread},
         ((4, 2), (3, 2)),
     )
     if center < 0:
-        sign = '-'
+        sign = "-"
     elif center > 0:
-        sign = '+'
+        sign = "+"
     else:
-        sign = ' '
-    return f'{sign}{displayed}'.rstrip()
+        sign = " "
+    return f"{sign}{displayed}".rstrip()
 
 
 def summary_line(message: str, d: DefaultDict[str, List[CaseDiff]]) -> str:
     all_cases = [c for cs in d.values() for c in cs]
     tests = len(all_cases)
     suites = len(d)
-    sp = f'{plural(suites)})'.ljust(2)
-    tp = f'{plural(tests)},'.ljust(2)
+    sp = f"{plural(suites)})".ljust(2)
+    tp = f"{plural(tests)},".ljust(2)
     # there might be a bug calculating this stdev, not sure
     stat = sum_normals(case_delta(c) for c in all_cases)
-    return ''.join([
-        f'{message} (across {suites:>4} suite{sp}',
-        f'{tests:>6} test{tp}',
-        f' totaling {display_final_stat(stat)}',
-    ])
+    return "".join(
+        [
+            f"{message} (across {suites:>4} suite{sp}",
+            f"{tests:>6} test{tp}",
+            f" totaling {display_final_stat(stat)}",
+        ]
+    )
 
 
 def summary(analysis: List[SuiteDiff]) -> str:
@@ -483,17 +545,17 @@ def summary(analysis: List[SuiteDiff]) -> str:
 
     for diff in analysis:
         # the use of 'margin' here is not the most elegant
-        name = diff['name']
-        margin = diff['margin']
-        cases = diff['cases']
-        if margin == '-':
+        name = diff["name"]
+        margin = diff["margin"]
+        cases = diff["cases"]
+        if margin == "-":
             removed_tests[name] += cases
-        elif margin == '+':
+        elif margin == "+":
             added_tests[name] += cases
         else:
-            removed = list(filter(lambda c: c['margin'] == '-', cases))
-            added = list(filter(lambda c: c['margin'] == '+', cases))
-            modified = list(filter(lambda c: c['margin'] == '!', cases))
+            removed = list(filter(lambda c: c["margin"] == "-", cases))
+            added = list(filter(lambda c: c["margin"] == "+", cases))
+            modified = list(filter(lambda c: c["margin"] == "!", cases))
             if removed:
                 removed_tests[name] += removed
             if added:
@@ -501,11 +563,13 @@ def summary(analysis: List[SuiteDiff]) -> str:
             if modified:
                 modified_tests[name] += modified
 
-    return unlines([
-        summary_line('Removed ', removed_tests),
-        summary_line('Modified', modified_tests),
-        summary_line('Added   ', added_tests),
-    ])
+    return unlines(
+        [
+            summary_line("Removed ", removed_tests),
+            summary_line("Modified", modified_tests),
+            summary_line("Added   ", added_tests),
+        ]
+    )
 
 
 def regression_info(
@@ -525,7 +589,7 @@ def regression_info(
     and its test times. Since Python dicts maintain insertion order
     (guaranteed as part of the language spec since 3.7), the
     base_reports argument must list the head's several most recent
-    master commits, from newest to oldest (so the merge-base is
+    main commits, from newest to oldest (so the merge-base is
     list(base_reports)[0]).
     """
     simpler_head = simplify(head_report)
@@ -537,42 +601,82 @@ def regression_info(
         base_reports=simpler_base,
     )
 
-    return '\n'.join([
-        unlines([
-            '----- Historic stats comparison result ------',
-            '',
-            f'    job: {job_name}',
-            f'    commit: {head_sha}',
-        ]),
-
-        # don't print anomalies, because sometimes due to sharding, the
-        # output from this would be very long and obscure better signal
-
-        # anomalies(analysis),
-
-        graph(
-            head_sha=head_sha,
-            head_seconds=head_report['total_seconds'],
-            base_seconds={
-                c: [r['total_seconds'] for r in rs]
-                for c, rs in base_reports.items()
-            },
-            on_master=on_master,
-            ancestry_path=ancestry_path,
-            other_ancestors=other_ancestors,
-        ),
-        summary(analysis),
-    ])
+    return "\n".join(
+        [
+            unlines(
+                [
+                    "----- Historic stats comparison result ------",
+                    "",
+                    f"    job: {job_name}",
+                    f"    commit: {head_sha}",
+                ]
+            ),
+            # don't print anomalies, because sometimes due to sharding, the
+            # output from this would be very long and obscure better signal
+            # anomalies(analysis),
+            graph(
+                head_sha=head_sha,
+                head_seconds=head_report["total_seconds"],
+                base_seconds={
+                    c: [r["total_seconds"] for r in rs]
+                    for c, rs in base_reports.items()
+                },
+                on_master=on_master,
+                ancestry_path=ancestry_path,
+                other_ancestors=other_ancestors,
+            ),
+            summary(analysis),
+        ]
+    )
 
 
 class TestCase:
     def __init__(self, dom: Any) -> None:
-        self.class_name = str(dom.attributes['classname'].value)
-        self.name = str(dom.attributes['name'].value)
-        self.time = float(dom.attributes['time'].value)
-        self.errored = len(dom.getElementsByTagName('error')) > 0
-        self.failed = len(dom.getElementsByTagName('failure')) > 0
-        self.skipped = len(dom.getElementsByTagName('skipped')) > 0
+        self.class_name = str(dom.attributes["classname"].value)
+        self.name = str(dom.attributes["name"].value)
+        self.time = float(dom.attributes["time"].value)
+        # The following attribute is currently ONLY used in process_intentional_test_runs for validation
+        # reasons. The test filename that populates TestFile is calculated and passed down through the test report path.
+        # The reason we don't just use this attribute is because it doesn't exist for cpp tests, e.g., in test_libtorch
+        self.file = (
+            str(dom.attributes["file"].value)
+            if dom.hasAttribute("file")
+            else "N/A - probably a cpp test"
+        )
+        error_elements = dom.getElementsByTagName("error")
+        # DISCLAIMER: unexpected successes and expected failures are currently not reported in assemble_s3_object
+        self.expected_failure = False
+        self.skipped = False
+        self.errored = False
+        self.unexpected_success = False
+        if len(error_elements) > 0:
+            # We are only expecting 1 element here
+            error_element = error_elements[0]
+            self.unexpected_success = (
+                error_element.hasAttribute("type")
+                and error_element.attributes["type"].value == "UnexpectedSuccess"
+            )
+            self.errored = not self.unexpected_success
+        skipped_elements = dom.getElementsByTagName("skipped")
+        if len(skipped_elements) > 0:
+            # We are only expecting 1 element here
+            skipped_element = skipped_elements[0]
+            self.expected_failure = (
+                skipped_element.hasAttribute("type")
+                and skipped_element.attributes["type"].value == "XFAIL"
+            )
+            self.skipped = not self.expected_failure
+        self.failed = len(dom.getElementsByTagName("failure")) > 0
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+    def __str__(self) -> str:
+        return (
+            f"[TestCase name: {self.name} | class_name: {self.class_name} | file: {self.file} | time: {self.time} | "
+            f"expected_failure: {self.expected_failure} | skipped: {self.skipped} | errored: {self.errored} | "
+            f"unexpected_success: {self.unexpected_success} | failed: {self.failed}]\n"
+        )
 
 
 class TestSuite:
@@ -583,12 +687,17 @@ class TestSuite:
         self.skipped_count = 0
         self.errored_count = 0
         self.total_time = 0.0
+        # The below are currently not included in test reports
+        self.unexpected_success_count = 0
+        self.expected_failure_count = 0
 
     def __repr__(self) -> str:
-        rc = f'{self.name} run_time: {self.total_time:.2f} tests: {len(self.test_cases)}'
+        rc = (
+            f"{self.name} run_time: {self.total_time:.2f} tests: {len(self.test_cases)}"
+        )
         if self.skipped_count > 0:
-            rc += f' skipped: {self.skipped_count}'
-        return f'TestSuite({rc})'
+            rc += f" skipped: {self.skipped_count}"
+        return f"TestSuite({rc})"
 
     def append(self, test_case: TestCase) -> None:
         self.test_cases[test_case.name] = test_case
@@ -596,30 +705,35 @@ class TestSuite:
         self.failed_count += 1 if test_case.failed else 0
         self.skipped_count += 1 if test_case.skipped else 0
         self.errored_count += 1 if test_case.errored else 0
+        self.unexpected_success_count += 1 if test_case.unexpected_success else 0
+        self.expected_failure_count += 1 if test_case.expected_failure else 0
 
     def update(self, test_case: TestCase) -> None:
         name = test_case.name
-        assert name in self.test_cases, f'Error: attempting to replace nonexistent test case {name}'
+        assert (
+            name in self.test_cases
+        ), f"Error: attempting to replace nonexistent test case {name}"
+        # Note that time for unexpected successes and expected failures are reported as 0s
         self.test_cases[name].time += test_case.time
         self.test_cases[name].failed |= test_case.failed
         self.test_cases[name].errored |= test_case.errored
         self.test_cases[name].skipped |= test_case.skipped
+        self.test_cases[name].unexpected_success |= test_case.unexpected_success
+        self.test_cases[name].expected_failure |= test_case.expected_failure
 
-    def print_report(self, num_longest: int = 3) -> None:
-        sorted_tests = sorted(self.test_cases.values(), key=lambda x: x.time)
-        test_count = len(sorted_tests)
-        print(f"class {self.name}:")
-        print(
-            f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} errored: {self.errored_count}")
-        print(f"    run_time: {self.total_time:.2f} seconds")
-        print(f"    avg_time: {self.total_time/test_count:.2f} seconds")
-        if test_count >= 2:
-            print(f"    median_time: {statistics.median(x.time for x in sorted_tests):.2f} seconds")
-        sorted_tests = sorted_tests[-num_longest:]
-        print(f"    {len(sorted_tests)} longest tests:")
-        for test in reversed(sorted_tests):
-            print(f"        {test.name} time: {test.time:.2f} seconds")
-        print("")
+
+# Tests that spawn duplicates (usually only twice) intentionally
+MULTITESTS = [
+    "test_cpp_extensions_aot",
+    "distributed/test_distributed_spawn",
+    "distributed\\test_distributed_spawn",  # for windows
+    "distributed/test_c10d_gloo",
+    "distributed\\test_c10d_gloo",  # for windows
+    "cpp",  # The caffe2 cpp tests spawn duplicate test cases as well.
+]
+
+
+DuplicatedDict = Dict[str, Dict[str, List[TestCase]]]
 
 
 class TestFile:
@@ -628,24 +742,25 @@ class TestFile:
         self.total_time = 0.0
         self.test_suites: Dict[str, TestSuite] = dict()
 
-    def append(self, test_case: TestCase, test_type: str) -> None:
-        is_multi_test = self.name == 'test_cpp_extensions_aot' or \
-            self.name == 'distributed/test_distributed_spawn' or \
-            self.name == 'distributed/test_c10d_gloo' or \
-            self.name == 'cpp'  # The caffe2 cpp tests spawn duplicate test cases as well.
-        if is_multi_test:
-            suite_name = test_case.class_name + '__' + test_type
-        else:
-            suite_name = test_case.class_name
+    def append(
+        self, test_case: TestCase, test_type: str, duplicated_tests_dict: DuplicatedDict
+    ) -> None:
+        suite_name = test_case.class_name
         if suite_name not in self.test_suites:
             self.test_suites[suite_name] = TestSuite(suite_name)
         if test_case.name in self.test_suites[suite_name].test_cases:
-            if is_multi_test:
+            if self.name in MULTITESTS:
                 self.test_suites[suite_name].update(test_case)
                 self.total_time += test_case.time
-            else:
-                raise RuntimeWarning(
-                    f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
+
+            # Gather up duplicated test cases to parse for flaky reruns
+            if suite_name not in duplicated_tests_dict:
+                duplicated_tests_dict[suite_name] = dict()
+            if test_case.name not in duplicated_tests_dict[suite_name]:
+                duplicated_tests_dict[suite_name][test_case.name] = [
+                    self.test_suites[suite_name].test_cases[test_case.name]
+                ]
+            duplicated_tests_dict[suite_name][test_case.name].append(test_case)
         else:
             self.test_suites[suite_name].append(test_case)
             self.total_time += test_case.time
@@ -657,7 +772,7 @@ def parse_report(path: str) -> Iterator[TestCase]:
     except Exception as e:
         print(f"Error occurred when parsing {path}: {e}")
         return
-    for test_case in dom.getElementsByTagName('testcase'):
+    for test_case in dom.getElementsByTagName("testcase"):
         yield TestCase(test_case)
 
 
@@ -675,32 +790,143 @@ def get_recursive_files(folder: str, extension: str) -> Iterable[str]:
                 yield os.path.join(root, fname)
 
 
-def parse_reports(folder: str) -> Dict[str, TestFile]:
+def parse_reports(folder: str) -> Tuple[Dict[str, TestFile], Dict[str, DuplicatedDict]]:
     tests_by_file = dict()
+    duplicated_tests_by_file: Dict[str, DuplicatedDict] = dict()
     for report in get_recursive_files(folder, ".xml"):
         report_path = Path(report)
         # basename of the directory of test-report is the test filename
-        test_filename = re.sub(r'\.', '/', report_path.parent.name)
+        test_filename = re.sub(r"\.", "/", report_path.parent.name)
         # test type is the parent directory (only applies to dist-*)
         # See: CUSTOM_HANDLERS in test/run_test.py
         test_type = report_path.parent.parent.name
+        if test_filename not in duplicated_tests_by_file:
+            duplicated_tests_by_file[test_filename] = dict()
         if test_filename not in tests_by_file:
             tests_by_file[test_filename] = TestFile(test_filename)
         for test_case in parse_report(report):
-            tests_by_file[test_filename].append(test_case, test_type)
-    return tests_by_file
+            tests_by_file[test_filename].append(
+                test_case, test_type, duplicated_tests_by_file[test_filename]
+            )
+    return tests_by_file, duplicated_tests_by_file
+
+
+def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
+    num_fail = 0
+    num_expected_fail = 0
+    num_pass = 0
+    num_unexpected_success = 0
+    num_errored = 0
+    num_skipped = 0
+    for test_run in runs:
+        if test_run.failed:
+            num_fail += 1
+        elif test_run.expected_failure:
+            num_expected_fail += 1
+        elif test_run.unexpected_success:
+            num_unexpected_success += 1
+        elif test_run.errored:
+            num_errored += 1
+        elif test_run.skipped:
+            num_skipped += 1
+        else:
+            num_pass += 1
+
+    # Do not run duplication checks for test files that spawn duplicate tests intentionally
+    # and are not necessarily flaky test reruns.
+    if not any(x in test_run.file for x in MULTITESTS):
+        err_msg = f"Warning: unintentional test case duplicates found for {test_run.name} in suite {test_run.class_name}."
+        report_only = os.getenv("PYTORCH_OVERRIDE_FLAKY_SIGNAL") != "1"
+        if (
+            report_only
+            and num_fail + num_errored + num_unexpected_success < 1
+            or not report_only
+            and num_expected_fail < 1
+        ):
+            raise RuntimeWarning(
+                f"{err_msg} Intentional reruns are only triggered when the first run fails or errors, but"
+                " we found no failures nor errors."
+            )
+        if num_unexpected_success + num_expected_fail < 1:
+            raise RuntimeWarning(
+                f"{err_msg} Intentional reruns should raise at least one unexpected success or expected "
+                "failure, but none have been found."
+            )
+        if report_only and num_pass != num_unexpected_success:
+            raise RuntimeWarning(
+                f"{err_msg} Every success in an intentional rerun is shadowed by one unexpected success."
+                f"However, successes = {num_pass} and unexpected successes = {num_unexpected_success}"
+            )
+        if not report_only and num_pass > 1:
+            raise RuntimeWarning(
+                f"{err_msg} There should be at most 1 successful run in an intentional rerun that stops"
+                f" at first success. The number of successful runs = {num_pass}"
+            )
+        if num_skipped > 0:
+            raise RuntimeWarning(
+                f"{err_msg} No skips should occur in intentional reruns, but skips = {num_skipped}"
+            )
+    return (
+        max(num_unexpected_success, num_pass),
+        num_fail + num_expected_fail + num_errored,
+    )
+
+
+def assemble_flaky_test_stats(
+    duplicated_tests_by_file: Dict[str, DuplicatedDict]
+) -> Any:
+    flaky_tests = []
+    workflow_id = os.environ.get(
+        "GITHUB_RUN_ID", os.environ.get("CIRCLE_WORKFLOW_ID", None)
+    )
+    for file_name, suite_to_dict in duplicated_tests_by_file.items():
+        for suite_name, testcase_to_runs in suite_to_dict.items():
+            for testcase_name, list_of_runs in testcase_to_runs.items():
+                num_green, num_red = process_intentional_test_runs(list_of_runs)
+                if (
+                    num_green > 0 and num_red > 0
+                ):  # Flaky tests show different results in consecutive reruns
+                    flaky_tests.append(
+                        {
+                            "name": testcase_name,
+                            "suite": suite_name,
+                            "file": file_name,
+                            "num_green": num_green,
+                            "num_red": num_red,
+                        }
+                    )
+    if len(flaky_tests) > 0:
+        # write to RDS
+        register_rds_schema("flaky_tests", schema_from_sample(flaky_tests[0]))
+        rds_write("flaky_tests", flaky_tests, only_on_master=False)
+
+        # write to S3 to go to Rockset as well
+        import uuid
+
+        for flaky_test in flaky_tests:
+            flaky_test["job_id"] = os.environ["GHA_WORKFLOW_JOB_ID"]
+            flaky_test["workflow_id"] = workflow_id
+            key = f"flaky_tests/{workflow_id}/{uuid.uuid4()}.json"
+            obj = get_S3_object_from_bucket("ossci-raw-job-status", key)
+            obj.put(Body=json.dumps(flaky_test), ContentType="application/json")
 
 
 def build_info() -> ReportMetaMeta:
     return {
-        "build_pr": os.environ.get("CIRCLE_PR_NUMBER", ""),
-        "build_tag": os.environ.get("CIRCLE_TAG", ""),
-        "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
-        "build_base_commit": get_base_commit(os.environ.get("CIRCLE_SHA1", "HEAD")),
-        "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
+        "build_pr": os.environ.get("PR_NUMBER", os.environ.get("CIRCLE_PR_NUMBER", "")),
+        "build_tag": os.environ.get("TAG", os.environ.get("CIRCLE_TAG", "")),
+        "build_sha1": os.environ.get("SHA1", os.environ.get("CIRCLE_SHA1", "")),
+        "build_base_commit": get_base_commit(
+            os.environ.get("SHA1", os.environ.get("CIRCLE_SHA1", "HEAD"))
+        ),
+        "build_branch": os.environ.get("BRANCH", os.environ.get("CIRCLE_BRANCH", "")),
         "build_job": os.environ.get("JOB_BASE_NAME", os.environ.get("CIRCLE_JOB", "")),
-        "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
-        "build_start_time_epoch": str(int(os.path.getmtime(os.path.realpath(__file__)))),
+        "build_workflow_id": os.environ.get(
+            "WORKFLOW_ID", os.environ.get("CIRCLE_WORKFLOW_ID", "")
+        ),
+        "build_start_time_epoch": str(
+            int(os.path.getmtime(os.path.realpath(__file__)))
+        ),
     }
 
 
@@ -708,7 +934,7 @@ def build_message(
     test_file: TestFile,
     test_suite: TestSuite,
     test_case: TestCase,
-    meta_info: ReportMetaMeta
+    meta_info: ReportMetaMeta,
 ) -> Dict[str, Dict[str, Any]]:
     return {
         "normal": {
@@ -734,7 +960,9 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
         [
             {
                 "category": "perfpipe_pytorch_test_times",
-                "message": json.dumps(build_message(test_file, test_suite, test_case, meta_info)),
+                "message": json.dumps(
+                    build_message(test_file, test_suite, test_case, meta_info)
+                ),
                 "line_escape": False,
             }
             for test_file in reports.values()
@@ -753,50 +981,50 @@ def assemble_s3_object(
 ) -> Version2Report:
     return {
         **build_info(),  # type: ignore[misc]
-        'total_seconds': total_seconds,
-        'format_version': 2,
-        'files': {
+        "total_seconds": total_seconds,
+        "format_version": 2,
+        "files": {
             name: {
-                'total_seconds': test_file.total_time,
-                'suites': {
+                "total_seconds": test_file.total_time,
+                "suites": {
                     name: {
-                        'total_seconds': suite.total_time,
-                        'cases': {
+                        "total_seconds": suite.total_time,
+                        "cases": {
                             name: {
-                                'seconds': case.time,
-                                'status': 'errored' if case.errored else
-                                          'failed' if case.failed else
-                                          'skipped' if case.skipped else None
+                                "seconds": case.time,
+                                "status": "errored"
+                                if case.errored
+                                else "failed"
+                                if case.failed
+                                else "skipped"
+                                if case.skipped
+                                else None,
                             }
                             for name, case in suite.test_cases.items()
                         },
                     }
                     for name, suite in test_file.test_suites.items()
-                }
+                },
             }
             for name, test_file in reports.items()
-        }
+        },
     }
 
 
 def send_report_to_s3(head_report: Version2Report) -> None:
-    job = os.getenv('JOB_BASE_NAME', os.environ.get('CIRCLE_JOB'))
-    sha1 = os.environ.get('CIRCLE_SHA1')
-    branch = os.environ.get('CIRCLE_BRANCH', '')
+    job = os.getenv("JOB_BASE_NAME", os.environ.get("CIRCLE_JOB"))
+    sha1 = os.environ.get("SHA1", os.environ.get("CIRCLE_SHA1", ""))
     now = datetime.datetime.utcnow().isoformat()
 
     # SHARD_NUMBER and TEST_CONFIG are specific to GHA, as these details would be included in CIRCLE_JOB already
-    shard = os.environ.get('SHARD_NUMBER', '')
-    test_config = os.environ.get('TEST_CONFIG')
+    shard = os.environ.get("SHARD_NUMBER", "")
+    test_config = os.environ.get("TEST_CONFIG")
 
-    job_report_dirname = f'{job}{f"-{test_config}" if test_config is not None else ""}{shard}'
-
-    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
-        pr = os.environ.get('CIRCLE_PR_NUMBER', 'unknown')
-        key = f'pr_test_time/{pr}/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
-    else:
-        key = f'test_time/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
-    obj = get_S3_object_from_bucket('ossci-metrics', key)
+    job_report_dirname = (
+        f'{job}{f"-{test_config}" if test_config is not None else ""}{shard}'
+    )
+    key = f"test_time/{sha1}/{job_report_dirname}/{now}Z.json.bz2"  # Z meaning UTC
+    obj = get_S3_object_from_bucket("ossci-metrics", key)
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
     # input files of a few megabytes in size like these JSON files, and
@@ -805,22 +1033,51 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     obj.put(Body=bz2.compress(json.dumps(head_report).encode()))
 
 
+def upload_failures_to_rds(reports: Dict[str, TestFile]) -> None:
+    """
+    We have 40k+ tests, so saving every test for every commit is not very
+    feasible for PyTorch. Most of these are things we don't care about anyways,
+    so this code filters out failures and saves only those to the DB.
+    """
+    # Gather all failures across the entire report
+    failures = []
+    for file in reports.values():
+        for suite in file.test_suites.values():
+            for case in suite.test_cases.values():
+                if case.errored or case.failed:
+                    failures.append(
+                        {
+                            "name": case.name,
+                            "suite": suite.name,
+                            "file": file.name,
+                            "status": "failure" if case.failed else "error",
+                        }
+                    )
+
+    if len(failures) > 0:
+        register_rds_schema("test_failures", schema_from_sample(failures[0]))
+        rds_write("test_failures", failures, only_on_master=False)
+
+
 def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
-    sha1 = os.environ.get("CIRCLE_SHA1", "HEAD")
+    sha1 = os.environ.get("SHA1", os.environ.get("CIRCLE_SHA1", "HEAD"))
 
     base = get_base_commit(sha1)
 
     count_spec = f"{base}..{sha1}"
-    intermediate_commits = int(subprocess.check_output(
-        ["git", "rev-list", "--count", count_spec],
-        encoding="ascii"
-    ))
-    ancestry_path = int(subprocess.check_output(
-        ["git", "rev-list", "--ancestry-path", "--count", count_spec],
-        encoding="ascii",
-    ))
+    intermediate_commits = int(
+        subprocess.check_output(
+            ["git", "rev-list", "--count", count_spec], encoding="ascii"
+        )
+    )
+    ancestry_path = int(
+        subprocess.check_output(
+            ["git", "rev-list", "--ancestry-path", "--count", count_spec],
+            encoding="ascii",
+        )
+    )
 
-    # if current commit is already on master, we need to exclude it from
+    # if current commit is already on main, we need to exclude it from
     # this history; otherwise we include the merge-base
     commits = subprocess.check_output(
         ["git", "rev-list", f"--max-count={num_prev_commits+1}", base],
@@ -843,15 +1100,18 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
             objects[commit].extend(summary)
 
     print()
-    print(regression_info(
-        head_sha=sha1,
-        head_report=head_report,
-        base_reports=objects,
-        job_name=job,
-        on_master=on_master,
-        ancestry_path=ancestry_path - 1,
-        other_ancestors=intermediate_commits - ancestry_path,
-    ), end="")
+    print(
+        regression_info(
+            head_sha=sha1,
+            head_report=head_report,
+            base_reports=objects,
+            job_name=job,
+            on_master=on_master,
+            ancestry_path=ancestry_path - 1,
+            other_ancestors=intermediate_commits - ancestry_path,
+        ),
+        end="",
+    )
 
 
 def positive_integer(value: str) -> float:
@@ -876,9 +1136,10 @@ def reports_has_no_tests(reports: Dict[str, TestFile]) -> bool:
     return True
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
     import sys
+
     parser = argparse.ArgumentParser(
         "Print statistics from test XML output.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -933,7 +1194,10 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    reports_by_file = parse_reports(args.folder)
+    reports_by_file, duplicated_tests_by_file = parse_reports(args.folder)
+    assemble_flaky_test_stats(duplicated_tests_by_file)
+
+    upload_failures_to_rds(reports_by_file)
     if reports_has_no_tests(reports_by_file):
         print(f"No tests in reports found in {args.folder}")
         sys.exit(0)
@@ -943,16 +1207,10 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"ERROR ENCOUNTERED WHEN UPLOADING TO SCRIBE: {e}")
 
-    # longest_tests can contain duplicates as the same tests can be spawned from different files
-    longest_tests: List[TestCase] = []
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
         for suite_name, test_suite in test_filename.test_suites.items():
             total_time += test_suite.total_time
-            if test_suite.total_time >= args.class_print_threshold:
-                test_suite.print_report(args.longest_of_class)
-                longest_tests.extend(test_suite.test_cases.values())
-    longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
 
     obj = assemble_s3_object(reports_by_file, total_seconds=total_time)
 
@@ -961,14 +1219,6 @@ if __name__ == '__main__':
             send_report_to_s3(obj)
         except Exception as e:
             print(f"ERROR ENCOUNTERED WHEN UPLOADING TO S3: {e}")
-
-    print(f"Total runtime is {datetime.timedelta(seconds=total_time)}")
-    print(
-        f"{len(longest_tests)} longest tests of entire run"
-        f" (ignoring suites totaling less than {args.class_print_threshold} seconds):"
-    )
-    for test_case in reversed(longest_tests):
-        print(f"    {test_case.class_name}.{test_case.name}  time: {test_case.time:.2f} seconds")
 
     if args.compare_with_s3:
         head_json = obj

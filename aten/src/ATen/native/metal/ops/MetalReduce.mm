@@ -76,7 +76,7 @@ Tensor wrapper_mean_dim(
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("mean.dim", TORCH_FN(wrapper_mean_dim));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mean.dim"), TORCH_FN(wrapper_mean_dim));
 };
 
 }

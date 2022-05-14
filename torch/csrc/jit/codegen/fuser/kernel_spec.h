@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/stack.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/arg_spec.h>
 #include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
@@ -77,7 +77,7 @@ struct TORCH_API KernelSpec {
     }
     nTensorInputs_ = std::count_if(
         graph_->inputs().begin(), graph_->inputs().end(), [](const Value* v) {
-          return v->type()->isSubtypeOf(TensorType::get());
+          return v->type()->isSubtypeOf(*TensorType::get());
         });
   }
 

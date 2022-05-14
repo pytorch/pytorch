@@ -2,11 +2,10 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 
-#include <ATen/ATen.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
-#include <ATen/native/Resize.h>
+#include <ATen/native/cuda/Sort.h>
 
 namespace at { namespace native {
 
@@ -159,8 +158,4 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
   }
 }
 
-bool should_use_small_sort(const Tensor &self, int64_t dim);
-void sortKeyValueInplace(const Tensor& key,
-                         const Tensor& value,
-                         int dim, bool dir);
 }} // at::native

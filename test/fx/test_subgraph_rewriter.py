@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import os
 import sys
 
@@ -458,3 +460,34 @@ class TestSubgraphRewriter(JitTestCase):
             if n.op == 'placeholder':
                 assert n.type == int
                 assert m.type == int
+
+    def test_subgraph_writer_replace_consecutive_submodules(self):
+
+        def f(x):
+            x = torch.sigmoid(x)
+            x = torch.sigmoid(x)
+            return torch.sigmoid(x)
+
+        def pattern(x):
+            return torch.sigmoid(x)
+
+        def replacement(x):
+            return torch.exp(x)
+
+        def comparison(x):
+            x = torch.exp(x)
+            x = torch.exp(x)
+            return torch.exp(x)
+
+        traced = symbolic_trace(f)
+        comparison_fn = symbolic_trace(comparison)
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced.forward(x)
+        self.assertEqual(ref_outs, test_outs)

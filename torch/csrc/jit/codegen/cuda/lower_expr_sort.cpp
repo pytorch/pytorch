@@ -239,7 +239,7 @@ class ExprGroup {
 // 1).
 class ExprSegmentationSorter {
  public:
-  ExprSegmentationSorter(Fusion* fusion) : complete_fusion_(fusion) {}
+  ExprSegmentationSorter(Fusion* fusion) : fusion_(fusion) {}
 
   void sort();
 
@@ -282,6 +282,13 @@ class ExprSegmentationSorter {
   // Go through groups that are marked as to merge and merge them.
   void mergeNodes();
 
+  // Initialize concrete_id_dependencies
+  void initializeForLoopDependencies();
+
+  // Checks if the for loop associated with the concrete ID is ready to be
+  // resolved in sorting.
+  bool loopReady(IterDomain* concrete_id);
+
   // Disconnect the edges connecting group to the rest of the graph, and return
   // all the edges that were disconnected
   std::unordered_set<ExprGroupConnections*> disconnectGroup(ExprGroup* group);
@@ -300,9 +307,7 @@ class ExprSegmentationSorter {
 
   std::unordered_set<ExprGroup*> to_merge_;
 
-  // Maintain my own fusion the state of which is not always the same as the
-  // original provided fusion.
-  Fusion* complete_fusion_;
+  Fusion* fusion_;
 
   // We use a theorem out of a paper mentioned in other comments. This theorem
   // is good at identifying multiple expr groups to merge during a single
@@ -313,6 +318,17 @@ class ExprSegmentationSorter {
   // forward progress based on the theorem we fallback to manually looking if we
   // can segmenet all combinations we haven't previously looked at.
   bool fallback_mode_enabled_ = false;
+
+  // We need to track ID resolution, see AdvancedLowering6. For loops need
+  // to be resolved from inner most to outer most. We therefore track
+  // loop dependencies where inner most loops need to be fully resolved before
+  // we can resolve the next outer loop. We track this by looking at all tensor
+  // views, and each iteration domain. An iter domain in the outer most position
+  // has dependencies on all inner dimensions. This tracking is done on concrete
+  // id's in the loop map, this is because IDs may exist in some TVs but not
+  // others, however, we need a "global" view to track these dependencies.
+  std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
+      concrete_id_dependencies;
 };
 
 // // Debug printing, disabled due to clang-tidy see above for declarations.
@@ -398,7 +414,7 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
   std::vector<bool> can_merge(true, neighbors.size());
 
   // Find neighbors with a level that is only 1 differant than this groups level
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if (std::abs(neighbors[i]->payload()->level - payload()->level) > 1) {
       can_merge[i] = false;
     }
@@ -407,7 +423,7 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
   // Check neighbor of neighbors we're considering, if any of them are merged
   // with another node, make sure the resulting edge wouldn't have a level
   // difference of 1
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if (!can_merge[i]) {
       continue;
     }
@@ -445,7 +461,7 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
   }
 
   std::vector<ExprGroup*> merge_candidates;
-  for (size_t i = 0; i < neighbors.size(); i++) {
+  for (const auto i : c10::irange(neighbors.size())) {
     if ((can_merge[i] && !fallback_mode_enabled) ||
         (!can_merge[i] && fallback_mode_enabled)) {
       merge_candidates.push_back(neighbors[i]);
@@ -525,13 +541,13 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup() {
 ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
   auto group = makeEmptyGroup();
   group->exprs().push_back(expr);
-  if (ir_utils::isTVOp(expr)) {
+  if (ir_utils::isTvOp(expr)) {
     auto out_tv = expr->outputs()[0]->as<TensorView>();
     // Grab all id's that are shared with other tensors.
-    for (size_t tv_i = 0; tv_i < out_tv->getComputeAtPosition(); tv_i++) {
+    for (const auto tv_i : c10::irange(out_tv->getComputeAtPosition())) {
       group->payload()->ca_domains_.push_back(out_tv->axis(tv_i));
     }
-    for (size_t tv_i = 0; tv_i < out_tv->getMaxProducerPosition(); tv_i++) {
+    for (const auto tv_i : c10::irange(out_tv->getMaxProducerPosition())) {
       group->payload()->pa_domains_.push_back(out_tv->axis(tv_i));
     }
   }
@@ -633,52 +649,35 @@ ExprGroup* getProducer(ExprGroup* sg1, ExprGroup* sg2) {
   return nullptr;
 }
 
-// Go through all expressions and compute a local ordering of loops. Since
-// overloading comparison operators for iter domains doesn't make a lot of
-// sense, we instead fake having a < operator by considering that every
-// expressions output domain must be relatively ordered correctly. So we use all
-// of the expressions in a group to get a "local" ordering of the output IDs in
-// the group. We can't rely on any single expression because it may or may not
-// have all loops in the group. We also can't break ties without all
-// expressions.
-//
-// For example two expressions may have domains: [I0], [I1] Yet we
-// won't know the ordering unless we see a domain with: [I0, I1]. This happened
-// in advancedIndexing9 test when merging T5 with the group containing T10
-// (cache of T5, which is post broadcasted output) and T6(pre broadcasted
-// output).
-// T5 had the domain [0, 1, 2, 3, 4] produce at 3
-// T6 had the domain [0, 3, 4] compute at 3
-// Merging [0, 1, 2] and [0, 3, 4] resulted in the domain [0, 3, 4, 1, 2]
-//
-// If ID's are not in filter, we don't care about their ordering and ignore
-// them. This is because we're really focused on loops we will have to merge
-// across groups.If the domain is not in a produce at position in the producer
-// edges, or a compute at position in the consumer edges, the expressions we
-// look at may not have a unique ordering.
 std::vector<IterDomain*> getLocalDomainOrdering(
     const std::vector<Expr*>& exprs,
     const ComputeAtMap& map,
-    const std::unordered_set<IterDomain*> filter) {
+    const std::unordered_set<IterDomain*> filter,
+    const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
+        concrete_id_dependencies) {
   if (exprs.empty()) {
     return std::vector<IterDomain*>();
   }
 
-  std::vector<std::vector<IterDomain*>> domains;
+  std::unordered_set<IterDomain*> domains;
 
   for (auto expr : exprs) {
-    if (!ir_utils::isTVOp(expr)) {
+    if (!ir_utils::isTvOp(expr)) {
       continue;
     }
 
     auto tv_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
     for (auto tv_input : tv_inputs) {
-      std::vector<IterDomain*> domain(
+      std::vector<IterDomain*> domain;
+
+      std::transform(
           tv_input->domain()->domain().begin(),
           tv_input->domain()->domain().begin() +
               std::max(
                   tv_input->getComputeAtPosition(),
-                  tv_input->getMaxProducerPosition()));
+                  tv_input->getMaxProducerPosition()),
+          std::back_inserter(domain),
+          [&map](IterDomain* id) { return map.getConcreteMappedID(id); });
 
       domain.erase(
           std::remove_if(
@@ -689,101 +688,17 @@ std::vector<IterDomain*> getLocalDomainOrdering(
               }),
           domain.end());
 
-      domains.emplace_back(domain);
+      domains.insert(domain.begin(), domain.end());
     }
   }
 
-  if (domains.size() == 1) {
-    return domains[0];
-  }
-
-  std::vector<IterDomain*> merged_domains;
-
-  // For each domain, keep an iterator to the current iter domain we're
-  // checking, and an iterator for the end of the domain.
-  typedef std::pair<
-      std::vector<IterDomain*>::const_iterator,
-      std::vector<IterDomain*>::const_iterator>
-      iter_pair_t;
-
-  std::vector<iter_pair_t> iterators(domains.size());
-  for (auto i : c10::irange(domains.size())) {
-    iterators[i] = std::make_pair(domains[i].begin(), domains[i].end());
-  }
-
-  auto empty = [](iter_pair_t& iter_pair) {
-    return iter_pair.first == iter_pair.second;
-  };
-
-  size_t candidate_i = 0;
-  size_t iterations_since_merge = 0;
-  IterDomain* last_id_checked = nullptr;
-
-  while (std::any_of(
-      iterators.begin(), iterators.end(), [](iter_pair_t iter_pair) {
-        return iter_pair.first != iter_pair.second;
-      })) {
-    TORCH_INTERNAL_ASSERT(
-        iterations_since_merge <= iterators.size(),
-        "Infinite loop detected in lower_expr_sort:mergeDomains.");
-    iterations_since_merge++;
-
-    if (candidate_i == iterators.size()) {
-      candidate_i = 0;
-    }
-    if (empty(iterators[candidate_i])) {
-      candidate_i++;
-      continue;
-    }
-
-    auto iter_dom_candidate = *iterators[candidate_i].first;
-    if (iter_dom_candidate == last_id_checked) {
-      candidate_i++;
-      continue;
-    }
-    last_id_checked = iter_dom_candidate;
-
-    bool candidate_is_next = true;
-
-    // Make sure this iter domain is in all first positions of all iter
-    // lists that contain it, otherwise it shouldn't be the next iter domain.
-    for (auto iterator : iterators) {
-      if (empty(iterator)) {
-        continue;
-      }
-      if (!map.areMapped(iter_dom_candidate, *iterator.first)) {
-        if (std::any_of(
-                iterator.first + 1,
-                iterator.second,
-                [&map, iter_dom_candidate](IterDomain* id) {
-                  return map.areMapped(iter_dom_candidate, id);
-                })) {
-          candidate_is_next = false;
-          break;
-        }
-      }
-    }
-
-    if (!candidate_is_next) {
-      candidate_i++;
-      continue;
-    }
-
-    merged_domains.emplace_back(map.getConcreteMappedID(iter_dom_candidate));
-
-    for (auto match_i : c10::irange(iterators.size())) {
-      if (empty(iterators[match_i])) {
-        continue;
-      }
-      if (map.areMapped(iter_dom_candidate, *iterators[match_i].first)) {
-        iterators[match_i] = std::make_pair(
-            iterators[match_i].first + 1, iterators[match_i].second);
-      }
-    }
-    iterations_since_merge = 0;
-  }
-
-  return merged_domains;
+  std::vector<IterDomain*> merged_domain(domains.begin(), domains.end());
+  std::sort(
+      merged_domain.begin(),
+      merged_domain.end(),
+      IterDomainDependencySorter(
+          concrete_id_dependencies, GpuLower::current()->caParallelMap()));
+  return merged_domain;
 }
 } // namespace
 
@@ -866,8 +781,8 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     auto producer_of_consumer_edge = consumer_group_edge->producer_val_;
     if (producer_of_consumer_edge->isA<TensorView>()) {
       auto tv = producer_of_consumer_edge->as<TensorView>();
-      for (size_t tv_i = 0; tv_i < tv->getComputeAtPosition(); tv_i++) {
-        ca_ids.emplace(GpuLower::current()->caLoopMap().getConcreteMappedID(
+      for (const auto tv_i : c10::irange(tv->getComputeAtPosition())) {
+        ca_ids.emplace(GpuLower::current()->caParallelMap().getConcreteMappedID(
             tv->axis(tv_i)));
       }
     }
@@ -881,8 +796,8 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     auto consumer_of_producer_edge = producer_group_edge->consumer_val_;
     if (consumer_of_producer_edge->isA<TensorView>()) {
       auto tv = consumer_of_producer_edge->as<TensorView>();
-      for (size_t tv_i = 0; tv_i < tv->getMaxProducerPosition(); tv_i++) {
-        pa_ids.emplace(GpuLower::current()->caLoopMap().getConcreteMappedID(
+      for (const auto tv_i : c10::irange(tv->getMaxProducerPosition())) {
+        pa_ids.emplace(GpuLower::current()->caParallelMap().getConcreteMappedID(
             tv->axis(tv_i)));
       }
     }
@@ -892,7 +807,10 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   all_ca_pa_ids.insert(pa_ids.begin(), pa_ids.end());
 
   auto ordered_ids = getLocalDomainOrdering(
-      joined_groups->exprs(), GpuLower::current()->caLoopMap(), all_ca_pa_ids);
+      joined_groups->exprs(),
+      GpuLower::current()->caParallelMap(),
+      all_ca_pa_ids,
+      concrete_id_dependencies);
 
   for (auto id : ordered_ids) {
     if (ca_ids.count(id)) {
@@ -937,8 +855,8 @@ bool canReducePA(ExprGroup* group) {
     // If this consumer_tv doesn't map to the last producer domain of this group
     // it can't decide if it can be reduced
     bool has_matching_pa = false;
-    for (size_t i = 0; i < consumer_tv->getMaxProducerPosition(); i++) {
-      if (GpuLower::current()->caLoopMap().areMapped(
+    for (const auto i : c10::irange(consumer_tv->getMaxProducerPosition())) {
+      if (GpuLower::current()->caParallelMap().areMapped(
               consumer_tv->axis(i), group_pa_last_id)) {
         has_matching_pa = true;
         break;
@@ -955,7 +873,7 @@ bool canReducePA(ExprGroup* group) {
              static_cast<int>(producer_tv->getComputeAtPosition());
          producer_pos_i > 0;
          producer_pos_i--) {
-      if (GpuLower::current()->caLoopMap().areMapped(
+      if (GpuLower::current()->caParallelMap().areMapped(
               producer_tv->axis(producer_pos_i - 1), group_pa_last_id)) {
         return false;
       }
@@ -1037,6 +955,137 @@ void ExprSegmentationSorter::mergeNodes() {
   });
 }
 
+// Initialize concrete_id_dependencies and concrete_id_to_all_ids
+void ExprSegmentationSorter::initializeForLoopDependencies() {
+  TORCH_INTERNAL_ASSERT(
+      concrete_id_dependencies.empty(),
+      "For loop dependencies have already been initialized.");
+
+  for (auto tv : ir_utils::allTvs(fusion_)) {
+    std::unordered_set<IterDomain*> dependencies;
+    for (size_t tv_id_i =
+             std::max(tv->getMaxProducerPosition(), tv->getComputeAtPosition());
+         tv_id_i > 0;
+         tv_id_i--) {
+      auto tv_id = tv->axis((int)(tv_id_i - 1));
+      auto concrete_id =
+          GpuLower::current()->caParallelMap().getConcreteMappedID(tv_id);
+
+      if (concrete_id_dependencies.find(concrete_id) ==
+          concrete_id_dependencies.end()) {
+        concrete_id_dependencies[concrete_id] = dependencies;
+      } else {
+        concrete_id_dependencies[concrete_id].insert(
+            dependencies.begin(), dependencies.end());
+      }
+
+      // Loops after tv_id are dependent on tv_id
+      dependencies.emplace(
+          GpuLower::current()->caParallelMap().getConcreteMappedID(tv_id));
+    }
+  }
+
+  // Fill out dependencies as IDs will have local dependency information, but
+  // it's still not guaranteed to be global.
+
+  // If loop structure is something like:
+  // T0 [I0]
+  // T1 [I0, I1]
+  // T2 [I1, I2]
+  //
+  // I1 will be marked as a dependency of I0
+  // I2 will be marked as a dependency of I1
+  //
+  // However, I2 will not be marked as a dep of I0, so we need to fill out the
+  // dependency analysis. This is done by iterating through IterDomains filling
+  // out all the dependencies of dependencies recursively.
+
+  std::deque<IterDomain*> to_visit;
+  std::unordered_set<IterDomain*> visited;
+
+  std::transform(
+      concrete_id_dependencies.begin(),
+      concrete_id_dependencies.end(),
+      std::back_inserter(to_visit),
+      [](const auto& concrete_dep_entry) { return concrete_dep_entry.first; });
+
+  size_t inf_loop_counter = to_visit.size();
+  bool failed = false;
+
+  while (!to_visit.empty()) {
+    auto id = to_visit.front();
+    to_visit.pop_front();
+
+    if (inf_loop_counter-- == 0) {
+      failed = true;
+      break;
+    }
+
+    auto& dependencies = concrete_id_dependencies.at(id);
+    bool ready = dependencies.empty() ||
+        std::all_of(dependencies.begin(),
+                    dependencies.end(),
+                    [&visited](IterDomain* id) { return visited.count(id); });
+
+    if (!ready) {
+      to_visit.push_back(id);
+      continue;
+    }
+
+    inf_loop_counter = to_visit.size();
+
+    for (auto dependency : dependencies) {
+      auto dep_of_dep = concrete_id_dependencies.at(dependency);
+      dependencies.insert(dep_of_dep.begin(), dep_of_dep.end());
+    }
+    visited.emplace(id);
+  }
+  if (failed) {
+    std::cerr
+        << "ERROR: Iteration domain sorting has failed, infinite loop detected."
+        << std::endl;
+    std::cerr << "Failed to sort out: " << std::endl;
+    for (auto entry : to_visit) {
+      std::cerr << entry->toString();
+      if (entry != to_visit.back()) {
+        std::cerr << ", ";
+      }
+    }
+
+    std::cerr << "Depdencies: " << std::endl;
+    for (const auto& dep_entry : concrete_id_dependencies) {
+      std::cerr << "  Deps of " << dep_entry.first->toString() << std::endl
+                << "   ";
+
+      for (auto dep : dep_entry.second) {
+        std::cerr << dep->toString() << ", ";
+      }
+      std::cerr << std::endl;
+    }
+
+    TORCH_INTERNAL_ASSERT(false);
+  }
+}
+
+// Checks if the for loop associated with the concrete ID is ready to be
+// resolved in sorting. This could be done more efficiently with some
+// additional tracking, however we recreate ca_domain_ when we merge groups,
+// so it's hard to track what is no longer needed.
+bool ExprSegmentationSorter::loopReady(IterDomain* concrete_id) {
+  const auto& dependencies = concrete_id_dependencies[concrete_id];
+  for (auto& group : groups_) {
+    // Only need to check compute at domain here, because if there's an entry in
+    // produce at, that has no matching entry in compute at, then that ID can be
+    // removed as in canReducePA
+    for (auto ca_domain : group->payload()->ca_domains_) {
+      if (dependencies.count(ca_domain)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 // Two expression groups can be merged together if there's a value produced by
 // producer group, consumed by consumer group, where the compute at position
 // maps to the inner most compute at domain of the producer group and maps to
@@ -1073,7 +1122,13 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
     return false;
   }
 
-  const auto& loop_map = GpuLower::current()->caLoopMap();
+  const auto& parallel_map = GpuLower::current()->caParallelMap();
+
+  // If inner loop dependencies have not been resolved, cannot merge.
+  if (!loopReady(producer_ca_domain.back()) ||
+      !loopReady(consumer_pa_domain.back())) {
+    return false;
+  }
 
   for (auto edge : producer_group->consumerEdges()) {
     if (edge->to != consumer_group) {
@@ -1104,11 +1159,11 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
       continue;
     }
 
-    if (!loop_map.areMapped(compute_at_dim, producer_ca_domain.back())) {
+    if (!parallel_map.areMapped(compute_at_dim, producer_ca_domain.back())) {
       continue;
     }
 
-    if (loop_map.areMapped(compute_at_dim, consumer_pa_domain.back())) {
+    if (parallel_map.areMapped(compute_at_dim, consumer_pa_domain.back())) {
       return true;
     }
   }
@@ -1158,13 +1213,13 @@ void ExprSegmentationSorter::sort() {
   std::unordered_map<Expr*, ExprGroup*> expr2group;
 
   // Initialize DAG, convert each expr to a segment group
-  for (auto expr : complete_fusion_->exprs()) {
+  for (auto expr : fusion_->exprs()) {
     auto group = makeEmptyGroup(expr);
     expr2group.insert(std::make_pair(expr, group));
   }
 
   // Create edges between the Exprs. Mark inputs and outputs of the fusion.
-  for (auto expr : complete_fusion_->exprs()) {
+  for (auto expr : fusion_->exprs()) {
     auto expr_group = expr2group.at(expr);
     auto out = expr->outputs()[0];
     for (auto inp : expr->inputs()) {
@@ -1186,6 +1241,10 @@ void ExprSegmentationSorter::sort() {
       inp_def_group->addConsumerEdge(edges_.back().get());
     }
   }
+
+  // Initialize loop dependency maps
+  initializeForLoopDependencies();
+
   bool inter_iter_update = true;
   while (inter_iter_update) {
     // If we didn't do any update, stop traversal, we're done.

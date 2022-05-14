@@ -1,14 +1,26 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/CUDAFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/CUDAFunctions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/cumsum_cuda_dispatch.h>
+#include <ATen/ops/uniform_native.h>
+#endif
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -73,12 +85,13 @@ void renormRows(Tensor& t) {
   const int64_t maxThreads = std::min(
       props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads);
 
+  int warp_size = at::cuda::warp_size();
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
-  dim3 block(std::min(maxThreads, C10_WARP_SIZE * ceil_div(cols, int64_t{C10_WARP_SIZE})));
+  dim3 block(std::min(maxThreads, warp_size * ceil_div(cols, int64_t{warp_size})));
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
-        <<<grid, block, (block.x / C10_WARP_SIZE) * sizeof(scalar_t),
+        <<<grid, block, (block.x / warp_size) * sizeof(scalar_t),
         at::cuda::getCurrentCUDAStream()>>>(t.data_ptr<scalar_t>(),
             rows, cols);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -334,8 +347,9 @@ void multinomial_with_replacement_kernel_impl(
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
 
-    int requiredWarps = at::ceil_div(numCategories, C10_WARP_SIZE);
-    int requiredThreads = std::min(maxThreads, requiredWarps * C10_WARP_SIZE);
+    int warp_size = at::cuda::warp_size();
+    int requiredWarps = at::ceil_div(numCategories, warp_size);
+    int requiredThreads = std::min(maxThreads, requiredWarps * warp_size);
     int requiredShared = requiredThreads * sizeof(accscalar_t);
 
     if (n_sample == 1 && maxShared >= requiredShared) {
@@ -343,9 +357,7 @@ void multinomial_with_replacement_kernel_impl(
       // To exploit greater parallelism for the sampling, generate the
       // Uniform random samples in a separate kernel launch, into
       // temporarily allocated memory. The device RNG is thread-limited
-      Tensor sampled = native::empty_cuda({numDist, n_sample}, optTypeMetaToScalarType(self_v.options().dtype_opt()),
-                                          self_v.options().layout_opt(), self_v.options().device_opt(),
-                                          self_v.options().pinned_memory_opt());
+      Tensor sampled = at::detail::empty_cuda({numDist, n_sample}, self_v.options());
       at::native::uniform_(sampled, 0.0, 1.0, generator);
 
       dim3 block(requiredThreads);

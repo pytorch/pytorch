@@ -41,8 +41,8 @@ void checkExprIR(const ExprHandle& e, const std::string& pattern) {
 }
 
 TEST(LoopNest, ExprSimple01) {
-  Tensor tensor = Compute(
-      "f", {{16, "X"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+  Tensor tensor =
+      Compute("f", {16, 5}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -53,8 +53,8 @@ TEST(LoopNest, ExprSimple01) {
 }
 
 TEST(LoopNest, ExprLower01) {
-  Tensor tensor = Compute(
-      "f", {{16, "x"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+  Tensor tensor =
+      Compute("f", {16, 5}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -69,7 +69,7 @@ TEST(LoopNest, ExprSimple02) {
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
-  Tensor tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
+  Tensor tensor = Compute("f", {26, 5}, func);
   LoopNest l({tensor});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
@@ -83,10 +83,10 @@ TEST(LoopNest, ExprSimple02) {
 
   {
     // Compare to a reference loop structure structure.
-    VarHandle x_outer("x_outer", kInt);
-    VarHandle x_inner("x_inner", kInt);
-    VarHandle y("y", kInt);
-    VarHandle x_tail("x_tail", kInt);
+    VarHandle x_outer("i_outer", kInt);
+    VarHandle x_inner("i_inner", kInt);
+    VarHandle y("i", kInt);
+    VarHandle x_tail("i_tail", kInt);
     BufHandle f("f", {26, 5}, kFloat);
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(26) - 0) / 4;
@@ -162,7 +162,7 @@ TEST(LoopNest, ExprSliceHeadWithLoopOptions) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {10}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -185,7 +185,7 @@ TEST(LoopNest, ExprSliceTailWithLoopOptions) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {10}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -217,7 +217,7 @@ TEST(LoopNest, ExprSliceHeadWhenFactorEqualsSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {10}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -237,7 +237,7 @@ TEST(LoopNest, ExprSliceHeadWhenFactorLargerThanSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {10}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -257,7 +257,7 @@ TEST(LoopNest, ExprSliceHead) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {10}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -279,7 +279,7 @@ TEST(LoopNest, ExprSliceHeadWithNonZeroStart) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {10}, func);
   LoopNest l({tensor});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
@@ -305,7 +305,7 @@ TEST(LoopNest, ExprSliceTailWhenFactorEqualsSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {10}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -327,7 +327,7 @@ TEST(LoopNest, ExprSliceTailWhenFactorLargerThanSize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {10}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -347,7 +347,7 @@ TEST(LoopNest, ExprSliceTail) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {10}, func);
   LoopNest l({tensor});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr head;
@@ -372,7 +372,7 @@ TEST(LoopNest, ExprSplitAndSlice) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{100, "x"}}, func);
+  Tensor tensor = Compute("f", {100}, func);
   LoopNest l({tensor});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -424,7 +424,7 @@ TEST(LoopNest, ExprSliceAndNormalize) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{10, "x"}}, func);
+  Tensor tensor = Compute("f", {10}, func);
   LoopNest l({tensor});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
 
@@ -455,7 +455,7 @@ TEST(LoopNest, ExprSliceWithVariableDimension) {
          const std::vector<std::pair<int, int>>& expected_for_ranges) {
         VarHandle dim("dim", kInt);
         Tensor tensor =
-            Compute("f", {{dim, "x"}}, [](const ExprHandle& x) { return x; });
+            Compute("f", {dim}, [](const ExprHandle& x) { return x; });
         LoopNest l({tensor});
         std::vector<ForPtr> loops =
             l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
@@ -492,7 +492,7 @@ TEST(LoopNest, ExprSplitWithTail) {
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
   };
-  Tensor tensor = Compute("f", {{199, "x"}}, func);
+  Tensor tensor = Compute("f", {199}, func);
   LoopNest l({tensor});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -521,7 +521,7 @@ TEST(LoopNest, ExprSplitWithTailNone) {
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
-  Tensor tensor = Compute("f", {{24, "x"}, {5, "y"}}, func);
+  Tensor tensor = Compute("f", {24, 5}, func);
   LoopNest l({tensor});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::splitWithTail(loops[0], 4);
@@ -534,10 +534,10 @@ TEST(LoopNest, ExprSplitWithTailNone) {
 
   {
     // Compare to a reference loop structure structure.
-    VarHandle x_outer("x_outer", kInt);
-    VarHandle x_inner("x_inner", kInt);
-    VarHandle y("y", kInt);
-    VarHandle x_tail("x_tail", kInt);
+    VarHandle x_outer("i_outer", kInt);
+    VarHandle x_inner("i_inner", kInt);
+    VarHandle y("i", kInt);
+    VarHandle x_tail("i_tail", kInt);
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks,cppcoreguidelines-avoid-magic-numbers)
     BufHandle f("f", {24, 5}, kFloat);
     ExprHandle x_1 = x_outer * 4 + x_inner;
@@ -579,8 +579,8 @@ TEST(LoopNest, ExprSplitWithMask01) {
   const int N = 5;
   BufHandle a_buf("a", {M, N}, kFloat);
   BufHandle b_buf("b", {M, N}, kFloat);
-  Tensor tensor = Compute(
-      "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor tensor =
+      Compute("f", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf.load(m, n) + b_buf.load(m, n) + 1.0f;
       });
 
@@ -613,7 +613,7 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
   const int M = 64;
   BufHandle a_buf("a", {M}, kFloat);
   BufHandle b_buf("b", {M}, kFloat);
-  Tensor tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
+  Tensor tensor = Compute("f", {M}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
 
@@ -697,8 +697,8 @@ TEST(LoopNest, TileSimple) {
   const int M = 64, N = 64;
   BufHandle a_buf("a", {M, N}, kFloat);
   BufHandle b_buf("b", {M, N}, kFloat);
-  Tensor tensor = Compute(
-      "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor tensor =
+      Compute("f", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf.load({m, n}) + b_buf.load({m, n}) + 1.0f;
       });
 
@@ -710,13 +710,13 @@ TEST(LoopNest, TileSimple) {
   // IR check
   StmtPtr stmt = IRSimplifier::simplify(l.root_stmt());
   checkIR(stmt, R"IR(
-# CHECK: for (int m_outer
-# CHECK:   for (int n_outer
-# CHECK:     for (int m_inner
-# CHECK:       for (int n_inner
+# CHECK: for (int i_outer
+# CHECK:   for (int i_outer_1
+# CHECK:     for (int i_inner
+# CHECK:       for (int i_inner_1
 # CHECK:         f[
-# CHECK-NOT:     for (int n_tail
-# CHECK-NOT: for (int m_tail)IR");
+# CHECK-NOT:     for (int i_tail
+# CHECK-NOT: for (int i_tail)IR");
 
   // Correctness check
   PaddedBuffer<float> a_v(M, N, "a");
@@ -742,8 +742,8 @@ TEST(LoopNest, TileWithTails) {
   const int M = 64, N = 64;
   BufHandle a_buf("a", {M, N}, kFloat);
   BufHandle b_buf("b", {M, N}, kFloat);
-  Tensor tensor = Compute(
-      "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor tensor =
+      Compute("f", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf.load({m, n}) + b_buf.load({m, n}) + 1.0f;
       });
 
@@ -755,14 +755,14 @@ TEST(LoopNest, TileWithTails) {
   // IR check
   StmtPtr stmt = IRSimplifier::simplify(l.root_stmt());
   checkIR(stmt, R"IR(
-# CHECK: for (int m_outer
-# CHECK:   for (int n_outer
-# CHECK:     for (int m_inner
-# CHECK:       for (int n_inner
+# CHECK: for (int i_outer
+# CHECK:   for (int i_outer_1
+# CHECK:     for (int i_inner
+# CHECK:       for (int i_inner_1
 # CHECK:         f[
-# CHECK:   for (int m_inner
+# CHECK:   for (int i_inner
 # CHECK:     f[
-# CHECK: for (int m_tail)IR");
+# CHECK: for (int i_tail)IR");
 
   // Correctness check
   PaddedBuffer<float> a_v(M, N, "a");
@@ -790,7 +790,7 @@ TEST(LoopNest, TileInMiddle) {
   BufHandle b_buf("b", {M, N, L, K}, kFloat);
   Tensor tensor = Compute(
       "f",
-      {{M, "m"}, {N, "n"}, {L, "l"}, {K, "k"}},
+      {M, N, L, K},
       [&](const ExprHandle& m,
           const ExprHandle& n,
           const ExprHandle& l,
@@ -807,18 +807,18 @@ TEST(LoopNest, TileInMiddle) {
   // IR check
   StmtPtr stmt = IRSimplifier::simplify(nest.root_stmt());
   checkIR(stmt, R"IR(
-# CHECK: for (int m
-# CHECK:   for (int n_outer
-# CHECK:     for (int l_outer
-# CHECK:       for (int n_inner
-# CHECK:         for (int l_inner
-# CHECK:           for (int k
+# CHECK: for (int i
+# CHECK:   for (int i_outer
+# CHECK:     for (int i_outer_1
+# CHECK:       for (int i_inner
+# CHECK:         for (int i_inner_1
+# CHECK:           for (int i_1
 # CHECK:             f[
-# CHECK:     for (int l_tail
-# CHECK:       for (int n_inner
-# CHECK:         for (int k
+# CHECK:     for (int i_tail_1
+# CHECK:       for (int i_inner_1
+# CHECK:         for (int i_1
 # CHECK:           f[
-# CHECK:   for (int n_tail)IR");
+# CHECK:   for (int i_tail)IR");
 
   // Correctness check
   PaddedBuffer<float> a_v(M, N, L, K, "a");
@@ -847,7 +847,7 @@ TEST(LoopNest, SplitWithTailWithLoopOptions) {
   const int M = 21;
   BufHandle a_buf("a", {M}, kFloat);
   BufHandle b_buf("b", {M}, kFloat);
-  Tensor tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
+  Tensor tensor = Compute("f", {M}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -877,7 +877,7 @@ TEST(LoopNest, SplitWithMaskWithLoopOptions) {
   const int M = 21;
   BufHandle a_buf("a", {M}, kFloat);
   BufHandle b_buf("b", {M}, kFloat);
-  Tensor tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
+  Tensor tensor = Compute("f", {M}, [&](const ExprHandle& m) {
     return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -905,7 +905,7 @@ TEST(LoopNest, ScheduleBroadcastAddBuffer) {
   BufHandle b_buf("b", {N, K}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
-      {{M, "m"}, {N, "n"}, {K, "k"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
       });
@@ -953,13 +953,13 @@ TEST(LoopNest, ScheduleFunctionCall01) {
   BufHandle b_buf("b", {N, K}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
-      {{M, "m"}, {N, "n"}, {K, "k"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
       });
   Tensor d = Compute(
       "d",
-      {{M, "m"}, {N, "n"}, {K, "k"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return c.load(m, n, k) + 1;
       });
@@ -1012,13 +1012,13 @@ TEST(LoopNest, ScheduleInlineSimple) {
 
   Tensor x = Compute(
       "x",
-      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor y = Compute(
       "y",
-      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return c_buf.load(m, n) * d_buf.load(m, k) + x.load(m, n, k);
       });
@@ -1092,19 +1092,19 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
 
   Tensor x = Compute(
       "x",
-      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor y = Compute(
       "y",
-      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return c_buf.load(m, n) * d_buf.load(m, k) + x.load(m, n, k);
       });
   Tensor z = Compute(
       "z",
-      {{M, "m3"}, {N, "n3"}, {K, "k3"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return x.load(m, n, k) + y.load(m, n, k);
       });
@@ -1171,7 +1171,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   if (inline_order.size() == 2) {
     Tensor z2 = Compute(
         "z",
-        {{M, "m3"}, {N, "n3"}, {K, "k3"}},
+        {M, N, K},
         [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
           return a_buf.load(m, n) * b_buf.load(n, k) +
               (c_buf.load(m, n) * d_buf.load(m, k) +
@@ -1206,13 +1206,13 @@ TEST(LoopNest, ScheduleInlineRandom) {
 
   Tensor x = Compute(
       "x",
-      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return Mod::make(Intrinsics::make(kRand, kInt), 5);
       });
   Tensor y = Compute(
       "y",
-      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return x.load(m, n, k) + x.load(m, n, k);
       });
@@ -1226,11 +1226,11 @@ TEST(LoopNest, ScheduleInlineRandom) {
 
   // Check the IR we produced
   checkIR(stmt1, R"IR(
-# CHECK: for (int m2 = 0; m2 < 4; m2++)
-# CHECK:   for (int n2 = 0; n2 < 5; n2++)
-# CHECK:     for (int k2 = 0; k2 < 6; k2++)
+# CHECK: for (int i = 0; i < 4; i++)
+# CHECK:   for (int i_1 = 0; i_1 < 5; i_1++)
+# CHECK:     for (int i_2 = 0; i_2 < 6; i_2++)
 # CHECK:       int x = rand();
-# CHECK:       y[m2, n2, k2] = 2 * (x % 5);)IR");
+# CHECK:       y[i, i_1, i_2] = 2 * (x % 5);)IR");
 }
 
 // Make sure we don't cache random vars that are not being inlined.
@@ -1241,13 +1241,13 @@ TEST(LoopNest, ScheduleInlineRandomUnrelated) {
 
   Tensor x = Compute(
       "x",
-      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return m * n * k;
       });
   Tensor y = Compute(
       "y",
-      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return x.load(m, n, k) + Intrinsics::make(kRand, kInt) +
             Intrinsics::make(kRand, kInt);
@@ -1262,10 +1262,10 @@ TEST(LoopNest, ScheduleInlineRandomUnrelated) {
 
   // Check the IR we produced
   checkIR(stmt1, R"IR(
-# CHECK: for (int m2 = 0; m2 < 4; m2++)
-# CHECK:   for (int n2 = 0; n2 < 5; n2++)
-# CHECK:     for (int k2 = 0; k2 < 6; k2++)
-# CHECK:       y[m2, n2, k2] = ((k2 * m2) * n2 + (rand())) + (rand());)IR");
+# CHECK: for (int i = 0; i < 4; i++)
+# CHECK:   for (int i_1 = 0; i_1 < 5; i_1++)
+# CHECK:     for (int i_2 = 0; i_2 < 6; i_2++)
+# CHECK:       y[i, i_1, i_2] = ((i * i_1) * i_2 + (rand())) + (rand());)IR");
 }
 
 // Make sure we generate the right number of random values == the dimensionality
@@ -1275,12 +1275,12 @@ TEST(LoopNest, ScheduleInlineRandomLowerDimensions) {
   const int N = 5;
   const int K = 6;
 
-  Tensor x = Compute("x", {{M, "m1"}}, [&](const VarHandle& m) {
+  Tensor x = Compute("x", {M}, [&](const VarHandle& m) {
     return Mod::make(Intrinsics::make(kRand, kInt), 5);
   });
   Tensor y = Compute(
       "y",
-      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return x.load(m) + x.load(m);
       });
@@ -1294,11 +1294,11 @@ TEST(LoopNest, ScheduleInlineRandomLowerDimensions) {
 
   // Check the IR we produced
   checkIR(stmt1, R"IR(
-# CHECK: for (int m2 = 0; m2 < 4; m2++)
+# CHECK: for (int i = 0; i < 4; i++)
 # CHECK:   int x = rand();
-# CHECK:   for (int n2 = 0; n2 < 5; n2++)
-# CHECK:     for (int k2 = 0; k2 < 6; k2++)
-# CHECK:       y[m2, n2, k2] = 2 * (x % 5);)IR");
+# CHECK:   for (int i_1 = 0; i_1 < 5; i_1++)
+# CHECK:     for (int i_2 = 0; i_2 < 6; i_2++)
+# CHECK:       y[i, i_1, i_2] = 2 * (x % 5);)IR");
 }
 
 // Make sure we don't screw up intrinsics thinking they're rand.
@@ -1311,13 +1311,13 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
 
   Tensor x = Compute(
       "x",
-      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor y = Compute(
       "y",
-      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return Intrinsics::make(kSqrt, x.load(m, n, k));
       });
@@ -1369,13 +1369,13 @@ TEST(LoopNest, ScheduleInlineRandWithIntrinsics) {
 
   Tensor x = Compute(
       "x",
-      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return Intrinsics::make(kRand, kFloat);
       });
   Tensor y = Compute(
       "y",
-      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return Intrinsics::make(kSqrt, x.load(m, n, k));
       });
@@ -1387,20 +1387,18 @@ TEST(LoopNest, ScheduleInlineRandWithIntrinsics) {
 
   // Check the IR we produced
   checkIR(stmt1, R"IR(
-# CHECK: for (int m2 = 0; m2 < 4; m2++)
-# CHECK:   for (int n2 = 0; n2 < 5; n2++)
-# CHECK:     for (int k2 = 0; k2 < 6; k2++)
+# CHECK: for (int i = 0; i < 4; i++)
+# CHECK:   for (int i_1 = 0; i_1 < 5; i_1++)
+# CHECK:     for (int i_2 = 0; i_2 < 6; i_2++)
 # CHECK:       float x = rand();
-# CHECK:       y[m2, n2, k2] = sqrt(x);)IR");
+# CHECK:       y[i, i_1, i_2] = sqrt(x);)IR");
 }
 
 // Split a Compute then inline it into another compute.
 TEST(LoopNest, ScheduleSplitAThenInline) {
-  Tensor a =
-      Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
-    return a.load(j + ExprHandle(8));
-  });
+  Tensor a = Compute("a", {18}, [&](const VarHandle& i) { return i * i; });
+  Tensor b = Compute(
+      "b", {2}, [&](const VarHandle& j) { return a.load(j + ExprHandle(8)); });
 
   LoopNest l({b}, {a, b});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
@@ -1410,11 +1408,9 @@ TEST(LoopNest, ScheduleSplitAThenInline) {
 
 // Split a Compute then inline another Compute into it.
 TEST(LoopNest, ScheduleSplitBThenInline) {
-  Tensor a =
-      Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a.load(j + ExprHandle(8));
-  });
+  Tensor a = Compute("a", {18}, [&](const VarHandle& i) { return i * i; });
+  Tensor b = Compute(
+      "b", {6}, [&](const VarHandle& j) { return a.load(j + ExprHandle(8)); });
 
   LoopNest l({b}, {a, b});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(b.buf()).at(0);
@@ -1434,11 +1430,9 @@ TEST(LoopNest, ScheduleSplitBThenInline) {
 
 // Split a Compute twice then inline it.
 TEST(LoopNest, ScheduleSplitTwiceThenInline) {
-  Tensor a =
-      Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
-    return a.load(j + ExprHandle(8));
-  });
+  Tensor a = Compute("a", {18}, [&](const VarHandle& i) { return i * i; });
+  Tensor b = Compute(
+      "b", {2}, [&](const VarHandle& j) { return a.load(j + ExprHandle(8)); });
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr i_inner;
 
@@ -1451,11 +1445,9 @@ TEST(LoopNest, ScheduleSplitTwiceThenInline) {
 
 // Inline a Compute, then split.
 TEST(LoopNest, ScheduleInlineThenSplit) {
-  Tensor a =
-      Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a.load(j + ExprHandle(8));
-  });
+  Tensor a = Compute("a", {18}, [&](const VarHandle& i) { return i * i; });
+  Tensor b = Compute(
+      "b", {6}, [&](const VarHandle& j) { return a.load(j + ExprHandle(8)); });
 
   LoopNest l({b}, {a, b});
   l.computeInline(a.buf());
@@ -1475,11 +1467,9 @@ TEST(LoopNest, ScheduleInlineThenSplit) {
 
 // Split a Compute, inline it, then split the result.
 TEST(LoopNest, ScheduleSplitInlineThenSplit) {
-  Tensor a =
-      Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor b = Compute("b", {{16, "j"}}, [&](const VarHandle& j) {
-    return a.load(j + ExprHandle(8));
-  });
+  Tensor a = Compute("a", {18}, [&](const VarHandle& i) { return i * i; });
+  Tensor b = Compute(
+      "b", {16}, [&](const VarHandle& j) { return a.load(j + ExprHandle(8)); });
 
   LoopNest l({b}, {a, b});
   auto loops = NodeFinder<For>::find(l.root_stmt());
@@ -1501,12 +1491,11 @@ TEST(LoopNest, ScheduleSplitInlineThenSplit) {
 
 // Oversplit a loop that is simplified out after inlining.
 TEST(LoopNest, ScheduleSplitInlineSimplify) {
-  Tensor a = Compute("a", {{18, "i"}}, [&](const VarHandle& i) {
+  Tensor a = Compute("a", {18}, [&](const VarHandle& i) {
     return ExprHandle(4) * i - ExprHandle(2) * i;
   });
-  Tensor b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
-    return a.load(j) - ExprHandle(1);
-  });
+  Tensor b = Compute(
+      "b", {2}, [&](const VarHandle& j) { return a.load(j) - ExprHandle(1); });
 
   LoopNest l({b}, {a, b});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
@@ -1516,15 +1505,12 @@ TEST(LoopNest, ScheduleSplitInlineSimplify) {
 
 // Inline a Compute with two consumers.
 TEST(LoopNest, ScheduleInlineThreeMixedOnce) {
-  Tensor a =
-      Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a.load(j + ExprHandle(8));
+  Tensor a = Compute("a", {18}, [&](const VarHandle& i) { return i * i; });
+  Tensor b = Compute(
+      "b", {6}, [&](const VarHandle& j) { return a.load(j + ExprHandle(8)); });
+  Tensor c = Compute("c", {4, 3}, [&](const VarHandle& k, const VarHandle& l) {
+    return a.load(k) * b.load(l);
   });
-  Tensor c = Compute(
-      "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a.load(k) * b.load(l);
-      });
 
   LoopNest l({c}, {a, b, c});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
@@ -1545,15 +1531,12 @@ TEST(LoopNest, ScheduleInlineThreeMixedOnce) {
 
 // Inline Compute A into B, then inline B into C.
 TEST(LoopNest, ScheduleInlineThreeMixedTwice) {
-  Tensor a =
-      Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a.load(j + ExprHandle(8));
+  Tensor a = Compute("a", {18}, [&](const VarHandle& i) { return i * i; });
+  Tensor b = Compute(
+      "b", {6}, [&](const VarHandle& j) { return a.load(j + ExprHandle(8)); });
+  Tensor c = Compute("c", {4, 3}, [&](const VarHandle& k, const VarHandle& l) {
+    return a.load(k) * b.load(l);
   });
-  Tensor c = Compute(
-      "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a.load(k) * b.load(l);
-      });
 
   LoopNest l({c}, {a, b, c});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
@@ -1575,15 +1558,12 @@ TEST(LoopNest, ScheduleInlineThreeMixedTwice) {
 
 // Inline a Compute that is both a producer and consumer.
 TEST(LoopNest, ScheduleInlineThreeMixedInner) {
-  Tensor a =
-      Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a.load(j + ExprHandle(8));
+  Tensor a = Compute("a", {18}, [&](const VarHandle& i) { return i * i; });
+  Tensor b = Compute(
+      "b", {6}, [&](const VarHandle& j) { return a.load(j + ExprHandle(8)); });
+  Tensor c = Compute("c", {4, 3}, [&](const VarHandle& k, const VarHandle& l) {
+    return a.load(k) * b.load(l);
   });
-  Tensor c = Compute(
-      "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a.load(k) * b.load(l);
-      });
 
   LoopNest l({c}, {a, b, c});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
@@ -1604,15 +1584,12 @@ TEST(LoopNest, ScheduleInlineThreeMixedInner) {
 
 // Split 3 Computes, then inline the first two into the last.
 TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
-  Tensor a =
-      Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
-  Tensor b = Compute("b", {{6, "j"}}, [&](const VarHandle& j) {
-    return a.load(j + ExprHandle(8));
+  Tensor a = Compute("a", {18}, [&](const VarHandle& i) { return i * i; });
+  Tensor b = Compute(
+      "b", {6}, [&](const VarHandle& j) { return a.load(j + ExprHandle(8)); });
+  Tensor c = Compute("c", {4, 3}, [&](const VarHandle& k, const VarHandle& l) {
+    return a.load(k) * b.load(l);
   });
-  Tensor c = Compute(
-      "c", {{4, "k"}, {3, "l"}}, [&](const VarHandle& k, const VarHandle& l) {
-        return a.load(k) * b.load(l);
-      });
 
   LoopNest l({c}, {a, b, c});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(a.buf()).at(0);
@@ -1633,13 +1610,13 @@ TEST(LoopNest, ScheduleInlineOutputTensors) {
 
   Tensor x = Compute(
       "x",
-      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return m * n * k;
       });
   Tensor y = Compute(
       "y",
-      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return x.load(m, n, k) + m;
       });
@@ -1653,14 +1630,14 @@ TEST(LoopNest, ScheduleInlineOutputTensors) {
 
   // Check the IR we produced
   checkIR(stmt1, R"IR(
-# CHECK: for (int m1 = 0; m1 < 4; m1++)
-# CHECK:   for (int n1 = 0; n1 < 5; n1++)
-# CHECK:     for (int k1 = 0; k1 < 6; k1++)
-# CHECK:       x[m1, n1, k1] = (k1 * m1) * n1;
-# CHECK: for (int m2 = 0; m2 < 4; m2++)
-# CHECK:   for (int n2 = 0; n2 < 5; n2++)
-# CHECK:     for (int k2 = 0; k2 < 6; k2++)
-# CHECK:       y[m2, n2, k2] = (k2 * m2) * n2 + m2;)IR");
+# CHECK: for (int i = 0; i < 4; i++)
+# CHECK:   for (int i_1 = 0; i_1 < 5; i_1++)
+# CHECK:     for (int i_2 = 0; i_2 < 6; i_2++)
+# CHECK:       x[i, i_1, i_2] = (i * i_1) * i_2;
+# CHECK: for (int i_3 = 0; i_3 < 4; i_3++)
+# CHECK:   for (int i_4 = 0; i_4 < 5; i_4++)
+# CHECK:     for (int i_5 = 0; i_5 < 6; i_5++)
+# CHECK:       y[i_3, i_4, i_5] = i_3 + (i_3 * i_4) * i_5;)IR");
 }
 
 TEST(LoopNest, ScheduleInlineWithCompoundIndices) {
@@ -1790,13 +1767,13 @@ TEST(LoopNest, ScheduleFuserStyle) {
 
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
 
-  Tensor b = Compute(
-      "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
+  Tensor b =
+      Compute("f", {kTotalSize}, [&](const std::vector<VarHandle>& axes) {
         return a_buf.load(axes[0]) + 11.0f;
       });
 
-  Tensor c = Compute(
-      "g", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
+  Tensor c =
+      Compute("g", {kTotalSize}, [&](const std::vector<VarHandle>& axes) {
         return b.load(axes[0]) + 1.0f;
       });
 
@@ -1825,13 +1802,13 @@ TEST(LoopNest, ScheduleFuserThreeArg) {
   BufHandle c("C", {ExprHandle(kTotalSize)}, kFloat);
   BufHandle d("D", {ExprHandle(kTotalSize)}, kFloat);
 
-  Tensor e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
+  Tensor e = Compute("e", {kTotalSize}, [&](const VarHandle& i) {
     return a.load(i) + b.load(i);
   });
-  Tensor f = Compute("f", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
+  Tensor f = Compute("f", {kTotalSize}, [&](const VarHandle& i) {
     return e.load(i) + c.load(i);
   });
-  Tensor g = Compute("g", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
+  Tensor g = Compute("g", {kTotalSize}, [&](const VarHandle& i) {
     return f.load(i) + d.load(i);
   });
 
@@ -1859,8 +1836,8 @@ TEST(LoopNest, ScheduleDynamicShape2D) {
     VarHandle n("n", kInt);
     BufHandle a("a", {m, n}, kFloat);
     BufHandle b("b", {m, n}, kFloat);
-    Tensor c = Compute(
-        "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
+    Tensor c =
+        Compute("c", {m, n}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
         });
     LoopNest l({c});
@@ -1893,27 +1870,26 @@ TEST(LoopNest, LoopNestComputeAt_1) {
   // should not be inlined into B. Instead, it should be computed into the temp,
   // and the temp should be used in B.
   VarHandle N("N", kInt);
-  Tensor A = Compute(
-      "A", {{N, "i_a"}}, [&](const VarHandle& i_a) { return i_a * i_a; });
-  Tensor B = Compute(
-      "B", {{N, "i_b"}}, [&](const VarHandle& i_b) { return A.load(i_b); });
+  Tensor A = Compute("A", {N}, [&](const VarHandle& i_a) { return i_a * i_a; });
+  Tensor B =
+      Compute("B", {N}, [&](const VarHandle& i_b) { return A.load(i_b); });
   LoopNest l({B}, {A, B});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(B.buf()).at(0);
   LoopNest::computeAt(l.getLoopBodyFor(A), loops[0]);
   l.prepareForCodegen();
-  StmtPtr s = l.root_stmt();
+  SimpleIREvaluator cg(l.root_stmt(), {B, N});
+  StmtPtr s = cg.stmt();
 
   checkIR(s, R"IR(
 # CHECK: Allocate(temp); // dtype=int, dims=[1]
-# CHECK: for (int i_b = 0; i_b < N; i_b++)
+# CHECK: for (int i = 0; i < N; i++)
 # CHECK:   temp[
 # CHECK-NOT: A[
-# CHECK:   B[i_b] = temp[0]
+# CHECK:   B[i_1] = temp[0]
 # CHECK:   Free(temp))IR");
 
   // Now check that the loop still produces the correct result.
   std::vector<int> b_data(100, 0);
-  SimpleIREvaluator cg(s, {B, N});
   cg.call({b_data, 100});
 
   std::vector<int> b_ref(100, 0);
@@ -1942,13 +1918,11 @@ TEST(LoopNest, LoopNestComputeAt_2) {
   VarHandle W("W", kInt);
   VarHandle H("H", kInt);
   Tensor p = Compute(
-      "prod",
-      {{H + 1, "py"}, {W + 1, "px"}},
-      [&](const VarHandle& py, const VarHandle& px) { return px * py; });
-  Tensor c = Compute(
-      "cons",
-      {{H, "cy"}, {W, "cx"}},
-      [&](const VarHandle& y, const VarHandle& x) {
+      "prod", {H + 1, W + 1}, [&](const VarHandle& py, const VarHandle& px) {
+        return px * py;
+      });
+  Tensor c =
+      Compute("cons", {H, W}, [&](const VarHandle& y, const VarHandle& x) {
         return p.load(y, x) + p.load(y + 1, x) + p.load(y, x + 1) +
             p.load(y + 1, x + 1);
       });
@@ -1967,22 +1941,22 @@ TEST(LoopNest, LoopNestComputeAt_2) {
     std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(p), loops[0]);
     l.prepareForCodegen();
-    StmtPtr s = l.root_stmt();
+    SimpleIREvaluator cg(l.root_stmt(), {c, W, H});
+    StmtPtr s = cg.stmt();
 
     // Check the IR we produced
     checkIR(s, R"IR(
 # CHECK: Allocate(temp); // dtype=int, dims=[2, W + 1]
-# CHECK: for (int cy = 0; cy < H; cy++)
+# CHECK: for (int i_2 = 0; i_2 < H; i_2++)
 # CHECK:   for
 # CHECK:     for
-# CHECK:   for (int cx = 0; cx < W; cx++)
+# CHECK:   for (int i_3 = 0; i_3 < W; i_3++)
 # CHECK-NOT: prod[
 # CHECK:     cons[
 # CHECK: Free(temp))IR");
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {c, W, H});
     cg.call({c_data, kW, kH});
 
     assertAllEqual(c_data, c_ref);
@@ -1993,13 +1967,14 @@ TEST(LoopNest, LoopNestComputeAt_2) {
     std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(p), loops[1]);
     l.prepareForCodegen();
-    StmtPtr s = l.root_stmt();
+    SimpleIREvaluator cg(l.root_stmt(), {c, W, H});
+    StmtPtr s = cg.stmt();
 
     // Check the IR we produced
     checkIR(s, R"IR(
 # CHECK: Allocate(temp); // dtype=int, dims=[2, 2]
-# CHECK: for (int cy = 0; cy < H; cy++)
-# CHECK:   for (int cx = 0; cx < W; cx++)
+# CHECK: for (int i_2 = 0; i_2 < H; i_2++)
+# CHECK:   for (int i_3 = 0; i_3 < W; i_3++)
 # CHECK:     for
 # CHECK:       for
 # CHECK-NOT: prod[
@@ -2008,7 +1983,6 @@ TEST(LoopNest, LoopNestComputeAt_2) {
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {c, W, H});
     cg.call({c_data, kW, kH});
 
     assertAllEqual(c_data, c_ref);
@@ -2029,23 +2003,19 @@ TEST(LoopNest, LoopNestComputeAt_3) {
   VarHandle W("W", kInt);
   VarHandle H("H", kInt);
   Tensor A = Compute(
-      "A",
-      {{H + 1, "ay"}, {W + 1, "ax"}},
-      [&](const VarHandle& ay, const VarHandle& ax) { return ax * ay; });
+      "A", {H + 1, W + 1}, [&](const VarHandle& ay, const VarHandle& ax) {
+        return ax * ay;
+      });
   Tensor B = Compute(
-      "B",
-      {{H + 1, "by"}, {W + 1, "bx"}},
-      [&](const VarHandle& by, const VarHandle& bx) { return A.load(by, bx); });
-  Tensor C = Compute(
-      "C",
-      {{H, "cy"}, {W, "cx"}},
-      [&](const VarHandle& cy, const VarHandle& cx) {
+      "B", {H + 1, W + 1}, [&](const VarHandle& by, const VarHandle& bx) {
+        return A.load(by, bx);
+      });
+  Tensor C =
+      Compute("C", {H, W}, [&](const VarHandle& cy, const VarHandle& cx) {
         return B.load(cy, cx + 1);
       });
-  Tensor D = Compute(
-      "D",
-      {{H, "dy"}, {W, "dx"}},
-      [&](const VarHandle& dy, const VarHandle& dx) {
+  Tensor D =
+      Compute("D", {H, W}, [&](const VarHandle& dy, const VarHandle& dx) {
         return A.load(dy + 1, dx) + C.load(dy, dx);
       });
 
@@ -2063,27 +2033,27 @@ TEST(LoopNest, LoopNestComputeAt_3) {
     std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(D.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(A), loops[0]);
     l.prepareForCodegen();
-    StmtPtr s = l.root_stmt();
+    SimpleIREvaluator cg(l.root_stmt(), {D, W, H});
+    StmtPtr s = cg.stmt();
 
     // Check the IR we produced
     checkIR(s, R"IR(
 # CHECK: Allocate(temp); // dtype=int, dims=[1, W]
-# CHECK: for (int ay = 0; ay < H + 1; ay++)
-# CHECK:   for (int ax = 0; ax < W + 1; ax++)
+# CHECK: for (int i = 0; i < H + 1; i++)
+# CHECK:   for (int i_1 = 0; i_1 < W + 1; i_1++)
 # CHECK:     A[
-# CHECK: for (int by = 0; by < H + 1; by++)
-# CHECK:   for (int bx = 0; bx < W + 1; bx++)
+# CHECK: for (int i_2 = 0; i_2 < H + 1; i_2++)
+# CHECK:   for (int i_3 = 0; i_3 < W + 1; i_3++)
 # CHECK:     B[
-# CHECK: for (int cy = 0; cy < H; cy++)
-# CHECK:   for (int cx = 0; cx < W; cx++)
+# CHECK: for (int i_4 = 0; i_4 < H; i_4++)
+# CHECK:   for (int i_5 = 0; i_5 < W; i_5++)
 # CHECK:     C[
-# CHECK: for (int dy = 0; dy < H; dy++)
-# CHECK:   for (int dx = 0; dx < W; dx++)
+# CHECK: for (int i_6 = 0; i_6 < H; i_6++)
+# CHECK:   for (int i_7 = 0; i_7 < W; i_7++)
 # CHECK-NOT: A[)IR");
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {D, W, H});
     cg.call({c_data, kW, kH});
 
     assertAllEqual(c_data, c_ref);
@@ -2094,27 +2064,27 @@ TEST(LoopNest, LoopNestComputeAt_3) {
     std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(D.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(A), loops[1]);
     l.prepareForCodegen();
-    StmtPtr s = l.root_stmt();
+    SimpleIREvaluator cg(l.root_stmt(), {D, W, H});
+    StmtPtr s = cg.stmt();
 
     // Check the IR we produced
     checkIR(s, R"IR(
 # CHECK: Allocate(temp); // dtype=int, dims=[1, 1]
-# CHECK: for (int ay = 0; ay < H + 1; ay++)
-# CHECK:   for (int ax = 0; ax < W + 1; ax++)
+# CHECK: for (int i = 0; i < H + 1; i++)
+# CHECK:   for (int i_1 = 0; i_1 < W + 1; i_1++)
 # CHECK:     A[
-# CHECK: for (int by = 0; by < H + 1; by++)
-# CHECK:   for (int bx = 0; bx < W + 1; bx++)
+# CHECK: for (int i_2 = 0; i_2 < H + 1; i_2++)
+# CHECK:   for (int i_3 = 0; i_3 < W + 1; i_3++)
 # CHECK:     B[
-# CHECK: for (int cy = 0; cy < H; cy++)
-# CHECK:   for (int cx = 0; cx < W; cx++)
+# CHECK: for (int i_4 = 0; i_4 < H; i_4++)
+# CHECK:   for (int i_5 = 0; i_5 < W; i_5++)
 # CHECK:     C[
-# CHECK: for (int dy = 0; dy < H; dy++)
-# CHECK:   for (int dx = 0; dx < W; dx++)
+# CHECK: for (int i_6 = 0; i_6 < H; i_6++)
+# CHECK:   for (int i_7 = 0; i_7 < W; i_7++)
 # CHECK-NOT: A[)IR");
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {D, W, H});
     cg.call({c_data, kW, kH});
 
     assertAllEqual(c_data, c_ref);
@@ -2128,16 +2098,14 @@ TEST(LoopNest, Reduce2dComputeAt) {
   VarHandle W("W", kInt);
   VarHandle H("H", kInt);
 
-  Tensor p =
-      Compute("prod", {{H + 1, "py"}, {W + 1, "px"}}, [&](Axis py, Axis px) {
-        return px * py;
-      });
+  Tensor p = Compute(
+      "prod", {H + 1, W + 1}, [&](Axis py, Axis px) { return px * py; });
   Tensor c = Reduce(
       "cons",
-      {{H, "cy"}, {W, "cx"}},
+      {H, W},
       Sum(),
       [&](Axis y, Axis x, Axis r, Axis s) { return p.load(y + r, x + s); },
-      {{2, "r"}, {2, "s"}});
+      {2, 2});
 
   std::vector<int> c_ref(kW * kH, 0);
   for (int y = 0; y < kH; y++) {
@@ -2147,17 +2115,17 @@ TEST(LoopNest, Reduce2dComputeAt) {
   }
   LoopNest orig_loopnest({c}, {p, c});
   checkIR(orig_loopnest.root_stmt(), R"IR(
-# CHECK: for (int py = 0; py < H + 1; py++) {
-# CHECK:   for (int px = 0; px < W + 1; px++) {
-# CHECK:     prod[py, px] = px * py;
+# CHECK: for (int i = 0; i < H + 1; i++) {
+# CHECK:   for (int i_1 = 0; i_1 < W + 1; i_1++) {
+# CHECK:     prod[i, i_1] = i_1 * i;
 # CHECK:   }
 # CHECK: }
-# CHECK: for (int cy = 0; cy < H; cy++) {
-# CHECK:   for (int cx = 0; cx < W; cx++) {
-# CHECK:     cons[cy, cx] = int(0);
-# CHECK:     for (int r = 0; r < 2; r++) {
-# CHECK:       for (int s = 0; s < 2; s++) {
-# CHECK:         cons[cy, cx] = ReduceOp((cons[cy, cx]) + (prod[cy + r, cx + s]), reduce_args={r, s});
+# CHECK: for (int i_2 = 0; i_2 < H; i_2++) {
+# CHECK:   for (int i_3 = 0; i_3 < W; i_3++) {
+# CHECK:     cons[i_2, i_3] = int(0);
+# CHECK:     for (int i_4 = 0; i_4 < 2; i_4++) {
+# CHECK:       for (int i_5 = 0; i_5 < 2; i_5++) {
+# CHECK:         cons[i_2, i_3] = ReduceOp((cons[i_2, i_3]) + (prod[i_2 + i_4, i_3 + i_5]), reduce_args={i_4, i_5});
 # CHECK:       }
 # CHECK:     }
 # CHECK:   }
@@ -2174,30 +2142,29 @@ TEST(LoopNest, Reduce2dComputeAt) {
     // l.simplify();
     l.eliminateDeadStores();
     l.prepareForCodegen();
-    checkIR(l.root_stmt(), R"IR(
+    SimpleIREvaluator cg(l.root_stmt(), {c, W, H});
+    checkIR(cg.stmt(), R"IR(
 # CHECK: Allocate(temp); // dtype=int, dims=[2, W + 1]
-# CHECK: for (int cy = 0; cy < H; cy++) {
+# CHECK: for (int i = 0; i < H; i++) {
 # CHECK:   for (int idx0 = 0; idx0 < 2; idx0++) {
 # CHECK:     for (int idx1 = 0; idx1 < W + 1; idx1++) {
-# CHECK:       temp[(0 + idx0 * (1 * (W + 1))) + idx1 * 1] = (idx0 + cy) * (idx1 + 0);
+# CHECK:       temp[(0 + idx0 * (1 * (W + 1))) + idx1 * 1] = (idx0 + i) * (idx1 + 0);
 # CHECK:     }
 # CHECK:   }
-# CHECK:   for (int cx = 0; cx < W; cx++) {
-# CHECK:     cons[(0 + cy * (1 * W)) + cx * 1] = int(0);
-# CHECK:     for (int r = 0; r < 2; r++) {
-# CHECK:       for (int s = 0; s < 2; s++) {
-# CHECK:         cons[(0 + cy * (1 * W)) + cx * 1] = (cons[(0 + cy * (1 * W)) + cx * 1]) + (temp[(0 + r * (1 * (W + 1))) + (cx + s) * 1]);
+# CHECK:   for (int i_1 = 0; i_1 < W; i_1++) {
+# CHECK:     cons[(0 + i * (1 * W)) + i_1 * 1] = int(0);
+# CHECK:     for (int i_2 = 0; i_2 < 2; i_2++) {
+# CHECK:       for (int i_3 = 0; i_3 < 2; i_3++) {
+# CHECK:         cons[(0 + i * (1 * W)) + i_1 * 1] = (cons[(0 + i * (1 * W)) + i_1 * 1]) + (temp[(0 + i_2 * (1 * (W + 1))) + (i_1 + i_3) * 1]);
 # CHECK:       }
 # CHECK:     }
 # CHECK:   }
 # CHECK: }
 # CHECK: Free(temp);
 )IR");
-    StmtPtr s = l.root_stmt();
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {c, W, H});
     cg.call({c_data, kW, kH});
     assertAllEqual(c_data, c_ref);
   }
@@ -2209,30 +2176,29 @@ TEST(LoopNest, Reduce2dComputeAt) {
     l.simplify();
     l.eliminateDeadStores();
     l.prepareForCodegen();
-    checkIR(l.root_stmt(), R"IR(
+    SimpleIREvaluator cg(l.root_stmt(), {c, W, H});
+    checkIR(cg.stmt(), R"IR(
 # CHECK: Allocate(temp); // dtype=int, dims=[2, 2]
-# CHECK: for (int cy = 0; cy < H; cy++) {
-# CHECK:   for (int cx = 0; cx < W; cx++) {
+# CHECK: for (int i = 0; i < H; i++) {
+# CHECK:   for (int i_1 = 0; i_1 < W; i_1++) {
 # CHECK:     for (int idx0 = 0; idx0 < 2; idx0++) {
 # CHECK:       for (int idx1 = 0; idx1 < 2; idx1++) {
-# CHECK:         temp[(0 + idx0 * (1 * 2)) + idx1 * 1] = (cy + idx0) * (cx + idx1);
+# CHECK:         temp[(0 + idx0 * (1 * 2)) + idx1 * 1] = (i + idx0) * (i_1 + idx1);
 # CHECK:       }
 # CHECK:     }
-# CHECK:     cons[(0 + cy * (1 * W)) + cx * 1] = 0;
-# CHECK:     for (int r = 0; r < 2; r++) {
-# CHECK:       for (int s = 0; s < 2; s++) {
-# CHECK:         cons[(0 + cy * (1 * W)) + cx * 1] = (cons[(0 + cy * (1 * W)) + cx * 1]) + (temp[(0 + r * (1 * 2)) + s * 1]);
+# CHECK:     cons[(0 + i * (1 * W)) + i_1 * 1] = 0;
+# CHECK:     for (int i_2 = 0; i_2 < 2; i_2++) {
+# CHECK:       for (int i_3 = 0; i_3 < 2; i_3++) {
+# CHECK:         cons[(0 + i * (1 * W)) + i_1 * 1] = (cons[(0 + i * (1 * W)) + i_1 * 1]) + (temp[(0 + i_2 * (1 * 2)) + i_3 * 1]);
 # CHECK:       }
 # CHECK:     }
 # CHECK:   }
 # CHECK: }
 # CHECK: Free(temp);
 )IR");
-    StmtPtr s = l.root_stmt();
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {c, W, H});
     cg.call({c_data, kW, kH});
     assertAllEqual(c_data, c_ref);
   }
@@ -2249,18 +2215,17 @@ TEST(LoopNest, DISABLED_Conv1d_NH) {
   int Pad = 1;
   BufHandle IP("input", {H}, kFloat);
 
-  Tensor A =
-      Compute("A", {{N, "np"}, {H + 2 * Pad, "hp"}}, [&](Axis n, Axis h) {
-        auto cond = CompareSelect::make(h, Pad, 1, 0, kLT);
-        cond = CompareSelect::make(h, H + Pad, 1, cond, kGE);
-        return ifThenElse(cond, 0.f, IP.load(n, h - Pad));
-      });
+  Tensor A = Compute("A", {N, H + 2 * Pad}, [&](Axis n, Axis h) {
+    auto cond = CompareSelect::make(h, Pad, 1, 0, kLT);
+    cond = CompareSelect::make(h, H + Pad, 1, cond, kGE);
+    return ifThenElse(cond, 0.f, IP.load(n, h - Pad));
+  });
   Tensor B = Reduce(
       "B",
-      {{N, "n"}, {H, "h"}},
+      {N, H},
       Sum(),
       [&](Axis n, Axis h, Axis r) { return A.load(n, h + r); },
-      {{R, "r"}});
+      {R});
   LoopNest l({B});
   checkIR(l.root_stmt(), R"IR(
 # CHECK: for (int np = 0; np < 4; np++) {
@@ -2335,12 +2300,12 @@ class LoopOrderHelper : public IRVisitor {
 };
 
 TEST(LoopNest, LoopNestReorderAxis1) {
-  Tensor tensor = Compute(
-      "f", {{2, "x"}, {3, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+  Tensor tensor =
+      Compute("f", {2, 3}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
-  StmtPtr stmt1 = Stmt::clone(l.root_stmt());
+  StmtPtr stmt1 = LoopNest::sanitizeNames(Stmt::clone(l.root_stmt()));
 
   std::vector<int> stmt1_output(6, 0);
   SimpleIREvaluator cg(stmt1, {tensor});
@@ -2348,15 +2313,15 @@ TEST(LoopNest, LoopNestReorderAxis1) {
 
   auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[0], loops[1]);
-  StmtPtr stmt2 = Stmt::clone(l.root_stmt());
+  StmtPtr stmt2 = LoopNest::sanitizeNames(Stmt::clone(l.root_stmt()));
 
   ASSERT_NE(stmt1, stmt2);
   LoopOrderHelper loopOrderHelper;
   std::string order1 = loopOrderHelper.getOrder(stmt1);
   std::string order2 = loopOrderHelper.getOrder(stmt2);
 
-  ASSERT_EQ(order1, "x,y,");
-  ASSERT_EQ(order2, "y,x,");
+  ASSERT_EQ(order1, "j,i,");
+  ASSERT_EQ(order2, "i,j,");
 
   std::vector<int> stmt2_output(6, 0);
   SimpleIREvaluator cg2(stmt2, {tensor});
@@ -2385,7 +2350,7 @@ TEST(LoopNest, LoopNestReorderAxis1) {
 TEST(LoopNest, LoopNestReorderPartialAxes) {
   Tensor tensor = Compute(
       "f",
-      {{2, "x"}, {3, "y"}, {4, "z"}},
+      {2, 3, 4},
       [](const VarHandle& x, const VarHandle& y, const VarHandle& z) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y +
             cast<float>(z) * z;
@@ -2393,8 +2358,8 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
   LoopNest l({tensor});
 
   LoopOrderHelper loopOrderHelper;
-  StmtPtr stmt1 = Stmt::clone(l.root_stmt());
-  ASSERT_EQ(loopOrderHelper.getOrder(stmt1), "x,y,z,");
+  StmtPtr stmt1 = LoopNest::sanitizeNames(Stmt::clone(l.root_stmt()));
+  ASSERT_EQ(loopOrderHelper.getOrder(stmt1), "i,j,k,");
 
   std::vector<int> stmt1_output(24, 0);
   SimpleIREvaluator cg(stmt1, {tensor});
@@ -2402,7 +2367,7 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
 
   auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[0], loops[1]);
-  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "y,x,z,");
+  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "j,i,k,");
 
   StmtPtr stmt2 = Stmt::clone(l.root_stmt());
 
@@ -2416,7 +2381,7 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
 
   loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[1], loops[2]);
-  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "y,z,x,");
+  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "j,k,i,");
 
   StmtPtr stmt3 = Stmt::clone(l.root_stmt());
 
@@ -2432,7 +2397,7 @@ TEST(LoopNest, LoopNestReorderPartialAxes) {
 TEST(LoopNest, LoopNestReorderInternalAxis) {
   Tensor tensor = Compute(
       "f",
-      {{1, "w"}, {2, "x"}, {3, "y"}, {4, "z"}},
+      {1, 2, 3, 4},
       [](const VarHandle& w,
          const VarHandle& x,
          const VarHandle& y,
@@ -2443,8 +2408,8 @@ TEST(LoopNest, LoopNestReorderInternalAxis) {
   LoopNest l({tensor});
 
   LoopOrderHelper loopOrderHelper;
-  StmtPtr stmt1 = Stmt::clone(l.root_stmt());
-  ASSERT_EQ(loopOrderHelper.getOrder(stmt1), "w,x,y,z,");
+  StmtPtr stmt1 = LoopNest::sanitizeNames(Stmt::clone(l.root_stmt()));
+  ASSERT_EQ(loopOrderHelper.getOrder(stmt1), "i,j,k,l,");
 
   std::vector<int> stmt1_output(24, 0);
   SimpleIREvaluator cg(stmt1, {tensor});
@@ -2452,7 +2417,7 @@ TEST(LoopNest, LoopNestReorderInternalAxis) {
 
   auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[2], loops[1]);
-  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "w,y,x,z,");
+  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "i,k,j,l,");
 
   StmtPtr stmt2 = l.root_stmt();
 
@@ -2468,7 +2433,7 @@ TEST(LoopNest, LoopNestReorderInternalAxis) {
 TEST(LoopNest, LoopNestReorderEnclosingAxis) {
   Tensor tensor = Compute(
       "f",
-      {{1, "w"}, {2, "x"}, {3, "y"}, {4, "z"}},
+      {1, 2, 3, 4},
       [](const VarHandle& w,
          const VarHandle& x,
          const VarHandle& y,
@@ -2479,7 +2444,7 @@ TEST(LoopNest, LoopNestReorderEnclosingAxis) {
   LoopNest l({tensor});
 
   LoopOrderHelper loopOrderHelper;
-  StmtPtr stmt1 = Stmt::clone(l.root_stmt());
+  StmtPtr stmt1 = LoopNest::sanitizeNames(Stmt::clone(l.root_stmt()));
 
   std::vector<int> stmt1_output(24, 0);
   SimpleIREvaluator cg(stmt1, {tensor});
@@ -2487,7 +2452,7 @@ TEST(LoopNest, LoopNestReorderEnclosingAxis) {
 
   auto loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[0], loops[3]);
-  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "z,x,y,w,");
+  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "l,j,k,i,");
 
   StmtPtr stmt2 = l.root_stmt();
 
@@ -2501,8 +2466,8 @@ TEST(LoopNest, LoopNestReorderEnclosingAxis) {
 }
 
 TEST(LoopNest, LoopNestReorderSameAxis) {
-  Tensor tensor = Compute(
-      "f", {{2, "x"}, {3, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+  Tensor tensor =
+      Compute("f", {2, 3}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -2520,18 +2485,18 @@ TEST(LoopNest, LoopNestReorderSameAxis) {
 
 TEST(LoopNest, LoopNestReorderExtraStatements) {
   /* We're going for a structure like this:
-   * for x in ...
+   * for i in ...
    *   Stmt 1
-   *   for y in ...
+   *   for j in ...
    *     Stmt 2
-   *     for z in ...
+   *     for k in ...
    *       Stmt 3
    *     Stmt 4
    */
 
   Tensor tensor = Compute(
       "f",
-      {{2, "x"}, {3, "y"}, {4, "z"}},
+      {2, 3, 4},
       [](const VarHandle& x, const VarHandle& y, const VarHandle& z) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y +
             cast<float>(z) * z;
@@ -2544,15 +2509,15 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
 
   VarHandle i = VarHandle(loops[0]->var());
 
-  StmtPtr store_1 = Store::make(extra, {i, 0}, ExprHandle(1.f));
-  StmtPtr store_2 = Store::make(extra, {i, 1}, ExprHandle(2.f));
+  StmtPtr store_1 = Store::make(extra, {i, 0}, 1.f);
+  StmtPtr store_2 = Store::make(extra, {i, 1}, 2.f);
   // stmt 3 is the Function body.
-  StmtPtr store_3 = Store::make(extra, {i, 2}, ExprHandle(4.f));
+  StmtPtr store_3 = Store::make(extra, {i, 2}, 4.f);
 
   loops[0]->body()->prepend_stmt(store_1);
   loops[1]->body()->prepend_stmt(store_2);
   loops[1]->body()->append_stmt(store_3);
-  StmtPtr stmt1 = Stmt::clone(l.root_stmt());
+  StmtPtr stmt1 = LoopNest::sanitizeNames(Stmt::clone(l.root_stmt()));
 
   std::vector<int> extra1(6, 0);
   std::vector<int> res1(24, 0);
@@ -2561,14 +2526,14 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
 
   /* Then we reorder loop y and z, we want it to look like:
    *
-   * for x in ...
+   * for i in ...
    *   Stmt 1
-   *   for y in ...
+   *   for j in ...
    *     Stmt 2
-   *   for z in ...
-   *    for y in ...
+   *   for j_1 in ...
+   *    for k in ...
    *       Stmt 3
-   *   for y in ...
+   *   for j_2 in ...
    *     Stmt 4
    *
    * We need extra loops because we don't have dependency info about stmt 3
@@ -2577,19 +2542,19 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
    */
 
   LoopNest::reorderAxis(loops[1], loops[2]);
-  StmtPtr stmt2 = Stmt::clone(l.root_stmt());
+  StmtPtr stmt2 = LoopNest::sanitizeNames(Stmt::clone(l.root_stmt()));
 
   // Check the IR we produced
   checkIR(stmt2, R"IR(
-# CHECK: for (int x
-# CHECK:   res[x, 0] = 1
-# CHECK:   for (int y
-# CHECK:     res[x, 1] = 2
-# CHECK:   for (int z
-# CHECK:     for (int y
+# CHECK: for
+# CHECK:   res[i, 0] = 1
+# CHECK:   for
+# CHECK:     res[i, 1] = 2
+# CHECK:   for
+# CHECK:     for
 # CHECK:       f[
-# CHECK:   for (int y
-# CHECK:     res[x, 2] = 4
+# CHECK:   for
+# CHECK:     res[i, 2] = 4
 )IR");
 
   std::vector<int> extra2(6, 0);
@@ -2625,21 +2590,21 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
    */
   loops = l.getAllLoopNestsWritingToBuf(tensor.buf()).at(0);
   LoopNest::reorderAxis(loops[0], loops[2]);
-  StmtPtr stmt3 = Stmt::clone(l.root_stmt());
+  StmtPtr stmt3 = LoopNest::sanitizeNames(Stmt::clone(l.root_stmt()));
 
   // Check the IR we produced
   checkIR(stmt3, R"IR(
-# CHECK: for (int x
-# CHECK:   res[x, 0] = 1
-# CHECK:   for (int y
-# CHECK:     res[x, 1] = 2
-# CHECK: for (int y
-# CHECK:   for (int z
-# CHECK:     for (int x
+# CHECK: for
+# CHECK:   res[i, 0] = 1
+# CHECK:   for
+# CHECK:     res[i, 1] = 2
+# CHECK: for
+# CHECK:   for
+# CHECK:     for
 # CHECK:       f[
-# CHECK: for (int x
-# CHECK:   for (int y
-# CHECK:     res[x, 2] = 4
+# CHECK: for
+# CHECK:   for
+# CHECK:     res[i_2, 2] = 4
 )IR");
 
   std::vector<int> extra3(6, 0);
@@ -2661,9 +2626,7 @@ void LoopNestReorderTestHelper(
     int index1,
     int index2) {
   Tensor c = Compute(
-      "5d",
-      {{2, "a"}, {3, "b"}, {2, "c"}, {3, "d"}, {2, "e"}},
-      [](const std::vector<VarHandle>&) { return -1; });
+      "5d", {2, 3, 2, 3, 2}, [](const std::vector<VarHandle>&) { return -1; });
   LoopNest l({c});
 
   BufHandle extra("extra", {5}, kInt);
@@ -2785,34 +2748,26 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
 
   Tensor x = Compute(
       "x",
-      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor y = Compute(
       "y",
-      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return c_buf.load(m, n) * d_buf.load(m, k) + x.load(m, n, k);
       });
   Tensor z = Compute(
       "z",
-      {{M, "m3"}, {N, "n3"}, {K, "k3"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return x.load(m, n, k) + y.load(m, n, k);
       });
 
   LoopNest l({z}, {x, y, z});
-  ForPtr a = nullptr;
-  ForPtr b = nullptr;
-  auto fors = NodeFinder<For>::find(l.root_stmt());
-  for (auto f : fors) {
-    if (f->var()->name_hint() == "m2") {
-      a = f;
-    } else if (f->var()->name_hint() == "k2") {
-      b = f;
-    }
-  }
+  ForPtr a = l.getAllLoopNestsWritingToBuf(y.buf())[0][2];
+  ForPtr b = l.getAllLoopNestsWritingToBuf(y.buf())[0][0];
   LoopNest::reorderAxis(a, b);
 
   l.prepareForCodegen();
@@ -2821,15 +2776,15 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
   // Check the IR we produced has the 3 nests in the right order, but k and m
   // swapped in the middle.
   checkIR(stmt, R"IR(
-# CHECK: for (int m1
-# CHECK:   for (int n1
-# CHECK:     for (int k1
-# CHECK: for (int k2
-# CHECK:   for (int n2
-# CHECK:     for (int m2
-# CHECK: for (int m3
-# CHECK:   for (int n3
-# CHECK:     for (int k3)IR");
+# CHECK: < 4
+# CHECK: < 5
+# CHECK: < 6
+# CHECK: < 6
+# CHECK: < 5
+# CHECK: < 4
+# CHECK: < 4
+# CHECK: < 5
+# CHECK: < 6)IR");
 
   {
     PaddedBuffer<float> a_v(M, N);
@@ -2875,8 +2830,8 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
 }
 
 TEST(LoopNest, OuterLoopVectorization) {
-  Tensor tensor = Compute(
-      "f", {{8, "X"}, {8, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+  Tensor tensor =
+      Compute("f", {8, 8}, [](const VarHandle& x, const VarHandle& y) {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
@@ -2926,12 +2881,12 @@ namespace {
 
 std::string constantUpperBoundLoopIR(int upper_bound_val) {
   ExprHandle upper_bound(upper_bound_val);
-  Tensor A = Compute(
-      "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
+  Tensor A =
+      Compute("A", {upper_bound}, [&](const VarHandle& x) { return x * 2; });
   LoopNest l({A});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A.buf())[0];
   StmtPtr unrolled = nullptr;
-  LoopNest::unroll(loops[0], &unrolled);
+  LoopNest::fullUnroll(loops[0], &unrolled);
   std::ostringstream oss;
   oss << *unrolled;
   return oss.str();
@@ -2955,21 +2910,21 @@ TEST(LoopNest, UnrollOuter) {
   ExprHandle inner_bound(4);
   Tensor A = Compute(
       "A",
-      {{outer_bound, "x"}, {inner_bound, "y"}},
+      {outer_bound, inner_bound},
       [&](const VarHandle& x, const VarHandle& y) { return x + y; });
   LoopNest l({A});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A.buf())[0];
   StmtPtr unrolled = nullptr;
-  LoopNest::unroll(loops[0], &unrolled);
+  LoopNest::fullUnroll(loops[0], &unrolled);
   checkIR(unrolled, R"IR(
-# CHECK: for (int y = 0; y < 4; y++) {
-# CHECK: A[0, y] = y;
+# CHECK: for (int i = 0; i < 4; i++) {
+# CHECK: A[0, i] = i;
 # CHECK: }
-# CHECK: for (int y = 0; y < 4; y++) {
-# CHECK: A[1, y] = y + 1;
+# CHECK: for (int i = 0; i < 4; i++) {
+# CHECK: A[1, i] = i + 1;
 # CHECK: }
-# CHECK: for (int y = 0; y < 4; y++) {
-# CHECK: A[2, y] = y + 2;
+# CHECK: for (int i = 0; i < 4; i++) {
+# CHECK: A[2, i] = i + 2;
 # CHECK: })IR");
 }
 
@@ -2978,19 +2933,19 @@ TEST(LoopNest, UnrollInner) {
   ExprHandle inner_bound(4);
   Tensor A = Compute(
       "A",
-      {{outer_bound, "x"}, {inner_bound, "y"}},
+      {outer_bound, inner_bound},
       [&](const VarHandle& x, const VarHandle& y) { return x + y; });
   LoopNest l({A});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A.buf())[0];
   StmtPtr unrolled = nullptr;
-  LoopNest::unroll(
+  LoopNest::fullUnroll(
       static_to<For>(loops[0]->body()->stmts().front()), &unrolled);
   checkIR(loops[0], R"IR(
-# CHECK: for (int x = 0; x < 3; x++) {
-# CHECK: A[x, 0] = x;
-# CHECK: A[x, 1] = x + 1;
-# CHECK: A[x, 2] = x + 2;
-# CHECK: A[x, 3] = x + 3;
+# CHECK: for (int i = 0; i < 3; i++) {
+# CHECK: A[i, 0] = i;
+# CHECK: A[i, 1] = i + 1;
+# CHECK: A[i, 2] = i + 2;
+# CHECK: A[i, 3] = i + 3;
 # CHECK: })IR");
 }
 
@@ -3009,7 +2964,7 @@ TEST(LoopNest, UnrollMultipleStatements) {
            Store::make(b_buf, {x}, Load::make(a_buf, {x}))}));
   auto parent_block = Block::make({f});
   StmtPtr unrolled = nullptr;
-  LoopNest::unroll(f, &unrolled);
+  LoopNest::fullUnroll(f, &unrolled);
   checkIR(unrolled, R"IR(
 # CHECK: A[0] = 0;
 # CHECK: B[0] = A[0];
@@ -3041,7 +2996,7 @@ TEST(LoopNest, UnrollNonLiteralConstantBounds) {
 
   std::vector<ForPtr> loops = {outer_for, inner_for};
   StmtPtr unrolled = nullptr;
-  LoopNest::unroll(loops[0], &unrolled);
+  LoopNest::fullUnroll(loops[0], &unrolled);
   checkIR(unrolled, R"IR(
 # CHECK: for (int j = 0; j < 4; j++) {
 # CHECK:   A[1, j] = j;
@@ -3052,6 +3007,117 @@ TEST(LoopNest, UnrollNonLiteralConstantBounds) {
 # CHECK: for (int j = 0; j < 4; j++) {
 # CHECK:   A[3, j] = 3 * j;
 # CHECK: })IR");
+}
+
+TEST(LoopNest, UnrollNonConstantBounds) {
+  // Input IR:
+  //   for (int i = 0; i < M; i++) {
+  //     for (int j = 0; j < N; j++) {
+  //       A[i, j] = i * j;
+  //     }
+  //   }
+  VarHandle M("M", kInt);
+  VarHandle N("N", kInt);
+  BufHandle a_buf("A", {M, N}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto inner_for = For::make(j, 0, N, for_body);
+  auto outer_for = For::make(i, 0, M, inner_for);
+  auto block = Block::make({outer_for});
+  LoopNest l(block, {a_buf.node()});
+
+  LoopNest::unroll(inner_for, 8);
+  l.simplify();
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int i = 0; i < M; i++) {
+    # CHECK:   for (int j_outer = 0; j_outer < N / 8; j_outer++) {
+    # CHECK:     A[i, 8 * j_outer] =
+    # CHECK:     A[i, 8 * j_outer + 1] =
+    # CHECK:     A[i, 2 * (4 * j_outer + 1)] =
+    # CHECK:     A[i, 8 * j_outer + 3] =
+    # CHECK:     A[i, 4 * (2 * j_outer + 1)] =
+    # CHECK:     A[i, 8 * j_outer + 5] =
+    # CHECK:     A[i, 8 * j_outer + 6] =
+    # CHECK:     A[i, 8 * j_outer + 7] =
+    # CHECK:   }
+    # CHECK:   for (int j_tail = 0; j_tail < N % 8; j_tail++) {
+    # CHECK:     A[i, 8 * (N / 8) + j_tail] =
+    # CHECK:   }
+    # CHECK: }
+  )IR");
+}
+
+TEST(LoopNest, UnrollByFactorsLessThan2) {
+  // Input IR:
+  //   for (int i = 0; i < M; i++) {
+  //     for (int j = 0; j < N; j++) {
+  //       A[i, j] = i * j;
+  //     }
+  //   }
+  VarHandle M("M", kInt);
+  VarHandle N("N", kInt);
+  BufHandle a_buf("A", {M, N}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto inner_for = For::make(j, 0, N, for_body);
+  auto outer_for = For::make(i, 0, M, inner_for);
+  auto block = Block::make({outer_for});
+  LoopNest l(block, {a_buf.node()});
+
+  // Unrolling by factor = 1 should do nothing.
+  LoopNest::unroll(inner_for, 1);
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int i = 0; i < M; i++) {
+    # CHECK:   for (int j = 0; j < N; j++) {
+    # CHECK:     A[i, j] =
+    # CHECK:   }
+    # CHECK: }
+  )IR");
+
+  // Unrolling by factor = 0 should do nothing.
+  LoopNest::unroll(inner_for, 0);
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int i = 0; i < M; i++) {
+    # CHECK:   for (int j = 0; j < N; j++) {
+    # CHECK:     A[i, j] =
+    # CHECK:   }
+    # CHECK: }
+  )IR");
+
+  // Unrolling by negative factor should do nothing.
+  LoopNest::unroll(inner_for, -2);
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int i = 0; i < M; i++) {
+    # CHECK:   for (int j = 0; j < N; j++) {
+    # CHECK:     A[i, j] =
+    # CHECK:   }
+    # CHECK: }
+  )IR");
+}
+
+TEST(LoopNest, UnrollByFactorEqualToIters) {
+  // Input IR:
+  //   for (int i = 0; i < 5; i++) {
+  //     A[i] = i * i;
+  //   }
+  BufHandle a_buf("A", {5}, kInt);
+  VarHandle i("i", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i}, i * i)});
+  auto for_loop = For::make(i, 0, 5, for_body);
+  auto block = Block::make({for_loop});
+  LoopNest l(block, {a_buf.node()});
+
+  LoopNest::unroll(for_loop, 5);
+  checkIR(l.root_stmt(), R"IR(
+    # CHECK: for (int i_outer = 0; i_outer < (5 - 0) / 5; i_outer++)
+    # CHECK:   A[5 * i_outer]
+    # CHECK:   A[5 * i_outer + 1]
+    # CHECK:   A[5 * i_outer + 2]
+    # CHECK:   A[5 * i_outer + 3]
+    # CHECK:   A[5 * i_outer + 4]
+  )IR");
 }
 
 TEST(LoopNest, UnrollEmpty) {
@@ -3065,13 +3131,13 @@ TEST(LoopNest, UnrollEmpty) {
 
 TEST(LoopNest, NoUnroll) {
   VarHandle upper_bound("N", kInt);
-  Tensor A = Compute(
-      "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
+  Tensor A =
+      Compute("A", {upper_bound}, [&](const VarHandle& x) { return x * 2; });
   LoopNest l({A});
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(A.buf())[0];
   StmtPtr unrolled = nullptr;
   ASSERT_THROWS_WITH(
-      LoopNest::unroll(loops[0], &unrolled), "non-constant loop");
+      LoopNest::fullUnroll(loops[0], &unrolled), "non-constant loop");
 }
 
 TEST(LoopNest, UnrollWithLet) {
@@ -3091,7 +3157,7 @@ TEST(LoopNest, UnrollWithLet) {
            Store::make(b_buf, {x}, e + 1)}));
   auto parent_block = Block::make({f});
   StmtPtr unrolled = nullptr;
-  LoopNest::unroll(f, &unrolled);
+  LoopNest::fullUnroll(f, &unrolled);
   std::ostringstream oss;
   oss << *unrolled;
   const std::string& verification_pattern =
@@ -3330,8 +3396,7 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
   // Create a dummy tensor to construct LoopNest.
   ExprHandle n(100);
   BufHandle a("a", {n}, kFloat);
-  Tensor b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor b = Compute("b", {n}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
   // Input IR:
@@ -3369,6 +3434,50 @@ TEST(LoopNest, NormalizeAndSplitWithTail) {
       R"IR(
         # CHECK: for (int x_tail = 0; x_tail < 5; x_tail++) {
         # CHECK:   A[x_tail + 5] = 2 * (x_tail + 5);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
+}
+
+TEST(LoopNest, NotNormalizeAndSplitWithTail) {
+  // Create a dummy tensor to construct LoopNest.
+  ExprHandle n(100);
+  BufHandle a("a", {n}, kFloat);
+  Tensor b = Compute("b", {n}, [&](const VarHandle& i) { return a.load(i); });
+  LoopNest l({b});
+
+  // Input IR:
+  //   for (int x = 5; x < 15; x++) {
+  //     A[x] = x * 2;
+  //   }
+  const int kTotalSize = 10;
+  BufHandle a_buf("A", {kTotalSize}, kInt);
+  VarHandle x("x", kInt);
+  auto for_stmt = For::make(x, 5, 15, Store::make(a_buf, {x}, x * 2));
+  auto parent_block = Block::make({for_stmt});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr x_inner;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr x_tail;
+  LoopNest::splitWithTail(for_stmt, 8, &x_inner, &x_tail);
+
+  auto x_outer_result = IRSimplifier::simplify(for_stmt);
+  std::ostringstream oss_outer;
+  oss_outer << *x_outer_result;
+  const std::string& expected_outer_ir =
+      R"IR(
+        # CHECK: {
+        # CHECK: }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_outer_ir, oss_outer.str());
+
+  auto x_tail_result = IRSimplifier::simplify(x_tail);
+  std::ostringstream oss_tail;
+  oss_tail << *x_tail_result;
+  const std::string& expected_tail_ir =
+      R"IR(
+        # CHECK: for (int x_tail = 0; x_tail < 2; x_tail++) {
+        # CHECK:   A[x_tail + 13] = 2 * (x_tail + 13);
       )IR";
   torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
 }
@@ -3606,7 +3715,7 @@ TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
   BufHandle b("b", {m, n}, kFloat);
-  Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
+  Tensor c = Reduce("sum", {M}, Sum(), b, {N});
   LoopNest loop({c});
   HashProvider hasher;
   auto hash_before = hasher.hash(loop.root_stmt());
@@ -3661,28 +3770,26 @@ TEST(LoopNest, DetectInlineRankMismatch) {
   const int kTotalSize = 8;
 
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kFloat);
-  Tensor a = Compute("a", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return a_buf.load(i);
-  });
+  Tensor a = Compute(
+      "a", {kTotalSize}, [&](const VarHandle& i) { return a_buf.load(i); });
   Tensor reshape = Compute(
       "reshape",
-      {{kTotalSize / 2, "i"}, {2, "j"}},
+      {kTotalSize / 2, 2},
       [&](const VarHandle& i, const VarHandle& j) { return a.load(i, j); });
   LoopNest l({reshape}, {a, reshape});
   ASSERT_FALSE(l.computeInline(l.getLoopBodyFor(a)));
 }
 
 TEST(LoopNest, CacheReadsSimple) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
-  Tensor B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
+  Tensor B =
+      Compute("B", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 30, j + 3);
       });
-  Tensor C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor C =
+      Compute("C", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
@@ -3691,7 +3798,10 @@ TEST(LoopNest, CacheReadsSimple) {
   LoopNest::cacheAccesses(A.buf(), "A_local", j_loop);
 
   l.prepareForCodegen();
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
+  SimpleIREvaluator cg(result, {B, C});
+  result = cg.stmt();
 
   // just this once: verify the whole thing.
   checkIR(result, R"IR(
@@ -3721,7 +3831,6 @@ TEST(LoopNest, CacheReadsSimple) {
 
   std::vector<int> b_data(200, 0);
   std::vector<int> c_data(200, 0);
-  SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
   std::vector<int> b_ref(200, 0);
@@ -3739,16 +3848,15 @@ TEST(LoopNest, CacheReadsSimple) {
 }
 
 TEST(LoopNest, CacheReadsOuter) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
-  Tensor B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
+  Tensor B =
+      Compute("B", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 30, j + 40) + A.load(i + 31, j + 41);
       });
-  Tensor C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor C =
+      Compute("C", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
@@ -3757,7 +3865,10 @@ TEST(LoopNest, CacheReadsOuter) {
   LoopNest::cacheAccesses(A.buf(), "A_local", i_loop);
 
   l.prepareForCodegen();
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
+  SimpleIREvaluator cg(result, {B, C});
+  result = cg.stmt();
 
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[21, 11]
@@ -3767,7 +3878,6 @@ TEST(LoopNest, CacheReadsOuter) {
 
   std::vector<int> b_data(200, 0);
   std::vector<int> c_data(200, 0);
-  SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
   std::vector<int> b_ref(200, 0);
@@ -3785,16 +3895,15 @@ TEST(LoopNest, CacheReadsOuter) {
 }
 
 TEST(LoopNest, CacheReadsInternal) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
-  Tensor B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
+  Tensor B =
+      Compute("B", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 30, j + 40) + A.load(i + 31, j + 41);
       });
-  Tensor C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor C =
+      Compute("C", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
@@ -3802,17 +3911,19 @@ TEST(LoopNest, CacheReadsInternal) {
   StmtPtr j_loop = l.getAllLoopNestsWritingToBuf(B.buf())[0][1];
   LoopNest::cacheAccesses(A.buf(), "A_local", j_loop);
   l.prepareForCodegen();
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
+  SimpleIREvaluator cg(result, {B, C});
+  result = cg.stmt();
 
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[2, 11]
-#CHECK: A_local[j_1 + 11 * i_2] =
+#CHECK: A_local[k + 11 * j_1] =
 #CHECK: B[j_2 + 10 * i_1] = (A_local[j_2 + 12]) + (A_local[j_2]);
       )IR");
 
   std::vector<int> b_data(200, 0);
   std::vector<int> c_data(200, 0);
-  SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
   std::vector<int> b_ref(200, 0);
@@ -3830,17 +3941,16 @@ TEST(LoopNest, CacheReadsInternal) {
 }
 
 TEST(LoopNest, CacheReadsInner) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
   // note im changing the offset of the first arg of the first call to A.
-  Tensor B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor B =
+      Compute("B", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 34, j + 40) + A.load(i + 30, j + 41);
       });
-  Tensor C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor C =
+      Compute("C", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
@@ -3848,17 +3958,19 @@ TEST(LoopNest, CacheReadsInner) {
   StmtPtr body = l.getLoopBodyFor(B);
   LoopNest::cacheAccesses(A.buf(), "A_local", body);
   l.prepareForCodegen();
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
+  SimpleIREvaluator cg(result, {B, C});
+  result = cg.stmt();
 
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[5, 2]
-#CHECK: A_local[j_2 + 2 * i_2] =
+#CHECK: A_local[l + 2 * k] =
 #CHECK: B[j_1 + 10 * i_1] = (A_local[1]) + (A_local[8]);
       )IR");
 
   std::vector<int> b_data(200, 0);
   std::vector<int> c_data(200, 0);
-  SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
   std::vector<int> b_ref(200, 0);
@@ -3876,16 +3988,15 @@ TEST(LoopNest, CacheReadsInner) {
 }
 
 TEST(LoopNest, CacheWritesSimple) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
-  Tensor B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
+  Tensor B =
+      Compute("B", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 30, j + 40) + A.load(i + 31, j + 41);
       });
-  Tensor C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor C =
+      Compute("C", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
@@ -3894,7 +4005,10 @@ TEST(LoopNest, CacheWritesSimple) {
   LoopNest::cacheAccesses(A.buf(), "A_local", a_loop);
 
   l.prepareForCodegen();
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
+  SimpleIREvaluator cg(result, {B, C});
+  result = cg.stmt();
 
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[1, 64]
@@ -3908,7 +4022,6 @@ TEST(LoopNest, CacheWritesSimple) {
 
   std::vector<int> b_data(200, 0);
   std::vector<int> c_data(200, 0);
-  SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
   std::vector<int> b_ref(200, 0);
@@ -4053,13 +4166,13 @@ TEST(LoopNest, InlineConstantIndex) {
   BufHandle x_buf("a", {1, N, 1}, kFloat);
   Tensor y = Compute(
       "f",
-      {{1, "m"}, {N, "n"}, {1, "o"}},
+      {1, N, 1},
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
         return x_buf.load(m, n, o);
       });
   Tensor z = Compute(
       "f",
-      {{1, "m"}, {N, "n"}, {1, "o"}},
+      {1, N, 1},
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
         return y.load(m, n, o);
       });
@@ -4085,10 +4198,9 @@ TEST(LoopNest, CompoundTensorUsed) {
   BlockPtr body = Block::make({outer_for1, outer_for2});
 
   Tensor A = Tensor(a_buf.node(), body);
-  Tensor B = Compute(
-      "B", {{10, "i"}, {3, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return A.load(i, j + 1) + A.load(i, j + 2);
-      });
+  Tensor B = Compute("B", {10, 3}, [&](const VarHandle& i, const VarHandle& j) {
+    return A.load(i, j + 1) + A.load(i, j + 2);
+  });
 
   LoopNest l({B}, {A, B});
   ASSERT_FALSE(l.computeInline(A.buf()));
@@ -4654,11 +4766,11 @@ static std::pair<BufHandle, Tensor> colReduce(int M, int N) {
   BufHandle a("a", {M, N}, kFloat);
   Tensor t = Reduce(
       "b",
-      {{N, "n"}},
+      {N},
       Sum(),
       [&](const VarHandle& n, const VarHandle& m) { return a.load(m, n); },
-      {{M, "m"}});
-  return {a, t};
+      {M});
+  return {a, Tensor(t.buf(), LoopNest::sanitizeNames(t.stmt()))};
 }
 
 static StmtPtr splitTailReorder(Tensor b) {
@@ -4668,23 +4780,23 @@ static StmtPtr splitTailReorder(Tensor b) {
   nest.splitWithTail(loops[0], kVectorWidth);
   // Now the loopnests will look like:
   //
-  // for (int n_outer = 0; ...
-  //   for (int n_inner = 0; ...
-  //     b[n_outer * 8 + n_inner] = float(0);
-  //     for (int m = 0; ...
-  //       b[n_outer * 8 + n_inner] = ReduceOp(...);
+  // for (int i_outer = 0; ...
+  //   for (int i_inner = 0; ...
+  //     b[i_outer * 8 + i_inner] = float(0);
+  //     for (int j = 0; ...
+  //       b[i_outer * 8 + i_inner] = ReduceOp(...);
   //
-  // for (int n_tail = 0; ...
-  //   b[n_tail + ((100 - 0) / 8) * 8] = float(0);
-  //   for (int m = 0; ...
-  //     b[n_tail + ((100 - 0) / 8) * 8] = ReduceOp(...);
+  // for (int i_tail = 0; ...
+  //   b[i_tail + ((100 - 0) / 8) * 8] = float(0);
+  //   for (int j = 0; ...
+  //     b[i_tail + ((100 - 0) / 8) * 8] = ReduceOp(...);
   //
   // Since there are 4 writes to b, we will get 4 loopnests from the
   // call to `getAllLoopNestsWritingToBuf` below.
   //
-  // Write #2: "b[n_outer * 8 + n_inner] = ReduceOp(...)"
-  // Loopnest #2: {n_outer, n_inner, m};
-  // We will have to reorder n_inner and m.
+  // Write #2: "b[i_outer * 8 + i_inner] = ReduceOp(...)"
+  // Loopnest #2: {i_outer, i_inner, j};
+  // We will have to reorder i_inner and j.
   auto loopnests = nest.getAllLoopNestsWritingToBuf(b.buf());
   LoopNest::reorderAxis(loopnests[1][1], loopnests[1][2]);
   nest.prepareForCodegen();
@@ -4732,11 +4844,11 @@ TEST(LoopNest, ColReduceSplitTailEvenReorder) {
   oss << *s;
   const std::string& verification_pattern =
       R"IR(
-# CHECK: for (int n_outer
-# CHECK-NEXT: for (int n_inner
+# CHECK: for (int i_outer
+# CHECK-NEXT: for (int i_inner
 # CHECK-NEXT: b[
-# CHECK: for (int m
-# CHECK-NEXT: for (int n_inner
+# CHECK: for (int j
+# CHECK-NEXT: for (int i_inner
 # CHECK-NEXT: b[
 # CHECK-NOT: for (
       )IR";
@@ -4754,15 +4866,15 @@ TEST(LoopNest, ColReduceSplitTailUnevenReorder) {
   oss << *s;
   const std::string& verification_pattern =
       R"IR(
-# CHECK: for (int n_outer
-# CHECK-NEXT: for (int n_inner
+# CHECK: for (int i_outer
+# CHECK-NEXT: for (int i_inner
 # CHECK-NEXT: b[
-# CHECK: for (int m
-# CHECK-NEXT: for (int n_inner
+# CHECK: for (int j
+# CHECK-NEXT: for (int i_inner
 # CHECK-NEXT: b[
-# CHECK: for (int n_tail
+# CHECK: for (int i_tail
 # CHECK-NEXT: b[
-# CHECK-NEXT: for (int m
+# CHECK-NEXT: for (int j
 # CHECK-NEXT: b[
       )IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -4826,10 +4938,10 @@ TEST(LoopNest, ReorderAxisWithMultipleConds) {
 TEST(LoopNest, VectorizeUse) {
   constexpr int N = 8;
   BufHandle a("a", {N}, kFloat);
-  Tensor b = Compute(
-      "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
-  Tensor c = Compute(
-      "c", {{N, "n"}}, [&](const VarHandle& n) { return b.load(n) + 2.0f; });
+  Tensor b =
+      Compute("b", {N}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
+  Tensor c =
+      Compute("c", {N}, [&](const VarHandle& n) { return b.load(n) + 2.0f; });
   LoopNest nest({c}, {b, c});
   auto loops = nest.getAllLoopNestsWritingToBuf(b.buf())[0];
   ASSERT_TRUE(LoopNest::vectorize(loops[0]));
@@ -4848,8 +4960,8 @@ TEST(LoopNest, VectorizeUse) {
 }
 
 const char* int64Loop = R"IR(
-# CHECK: for (int64_t n = 0ll; n < 12ll; n++) {
-# CHECK:   b[n] = (a[n]) + 1ll;
+# CHECK: for (int64_t i = 0ll; i < 12ll; i++) {
+# CHECK:   b[i] = (a[i]) + 1ll;
 # CHECK: }
 )IR";
 
@@ -4857,7 +4969,7 @@ TEST(LoopNest, Int64Direct) {
   constexpr int64_t N = 12;
   BufHandle a("a", {N}, kLong);
   BufHandle b("b", {N}, kLong);
-  VarHandle n("n", kLong);
+  VarHandle n("i", kLong);
   StmtPtr s = For::make(
       n, LongImm::make(0l), N, b.store({n}, a.load({n}) + LongImm::make(1l)));
   s = IRSimplifier::simplify(s);
@@ -4869,7 +4981,7 @@ TEST(LoopNest, Int64Direct) {
 TEST(LoopNest, Int64Compute) {
   constexpr int64_t N = 12;
   BufHandle a("a", {N}, kLong);
-  Tensor b = Compute("b", {{N, "n"}}, [&](const VarHandle& n) {
+  Tensor b = Compute("b", {N}, [&](const VarHandle& n) {
     return a.load(n) + LongImm::make(1l);
   });
   LoopNest nest({b});
@@ -6776,15 +6888,15 @@ TEST(LoopNest, compressMultipleBuffers) {
 }
 
 TEST(LoopNest, sanitizeNames) {
-  std::vector<DimArg> dim_args;
+  std::vector<ExprHandle> dim_args;
   // Let's pick names that would overlap with default index names if not
   // sanitized properly:
-  dim_args.emplace_back(ExprHandle(alloc<Var>("i", kInt)), "");
-  dim_args.emplace_back(ExprHandle(alloc<Var>("N:2", kInt)), "");
+  dim_args.emplace_back(ExprHandle(alloc<Var>("i", kInt)));
+  dim_args.emplace_back(ExprHandle(alloc<Var>("N:2", kInt)));
   // Now let's create a many dimensions so that we had to use the same letter
   // for different loops
   for (int i = 0; i < 10; i++) {
-    dim_args.emplace_back(ExprHandle(alloc<Var>("N", kInt)), "");
+    dim_args.emplace_back(ExprHandle(alloc<Var>("N", kInt)));
   }
 
   // Now create two Computes with conflicting after sanitization names:

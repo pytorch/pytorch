@@ -8,8 +8,8 @@ This template will be consumed by `cpp_jit.py`, and will replace:
 sections with user provided statements.
 */
 
-#include <callgrind.h>
 #include <c10/util/irange.h>
+#include <callgrind.h>
 #include <torch/torch.h>
 
 #include <string>
@@ -21,42 +21,44 @@ sections with user provided statements.
 static_assert(false);
 #endif
 
-
 int main(int argc, char* argv[]) {
-    // This file should only be called inside of `Timer`, so we can adopt a
-    // very simple and rigid argument parsing scheme.
-    TORCH_CHECK(argc == 9);
-    TORCH_CHECK(std::string(argv[1]) == "--number");
-    auto number = std::stoi(argv[2]);
+  // This file should only be called inside of `Timer`, so we can adopt a
+  // very simple and rigid argument parsing scheme.
+  TORCH_CHECK(argc == 9);
+  TORCH_CHECK(std::string(argv[1]) == "--number");
+  auto number = std::stoi(argv[2]);
 
-    TORCH_CHECK(std::string(argv[3]) == "--number_warmup");
-    auto number_warmup = std::stoi(argv[4]);
+  TORCH_CHECK(std::string(argv[3]) == "--number_warmup");
+  auto number_warmup = std::stoi(argv[4]);
 
-    TORCH_CHECK(std::string(argv[5]) == "--repeats");
-    auto repeats = std::stoi(argv[6]);
+  TORCH_CHECK(std::string(argv[5]) == "--repeats");
+  auto repeats = std::stoi(argv[6]);
 
-    TORCH_CHECK(std::string(argv[7]) == "--number_threads");
-    auto number_threads = std::stoi(argv[8]);
-    torch::set_num_threads(number_threads);
+  TORCH_CHECK(std::string(argv[7]) == "--number_threads");
+  auto number_threads = std::stoi(argv[8]);
+  torch::set_num_threads(number_threads);
 
-    // Setup
-    // SETUP_TEMPLATE_LOCATION
+  // Setup
+  // SETUP_TEMPLATE_LOCATION
 
-    // Warmup
-    for(const auto i : c10::irange(number_warmup)) {
-        // STMT_TEMPLATE_LOCATION
+  // Warmup
+  for (const auto i : c10::irange(number_warmup)) {
+    (void)i;
+    // STMT_TEMPLATE_LOCATION
+  }
+
+  // Main loop
+  for (const auto repeat : c10::irange(repeats)) {
+    (void)repeat;
+    CALLGRIND_TOGGLE_COLLECT;
+
+    for (const auto i : c10::irange(number)) {
+      (void)i;
+      // STMT_TEMPLATE_LOCATION
     }
 
-    // Main loop
-    for(const auto repeat : c10::irange(repeats)) {
-        CALLGRIND_TOGGLE_COLLECT;
-
-        for(const auto i : c10::irange(number)) {
-        // STMT_TEMPLATE_LOCATION
-        }
-
-        // NB: See note in Module.cpp
-        CALLGRIND_TOGGLE_COLLECT;
-        CALLGRIND_DUMP_STATS;
-    }
+    // NB: See note in Module.cpp
+    CALLGRIND_TOGGLE_COLLECT;
+    CALLGRIND_DUMP_STATS;
+  }
 }

@@ -4,8 +4,8 @@ from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
            'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
-           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round', 'log_softmax',
-           'zeta', 'multigammaln', 'gammainc', 'gammaincc']
+           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log_ndtr', 'log1p', 'sinc', 'round', 'log_softmax',
+           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
 
 Tensor = torch.Tensor
 
@@ -547,6 +547,27 @@ Example::
     tensor([   -inf, -0.6745,  0.0000,  0.6745,     inf])
 """.format(**common_args))
 
+log_ndtr = _add_docstr(_special.special_log_ndtr,
+                       r"""
+log_ndtr(input, *, out=None) -> Tensor
+Computes the log of the area under the standard Gaussian probability density function,
+integrated from minus infinity to :attr:`input`, elementwise.
+
+.. math::
+    \text{log\_ndtr}(x) = \log\left(\frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt \right)
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.log_ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
+    tensor([-6.6077 -3.7832 -1.841  -0.6931 -0.1728 -0.023  -0.0014])
+""".format(**common_args))
+
 log1p = _add_docstr(_special.special_log1p,
                     r"""
 log1p(input, *, out=None) -> Tensor
@@ -589,9 +610,38 @@ round(input, *, out=None) -> Tensor
 Alias for :func:`torch.round`.
 """)
 
+softmax = _add_docstr(_special.special_softmax,
+                      r"""
+softmax(input, dim, *, dtype=None) -> Tensor
+
+Computes the softmax function.
+
+Softmax is defined as:
+
+:math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
+
+It is applied to all slices along dim, and will re-scale them so that the elements
+lie in the range `[0, 1]` and sum to 1.
+
+Args:
+    input (Tensor): input
+    dim (int): A dimension along which softmax will be computed.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is cast to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+
+Examples::
+    >>> t = torch.ones(2, 2)
+    >>> torch.special.softmax(t, 0)
+    tensor([[0.5000, 0.5000],
+            [0.5000, 0.5000]])
+
+""")
+
 log_softmax = _add_docstr(_special.special_log_softmax,
                           r"""
 log_softmax(input, dim, *, dtype=None) -> Tensor
+
 Computes softmax followed by a logarithm.
 
 While mathematically equivalent to log(softmax(x)), doing these two

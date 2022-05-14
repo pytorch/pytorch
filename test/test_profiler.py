@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: profiler"]
+
 import collections
 import gc
 import io
@@ -9,15 +11,19 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
+import torch.utils.data.datapipes as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
     TemporaryFileName, TemporaryDirectoryName)
+from torch.autograd import (_record_function_with_args_enter, _record_function_with_args_exit)
 from torch.autograd.profiler import profile as _profile
+from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
     DeviceType, ProfilerAction, ProfilerActivity
 )
+from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
     import psutil
@@ -32,6 +38,8 @@ import pickle
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
+
+    @skipCUDAVersionIn([(11, 5)])  # https://github.com/pytorch/pytorch/issues/69023
     def test_mem_leak(self):
         """Checks that there's no memory leak when using profiler with CUDA
         """
@@ -56,6 +64,130 @@ class TestProfilerCUDA(TestCase):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
         self.assertTrue(not (is_increasing and max_diff > 100 * 1024),
                         msg='memory usage is increasing, {}'.format(str(last_rss)))
+
+    def test_custom_module_input_op_ids(self):
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                return x
+
+        def custom_layer(input_ten):
+            return MyFunc.apply(input_ten)
+
+        # Only testing that emit_nvtx runs when
+        # record_shapes option is enabled.
+        with torch.autograd.profiler.emit_nvtx(record_shapes=True) as prof:
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
+            z = x + y
+            s = custom_layer(z)
+            q = s.sum()
+            q.backward()
+
+class TestRecordFunction(TestCase):
+    def _record_function_with_param(self):
+        u = torch.randn(3, 4, 5, requires_grad=True)
+        with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
+            with record_function("## TEST 1 ##", "1, 2, 3"):
+                rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], "hello", u)
+                _record_function_with_args_exit(rf_handle)
+        return prof
+
+    def test_record_function(self):
+        prof_result = self._record_function_with_param()
+        found_test_1 = False
+        found_test_2 = False
+        for e in prof_result.function_events:
+            if "## TEST 1 ##" == e.name:
+                found_test_1 = True
+                self.assertTrue(e.input_shapes == [[]])
+            elif "## TEST 2 ##" == e.name:
+                found_test_2 = True
+                self.assertTrue(e.input_shapes == [[], [], [], [], [], [3, 4, 5]])
+        self.assertTrue(found_test_1)
+        self.assertTrue(found_test_2)
+
+    def test_datapipe_with_record_function(self):
+        with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
+            input_dp1 = dp.iter.IterableWrapper(range(4))
+            input_dp2 = dp.iter.IterableWrapper(range(4, 8))
+            input_dp3 = dp.iter.IterableWrapper(range(8, 12))
+            output_dp = input_dp1.mux(input_dp2, input_dp3)
+            output = list(output_dp)
+
+        has_iter = False
+        has_mux = False
+        for e in prof.function_events:
+            if has_iter and has_mux:
+                break
+
+            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+                has_iter = True
+            if not has_mux and e.name == "enumerate(DataPipe)#MultiplexerIterDataPipe":
+                has_mux = True
+        self.assertTrue(has_iter)
+        self.assertTrue(has_mux)
+
+    def test_datapipe_delegation_with_profiler(self):
+        class IDPIterator(torch.utils.data.IterDataPipe):
+            def __init__(self):
+                self.data = list(range(10))
+                self._idx = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self._idx >= 10:
+                    self._idx = 0
+                    raise StopIteration
+                self._idx += 1
+                return self.data[self._idx - 1]
+
+            def get_value(self, idx):
+                return self.data[idx]
+
+        dp1 = IDPIterator()
+        self.assertEqual(5, dp1.get_value(5))
+        it_dp1 = iter(dp1)
+        self.assertEqual(5, it_dp1.get_value(5))
+        self.assertEqual(list(range(10)), list(it_dp1))
+
+        class IDPDelegator(torch.utils.data.IterDataPipe):
+            def __init__(self, datapipe):
+                self.datapipe = datapipe
+
+            def __iter__(self):
+                return iter(self.datapipe)
+
+        dp2 = IDPDelegator(dp1)
+        it_dp2 = iter(dp2)
+        self.assertEqual(5, it_dp2.get_value(5))
+        self.assertEqual(list(range(10)), list(it_dp2))
+
+    def test_datapipe_with_record_function_fork(self):
+        with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
+            input_dp = dp.iter.IterableWrapper(range(10))
+            dp1, dp2, dp3 = input_dp.fork(num_instances=3)
+            output1 = list(dp1)
+        has_iter = False
+        has_child = False
+        for e in prof.function_events:
+            if has_iter and has_child:
+                break
+
+            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+                has_iter = True
+            if not has_child and e.name == "enumerate(DataPipe)#_ChildDataPipe":
+                has_child = True
+        self.assertTrue(has_iter)
+        self.assertTrue(has_child)
 
 class TestProfiler(TestCase):
     def test_source(self):
@@ -247,6 +379,10 @@ class TestProfiler(TestCase):
                             assert "Device Type" in evt["args"]
                             assert "Device Id" in evt["args"]
                             assert "Bytes" in evt["args"]
+
+                            # Memory should be an instantaneous event.
+                            assert "dur" not in evt["args"]
+                            assert "cat" not in evt["args"]
                     assert found_memory_events
 
         if torch.cuda.is_available():
@@ -709,6 +845,7 @@ class TestProfiler(TestCase):
         if kineto_available():
             self._test_profiler_tracing(True)
 
+    @unittest.skip("Disable forward->backward link to workaround profiler crash")
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
             t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
@@ -745,6 +882,20 @@ class TestProfiler(TestCase):
                 self.assertTrue(all([ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]]))
                 self.assertTrue(ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits")
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
+
+    def test_profiler_type(self):
+        profiler_type = torch._C._autograd._profiler_type
+        ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+        self.assertEqual(profiler_type(), ActiveProfilerType.NONE)
+
+        # Autograd profiler
+        with _profile_legacy():
+            self.assertEqual(profiler_type(), ActiveProfilerType.LEGACY)
+
+        # Kineto profiler
+        with profile():
+            self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
+
 
 if __name__ == '__main__':
     run_tests()

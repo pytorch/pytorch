@@ -1,7 +1,9 @@
+# Owner(s): ["oncall: quantization"]
+
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-from torch.quantization import (
+from torch.ao.quantization import (
     DeQuantStub,
     QuantStub,
     convert,
@@ -17,16 +19,20 @@ from torch.ao.ns._numeric_suite import (
     compare_model_outputs,
     compare_model_stub,
     compare_weights,
+    prepare_model_outputs,
+    get_matching_activations,
 )
 from torch.testing._internal.common_quantization import (
     AnnotatedConvBnReLUModel,
     AnnotatedConvModel,
+    AnnotatedConvTransposeModel,
     AnnotatedSingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
     AnnotatedTwoLayerLinearModel,
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
     test_only_eval_fn,
+    skip_if_no_torchvision,
 )
 from torch.testing._internal.common_quantized import override_qengines
 
@@ -85,7 +91,7 @@ class ModelWithFunctionals(torch.nn.Module):
         return w
 
 
-class TestEagerModeNumericSuite(QuantizationTestCase):
+class TestNumericSuiteEager(QuantizationTestCase):
     @override_qengines
     def test_compare_weights_conv_static(self):
         r"""Compare the weights of float and static quantized conv layer"""
@@ -192,8 +198,10 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 for i, val in enumerate(v["quantized"]):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
-        model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
-        module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d]
+        model_list = [AnnotatedConvModel(qengine),
+                      AnnotatedConvTransposeModel("qnnpack"),  # ConvT cannot use per channel weights
+                      AnnotatedConvBnReLUModel(qengine)]
+        module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d, nn.ConvTranspose2d]
         for model in model_list:
             model.eval()
             if hasattr(model, "fuse_model"):
@@ -277,7 +285,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         qengine = torch.backends.quantized.engine
 
         model = ModelWithFunctionals().eval()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
         q_model = prepare(model, inplace=False)
         q_model(self.img_data_2d[0][0])
         q_model = convert(q_model)
@@ -411,19 +419,17 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         qengine = torch.backends.quantized.engine
 
         model = ModelWithFunctionals().eval()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
         q_model = prepare(model, inplace=False)
         q_model(self.img_data_2d[0][0])
         q_model = convert(q_model)
         act_compare_dict = compare_model_outputs(model, q_model, self.img_data_2d[0][0])
-        self.assertEqual(len(act_compare_dict), 7)
+        self.assertEqual(len(act_compare_dict), 5)
         expected_act_compare_dict_keys = {
             "mycat.stats",
             "myadd.stats",
             "mymul.stats",
             "myadd_relu.stats",
-            "my_scalar_add.stats",
-            "my_scalar_mul.stats",
             "quant.stats",
         }
         self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
@@ -529,3 +535,50 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
         self.assertEqual(len(logger.stats["float"]), 2)
         self.assertEqual(len(logger.stats["quantized"]), 2)
+
+    @skip_if_no_torchvision
+    def _test_vision_model(self, float_model):
+        float_model.to('cpu')
+        float_model.eval()
+        float_model.fuse_model()
+        float_model.qconfig = torch.quantization.default_qconfig
+        img_data = [(torch.rand(2, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
+        qmodel = quantize(float_model, torch.quantization.default_eval_fn, [img_data], inplace=False)
+
+        wt_compare_dict = compare_weights(float_model.state_dict(), qmodel.state_dict())
+
+        def compute_error(x, y):
+            Ps = torch.norm(x)
+            Pn = torch.norm(x - y)
+            return 20 * torch.log10(Ps / Pn)
+
+        data = img_data[0][0]
+        # Take in floating point and quantized model as well as input data, and returns a dict, with keys
+        # corresponding to the quantized module names and each entry being a dictionary with two keys 'float' and
+        # 'quantized', containing the activations of floating point and quantized model at matching locations.
+        act_compare_dict = compare_model_outputs(float_model, qmodel, data)
+
+
+        for key in act_compare_dict:
+            compute_error(act_compare_dict[key]['float'][0], act_compare_dict[key]['quantized'][0].dequantize())
+
+        prepare_model_outputs(float_model, qmodel)
+
+        for data in img_data:
+            float_model(data[0])
+            qmodel(data[0])
+
+        # Find the matching activation between floating point and quantized modules, and return a dict with key
+        # corresponding to quantized module names and each entry being a dictionary with two keys 'float'
+        # and 'quantized', containing the matching floating point and quantized activations logged by the logger
+        act_compare_dict = get_matching_activations(float_model, qmodel)
+
+    @skip_if_no_torchvision
+    def test_mobilenet_v2(self):
+        from torchvision.models.quantization import mobilenet_v2
+        self._test_vision_model(mobilenet_v2(pretrained=True, quantize=False))
+
+    @skip_if_no_torchvision
+    def test_mobilenet_v3(self):
+        from torchvision.models.quantization import mobilenet_v3_large
+        self._test_vision_model(mobilenet_v3_large(pretrained=True, quantize=False))

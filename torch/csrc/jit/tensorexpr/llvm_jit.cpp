@@ -1,5 +1,6 @@
 #ifdef TORCH_ENABLE_LLVM
 
+#include <torch/csrc/jit/tensorexpr/external_functions.h>
 #include <torch/csrc/jit/tensorexpr/intrinsic_symbols.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
@@ -119,6 +120,8 @@ static void registerIntrinsics(
   }
   assertSuccess(JD.define(
       absoluteSymbols({entry("DispatchParallel", DispatchParallel)})));
+  assertSuccess(
+      JD.define(absoluteSymbols({entry("nnc_aten_free", nnc_aten_free)})));
 }
 
 namespace llvm {
@@ -168,7 +171,16 @@ class TORCH_API PytorchLLVMJITImpl {
   }
 
   JITSymbol findSymbol(const std::string Name) {
+#if LLVM_VERSION_MAJOR >= 15
+    // Starting with llvm-15, LLJIT::lookup returns an address rather than a
+    // symbol. Even though an address is what we ultimately we want, we also
+    // want to avoid churning our internal APIs, so we wrap the returned address
+    // in a fake JITSymbol.
+    auto result = assertSuccess(LLJ->lookup(Name));
+    return JITSymbol(result.getValue(), JITSymbolFlags());
+#else
     return assertSuccess(LLJ->lookup(Name));
+#endif
   }
 
   bool hasSymbol(const std::string& Name) {

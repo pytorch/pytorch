@@ -2,7 +2,7 @@
 #include <ATen/core/Macros.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/frontend/strtod.h>
@@ -13,6 +13,11 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
 
 namespace torch {
 namespace jit {
@@ -182,10 +187,134 @@ struct TORCH_API SharedParserData {
 #undef ADD_CASE
   }
 
+  bool match(
+      StringCordView::Iterator pos,
+      bool continuation, // are we inside a scope where newlines don't count
+                         // (e.g. inside parens)
+      bool whitespace_token, // should we treat whitespace as a token
+      int* kind,
+      StringCordView::Iterator* start,
+      StringCordView::Iterator* end) {
+    *start = pos;
+    // skip whitespace
+    while (pos.has_next() && isblank(*pos)) {
+      ++pos;
+    }
+
+    // special handling
+    if (pos.has_next()) {
+      if (*pos == '#' && !isTypeComment(pos)) {
+        // skip comments
+        while (pos.has_next() && *pos != '\n')
+          ++pos;
+        // tail call, handle whitespace and more comments
+        return match(pos, continuation, whitespace_token, kind, start, end);
+      }
+      if (*pos == '\\') {
+        auto newiter = pos;
+        ++newiter;
+        if (newiter.has_next() && *newiter == '\n' && !whitespace_token) {
+          ++newiter;
+          return match(newiter, continuation, false, kind, start, end);
+        }
+      }
+      if (*pos == '\n') {
+        return match(++pos, continuation, !continuation, kind, start, end);
+      }
+    }
+    // we handle white space before EOF because in the case we have something
+    // like the following where we need to generate the dedent token if foo:
+    //   ...
+    // else:
+    //   pass
+    if (whitespace_token) {
+      *kind = !pos.has_next() ? TK_WHITESPACE_EOF : TK_WHITESPACE;
+      *end = pos;
+      return true;
+    }
+    if (!pos.has_next()) {
+      *kind = TK_EOF;
+      *start = pos;
+      *end = *start;
+      return true;
+    }
+    // invariant: the next token is not whitespace or newline
+    *start = pos;
+    // check for a valid number
+    size_t len;
+    if (isNumber(pos.rest_line(), 0, &len)) {
+      *end = *start;
+      *end += len;
+      *kind = TK_NUMBER;
+      return true;
+    }
+    // check for string
+    if (isString(pos.rest_line(), 0, &len)) {
+      *kind = TK_STRINGLITERAL;
+      *end = *start;
+      *end += len;
+      return true;
+    }
+
+    // check for either an ident or a token
+    // ident tracks whether what we have scanned so far could be an identifier
+    // matched indicates if we have found any match.
+    bool matched = false;
+    bool ident = true;
+    TokenTrie* cur = head.get();
+    // for (size_t i = 0; pos + i < str.size() && (ident || cur != nullptr);
+    // i++)
+    for (size_t i = 0; pos.has_next() && (ident || cur != nullptr);
+         ++pos, ++i) {
+      ident = ident && validIdent(i, *pos);
+      if (ident) {
+        matched = true;
+        *end = pos.next_iter();
+        *kind = TK_IDENT;
+      }
+      // check for token second, so that e.g. 'max' matches the token TK_MAX
+      // rather the
+      // identifier 'max'
+      if (cur) {
+        const auto begin_it = cur->child_chars.begin();
+        const auto end_it = cur->child_chars.end();
+        const auto ch_it = std::find(begin_it, end_it, *pos);
+
+        cur = (ch_it == end_it) ? nullptr
+                                : cur->child_tries[ch_it - begin_it].get();
+
+        if (cur && cur->kind != 0) {
+          matched = true;
+          *end = pos.next_iter();
+          *kind = cur->kind;
+        }
+      }
+    }
+    return matched;
+  }
+
+  bool isUnary(int kind, int* prec);
+  bool isBinary(int kind, int* prec);
+  bool isRightAssociative(int kind) {
+    switch (kind) {
+      case '?':
+      case TK_POW:
+      case TK_IF:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+ private:
+  bool validIdent(size_t i, char n) {
+    return isalpha(n) || n == '_' || (i > 0 && isdigit(n));
+  }
+
   // 1. skip whitespace
   // 2. handle comment or newline
   //
-  bool isNumber(const std::string& str, size_t start, size_t* len) {
+  bool isNumber(c10::string_view str, size_t start, size_t* len) {
     char first = str[start];
     // strtod allows numbers to start with + or - or nan or inf
     // http://en.cppreference.com/w/cpp/string/byte/strtof
@@ -193,7 +322,7 @@ struct TORCH_API SharedParserData {
     // adjacent numbers in the lexer
     if (first == '-' || first == '+' || isalpha(first))
       return false;
-    const char* startptr = str.c_str() + start;
+    const char* startptr = str.data() + start;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     char* endptr;
     torch::jit::strtod_c(startptr, &endptr);
@@ -206,7 +335,7 @@ struct TORCH_API SharedParserData {
     return *len > 0;
   }
 
-  bool isCharCount(char c, const std::string& str, size_t start, int len) {
+  bool isCharCount(char c, c10::string_view str, size_t start, int len) {
     // count checks from [start, start + len)
     return start + len <= str.size() &&
         std::count(str.begin() + start, str.begin() + start + len, c) == len;
@@ -216,7 +345,7 @@ struct TORCH_API SharedParserData {
   // strings can be enclosed with 1 or 3 single or double quotes
   // if enclosed with 3 quotes newlines are valid
   // as elsewhere, backslash and new line should be ignored
-  bool isString(const std::string& str, size_t start, size_t* len) {
+  bool isString(c10::string_view str, size_t start, size_t* len) {
     char quote = str[start];
     if (quote != '\"' && quote != '\'')
       return false;
@@ -247,8 +376,19 @@ struct TORCH_API SharedParserData {
   bool isblank(int n) {
     return isspace(n) && n != '\n';
   }
+
+  bool isTypeComment(StringCordView::Iterator str_iter) {
+    c10::string_view rest_line = str_iter.rest_line();
+    const std::string type_string = "# type:";
+    if (rest_line.size() < type_string.length()) {
+      return false;
+    }
+    auto match_string = rest_line.substr(0, type_string.size());
+    return match_string == type_string;
+  }
+
   // Make an exception ignoring comments for type annotation comments
-  bool isTypeComment(const std::string& str, size_t pos) {
+  bool isTypeComment(StringCordView str, size_t pos) {
     const std::string type_string = "# type:";
     if (str.size() < pos + type_string.length()) {
       return false;
@@ -256,119 +396,7 @@ struct TORCH_API SharedParserData {
     auto match_string = str.substr(pos, type_string.size());
     return match_string == type_string;
   }
-  // find the longest match of str.substring(pos) against a token, return true
-  // if successful filling in kind, start,and len
-  bool match(
-      const std::string& str,
-      size_t pos,
-      bool continuation, // are we inside a scope where newlines don't count
-                         // (e.g. inside parens)
-      bool whitespace_token, // should we treat whitespace as a token
-      int* kind,
-      size_t* start,
-      size_t* len) {
-    *start = pos;
-    // skip whitespace
-    while (pos < str.size() && isblank(str[pos]))
-      pos++;
 
-    // special handling
-    if (pos < str.size()) {
-      if (str[pos] == '#' && !isTypeComment(str, pos)) {
-        // skip comments
-        while (pos < str.size() && str[pos] != '\n')
-          pos++;
-        // tail call, handle whitespace and more comments
-        return match(
-            str, pos, continuation, whitespace_token, kind, start, len);
-      }
-      if (str[pos] == '\\' && pos + 1 < str.size() && str[pos + 1] == '\n' &&
-          !whitespace_token) {
-        return match(str, pos + 2, continuation, false, kind, start, len);
-      }
-      if (str[pos] == '\n') {
-        return match(
-            str, pos + 1, continuation, !continuation, kind, start, len);
-      }
-    }
-    // we handle white space before EOF because in the case we have something
-    // like the following where we need to generate the dedent token if foo:
-    //   ...
-    // else:
-    //   pass
-    if (whitespace_token) {
-      *kind = pos == str.size() ? TK_WHITESPACE_EOF : TK_WHITESPACE;
-      *len = pos - *start;
-      return true;
-    }
-    if (pos == str.size()) {
-      *kind = TK_EOF;
-      *start = pos;
-      *len = 0;
-      return true;
-    }
-    // invariant: the next token is not whitespace or newline
-    *start = pos;
-    // check for a valid number
-    if (isNumber(str, pos, len)) {
-      *kind = TK_NUMBER;
-      return true;
-    }
-    // check for string
-    if (isString(str, pos, len)) {
-      *kind = TK_STRINGLITERAL;
-      return true;
-    }
-
-    // check for either an ident or a token
-    // ident tracks whether what we have scanned so far could be an identifier
-    // matched indicates if we have found any match.
-    bool matched = false;
-    bool ident = true;
-    TokenTrie* cur = head.get();
-    for (size_t i = 0; pos + i < str.size() && (ident || cur != nullptr); i++) {
-      ident = ident && validIdent(i, str[pos + i]);
-      if (ident) {
-        matched = true;
-        *len = i + 1;
-        *kind = TK_IDENT;
-      }
-      // check for token second, so that e.g. 'max' matches the token TK_MAX
-      // rather the
-      // identifier 'max'
-      if (cur) {
-        const auto begin_it = cur->child_chars.begin();
-        const auto end_it = cur->child_chars.end();
-        const auto ch_it = std::find(begin_it, end_it, str[pos + i]);
-
-        cur = (ch_it == end_it) ? nullptr
-                                : cur->child_tries[ch_it - begin_it].get();
-
-        if (cur && cur->kind != 0) {
-          matched = true;
-          *len = i + 1;
-          *kind = cur->kind;
-        }
-      }
-    }
-    return matched;
-  }
-  bool isUnary(int kind, int* prec);
-  bool isBinary(int kind, int* prec);
-  bool isRightAssociative(int kind) {
-    switch (kind) {
-      case '?':
-      case TK_POW:
-        return true;
-      default:
-        return false;
-    }
-  }
-
- private:
-  bool validIdent(size_t i, char n) {
-    return isalpha(n) || n == '_' || (i > 0 && isdigit(n));
-  }
   TokenTrieRef head;
 };
 
@@ -379,7 +407,7 @@ struct Token {
   SourceRange range;
   Token(int kind, SourceRange range) : kind(kind), range(std::move(range)) {}
   std::string text() {
-    return range.text();
+    return std::string(range.token_text());
   }
   std::string kindString() const {
     return kindToString(kind);
@@ -505,30 +533,37 @@ struct Lexer {
   Token lexRaw(bool whitespace_token = false) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int kind;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t start;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t length;
     AT_ASSERT(source);
+    if (current == nullptr) {
+      AT_ASSERT(pos == 0);
+      current = std::make_unique<StringCordView::Iterator>(
+          source->text_str().begin());
+    }
+
+    StringCordView::Iterator start_iter = *current;
+    StringCordView::Iterator end_iter = *current;
     if (!shared.match(
-            source->text(),
-            pos,
+            *current,
             nesting > 0,
             whitespace_token,
             &kind,
-            &start,
-            &length)) {
+            &start_iter,
+            &end_iter)) {
       expected(
           "a valid token",
           Token(
-              (source->text())[start], SourceRange(source, start, start + 1)));
+              **current,
+              SourceRange(source, start_iter, start_iter.pos() + 1)));
     }
-    auto t = Token(kind, SourceRange(source, start, start + length));
-    pos = start + length;
+
+    auto t = Token(kind, SourceRange(source, start_iter, end_iter.pos()));
+    pos = end_iter.pos();
+    *current = end_iter;
     return t;
   }
 
   std::shared_ptr<Source> source;
+  std::unique_ptr<StringCordView::Iterator> current;
   size_t pos;
   size_t nesting; // depth of ( [ { nesting...
   std::vector<int> indent_stack; // stack of indentation level of blocks
@@ -538,3 +573,5 @@ struct Lexer {
 };
 } // namespace jit
 } // namespace torch
+
+C10_CLANG_DIAGNOSTIC_POP()

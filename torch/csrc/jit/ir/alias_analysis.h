@@ -40,12 +40,21 @@ namespace jit {
  * mutable, so you can add and delete elements from it. On the other
  * hand, you can't modify a Tuple once you create it, making `Tuple` an
  * immutable container.)
+ *
+ * `isFrozen` - if the Module is frozen then consider attributes as freshly
+ * created objects. Freezing API invokes alias analysis to check if they are
+ * mutated internally.
+ *
+ * `descendFunctionCalls` - recursively analyze function and method calls
+ * instead of conservative analysis. Generally analysis should be done after
+ * inlining so the implmentation for recursive analysis is unoptimized.
  */
 class AliasDb {
  public:
   TORCH_API explicit AliasDb(
       std::shared_ptr<Graph> graphi,
-      bool isFrozen = false);
+      bool isFrozen = false,
+      bool descendFunctionCalls = false);
   TORCH_API ~AliasDb();
 
   // There are limitations to what effects the alias analysis can track. Two
@@ -65,6 +74,8 @@ class AliasDb {
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
   TORCH_API bool mayContainAlias(Value* a, Value* b) const;
+
+  TORCH_API bool mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const;
 
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
@@ -150,11 +161,14 @@ class AliasDb {
    * this.
    */
   // Copy `existing`s aliasing info to `new_value`, and remove `existing`.
-  void replaceWithNewValue(Value* existing, Value* new_value);
+  TORCH_API void replaceWithNewValue(Value* existing, Value* new_value);
   // Copy `from`s aliasing info to `to`.
-  void copyValue(Value* from, Value* to);
+  TORCH_API void copyValue(Value* from, Value* to);
   // Create a new `value` that does not alias anything else.
-  void createValue(const Value* value);
+  TORCH_API void createValue(const Value* value);
+
+  // Enable more precise treatment of prim::TupleConstruct.
+  void enablePreciseTupleContainerAnalysis();
 
   friend struct MutationRemover;
 
@@ -203,6 +217,7 @@ class AliasDb {
   void analyzeImpl(Node* node);
   void analyzeIf(Node* node);
   void analyzeLoop(Node* node);
+  void analyzeSubgraph(Node* node, std::shared_ptr<Graph> subgraph);
   void analyzeSubgraph(Node* node);
   void analyzeCreator(Node* node);
   void analyzeExtractor(Node* node);
@@ -211,6 +226,8 @@ class AliasDb {
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
   void analyzeRpcAsync(Node* node);
+  void analyzeBatchNorm(Node* node);
+  void analyzeInstanceNorm(Node* node);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeConservative(Node* node);
@@ -231,9 +248,9 @@ class AliasDb {
       bool add_wildcard_to_contained_elems = true);
   Element* getOrCreateElement(const Value* value);
 
-  c10::optional<AliasTypeSet> mapTypeToAliasTypeSetPtr(
-      const TypePtr& type) const;
+  const AliasTypeSet* mapTypeToAliasTypeSetPtr(const TypePtr& type) const;
   bool functionalNonEscapingListUse(const Use& use) const;
+  bool functionalNonEscapingTupleUse(const Use& use) const;
 
   std::shared_ptr<Graph> graph_;
 
@@ -242,6 +259,10 @@ class AliasDb {
   // internally.
   bool isFrozen_;
 
+  bool descend_function_calls_;
+  std::unordered_map<Graph*, std::vector<std::shared_ptr<Graph>>>
+      function_call_copies_;
+
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAGBuilder> memoryDAGBuilder_;
   std::unique_ptr<MemoryDAG> memoryDAG_;
@@ -249,7 +270,7 @@ class AliasDb {
   // Mapping of values to MemoryDAG elements
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard Elements (one for each unique mutable type)
-  std::unordered_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
+  ska::flat_hash_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
   c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
   void addContainedTypesToFreshElement(
@@ -265,7 +286,7 @@ class AliasDb {
   bool hasWriters(const at::ArrayRef<Value*>& values) const;
 
   // Cached mapping of type ptrs to their mutable types
-  mutable std::unordered_map<TypePtr, AliasTypeSet> mapped_mutable_types_;
+  mutable ska::flat_hash_map<TypePtr, AliasTypeSet> mapped_mutable_types_;
 
   /**
    * State for tracking write info.

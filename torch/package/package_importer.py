@@ -45,6 +45,8 @@ class PackageImporter(Importer):
     """The dictionary of already loaded modules from this package, equivalent to ``sys.modules`` but
     local to this importer.
     """
+    torch._C._log_api_usage_once("torch.package.PackageImporter")
+
     modules: Dict[str, types.ModuleType]
 
     def __init__(
@@ -184,9 +186,8 @@ class PackageImporter(Importer):
         loaded_reduces = {}
         storage_context = torch._C.DeserializationStorageContext()
 
-        def load_tensor(data_type, size, key, location, restore_location):
-            name = f"{int(key)}.storage"
-            dtype = data_type(0).dtype
+        def load_tensor(dtype, size, key, location, restore_location):
+            name = f"{key}.storage"
 
             if storage_context.has_storage(name):
                 storage = storage_context.get_storage(name, dtype).storage()
@@ -205,17 +206,23 @@ class PackageImporter(Importer):
             data = saved_id[1:]
 
             if typename == "storage":
-                data_type, key, location, size = data
+                storage_type, key, location, size = data
+                dtype = storage_type.dtype
+
                 if key not in loaded_storages:
                     load_tensor(
-                        data_type,
+                        dtype,
                         size,
                         key,
                         _maybe_decode_ascii(location),
                         restore_location,
                     )
                 storage = loaded_storages[key]
-                return storage
+                # TODO: Once we decide to break serialization FC, we can
+                # stop wrapping with _TypedStorage
+                return torch.storage._TypedStorage(
+                    wrap_storage=storage._untyped(), dtype=dtype
+                )
             elif typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
                 # will be loaded multiple times erroneously
@@ -232,7 +239,7 @@ class PackageImporter(Importer):
         # Load the data (which may in turn use `persistent_load` to load tensors)
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
-        unpickler.persistent_load = persistent_load
+        unpickler.persistent_load = persistent_load  # type: ignore[assignment]
 
         @contextmanager
         def set_deserialization_context():
@@ -282,6 +289,22 @@ class PackageImporter(Importer):
         """
         return _create_directory_from_file_list(
             self.filename, self.zip_reader.get_all_records(), include, exclude
+        )
+
+    def python_version(self):
+        """Returns the version of python that was used to create this package.
+
+        Note: this function is experimental and not Forward Compatible. The plan is to move this into a lock
+        file later on.
+
+        Returns:
+            :class:`Optional[str]` a python version e.g. 3.8.9 or None if no version was stored with this package
+        """
+        python_version_path = ".data/python_version"
+        return (
+            self.zip_reader.get_record(python_version_path).decode("utf-8").strip()
+            if self.zip_reader.has_record(python_version_path)
+            else None
         )
 
     def _read_extern(self):

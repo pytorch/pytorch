@@ -45,7 +45,8 @@ void ReplayTransformations::handle(Split* s) {
       "Transform traversal failed, modified a node but it was not a leaf node.");
 
   // Replay the split onto mapped
-  auto outs = IterDomain::split(mapped, s->factor(), s->innerSplit());
+  auto outs = IterDomain::split(
+      mapped, s->factor(), s->innerSplit(), s->startOffset(), s->stopOffset());
   // Remove mapped from the leaf IDs
   leaf_ids_.erase(mapped);
 
@@ -227,7 +228,7 @@ BestEffortReplay::BestEffortReplay(
   }
 
   // Grab expr history of iter domains in target_domain
-  std::vector<Expr*> target_exprs = ExprSort::getExprs(
+  std::vector<Expr*> target_exprs = StmtSort::getExprs(
       FusionGuard::getCurFusion(),
       std::vector<Val*>(target_domain.begin(), target_domain.end()));
 
@@ -238,10 +239,21 @@ BestEffortReplay::BestEffortReplay(
   // replay_domain map.
 
   // Map replay domain's IterDomains to the Exprs they're used in
-  std::vector<Expr*> replay_exprs = ExprSort::getExprs(
+  std::vector<Expr*> replay_exprs = StmtSort::getExprs(
       FusionGuard::getCurFusion(),
       std::vector<Val*>(replay_domain.begin(), replay_domain.end()));
 
+  // Track which id's in replay have to be replayed to guarantee rfactor
+  // transformations. The iteration domains in the rfactor axes don't have
+  // to be used in a matching expression in target, so we want to exclude those.
+  // Only the iteration domains [root_domains, rfactor) domains have to be used
+  // in matching transformation to guarantee rfactor domain is consistent.
+  // However, if any rfactor id was used to produce the rfactor domain, we need
+  // transformations on them to match the target exactly.
+  std::unordered_set<IterDomain*> replay_rfactor_ids;
+
+  // Track which expressions iteration domains are used, they should only be
+  // used in one expression.
   std::unordered_map<IterDomain*, Expr*> replay_id2expr_map;
   for (auto replay_expr : replay_exprs) {
     for (auto id : ir_utils::filterByType<IterDomain>(replay_expr->inputs())) {
@@ -251,11 +263,23 @@ BestEffortReplay::BestEffortReplay(
           " An IterDomain was found to be used in more than one expression.");
       // Only want to forward rfactor in map
       replay_id2expr_map[id] = replay_expr;
+
+      auto out_ids = ir_utils::filterByType<IterDomain>(replay_expr->outputs());
+
+      if (std::any_of(out_ids.begin(), out_ids.end(), [](IterDomain* id) {
+            return id->isRFactorProduct();
+          })) {
+        auto inp_ids =
+            ir_utils::filterByType<IterDomain>(replay_expr->inputs());
+        replay_rfactor_ids.insert(inp_ids.begin(), inp_ids.end());
+      }
     }
   }
 
   std::string err_str(
       "Error during replay, a transformation was called that conflicts with an rfactor call.");
+
+  bool any_target_expr_contains_broadcast_id = false;
 
   // Iterate through target IterDomains' history and compare with what we
   // recorded from replay_domain
@@ -291,6 +315,12 @@ BestEffortReplay::BestEffortReplay(
     std::vector<IterDomain*> target_id_inps(
         target_inps_filtered.begin(), target_inps_filtered.end());
 
+    bool target_expr_contains_broadcast_id = std::any_of(
+        target_inps_filtered.begin(),
+        target_inps_filtered.end(),
+        [](IterDomain* id) { return id->isBroadcast(); });
+    any_target_expr_contains_broadcast_id |= target_expr_contains_broadcast_id;
+
     std::vector<IterDomain*> replay_inps =
         std::vector<IterDomain*>(target_id_inps.size(), nullptr);
 
@@ -309,9 +339,13 @@ BestEffortReplay::BestEffortReplay(
     }
 
     // Check if any of the associated replay id's are part of an rfactor domain
-    bool replay_has_rfactor_inp =
-        std::any_of(replay_inps.begin(), replay_inps.end(), [](IterDomain* id) {
-          return id == nullptr ? false : id->isRFactorProduct();
+    bool replay_has_rfactor_inp = std::any_of(
+        replay_inps.begin(),
+        replay_inps.end(),
+        [&replay_rfactor_ids](IterDomain* id) {
+          return id == nullptr ? false
+                               : id->isRFactorProduct() &&
+                  (replay_rfactor_ids.find(id) != replay_rfactor_ids.end());
         });
 
     // If some replay id inputs are part of rfactor, make sure all target
@@ -327,12 +361,20 @@ BestEffortReplay::BestEffortReplay(
               return replay_id2expr_map.find(id) == replay_id2expr_map.end();
             }
           });
-      TORCH_INTERNAL_ASSERT(no_missing_exprs, err_str);
+      // View operation creates a TensorView with rfactor. After view, broadcast
+      // operation adds iterDomains for any size-1 dimensions. Therefore, the
+      // target domain (broadcast) may contain broadcast ids that are not
+      // present in the replay domain (view). In this case, we skip any target
+      // expressions that contain broadcast ids.
+      TORCH_INTERNAL_ASSERT(
+          no_missing_exprs || any_target_expr_contains_broadcast_id, err_str);
     }
 
     // If any inputs are missing, continue as this expr doesn't match.
     if (missing_replay_input) {
-      TORCH_INTERNAL_ASSERT(!replay_has_rfactor_inp, err_str);
+      TORCH_INTERNAL_ASSERT(
+          !replay_has_rfactor_inp || any_target_expr_contains_broadcast_id,
+          err_str);
       continue;
     }
 
@@ -398,14 +440,16 @@ BestEffortReplay::BestEffortReplay(
       auto r_split = replay_expr->as<Split>();
       auto t_split = target_expr->as<Split>();
       if (!r_split->factor()->sameAs(t_split->factor()) ||
-          r_split->innerSplit() != t_split->innerSplit()) {
+          r_split->innerSplit() != t_split->innerSplit() ||
+          !r_split->startOffset()->sameAs(t_split->startOffset()) ||
+          !r_split->stopOffset()->sameAs(t_split->stopOffset())) {
         TORCH_INTERNAL_ASSERT(!replay_has_rfactor_inp, err_str);
         continue;
       }
     }
 
     // Take replay expr inputs out of map:
-    for (size_t t_i = 0; t_i < target_id_inps.size(); t_i++) {
+    for (const auto t_i : c10::irange(target_id_inps.size())) {
       auto t_inp = target_id_inps[t_i];
       auto r_orig_inp = target2replay_id_map_.at(t_inp);
       auto r_maybe_forwarded_inp = replay_inps[t_i];
@@ -533,7 +577,7 @@ struct ConsumerForwardingInfo {
     auto consumer_bcast_ids_not_in_producer =
         consumer_bcast_roots_not_in_producer;
 
-    std::vector<Expr*> consumer_history = ExprSort::getExprs(
+    std::vector<Expr*> consumer_history = StmtSort::getExprs(
         FusionGuard::getCurFusion(),
         std::vector<Val*>(
             consumer->domain()->domain().begin(),
@@ -678,7 +722,7 @@ BestEffortReplay BestEffortReplay::replayCasP(
   }
 
   // Grab all exprs used to make the forwarded compliments
-  auto compliment_exprs = ExprSort::getExprs(
+  auto compliment_exprs = StmtSort::getExprs(
       FusionGuard::getCurFusion(), {compliments.begin(), compliments.end()});
 
   // Figure out if there are any leaves in compliment_exprs that aren't

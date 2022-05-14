@@ -3,6 +3,11 @@
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+if [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
+  pip install click mock tabulate networkx==2.0
+  pip -q install --user "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+fi
+
 # Skip tests in environments where they are not built/applicable
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   echo 'Skipping tests'
@@ -40,8 +45,8 @@ fi
 ################################################################################
 # C++ tests #
 ################################################################################
-# Don't run cpp tests a second time in the sharded ort_test2 job
-if [[ "$BUILD_ENVIRONMENT" != *ort_test2* ]]; then
+# Only run cpp tests in the first shard, don't run cpp tests a second time in the second shard
+if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
   echo "Running C++ tests.."
   for test in $(find "$cpp_test_dir" -executable -type f); do
     case "$test" in
@@ -129,50 +134,52 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/ideep/pool_op_test.py")
 fi
 
-# NB: Warnings are disabled because they make it harder to see what
-# the actual erroring test is
 echo "Running Python tests.."
-if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-  # locale setting is required by click package with py3
-  for loc in "en_US.utf8" "C.UTF-8"; do
-    if locale -a | grep "$loc" >/dev/null 2>&1; then
-      export LC_ALL="$loc"
-      export LANG="$loc"
-      break;
-    fi
-  done
+# locale setting is required by click package
+for loc in "en_US.utf8" "C.UTF-8"; do
+  if locale -a | grep "$loc" >/dev/null 2>&1; then
+    export LC_ALL="$loc"
+    export LANG="$loc"
+    break;
+  fi
+done
+
+# Some Caffe2 tests fail when run using AVX512 ISA, see https://github.com/pytorch/pytorch/issues/66111
+export DNNL_MAX_CPU_ISA=AVX2
+
+# Should still run even in the absence of SHARD_NUMBER
+if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
+  pip install --user pytest-sugar
+  # NB: Warnings are disabled because they make it harder to see what
+  # the actual erroring test is
+  "$PYTHON" \
+    -m pytest \
+    -x \
+    -v \
+    --disable-warnings \
+    --junit-xml="$pytest_reports_dir/result.xml" \
+    --ignore "$caffe2_pypath/python/test/executor_test.py" \
+    --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
+    --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
+    --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
+    --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
+    ${rocm_ignore_test[@]} \
+    "$caffe2_pypath/python" \
+    "${EXTRA_TESTS[@]}"
 fi
 
-pip install --user pytest-sugar
-"$PYTHON" \
-  -m pytest \
-  -x \
-  -v \
-  --disable-warnings \
-  --junit-xml="$pytest_reports_dir/result.xml" \
-  --ignore "$caffe2_pypath/python/test/executor_test.py" \
-  --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
-  --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
-  --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
-  --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
-  ${rocm_ignore_test[@]} \
-  "$caffe2_pypath/python" \
-  "${EXTRA_TESTS[@]}"
-
-#####################
-# torchvision tests #
-#####################
+##############
+# ONNX tests #
+##############
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # Check out torch/vision at 0.9.0-rc1 commit
   # This hash must match one in .jenkins/pytorch/test.sh
   pip install -q --user git+https://github.com/pytorch/vision.git@8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
-  pip install -q --user ninja
+  pip install -q --user ninja flatbuffers==2.0 numpy==1.21.5 onnxruntime==1.11.0
+  # numba requires numpy <= 1.20, onnxruntime requires numpy >= 1.21.
+  # We don't actually need it for our tests, but it's imported if it's present, so uninstall.
+  pip uninstall -q --yes numba
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
-  if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    pip install -q --user flatbuffers==2.0
-    wget https://ortpypackage.blob.core.windows.net/ort-nightly/ort_nightly-1.8.0.dev202107131-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-    pip install -q --user ort_nightly-1.8.0.dev202107131-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-  fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

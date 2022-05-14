@@ -14,12 +14,11 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import (Awaitable, DefaultDict, Dict, List, Match, Optional, Set,
-                    cast)
+from typing import Awaitable, DefaultDict, Dict, List, Match, Optional, Set, cast
 
 from typing_extensions import TypedDict
 
-help_msg = '''fast_nvcc [OPTION]... -- [NVCC_ARG]...
+help_msg = """fast_nvcc [OPTION]... -- [NVCC_ARG]...
 
 Run the commands given by nvcc --dryrun, in parallel.
 
@@ -31,61 +30,61 @@ This script only works with the "normal" execution path of nvcc, so for
 instance passing --help (after "--") doesn't work since the --help
 execution path doesn't compile anything, so adding --dryrun there gives
 nothing in stderr.
-'''
+"""
 parser = argparse.ArgumentParser(help_msg)
 parser.add_argument(
-    '--faithful',
-    action='store_true',
+    "--faithful",
+    action="store_true",
     help="don't modify the commands given by nvcc (slower)",
 )
 parser.add_argument(
-    '--graph',
-    metavar='FILE.gv',
-    help='write Graphviz DOT file with execution graph',
+    "--graph",
+    metavar="FILE.gv",
+    help="write Graphviz DOT file with execution graph",
 )
 parser.add_argument(
-    '--nvcc',
-    metavar='PATH',
-    default='nvcc',
+    "--nvcc",
+    metavar="PATH",
+    default="nvcc",
     help='path to nvcc (default is just "nvcc")',
 )
 parser.add_argument(
-    '--save',
-    metavar='DIR',
-    help='copy intermediate files from each command into DIR',
+    "--save",
+    metavar="DIR",
+    help="copy intermediate files from each command into DIR",
 )
 parser.add_argument(
-    '--sequential',
-    action='store_true',
-    help='sequence commands instead of using the graph (slower)',
+    "--sequential",
+    action="store_true",
+    help="sequence commands instead of using the graph (slower)",
 )
 parser.add_argument(
-    '--table',
-    metavar='FILE.csv',
-    help='write CSV with times and intermediate file sizes',
+    "--table",
+    metavar="FILE.csv",
+    help="write CSV with times and intermediate file sizes",
 )
 parser.add_argument(
-    '--verbose',
-    metavar='FILE.txt',
-    help='like nvcc --verbose, but expanded and into a file',
+    "--verbose",
+    metavar="FILE.txt",
+    help="like nvcc --verbose, but expanded and into a file",
 )
 default_config = parser.parse_args([])
 
 
 # docs about temporary directories used by NVCC
-url_base = 'https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html'
-url_vars = f'{url_base}#keeping-intermediate-phase-files'
+url_base = "https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html"
+url_vars = f"{url_base}#keeping-intermediate-phase-files"
 
 
 # regex for temporary file names
-re_tmp = r'(?<![\w\-/])(?:/tmp/)?(tmp[^ \"\'\\]+)'
+re_tmp = r"(?<![\w\-/])(?:/tmp/)?(tmp[^ \"\'\\]+)"
 
 
 def fast_nvcc_warn(warning: str) -> None:
     """
     Warn the user about something regarding fast_nvcc.
     """
-    print(f'warning (fast_nvcc): {warning}', file=sys.stderr)
+    print(f"warning (fast_nvcc): {warning}", file=sys.stderr)
 
 
 def warn_if_windows() -> None:
@@ -95,7 +94,7 @@ def warn_if_windows() -> None:
     # use os.name instead of platform.system() because there is a
     # platform.py file in this directory, making it very difficult to
     # import the platform module from the Python standard library
-    if os.name == 'nt':
+    if os.name == "nt":
         fast_nvcc_warn("untested on Windows, might not work; see this URL:")
         fast_nvcc_warn(url_vars)
 
@@ -104,24 +103,24 @@ def warn_if_tmpdir_flag(args: List[str]) -> None:
     """
     Warn the user that using fast_nvcc with some flags might not work.
     """
-    file_path_specs = 'file-and-path-specifications'
-    guiding_driver = 'options-for-guiding-compiler-driver'
+    file_path_specs = "file-and-path-specifications"
+    guiding_driver = "options-for-guiding-compiler-driver"
     scary_flags = {
-        '--objdir-as-tempdir': file_path_specs,
-        '-objtemp': file_path_specs,
-        '--keep': guiding_driver,
-        '-keep': guiding_driver,
-        '--keep-dir': guiding_driver,
-        '-keep-dir': guiding_driver,
-        '--save-temps': guiding_driver,
-        '-save-temps': guiding_driver,
+        "--objdir-as-tempdir": file_path_specs,
+        "-objtemp": file_path_specs,
+        "--keep": guiding_driver,
+        "-keep": guiding_driver,
+        "--keep-dir": guiding_driver,
+        "-keep-dir": guiding_driver,
+        "--save-temps": guiding_driver,
+        "-save-temps": guiding_driver,
     }
     for arg in args:
         for flag, frag in scary_flags.items():
-            if re.match(fr'^{re.escape(flag)}(?:=.*)?$', arg):
-                fast_nvcc_warn(f'{flag} not supported since it interacts with')
-                fast_nvcc_warn('TMPDIR, so fast_nvcc may break; see this URL:')
-                fast_nvcc_warn(f'{url_base}#{frag}')
+            if re.match(rf"^{re.escape(flag)}(?:=.*)?$", arg):
+                fast_nvcc_warn(f"{flag} not supported since it interacts with")
+                fast_nvcc_warn("TMPDIR, so fast_nvcc may break; see this URL:")
+                fast_nvcc_warn(f"{url_base}#{frag}")
 
 
 class DryunData(TypedDict):
@@ -135,18 +134,18 @@ def nvcc_dryrun_data(binary: str, args: List[str]) -> DryunData:
     Return parsed environment variables and commands from nvcc --dryrun.
     """
     result = subprocess.run(  # type: ignore[call-overload]
-        [binary, '--dryrun'] + args,
+        [binary, "--dryrun"] + args,
         capture_output=True,
-        encoding='ascii',  # this is just a guess
+        encoding="ascii",  # this is just a guess
     )
-    print(result.stdout, end='')
+    print(result.stdout, end="")
     env = {}
     commands = []
     for line in result.stderr.splitlines():
-        match = re.match(r'^#\$ (.*)$', line)
+        match = re.match(r"^#\$ (.*)$", line)
         if match:
-            stripped, = match.groups()
-            mapping = re.match(r'^(\w+)=(.*)$', stripped)
+            (stripped,) = match.groups()
+            mapping = re.match(r"^(\w+)=(.*)$", stripped)
             if mapping:
                 name, val = mapping.groups()
                 env[name] = val
@@ -154,14 +153,14 @@ def nvcc_dryrun_data(binary: str, args: List[str]) -> DryunData:
                 commands.append(stripped)
         else:
             print(line, file=sys.stderr)
-    return {'env': env, 'commands': commands, 'exit_code': result.returncode}
+    return {"env": env, "commands": commands, "exit_code": result.returncode}
 
 
 def warn_if_tmpdir_set(env: Dict[str, str]) -> None:
     """
     Warn the user that setting TMPDIR with fast_nvcc might not work.
     """
-    if os.getenv('TMPDIR') or 'TMPDIR' in env:
+    if os.getenv("TMPDIR") or "TMPDIR" in env:
         fast_nvcc_warn("TMPDIR is set, might not work; see this URL:")
         fast_nvcc_warn(url_vars)
 
@@ -183,17 +182,17 @@ def module_id_contents(command: List[str]) -> str:
     """
     Guess the contents of the .module_id file contained within command.
     """
-    if command[0] == 'cicc':
+    if command[0] == "cicc":
         path = command[-3]
-    elif command[0] == 'cudafe++':
+    elif command[0] == "cudafe++":
         path = command[-1]
-    middle = pathlib.PurePath(path).name.replace('-', '_').replace('.', '_')
+    middle = pathlib.PurePath(path).name.replace("-", "_").replace(".", "_")
     # this suffix is very wrong (the real one is far less likely to be
     # unique), but it seems difficult to find a rule that reproduces the
     # real suffixes, so here's one that, while inaccurate, is at least
     # hopefully as straightforward as possible
     suffix = hashlib.md5(str.encode(middle)).hexdigest()[:8]
-    return f'_{len(middle)}_{middle}_{suffix}'
+    return f"_{len(middle)}_{middle}_{suffix}"
 
 
 def unique_module_id_files(commands: List[str]) -> List[str]:
@@ -206,14 +205,14 @@ def unique_module_id_files(commands: List[str]) -> List[str]:
         arr = []
 
         def uniqueify(s: Match[str]) -> str:
-            filename = re.sub(r'\-(\d+)', r'-\1-' + str(i), s.group(0))
+            filename = re.sub(r"\-(\d+)", r"-\1-" + str(i), s.group(0))
             arr.append(filename)
             return filename
 
-        line = re.sub(re_tmp + r'.module_id', uniqueify, line)
-        line = re.sub(r'\s*\-\-gen\_module\_id\_file\s*', ' ', line)
+        line = re.sub(re_tmp + r".module_id", uniqueify, line)
+        line = re.sub(r"\s*\-\-gen\_module\_id\_file\s*", " ", line)
         if arr:
-            filename, = arr
+            (filename,) = arr
             if not module_id:
                 module_id = module_id_contents(shlex.split(line))
             uniqueified.append(f"echo -n '{module_id}' > '{filename}'")
@@ -225,7 +224,7 @@ def make_rm_force(commands: List[str]) -> List[str]:
     """
     Add --force to all rm commands.
     """
-    return [f'{c} --force' if c.startswith('rm ') else c for c in commands]
+    return [f"{c} --force" if c.startswith("rm ") else c for c in commands]
 
 
 def print_verbose_output(
@@ -238,12 +237,12 @@ def print_verbose_output(
     Human-readably write nvcc --dryrun data to stderr.
     """
     padding = len(str(len(commands) - 1))
-    with open(filename, 'w') as f:
+    with open(filename, "w") as f:
         for name, val in env.items():
             print(f'#{" "*padding}$ {name}={val}', file=f)
         for i, command in enumerate(commands):
-            prefix = f'{str(i).rjust(padding)}$ '
-            print(f'#{prefix}{command[0]}', file=f)
+            prefix = f"{str(i).rjust(padding)}$ "
+            print(f"#{prefix}{command[0]}", file=f)
             for part in command[1:]:
                 print(f'#{" "*len(prefix)}{part}', file=f)
 
@@ -262,7 +261,7 @@ def files_mentioned(command: str) -> List[str]:
     """
     Return fully-qualified names of all tmp files referenced by command.
     """
-    return [f'/tmp/{match.group(1)}' for match in re.finditer(re_tmp, command)]
+    return [f"/tmp/{match.group(1)}" for match in re.finditer(re_tmp, command)]
 
 
 def nvcc_data_dependencies(commands: List[str]) -> Graph:
@@ -291,11 +290,11 @@ def nvcc_data_dependencies(commands: List[str]) -> Graph:
                     for filename in fatbins[dep]:
                         if filename in tmp_files:
                             deps.add(tmp_files[filename])
-            if tmp.endswith('.fatbin.c') and not line.startswith('fatbinary'):
+            if tmp.endswith(".fatbin.c") and not line.startswith("fatbinary"):
                 fatbins[i].add(tmp)
             else:
                 tmp_files[tmp] = i
-        if line.startswith('rm ') and not deps:
+        if line.startswith("rm ") and not deps:
             deps.add(i - 1)
         graph.append(deps)
     return graph
@@ -329,7 +328,7 @@ def warn_if_not_weakly_connected(graph: Graph) -> None:
     Warn the user if the execution graph is not weakly connected.
     """
     if not is_weakly_connected(graph):
-        fast_nvcc_warn('execution graph is not (weakly) connected')
+        fast_nvcc_warn("execution graph is not (weakly) connected")
 
 
 def print_dot_graph(
@@ -341,18 +340,19 @@ def print_dot_graph(
     """
     Print a DOT file displaying short versions of the commands in graph.
     """
+
     def name(k: int) -> str:
         return f'"{k} {os.path.basename(commands[k][0])}"'
-    with open(filename, 'w') as f:
-        print('digraph {', file=f)
+
+    with open(filename, "w") as f:
+        print("digraph {", file=f)
         # print all nodes, in case it's disconnected
         for i in range(len(graph)):
-            print(f'    {name(i)};', file=f)
+            print(f"    {name(i)};", file=f)
         for i, deps in enumerate(graph):
             for j in deps:
-                print(f'    {name(j)} -> {name(i)};', file=f)
-        print('}', file=f)
-
+                print(f"    {name(j)} -> {name(i)};", file=f)
+        print("}", file=f)
 
 
 class Result(TypedDict, total=False):
@@ -378,7 +378,7 @@ async def run_command(
     for task in deps:
         dep_result = await task
         # abort if a previous step failed
-        if 'exit_code' not in dep_result or dep_result['exit_code'] != 0:
+        if "exit_code" not in dep_result or dep_result["exit_code"] != 0:
             return {}
     if gather_data:
         t1 = time.monotonic()
@@ -390,17 +390,17 @@ async def run_command(
     )
     stdout, stderr = await proc.communicate()
     code = cast(int, proc.returncode)
-    results: Result = {'exit_code': code, 'stdout': stdout, 'stderr': stderr}
+    results: Result = {"exit_code": code, "stdout": stdout, "stderr": stderr}
     if gather_data:
         t2 = time.monotonic()
-        results['time'] = t2 - t1
+        results["time"] = t2 - t1
         sizes = {}
         for tmp_file in files_mentioned(command):
             if os.path.exists(tmp_file):
                 sizes[tmp_file] = os.path.getsize(tmp_file)
             else:
                 sizes[tmp_file] = 0
-        results['files'] = sizes
+        results["files"] = sizes
     if save:
         dest = pathlib.Path(save) / str(i)
         dest.mkdir()
@@ -424,14 +424,18 @@ async def run_graph(
     tasks: List[Awaitable[Result]] = []
     for i, (command, indices) in enumerate(zip(commands, graph)):
         deps = {tasks[j] for j in indices}
-        tasks.append(asyncio.create_task(run_command(  # type: ignore[attr-defined]
-            command,
-            env=env,
-            deps=deps,
-            gather_data=gather_data,
-            i=i,
-            save=save,
-        )))
+        tasks.append(
+            asyncio.create_task(
+                run_command(  # type: ignore[attr-defined]
+                    command,
+                    env=env,
+                    deps=deps,
+                    gather_data=gather_data,
+                    i=i,
+                    save=save,
+                )
+            )
+        )
     return [await task for task in tasks]
 
 
@@ -440,8 +444,8 @@ def print_command_outputs(command_results: List[Result]) -> None:
     Print captured stdout and stderr from commands.
     """
     for result in command_results:
-        sys.stdout.write(result.get('stdout', b'').decode('ascii'))
-        sys.stderr.write(result.get('stderr', b'').decode('ascii'))
+        sys.stdout.write(result.get("stdout", b"").decode("ascii"))
+        sys.stderr.write(result.get("stderr", b"").decode("ascii"))
 
 
 def write_log_csv(
@@ -455,15 +459,15 @@ def write_log_csv(
     """
     tmp_files: List[str] = []
     for result in command_results:
-        tmp_files.extend(result.get('files', {}).keys())
-    with open(filename, 'w', newline='') as csvfile:
-        fieldnames = ['command', 'seconds'] + list(dict.fromkeys(tmp_files))
+        tmp_files.extend(result.get("files", {}).keys())
+    with open(filename, "w", newline="") as csvfile:
+        fieldnames = ["command", "seconds"] + list(dict.fromkeys(tmp_files))
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for i, result in enumerate(command_results):
-            command = f'{i} {os.path.basename(command_parts[i][0])}'
-            row = {'command': command, 'seconds': result.get('time', 0)}
-            writer.writerow({**row, **result.get('files', {})})
+            command = f"{i} {os.path.basename(command_parts[i][0])}"
+            row = {"command": command, "seconds": result.get("time", 0)}
+            writer.writerow({**row, **result.get("files", {})})
 
 
 def exit_code(results: List[Result]) -> int:
@@ -471,7 +475,7 @@ def exit_code(results: List[Result]) -> int:
     Aggregate individual exit codes into a single code.
     """
     for result in results:
-        code = result.get('exit_code', 0)
+        code = result.get("exit_code", 0)
         if code != 0:
             return code
     return 0
@@ -497,9 +501,9 @@ def fast_nvcc(
     warn_if_windows()
     warn_if_tmpdir_flag(args)
     dryrun_data = nvcc_dryrun_data(config.nvcc, args)
-    env = dryrun_data['env']
+    env = dryrun_data["env"]
     warn_if_tmpdir_set(env)
-    commands = dryrun_data['commands']
+    commands = dryrun_data["commands"]
     if not config.faithful:
         commands = make_rm_force(unique_module_id_files(commands))
 
@@ -523,24 +527,26 @@ def fast_nvcc(
         )
     if config.sequential:
         graph = straight_line_dependencies(commands)
-    results = asyncio.run(run_graph(  # type: ignore[attr-defined]
-        env=env,
-        commands=commands,
-        graph=graph,
-        gather_data=bool(config.table),
-        save=config.save,
-    ))
+    results = asyncio.run(
+        run_graph(  # type: ignore[attr-defined]
+            env=env,
+            commands=commands,
+            graph=graph,
+            gather_data=bool(config.table),
+            save=config.save,
+        )
+    )
     print_command_outputs(results)
     if config.table:
         write_log_csv(command_parts, results, filename=config.table)
-    return exit_code([dryrun_data] + results)
+    return exit_code([dryrun_data] + results)  # type: ignore[arg-type, operator]
 
 
 def our_arg(arg: str) -> bool:
-    return arg != '--'
+    return arg != "--"
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     argv = sys.argv[1:]
     us = list(itertools.takewhile(our_arg, argv))
     them = list(itertools.dropwhile(our_arg, argv))

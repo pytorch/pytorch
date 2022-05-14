@@ -3,7 +3,9 @@
 #include <test/cpp/jit/test_utils.h>
 #include <sstream>
 
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
@@ -12,6 +14,32 @@
 
 namespace torch {
 namespace jit {
+
+namespace {
+
+Module roundtripThroughMobile(const Module& m) {
+  ExtraFilesMap files;
+  std::vector<IValue> constants;
+  jitModuleToPythonCodeAndConstants(m, &files, &constants);
+  CompilationOptions options;
+  mobile::Module mobilem = jitModuleToMobile(m, options);
+  return jitModuleFromSourceAndConstants(
+      mobilem._ivalue(), files, constants, 8);
+}
+
+template <class Functor>
+inline void expectThrowsEq(Functor&& functor, const char* expectedMessage) {
+  try {
+    std::forward<Functor>(functor)();
+  } catch (const Error& e) {
+    EXPECT_STREQ(e.what_without_backtrace(), expectedMessage);
+    return;
+  }
+  ADD_FAILURE() << "Expected to throw exception with message \""
+                << expectedMessage << "\" but didn't throw";
+}
+
+} // namespace
 
 TEST(SerializationTest, ExtraFilesHookPreference) {
   // Tests that an extra file written explicitly has precedence over
@@ -116,8 +144,8 @@ TEST(SerializationTest, TypeTags) {
   for (auto item : items) {
     auto bytes = torch::pickle_save(item.value);
     auto loaded = torch::pickle_load(bytes);
-    ASSERT_TRUE(loaded.type()->isSubtypeOf(item.expected_type));
-    ASSERT_TRUE(item.expected_type->isSubtypeOf(loaded.type()));
+    ASSERT_TRUE(loaded.type()->isSubtypeOf(*item.expected_type));
+    ASSERT_TRUE(item.expected_type->isSubtypeOf(*loaded.type()));
   }
 }
 
@@ -130,7 +158,7 @@ TEST(SerializationTest, TestJitStream_CUDA) {
   model = torch::jit::load("saved_stream_model.pt");
 
   auto output = model.forward(inputs);
-  auto list_of_elements = output.toTuple()->elements();
+  const auto& list_of_elements = output.toTupleRef().elements();
   auto is_stream_s = list_of_elements[0].toBool();
 
   // a,b: These are the two input tensors
@@ -149,5 +177,87 @@ TEST(SerializationTest, TestJitStream_CUDA) {
   // Check if both the output tensors are equal
   ASSERT_TRUE(op.equal(c));
 }
+
+TEST(TestSourceRoundTrip, UpsampleNearest2d) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::rand({1, 3, 128, 128}));
+  inputs.emplace_back(at::Scalar(2.0));
+  auto ref = m.forward(inputs);
+
+  Module m2 = roundtripThroughMobile(m);
+  auto res = m2.forward(inputs);
+
+  auto resd = res.toTensor();
+  auto refd = ref.toTensor();
+  ASSERT_TRUE(resd.equal(refd));
+}
+
+TEST(TestSourceRoundTrip, CheckAttrAccess) {
+  Module m("m");
+  m.register_attribute("mobile_optimized", BoolType::get(), true);
+  Module m2 = roundtripThroughMobile(m);
+  bool mobile_optimized = m2.attr("mobile_optimized", false).toBool();
+  AT_ASSERT(mobile_optimized);
+}
+
+TEST(TestSourceRoundTrip,
+     MethodInvocation) { // NOLINT (use =delete in gtest)
+  const std::vector<std::string> test_programs{
+      // test invoking a method with default parameter
+      R"(
+      def test_func(self, x, b : int = 4):
+        return self.foo + x + b
+      )",
+      // inner method call with default parameter (gets inlined)
+      R"(
+      def add_with_default_arg(self, x, b : int = 4):
+        return self.foo + x + b
+      def test_func(self, x):
+        return self.add_with_default_arg(x)  # invoke method w/ default arg
+      )",
+      // simple method call
+      R"(
+      def test_func(self, x):
+        b = 4
+        return self.foo + x + b
+      )",
+  };
+  for (const auto& test_program : test_programs) {
+    Module m("m");
+    m.register_parameter("foo", torch::ones({}), false);
+    m.define(test_program);
+
+    const int fortyTwo = 42; // (keep linter happy)
+    auto minput = fortyTwo * torch::ones({});
+    auto ref = m.run_method("test_func", minput);
+
+    Module m2 = roundtripThroughMobile(m);
+    const auto& test_func = m2.get_method("test_func");
+    IValue res;
+    for (int i = 0; i < 3; ++i) {
+      res = test_func({minput});
+    }
+
+    auto resd = res.toTensor().item<float>();
+    auto refd = ref.toTensor().item<float>();
+    AT_ASSERT(resd == refd);
+  }
+}
+
+TEST(SerializationTest, ParentDirNotExist) {
+  expectThrowsEq(
+      []() {
+        auto t = torch::nn::Linear(5, 5);
+        torch::save(t, "./doesnotexist/file.pt");
+      },
+      "Parent directory ./doesnotexist does not exist.");
+}
+
 } // namespace jit
 } // namespace torch

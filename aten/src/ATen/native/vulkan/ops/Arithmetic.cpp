@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
@@ -54,7 +55,8 @@ Tensor arithmetic_scalar(
     const Tensor& self_arg,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -69,6 +71,8 @@ Tensor arithmetic_scalar(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
       const float other_val = alpha_arg
           ? other.to<float>() * alpha_arg->to<float>()
@@ -91,12 +95,16 @@ Tensor arithmetic_scalar(
           shader_descriptor,
           v_output.extents(),
           adaptive_work_group_size(v_output.extents()),
-          // Shader parameters
-          block,
-          // Textures
+          // Write-only access bypasses synchronization but inserts appropriate
+          // barriers if necessary.
           v_output.image(
               command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
-          v_self.image(command_buffer, vTensor::Stage::Compute));
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
+          v_self.image(command_buffer, vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -110,7 +118,8 @@ Tensor& arithmetic_scalar_(
     Tensor& self,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
@@ -122,6 +131,8 @@ Tensor& arithmetic_scalar_(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY (v_self.has_image()) {
       const float other_val = alpha_arg
           ? other.to<float>() * alpha_arg->to<float>()
@@ -143,13 +154,15 @@ Tensor& arithmetic_scalar_(
           shader_descriptor,
           v_self.extents(),
           adaptive_work_group_size(v_self.extents()),
-          // Shader parameters
-          block,
-          // Textures
+          // Read-Write access triggers an async synchronization if necessory
+          // and inserts appropriate barriers if hazards are detected.
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write));
+              vTensor::Access::Read | vTensor::Access::Write),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -163,7 +176,8 @@ Tensor arithmetic_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   check_inputs(self_arg, other_arg);
   api::Context* const context = api::context();
 
@@ -182,6 +196,8 @@ Tensor arithmetic_tensor(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY (v_self.has_image() && v_other.has_image()) {
       const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
       const struct Block final {
@@ -211,13 +227,19 @@ Tensor arithmetic_tensor(
           shader_descriptor,
           v_output.extents(),
           adaptive_work_group_size(v_output.extents()),
-          // Shader parameters
-          block,
-          // Textures
+          // Write-only access bypasses synchronization but inserts appropriate
+          // barriers if necessary.
           v_output.image(
               command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
           v_self.image(command_buffer, vTensor::Stage::Compute),
-          v_other.image(command_buffer, vTensor::Stage::Compute));
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
+          v_other.image(command_buffer, vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -231,7 +253,8 @@ Tensor& arithmetic_tensor_(
     Tensor& self,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   check_inputs(self, other_arg);
   api::Context* const context = api::context();
 
@@ -247,6 +270,8 @@ Tensor& arithmetic_tensor_(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY (
         v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
       const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
@@ -272,16 +297,18 @@ Tensor& arithmetic_tensor_(
           shader_descriptor,
           v_self.extents(),
           adaptive_work_group_size(v_self.extents()),
-          // Shader parameters
-          block,
-          // Textures
+          // Read-Write access triggers an async synchronization if necessory
+          // and inserts appropriate barriers if hazards are detected.
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Read | vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_other.image(command_buffer, vTensor::Stage::Compute));
+          v_other.image(command_buffer, vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -296,25 +323,33 @@ Tensor add_scalar(
     const Scalar& other,
     const Scalar& alpha) {
   return arithmetic_scalar(
-      self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar));
+      self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar), "aten::add.Scalar");
 }
 
 Tensor& add_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return arithmetic_scalar_(
-      self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_));
+      self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_), "aten::add_.Scalar");
 }
 
 Tensor add_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar& alpha) {
+  if (other_arg.sizes().size() == 0) {
+    return arithmetic_scalar(
+        self_arg,
+        other_arg.item<float>(),
+        c10::optional<Scalar>(alpha.to<float>()),
+        VK_KERNEL(add_scalar),
+        "aten::add.Tensor");
+  }
   return arithmetic_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
+      self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add), "aten::add.Tensor");
 }
 
 Tensor& add_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
   return arithmetic_tensor_(
-      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
+      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_), "aten::add_.Tensor");
 }
 
 Tensor sub_scalar(
@@ -325,7 +360,8 @@ Tensor sub_scalar(
       self_arg,
       other,
       c10::optional<Scalar>(-1 * alpha.to<float>()),
-      VK_KERNEL(add_scalar));
+      VK_KERNEL(add_scalar),
+      "aten::sub.Scalar");
 }
 
 Tensor& sub_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
@@ -333,40 +369,57 @@ Tensor& sub_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
       self,
       other,
       c10::optional<Scalar>(-1 * alpha.to<float>()),
-      VK_KERNEL(add_scalar_));
+      VK_KERNEL(add_scalar_),
+      "aten::sub_.Scalar");
 }
 
 Tensor sub_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar& alpha) {
+  if (other_arg.sizes().size() == 0) {
+    return arithmetic_scalar(
+        self_arg,
+        other_arg.item<float>(),
+        c10::optional<Scalar>(-1 * alpha.to<float>()),
+        VK_KERNEL(add_scalar),
+        "aten::sub.Tensor");
+  }
   return arithmetic_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
+      self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub), "aten::sub.Tensor");
 }
 
 Tensor& sub_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
   return arithmetic_tensor_(
-      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
+      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_), "aten::sub_.Tensor");
 }
 
 Tensor mul_scalar(const Tensor& self_arg, const Scalar& other) {
   return arithmetic_scalar(
-      self_arg, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar));
+      self_arg, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar), "aten::mul.Scalar");
 }
 
 Tensor& mul_scalar_(Tensor& self, const Scalar& other) {
   return arithmetic_scalar_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_));
+      self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_), "aten::mul_.Scalar");
 }
 
 Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
+  if (other_arg.sizes().size() == 0) {
+    return arithmetic_scalar(
+        self_arg,
+        other_arg.item<float>(),
+        c10::optional<Scalar>(),
+        VK_KERNEL(mul_scalar),
+        "aten::mul.Tensor");
+  }
   return arithmetic_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul));
+      self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul), "aten::mul.Tensor");
 }
 
 Tensor& mul_tensor_(Tensor& self, const Tensor& other_arg) {
   return arithmetic_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_));
+      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_), "aten::mul_.Tensor");
 }
 
 Tensor div_scalar(const Tensor& self_arg, const Scalar& other) {
@@ -374,7 +427,8 @@ Tensor div_scalar(const Tensor& self_arg, const Scalar& other) {
       self_arg,
       1.0 / other.to<float>(),
       c10::optional<Scalar>(),
-      VK_KERNEL(mul_scalar));
+      VK_KERNEL(mul_scalar),
+      "aten::div.Scalar");
 }
 
 Tensor& div_scalar_(Tensor& self, const Scalar& other) {
@@ -382,17 +436,26 @@ Tensor& div_scalar_(Tensor& self, const Scalar& other) {
       self,
       1.0 / other.to<float>(),
       c10::optional<Scalar>(),
-      VK_KERNEL(mul_scalar_));
+      VK_KERNEL(mul_scalar_),
+      "aten::div_.Scalar");
 }
 
 Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
+  if (other_arg.sizes().size() == 0) {
+    return arithmetic_scalar(
+        self_arg,
+        1.0 / other_arg.item<float>(),
+        c10::optional<Scalar>(),
+        VK_KERNEL(mul_scalar),
+        "aten::div.Tensor");
+  }
   return arithmetic_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(div));
+      self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(div), "aten::div.Tensor");
 }
 
 Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
   return arithmetic_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_));
+      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_), "aten::div_.Tensor");
 }
 
 #ifdef USE_VULKAN_API

@@ -10,7 +10,7 @@ namespace at {
 
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 
-inline bool has_names(TensorList tensors) {
+inline bool has_names(ITensorListRef tensors) {
   return std::any_of(
       tensors.begin(), tensors.end(), [](const Tensor& t) { return t.has_names(); });
 }
@@ -98,7 +98,7 @@ TORCH_API void propagate_names_for_reduction(const Tensor& result, const Tensor&
 
 TORCH_API void propagate_names_for_expand(const Tensor& result, const Tensor& self);
 
-TORCH_API std::vector<Dimname> compute_cat_outnames(TensorList tensors);
+TORCH_API std::vector<Dimname> compute_cat_outnames(ITensorListRef tensors);
 
 TORCH_API std::vector<Dimname> compute_broadcast_outnames(
     const Tensor& self,
@@ -138,6 +138,24 @@ TORCH_API TensorImpl* propagate_names(
     bool validate_names = false);
 
 TORCH_API void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
+
+TORCH_API inline void propagate_names(
+    const TensorBase& result,
+    DimnameList names,
+    bool validate_names = false) {
+  propagate_names(result.unsafeGetTensorImpl(), names, validate_names);
+}
+
+TORCH_API inline void propagate_names_if_nonempty(
+    const TensorBase& result,
+    DimnameList names,
+    bool validate_names = false) {
+  propagate_names_if_nonempty(result.unsafeGetTensorImpl(), names, validate_names);
+}
+
+TORCH_API inline void propagate_names(const TensorBase& result, const TensorBase& src) {
+  propagate_names(result.unsafeGetTensorImpl(), src.unsafeGetTensorImpl());
+}
 
 // result = m1 @ m2 + bias
 TORCH_API std::vector<Dimname> propagate_names_for_addmm(

@@ -1,20 +1,35 @@
+#include <ATen/ScalarOps.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
-
 namespace torch {
 namespace jit {
+
 void tupleIndex(Stack& stack) {
   int64_t index = pop(stack).toInt();
   auto tuple = pop(stack).toTuple();
   auto norm_index = normalizeIndex(index, tuple->elements().size());
   if (norm_index < 0 ||
-      norm_index > static_cast<int64_t>(tuple->elements().size())) {
+      norm_index >= static_cast<int64_t>(tuple->elements().size())) {
     throw std::out_of_range("Tuple list index out of range");
   }
   stack.emplace_back(tuple->elements()[norm_index]);
 }
 
 void raiseException(Stack& stack) {
+  // this kernel supports RaiseException with only one argument: the error
+  // DEPRECATED from bytecode_version 8;
+  // Please do not make any changes to this to support BC
   throw JITException(pop(stack).toStringRef());
+}
+
+void raiseExceptionWithMessage(Stack& stack) {
+  // this kernel supports RaiseException with only two arguments: the error and
+  // the message Please make changes only to this kernel
+  c10::optional<std::string> qualified_class_name =
+      pop(stack).toOptional<std::string>();
+  std::string message;
+  pop(stack, message);
+
+  throw JITException(message, qualified_class_name);
 }
 
 void is(Stack& stack) {
@@ -78,7 +93,7 @@ void _not(Stack& stack) {
 void boolTensor(Stack& stack) {
   at::Tensor a;
   pop(stack, a);
-  push(stack, a.is_nonzero());
+  push(stack, at::native::is_nonzero(a));
 }
 
 void toList(Stack& stack) {
@@ -99,15 +114,15 @@ void toList(Stack& stack) {
 
   // Rebuild the output type using elem_ty_val and dim_val. Start
   // with the element type corresponding to elem_ty_val.
-  TypePtr out_ty;
+  at::TypePtr out_ty;
   if (elem_ty_val == 0) {
-    out_ty = IntType::get();
+    out_ty = at::IntType::get();
   } else if (elem_ty_val == 1) {
-    out_ty = FloatType::get();
+    out_ty = at::FloatType::get();
   } else if (elem_ty_val == 2) {
-    out_ty = BoolType::get();
+    out_ty = at::BoolType::get();
   } else if (elem_ty_val == 3) {
-    out_ty = ComplexType::get();
+    out_ty = at::ComplexType::get();
   } else {
     TORCH_CHECK(
         false,
@@ -120,9 +135,9 @@ void toList(Stack& stack) {
   // the elements will be casted to double/c10::complex<double>
   // later.
   TORCH_CHECK(
-      (out_ty == FloatType::get() && t.is_floating_point()) ||
-          (out_ty == ComplexType::get() && t.is_complex()) ||
-          tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
+      (out_ty == at::FloatType::get() && t.is_floating_point()) ||
+          (out_ty == at::ComplexType::get() && t.is_complex()) ||
+          tryScalarTypeFromJitType(*out_ty) == t.scalar_type(),
       "Output annotation element type and runtime tensor element type must match for tolist()");
 
   // Check that the dimension of the Tensor matches that of the
@@ -134,7 +149,7 @@ void toList(Stack& stack) {
   // Wrap out_ty in a ListType dim times.
   for (const auto i : c10::irange(dim_val)) {
     (void)i; // Suppress unused variable warning
-    out_ty = ListType::create(out_ty);
+    out_ty = at::ListType::create(out_ty);
   }
 
   int64_t dim = t.dim();
@@ -150,7 +165,7 @@ void toList(Stack& stack) {
 void numToTensorScalar(Stack& stack) {
   at::Scalar s;
   pop(stack, s);
-  push(stack, at::scalar_to_tensor(s));
+  push(stack, c10::scalar_to_tensor(s));
 }
 
 void isCuda(Stack& stack) {
@@ -163,15 +178,27 @@ void numToTensorBool(Stack& stack) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool b;
   pop(stack, b);
-  push(stack, at::scalar_to_tensor(b));
+  push(stack, c10::scalar_to_tensor(b));
 }
 
-static const std::array<mobile::prim_op_fn_register, 14> op_reg = {
+void dictIndex(Stack& stack) {
+  auto key = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  auto value = dict.find(key);
+  if (value == dict.end()) {
+    AT_ERROR("KeyError: ", key);
+  }
+  push(stack, value->value());
+}
+
+static const C10_UNUSED std::array<mobile::prim_op_fn_register, 15> op_reg = {
     mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
     mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
     mobile::prim_op_fn_register("aten::format", aten_format),
     mobile::prim_op_fn_register("prim::NumToTensor.Scalar", numToTensorScalar),
-    mobile::prim_op_fn_register("prim::RaiseException", raiseException),
+    mobile::prim_op_fn_register(
+        "prim::RaiseException",
+        raiseExceptionWithMessage),
     mobile::prim_op_fn_register("prim::device", device),
     mobile::prim_op_fn_register("prim::dtype", dtype),
     mobile::prim_op_fn_register("aten::__not__", _not),
@@ -179,8 +206,9 @@ static const std::array<mobile::prim_op_fn_register, 14> op_reg = {
     mobile::prim_op_fn_register("aten::__isnot__", isNot),
     mobile::prim_op_fn_register("aten::dim", dim),
     mobile::prim_op_fn_register("prim::Uninitialized", unInitialized),
-    mobile::prim_op_fn_register("aten::to.prim_dtype", toPrimDType),
-    mobile::prim_op_fn_register("prim::is_cuda", isCuda)
+    mobile::prim_op_fn_register("prim::is_cuda", isCuda),
+    mobile::prim_op_fn_register("aten::__getitem__.Dict_str", dictIndex),
+    mobile::prim_op_fn_register("prim::unchecked_cast", noop),
     // TODO: (@pavithran) size is overloaded with int[] and Tensor
     // so this throws error expecting int not Tensor
     // mobile::prim_op_fn_register("aten::size", size)

@@ -342,8 +342,8 @@ constexpr vbool64 VsxComplexDblMask2(uint32_t mask) {
 // constants
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 //
 constexpr int offset0 = 0;
 constexpr int offset16 = 16;

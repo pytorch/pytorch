@@ -1,9 +1,11 @@
+# Owner(s): ["oncall: distributed"]
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import SGD, Adam, AdamW
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.distributed.optim import functional_optim_map
+from torch.distributed.optim.utils import functional_optim_map
 
 class MyModule(torch.nn.Module):
     def __init__(self):

@@ -61,7 +61,7 @@ auto initBindings() {
             return static_cast<int64_t>((*self)->starting_line_no());
           })
       .def("text", [](const c10::intrusive_ptr<SourceRef>& self) {
-        return (*self)->text();
+        return (*self)->text_str().str();
       });
 
   torch::class_<InstructionStats>("profiling", "InstructionStats")
@@ -103,7 +103,7 @@ auto initBindings() {
   return nullptr;
 }
 
-const auto torchBindInitializer = initBindings();
+const auto C10_UNUSED torchBindInitializer = initBindings();
 
 } // namespace
 

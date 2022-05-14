@@ -14,7 +14,7 @@ def _is_orthogonal(Q, eps=None):
     Id = torch.eye(k, dtype=Q.dtype, device=Q.device)
     # A reasonable eps, but not too large
     eps = 10. * n * torch.finfo(Q.dtype).eps
-    return torch.allclose(Q.transpose(-2, -1).conj() @ Q, Id, atol=eps)
+    return torch.allclose(Q.mH @ Q, Id, atol=eps)
 
 
 def _make_orthogonal(A):
@@ -68,7 +68,7 @@ class _Orthogonal(Module):
         n, k = X.size(-2), X.size(-1)
         transposed = n < k
         if transposed:
-            X = X.transpose(-2, -1)
+            X = X.mT
             n, k = k, n
         # Here n > k and X is a tall matrix
         if self.orthogonal_map == _OrthMaps.matrix_exp or self.orthogonal_map == _OrthMaps.cayley:
@@ -77,7 +77,7 @@ class _Orthogonal(Module):
             if n != k:
                 # Embed into a square matrix
                 X = torch.cat([X, X.new_zeros(n, n - k).expand(*X.shape[:-2], -1, -1)], dim=-1)
-            A = X - X.transpose(-2, -1).conj()
+            A = X - X.mH
             # A is skew-symmetric (or skew-hermitian)
             if self.orthogonal_map == _OrthMaps.matrix_exp:
                 Q = torch.matrix_exp(A)
@@ -101,7 +101,7 @@ class _Orthogonal(Module):
         if hasattr(self, "base"):
             Q = self.base @ Q
         if transposed:
-            Q = Q.transpose(-2, -1)
+            Q = Q.mT
         return Q
 
     @torch.autograd.no_grad()
@@ -114,7 +114,7 @@ class _Orthogonal(Module):
         n, k = Q.size(-2), Q.size(-1)
         transpose = n < k
         if transpose:
-            Q = Q.transpose(-2, -1)
+            Q = Q.mT
             n, k = k, n
 
         # We always make sure to always copy Q in every path
@@ -124,7 +124,7 @@ class _Orthogonal(Module):
             # map for the Householder. To see why, think that for the Cayley map,
             # we would need to find the matrix X \in R^{n x k} such that:
             # Y = torch.cat([X.tril(), X.new_zeros(n, n - k).expand(*X.shape[:-2], -1, -1)], dim=-1)
-            # A = Y - Y.transpose(-2, -1).conj()
+            # A = Y - Y.mH
             # cayley(A)[:, :k]
             # gives the original tensor. It is not clear how to do this.
             # Perhaps via some algebraic manipulation involving the QR like that of
@@ -144,7 +144,7 @@ class _Orthogonal(Module):
             # Equality with zero is ok because LAPACK returns exactly zero when it does not want
             # to use a particular reflection
             A.diagonal(dim1=-2, dim2=-1)[tau == 0.] *= -1
-            return A.transpose(-2, -1) if transpose else A
+            return A.mT if transpose else A
         else:
             if n == k:
                 # We check whether Q is orthogonal

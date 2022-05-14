@@ -1,3 +1,5 @@
+# Owner(s): ["module: ci"]
+
 import subprocess
 import sys
 import unittest
@@ -32,6 +34,7 @@ class TestImportTime(TestCase):
 
     @unittest.skipIf(not IS_LINUX, "Memory test is only implemented for Linux")
     @unittest.skipIf(not IS_IN_CI, "Memory test only runs in CI")
+    @unittest.skipIf(rds_write is None, "Cannot import rds_write from tools.stats.scribe")
     def test_peak_memory(self):
         def profile(module, name):
             command = f"import {module}; import resource; print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)"
@@ -48,20 +51,24 @@ class TestImportTime(TestCase):
 
         data = profile("torch", "pytorch")
         baseline = profile("sys", "baseline")
-        rds_write(
-            "import_stats", [data, baseline]
-        )
+        try:
+            rds_write("import_stats", [data, baseline])
+        except Exception as e:
+            raise unittest.SkipTest(f"Failed to record import_stats: {e}")
 
 
 if __name__ == "__main__":
     if register_rds_schema and IS_IN_CI:
-        register_rds_schema(
-            "import_stats",
-            {
-                "test_name": "string",
-                "peak_memory_bytes": "int",
-                "time_ms": "int",
-            },
-        )
+        try:
+            register_rds_schema(
+                "import_stats",
+                {
+                    "test_name": "string",
+                    "peak_memory_bytes": "int",
+                    "time_ms": "int",
+                },
+            )
+        except Exception as e:
+            print(f"Failed to register RDS schema: {e}")
 
     run_tests()

@@ -11,12 +11,12 @@ from typing import Tuple, Callable, Dict, Set, List, Optional, Union
 
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-from torch.quantization import (
+from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
 )
-from torch.quantization.utils import getattr_from_fqn
-from torch.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.quantize import is_activation_post_process
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
@@ -60,10 +60,15 @@ def get_node_first_input_and_output_type(
         elif node.target in FUNS_IO_TYPE_INT8:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
         elif node.target in FUNS_IO_TYPE_FP32_OR_INT8:
-            return (
-                NodeInputOrOutputType.FP32_OR_INT8,
-                NodeInputOrOutputType.FP32_OR_INT8,
+            first_arg = node.args[0]
+            assert isinstance(first_arg, Node)
+            (
+                _prev_node_input_type,
+                prev_node_output_type,
+            ) = get_node_first_input_and_output_type(
+                first_arg, gm, logger_cls, node_type_to_io_type_map
             )
+            return (prev_node_output_type, prev_node_output_type)
         else:
             return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
@@ -71,7 +76,13 @@ def get_node_first_input_and_output_type(
         assert node.op == "call_module"
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
-        if isinstance(mod, (logger_cls, ObserverBase, FakeQuantizeBase)):  # type: ignore[arg-type]
+        is_known_fp32_or_int8_input_module = any(
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
+        )
+        if (
+            isinstance(mod, (logger_cls, ObserverBase, FakeQuantizeBase))  # type: ignore[arg-type]
+            or is_known_fp32_or_int8_input_module
+        ):
             # A logger or observer's input and output type is the output
             # type of the preceding node.
             first_arg = node.args[0]
@@ -89,18 +100,10 @@ def get_node_first_input_and_output_type(
         is_known_int8_input_module = any(
             isinstance(mod, target_type) for target_type in MODS_IO_TYPE_INT8  # type: ignore[arg-type]
         )
-        is_known_fp32_or_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
-        )
         if is_known_fp32_input_module:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
         elif is_known_int8_input_module:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
-        elif is_known_fp32_or_int8_input_module:
-            return (
-                NodeInputOrOutputType.FP32_OR_INT8,
-                NodeInputOrOutputType.FP32_OR_INT8,
-            )
         else:
             return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
@@ -141,10 +144,15 @@ def get_node_first_input_and_output_type(
             return (prev_node_output_type, NodeInputOrOutputType.FP16)
 
         elif node.target in METHS_IO_TYPE_FP32_OR_INT8:
-            return (
-                NodeInputOrOutputType.FP32_OR_INT8,
-                NodeInputOrOutputType.FP32_OR_INT8,
+            first_arg = node.args[0]
+            assert isinstance(first_arg, Node)
+            (
+                _prev_node_input_type,
+                prev_node_output_type,
+            ) = get_node_first_input_and_output_type(
+                first_arg, gm, logger_cls, node_type_to_io_type_map
             )
+            return (prev_node_output_type, prev_node_output_type)
 
         return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
     else:
@@ -433,6 +441,16 @@ def maybe_dequantize_first_two_tensor_args_and_handle_tuples(f):
 
 @maybe_dequantize_first_two_tensor_args_and_handle_tuples
 def compute_sqnr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the SQNR between `x` and `y`.
+
+    Args:
+        x: Tensor or tuple of tensors
+        y: Tensor or tuple of tensors
+
+    Return:
+        float or tuple of floats
+    """
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
@@ -440,14 +458,41 @@ def compute_sqnr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 
 @maybe_dequantize_first_two_tensor_args_and_handle_tuples
 def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the normalized L2 error between `x` and `y`.
+
+    Args:
+        x: Tensor or tuple of tensors
+        y: Tensor or tuple of tensors
+
+    Return:
+        float or tuple of floats
+    """
     return torch.sqrt(((x - y) ** 2).sum() / (x ** 2).sum())
 
 
 @maybe_dequantize_first_two_tensor_args_and_handle_tuples
 def compute_cosine_similarity(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the cosine similarity between `x` and `y`.
+
+    Args:
+        x: Tensor or tuple of tensors
+        y: Tensor or tuple of tensors
+
+    Return:
+        float or tuple of floats
+    """
     # For convolutions, the shape of the quantized weight has one additional
     # dimension compared to the shape of the fp32 weight. Match the shapes
     # to enable cosine similarity comparison.
     x = x.reshape(1, -1)
     y = y.reshape(1, -1)
     return torch.nn.functional.cosine_similarity(x, y)
+
+def op_type_supports_shadowing(node: Node) -> bool:
+    if node.op == 'call_function':
+        if node.target in (torch.add, torch.mul, operator.add, operator.mul, torch.cat, torch.stack):
+            # shadowing for ops with multiple tensor inputs is not implemented yet
+            return False
+    return True

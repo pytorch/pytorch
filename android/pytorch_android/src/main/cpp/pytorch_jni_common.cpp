@@ -4,6 +4,7 @@
 #include <string>
 
 #include <c10/core/MemoryFormat.h>
+#include <c10/util/irange.h>
 
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
@@ -97,7 +98,7 @@ static at::Tensor newAtTensor(
   std::vector<int64_t> shapeVec{};
   shapeVec.reserve(rank);
   auto numel = 1;
-  for (auto i = 0; i < rank; ++i) {
+  for (const auto i : c10::irange(rank)) {
     shapeVec.push_back(shapeArr[i]);
     numel *= shapeArr[i];
   }
@@ -222,7 +223,8 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
     } else {
       facebook::jni::throwNewJavaException(
           facebook::jni::gJavaLangIllegalArgumentException,
-          "at::Tensor scalar type is not supported on java side");
+          "at::Tensor scalar type %s is not supported on java side",
+          c10::toString(scalarType));
     }
 
     const auto& tensorShape = tensor.sizes();
@@ -286,8 +288,51 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
   at::Tensor tensor_;
 };
 
+facebook::jni::local_ref<JIValue> JIValue::newJIValueFromStringDict(
+    c10::Dict<c10::IValue, c10::IValue> dict) {
+  static auto jMethodDictStringKey =
+      JIValue::javaClassStatic()
+          ->getStaticMethod<facebook::jni::local_ref<JIValue>(
+              facebook::jni::alias_ref<facebook::jni::JMap<
+                  facebook::jni::alias_ref<facebook::jni::JString::javaobject>,
+                  facebook::jni::alias_ref<JIValue::javaobject>>>)>(
+              "dictStringKeyFrom");
+
+  auto jmap = JHashMap<
+      facebook::jni::alias_ref<facebook::jni::JString::javaobject>,
+      facebook::jni::alias_ref<JIValue::javaobject>>::create();
+  for (auto& pair : dict) {
+    jmap->put(
+        facebook::jni::make_jstring(pair.key().toString()->string()),
+        JIValue::newJIValueFromAtIValue(pair.value()));
+  }
+  return jMethodDictStringKey(JIValue::javaClassStatic(), jmap);
+}
+
+facebook::jni::local_ref<JIValue> JIValue::newJIValueFromIntDict(
+    c10::Dict<c10::IValue, c10::IValue> dict) {
+  static auto jMethodDictLongKey =
+      JIValue::javaClassStatic()
+          ->getStaticMethod<facebook::jni::local_ref<JIValue>(
+              facebook::jni::alias_ref<facebook::jni::JMap<
+                  facebook::jni::alias_ref<facebook::jni::JLong::javaobject>,
+                  facebook::jni::alias_ref<JIValue::javaobject>>>)>(
+              "dictLongKeyFrom");
+  auto jmap = JHashMap<
+      facebook::jni::alias_ref<facebook::jni::JLong::javaobject>,
+      facebook::jni::alias_ref<JIValue::javaobject>>::create();
+  for (auto& pair : dict) {
+    jmap->put(
+        facebook::jni::JLong::valueOf(pair.key().toInt()),
+        JIValue::newJIValueFromAtIValue(pair.value()));
+  }
+  return jMethodDictLongKey(JIValue::javaClassStatic(), jmap);
+}
+
 facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
-    const at::IValue& ivalue) {
+    const at::IValue& ivalue,
+    DictCallback stringDictCallback,
+    DictCallback intDictCallback) {
   Trace _s{"jni::JIValue::newJIValueFromAtIValue"};
   if (ivalue.isNone()) {
     static auto jMethodOptionalNull =
@@ -331,7 +376,7 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
         JIValue::javaClassStatic(),
         facebook::jni::make_jstring(ivalue.toStringRef()));
   } else if (ivalue.isTuple()) {
-    auto elementsVec = ivalue.toTuple()->elements();
+    auto elementsVec = ivalue.toTupleRef().elements();
     static auto jMethodTupleArr =
         JIValue::javaClassStatic()
             ->getStaticMethod<facebook::jni::local_ref<JIValue>(
@@ -426,49 +471,16 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
           "Unknown IValue-Dict key type");
     }
 
-    const auto keyTypeKind = keyType->kind();
-    if (c10::TypeKind::StringType == keyTypeKind) {
-      static auto jMethodDictStringKey =
-          JIValue::javaClassStatic()
-              ->getStaticMethod<facebook::jni::local_ref<JIValue>(
-                  facebook::jni::alias_ref<facebook::jni::JMap<
-                      facebook::jni::alias_ref<
-                          facebook::jni::JString::javaobject>,
-                      facebook::jni::alias_ref<JIValue::javaobject>>>)>(
-                  "dictStringKeyFrom");
-
-      auto jmap = JHashMap<
-          facebook::jni::alias_ref<facebook::jni::JString::javaobject>,
-          facebook::jni::alias_ref<JIValue::javaobject>>::create();
-      for (auto& pair : dict) {
-        jmap->put(
-            facebook::jni::make_jstring(pair.key().toString()->string()),
-            JIValue::newJIValueFromAtIValue(pair.value()));
-      }
-      return jMethodDictStringKey(JIValue::javaClassStatic(), jmap);
-    } else if (c10::TypeKind::IntType == keyTypeKind) {
-      static auto jMethodDictLongKey =
-          JIValue::javaClassStatic()
-              ->getStaticMethod<facebook::jni::local_ref<JIValue>(
-                  facebook::jni::alias_ref<facebook::jni::JMap<
-                      facebook::jni::alias_ref<
-                          facebook::jni::JLong::javaobject>,
-                      facebook::jni::alias_ref<JIValue::javaobject>>>)>(
-                  "dictLongKeyFrom");
-      auto jmap = JHashMap<
-          facebook::jni::alias_ref<facebook::jni::JLong::javaobject>,
-          facebook::jni::alias_ref<JIValue::javaobject>>::create();
-      for (auto& pair : dict) {
-        jmap->put(
-            facebook::jni::JLong::valueOf(pair.key().toInt()),
-            JIValue::newJIValueFromAtIValue(pair.value()));
-      }
-      return jMethodDictLongKey(JIValue::javaClassStatic(), jmap);
+    if (*keyType == *c10::StringType::get()) {
+      return stringDictCallback(std::move(dict));
+    } else if (*keyType == *c10::IntType::get()) {
+      return intDictCallback(std::move(dict));
     }
 
     facebook::jni::throwNewJavaException(
         facebook::jni::gJavaLangIllegalArgumentException,
-        "Unsupported IValue-Dict key type");
+        "Unsupported IValue-Dict key type: %s",
+        keyType->str().c_str());
   }
 
   facebook::jni::throwNewJavaException(
@@ -521,7 +533,7 @@ at::IValue JIValue::JIValueToAtIValue(
 
     std::vector<at::IValue> elements;
     elements.reserve(n);
-    for (auto i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       auto jivalue_element = jarray->getElement(i);
       auto element = JIValue::JIValueToAtIValue(jivalue_element);
       elements.push_back(std::move(element));
@@ -535,7 +547,7 @@ at::IValue JIValue::JIValueToAtIValue(
     size_t n = jArrayPinned.size();
     c10::List<bool> list{};
     list.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       list.push_back(jArrayPinned[i]);
     }
     return at::IValue{std::move(list)};
@@ -547,7 +559,7 @@ at::IValue JIValue::JIValueToAtIValue(
     size_t n = jArrayPinned.size();
     c10::List<int64_t> list{};
     list.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       list.push_back(jArrayPinned[i]);
     }
     return at::IValue{std::move(list)};
@@ -559,7 +571,7 @@ at::IValue JIValue::JIValueToAtIValue(
     size_t n = jArrayPinned.size();
     c10::List<double> list{};
     list.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       list.push_back(jArrayPinned[i]);
     }
     return at::IValue{std::move(list)};
@@ -572,7 +584,7 @@ at::IValue JIValue::JIValueToAtIValue(
     size_t n = jArray->size();
     c10::List<at::Tensor> list{};
     list.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       list.push_back(
           TensorHybrid::newAtTensorFromJTensor(jArray->getElement(i)));
     }
@@ -594,7 +606,7 @@ at::IValue JIValue::JIValueToAtIValue(
     c10::impl::GenericList list{c10::unshapedType(first_element.type())};
     list.reserve(n);
     list.push_back(first_element);
-    for (auto i = 1; i < n; ++i) {
+    for (const auto i : c10::irange(1, n)) {
       auto jivalue_element = jarray->getElement(i);
       auto element = JIValue::JIValueToAtIValue(jivalue_element);
       list.push_back(element);
@@ -613,8 +625,8 @@ at::IValue JIValue::JIValueToAtIValue(
     }
 
     auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
-    c10::impl::GenericDict dict{c10::StringType::get(),
-                                c10::unshapedType(firstEntryValue.type())};
+    c10::impl::GenericDict dict{
+        c10::StringType::get(), c10::unshapedType(firstEntryValue.type())};
     dict.insert(it->first->toStdString(), firstEntryValue);
     it++;
     for (; it != jmap->end(); it++) {
@@ -636,8 +648,8 @@ at::IValue JIValue::JIValueToAtIValue(
     }
 
     auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
-    c10::impl::GenericDict dict{c10::IntType::get(),
-                                c10::unshapedType(firstEntryValue.type())};
+    c10::impl::GenericDict dict{
+        c10::IntType::get(), c10::unshapedType(firstEntryValue.type())};
     dict.insert((int64_t)it->first->longValue(), firstEntryValue);
     it++;
     for (; it != jmap->end(); it++) {

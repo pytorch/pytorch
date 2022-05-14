@@ -1,9 +1,17 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/UniqueCub.cuh>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at {
 namespace native {
@@ -68,12 +76,10 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> compute_unique(
 
     Tensor inv_loc_out =
         consecutive ? inverse_indices : at::empty({num_inp}, options);
-    CUB_WRAPPER(
-        cub::DeviceScan::InclusiveSum,
+    at::cuda::cub::inclusive_sum_truncating(
         inv_loc_ptr,
         inv_loc_out.data_ptr<int64_t>(),
-        num_inp,
-        stream);
+        num_inp);
 
     if (!consecutive) {
       TORCH_INTERNAL_ASSERT(
@@ -98,14 +104,12 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> compute_unique(
     num_out = length.item<int64_t>();
   } else {
     counts.resize_(num_inp);
-    CUB_WRAPPER(
-        cub::DeviceRunLengthEncode::Encode,
+    at::cuda::cub::run_length_encode(
         data,
         data_out.data_ptr<scalar_t>(),
         counts.data_ptr<int64_t>(),
         length.data_ptr<int64_t>(),
-        num_inp,
-        stream);
+        num_inp);
     num_out = length.item<int64_t>();
     counts.resize_(num_out);
   }
@@ -141,13 +145,13 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   Tensor sorted_indices;
   if (!return_inverse) {
     if (!consecutive) {
-      cuda::cub::sort_keys(self_c.data_ptr<scalar_t>(), sorted_data, num_inp);
+      cuda::cub::radix_sort_keys(self_c.data_ptr<scalar_t>(), sorted_data, num_inp);
     }
   } else {
     if (!consecutive) {
       Tensor range = at::arange(0, num_inp, options);
       sorted_indices = at::empty({num_inp}, options);
-      cuda::cub::sort_pairs(
+      cuda::cub::radix_sort_pairs(
           self_c.data_ptr<scalar_t>(),
           sorted_data,
           range.data_ptr<int64_t>(),

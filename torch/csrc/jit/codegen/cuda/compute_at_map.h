@@ -42,6 +42,18 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   // IterDomains that could have different parallelization strategies. We also
   // propagate the parallel strategy in parallel mode so all mapped IDs that
   // must have the same parallel type, do.
+  //
+  // MappingMode::PARALLEL
+  //   Only maps leaf axes to left of compute at
+  //   Forward broadcast axes in replay
+  // MappingMode::LOOP
+  //   Forward broadcast axes in replay
+  //   Map all iteration domains
+  //   Always contain root mappings (otherwise they could have been forwarded in
+  //   broadcast)
+  // MappingMode::INDEX
+  //   Don't map any broadcast axes to non-broadcast axes
+  //   Do not forward through any broadcast IDs
   enum class MappingMode { PARALLEL, LOOP, INDEX };
 
   ComputeAtMap() = default;
@@ -55,33 +67,17 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   //! same loop nest in the lowered code
   bool areMapped(IterDomain* id0, IterDomain* id1) const;
 
-  bool areMapped(kir::IterDomain* id0, kir::IterDomain* id1) const;
-
   //! Returns an iter domain that is the maximum expanded size of all iter
   //! domains the one provided maps to. Useful for opening loops to the correct
   //! iteration size. Not guarenteed to return the same ID every call, but is
   //! guarenteed to return iter domains in the same disjoint set.
   IterDomain* getConcreteMappedID(IterDomain* id) const;
 
-  kir::IterDomain* getConcreteMappedID(kir::IterDomain* id) const;
-
-  // TODO: Would be great if we didn't need this, but we have nice functionality
-  // in iter_visitor that isn't moved over. Use of this is limited to indexing
-  // and this should definitely be removed by building out kernel ir to have
-  // better parity with fusion ir.
-  IterDomain* toFusion(kir::IterDomain* kir) const;
-
   // Prints mapping information via Fusion IR
   std::string toString() const;
 
  private:
-  bool has_lowered_kir_ = false;
-
   void mapIds(IterDomain* id0, IterDomain* id1);
-
-  //! Convert everything to lowered structures (kernel ir), as we will use
-  //! this class frequently during lowering.
-  void convertToKir(Fusion* fusion, GpuLower* gpu_lower);
 
  private:
   MappingMode mapping_mode_ = MappingMode::LOOP;
@@ -97,11 +93,6 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   std::unordered_map<IterDomain*, std::shared_ptr<std::deque<IterDomain*>>>
       disjoint_iter_set_maps_;
 
-  std::unordered_map<
-      kir::IterDomain*,
-      std::shared_ptr<std::deque<kir::IterDomain*>>>
-      kir_disjoint_iter_set_maps_;
-
   // Keep a list of disjoint_iter_sets that's deterministic to iterate over
   std::deque<std::shared_ptr<std::deque<IterDomain*>>> disjoint_iter_sets_;
 
@@ -113,12 +104,6 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   // For each IterDomain set we will track how many concrete root domains were
   // used to generate the IterDomain
   std::unordered_map<IterDomain*, IterDomain*> concrete_id_map_;
-
-  std::unordered_map<kir::IterDomain*, kir::IterDomain*> kir_concrete_id_map_;
-
-  // Map kir::IterDomain* back to the fusion IR IterDomain*.
-  // TODO: Would be great if we didn't need this.
-  std::unordered_map<kir::IterDomain*, IterDomain*> kir_2_fusion_;
 };
 
 } // namespace cuda

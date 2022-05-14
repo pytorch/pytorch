@@ -1,7 +1,8 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 
 #include <unordered_map>
 #include <vector>
@@ -11,19 +12,21 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class Fusion;
+class IrContainer;
 
 //! Clones nodes from an exiting Fusion
 //!
 //! \warning IrCloner machinery is a specialized helper for implementing
-//!   Fusion copy operations and it's not intended for any other uses
+//!   Fusion copy operations and the and limited scope of RecomputeTv below.
+//!   It is not intended for any other uses.
 //!
 class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   friend class Statement;
+  friend class IrBuilder;
 
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit IrCloner(Fusion* new_fusion) : fusion_(new_fusion) {}
+  explicit IrCloner(IrContainer* container);
 
   Statement* clone(const Statement* statement);
 
@@ -44,11 +47,11 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
     return copy;
   }
 
-  Fusion* fusion() const {
-    return fusion_;
+  IrContainer* container() const {
+    return ir_container_;
   }
 
- private:
+ protected:
   void registerClone(const Statement* src, Statement* clone);
 
   void handle(const Statement*) override;
@@ -62,6 +65,7 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   void handle(const Bool*) override;
   void handle(const Double*) override;
   void handle(const Int*) override;
+  void handle(const ComplexDouble*) override;
   void handle(const NamedScalar*) override;
 
   void handle(const UnaryOp*) override;
@@ -70,25 +74,48 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   void handle(const BroadcastOp*) override;
   void handle(const ReductionOp*) override;
   void handle(const WelfordOp*) override;
+  void handle(const MmaOp*) override;
   void handle(const TransposeOp*) override;
   void handle(const ShiftOp*) override;
   void handle(const GatherOp*) override;
+  void handle(const ViewDtypeOp*) override;
+  void handle(const ViewOp*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;
 
+ protected:
+  // We keep track of the original -> clone map so we don't
+  // duplicate clones of the same object if referenced multiple times
+  std::unordered_map<const Statement*, Statement*> clones_map_;
+
  private:
   // The destination Fusion container
-  Fusion* fusion_ = nullptr;
+  IrContainer* ir_container_ = nullptr;
 
   // The dispatch interface doesn't allow returning values from
   // individual `handle()` methods, so they are storing the
   // result here
   Statement* clone_ = nullptr;
 
-  // We keep track of the original -> clone map so we don't
-  // duplicate clones of the same object if referenced multiple times
-  std::unordered_map<const Statement*, Statement*> clones_map_;
+  // Builder to make all the new nodes
+  IrBuilder builder_;
+};
+
+// Replicates all expressions used to generate the provided TensorView. Does not
+// replicate inputs. Does not replicate scalar values. In other words the value
+// provided will be recomputed from the inputs of the fusion.
+class RecomputeTv : private IrCloner {
+ public:
+  // Replicates expressions and values in provided expressions.
+  static TensorView* recompute(TensorView* tv);
+
+ private:
+  RecomputeTv(Fusion* fusion, std::vector<Expr*> exprs);
+
+  void handle(const TensorDomain*) final;
+
+  Fusion* fusion_;
 };
 
 } // namespace cuda

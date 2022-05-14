@@ -1,3 +1,5 @@
+# Owner(s): ["module: distributions"]
+
 import pytest
 
 import torch

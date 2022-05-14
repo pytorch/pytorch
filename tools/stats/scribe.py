@@ -173,13 +173,13 @@ def rds_write(
     'values_list' should be a list of dictionaries that map field names to
     values.
     """
-    sprint("Writing for", os.getenv("CIRCLE_PR_NUMBER"))
-    is_master = os.getenv("CIRCLE_PR_NUMBER", "").strip() == ""
+    sprint("Writing for", os.getenv("PR_NUMBER"))
+    is_master = os.getenv("PR_NUMBER", "").strip() == ""
     if only_on_master and not is_master:
         sprint("Skipping RDS write on PR")
         return
 
-    pr = os.getenv("CIRCLE_PR_NUMBER", None)
+    pr = os.getenv("PR_NUMBER", None)
     if pr is not None and pr.strip() == "":
         pr = None
 
@@ -190,8 +190,8 @@ def rds_write(
 
     base = {
         "pr": pr,
-        "ref": os.getenv("CIRCLE_SHA1"),
-        "branch": os.getenv("CIRCLE_BRANCH"),
+        "ref": os.getenv("SHA1"),
+        "branch": os.getenv("BRANCH"),
         "workflow_id": os.getenv("GITHUB_RUN_ID"),
         "build_environment": build_environment,
     }

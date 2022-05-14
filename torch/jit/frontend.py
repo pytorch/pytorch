@@ -3,6 +3,7 @@ import sys
 import ast
 import inspect
 import string
+import re
 from collections import namedtuple
 from textwrap import dedent
 from typing import List, Tuple  # noqa: F401
@@ -390,7 +391,8 @@ def build_ignore_context_manager(ctx, stmt):
     def create_unique_name_ext(ctx, stmt):
         # extension will be based on the full path filename plus
         # the line number of original context manager
-        return ctx.filename.replace(".", "_").replace("/", "_") + "_" + str(stmt.lineno)
+        fn = re.sub(r'[^a-zA-Z0-9_]', '_', ctx.filename)
+        return f"{fn}_{stmt.lineno}"
 
     def build_return_ann_stmt(outputs):
         return_type_ann = ""
@@ -533,6 +535,18 @@ class StmtBuilder(Builder):
     def build_AnnAssign(ctx, stmt):
         if stmt.value is None:
             raise UnsupportedNodeError(ctx, stmt, reason='without assigned value')
+
+        # Disallow type annotations on instance attributes outside of __init__
+        if type(stmt.target) == ast.Attribute and \
+                stmt.target.value.id == "self" and ctx.funcname != "__init__":  # type: ignore[attr-defined]
+            start = stmt.col_offset
+            end = start + len(f"self.{stmt.target.attr}")
+            if hasattr(stmt.annotation, 'id'):
+                end += len(f": {stmt.annotation.id}")
+            sr = ctx.make_range(stmt.lineno, start, end)
+            raise ValueError("Type annotations on instance attributes must be declared in "
+                             f"__init__, not '{ctx.funcname}': {sr}")
+
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
@@ -939,7 +953,7 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Str(ctx, expr):
         value = str(expr.s)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value) + 1)
         return StringLiteral(r, value)
 
     @staticmethod

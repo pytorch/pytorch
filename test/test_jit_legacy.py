@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import sys
 sys.argv.append("--jit_executor=legacy")
 from test_jit import *  # noqa: F403

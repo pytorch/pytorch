@@ -1,7 +1,10 @@
 SET(INTERPRETER_DIR "${DEPLOY_DIR}/interpreter" )
 SET(INTERPRETER_DIR "${DEPLOY_DIR}/interpreter" PARENT_SCOPE)
-
 SET(PYTORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
+
+if(NOT TORCH_INSTALL_LIB_DIR)
+  set(TORCH_INSTALL_LIB_DIR lib)
+endif()
 
 # Build cpython
 SET(PYTHON_INSTALL_DIR "${INTERPRETER_DIR}/cpython")
@@ -87,6 +90,8 @@ add_library(torch_python_static STATIC $<TARGET_OBJECTS:torch_python_obj>)
 # We bake the python and torch_python binding objs into libinterpreter
 set(INTERPRETER_LIB_SOURCES
   ${INTERPRETER_DIR}/interpreter_impl.cpp
+  ${INTERPRETER_DIR}/builtin_registry.cpp
+  ${INTERPRETER_DIR}/register_frozenpython.cpp
   ${INTERPRETER_DIR}/import_find_sharedfuncptr.cpp
   ${FROZEN_FILES}
   ${LINKER_SCRIPT}
@@ -106,3 +111,7 @@ target_include_directories(torch_deployinterpreter BEFORE PUBLIC ${PYTHON_INC_DI
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)
 target_link_libraries(torch_deployinterpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_INSTALL_DIR}/lib/libssl.a ${PYTHON_INSTALL_DIR}/lib/libcrypto.a)
+target_link_libraries(torch_deployinterpreter PRIVATE pybind::pybind11)
+
+# expose torch_python_static for multipy
+install(TARGETS torch_python_static DESTINATION "${TORCH_INSTALL_LIB_DIR}")

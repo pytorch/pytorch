@@ -6,6 +6,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -39,7 +40,7 @@ class MaxOp final : public Operator<Context> {
         Y->sizes());
     const T* X1_data = X1.template data<T>();
     math::Max<T, Context>(N, X0_data, X1_data, Y_data, &context_);
-    for (int i = 2; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(2, InputSize())) {
       const auto& Xi = Input(i);
       CAFFE_ENFORCE_EQ(
           Xi.sizes(),
@@ -87,7 +88,7 @@ class MinOp final : public Operator<Context> {
         Y->sizes());
     const T* X1_data = X1.template data<T>();
     math::Min<T, Context>(N, X0_data, X1_data, Y_data, &context_);
-    for (int i = 2; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(2, InputSize())) {
       const auto& Xi = Input(i);
       CAFFE_ENFORCE_EQ(
           Xi.sizes(),

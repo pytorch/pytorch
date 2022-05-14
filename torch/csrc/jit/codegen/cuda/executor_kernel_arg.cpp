@@ -1,4 +1,3 @@
-#include <ATen/CUDAGeneratorImpl.h>
 #include <c10/util/irange.h>
 
 // Extract size and strides
@@ -63,9 +62,9 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(int nDims) {
     default:
       TORCH_INTERNAL_ASSERT(
           false,
-          "Tried to gerneate a tensor to run a generated kernel with ",
+          "Tried to generate a tensor to run a generated kernel with ",
           nDims,
-          " dimensions, however it must be a 1-8 dimensional tensor.");
+          " dimensions, however only 0 to 8 dimensional tensor are supported.");
   }
   return nullptr;
 }
@@ -81,12 +80,18 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
       return getTensorArg<float, INDEX_MODE>(nDims);
     case c10::ScalarType::Half:
       return getTensorArg<at::Half, INDEX_MODE>(nDims);
+    case c10::ScalarType::BFloat16:
+      return getTensorArg<at::BFloat16, INDEX_MODE>(nDims);
     case c10::ScalarType::Bool:
       return getTensorArg<bool, INDEX_MODE>(nDims);
     case c10::ScalarType::Long:
       return getTensorArg<int64_t, INDEX_MODE>(nDims);
     case c10::ScalarType::Int:
       return getTensorArg<int32_t, INDEX_MODE>(nDims);
+    case c10::ScalarType::ComplexFloat:
+      return getTensorArg<c10::complex<float>, INDEX_MODE>(nDims);
+    case c10::ScalarType::ComplexDouble:
+      return getTensorArg<c10::complex<double>, INDEX_MODE>(nDims);
     default:
       TORCH_CHECK(
           false,
@@ -95,8 +100,6 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
           " not currently supported in code generated kernels.");
   }
 }
-
-} // namespace
 
 std::unique_ptr<TensorArgAbstract> getTensorArg(
     c10::ScalarType dtype,
@@ -115,20 +118,73 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
   return nullptr;
 }
 
+} // namespace
+
 // Push a tensor to the arguments
 void KernelArgumentHolder::push(const at::Tensor& tensor) {
   changed_ = true;
-  int nDims = tensor.ndimension();
+  if (is_cpu_scalar(tensor)) {
+    switch (tensor.scalar_type()) {
+      case c10::ScalarType::Double:
+        arguments_.push_back(
+            std::make_unique<
+                CpuScalarTensorArg<CpuScalarTensorCodegen<double>>>(
+                tensor.data_ptr<double>()[0]));
+        break;
+      case c10::ScalarType::Float:
+        arguments_.push_back(
+            std::make_unique<CpuScalarTensorArg<CpuScalarTensorCodegen<float>>>(
+                tensor.data_ptr<float>()[0]));
+        break;
+      case c10::ScalarType::Half:
+        arguments_.push_back(
+            std::make_unique<
+                CpuScalarTensorArg<CpuScalarTensorCodegen<at::Half>>>(
+                tensor.data_ptr<at::Half>()[0]));
+        break;
+      case c10::ScalarType::BFloat16:
+        arguments_.push_back(
+            std::make_unique<
+                CpuScalarTensorArg<CpuScalarTensorCodegen<at::BFloat16>>>(
+                tensor.data_ptr<at::BFloat16>()[0]));
+        break;
+      case c10::ScalarType::Bool:
+        arguments_.push_back(
+            std::make_unique<CpuScalarTensorArg<CpuScalarTensorCodegen<bool>>>(
+                tensor.data_ptr<bool>()[0]));
+        break;
+      case c10::ScalarType::Long:
+        arguments_.push_back(
+            std::make_unique<
+                CpuScalarTensorArg<CpuScalarTensorCodegen<int64_t>>>(
+                tensor.data_ptr<int64_t>()[0]));
+        break;
+      case c10::ScalarType::Int:
+        arguments_.push_back(
+            std::make_unique<
+                CpuScalarTensorArg<CpuScalarTensorCodegen<int32_t>>>(
+                tensor.data_ptr<int32_t>()[0]));
+        break;
+      default:
+        TORCH_CHECK(
+            false,
+            "Dtype: ",
+            tensor.scalar_type(),
+            " not currently supported in code generated kernels.");
+    }
+  } else {
+    int nDims = tensor.ndimension();
 
-  c10::ScalarType dtype = tensor.scalar_type();
-  std::unique_ptr<TensorArgAbstract> tensor_arg =
-      getTensorArg(dtype, nDims, index_mode_);
-  tensor_arg->setPointer(tensor.data_ptr());
-  for (const auto i : c10::irange(nDims)) {
-    tensor_arg->setSize(i, tensor.sizes()[i]);
-    tensor_arg->setStride(i, tensor.strides()[i]);
+    c10::ScalarType dtype = tensor.scalar_type();
+    std::unique_ptr<TensorArgAbstract> tensor_arg =
+        getTensorArg(dtype, nDims, index_mode_);
+    tensor_arg->setPointer(tensor.data_ptr());
+    for (const auto i : c10::irange(nDims)) {
+      tensor_arg->setSize(i, tensor.sizes()[i]);
+      tensor_arg->setStride(i, tensor.strides()[i]);
+    }
+    arguments_.push_back(std::move(tensor_arg));
   }
-  arguments_.push_back(std::move(tensor_arg));
 }
 
 // Push a scalar or integer to the arguments
@@ -141,6 +197,10 @@ void KernelArgumentHolder::push(const IValue& val) {
   auto scalar_val = val.toScalar();
   switch (scalar_val.type()) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
+    case c10::ScalarType::ComplexDouble:
+      arguments_.push_back(
+          std::make_unique<ComplexDoubleArg>(scalar_val.toComplexDouble()));
+      return;
     case c10::ScalarType::Double:
       arguments_.push_back(std::make_unique<DoubleArg>(scalar_val.toDouble()));
       return;
