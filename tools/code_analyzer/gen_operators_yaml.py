@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# @lint-ignore MYPY
 import argparse
 import json
 import sys
@@ -11,7 +10,7 @@ from gen_op_registration_allowlist import (
     gen_transitive_closure,
     load_op_dep_graph,
 )
-from torchgen.selective_build.operator import *
+from torchgen.selective_build.operator import SelectiveBuildOperator, merge_operator_dicts
 from torchgen.selective_build.selector import merge_kernel_metadata
 
 # Generate YAML file containing the operators used for a specific PyTorch model.
@@ -82,13 +81,8 @@ from torchgen.selective_build.selector import merge_kernel_metadata
 #
 
 
-def canonical_opnames(opnames):
+def canonical_opnames(opnames: List[str]) -> List[str]:
     return [canonical_name(opname) for opname in opnames]
-
-
-def load_all_models_yaml(models_yaml_path):
-    with open(models_yaml_path, "rb") as models_yaml_file:
-        return yaml.safe_load(models_yaml_file)
 
 
 def make_filter_from_options(
@@ -218,7 +212,9 @@ def fill_output(output: Dict[str, object], options: object):
         options.model_assets.split(",") if options.model_assets is not None else None
     )
 
-    all_models_yaml = load_all_models_yaml(options.models_yaml_path) or []
+    with open(options.models_yaml_path, "rb") as models_yaml_file:
+        all_models_yaml = yaml.safe_load(models_yaml_file) or []
+
     model_filter_func = make_filter_from_options(
         options.model_name, model_versions, model_assets, options.model_backends
     )
@@ -559,7 +555,7 @@ def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
     return options
 
 
-def main(argv):
+def main(argv) -> None:
     parser = argparse.ArgumentParser(description="Generate used operators YAML")
     options = get_parser_options(parser)
 

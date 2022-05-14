@@ -106,6 +106,7 @@ exclude_patterns = [
     'caffe2/contrib/fakelowp/test/test_batchmatmul_nnpi_fp16.py',
     'test/test_numpy_interop.py',
     'torch/torch_version.py',
+    'tools/code_analyzer/gen_operators_yaml.py',
 ]
 command = [
     'python3',
