@@ -468,6 +468,21 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
   return self.to_sparse().to_sparse_csr();
 }
 
+Tensor dense_to_sparse_csc(const Tensor& self) {
+  AT_ERROR("Conversion from ", self.layout(), " to CSC is currently not supported.");
+  return self;
+}
+
+Tensor dense_to_sparse_bsr(const Tensor& self) {
+  AT_ERROR("Conversion from ", self.layout(), " to BSR is currently not supported.");
+  return self;
+}
+
+Tensor dense_to_sparse_bsc(const Tensor& self) {
+  AT_ERROR("Conversion from ", self.layout(), " to BSC is currently not supported.");
+  return self;
+}
+
 Tensor csr_to_sparse_csr(const Tensor& self) {
   // Just returning self doesn't work
   // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152,
@@ -500,6 +515,21 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
       coalesced_self.scalar_type(),
       c10::kSparseCsr,
       coalesced_self.device());
+}
+
+Tensor coo_to_sparse_csc(const Tensor& self) {
+  AT_ERROR("Conversion from ", self.layout(), " to CSC is currently not supported.");
+  return self;
+}
+
+Tensor coo_to_sparse_bsr(const Tensor& self) {
+  AT_ERROR("Conversion from ", self.layout(), " to BSR is currently not supported.");
+  return self;
+}
+
+Tensor coo_to_sparse_bsc(const Tensor& self) {
+  AT_ERROR("Conversion from ", self.layout(), " to BSC is currently not supported.");
+  return self;
 }
 
 namespace {
