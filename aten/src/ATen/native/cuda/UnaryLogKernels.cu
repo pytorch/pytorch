@@ -31,7 +31,7 @@ void log_kernel_cuda(TensorIteratorBase& iter) {
       gpu_kernel(
           iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
             using opmath_t = at::opmath_type<scalar_t>;
-            return ::log(static_cast<opmath_t>(a)); 
+            return ::log(static_cast<opmath_t>(a));
           });
     });
 #endif
