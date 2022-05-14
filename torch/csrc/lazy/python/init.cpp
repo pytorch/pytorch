@@ -6,7 +6,6 @@
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/metrics.h>
-#include <torch/csrc/lazy/core/trie.h>
 #include <torch/csrc/lazy/python/python_util.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
@@ -168,16 +167,6 @@ void initLazyBindings(PyObject* module){
   lazy.def(
     "_set_force_fallback", [](std::string newval) {
         torch::lazy::getLTCForceFallback() = newval;
-    }
-  );
-  lazy.def(
-    "_clear_ir_cache", []() {
-        TrieCache::Get()->Clear();
-    }
-  );
-  lazy.def(
-    "_dump_ir_cache", [](std::string filename) {
-        TrieCache::Get()->DumpToDotFile(filename);
     }
   );
   lazy.def(
