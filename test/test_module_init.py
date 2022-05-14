@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 # TODO: Merge this in with the initial ModuleInfo implementation.
 def build_constructor_arg_db():
     return {
+        torch.nn.Bias: ((5,), {}),
         torch.nn.AdaptiveAvgPool1d: ((5,), {}),
         torch.nn.AdaptiveAvgPool2d: ((5,), {}),
         torch.nn.AdaptiveAvgPool3d: ((5,), {}),

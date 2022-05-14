@@ -21,7 +21,7 @@ __all__ = [
 class Bias(Module):
     r"""Adds a bias to the last dimension of an input
 
-    tensorArgs:
+    Args:
         num_features:  the size of vector parameter that will be used to add bias
 
     Shape:
