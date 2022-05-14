@@ -10,10 +10,11 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/cuda/Atomic.cuh>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/cuda/CUDAUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -29,6 +30,8 @@
 #include <ATen/ops/index_reduce_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/repeat_interleave.h>
 #endif
 
 #include <ATen/cuda/CUDAContext.h>
@@ -1242,6 +1245,214 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
       "with ", value.dim(), " dimension(s).");
   return masked_fill__cuda(self, mask, value.item());
 }
+
+namespace {
+  // Cannot use fastAtomicAdd inside GPU_LAMBDA as nvcc complaints
+  // about calling __device__ operator() in the __host__ context
+  template <typename index_t>
+  static __host__ __device__ __forceinline__ void applyFastAtomicIndexInc(
+      index_t* const src,
+      index_t idx,
+      index_t numel
+  ) {
+    fastAtomicAdd(
+      src, idx, numel,
+      /*value=*/static_cast<index_t>(1),
+      /*fast_atomics=*/true
+    );
+  }
+
+  // Cannot use fastAtomicAdd inside GPU_LAMBDA as nvcc complaints
+  // about calling __device__ operator() in the __host__ context
+  template <typename index_t>
+  static __host__ __device__ __forceinline__ index_t applyAtomicIndexInc(
+      index_t* const address,
+      index_t val
+  ) {
+    return gpuAtomicAddWithReturn(address, val);
+  }
+}
+
+Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
+  // This just implements a naive brute-force algorithm.
+  // TODO: implement more sophisticated and performant algorithms
+  // similar to how index_select_sparse_cpu is doing that.
+  const auto ndim = self.dim();
+  TORCH_CHECK_INDEX(ndim, "index_select() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK_INDEX(
+      index.dim() == 1 && index.dtype() == at::kLong && index.options().layout() == at::kStrided,
+      "index_select() argument index must be 1-D strided (non-sparse) long-tensor.");
+  dim = maybe_wrap_dim(dim, ndim);
+  const auto size = self.size(dim);
+  const auto sparse_dim = self.sparse_dim();
+  const auto dense_dim = self.dense_dim();
+  const auto indices = self._indices();
+  const auto values = self._values();
+  const auto nnz = values.size(0);
+  const auto index_len = index.size(0);
+  auto res_sizes = self.sizes().vec();
+  res_sizes[dim] = index_len;
+
+  // If indexing into sparse dimensions
+  if (dim < sparse_dim) {
+    // short-circuit if index is empty
+    if (!index_len) {
+      auto res_indices = indices.index_select(1, index);
+      res_indices[dim] = index;
+      const auto res_values = values.index_select(0, index);
+
+      return at::_sparse_coo_tensor_with_dims_and_tensors(
+          sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
+    }
+
+    const auto nneg_index = [&index, size, dim]() -> Tensor {
+      auto nneg_index = at::empty_like(index, at::MemoryFormat::Contiguous);
+
+      auto iter = TensorIteratorConfig()
+        .add_output(nneg_index)
+        .add_input(index)
+        .build();
+
+      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_select_sparse_cuda", [&]() {
+          gpu_kernel(iter, [size, dim] GPU_LAMBDA (index_t idx) -> index_t {
+              CUDA_KERNEL_ASSERT(idx >= -size && idx < size
+                  && "index_select(): index out of bounds");
+              return idx < 0 ? idx + size : idx;
+          });
+      });
+      return nneg_index;
+    }();
+    const auto dim_indices = indices[dim].contiguous();
+
+    const auto idx_nneg_index = at::arange(index_len, nneg_index.options());
+    const auto idx_dim_indices = at::arange(nnz, dim_indices.options());
+
+    const auto intrsc_counts_nneg_index = [&]() -> Tensor {
+      auto intrsc_counts_nneg_index = at::zeros_like(nneg_index);
+
+      const auto rows_over_dim_indices = (nnz <= index_len);
+      // Need to have output as TensorIterator does not allow having void lambdas.
+      auto dummy_output = at::empty({1, 1}, dim_indices.options())
+        .expand(
+            rows_over_dim_indices
+            ? IntArrayRef({nnz, index_len})
+            : IntArrayRef({index_len, nnz})
+        );
+      auto iter = TensorIteratorConfig()
+        .add_output(dummy_output)
+        // All iterations map to a single element in dummy_output by design,
+        // hence removed output memory overlap check.
+        .set_check_mem_overlap(false)
+        .add_owned_input(dim_indices.unsqueeze(rows_over_dim_indices ? -1: -2))
+        .add_owned_input(nneg_index.unsqueeze(rows_over_dim_indices ? -2: -1))
+        .add_owned_input(idx_nneg_index.unsqueeze(rows_over_dim_indices ? -2: -1))
+        .build();
+
+      AT_DISPATCH_INDEX_TYPES(nneg_index.scalar_type(), "index_select_sparse_cuda", [&]() {
+          index_t* ptr_intrsc_counts_nneg_index = intrsc_counts_nneg_index.data_ptr<index_t>();
+          gpu_kernel(
+              iter,
+              [ptr_intrsc_counts_nneg_index, nnz, index_len] GPU_LAMBDA (
+                index_t dim_val, index_t idx_val, // dim_indices[j], j
+                index_t idx_idx // i
+              ) -> index_t {
+                if (dim_val == idx_val) {
+                  applyFastAtomicIndexInc(
+                    ptr_intrsc_counts_nneg_index,
+                    idx_idx,
+                    static_cast<index_t>(index_len)
+                  );
+                }
+                // A dummy return scalar for a dummy output
+                return static_cast<index_t>(1);
+              }
+          );
+      });
+
+      return intrsc_counts_nneg_index;
+    }();
+
+    Tensor selected_dim_indices, res_dim_indices;
+    std::tie(selected_dim_indices, res_dim_indices) = [&]() -> std::tuple<Tensor, Tensor> {
+      // Unavoidable sync since the shape of the result is not known in advance
+      auto res_len = intrsc_counts_nneg_index.sum().item<int64_t>();
+      // Short-circuit if empty intersection
+      if (!res_len) {
+        auto empty_idx = at::empty({0}, nneg_index.options());
+        return std::make_tuple(empty_idx, empty_idx);
+      }
+
+      const auto res_dim_indices = at::repeat_interleave(
+          /*self=*/idx_nneg_index,
+          /*counts=*/intrsc_counts_nneg_index,
+          /*dim=*/-1,
+          /*output_size=*/res_len
+      );
+
+      const auto selected_dim_indices = at::empty_like(res_dim_indices);
+      auto selected_dim_indices_offsets = intrsc_counts_nneg_index.cumsum(0)
+        .sub_(intrsc_counts_nneg_index);
+
+      const auto rows_over_dim_indices = (nnz <= index_len);
+      // Need to have output as TensorIterator does not allow having void lambdas.
+      auto dummy_output = at::empty({1, 1}, dim_indices.options())
+        .expand(
+            rows_over_dim_indices
+            ? IntArrayRef({nnz, index_len})
+            : IntArrayRef({index_len, nnz})
+        );
+      auto iter = TensorIteratorConfig()
+        .add_output(dummy_output)
+        // All iterations map to a single element in dummy_output by design,
+        // hence removed output memory overlap check.
+        .set_check_mem_overlap(false)
+        .add_owned_input(dim_indices.unsqueeze(rows_over_dim_indices ? -1: -2))
+        .add_owned_input(idx_dim_indices.unsqueeze(rows_over_dim_indices ? -1: -2))
+        .add_owned_input(nneg_index.unsqueeze(rows_over_dim_indices ? -2: -1))
+        .add_owned_input(idx_nneg_index.unsqueeze(rows_over_dim_indices ? -2: -1))
+        .build();
+
+      AT_DISPATCH_INDEX_TYPES(nneg_index.scalar_type(), "index_select_sparse_cuda", [&]() {
+          index_t* ptr_selected_dim_indices = selected_dim_indices.data_ptr<index_t>();
+          index_t* ptr_selected_dim_indices_offsets = selected_dim_indices_offsets.data_ptr<index_t>();
+          gpu_kernel(
+              iter,
+              [ptr_selected_dim_indices, ptr_selected_dim_indices_offsets, nnz, index_len] GPU_LAMBDA (
+                index_t dim_val, index_t idx_dim, // dim_indices[j], j
+                index_t idx_val, index_t idx_idx // index[i], i
+              ) -> index_t {
+                if (dim_val == idx_val) {
+                  index_t* ptr_offset = ptr_selected_dim_indices_offsets + idx_idx;
+                  index_t offset = applyAtomicIndexInc(ptr_offset, static_cast<index_t>(1));
+                  ptr_selected_dim_indices[offset] = idx_dim;
+                }
+                // A dummy return scalar for a dummy output
+                return static_cast<index_t>(1);
+              }
+          );
+      });
+
+      return std::make_tuple(selected_dim_indices, res_dim_indices);
+    }();
+
+    auto res_indices = indices.index_select(1, selected_dim_indices);
+    res_indices[dim] = res_dim_indices;
+    const auto res_values = values.index_select(0, selected_dim_indices);
+
+    return _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
+  }
+  // If indexing into dense dimensions
+  else {
+    // It is sufficient to just perform `index_select` on values
+    // if `dim` refers to dense dimensions.
+    const auto res_values = values.index_select(dim - sparse_dim + 1, index);
+
+    return _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim, dense_dim, res_sizes, indices, res_values, self.options());
+  }
+}
+
 
 } // native
 } // at

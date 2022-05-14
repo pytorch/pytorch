@@ -168,6 +168,18 @@ static inline __device__ int32_t gpuAtomicAdd(int32_t *address, int32_t val) {
   return atomicAdd(address, val);
 }
 
+static inline __device__ int32_t gpuAtomicAddWithReturn(int32_t *address, int32_t val) {
+  return atomicAdd(address, val);
+}
+
+// WARNING: int64_t gets cast to an unsigned type! Beware of potential overflows
+static inline __device__ int64_t gpuAtomicAddWithReturn(int64_t *address, int64_t val) {
+  using cuda_int64_t = unsigned long long int;
+  return static_cast<int64_t>(
+      atomicAdd(reinterpret_cast<cuda_int64_t*>(address), static_cast<cuda_int64_t>(val))
+  );
+}
+
 static inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
 #if defined(USE_ROCM)
   __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
