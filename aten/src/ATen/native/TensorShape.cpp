@@ -3137,7 +3137,7 @@ Tensor diag(const Tensor& self, int64_t dimension) {
 }
 
 Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, self.scalar_type(), "diag", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kBool, self.scalar_type(), "diag", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });
   return result;
@@ -3326,6 +3326,13 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
+}
+
+// The default implementation of lift is a no-op.
+// If TLS is set appropriately (for wrapper-tensor keys like Functionalize or functorch transforms),
+// then we'll dispatch to one of their implementations, which will properly lift the tensor into a wrapper.
+at::Tensor lift(const at::Tensor& self) {
+    return self;
 }
 
 } // namespace native
