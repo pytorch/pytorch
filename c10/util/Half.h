@@ -448,6 +448,17 @@ struct alignas(4) complex<Half> {
     imag_ = a * d + b * c;
     return *this;
   }
+
+  complex<Half>& operator/=(const complex<Half>& other) {
+    auto a = static_cast<float>(real_);
+    auto b = static_cast<float>(imag_);
+    auto c = static_cast<float>(other.real());
+    auto d = static_cast<float>(other.imag());
+    auto denominator = c * c + d * d;
+    real_ = (a * c + b * d) / denominator;
+    imag_ = (b * c - a * d) / denominator;
+    return *this;
+  }
 };
 
 // In some versions of MSVC, there will be a compiler error when building.
