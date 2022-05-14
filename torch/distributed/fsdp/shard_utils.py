@@ -152,7 +152,9 @@ def _gather_state_dict(
     for key, tensor in state_dict.items():
         if isinstance(tensor, ShardedTensor):
             output_tensor = (
-                torch.empty(tensor.shape).cuda() if curr_rank == output_rank else None
+                torch.empty(tensor.shape, dtype=tensor.dtype).cuda()
+                if curr_rank == output_rank
+                else None
             )
             tensor.gather(0, output_tensor)
             tensor = output_tensor
