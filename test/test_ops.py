@@ -983,22 +983,15 @@ class TestCommon(TestCase):
             false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
             x_int = torch.where(x, true_vals, false_vals)
 
-            # Reinterpret the storage as a boolean tensor
-            ret = torch.empty_like(x).set_(
-                x_int.storage()._untyped(),
-                storage_offset=x_int.storage_offset(),
-                size=x_int.shape,
-                stride=x_int.stride())
+            ret = x_int.view(torch.bool)
             self.assertEqual(ret, x)
             return ret
 
         for sample in op.sample_inputs(device, dtype):
             expect = op(sample.input, *sample.args, **sample.kwargs)
 
-            inp = convert_boolean_tensors(sample.input)
-            args = tree_map(convert_boolean_tensors, sample.args)
-            kwargs = tree_map(convert_boolean_tensors, sample.kwargs)
-            actual = op(inp, *args, **kwargs)
+            transformed = sample.transform(convert_boolean_tensors)
+            actual = op(transformed.input, *transformed.args, **transformed.kwargs)
 
             self.assertEqual(expect, actual)
 
