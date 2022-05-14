@@ -590,15 +590,29 @@ class OpInfo(object):
     # the function variant of the operation, populated as torch.<name> if None
     op: Callable = None
 
-    # explicitly specifies the method variant of the operator
-    # if _NOTHING (default), the method variant will be autopopulated
-    # if None, then the OpInfo specifies no method variant
+    # allows the method variant of this operation to be specified as follows:
+    # - if _NOTHING (default), then the OpInfo attempts to discover the variant using its name
+    # - if None, then the OpInfo explicitly specifies is has no associated method
+    # - if a Callable, then that callable should be the method associated with this operation
     method_variant: Callable = _NOTHING
 
-    # explicitly specifies the inplace variant of the operator
-    # if _NOTHING (default), the method variant will be autopopulated
-    # if None, then the OpInfo specifies no method variant
+    # allows the inplace variant of this operation to be specified as follows:
+    # - if _NOTHING (default), then the OpInfo attempts to discover the variant using its name
+    # - if None, then the OpInfo explicitly specifies is has no associated inplace variant
+    # - if a Callable, then that callable should be the inplace variant associated with this operation
     inplace_variant: Callable = _NOTHING
+
+    # allows the operator variant of this operation to be specified as follows:
+    # - if _NOTHING (default), then the OpInfo attempts to discover the variant using its name
+    # - if None, then the OpInfo explicitly specifies is has no associated operator
+    # - if a Callable, then that callable should be the operator associated with this operation
+    operator_variant: Callable = _NOTHING
+
+    # allows the inplace operator variant of this operation to be specified as follows:
+    # - if _NOTHING (default), then the OpInfo attempts to discover the variant using its name
+    # - if None, then the OpInfo explicitly specifies is has no associated inplace operator
+    # - if a Callable, then that callable should be the inplace operator associated with this operation
+    inplace_operator_variant: Callable = _NOTHING
 
     # the following metadata are test directives for skipping or modifying tests
 
@@ -767,6 +781,7 @@ class OpInfo(object):
         assert self.dtypes is not None, "OpInfo for {0} has no dtypes!".format(self.name)
 
         dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
+
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
@@ -822,7 +837,19 @@ class OpInfo(object):
             inplace_name = self.name + "_"
             self.inplace_variant = getattr(torch.Tensor, inplace_name, None)
 
-        self.operator_variant = getattr(operator, self.name, None)
+        if self.operator_variant is _NOTHING:
+            self.operator_variant = getattr(operator, self.name, None)
+
+        if self.inplace_operator_variant is _NOTHING:
+            # Note: operator.i<op> will use operator.<op> and assign the result to the lhs when no
+            # __i<op>__ method is found. This results in the appearance of an inplace operator variant which
+            # does not have the correct inplace behavior. To avoid this, we guard automatic detection of the inplace
+            # operator with a check that an inplace variant exists.
+            if self.inplace_variant is not None:
+                inplace_operator_name = "i" + self.name
+                self.inplace_operator_variant = getattr(operator, inplace_operator_name, None)
+            else:
+                self.inplace_operator_variant = None
 
         self.decorators = (*self.decorators, *self.skips)
 
@@ -917,11 +944,16 @@ class OpInfo(object):
         """
         return self.inplace_variant
 
-    def get_operator_variant(self):
+    def get_operator(self):
         """Returns operator variant of the operator, e.g. operator.neg
         Returns None if the operator has no operator variant.
         """
         return self.operator_variant
+
+    def get_inplace_operator(self):
+        """Returns the inplace operator variant of the operator, e.g operator.iadd
+        Returns None if the operator has no inplace operator variant"""
+        return self.inplace_operator_variant
 
     def conjugate_sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs but with the tensor input or first
@@ -10083,6 +10115,8 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('bitwise_and',
                     dtypes=integral_types_and(torch.bool),
                     supports_autograd=False,
+                    operator_variant=operator.and_,
+                    inplace_operator_variant=operator.iand,
                     skips=(
                         # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
@@ -10091,11 +10125,14 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('bitwise_not',
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
+                   operator_variant=operator.invert,
                    supports_autograd=False),
     BinaryUfuncInfo('bitwise_left_shift',
                     op=torch.bitwise_left_shift,
                     dtypes=integral_types(),
                     dtypesIfCUDA=integral_types(),
+                    operator_variant=operator.lshift,
+                    inplace_operator_variant=operator.ilshift,
                     supports_autograd=False,
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs=dict(low=0),
@@ -10106,6 +10143,8 @@ op_db: List[OpInfo] = [
                     op=torch.bitwise_right_shift,
                     dtypes=integral_types(),
                     dtypesIfCUDA=integral_types(),
+                    operator_variant=operator.rshift,
+                    inplace_operator_variant=operator.irshift,
                     supports_autograd=False,
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs=dict(low=0),
@@ -10711,6 +10750,8 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=None,
+                    operator_variant=operator.mod,
+                    inplace_operator_variant=operator.imod,
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs={'exclude_zero': True},
                     decorators=(
@@ -12252,6 +12293,8 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('bitwise_or',
                     ref=np.bitwise_or,
                     dtypes=integral_types_and(torch.bool),
+                    operator_variant=operator.or_,
+                    inplace_operator_variant=operator.ior,
                     supports_autograd=False,
                     skips=(
                         # TODO: FIXME: RuntimeError: "bitwise_or_cuda" not implemented for 'Half'
@@ -12263,6 +12306,8 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('bitwise_xor',
                     ref=np.bitwise_xor,
                     dtypes=integral_types_and(torch.bool),
+                    operator_variant=operator.xor,
+                    inplace_operator_variant=operator.ixor,
                     supports_autograd=False,
                     skips=(
                         # TODO: FIXME: RuntimeError: "bitwise_xor_cuda" not implemented for 'Half'
