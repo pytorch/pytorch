@@ -20,7 +20,7 @@ from torch import _C
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx import symbolic_helper
 from torch.onnx._globals import GLOBALS
-from torch.onnx.symbolic_helper import ScalarType, parse_args, quantized_args
+from torch.onnx.symbolic_helper import parse_args, quantized_args
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -507,7 +507,7 @@ def expand(g, self, size, implicit):
         size = symbolic_helper._reshape_helper(
             g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1]))
         )
-    dtype = ScalarType.INT64
+    dtype = symbolic_helper.ScalarType.INT64
     ones = ones_like(g, size, dtype)
     neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
     size = where(g, g.op("Equal", size, neg_ones), ones, size)
@@ -2475,7 +2475,7 @@ def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
 def scalar_tensor(g, scalar, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = ScalarType.FLOAT
+        dtype = symbolic_helper.ScalarType.FLOAT
     scalar = g.op("Cast", scalar, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
     return scalar
 
@@ -2517,7 +2517,7 @@ def as_tensor(g, data, dtype=None, device=None):
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
     if dtype is None:
-        dtype = ScalarType.FLOAT
+        dtype = symbolic_helper.ScalarType.FLOAT
     sizes_ = symbolic_helper._maybe_get_const(sizes, "is")
     if isinstance(sizes_, list) and len(sizes_) == 0:
         sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
@@ -2536,7 +2536,7 @@ def zeros_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        dtype = ScalarType.FLOAT
+        dtype = symbolic_helper.ScalarType.FLOAT
     return g.op(
         "ConstantOfShape",
         shape,
@@ -2559,7 +2559,7 @@ def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
 @parse_args("v", "i", "v", "v", "v")
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
     if dtype is None:
-        dtype = ScalarType.FLOAT
+        dtype = symbolic_helper.ScalarType.FLOAT
     sizes_ = symbolic_helper._maybe_get_const(sizes, "is")
     if isinstance(sizes_, list) and len(sizes_) == 0:
         sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
@@ -2578,7 +2578,7 @@ def ones_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        dtype = ScalarType.FLOAT
+        dtype = symbolic_helper.ScalarType.FLOAT
     return g.op(
         "ConstantOfShape",
         shape,
@@ -2601,12 +2601,12 @@ def new_ones(g, self, sizes, dtype, layout, device, pin_memory=False):
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = symbolic_helper._maybe_get_const(value, "t")
     if symbolic_helper._is_value(const_value):
-        dtype = ScalarType.FLOAT if dtype is None else dtype
+        dtype = symbolic_helper.ScalarType.FLOAT if dtype is None else dtype
         tmp = zeros(g, sizes, dtype, layout, device)
         return add(g, tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-        dtype = ScalarType.FLOAT if dtype is None else dtype
+        dtype = symbolic_helper.ScalarType.FLOAT if dtype is None else dtype
         sizes_ = symbolic_helper._maybe_get_const(sizes, "is")
         if isinstance(sizes_, list) and len(sizes_) == 0:
             sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
@@ -2631,7 +2631,7 @@ def full_like(
 ):
     fill_value = symbolic_helper._maybe_get_const(fill_value, "f")
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-    dtype = ScalarType.FLOAT if dtype is None else dtype
+    dtype = symbolic_helper.ScalarType.FLOAT if dtype is None else dtype
     if symbolic_helper._is_value(fill_value):
         tmp = zeros_like(g, input, dtype, layout, device)
         fill_value = g.op(
@@ -2936,7 +2936,7 @@ def to(g, self, *args):
 
 
 def repeat(g, self, repeats):
-    dtype = ScalarType.INT64
+    dtype = symbolic_helper.ScalarType.INT64
     shape_ = ones_like(g, repeats, dtype)
     self = g.op("Expand", self, shape_)
     return g.op("Tile", self, repeats)
@@ -3618,7 +3618,7 @@ def _pad_packed_sequence(
 def randn(g, shapes, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = ScalarType.FLOAT
+        dtype = symbolic_helper.ScalarType.FLOAT
     shape = symbolic_helper._maybe_get_const(shapes, "is")
     if symbolic_helper._is_value(shape):
         shape_const = g.op(
@@ -3639,7 +3639,7 @@ def randn(g, shapes, dtype, *options):
 def rand(g, shapes, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = ScalarType.FLOAT
+        dtype = symbolic_helper.ScalarType.FLOAT
     shape = symbolic_helper._maybe_get_const(shapes, "is")
     if symbolic_helper._is_value(shape):
         shape_const = g.op(
@@ -3662,7 +3662,7 @@ def randn_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = ScalarType.FLOAT
+        dtype = symbolic_helper.ScalarType.FLOAT
     return g.op(
         "RandomNormalLike", self, dtype_i=symbolic_helper.scalar_type_to_onnx[dtype]
     )
@@ -3673,7 +3673,7 @@ def rand_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = ScalarType.FLOAT
+        dtype = symbolic_helper.ScalarType.FLOAT
     return g.op(
         "RandomUniformLike", self, dtype_i=symbolic_helper.scalar_type_to_onnx[dtype]
     )
@@ -4735,7 +4735,7 @@ def dot(g, self, other):
 def fill(g, self, value):
     dtype = self.type().scalarType()
     if dtype is None:
-        dtype = ScalarType.FLOAT
+        dtype = symbolic_helper.ScalarType.FLOAT
     else:
         dtype = symbolic_helper.scalar_type_to_onnx.index(
             symbolic_helper.cast_pytorch_to_onnx[dtype]

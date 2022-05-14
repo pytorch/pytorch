@@ -12,8 +12,8 @@ Updated operators:
 
 import warnings
 
+from torch.onnx._symbolic_opsets import symbolic_opset9 as opset9
 from torch.onnx.symbolic_helper import _block_list_in_opset
-from torch.onnx._symbolic_opsets import symbolic_opset9
 
 block_listed_operators = [
     "scan",
@@ -40,7 +40,7 @@ def max(g, self, dim_or_y=None, keepdim=None):
             "This might cause the onnx model to be incorrect, if inputs to max operators "
             "have different shapes"
         )
-    return symbolic_opset9.max(g, self, dim_or_y, keepdim)
+    return opset9.max(g, self, dim_or_y, keepdim)
 
 
 def min(g, self, dim_or_y=None, keepdim=None):
@@ -51,7 +51,7 @@ def min(g, self, dim_or_y=None, keepdim=None):
             "This might cause the onnx model to be incorrect, if inputs to min operators "
             "have different shapes"
         )
-    return symbolic_opset9.min(g, self, dim_or_y, keepdim)
+    return opset9.min(g, self, dim_or_y, keepdim)
 
 
 for block_listed_op in block_listed_operators:
