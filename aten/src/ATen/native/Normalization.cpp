@@ -173,7 +173,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   // For contiguous case, leave 'mean' computation to kernel
   Tensor save_mean = all_contiguous
       ? at::empty({n_input}, input.options().dtype(dtype))
-      : at::mean(input, /*dims=*/reduce_dims, /*keepdim=*/false, dtype);
+      : at::mean(input, /*dim=*/reduce_dims, /*keepdim=*/false, dtype);
   Tensor save_var_transform = at::empty({n_input}, input.options().dtype(dtype));
   auto save_mean_a = save_mean.accessor<param_t, 1>();
   auto save_var_transform_a = save_var_transform.accessor<param_t, 1>();
