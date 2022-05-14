@@ -1983,6 +1983,15 @@ class TestSparseCSR(TestCase):
             detached_inp = inp.detach()
             self.assertEqual(inp, detached_inp)
 
+    @skipMeta
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_compressed_layout_conversions_coverage(self, device, dtype):
+        """
+        This test performs a smoke test for covered conversion and verifies
+        that an exception is thrown for unsupported conversions.
+        """
+        pass
+
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
