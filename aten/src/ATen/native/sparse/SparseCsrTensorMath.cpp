@@ -137,36 +137,6 @@ namespace {
 
 constexpr int64_t GRAIN_SIZE = at::internal::GRAIN_SIZE;
 
-template <typename input_t, typename output_t>
-void convert_indices_from_coo_to_csr_cpu(
-    const Tensor& result,
-    const Tensor& input,
-    const int64_t size) {
-  int64_t numel = input.numel();
-  const input_t* data_in = input.data_ptr<input_t>();
-  output_t* data_out = result.data_ptr<output_t>();
-
-  if (numel == 0) {
-    result.zero_();
-    return;
-  }
-
-  for (int64_t i = 0; i <= data_in[0]; i++)
-    data_out[i] = static_cast<output_t>(0);
-
-  at::parallel_for(0, numel - 1, GRAIN_SIZE, [&](int64_t start, int64_t end) {
-    input_t curr_value = data_in[start], next_value;
-    for (const auto i : c10::irange(start, end)) {
-      next_value = data_in[i + 1];
-      for (; curr_value < next_value; curr_value++)
-        data_out[curr_value + 1] = static_cast<output_t>(i + 1);
-    }
-  });
-
-  for (int64_t i = data_in[numel - 1] + 1; i < size + 1; i++)
-    data_out[i] = static_cast<output_t>(numel);
-}
-
 template <typename F>
 Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
