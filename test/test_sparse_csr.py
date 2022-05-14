@@ -2017,7 +2017,6 @@ class TestSparseCSR(TestCase):
                 b = _convert_to_layout(a, layout_a)
                 _convert_to_layout(b, layout_b)
 
-        print((from_layout, to_layout))
         _to_from_layout(from_layout, to_layout)
 
 
