@@ -234,10 +234,10 @@
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), mat2.layout(), alpha)
   result: maybe_multiply(self_t, beta) + maybe_multiply(mat1_t.mm(mat2_p), alpha) + maybe_multiply(mat1_p.mm(mat2_t), alpha)
 
-- name: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- name: _sparse_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
-  sparse: _sparse_addmm_sparse_backward(grad, sparse, dense, alpha)
-  dense: mm_mat2_backward(grad, sparse, dense.sizes(), dense.strides(), dense.layout(), alpha)
+  mat1: mm_mat1_sparse_backward(grad, mat1, mat2, alpha)
+  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), mat2.layout(), alpha)
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
@@ -260,7 +260,7 @@
 
 - name: angle(Tensor self) -> Tensor
   self: angle_backward(grad, self)
-  result: handle_r_to_c(result.scalar_type(), angle_backward(self_t, self_p))
+  result: handle_r_to_c(result.scalar_type(), angle_backward(self_t.conj(), self_p).conj())
 
 # The four items below are necessary because TensorIterator doesn't work on
 # Variables (codegen does not unwrap the input Tensor for all() and any() ).
@@ -768,12 +768,12 @@
   index: non_differentiable
   result: at::index_add(self_t, dim, index, maybe_multiply(source_t, alpha))
 
-- name: _index_reduce(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor
-  self, source: _index_reduce_backward(grad, self, dim, index, source, reduce, include_self, result)
+- name: index_reduce(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor
+  self, source: index_reduce_backward(grad, self, dim, index, source, reduce, include_self, result)
   index: non_differentiable
 
 - name: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
-  self: grad.clone().index_fill_(dim, index, 0)
+  self: grad.index_fill(dim, index, 0)
   # The case source.dim() == 0 is necessary to support scalar tensors of the form
   # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
   # This is because source is not broadcastable to index, as source.dim() < index.dim()
@@ -954,17 +954,26 @@
   result: self_t.zero_()
 
 - name: linalg_lu_factor_ex(Tensor A, *, bool pivot=True, bool check_errors=False) -> (Tensor LU, Tensor pivots, Tensor info)
-  A: lu_factor_ex_backward(grad, A, LU, pivots)
-  LU: lu_factor_ex_jvp(A_t, LU, pivots)
+  A: lu_factor_ex_backward(grad, LU, pivots, pivot)
+  LU: lu_factor_ex_jvp(A_t, LU, pivots, pivot)
   output_differentiability: [True, False, False]
+
+- name: linalg_lu(Tensor A, *, bool pivot=True) -> (Tensor P, Tensor L, Tensor U)
+  A: linalg_lu_backward(grad_L, grad_U, P, L, U, pivot)
+  L: std::get<0>(linalg_lu_jvp(A_t, P, L, U, pivot))
+  U: std::get<1>(linalg_lu_jvp(A_t, P, L, U, pivot))
+  output_differentiability: [False, True, True]
 
 - name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   self, LU_data: lu_solve_backward(grad, result, LU_data, LU_pivots, grad_input_mask)
   result: lu_solve_jvp(result, LU_data_p, LU_data_t, self_t, LU_pivots)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
-  LU_data: lu_unpack_backward(grads, LU_data, unpack_data)
+  LU_data: lu_unpack_backward(grad_L, grad_U, LU_data.size(-2), LU_data.size(-1))
   LU_pivots: non_differentiable
+  L: "LU_data_t.size(-2) >= LU_data_t.size(-1) ? LU_data_t.tril(-1) : LU_data_t.narrow(-1, 0, LU_data_t.size(-2)).tril(-1)"
+  U: "LU_data_t.size(-1) >= LU_data_t.size(-2) ? LU_data_t.triu() : LU_data_t.narrow(-2, 0, LU_data_t.size(-1)).triu()"
+  output_differentiability: [False, True, True]
 
 - name: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
   self: grad.masked_fill(mask, 0)
@@ -1246,10 +1255,9 @@
   index: non_differentiable
   source: grad.take(index).reshape_as(source)
 
-- name: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
-  self: linalg_qr_backward(grads, self, mode, Q, R)
-  Q: linalg_qr_jvp_Q(self_t, Q, R)
-  R: linalg_qr_jvp_R(self_t, Q, R)
+- name: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
+  A: linalg_qr_backward(grad_Q, grad_R, Q, R, mode)
+  Q, R: linalg_qr_jvp(A_t, Q, R, mode)
 
 - name: rad2deg(Tensor self) -> Tensor
   self: rad2deg_backward(grad)
@@ -1410,10 +1418,6 @@
 - name: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
-
-- name: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
-  self: solve_backward_self(grad, self, A)
-  A: solve_backward_A(grad, self, A, solution)
 
 - name: linalg_solve(Tensor input, Tensor other) -> Tensor
   input: solve_backward_A(grad, other, input, result)
@@ -1849,6 +1853,7 @@
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)
+  result: glu_jvp(result, self_p, self_t, dim)
 
 - name: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   self: hardshrink_backward(grad, self, lambd)
@@ -2078,6 +2083,19 @@
   result0: gather(self_t.flatten(-3), -1, result1.flatten(-3)).view_as(result1)
   output_differentiability: [True, False]
 
+#mps
+- name: _mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  self: mps_max_pool2d_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode)
+
+- name: _mps_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
+  self, weight, bias: "grad.defined() ? mps_convolution_backward(self, grad, weight, padding, stride, dilation, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+
+- name: mps_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, grad_input_mask)
+
+- name: _mps_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+  self, weight, bias: mps_linear_backward(self, grad, weight, grad_input_mask)
+
 - name: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
   self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
   result0: gather(self_t.flatten(-2), -1, result1.flatten(-2)).view_as(result1)
@@ -2089,12 +2107,12 @@
   output_differentiability: [True, False]
 
 - name: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  self: max_unpool2d_backward(grad, self, indices, output_size)
+  self: max_pool_double_backward(grad, indices, 2)
   indices: non_differentiable
   result: auto_linear
 
 - name: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
-  self: max_unpool3d_backward(grad, self, indices, output_size, stride, padding)
+  self: max_pool_double_backward(grad, indices, 3)
   indices: non_differentiable
   result: auto_linear
 
@@ -2272,11 +2290,6 @@
   indices: non_differentiable
   result: auto_linear
 
-- name: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  grad_output: max_unpool2d(grad, indices, output_size)
-  self: zeros_like(self)
-  indices: non_differentiable
-
 - name: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: mse_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
   self: mse_loss_double_backward(grad * grad_output, self, reduction)
@@ -2326,6 +2339,11 @@
   grad_output: replication_pad3d(grad, padding)
   self: zeros_like(self)
   result: replication_pad3d_backward(grad_output_t, self_p, padding)
+
+- name: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  self: maybe_multiply(grad, beta.conj())
+  mat1: maybe_multiply(grad.sparse_mask(self).mm(mat2.mH()), alpha.conj())
+  mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, beta)
@@ -2470,6 +2488,9 @@
 - name: cudnn_convolution_transpose(Tensor self, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
   self, weight: "_cudnn_convolution_backward(self, grad, weight, padding, output_padding, stride, dilation, true, groups, {grad_input_mask[0], grad_input_mask[1]})"
 
+- name: _mps_convolution_transpose(Tensor self, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups) -> Tensor
+  self, weight: "grad.defined() ? mps_convolution_transpose_backward(self, grad, weight, padding, output_padding, stride, dilation, groups, grad_input_mask) : std::tuple<Tensor, Tensor>()"
+
 - name: cudnn_convolution(Tensor self, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
   self, weight: "_cudnn_convolution_backward(self, grad, weight, padding, std::vector<int64_t>(padding.size(), 0), stride, dilation, false, groups, {grad_input_mask[0], grad_input_mask[1]})"
 
@@ -2504,6 +2525,15 @@
 - name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding, int[2] stride=1) -> Tensor
   # NNPACK does not support strided convolutions in the backwards path, which is the reason why we are using the closest available function that does here.
   input, weight, bias: "grad.defined() ? convolution_backward(grad, input, weight, bias->sizes(), stride, padding, std::vector<int64_t>(padding.size(), 1), false, std::vector<int64_t>(padding.size(), 0), 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+
+#LSTM MPS
+- name: _lstm_mps(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  output_differentiability: [True, True, True, False, False]
+  input, hx, params: "lstm_mps_backward(grads[0], grads[1], grads[2], result3, result4, input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first)"
+
+- name: lstm_mps_backward(Tensor grad_y, Tensor? grad_hy, Tensor? grad_cy, Tensor z_state, Tensor cell_state_fwd, Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor[], Tensor[])
+
+
 
 # Only frst three of _cudnn_rnn outputs can have gradients.
 # _cudnn_rnn outputs: (output, hy, cy, reserve, weight_buf)
