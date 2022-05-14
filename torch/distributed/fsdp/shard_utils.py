@@ -156,7 +156,7 @@ def _gather_state_dict(
                 if curr_rank == output_rank
                 else None
             )
-            tensor.gather(0, output_tensor)
+            tensor.gather(output_rank, output_tensor)
             tensor = output_tensor
         new_state_dict[key] = tensor
     return new_state_dict
