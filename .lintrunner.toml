@@ -106,7 +106,6 @@ exclude_patterns = [
     'caffe2/contrib/fakelowp/test/test_batchmatmul_nnpi_fp16.py',
     'test/test_numpy_interop.py',
     'torch/torch_version.py',
-    'tools/code_analyzer/gen_operators_yaml.py',
 ]
 command = [
     'python3',
@@ -144,6 +143,10 @@ include_patterns = [
     'torch/utils/benchmark/utils/common.py',
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/**/*.py',
+]
+exclude_patterns = [
+    # (linbinyu) copied from internal repo
+    'tools/code_analyzer/gen_operators_yaml.py',
 ]
 command = [
     'python3',
