@@ -67,7 +67,7 @@ jobs:
         run: |
           if ! command -v conda &> /dev/null
           then
-            echo "GOood!"
+            brew install --cask miniconda
           fi
 
       - name: Setup miniconda
