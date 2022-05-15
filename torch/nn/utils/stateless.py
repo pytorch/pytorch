@@ -35,7 +35,7 @@ def _change_class(module, params_and_buffers) -> None:
     module.__class__ = param_cls
     module._orig_class = cls
 
-def create_swap_params(params_and_buffers):
+def _create_swap_params(params_and_buffers):
     def _swap_parameters(module, tensor_name: str, full_path: str, tensor: Tensor) -> None:
         # Changes the module class to get a new __getattr__ dunder method
         # that looks for the reparametrized tensor
@@ -62,7 +62,7 @@ def _reparametrize_module(
 ) -> Iterator[None]:
     for name, tensor in parameters_and_buffers.items():
         _apply_func_submodules(
-            create_swap_params(parameters_and_buffers),
+            _create_swap_params(parameters_and_buffers),
             module, name.split("."), name, (tensor,))
     yield
     for name in parameters_and_buffers:
