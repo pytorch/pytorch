@@ -461,7 +461,8 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   friend TORCH_CUDA_CU_API OptOutMutator;
   friend ComputeAt;
   friend class ir_utils::TVDomainGuard;
-  friend void groupReductions(const std::vector<TensorView*>&);
+  friend TORCH_CUDA_CU_API void groupReductions(
+      const std::vector<TensorView*>&);
 
  protected:
   void setDomain(TensorDomain* td) {
