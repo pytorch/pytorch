@@ -63,7 +63,54 @@ jobs:
           wget https://github.com/facebook/buck/releases/download/v2021.01.12.01/buck.2021.01.12.01_all.deb
           sudo apt install ./buck.2021.01.12.01_all.deb
 
-      - name: Build Buck target
+      - name: Download third party libraries and generate wrappers
         run: |
-          echo -e "[buildfile]\n  name = BUILD.buck\n" > .buckconfig
-          buck build --keep-going //third_party:
+          sh scripts/buck_setup.sh
+
+      - name: Build glog
+        run: |
+          buck build third_party:glog
+
+      - name: Build C10
+        run: |
+          buck build c10:c10
+
+      - name: Build cpuinfo
+        run: |
+          buck build third_party:cpuinfo
+
+      - name: Build pthreadpool
+        run: |
+          buck build third_party:pthreadpool
+
+      - name: Build XNNPACK
+        run: |
+          buck build third_party:XNNPACK
+
+      - name: Build QNNPACK
+        run: |
+          buck build aten/src/ATen/native/quantized/cpu/qnnpack/... --keep-going
+
+      - name: Build aten_cpu
+        run: |
+          buck build :aten_cpu
+
+      - name: Build torch_mobile_core
+        run: |
+          buck build :torch_mobile_core
+
+      - name: Build torch_mobile_all_ops
+        run: |
+          buck build :torch_mobile_all_ops
+
+      - name: Build mobile benchmark
+        run: |
+          buck build :ptmobile_benchmark
+
+      - name: Run lite interpreter model
+        run: |
+          buck run :ptmobile_benchmark -- --model=ios/TestApp/models/mobilenet_v2.ptl --input_dims=1,3,224,224 --input_type=float
+
+      - name: Build everything
+        run: |
+          buck build //... --keep-going
