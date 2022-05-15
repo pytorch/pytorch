@@ -236,6 +236,22 @@ if COLLECT_EXPECT:
 # Success forces pass; failure forces fail; skip unconditionally skips testing
 TestExpect = Enum("TestExpect", ("SUCCESS", "FAILURE", "SKIP"))
 
+# unlike print produce strides
+def verbose_print(e):
+    class Lit:
+        def __init__(self, s):
+            self.s = s
+        def __repr__(self):
+            return self.s
+
+    def go(t):
+        if isinstance(t, torch.Tensor):
+            return Lit(f"{t} stride={t.stride()}")
+        else:
+            return t
+
+    return repr(tree_map(go, e))
+
 def run_meta_crossref(
     test_case,
     test_expect,
@@ -284,17 +300,17 @@ def run_meta_crossref(
                 return rs
             raise RuntimeError(f"""\
 failed to run: {resolve_name(func)}(
-*{meta_args},
-**{meta_kwargs}
+*{verbose_print(meta_args)},
+**{verbose_print(meta_kwargs)}
 )""") from e
         else:
             try:
-                assert_ref_meta_equal(test_case, rs, meta_rs, lambda msg: f"""\
+                assert_ref_meta_equal(test_case, meta_rs, rs, lambda msg: f"""\
 meta disagrees with real impl:
 {resolve_name(func)}(
-*{meta_args},
-**{meta_kwargs}
-) = {meta_rs}
+*{verbose_print(meta_args)},
+**{verbose_print(meta_kwargs)}
+) = {verbose_print(meta_rs)}
 {msg}
 """)
             except Exception:
@@ -458,11 +474,9 @@ sys.exit()
 
 meta_function_skips = {
     torch.Tensor.__getitem__: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32},
-    torch.Tensor.__rmatmul__: {bf16, f32, f64, i16, i32, i64, i8, u8},
-    torch.index_reduce: {bf16, f16, f32, f64},
     torch.addr: {b8},
     torch.aminmax: {b8, f32, f64, i16, i32, i64, i8, u8},
-    torch.bernoulli: {bf16, f32, f64},
+    torch.bernoulli: {bf16, f32, f64},  # TODO
     torch.conj_physical: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.cummax: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.cummin: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
@@ -473,13 +487,13 @@ meta_function_skips = {
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_xor: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
-    torch.logit: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
-    torch.matmul: {bf16, f32, f64, i16, i32, i64, i8, u8},
+    torch.logit: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},  # TODO
     torch.nn.functional.adaptive_avg_pool1d: {bf16, f32, f64},
-    torch.nn.functional.adaptive_avg_pool3d: {f16, f32, f64},
-    torch.nn.functional.batch_norm: {f32, f64},
+    torch.nn.functional.adaptive_avg_pool3d: {f16, f32, f64},  # TODO
+    torch.nn.functional.batch_norm: {f32, f64},  # TODO
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
+    # BEGIN TODO
     torch.nn.functional.nll_loss: {bf16, f32, f64},
     torch.nn.functional.pad: {f32, f64},
     torch.normal: {bf16, f16, f32, f64},
@@ -487,6 +501,7 @@ meta_function_skips = {
     torch.square: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.tensor_split: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.logsigmoid: {bf16, f16, f32, f64},  # logsigmoid.output
+    # END TODO
     torch.inverse: {f32, f64},
     torch.linalg.matrix_power: {f32, f64},
     torch.linalg.matrix_rank: {f32, f64},
@@ -574,7 +589,6 @@ meta_function_device_expected_failures['cuda'] = {
 
 meta_function_device_skips['cuda'] = {
     torch.Tensor.__getitem__: {c32},
-    torch.Tensor.__rmatmul__: {f16},
     torch.bernoulli: {f16},
     torch.cummax: {f16},
     torch.cummin: {f16},
@@ -585,7 +599,6 @@ meta_function_device_skips['cuda'] = {
     torch.linalg.matrix_rank: {f32, f64},
     torch.linalg.svd: {f32, f64},
     torch.logit: {f16},
-    torch.matmul: {f16},
     torch.nn.functional.adaptive_avg_pool1d: {f16},
     torch.nn.functional.adaptive_avg_pool3d: {bf16},
     torch.nn.functional.batch_norm: {bf16, f16},
@@ -677,8 +690,6 @@ meta_dispatch_expected_failures = {
     aten.count_nonzero.dim_IntList: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.diag.default: {i64, u8, b8, f32, i8, f64, i16, i32, bf16},
     aten.diag.out: {bf16, i64, u8, b8, f32, i8, f64, i16, i32},
-    aten.dot.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.dot.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.floor_divide.default: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.floor_divide.out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.frexp.Tensor: {bf16, f16, f64, f32},
@@ -790,8 +801,6 @@ meta_dispatch_expected_failures = {
 
 # these sometimes pass and sometimes fail
 meta_dispatch_skips = {
-    aten.index_reduce.default: {bf16, f16, f64, f32},
-    aten.index_reduce.out: {bf16, f16, f64, f32},
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.addr.default: {b8},
     aten.addr.out: {b8},
@@ -799,14 +808,11 @@ meta_dispatch_skips = {
     aten.copy_.default: {c32},
     aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.cummin.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
-    aten.index_add.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.index_add.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
+    aten.index_add.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},  # TODO
+    aten.index_add.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},  # TODO
     aten.isnan.default: {f64, f32},
-    aten.mul.Scalar: {i64, bf16, f16, f32, i8, f64, i16, i32},
-    aten.native_batch_norm.default: {f64, f32},
-    aten.native_layer_norm.default: {bf16, f64, f32},
-    aten.slice.Tensor: {c32},
-    aten.inverse.default: {f32, f64},
+    aten.mul.Scalar: {i64, bf16, f16, f32, i8, f64, i16, i32},  # test_dispatch_meta_gradient_cpu_bfloat16
+    aten.slice.Tensor: {c32},  # TODO
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
 }
@@ -836,8 +842,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.diag.default: {f16},  # aten::diag.out
     aten.diag.out: {bf16, f16},  # aten::diag.out
-    aten.dot.default: {f16},  # aten::dot
-    aten.dot.out: {f16},  # aten::dot
     aten.geqrf.default: {f32, f64},  # aten::geqrf
     aten.grid_sampler_2d.default: {f16},  # aten::grid_sampler_2d
     aten.grid_sampler_3d.default: {f16},  # aten::grid_sampler_3d

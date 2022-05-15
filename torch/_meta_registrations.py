@@ -1,6 +1,11 @@
 import torch
+from torch._prims import utils
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
+
+def check(b, s):
+    if not b:
+        raise RuntimeError(s)
 
 def toRealValueType(dtype):
     from_complex = {
@@ -66,3 +71,28 @@ def meta_linalg_eigh(self, uplo="L"):
     values.transpose_(-2, -1)
     vectors = self.new_empty(self.shape[:-1])
     return (values, vectors)
+
+@torch.library.impl(meta_lib, "dot")
+def meta_dot(self, tensor):
+    check(
+        self.dim() == 1 and tensor.dim() == 1,
+        f"1D tensors expected, but got {self.dim()}D and {tensor.dim()}D tensors"
+    )
+    return self.new_empty(())
+
+@torch.library.impl(meta_lib, "var_mean.correction")
+def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
+    output_shape = utils.compute_reduction_output_shape(self.shape, dim)
+    result1 = self.new_empty(output_shape, dtype=toRealValueType(self.dtype))
+    result2 = self.new_empty(output_shape)
+    return result1, result2
+
+@torch.library.impl(meta_lib, "inverse")
+def meta_inverse(self):
+    # Bug: https://github.com/pytorch/pytorch/issues/77498
+    if self.numel() == 0:
+        return torch.empty_like(self)
+    r = self.new_empty(self.shape)
+    r.transpose_(-2, -1)
+    return r
+
