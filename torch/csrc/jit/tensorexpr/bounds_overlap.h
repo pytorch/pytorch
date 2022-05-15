@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
-#include <torch/csrc/jit/tensorexpr/stmt.h>
+#include <torch/csrc/jit/tensorexpr/expr.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+
 #include <deque>
 #include <vector>
 
@@ -24,17 +24,19 @@ struct TORCH_API Bound {
   Bound() = default;
   Bound(ExprPtr s, ExprPtr e) : start(s), end(e) {}
 
-  void print() const {
-    std::cout << "(" << *start << ", " << *end << ")";
-  }
+  void print() const;
+  bool equals(const Bound& other) const;
 
-  bool equals(const Bound& other) const {
-    return exprEquals(start, other.start) && exprEquals(end, other.end);
-  }
-
-  bool operator==(const Bound& other) const {
-    return exprEquals(start, other.start) && exprEquals(end, other.end);
-  }
+  // The comparison operators are conservative. If the compare operator returns
+  // true, it means that all the elements satisfy the logical expression. But
+  // the false does not mean the opposite comparison is satisfied. It could be
+  // but not always.
+  bool operator==(const Bound& other) const;
+  bool operator!=(const Bound& other) const;
+  bool operator<(const Bound& other) const;
+  bool operator<=(const Bound& other) const;
+  bool operator>(const Bound& other) const;
+  bool operator>=(const Bound& other) const;
 
   void swap() {
     std::swap(start, end);
@@ -57,9 +59,25 @@ struct BoundHash {
 //     NoOverlap: No elements in the Bound A are in the bound B.
 enum OverlapKind { ContainedOrEqual, Contains, PartialOverlap, NoOverlap };
 
+// The Bound comparison result.
+//     TRUE: Every Bound element always satifies the given comparison operator
+//     FALSE: Every Bound element always does NOT satify the given comparison
+//     operator
+//     NOT_DETERMINED: Some elements satify the given comparison operator and
+//     some elements not
+enum CmpEvalResult { TRUE, FALSE, NOT_DETERMINED };
+
 // Returns the kind of overlap between Bound A and Bound A in a single
 // dimension.
 OverlapKind TORCH_API boundOverlap(Bound A, Bound B);
+
+// The comparison is conservative and the compare result is deterministic.
+// It means that every element of the Bound to be compared needs to satisfiy
+// the given comparison operator.
+CmpEvalResult TORCH_API compareBound(
+    const Bound& a,
+    const Bound& b,
+    const CompareSelectOperation& cmp_op);
 
 // A multi dimensional bound representing the bound of a set of indices.
 using IndexBounds = std::vector<Bound>;
