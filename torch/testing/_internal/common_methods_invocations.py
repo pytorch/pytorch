@@ -13703,10 +13703,8 @@ op_db: List[OpInfo] = [
            skips=(
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
-               # TODO: enable this when BFLoat16 CPU fusion is enabled from
-               # torch/csrc/jit/passes/tensorexpr_fuser.cpp
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
-                            device_type='cpu', dtypes=(torch.float16,)),
+                            device_type='cpu', dtypes=(torch.bfloat16,)),
                # see https://github.com/pytorch/pytorch/issues/76283
                DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                             device_type="cpu"),
