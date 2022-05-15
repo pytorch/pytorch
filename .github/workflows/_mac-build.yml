@@ -68,7 +68,9 @@ jobs:
           if ! command -v conda &> /dev/null
           then
             brew install --cask miniconda
-            conda create --name base
+            conda info
+            conda activate
+            conda info
           fi
 
       - name: Setup miniconda
