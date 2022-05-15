@@ -34,13 +34,6 @@ http_archive(
 )
 
 http_archive(
-    name = "google_benchmark",
-    sha256 = "6132883bc8c9b0df5375b16ab520fac1a85dc9e4cf5be59480448ece74b278d4",
-    strip_prefix = "benchmark-1.6.1/",
-    urls = ["https://github.com/google/benchmark/archive/refs/tags/v1.6.1.tar.gz"],
-)
-
-http_archive(
   name = "pybind11_bazel",
   strip_prefix = "pybind11_bazel-7f397b5d2cc2434bbd651e096548f7b40c128044",
   urls = ["https://github.com/pybind/pybind11_bazel/archive/7f397b5d2cc2434bbd651e096548f7b40c128044.zip"],
@@ -178,8 +171,8 @@ http_archive(
 
 http_archive(
     name = "rules_python",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.0.1/rules_python-0.0.1.tar.gz",
-    sha256 = "aa96a691d3a8177f3215b14b0edc9641787abaaa30363a080165d06ab65e1161",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.1.0/rules_python-0.1.0.tar.gz",
+    sha256 = "b6d46438523a3ec0f3cead544190ee13223a52f6a6765a29eae7b7cc24cc83a0",
 )
 
 load("@pybind11_bazel//:python_configure.bzl", "python_configure")
@@ -208,4 +201,17 @@ new_local_repository(
 local_repository(
     name = "com_github_google_flatbuffers",
     path = "third_party/flatbuffers",
+)
+
+load("@rules_python//python:pip.bzl", pip3_install="pip_install")
+
+pip3_install(
+   name = "py_deps",
+   requirements = "//:requirements.txt",
+)
+
+new_local_repository(
+    name = "google_benchmark",
+    build_file = "//third_party/benchmark:BUILD.bazel",
+    path = "third_party/benchmark",
 )
