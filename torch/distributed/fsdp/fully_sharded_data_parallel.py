@@ -283,10 +283,21 @@ class FullStateDictConfig(StateDictConfig):
     together to optimize memory savings when taking checkpoints. Note that
     this config class is meant for user via the :func:`state_dict_type`
     context manager as follows:
+        >>> fsdp = FSDP(model, auto_wrap_policy=...)
         >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        >>> with fsdp.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
+        >>> with FullyShardedDataParallel.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
         >>>     state = fsdp.state_dict()
         >>>     # state will be empty on non rank 0 and contain CPU tensors on rank 0.
+        >>> # To reload checkpoint for inference, finetuning, transfer learning, etc:
+        >>> model = model_fn() # Initialize model on CPU in preparation for wrapping with FSDP
+        >>> if dist.get_rank() == 0:
+        >>>     # Load checkpoint only on rank 0 to avoid memory redundancy
+        >>>     state_dict = torch.load("my_checkpoint.pt")
+        >>>     model.load_state_dict(state_dict)
+        >>> # All ranks initialize FSDP module as usual. ``sync_module_states`` argument
+        >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
+        >>> fsdp = FSDP(Model, auto_wrap_policy=..., sync_module_states=True)
+        >>> # After this point, all ranks have FSDP model with loaded checkpoint.
     """
     offload_to_cpu: bool = False
     rank0_only: bool = False
@@ -569,9 +580,18 @@ class FullyShardedDataParallel(nn.Module):
 
         sync_module_states (bool): If ``True``, each individually wrapped FSDP unit will broadcast
             module parameters from rank 0 to ensure they are the same across all ranks after
-            initialization. This helps ensure model parameters are the same across ranks before starting
-            training, but adds communication overhead to ``__init__``, as at least one broadcast is triggered
-            per individually wrapped FSDP unit. (Default: ``False``)
+            initialization. This helps ensure model parameters are the same across ranks
+            before starting training, but adds communication overhead to ``__init__``, as atleast
+            one broadcast is triggered per individually wrapped FSDP unit.
+            This can also help load checkpoints taken by ``state_dict`` and to be loaded by
+            ``load_state_dict`` in a memory efficient way. See example below for details.
+            (Default: ``False)
+
+            Example::
+
+                >>> module = FSDP(module, auto_wrap_policy=...)
+                >>> # Take checkpoint on rank 0 only and CPU to avoid OOM
+                >>>
 
     """
 
@@ -760,10 +780,18 @@ class FullyShardedDataParallel(nn.Module):
         ]
 
         if sync_module_states:
+            # Collect buffers we have to synchronize, avoiding buffers that have already
+            # been synchronized to avoid redundant synchronization.
+            bufs_to_sync = []
+            for buf in module.buffers():
+                if not getattr(buf, '_fsdp_has_been_sync', False):
+                    buf._fsdp_has_been_sync = True
+                    bufs_to_sync.append(buf.detach())
+
             _sync_params_and_buffers(
                 process_group=self.process_group,
                 # TODO: FSDP should sync buffers as well
-                module_states=[param.detach() for param in params],
+                module_states=[param.detach() for param in params].extend(bufs_to_sync),
                 # Same bucket size as DDP
                 broadcast_bucket_size=int(250 * 1024 * 1024),
                 src=0,
