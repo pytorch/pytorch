@@ -26,14 +26,6 @@ http_archive(
 )
 
 http_archive(
-    name = "com_google_googletest",
-    strip_prefix = "googletest-cd6b9ae3243985d4dc725abd513a874ab4161f3e",
-    urls = [
-        "https://github.com/google/googletest/archive/cd6b9ae3243985d4dc725abd513a874ab4161f3e.tar.gz",
-    ],
-)
-
-http_archive(
   name = "pybind11_bazel",
   strip_prefix = "pybind11_bazel-7f397b5d2cc2434bbd651e096548f7b40c128044",
   urls = ["https://github.com/pybind/pybind11_bazel/archive/7f397b5d2cc2434bbd651e096548f7b40c128044.zip"],
@@ -210,8 +202,30 @@ pip3_install(
    requirements = "//:requirements.txt",
 )
 
-new_local_repository(
+local_repository(
     name = "google_benchmark",
-    build_file = "//third_party/benchmark:BUILD.bazel",
     path = "third_party/benchmark",
+)
+
+local_repository(
+    name = "com_google_googletest",
+    path = "third_party/googletest",
+)
+
+local_repository(
+    name = "pthreadpool",
+    path = "third_party/pthreadpool",
+    repo_mapping = {"@com_google_benchmark" : "@google_benchmark"}
+)
+
+local_repository(
+    name = "FXdiv",
+    path = "third_party/FXdiv",
+    repo_mapping = {"@com_google_benchmark" : "@google_benchmark"}
+)
+
+local_repository(
+    name = "XNNPACK",
+    path = "third_party/XNNPACK",
+    repo_mapping = {"@com_google_benchmark" : "@google_benchmark"}
 )
