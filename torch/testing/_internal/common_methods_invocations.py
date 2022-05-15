@@ -9500,6 +9500,35 @@ def generate_std_var_kwargs(t: torch.Tensor, **kwargs):
         numel = torch.tensor(t.shape)[kwargs.get('dim')].prod()
         yield ((), {'correction': numel // 2})
 
+def error_inputs_mean(op_info, device, **kwargs):
+    err_msg1 = (r"mean\(\): could not infer output dtype. "
+                r"Input dtype must be either a floating point or complex dtype. "
+                r"Got: Long")
+    si1 = SampleInput(
+        make_tensor((3, 4, 5), dtype=torch.int64, device=device),
+        args=([],))
+
+    err_msg2 = (r"mean\(\): could not infer output dtype. "
+                r"Optional dtype must be either a floating point or complex dtype. "
+                r"Got: Long")
+    si2 = SampleInput(
+        make_tensor((3, 4, 5), dtype=torch.float32, device=device),
+        args=([],),
+        kwargs={"dtype": torch.int64})
+
+    err_msg3 = "Expected out tensor to have dtype double, but got float instead"
+    si3 = SampleInput(
+        make_tensor((3, 4, 5), dtype=torch.int64, device=device),
+        args=([],),
+        kwargs={
+            "dtype": torch.float64,
+            "out": make_tensor([], dtype=torch.float32, device=device),
+        })
+
+    return (ErrorInput(si1, error_regex=err_msg1),
+            ErrorInput(si2, error_regex=err_msg2),
+            ErrorInput(si3, error_regex=err_msg3))
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -12710,7 +12739,7 @@ op_db: List[OpInfo] = [
            supports_expanded_weight=True,),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -13694,7 +13723,7 @@ op_db: List[OpInfo] = [
     # See https://github.com/pytorch/pytorch/pull/63218#discussion_r688549391 for more details
     OpInfo('nn.functional.batch_norm',
            aten_name='batch_norm',
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -16343,13 +16372,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_logsumexp,
-           skips=(
-               # RuntimeError: "abs_cpu" not implemented for 'Bool'
-               # RuntimeError: value cannot be converted to type int without overflow
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
-                            dtypes=integral_types_and(torch.bool)),
-           )),
+           sample_inputs_func=sample_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -17283,14 +17306,18 @@ op_db: List[OpInfo] = [
     ReductionOpInfo(
         'mean',
         nan_policy='propagate',
-        supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        # FIXME: mean needs 'dim' parameter when using the 'out' overload.
+        # Adding it with 'generate_args_kwargs' does not work, since these also get passed
+        # onto the reference implementations.
+        supports_out=False,
         assert_autodiffed=True,
         assert_jit_shape_analysis=True,
         promotes_int_to_float=True,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.mean),
+        error_inputs_func=error_inputs_mean,
         skips=(
             # FIXME: mean does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
