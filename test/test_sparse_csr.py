@@ -166,7 +166,8 @@ class TestSparseCompressed(TestCase):
         The input is defined as a 4-tuple:
           compressed_indices, plain_indices, values, expected_size_from_shape_inference
         """
-        batch_shape = (2, 3)
+        from operator import mul
+        from functools import reduce
         if layout in {torch.sparse_csr, torch.sparse_csc}:
             yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype),
                    torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype),
@@ -176,10 +177,12 @@ class TestSparseCompressed(TestCase):
                    torch.tensor([], device=device, dtype=index_dtype),
                    torch.tensor([], device=device, dtype=dtype),
                    (0, 0))
-            yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype).repeat(6, 1).reshape(*batch_shape, -1),
-                   torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype).repeat(6, 1).reshape(*batch_shape, -1),
-                   torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(6, 1).reshape(*batch_shape, -1),
-                   (*batch_shape, 2, 2))
+            for batch_shape in {(2, 3), (2,)}:
+                prod = reduce(mul, batch_shape, 1)
+                yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
+                       torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
+                       torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(prod, 1).reshape(*batch_shape, -1),
+                       (*batch_shape, 2, 2))
         else:
             assert layout in {torch.sparse_bsr, torch.sparse_bsc}
             yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype),
@@ -190,11 +193,13 @@ class TestSparseCompressed(TestCase):
                    torch.tensor([], device=device, dtype=index_dtype),
                    torch.tensor([], device=device, dtype=dtype).reshape(1, 0, 0),
                    (0, 0))
-            yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype).repeat(6, 1).reshape(*batch_shape, -1),
-                   torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype).repeat(6, 1).reshape(*batch_shape, -1),
-                   torch.tensor([[[1, 11]], [[2, 22]], [[3, 33]], [[4, 44]]],
-                                device=device, dtype=dtype).repeat(6, 1, 1).reshape(*batch_shape, 4, 1, 2),
-                   (*batch_shape, 2, 2))
+            for batch_shape in {(2, 3), (2,)}:
+                prod = reduce(mul, batch_shape, 1)
+                yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
+                       torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
+                       torch.tensor([[[1, 11]], [[2, 22]], [[3, 33]], [[4, 44]]],
+                                    device=device, dtype=dtype).repeat(prod, 1, 1).reshape(*batch_shape, 4, 1, 2),
+                       (*batch_shape, 2, 2))
 
     @all_sparse_compressed_layouts
     @onlyCPU
@@ -311,6 +316,28 @@ class TestSparseCompressed(TestCase):
                                     ", but got size"):
             torch.empty((5,), dtype=dtype, device=device, layout=layout)
 
+    @skipMeta
+    @all_sparse_compressed_layouts
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    def test_clone(self, layout, device, dtype):
+        for compressed_indices, plain_indices, values, size in self._generate_small_inputs(
+                layout, device, dtype, index_dtype=torch.int32):
+            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
+                                                    dtype=dtype, layout=layout, device=device)
+            cloned_sparse = sparse.clone()
+            if layout == torch.sparse_csr:
+                self.assertEqual(sparse, cloned_sparse)
+            else:
+                # TODO: implement sparse compressed tensor comparison in torch/testing/_comparison.py
+                self.assertEqual(sparse.layout, cloned_sparse.layout)
+                self.assertEqual(sparse.values(), cloned_sparse.values())
+                if layout in {torch.sparse_csr, torch.sparse_bsr}:
+                    self.assertEqual(sparse.crow_indices(), cloned_sparse.crow_indices())
+                    self.assertEqual(sparse.col_indices(), cloned_sparse.col_indices())
+                else:
+                    self.assertEqual(sparse.ccol_indices(), cloned_sparse.ccol_indices())
+                    self.assertEqual(sparse.row_indices(), cloned_sparse.row_indices())
+
 
 class TestSparseCSR(TestCase):
 
@@ -382,20 +409,6 @@ class TestSparseCSR(TestCase):
         # assigning to sparse trhough indexing is disabled
         with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
             sparse[0, 0, 0, 0] = 99.0
-
-    @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
-    def test_clone(self, device, dtype):
-        from operator import mul
-        from functools import reduce
-        for batch_shape in ((), (2,), (2, 3)):
-            prod = reduce(mul, batch_shape, 1)
-            crow_indices = torch.tensor([0, 2, 4], device=device).repeat(prod, 1).reshape(*batch_shape, -1)
-            col_indices = torch.tensor([0, 1, 0, 1], device=device).repeat(prod, 1).reshape(*batch_shape, -1)
-            values = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(prod, 1).reshape(*batch_shape, -1)
-            sparse = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=dtype, device=device)
-            cloned_sparse = sparse.clone()
-            self.assertEqual(sparse, cloned_sparse)
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
