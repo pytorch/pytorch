@@ -1,7 +1,7 @@
 import bisect
 import itertools
 import math
-from typing import Any, cast, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -150,9 +150,9 @@ def _all_gather_sharded_tensor(
         pg = distributed_c10d._get_default_group()
     world_size = dist.get_world_size(pg)
     shards = sharded_tensor.local_shards()
-    local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
-    dim_0_size = sharded_tensor.size()[0]
-    tensor_numel = sharded_tensor.size().numel()
+    local_tensor = shards[0].tensor.flatten()
+    dim_0_size = sharded_tensor.size()[0]  # type: ignore[index]
+    tensor_numel = sharded_tensor.size().numel()  # type: ignore[union-attr]
     chunk_size = math.ceil(dim_0_size / world_size) * tensor_numel // dim_0_size
     num_padding = chunk_size - local_tensor.numel()
     if num_padding > 0:
@@ -175,6 +175,8 @@ def _gather_state_dict(
     for key, tensor in state_dict.items():
         if isinstance(tensor, ShardedTensor):
             """
+            # TODO: It is unclear why the following implementation cause a
+            # timeout in some unittests on AWS servers but not other environment.
             output_tensor = (
                 torch.empty(tensor.shape, dtype=tensor.dtype).cuda()
                 if curr_rank == output_rank
