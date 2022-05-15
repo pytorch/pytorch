@@ -112,8 +112,9 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
     #else
       AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "rsqrt_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          using opmath_t = at::opmath_type<scalar_t>;
           // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
-          return rsqrt_wrapper(a);
+          return rsqrt_wrapper(static_cast<opmath_t>(a));
         });
       });
     #endif
@@ -150,7 +151,8 @@ void sqrt_kernel_cuda(TensorIteratorBase& iter) {
     #else
       AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sqrt_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return std::sqrt(a);
+          using opmath_t = at::opmath_type<scalar_t>;
+          return ::sqrt(static_cast<opmath_t>(a));
         });
       });
     #endif
