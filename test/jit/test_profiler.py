@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 
@@ -16,7 +18,7 @@ if __name__ == '__main__':
 class TestProfiler(JitTestCase):
     def setUp(self):
         self.prev_exec = torch._C._jit_set_profiling_executor(True)
-        self.prev_profiling = torch._C._jit_set_profiling_mode(True)
+        self.prev_profiling = torch._C._get_graph_executor_optimize(True)
         self.inline_autodiff = torch._C._debug_set_autodiff_subgraph_inlining(False)
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         self.can_fuse_on_cpu = torch._C._jit_can_fuse_on_cpu()
@@ -27,16 +29,19 @@ class TestProfiler(JitTestCase):
         torch.set_default_dtype(torch.double)
         self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.prev_exec)
-        torch._C._jit_set_profiling_mode(self.prev_profiling)
+        torch._C._get_graph_executor_optimize(self.prev_profiling)
         torch._C._debug_set_autodiff_subgraph_inlining(self.inline_autodiff)
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.can_fuse_on_cpu)
         torch.set_default_dtype(self.default_dtype)
         torch._C._jit_set_texpr_reductions_enabled(self.old_reduction_enabled)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
     def test_tensor_type_not_determined_by_inputs(self):
         @torch.jit.script
@@ -226,6 +231,24 @@ class TestProfiler(JitTestCase):
         self.assertEqual(foo_script(x, x), foo(x, x))
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check_count("aten::add", 2, exactly=True).run(g)
+
+    def test_local_fusion_strategy(self):
+        @torch.jit.script
+        def foo(x):
+            return x + x + x
+
+        torch.jit.set_fusion_strategy([("STATIC", 1)])
+        for _ in range(3):
+            foo(torch.rand([10]))
+
+        torch.jit.set_fusion_strategy([("STATIC", 10)])
+
+        for i in range(10):
+            foo(torch.rand([i]))
+            foo(torch.rand([i]))
+
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_count(":TensorExprGroup", 2, exactly=True).run(g)
 
     def test_iterative_fusion(self):
         @torch.jit.script

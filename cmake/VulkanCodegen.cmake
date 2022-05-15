@@ -7,7 +7,10 @@ set(VULKAN_GEN_OUTPUT_PATH "${CMAKE_BINARY_DIR}/vulkan/ATen/native/vulkan")
 set(VULKAN_GEN_ARG_ENV "")
 
 if(USE_VULKAN_RELAXED_PRECISION)
-  string(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
+  list(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
+endif()
+if(USE_VULKAN_FP16_INFERENCE)
+  list(APPEND VULKAN_GEN_ARG_ENV "format=rgba16f")
 endif()
 
 if(USE_VULKAN_SHADERC_RUNTIME)
@@ -45,11 +48,13 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
       GLSLC_PATH glslc
       PATHS
       ENV VULKAN_SDK
-      PATHS "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/bin")
+      PATHS "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/bin"
+      PATHS "$ENV{VULKAN_SDK}/bin"
+    )
 
     if(NOT GLSLC_PATH)
       message(FATAL_ERROR "USE_VULKAN glslc not found")
-    endif(GLSLC_PATH)
+    endif(NOT GLSLC_PATH)
   endif()
 
   set(PYTHONPATH "$ENV{PYTHONPATH}")

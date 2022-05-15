@@ -1,8 +1,13 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <c10/macros/Export.h>
+
+namespace c10 {
+struct TensorImpl;
+}
 
 namespace at {
+class TensorBase;
 
 // MemOverlap: Whether or not there is memory overlap
 //
@@ -15,19 +20,19 @@ enum class MemOverlap { NO, YES, TOO_HARD };
 
 enum class MemOverlapStatus { FULL, PARTIAL, NO, TOO_HARD };
 
-TORCH_API MemOverlap has_internal_overlap(const Tensor& t);
-TORCH_API MemOverlap has_internal_overlap(TensorImpl* t);
+TORCH_API MemOverlap has_internal_overlap(const TensorBase& t);
+TORCH_API MemOverlap has_internal_overlap(c10::TensorImpl* t);
 
-TORCH_API void assert_no_internal_overlap(const Tensor& t);
-TORCH_API void assert_no_internal_overlap(TensorImpl* t);
+TORCH_API void assert_no_internal_overlap(const TensorBase& t);
+TORCH_API void assert_no_internal_overlap(c10::TensorImpl* t);
 
-TORCH_API MemOverlapStatus get_overlap_status(const Tensor& a, const Tensor& b);
-TORCH_API MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b);
+TORCH_API MemOverlapStatus get_overlap_status(const TensorBase& a, const TensorBase& b);
+TORCH_API MemOverlapStatus get_overlap_status(c10::TensorImpl* a, c10::TensorImpl* b);
 
-TORCH_API void assert_no_partial_overlap(const Tensor& a, const Tensor& b);
-void assert_no_partial_overlap(TensorImpl* a, TensorImpl* b);
+TORCH_API void assert_no_partial_overlap(const TensorBase& a, const TensorBase& b);
+void assert_no_partial_overlap(c10::TensorImpl* a, c10::TensorImpl* b);
 
-TORCH_API void assert_no_overlap(const Tensor& a, const Tensor& b);
-TORCH_API void assert_no_overlap(TensorImpl* a, TensorImpl* b);
+TORCH_API void assert_no_overlap(const TensorBase& a, const TensorBase& b);
+TORCH_API void assert_no_overlap(c10::TensorImpl* a, c10::TensorImpl* b);
 
 }

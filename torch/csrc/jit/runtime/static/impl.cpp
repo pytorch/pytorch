@@ -1,650 +1,1619 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-#include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/MemoryOverlap.h>
+#include <ATen/core/symbol.h>
+#include <ATen/record_function.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/InferenceMode.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/MaybeOwned.h>
+#include <c10/util/irange.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/add_if_then_else.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/variadic_ops.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
+#include <torch/csrc/jit/runtime/static/fusion.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <algorithm>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/clone_native.h>
+#endif
+
+#include <iterator>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+
+#ifdef FBCODE_CAFFE2
+#include <common/logging/logging.h>
+#include <folly/dynamic.h>
+#include <folly/json.h>
+#endif
+
+// used in test only
+C10_DEFINE_bool(
+    static_runtime_disable_debug_memory_overlap_check,
+    false,
+    "If true, disable the memory overlap check in debug mode in ProcessedNode::run()");
 
 namespace torch {
 namespace jit {
 
-void PrepareGraphForStaticRuntime(std::shared_ptr<torch::jit::Graph> graph) {
+namespace {
+
+bool allArgsAreTensors(Node* node) {
+  const auto& inputs = node->inputs();
+  return std::all_of(inputs.begin(), inputs.end(), [](Value* value) {
+    return value->type()->kind() == TypeKind::TensorType;
+  });
+}
+
+} // namespace
+
+// A manually curated set of ops that are disallowed in static runtime.
+// These are rarely-used ops. Disallowing them typically eliminates
+// corner cases in graph optimizations, allowing for more aggressive
+// optimizations and better performance.
+bool isUnsupportedOp(Node* node) {
+  auto kind = node->kind();
+  if (kind != aten::__is__ && kind != aten::__isnot__) {
+    return false;
+  }
+
+  // We can't support aten::__is__ (and __isnot__) with tensor arguments.
+  // Consider the following graph:
+  // def forward(x):
+  //     y = x.detach()
+  //     return x is y
+  // We have a graph optimization that removes the `detach` node since it is
+  // a no-op during inference. But this affects the result - we get true
+  // instead of false! There are many other graph passes affected by this
+  // issue.
+  return allArgsAreTensors(node);
+}
+
+// graph must be frozen or canEnableStaticRuntime would return false
+// if there's any prim::CallMethod op left in the graph
+bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
+  // check for sub-blocks
+  bool can_support = true;
+  for (auto* node : graph->block()->nodes()) {
+    const auto kind = node->kind();
+    if (kind == prim::Constant) {
+      continue;
+    }
+    // check if can get op from Node
+    const Operator* op = node->maybeOperator();
+    if (isUnsupportedOp(node) || (!op && !nativeOpIsRegistered(kind))) {
+      can_support = false;
+      LOG(WARNING) << "Found unsupported op: " << kind.toQualString();
+    }
+  }
+  return can_support;
+}
+
+std::string dumpValueSet(
+    const FastSet<const Value*>& value_set,
+    const char* set_name) {
+  std::ostringstream oss;
+  oss << set_name << ": {";
+  for (const auto* val : value_set) {
+    oss << "%" << val->debugName() << ", ";
+  }
+  oss << "}";
+  return oss.str();
+}
+
+namespace {
+
+void OptimizeGraph(
+    std::shared_ptr<torch::jit::Graph>& graph,
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
+  GRAPH_DUMP("Before optimizations: ", graph);
+  if (opts.enable_tensorexpr_fusion) {
+    if (sample_inputs.empty()) {
+      VLOG(1) << "Cannot perform TensorExpr fusion - sample_inputs is empty";
+    } else {
+      VLOG(1) << "Performing TensorExpr fusion";
+      performTensorExprFusion(graph, std::move(sample_inputs));
+    }
+  }
   Inline(*graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
+  EliminateNoOpSlice(graph);
   EliminateDeadCode(graph);
-}
-
-namespace {
-void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
-  PrepareGraphForStaticRuntime(graph);
   FuseInferenceOpsForSparseNN(graph);
+  UseVariadicCat(graph);
+  UseVariadicStack(graph);
+  EliminateTrivialEquallySplit(graph);
+  EliminateExtraPermuteOps(graph);
+
+  if (opts.enable_out_variant) {
+    UseVariadicOp(
+        graph,
+        fromQualString("fb::sigrid_transforms_torch_bind"),
+        fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
+    // These fused ops only have out variants - we can't do the fusion when
+    // out variants are disabled.
+    FuseSignLog1P(graph);
+    FuseClampNaNToNum(graph);
+
+#ifdef FBCODE_CAFFE2
+    if (opts.use_copy_variants && !opts.enable_tensorexpr_fusion) {
+      ReplaceWithCopy(graph);
+    }
+    if (opts.use_maybe_copy_variants && !opts.enable_tensorexpr_fusion) {
+      ReplaceWithMaybeCopy(graph);
+    }
+    FuseListUnpack(graph);
+    RemoveUnnecessaryOutputs(graph);
+#endif
+  }
+
   ConstantPropagation(graph);
+  RemoveImmutableInputDictLookups(graph);
+  UseVariadicTupleUnpack(graph);
+  UseVariadicGroupedAccessor(graph);
+  EliminateNoOps(
+      graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
+  AddIfThenElseOp(graph);
+  UseSplitAndSqueeze(graph);
+  QuantizedLinearReluFusion(graph);
+  GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
-void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
-  for (auto n : graph->nodes()) {
-    if (n->kind() == c10::Symbol::fromQualString("prim::GetAttr")) {
-      throw std::runtime_error("Cannot accelerate unfrozen graphs");
-    }
-  }
-  // check output types
-  // Static Runtime supports output types include None, Tensor and List/Tuple
-  // of Tensor
-  for (Value* output : graph->outputs()) {
-    VLOG(1) << "output: %" << output->debugName()
-            << " has type: " << output->type()->repr_str();
-    auto kind = output->node()->kind();
-    if (kind == prim::TupleConstruct || kind == prim::ListConstruct) {
-      for (Value* input : output->node()->inputs()) {
-        const auto& type = input->type();
-        TORCH_CHECK(
-            type->cast<TensorType>() != nullptr,
-            "Static Runtime expects output type as List or Tuple of Tensor, but got List or Tuple of ",
-            type->repr_str());
-      }
-    } else {
-      const auto& type = output->type();
-      TORCH_CHECK(
-          type->cast<TensorType>() != nullptr ||
-              type->cast<NoneType>() != nullptr,
-          "Static Runtime expects output type as None or Tensor, but got ",
-          type->repr_str());
-    }
-  }
+bool IsSelfInGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
+  return !graph->inputs().empty() && graph->inputs().at(0)->type()->is_module();
 }
 
 // remove unused input 0 from graph
-void RemoveSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
+bool removeSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
   if (graph->inputs().at(0)->type()->is_module()) {
-    TORCH_CHECK(!graph->inputs().at(0)->hasUses());
+    if (graph->inputs().at(0)->hasUses()) {
+      return false;
+    }
     graph->eraseInput(0);
   }
+  return true;
 }
 
-// remove "self" from function schema
-std::unique_ptr<c10::FunctionSchema> RemoveSelfFromSchema(
-    const c10::FunctionSchema& s) {
-  TORCH_CHECK(s.arguments().size() >= 1 && s.arguments()[0].name() == "self");
-  std::vector<Argument> args({s.arguments().begin() + 1, s.arguments().end()});
-  return std::make_unique<c10::FunctionSchema>(s.cloneWithArguments(args));
+std::vector<Value*> valueVecFromFastSet(const FastSet<const Value*>& s) {
+  std::vector<Value*> result;
+  result.reserve(s.size());
+  for (auto* v : s) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    result.emplace_back(const_cast<Value*>(v));
+  }
+  return result;
 }
 
-// Returns two useful constructs:
-//  first: map each value to all values that are alive
-//    at the same time.
-//  second: set of all inputs/outputs/constants (always alive)
-std::pair<std::unordered_map<Value*, std::set<Value*>>, std::set<Value*>>
-LivenessMap(const std::shared_ptr<torch::jit::Graph>& graph) {
-  std::unordered_map<Value*, std::set<Value*>> liveness_map;
-  std::set<Value*> always_alive;
-
-  std::vector<Value*> frontier;
-  // map live values to their deps, invariant: set.size() > 0
-  std::unordered_map<Value*, std::set<Node*>> live_values;
-  for (const auto& input : graph->inputs()) {
-    frontier.emplace_back(input);
-    always_alive.insert(input);
-  }
-  for (const auto& output : graph->outputs()) {
-    always_alive.insert(output);
-  }
-
-  auto add_live_value = [&](Value* v) {
-    liveness_map[v] = {};
-
-    for (const auto& live_v : live_values) {
-      liveness_map.at(v).insert(live_v.first);
-      liveness_map.at(live_v.first).insert(v);
-    }
-
-    // only add values to the live set if they
-    // have deps, otherwise they die immediately
-    if (v->uses().size()) {
-      live_values[v] = {};
-    }
-
-    for (const auto& u : v->uses()) {
-      const auto& node = u.user;
-      // track deps of this value
-      live_values.at(v).insert(node);
-    }
-  };
-
-  auto traverse_node = [&](Node* node, std::vector<Value*>& dead) {
-    for (const auto& input : node->inputs()) {
-      // ignore constant values
-      if (input->node()->kind() == prim::Constant) {
-        always_alive.insert(input);
-        continue;
-      }
-      if (live_values.count(input)) {
-        live_values.at(input).erase(node);
-        if (!live_values.at(input).size()) {
-          dead.emplace_back(input);
-        }
-      }
-    }
-  };
-
-  for (const auto& node : graph->nodes()) {
-    for (const auto& v : node->outputs()) {
-      add_live_value(v);
-    }
-
-    std::vector<Value*> dead;
-    traverse_node(node, dead);
-    for (const auto& dead_value : dead) {
-      live_values.erase(dead_value);
-    }
-  }
-
-  for (const auto& v : live_values) {
-    TORCH_CHECK(always_alive.count(v.first));
-  }
-
-  for (const auto& node : graph->nodes()) {
-    for (const auto& input : node->inputs()) {
-      for (const auto& output : node->outputs()) {
-        if (liveness_map.count(input) && liveness_map.count(output)) {
-          liveness_map.at(input).insert(output);
-          liveness_map.at(output).insert(input);
-        }
-      }
-    }
-  }
-
-  return std::make_pair(liveness_map, always_alive);
+bool mayContainAlias(const AliasDb& db, const Value* v1, const Value* v2) {
+  // AliasDb is not const-correct here, so we have to const_cast
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.mayContainAlias(const_cast<Value*>(v1), const_cast<Value*>(v2));
 }
 
-std::unordered_set<Value*> GetOptimizableValues(
-    const std::shared_ptr<torch::jit::Graph>& graph) {
-  std::unordered_set<Value*> can_reuse;
-  // values used by unsupported ops (as either inputs or outputs)
-  // these need to be removed from "can_reuse" after analyzing all nodes
-  std::unordered_set<Value*> cannot_reuse;
-  for (const auto& n : graph->nodes()) {
-    for (const auto& v : n->inputs()) {
-      if (canRunOutOfPlace(n) && canReuseInputsOutputs(n) &&
-          canReuseInputs(n)) {
-        can_reuse.insert(v);
-      } else {
-        cannot_reuse.insert(v);
-      }
-    }
-    for (const auto& v : n->outputs()) {
-      if (canRunOutOfPlace(n) && canReuseInputsOutputs(n) &&
-          canReuseOutputs(n)) {
-        can_reuse.insert(v);
-      } else {
-        cannot_reuse.insert(v);
-      }
-    }
-  }
-  for (auto v : cannot_reuse) {
-    can_reuse.erase(v);
-  }
-  return can_reuse;
+bool mayContainAlias(
+    const AliasDb& db,
+    const Value* a,
+    const FastSet<const Value*>& b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
 }
 
-size_t AssignRegisters(
-    const std::shared_ptr<torch::jit::Graph>& graph,
-    std::unordered_map<Value*, size_t>& value_to_reg,
-    std::vector<Value*>& values,
-    std::vector<size_t>& input_regs,
-    std::vector<size_t>& output_regs,
-    bool optimize_memory) {
-  auto lm = LivenessMap(graph);
-  auto optimizable_values = GetOptimizableValues(graph);
-
-  size_t num_regs = 0;
-  size_t reused_regs = 0;
-  std::unordered_map<size_t, std::set<Value*>> reg_to_val;
-  auto getReg = [&](Value* v) -> size_t {
-    if (!optimize_memory) {
-      return num_regs++;
-    }
-    TORCH_CHECK(!value_to_reg.count(v));
-    auto iter = lm.first.find(v);
-    if (iter == lm.first.end()) {
-      return num_regs++;
-    }
-    if (!optimizable_values.count(v)) {
-      return num_regs++;
-    }
-    if (lm.second.count(v)) {
-      return num_regs++;
-    }
-    const auto& live_values = iter->second;
-    // iterate through all the allocated registers
-    // and check for potential re-use, greedily
-    for (const auto& v2r : value_to_reg) {
-      auto candidate_v = v2r.first;
-
-      if (!optimizable_values.count(candidate_v)) {
-        continue;
-      }
-      if (lm.second.count(candidate_v)) {
-        continue;
-      }
-
-      // Only re-use float* tensors
-      auto t = candidate_v->type()->cast<TensorType>();
-      if (!t) {
-        continue;
-      }
-      // TODO audit this assumption (passes tests, but is scary)
-      if (t->scalarType() && *(t->scalarType()) != at::kFloat) {
-        continue;
-      }
-      // TODO
-      // if (*(t->scalarType()) != at::kFloat) {
-      //  continue;
-      //}
-      if (!live_values.count(candidate_v)) {
-        bool already_used = false;
-        for (auto use : reg_to_val.at(v2r.second)) {
-          if (live_values.count(use)) {
-            already_used = true;
-          }
-        }
-        if (already_used) {
-          continue;
-        }
-        reused_regs++;
-        return v2r.second;
-      }
-    }
-    return num_regs++;
-  };
-
-  // assign register to Value*
-  for (Value* input : graph->inputs()) {
-    TORCH_CHECK(value_to_reg.count(input) == 0);
-    auto reg = getReg(input);
-    value_to_reg[input] = reg;
-    reg_to_val[reg].insert(input);
-    input_regs.push_back(reg);
-  }
-  for (Node* node : graph->nodes()) {
-    for (Value* input : node->inputs()) {
-      TORCH_CHECK(value_to_reg.count(input) > 0);
-    }
-    for (Value* output : node->outputs()) {
-      TORCH_CHECK(
-          value_to_reg.count(output) == 0, "the graph needs to be in SSA form");
-      auto reg = getReg(output);
-      value_to_reg[output] = reg;
-      reg_to_val[reg].insert(output);
-    }
-  }
-  TORCH_CHECK(graph->outputs().size() > 0);
-  for (Value* output : graph->outputs()) {
-    TORCH_CHECK(value_to_reg.count(output) > 0);
-    output_regs.push_back(value_to_reg[output]);
-  }
-
-  values.resize(value_to_reg.size());
-  for (const auto& p : value_to_reg) {
-    values[p.second] = p.first;
-  }
-  return reused_regs;
+bool escapesScope(const AliasDb& db, const Value* a) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.escapesScope({const_cast<Value*>(a)});
 }
 
-// Internal values are discarded after run if
-// opts_.cleanup_activations is true.
-void DeduceInternalValues(
-    const std::shared_ptr<torch::jit::Graph>& graph,
-    const std::unordered_map<Value*, size_t>& value_to_reg,
-    std::vector<size_t>& internals) {
-  std::unordered_set<Value*> outputs{
-      graph->outputs().begin(), graph->outputs().end()};
-  for (Node* node : graph->nodes()) {
-    if (node->kind() != prim::Constant) {
-      for (Value* output : node->outputs()) {
-        if (outputs.count(output) == 0) {
-          internals.push_back(value_to_reg.at(output));
-        }
-      }
-    }
-  }
-}
-} // namespace
+void PrepareGraphForStaticModule(
+    std::shared_ptr<torch::jit::Graph> graph,
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
+  TORCH_CHECK(canEnableStaticRuntime(graph));
+  OptimizeGraph(graph, opts, std::move(sample_inputs));
 
-void InferenceModule::init() {
-  OptimizeGraph(graph);
-  CheckGraphEligibility(graph);
-  RemoveSelfFromGraphInput(graph);
-  reused_regs = AssignRegisters(
-      graph,
-      value_to_reg,
-      values,
-      input_regs,
-      output_regs,
-      opts.optimize_memory);
-  DeduceInternalValues(graph, value_to_reg, internals);
+  // Static runtime moves its outputs out of the runtime
+  // by default. In some rare cases, this is not actually safe to
+  // do - for example, if the value is a constant, static runtime
+  // needs to hold onto a copy. Rather than adding special logic
+  // to handle this rare case, we use this pass to detect it and
+  // create an owned reference that can be safely moved out of the
+  // runtime.
+  CreateOwnedRefsForSpecialValues(*graph);
+
+  // We assume that each sub-block has at least one output. If we
+  // detect any that have 0, force the sub-block to return None.
+  ForceNonEmptyOutputs(*graph);
 }
 
-InferenceModule::InferenceModule(
+std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
-    InferenceModuleOptions opts_)
-    : module(m.copy()), graph(nullptr), schema(nullptr), opts(opts_) {
-  module.eval();
-  module = freeze_module(module);
+    bool is_frozen,
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
+  LOG(INFO) << "StaticModuleOptions: enable_out_variant "
+            << opts.enable_out_variant << ", optimize_memory "
+            << opts.optimize_memory << ", manage_output_tensors "
+            << opts.manage_output_tensors << ", use_copy_variants "
+            << opts.use_copy_variants << ", use_maybe_copy_variants "
+            << opts.use_maybe_copy_variants << ", enable_tensorexpr_fusion "
+            << opts.enable_tensorexpr_fusion;
+
+  Module module = m.copy();
+  if (!is_frozen) {
+    module.eval();
+    module = freeze_module(module);
+  }
 
   Method method = module.get_method("forward");
-  graph = method.graph();
+  auto graph = module.get_method("forward").graph();
 
-  const c10::FunctionSchema& s = method.function().getSchema();
-  schema = RemoveSelfFromSchema(s);
+  if (!sample_inputs.empty() && IsSelfInGraphInput(graph)) {
+    sample_inputs.insert(sample_inputs.begin(), m._ivalue());
+  }
+  PrepareGraphForStaticModule(graph, opts, std::move(sample_inputs));
 
-  init();
+  return std::make_pair(graph, module);
 }
 
-InferenceModule::InferenceModule(
-    std::shared_ptr<torch::jit::Graph> g,
-    InferenceModuleOptions opts_)
-    : module(), graph(std::move(g)), schema(nullptr), opts(opts_) {
-  init();
+std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
+    std::shared_ptr<torch::jit::Graph> graph,
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
+  PrepareGraphForStaticModule(graph, opts, std::move(sample_inputs));
+  return std::make_pair(graph, c10::nullopt);
 }
 
-StaticRuntime::StaticRuntime(
-    const torch::jit::Module& m,
-    const StaticRuntimeOptions& opts)
-    : StaticRuntime(PrepareForStaticRuntime(m), opts) {}
+} // namespace
 
-StaticRuntime::StaticRuntime(
-    std::shared_ptr<InferenceModule> m,
-    const StaticRuntimeOptions& opts)
-    : module_(m), opts_(opts) {
-  TORCH_CHECK(
-      module_ != nullptr,
-      "std::shared_ptr<InferenceModule> module_ cannot be nullptr")
-
-  Graph* graph = module_->graph.get();
-  std::unordered_map<Value*, IValue*> val_to_ival;
-
-  // NB: create an unchanging std::vector<IValue> we can reference
-  for (auto input : graph->inputs()) {
-    inputs_.emplace_back();
+void ValueGroup::init(const Block& block, const AliasDb& db) {
+  external_aliases_.clear();
+  output_aliases_.clear();
+  // Build `external_aliases` as we look through nodes forwardly from
+  // the graph's inputs and add aliases of the inputs being created by the
+  // nodes.
+  external_aliases_.insert(block.inputs().begin(), block.inputs().end());
+  for (const auto* node : block.nodes()) {
+    if (node->kind() == prim::Constant) {
+      for (const auto* output : node->outputs()) {
+        external_aliases_.insert(output);
+      }
+    }
   }
-  for (auto i = 0; i < graph->inputs().size(); ++i) {
-    Value* input = graph->inputs()[i];
-    val_to_ival[input] = &(inputs_[i]);
-  }
-
-  // fill workspace_ with constants and create ProcessedNodes
-  // NB: before optimizing the order of execution, ensure that the
-  // memory optimization pass (LivenessMap + AssignRegisters) is
-  // aware of the new order!
-
-  // Fill constants first, so we have a std::vector<IValue> we can reference
-  // later
-  for (Node* node : graph->nodes()) {
-    if (node->kind() != prim::Constant) {
+  for (const auto* node : block.nodes()) {
+    if (node->kind() == prim::Constant) {
+      // Constants are already in `external_aliases`.
       continue;
     }
-    auto* v = node->output();
-    TORCH_CHECK(v->type()->kind() != FunctionType::Kind);
-    constants_.emplace_back(toIValue(v).value());
-  }
-  {
-    int i = 0;
-    for (Node* node : graph->nodes()) {
-      if (node->kind() != prim::Constant) {
-        continue;
+    for (const auto* v : node->outputs()) {
+      if (escapesScope(db, v) || mayContainAlias(db, v, external_aliases_)) {
+        external_aliases_.insert(v);
       }
-      auto* v = node->output();
-      val_to_ival[v] = &(constants_[i++]);
     }
   }
-  for (Node* node : graph->nodes()) {
+
+  // Build `output_aliases` as we look through nodes reversely so that we can
+  // start from the output values, and follow the flows backwardly from there.
+  output_aliases_.insert(block.outputs().begin(), block.outputs().end());
+  for (const auto* node : block.nodes().reverse()) {
+    if (node->kind() == prim::Constant) {
+      // Constants cannot create any aliases.
+      continue;
+    }
+    for (const auto* v : node->outputs()) {
+      if (mayContainAlias(db, v, output_aliases_)) {
+        output_aliases_.insert(v);
+      }
+    }
+  }
+}
+
+namespace {
+
+bool isTensorList(const Value* value) {
+  auto* type = value->type()->castRaw<ListType>();
+  if (!type) {
+    return false;
+  }
+  return type->getElementType()->kind() == c10::TypeKind::TensorType;
+}
+
+bool containTensorsOnly(at::ArrayRef<Value*> values) {
+  // return true only if all outputs are tensors
+  return std::all_of(values.begin(), values.end(), [](const Value* value) {
+    return value->type()->kind() == c10::TypeKind::TensorType ||
+        isTensorList(value);
+  });
+}
+
+bool isPureFunction(const Node* node) {
+  auto* schema = node->maybeSchema();
+  return schema &&
+      schema->aliasAnalysis() == c10::AliasAnalysisKind::PURE_FUNCTION;
+}
+
+} // namespace
+
+ManagedTensorRanges::ManagedTensorRanges(
+    Block& block,
+    const AliasDb& alias_db,
+    const FastSet<const Value*>& managed_tensor_values) {
+  const std::vector<Node*> nodes(block.nodes().begin(), block.nodes().end());
+  const FastSet<const Value*> graph_inputs(
+      block.inputs().begin(), block.inputs().end());
+
+  const auto num_nodes = nodes.size();
+  for (const auto i : c10::irange(num_nodes)) {
+    auto* node = nodes[i];
+    for (auto* input : node->inputs()) {
+      auto* lifetime = getLifetime(input);
+      if (!lifetime) {
+        continue;
+      }
+      DCHECK(lifetime->end <= i);
+      lifetime->end = i;
+    }
+    for (auto* output : node->outputs()) {
+      if (!alias_db.isMutableType(output)) {
+        continue;
+      }
+      value_lifetimes_.emplace(output, Lifetime(i, i));
+    }
+  }
+  for (auto* graph_output : block.outputs()) {
+    auto* lifetime = getLifetime(graph_output);
+    if (!lifetime) {
+      continue;
+    }
+    lifetime->end = num_nodes;
+  }
+
+  // Handle aliases. Aliases may extend a Value*'s lifetime. If a node
+  // has an input and output that may alias each other, set the input's
+  // lifetime end to max(input.lifetime_end, output.lifetime_end). Iterate
+  // backwards to handle chains of aliases.
+  for (const auto* node : block.nodes().reverse()) {
+    if (isPureFunction(node)) {
+      // If the node is a pure function, it doesn't create any aliases,
+      // so we can safely skip it.
+      continue;
+    }
+
+    auto inputs = collectValuesWithTrackedLifetimes(node->inputs());
+    auto outputs = collectValuesWithTrackedLifetimes(node->outputs());
+    for (auto* input : inputs) {
+      auto* input_lifetime = getLifetime(input);
+      DCHECK(input_lifetime != nullptr);
+      for (auto* output : outputs) {
+        if (mayContainAlias(alias_db, input, output)) {
+          auto* output_lifetime = getLifetime(output);
+          DCHECK(output_lifetime != nullptr);
+          input_lifetime->end =
+              std::max(output_lifetime->end, input_lifetime->end);
+        }
+      }
+    }
+  }
+  for (auto* managed_tensor : managed_tensor_values) {
+    auto* lifetime = getLifetime(managed_tensor);
+    DCHECK(lifetime && lifetime->end <= num_nodes);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Node* freeing_node;
+    if (lifetime->end == num_nodes) {
+      freeing_node = block.return_node();
+    } else {
+      freeing_node = nodes[lifetime->end];
+    }
+    node_to_newly_free_tensors_[freeing_node].emplace_back(managed_tensor);
+  }
+}
+
+bool ManagedTensorRanges::nodeFreesManagedTensors(Node* node) const {
+  auto it = node_to_newly_free_tensors_.find(node);
+  return it != node_to_newly_free_tensors_.end() && !it->second.empty();
+}
+
+const std::vector<const Value*>& ManagedTensorRanges::
+    availableTensorValuesAfterNode(Node* node) const {
+  return node_to_newly_free_tensors_.at(node);
+}
+
+bool ManagedTensorRanges::lifetimesOverlap(const Value* v1, const Value* v2)
+    const {
+  const auto* v1_lifetime = getLifetime(v1);
+  const auto* v2_lifetime = getLifetime(v2);
+  if (!v1_lifetime || !v2_lifetime) {
+    return false;
+  }
+
+  if (v1_lifetime->start < v2_lifetime->start) {
+    return v1_lifetime->end >= v2_lifetime->start;
+  }
+  return v2_lifetime->end >= v1_lifetime->start;
+}
+
+const ManagedTensorRanges::Lifetime* ManagedTensorRanges::getLifetime(
+    const Value* value) const {
+  auto it = value_lifetimes_.find(value);
+  if (it != value_lifetimes_.end()) {
+    return &it->second;
+  }
+  return nullptr;
+}
+
+ManagedTensorRanges::Lifetime* ManagedTensorRanges::getLifetime(
+    const Value* value) {
+  // const_cast is safe here, this is just a way to avoid code duplication
+  // between the const/non-const versions of getLifetime.
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  const auto* const_this = const_cast<const ManagedTensorRanges*>(this);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return const_cast<ManagedTensorRanges::Lifetime*>(
+      const_this->getLifetime(value));
+}
+
+std::vector<const Value*> ManagedTensorRanges::
+    collectValuesWithTrackedLifetimes(at::ArrayRef<const Value*> values) {
+  std::vector<const Value*> mutable_values;
+  mutable_values.reserve(values.size());
+  std::copy_if(
+      values.begin(),
+      values.end(),
+      std::back_inserter(mutable_values),
+      [this](const Value* value) { return getLifetime(value) != nullptr; });
+  return mutable_values;
+}
+
+StaticModule::StaticModule(
+    std::shared_ptr<torch::jit::Graph> g,
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs)
+    : StaticModule(
+          PrepareForStaticModule(g->copy(), opts, std::move(sample_inputs)),
+          opts) {}
+
+StaticModule::StaticModule(
+    const torch::jit::Module& m,
+    bool is_frozen,
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs)
+    : StaticModule(
+          PrepareForStaticModule(m, is_frozen, opts, std::move(sample_inputs)),
+          opts) {}
+
+StaticModule::StaticModule(
+    std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
+        graph_and_module,
+    const StaticModuleOptions& opts)
+    : opts_(opts),
+      graph_(std::move(graph_and_module.first)),
+      module_(std::move(graph_and_module.second)),
+      num_inputs_(graph_->inputs().size()) {
+  // check opt flags
+  if (opts.manage_output_tensors) {
+    TORCH_CHECK(
+        opts_.enable_out_variant,
+        "When manage_output_tensors is true, enable_out_variant must be set to true");
+  }
+  if (opts_.optimize_memory) {
+    TORCH_CHECK(
+        opts_.enable_out_variant,
+        "When optimize_memory is true, enable_out_variant must be set to true");
+  }
+
+  // handle schema
+  if (module_.has_value()) {
+    Method method = module_->get_method("forward");
+    schema_ = method.function().getSchema();
+    const auto num_schema_args = schema_->arguments().size();
+    DCHECK(num_schema_args > 0);
+    if (removeSelfFromGraphInput(graph_)) {
+      module_ = c10::nullopt;
+      num_inputs_ = num_schema_args - 1;
+    }
+  }
+
+  {
+    size_t nodes_size = 0, constants_size = 0;
+    for (Node* node : graph_->nodes()) {
+      ++(node->kind() == prim::Constant ? constants_size : nodes_size);
+    }
+
+    constants_.reserve(constants_size);
+    functions_.reserve(nodes_size);
+  }
+
+  // Create ProcessedFunction instances first to freeze their addresses to pass
+  // to ProcessedNode.
+  AliasDb alias_db(graph_, /*isFrozen=*/false);
+  GRAPH_DEBUG("AliasDb: ", alias_db.toString());
+
+  // Maps each Value* in the graph to its index in the values_ array that will
+  // eventually be created by StaticRuntime.
+  FastMap<const Value*, uint32_t> value_to_index;
+  prepareFunctionsAndConstants(graph_->block(), alias_db, value_to_index);
+
+  const auto constants_index_offset = 0;
+  const auto values_index_offset = constants_index_offset + constants().size();
+  value_buffer_size_ = values_index_offset;
+
+  value_buffer_size_ +=
+      prepareBlockInfo(graph_->block(), values_index_offset, value_to_index);
+
+  prepareStaticNodeInfos(graph_->block(), value_to_index, alias_db);
+
+  for (auto& block_and_info : block_infos_) {
+    auto& block_info = block_and_info.second;
+    block_info.prepare_for_memory_planner(alias_db, opts);
+  }
+}
+
+size_t StaticModule::prepareBlockInfo(
+    Block* block,
+    const size_t start_idx,
+    FastMap<const Value*, uint32_t>& value_to_index) {
+  block_infos_.emplace(block, BlockInfo(start_idx, *block));
+
+  const auto num_inputs = block->inputs().size();
+  for (const auto i : c10::irange(num_inputs)) {
+    value_to_index.emplace(block->inputs()[i], start_idx + i);
+  }
+  auto cur_idx = start_idx + num_inputs;
+
+  for (auto* node : block->nodes()) {
+    for (auto* sub_block : node->blocks()) {
+      cur_idx += prepareBlockInfo(sub_block, cur_idx, value_to_index);
+    }
+
     if (node->kind() == prim::Constant) {
       continue;
     }
-    std::vector<const IValue*> inputs;
-    for (Value* input : node->inputs()) {
-      inputs.emplace_back(val_to_ival.at(input));
+
+    TORCH_CHECK(
+        cur_idx < (1 << 16),
+        "outputs offset in values table",
+        cur_idx,
+        " would overflow 2-byte index storage");
+
+    const auto num_outputs = node->outputs().size();
+    for (const auto i : c10::irange(num_outputs)) {
+      value_to_index.emplace(node->outputs()[i], cur_idx + i);
     }
-    nodes_.emplace_back(
-        ProcessedNode(node, std::move(inputs), opts.enable_out_variant));
-    for (auto i = 0; i < node->outputs().size(); ++i) {
-      val_to_ival[node->outputs()[i]] = &nodes_.back().Output(i);
-    }
+    cur_idx += num_outputs;
   }
-  for (auto output : graph->outputs()) {
-    outputs_.emplace_back(val_to_ival.at(output));
+
+  std::vector<uint16_t> output_indices;
+  output_indices.reserve(block->outputs().size());
+  for (auto* output : block->outputs()) {
+    const auto output_idx = value_to_index.at(output);
+    TORCH_CHECK(
+        output_idx < (1 << 16),
+        "outputs offset in values table",
+        output_idx,
+        " would overflow 2-byte index storage");
+    output_indices.push_back(output_idx);
+  }
+
+  block_infos_.at(block).set_output_indices(std::move(output_indices));
+  return cur_idx - start_idx;
+}
+
+void StaticModule::prepareFunctionsAndConstants(
+    Block* block,
+    const AliasDb& alias_db,
+    FastMap<const Value*, uint32_t>& value_to_index) {
+  for (auto* node : block->nodes()) {
+    for (auto* sub_block : node->blocks()) {
+      prepareFunctionsAndConstants(sub_block, alias_db, value_to_index);
+    }
+
+    if (node->kind() == prim::Constant) {
+      auto* v = node->output();
+      TORCH_CHECK(v->type()->kind() != FunctionType::Kind);
+      value_to_index.emplace(v, constants_.size());
+      constants_.emplace_back(toIValue(v).value());
+      continue;
+    }
+
+    // see [Check and correct bad schema alias info at runtime]
+    bool check_outputs_for_overlap =
+        !alias_db.mayContainAlias(node->inputs(), node->outputs()) &&
+        containTensorsOnly(node->outputs());
+    // new ProcessedFunction
+    functions_.emplace_back(
+        node, opts_.enable_out_variant, check_outputs_for_overlap);
   }
 }
 
-size_t StaticRuntime::num_outputs() const {
-  return module_->output_regs.size();
-}
+size_t StaticModule::prepareStaticNodeInfos(
+    Block* block,
+    const FastMap<const Value*, uint32_t>& value_to_index,
+    const AliasDb& alias_db,
+    size_t node_idx) {
+  const auto node_start = node_idx;
 
-std::vector<at::Tensor> StaticRuntime::run(
-    const std::vector<at::Tensor>& inps) {
-  std::vector<c10::IValue> stack;
-  stack.resize(inps.size());
-  for (size_t i = 0; i < inps.size(); i++) {
-    stack[i] = inps[i];
-  }
+  auto& block_info = block_infos_.at(block);
+  std::vector<StaticNodeInfo> nodes;
+  FastMap<Node*, bool> node_has_out_variant;
 
-  c10::IValue v = run(stack, std::unordered_map<std::string, c10::IValue>());
-
-  std::vector<at::Tensor> out;
-
-  if (v.isTuple()) {
-    auto t = v.toTuple();
-    for (const auto& el : t->elements()) {
-      out.emplace_back(el.toTensor());
+  for (auto* node : block->nodes()) {
+    if (node->kind() == prim::Constant) {
+      continue;
     }
-  } else {
-    out.emplace_back(v.toTensor());
+
+    for (auto* sub_block : node->blocks()) {
+      node_idx +=
+          prepareStaticNodeInfos(sub_block, value_to_index, alias_db, node_idx);
+    }
+    ProcessedNodeInputs input_indices(node->inputs().size());
+    for (const auto input_idx : c10::irange(node->inputs().size())) {
+      auto* input = node->inputs()[input_idx];
+      auto input_ivalue_idx = value_to_index.at(input);
+      TORCH_CHECK(
+          input_ivalue_idx < (1 << 16),
+          "input index in values table ",
+          input_ivalue_idx,
+          " would overflow 2-byte index storage");
+      input_indices[input_idx] = input_ivalue_idx;
+    }
+
+    ProcessedFunction* fn = &functions_[node_idx];
+
+    // create a new ProcessedNode
+    const auto node_output_idx = node->outputs().empty()
+        // The index is unused if there are no outputs, so just create a
+        // placeholder value.
+        ? std::numeric_limits<uint16_t>::max()
+        : value_to_index.at(node->output(0));
+    nodes.emplace_back(node, fn, std::move(input_indices), node_output_idx);
+
+    node_has_out_variant.emplace(node, nodes.back().has_out_variant());
+    ++node_idx;
   }
-  return out;
+
+  block_info.set_nodes(std::move(nodes), node_has_out_variant);
+  block_info.init_value_group(alias_db);
+
+  return node_idx - node_start;
 }
 
-c10::IValue StaticRuntime::run(
+void BlockInfo::set_nodes(
+    std::vector<StaticNodeInfo> nodes,
+    const FastMap<Node*, bool>& node_has_out_variant) {
+  nodes_ = std::move(nodes);
+
+  for (auto& node : nodes_) {
+    if (node.num_outputs() == 1 &&
+        isOptimizableContainerType(node.node(), node_has_out_variant)) {
+      node_is_optimizable_container_type_.emplace(node.node());
+    }
+  }
+}
+void BlockInfo::prepare_for_memory_planner(
+    const AliasDb& alias_db,
+    const StaticModuleOptions& opts) {
+  if (!opts.enable_out_variant) {
+    return;
+  }
+
+  // Never manage graph outputs so that we can do std::move(output_ivalue).
+  // This does not affect performance if the graph returns a collection object.
+  FastSet<const Value*> graph_output_values(
+      block_.outputs().begin(), block_.outputs().end());
+
+  // collect register indices of outputs of ops with out variant
+  for (StaticNodeInfo& pnode : nodes_) {
+    if (!pnode.has_out_variant()) {
+      continue;
+    }
+    auto outputs = pnode.node()->outputs();
+    for (const auto i : c10::irange(outputs.size())) {
+      const Value* out_v = outputs[i];
+      // Types are stored in the underlying TorchScript IR
+      bool is_tensor_type = out_v->type()->castRaw<TensorType>();
+      if (opts.manage_output_tensors && is_tensor_type &&
+          graph_output_values.find(out_v) == graph_output_values.end() &&
+          value_group_.isOutputAlias(out_v)) {
+        managed_output_tensor_values_.insert(out_v);
+        continue;
+      }
+      if (value_group_.isAlwaysAlive(out_v)) {
+        continue;
+      }
+      if (is_tensor_type) {
+        managed_tensor_values_.insert(out_v);
+      } else if (node_is_optimizable_container_type(pnode.node())) {
+        // We "leak" certain container types because their allocations
+        // take a long time
+        leaked_values_.insert(out_v);
+      }
+    }
+  }
+
+  for (const Value* output : block_.outputs()) {
+    managed_tensor_values_.erase(output);
+  }
+  GRAPH_DEBUG("managed_tensor_values: ", dumpValueSet(managed_tensor_values_));
+  GRAPH_DEBUG(
+      "managed_output_tensor_values_: ",
+      dumpValueSet(managed_output_tensor_values_));
+
+  managed_tensor_ranges_ =
+      ManagedTensorRanges(block_, alias_db, managed_tensor_values_);
+}
+
+const StaticModuleOptions& StaticModule::opts() const {
+  return opts_;
+}
+
+size_t StaticModule::num_outputs() const {
+  return graph_->outputs().size();
+}
+
+size_t StaticModule::num_inputs() const {
+  return num_inputs_;
+}
+
+StaticRuntime& StaticModule::runtime() {
+  if (!cached_runtime_) {
+    cached_runtime_ = std::make_unique<StaticRuntime>(*this);
+  }
+  return *cached_runtime_;
+}
+
+Node* StaticModule::findNodeWithKindForTesting(const std::string& kind) const {
+  for (auto& block_and_info : block_infos_) {
+    auto& block_info = block_and_info.second;
+    for (auto& pnode : block_info.nodes()) {
+      if (pnode.node()->kind().toQualString() == kind) {
+        return pnode.node();
+      }
+    }
+  }
+  return nullptr;
+}
+
+c10::IValue StaticModule::operator()(
     const std::vector<c10::IValue>& args,
+    const KeywordArgs& kwargs) {
+  return runtime()(args, kwargs);
+}
+
+c10::IValue StaticModule::operator()(
+    std::vector<c10::IValue>&& args,
+    const KeywordArgs& kwargs) {
+  return runtime()(std::move(args), kwargs);
+}
+
+BlockRunner::BlockRunner(
+    const StaticModule& sm,
+    IValue* values,
+    Block* block,
+    bool is_root_block)
+    : static_module_(sm),
+      block_info_(static_module_.block_info(block)),
+      is_root_block_(is_root_block),
+      first_input_is_self_(
+          is_root_block_ && static_module_.first_input_is_self()),
+      inputs_begin_(block_info_.block_inputs_idx()),
+      // TODO(T108633124): Turn on manage output tensors for sub-blocks.
+      manage_output_tensors_enabled_(
+          is_root_block_ && sm.opts().manage_output_tensors),
+      values_(values) {
+  nodes_.reserve(block_info_.nodes().size());
+  for (auto& pre_pnode : block_info_.nodes()) {
+    nodes_.emplace_back(pre_pnode, values_);
+  }
+
+  for (auto index : block_info_.block_output_indices()) {
+    outputs_.emplace_back(&values_[index]);
+  }
+
+  for (auto& pnode : nodes_) {
+    auto* node = pnode.node();
+    auto blocks = node->blocks();
+    const auto num_blocks = blocks.size();
+    if (num_blocks == 0) {
+      continue;
+    }
+    DCHECK(node->kind() == prim::If || node->kind() == prim::Loop);
+    auto block_runners = std::make_unique<std::vector<BlockRunner>>();
+    block_runners->reserve(num_blocks);
+
+    for (auto* b : blocks) {
+      block_runners->emplace_back(sm, values_, b);
+    }
+    pnode.set_block_runners(std::move(block_runners));
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+BlockRunner::BlockRunner(BlockRunner&&) noexcept = default;
+
+BlockRunner::~BlockRunner() = default;
+
+void BlockRunner::set_arg(const size_t idx, std::vector<IValue>&& args) {
+  DCHECK(idx < args.size());
+  Input(idx + first_input_is_self_) = std::move(args[idx]);
+}
+
+void BlockRunner::set_arg(const size_t idx, const std::vector<IValue>& args) {
+  DCHECK(idx < args.size());
+  Input(idx + first_input_is_self_) = args[idx];
+}
+
+void BlockRunner::set_arg(const size_t idx, const IValue& arg) {
+  Input(idx + first_input_is_self_) = arg;
+}
+
+namespace {
+void check_type(const Argument& schema_arg, const IValue& arg) {
+  // Fast path for most common case
+  if (arg.isTensor() &&
+      schema_arg.type()->kind() == c10::TypeKind::TensorType) {
+    return;
+  }
+  TORCH_CHECK(arg.type()->isSubtypeOf(schema_arg.type()));
+}
+} // namespace
+
+template <typename IValueList>
+void BlockRunner::set_inputs(
+    IValueList&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  const auto& schema = static_module_.schema();
+  if (first_input_is_self_) {
+    Input(0) = static_module_.module()._ivalue();
+  }
+
+  if (!is_root_block_ || C10_UNLIKELY(!schema)) {
+    TORCH_CHECK(
+        kwargs.empty(), "Schema is not available, but BlockRunner got kwargs.");
+
+    const auto total_num_inputs = args.size() + first_input_is_self_;
+    TORCH_CHECK(total_num_inputs == block_info_.num_inputs());
+
+    for (size_t i = 0; i < args.size(); ++i) {
+      set_arg(i, std::forward<IValueList>(args));
+    }
+    return;
+  }
+
+  const auto& schema_args = schema->arguments();
+  size_t consumed_kwargs = 0;
+  DCHECK(schema_args.size() > 0);
+  TORCH_CHECK(
+      args.size() < schema_args.size(),
+      "Static runtime got too many arguments");
+  for (size_t i = 0; i < schema_args.size() - 1; ++i) {
+    // Start at 1 since the schema always contains `self`.
+    const auto& schema_arg = schema_args[i + 1];
+
+    if (i < args.size()) {
+      check_type(schema_arg, args[i]);
+      set_arg(i, std::forward<IValueList>(args));
+      continue;
+    }
+
+    auto it = kwargs.find(schema_arg.name());
+    if (it != kwargs.end()) {
+      check_type(schema_arg, it->second);
+      set_arg(i, it->second);
+      ++consumed_kwargs;
+      continue;
+    }
+
+    auto maybe_default_val = schema_arg.default_value();
+    if (maybe_default_val) {
+      set_arg(i, *maybe_default_val);
+      continue;
+    }
+
+    TORCH_CHECK(
+        false, "Static runtime is missing required kwarg ", schema_arg.name());
+  }
+  TORCH_CHECK(consumed_kwargs == kwargs.size());
+}
+
+void BlockRunner::create_memory_planner() {
+  if (!planner_) {
+    planner_ = std::make_unique<StandardMemoryPlanner>(
+        this,
+        block_info_,
+        static_module_.opts().enable_out_variant,
+        manage_output_tensors_enabled_,
+        static_module_.opts().optimize_memory);
+  }
+}
+
+namespace {
+
+void destroyNodeOutputs(ProcessedNode& p_node) {
+  const auto borrows_outputs = borrowsOutputs(p_node.node()->kind());
+  for (const auto i : c10::irange(p_node.num_outputs())) {
+    auto& output = p_node.Output(i);
+    if (doesNotHeapAllocateWhenStoredInIValue(*output.type())) {
+      continue;
+    }
+
+    if (borrows_outputs) {
+      // NB: No need to incref here. This codepath is only hit if the run didn't
+      // finish, so we shouldn't be returning anything to the client.
+      c10::MaybeOwnedTraits<IValue>::destroyBorrow(output);
+    } else {
+      output = IValue();
+    }
+  }
+}
+
+} // namespace
+
+void BlockRunner::clean_up_intermediate_ivalues() noexcept {
+  // We have to iterate in reverse order here due to borrowed
+  // IValues - we don't want to destroy a value until all of its
+  // borrows are cleaned up!
+  for (auto it = nodes_.rbegin(); it != nodes_.rend(); ++it) {
+    destroyNodeOutputs(*it);
+  }
+}
+
+void BlockRunner::resetMemory() noexcept {
+  planner_.reset();
+  // We must clean up intermediate values before inputs in case
+  // there are borrowed inputs and static runtime owns the only
+  // reference (e.g. the inputs were std::move'd into the runtime)
+  clean_up_intermediate_ivalues();
+  clean_up_input_ivalues();
+}
+
+c10::IValue BlockRunner::move_outputs_to_tuple(uint32_t num_outputs) {
+  switch (num_outputs) {
+    case 1:
+      return c10::ivalue::Tuple::create(IValue(std::move(*outputs_[0])));
+    case 2:
+      return c10::ivalue::Tuple::create(
+          IValue(std::move(*outputs_[0])), IValue(std::move(*outputs_[1])));
+    case 3:
+      return c10::ivalue::Tuple::create(
+          IValue(std::move(*outputs_[0])),
+          IValue(std::move(*outputs_[1])),
+          IValue(std::move(*outputs_[2])));
+    default: {
+      std::vector<c10::IValue> outputs;
+      outputs.reserve(num_outputs);
+      for (const auto i : c10::irange(num_outputs)) {
+        // use move here. Otherwise, clean up outputs_[i] explicitly
+        outputs.emplace_back(std::move(*outputs_[i]));
+      }
+      return c10::ivalue::Tuple::create(std::move(outputs));
+    }
+  }
+}
+
+/// [Check and correct bad schema alias info at runtime]
+/// Static runtime relies on the operator schema's alias info to be correct for
+/// memory planning. Because it's hard to enforce the alias info to be correct,
+/// we need to do runtime detection for accidental aliases that do not comply
+/// with the schema. Only aliases of managed tensors are problematic. To avoid
+/// runtime crashes, we can add runtime detection and force the op to comply
+/// with its schema by cloning the alias. Because all managed tensors' data_ptrs
+/// are part of the internal buffer that the MemoryPlanner allocates, we can
+/// check aliases by checking the memory overlap with this internal buffer. But
+/// a tensor's storage can be resized during inferenceso we need another way to
+/// handle the resized case.
+///
+/// There are two ways for incorrect schema to break memory planning. Let's look
+/// at two examples:
+///
+/// Example 1:
+/// @code
+///   def forward(x):
+///     a = x + x
+///     b = bad_op(a)  # b ends up aliasing a incorrectly
+///     return (b)
+/// @endcode
+/// bad_op: its schema says it returns a new Tensor, but it actually returns an
+/// alias. In this case, the memory planner would recognize `a` as a managed
+/// tensor and clean up its memory before returning `b`. But `b` is actually an
+/// alias of `a`, when `a`'s data_ptr get reset, `b`'s data_ptr gets reset too.
+///
+/// Example 2:
+/// @code
+///   def forward(x):
+///     a = x + x
+///     a2 = bad_op(a) # a2 ends up alias a incorrectly
+///     b = a + a
+///     c = b * b # c shares storage with a
+///     d = c + 2 # d shares storage with b
+///     e = a2 * a2
+///     return (d, e)
+/// @endcode
+/// With the memory reuse algorithm, `c` could end up sharing storage with `a`,
+/// but because of bad_op, `a2` now aliases `a`. `c` overwrites `a` and
+/// therefore `a2`, leading to the wrong results. We solve this problem with two
+/// steps. Note this doesn't happen with the current memory reuse algorithm
+/// because of the way it's implemented. Things could change with a different
+/// implementation.
+///
+/// Step 1, annotate the ProcessedNodes with a flag `check_memory_overlap_` set
+/// to true if its outputs do not alias its inputs as indicated by the AliasDb
+/// and all of its outputs are Tensors. Then at runtime, we check that the
+/// nodes' output tensors do not overlap with the internal buffer that the
+/// MemoryPlanner allocates. For latency concerns, we only run this check for
+/// fallback ops. The schemas of native ops and out variants are vetted and
+/// enforced with static runtime unit tests. For the first iteration, we do a
+/// full memory overlap check with
+/// ProcessedNode::verify_and_correct_memory_overlap() because the internal
+/// buffer doesn't exist yet.
+///
+/// Step 2, if a managed tensor gets resized during inference, it gets a new
+/// data_ptr which is not from the buffer. We can tackle this corner case by
+/// delaying the deallocation of the managed tensors to after the outputs are no
+/// longer used (essentially merging the internal/output buffers into one).
+/// Before the merging is implemented, we add another flag `overlap_detected_`
+/// to flag any node with overlap detected in Step 1 and do a full memory
+/// overlap check if the fast check (by checking memory overlap with internal
+/// buffer) fails. There is still a corner case that fails with the added flag.
+/// If a resize is triggered at the same time as the op creating an alias at the
+/// same time, the current checks would fail to detect the alias.
+void BlockRunner::verify_and_correct_memory_overlap(ProcessedNode& n) {
+  // The slow check can be removed once the internal/output buffers are merged
+  if (C10_UNLIKELY(n.check_outputs_for_memory_overlap())) {
+    if (C10_UNLIKELY(!planner_)) {
+      // slow check, for first iter only
+      n.verify_and_correct_memory_overlap();
+    } else {
+      bool overlap_detected_with_fast_check = false;
+      for (size_t i = 0; i < n.outputs().size(); i++) {
+        auto& output = n.Output(i);
+        if (output.isTensor()) {
+          overlap_detected_with_fast_check |=
+              fast_check_and_correct_overlap_with(n, output);
+        } else if (output.isTensorList()) {
+          auto tensor_list = output.toListRef();
+          for (auto& ival : tensor_list) {
+            overlap_detected_with_fast_check |=
+                fast_check_and_correct_overlap_with(
+                    n,
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+                    const_cast<c10::IValue&>(ival));
+          }
+        }
+      }
+      if (n.outputs_memory_overlap_detected() &&
+          !overlap_detected_with_fast_check) {
+        // slow check. Only run when the fast check fails.
+        n.verify_and_correct_memory_overlap();
+      }
+    }
+  }
+}
+
+bool BlockRunner::fast_check_and_correct_overlap_with(
+    ProcessedNode& n,
+    c10::IValue& tensor_ival) {
+  auto& tensor = tensor_ival.toTensor();
+  if (planner_->overlapWithInternalBuffer(tensor.data_ptr())) {
+    DLOG(INFO) << "Detected alias for node: " << PrintNode(n.node());
+    tensor_ival = at::native::clone(tensor, c10::nullopt);
+    n.set_outputs_memory_overlap_detected();
+    return true;
+  }
+  return false;
+}
+
+BlockRunner::Deallocator::~Deallocator() {
+  // Assume cleanup cannot throw.
+  cleanupImpl();
+#ifndef NDEBUG
+  block_runner_.check_for_memory_leak(/*output_returned*/ false);
+#endif
+}
+
+void BlockRunner::Deallocator::cleanupImpl() {
+  // MemoryPlanner is created after the first invocation of `run()`. This
+  // is done intentionally because MemoryPlanner uses `Tensor` sizes of
+  // the previous `run()` for memory planning of subsequent runs
+  if (C10_LIKELY(finished_)) {
+    block_runner_.create_memory_planner();
+  }
+
+  if (C10_LIKELY(block_runner_.planner_)) {
+    block_runner_.planner_->deallocate();
+  } else {
+    // This is the first run, and it didn't finish, so we can't use a
+    // `MemoryPlanner` to deallocate stuff. Just reset everything mannually.
+    block_runner_.resetMemory();
+  }
+  // clean up owning refs of input tensors
+  block_runner_.clean_up_input_ivalues();
+  if (C10_UNLIKELY(!finished_)) {
+    block_runner_.deallocateOutputTensors();
+  }
+}
+
+template <typename IValueList>
+c10::IValue BlockRunner::run_impl(
+    IValueList&& args,
+    const KeywordArgs& kwargs) {
   // We assume inference workloads, so we do not need
   // autograd. Enabling this is a significant win on dispatcher
   // overhead because it saves a round of dispatch for at least some
   // functions, such as resize_ and resize_as_.
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  c10::InferenceMode mode;
 
-  if (planner_) {
-    planner_->allocate();
-  }
+  {
+    auto on_exit = Deallocator(*this);
 
-  if (!kwargs.empty()) {
-    // This is not ideal
-    TORCH_CHECK(
-        module_->schema != nullptr,
-        "Schema is not available. Consider creating the Static Runtime "
-        "with StaticRuntime(const torch::jit::Module& m) instead.");
-    std::vector<c10::IValue> s = args;
-    module_->schema->checkAndNormalizeInputs(s, kwargs);
-    for (size_t i = 0; i < s.size(); i++) {
-      Input(i) = s[i];
+    if (planner_) {
+      DCHECK(!manage_output_tensors_enabled_ || checkOutputTensorMemoryLeaks());
+      planner_->allocate();
     }
-  } else {
-    for (size_t i = 0; i < args.size(); i++) {
-      Input(i) = args[i];
-    }
-  }
 
-  // NB: before optimizing the order of execution, ensure that the
-  // memory optimization pass (LivenessMap + AssignRegisters) is
-  // aware of the new order!
-  for (auto& n : nodes_) {
-    n.run();
-  }
+    set_inputs(std::forward<IValueList>(args), kwargs);
 
-  if (opts_.cleanup_activations) {
-    if (!planner_) {
-      std::unordered_map<Value*, std::vector<Value*>> shared;
-      planner_ = std::make_unique<MemoryPlanner>(this, shared);
+    for (auto& n : nodes_) {
+      // LOG(INFO) << "Running node: " << PrintNode(n.node());
+      n.run();
+      // Check for incorrect schema alias info.
+      verify_and_correct_memory_overlap(n);
     }
-    planner_->deallocate();
+    on_exit.setFinished();
   }
 
   // no need to keep references of outputs in static runtime anymore
-  if (num_outputs() > 1) {
-    std::vector<c10::IValue> outputs;
-    outputs.reserve(num_outputs());
-    for (auto i = 0; i < num_outputs(); ++i) {
-      outputs.emplace_back(Output(i));
-    }
-    return c10::ivalue::Tuple::create(outputs);
+  if (block_info_.num_outputs() > 1) {
+    return move_outputs_to_tuple(block_info_.num_outputs());
   }
-  return Output(0);
+
+  DCHECK(check_for_memory_leak(/*output_returned*/ false));
+
+  // use move here. Otherwise, clean up outputs_[0] explicitly
+  return std::move(*outputs_[0]);
 }
 
-void StaticRuntime::benchmark(
+template <typename IValueList>
+c10::IValue BlockRunner::run_impl_record_functions(
+    IValueList&& args,
+    const KeywordArgs& kwargs) {
+  auto step_callbacks =
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
+  if (!step_callbacks.empty()) {
+    at::RecordFunction guard(std::move(step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    guard.needsInputs()
+        ? guard.before(
+              "forward", c10::ArrayRef<const IValue>(args.data(), args.size()))
+        : guard.before("forward");
+
+    return run_impl(std::forward<IValueList>(args), kwargs);
+  }
+  return run_impl(std::forward<IValueList>(args), kwargs);
+}
+
+c10::IValue BlockRunner::operator()(
     const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs,
+    const KeywordArgs& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
+  return run_impl(args, kwargs);
+#else
+  return run_impl_record_functions(args, kwargs);
+#endif
+}
+
+c10::IValue BlockRunner::operator()(
+    std::vector<c10::IValue>&& args,
+    const KeywordArgs& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
+  return run_impl(std::move(args), kwargs);
+#else
+  return run_impl_record_functions(std::move(args), kwargs);
+#endif
+}
+
+namespace {
+
+std::string generate_latency_json(const std::string& label, double millis) {
+#ifdef FBCODE_CAFFE2
+  folly::dynamic json = folly::dynamic::object();
+  json["type"] = label;
+  json["metric"] = "latency";
+  json["unit"] = "ms";
+  json["value"] = millis;
+  return "PyTorchObserver " + folly::toJson(json);
+#else
+  return "";
+#endif
+}
+
+} // namespace
+
+void BlockRunner::benchmark(
+    const std::vector<std::vector<c10::IValue>>& args_list,
+    const std::vector<KeywordArgs>& kwargs_list,
     const int warmup_runs,
-    const int main_runs) {
-  float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
+    const int main_runs,
+    bool print_per_node_time,
+    bool generate_ai_pep_output) {
+  TORCH_CHECK(
+      kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
+  std::cout << "Input size: " << args_list.size() << std::endl;
+  float time_per_iter =
+      benchmark_model(args_list, kwargs_list, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
             << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
   IndividualMetrics results =
-      benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
-  std::cout << "Setting up took " << results.setup_time << " ms" << std::endl;
+      benchmark_individual_ops(args_list, kwargs_list, warmup_runs, main_runs);
 
-  for (size_t i = 0; i < nodes_.size(); i++) {
-    const Node* node = nodes_[i].get_node();
-    std::cout << "Node #" << i << ": " << results.time_per_node[i]
-              << " ms/iter, ";
-    node->print(std::cout, 0, nullptr, false);
+  if (print_per_node_time) {
+    for (const auto i : c10::irange(nodes_.size())) {
+      const Node* node = nodes_[i].node();
+      std::cout << "Node #" << i << ": " << results.time_per_node[i]
+                << " ms/iter, ";
+      node->print(std::cout, 0, nullptr, false);
+    }
   }
 
   std::vector<std::pair<std::string, double>> time_per_node_type_vec{
       results.time_per_node_type.begin(), results.time_per_node_type.end()};
-  std::sort(
-      time_per_node_type_vec.begin(),
-      time_per_node_type_vec.end(),
-      [](auto& left, auto& right) { return left.second > right.second; });
-
+  if (args_list.size() == 0) {
+    std::sort(
+        time_per_node_type_vec.begin(),
+        time_per_node_type_vec.end(),
+        [&results](auto& left, auto& right) {
+          return results.instances_per_node_type[left.first] >
+              results.instances_per_node_type[right.first];
+        });
+  } else {
+    std::sort(
+        time_per_node_type_vec.begin(),
+        time_per_node_type_vec.end(),
+        [](auto& left, auto& right) { return left.second > right.second; });
+  }
   std::cout << "Time per node type:" << std::endl;
   for (const auto& p : time_per_node_type_vec) {
     const std::string& kind = p.first;
     const double ms = p.second;
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
-              << results.instances_per_node_type[kind] << " nodes)"
-              << std::endl;
+              << results.instances_per_node_type[kind] << " nodes";
+    if (results.out_nodes.count(kind)) {
+      std::cout << ", out variant)" << std::endl;
+    } else if (results.native_nodes.count(kind)) {
+      std::cout << ", native)" << std::endl;
+    } else {
+      std::cout << ")" << std::endl;
+    }
+
+    if (generate_ai_pep_output) {
+      LOG(INFO) << generate_latency_json(kind, ms);
+    }
+  }
+  if (generate_ai_pep_output) {
+    LOG(INFO) << generate_latency_json(
+        "static_runtime_first_iter", results.first_iter_time);
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
+  std::cout << "BlockRunner setup time: " << results.setup_time << " ms"
+            << std::endl;
+  std::cout << "Memory allocation time: " << results.memory_alloc_time
+            << " ms\n";
+  std::cout << "Memory deallocation time: " << results.memory_dealloc_time
+            << " ms" << std::endl;
+  std::cout << "Outputs deallocation time: " << results.output_dealloc_time
+            << " ms" << std::endl;
+  std::cout << "First iter time: " << results.first_iter_time << " ms"
+            << std::endl;
+  std::cout << "Number of operators: " << nodes_.size() << std::endl;
 
   if (planner_) {
+    std::cout << "Total number of managed tensors: "
+              << planner_->total_num_managed_tensors() << std::endl;
+    std::cout << "Total number of managed output tensors: "
+              << planner_->total_num_managed_output_tensors() << std::endl;
+    std::cout << "Total number of unmanaged values: "
+              << planner_->total_num_unmanaged() << std::endl;
+    std::cout << "Number of unmanaged values requiring cleanup: "
+              << planner_->num_unmanaged_non_scalars() << std::endl;
+    std::cout << "Number of unmanaged values not requiring cleanup: "
+              << planner_->num_unmanaged_scalars() << std::endl;
     std::cout << "Total memory managed: " << planner_->total_managed()
               << " bytes" << std::endl;
+    if (static_module_.opts().optimize_memory) {
+      std::cout << "Total number of reused tensors: "
+                << planner_->total_reused_tensors() << std::endl;
+    }
   }
-  if (module_->opts.optimize_memory) {
-    std::cout << "Total number of reused registers: " << module_->reused_regs
-              << std::endl;
-  }
+  std::cout << "Total number of 'out' variant nodes/total number of nodes: "
+            << results.out_nodes_count << "/" << results.total_nodes_count
+            << " ("
+            << 100.0 * (results.out_nodes_count) /
+          static_cast<float>(results.total_nodes_count)
+            << "%)" << std::endl;
+
+  check_for_memory_leak();
+
+#ifndef NDEBUG
+  KeywordArgs empty_kwargs;
+  display_nodes(
+      args_list[0], kwargs_list.size() > 0 ? kwargs_list[0] : empty_kwargs);
+#endif
 }
 
-float StaticRuntime::benchmark_model(
-    const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs,
+float BlockRunner::benchmark_model(
+    const std::vector<std::vector<c10::IValue>>& args_list,
+    const std::vector<KeywordArgs>& kwargs_list,
     const int warmup_runs,
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+  TORCH_CHECK(
+      kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
 
-  for (int i = 0; i < warmup_runs; i++) {
-    run(args, kwargs);
+  const bool is_kwargs_empty = kwargs_list.size() == 0;
+  const KeywordArgs empty_kwargs;
+  for (const auto i : c10::irange(warmup_runs)) {
+    (void)i; // Suppress unused variable warning
+    for (const auto j : c10::irange(args_list.size())) {
+      operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors_enabled_) {
+        deallocateOutputTensors();
+      }
+    }
   }
   caffe2::Timer timer;
-  for (int i = 0; i < main_runs; i++) {
-    run(args, kwargs);
+  for (const auto i : c10::irange(main_runs)) {
+    (void)i; // Suppress unused variable warning
+    for (const auto j : c10::irange(args_list.size())) {
+      operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors_enabled_) {
+        deallocateOutputTensors();
+      }
+    }
   }
   float millis = timer.MilliSeconds();
-  return millis / static_cast<float>(main_runs);
+  return millis / (static_cast<float>(main_runs) * args_list.size());
 }
 
-StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
+bool display_ivalue(const IValue& iv) {
+  if (iv.isTensor()) {
+    std::cout << "Tensor " << iv.toTensor().toString() << " {";
+    for (const auto i : c10::irange(iv.toTensor().sizes().size())) {
+      std::cout << iv.toTensor().sizes()[i];
+      if (iv.toTensor().sizes().size() > i + 1) {
+        std::cout << ", ";
+      }
+    }
+    std::cout << "}\n";
+    return true;
+  } else if (iv.isTensorList()) {
+    std::cout << "TensorList {" << iv.toTensorList().size() << "}\n";
+    return true;
+  } else if (iv.isGenericDict()) {
+    std::cout << "Dict {" << iv.toGenericDict().size() << "}\n";
+    return true;
+  } else if (iv.isTuple()) {
+    std::cout << "Tuple {" << iv.toTupleRef().elements().size() << "}\n";
+    return true;
+  } else if (iv.isInt()) {
+    std::cout << "int {" << iv.toInt() << "}\n";
+    return true;
+  } else if (iv.isBool()) {
+    std::cout << "bool {" << iv.toBool() << "}\n";
+    return true;
+  } else if (iv.isDouble()) {
+    std::cout << "double {" << iv.toDouble() << "}\n";
+    return true;
+  }
+  return false;
+}
+
+void display_pnode_info(const ProcessedNode& pnode) {
+  pnode.node()->print(std::cout, 0, nullptr, false);
+  for (const auto i : c10::irange(pnode.num_inputs())) {
+    std::cout << "\ti" << i << ": ";
+    if (!display_ivalue(pnode.Input(i))) {
+      std::cout << *(pnode.node()->inputs()[i]->type()) << '\n';
+    }
+  }
+  const auto outputs = pnode.outputs();
+  for (const auto i : c10::irange(outputs.size())) {
+    std::cout << "\to" << i << ": ";
+    if (!display_ivalue(outputs[i])) {
+      std::cout << *(pnode.node()->outputs()[i]->type()) << '\n';
+    }
+  }
+}
+
+void BlockRunner::display_nodes(
     const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs,
+    const KeywordArgs& kwargs) {
+  c10::InferenceMode mode;
+
+  auto on_exit = Deallocator(*this);
+
+  if (planner_) {
+    planner_->allocate();
+  }
+  set_inputs(args, kwargs);
+
+  for (auto& node : nodes_) {
+    node.run();
+    display_pnode_info(node);
+  }
+  on_exit.setFinished();
+}
+
+BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
+    const std::vector<std::vector<c10::IValue>>& args_list,
+    const std::vector<KeywordArgs>& kwargs_list,
     const int warmup_runs,
     const int main_runs) {
-  TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
-
-  // See comment on above use of AutoNonVariableTypeMode for
-  // explanation.
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  TORCH_CHECK(
+      kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
+  TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
 
   IndividualMetrics results;
-  results.total_time = 0.0;
   results.time_per_node.resize(nodes_.size(), 0);
+  if (args_list.size() == 0) {
+    // When the given input is empty, compute the op statistics from the given
+    // graph without executing it.
+    for (const auto i : c10::irange(nodes_.size())) {
+      const Node* node = nodes_[i].node();
+      std::string kind(node->kind().toQualString());
+      // TODO: Collect op statistics from sub-blocks here.
+      results.time_per_node[i] = 0;
+      results.time_per_node_type[kind] = 0;
+      results.instances_per_node_type[kind]++;
+      if (nodes_[i].has_out_variant()) {
+        results.out_nodes.insert(kind);
+        results.out_nodes_count++;
+      } else if (nodes_[i].has_native()) {
+        results.native_nodes.insert(kind);
+      }
+      results.total_time += results.time_per_node[i];
+    }
+    results.total_nodes_count = nodes_.size();
+    results.memory_alloc_time = 0;
+    results.memory_dealloc_time = 0;
+    results.output_dealloc_time = 0;
+    for (const auto& p : results.time_per_node_type) {
+      const std::string& kind = p.first;
+      results.percent_per_node_type[kind] = 0;
+    }
+    return results;
+  }
+
+  const bool is_kwargs_empty = kwargs_list.size() == 0;
+  const KeywordArgs empty_kwargs;
+  bool manage_output_tensors = static_module_.opts().manage_output_tensors;
+  // See comment on above use of InferenceMode for
+  // explanation.
+  c10::InferenceMode mode;
 
   // setup time
   caffe2::Timer timer;
-  std::vector<IValue> stack(args);
-  if (!kwargs.empty()) {
-    // This is not ideal
-    TORCH_CHECK(
-        module_->schema != nullptr,
-        "Schema is not available. Consider creating the Static Runtime "
-        "with StaticRuntime(const torch::jit::Module& m) instead.");
-    module_->schema->checkAndNormalizeInputs(stack, kwargs);
-  }
-  for (size_t i = 0; i < stack.size(); i++) {
-    Input(i) = stack[i];
-  }
+
+  set_inputs(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
+
   results.setup_time = timer.MilliSeconds();
 
+  // The first iteration profiles each node's output Tensors' sizes and
+  // initializes the memory planner with the profile information. Folllowing
+  // iterations just use the already established memory planning.
+  timer.Start();
+  operator()(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
+  if (manage_output_tensors) {
+    deallocateOutputTensors();
+  }
+  results.first_iter_time = timer.MilliSeconds();
+
   // warmup runs
-  for (int i = 0; i < warmup_runs; i++) {
-    run(args, kwargs);
+  for (const auto i : c10::irange(warmup_runs - 1)) {
+    (void)i; // Suppress unused variable warning
+    for (const auto j : c10::irange(args_list.size())) {
+      operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
+    }
   }
 
   // main runs
-  for (int i = 0; i < main_runs; i++) {
-    if (planner_) {
-      planner_->allocate();
-    }
-    for (size_t j = 0; j < nodes_.size(); j++) {
+  for (const auto i : c10::irange(main_runs)) {
+    (void)i; // Suppress unused variable warning
+
+    for (const auto j : c10::irange(args_list.size())) {
+      set_inputs(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
+
       timer.Start();
-      nodes_[j].run();
-      float millis = timer.MilliSeconds();
-      results.time_per_node[j] += millis;
-    }
-    if (opts_.cleanup_activations) {
-      if (!planner_) {
-        std::unordered_map<Value*, std::vector<Value*>> shared;
-        planner_ = std::make_unique<MemoryPlanner>(this, shared);
+      if (planner_) {
+        planner_->allocate();
       }
+      float millis = timer.MilliSeconds();
+      results.memory_alloc_time += millis;
+
+      for (const auto k : c10::irange(nodes_.size())) {
+        timer.Start();
+        nodes_[k].run();
+        millis = timer.MilliSeconds();
+        results.time_per_node[k] += millis;
+        verify_and_correct_memory_overlap(nodes_[k]);
+      }
+      timer.Start();
+      create_memory_planner();
       planner_->deallocate();
+      // clean up owning refs of input tensors
+      clean_up_input_ivalues();
+      if (manage_output_tensors) {
+        deallocateOutputTensors();
+      }
+      millis = timer.MilliSeconds();
+      results.memory_dealloc_time += millis;
+
+      timer.Start();
+      // no need to keep references of outputs in static runtime anymore
+      c10::IValue output;
+      if (static_module_.num_outputs() > 1) {
+        output = move_outputs_to_tuple(static_module_.num_outputs());
+      }
+
+      DCHECK(check_for_memory_leak(/*output_returned*/ false));
+
+      // use move here. Otherwise, clean up outputs_[0] explicitly
+      output = std::move(*outputs_[0]);
+      // release outputs explicitly to measure the time it takes
+      output = IValue();
+      millis = timer.MilliSeconds();
+      results.output_dealloc_time += millis;
     }
   }
 
   // post processing
-  for (size_t i = 0; i < nodes_.size(); i++) {
-    const Node* node = nodes_[i].get_node();
+  const float num_total_iters =
+      (static_cast<float>(main_runs) * args_list.size());
+  for (const auto i : c10::irange(nodes_.size())) {
+    const Node* node = nodes_[i].node();
     std::string kind = std::string(node->kind().toQualString());
-    results.time_per_node[i] /= static_cast<float>(main_runs);
+    results.time_per_node[i] /= num_total_iters;
     results.time_per_node_type[kind] += results.time_per_node[i];
     results.instances_per_node_type[kind]++;
+    if (nodes_[i].has_out_variant()) {
+      results.out_nodes.insert(kind);
+      results.out_nodes_count++;
+    } else if (nodes_[i].has_native()) {
+      results.native_nodes.insert(kind);
+    }
     results.total_time += results.time_per_node[i];
   }
+  results.total_nodes_count = nodes_.size();
+  results.memory_alloc_time /= num_total_iters;
+  results.memory_dealloc_time /= num_total_iters;
+  results.output_dealloc_time /= num_total_iters;
   for (const auto& p : results.time_per_node_type) {
     const std::string& kind = p.first;
     results.percent_per_node_type[kind] = p.second / results.total_time * 100;
@@ -652,219 +1621,439 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   return results;
 }
 
-MemoryPlanner::MemoryPlanner(
-    StaticRuntime* runtime,
-    std::unordered_map<Value*, std::vector<Value*>> should_share) {
-  // get input Value*
-  at::ArrayRef<Value*> inputs =
-      runtime->get_inference_module()->graph->inputs();
-  std::unordered_set<Value*> graph_input_values(inputs.begin(), inputs.end());
-
-  // collect register indices of outputs of ops with out variant
-  std::unordered_set<Value*> managed_values;
-  std::unordered_set<IValue*> unmanaged_value_set;
-  for (ProcessedNode& pnode : runtime->get_nodes()) {
-    bool should_manage = pnode.has_out_variant();
-    if (should_manage && isViewOp(pnode.get_node())) {
-      // outputs of view ops with inputs as the graph inputs shouldn't be
-      // managed by the MemoryPlanner. It may release the storage of the graph
-      // inputs.
-      for (Value* in : pnode.get_node()->inputs()) {
-        if (graph_input_values.count(in) > 0) {
-          should_manage = false;
-          break;
-        }
+bool BlockRunner::check_for_memory_leak(
+    bool output_returned,
+    bool recurse_on_sub_blocks) {
+  // check for inputs
+  for (const auto i : c10::irange(block_info_.num_inputs())) {
+    TORCH_CHECK(
+        values_[i + block_info_.block_inputs_idx()].isNone(),
+        "Input ",
+        i,
+        " was not cleaned up");
+  }
+  FastSet<const IValue*> output_ivalues(outputs_.begin(), outputs_.end());
+  for (const auto n : c10::irange(nodes_.size())) {
+    auto& pnode = nodes_[n];
+    for (const auto i : c10::irange(pnode.num_outputs())) {
+      const IValue* ival = &pnode.Output(i);
+      const Value* val = pnode.node()->output(i);
+      // subtlety: isManagedOutputTensorValue may give a false
+      // negative here if an output is an alias of this value, so
+      // check the actual tensor!
+      if (planner_ &&
+          (isManagedOutputTensor(*ival) || isManagedOutputTensorValue(val))) {
+        // `ival` contains a managed output tensor that the runtime doesn't
+        // reclaim at the end of an iteration, but the client does so
+        // by explicitly calling
+        // `BlockRunner::deallocateOutputTensors`.
+        continue;
       }
-    }
-    if (should_manage) {
-      // Types are stored in the underlying TorchScript IR
-      for (Value* out : pnode.get_node()->outputs()) {
-        if (out->type()->cast<TensorType>()) {
-          managed_values.insert(out);
-        }
-      }
-    } else {
-      for (auto i = 0; i < pnode.outputs().size(); ++i) {
-        unmanaged_value_set.insert(&pnode.Output(i));
-      }
-    }
-  }
-
-  const InferenceModule* module = runtime->get_inference_module();
-
-  // remove model outputs from managed_values
-  for (Value* output : module->graph->outputs()) {
-    managed_values.erase(output);
-  }
-  for (IValue* output : runtime->outputs()) {
-    unmanaged_value_set.erase(output);
-  }
-  for (IValue* out : unmanaged_value_set) {
-    unmanaged_values_.emplace_back(out);
-  }
-
-  // remove tensors in output List/Tuple from managed_values
-  for (Value* output : module->graph->outputs()) {
-    Node* output_node = output->node();
-    if (output_node->kind() == prim::TupleConstruct ||
-        output_node->kind() == prim::ListConstruct) {
-      for (Value* input : output_node->inputs()) {
-        managed_values.erase(input);
-      }
-    }
-  }
-
-  // some Values should share storage, this map will
-  // keep track of the index into managed_storage_
-  std::unordered_map<Value*, size_t> shared;
-  // the StorageImpls of Tensor views should not be managed
-  std::unordered_set<c10::StorageImpl*> managed_storage_impls;
-
-  // Snapshot of the current memory state
-  for (const auto& pnode : runtime->get_nodes()) {
-    for (auto i = 0; i < pnode.outputs().size(); ++i) {
-      const auto& ival = pnode.outputs()[i];
-      auto* val = pnode.get_node()->outputs()[i];
-      if (managed_values.count(val)) {
-        TORCH_CHECK(ival.isTensor());
-        auto* impl = ival.toTensor().storage().unsafeGetStorageImpl();
-
-        auto didInsert = managed_storage_impls.insert(impl).second;
-        if (!didInsert) {
-          continue;
-        }
-
-        if (shared.count(val)) {
-          managed_storage_[shared.at(val)].second.emplace_back(impl);
-        } else {
-          auto p =
-              std::make_pair<size_t, std::vector<c10::StorageImpl*>>(0, {impl});
-          managed_storage_.emplace_back(std::move(p));
-          // first of a group, update the shared map with the index
-          if (should_share.count(val)) {
-            for (auto v : should_share.at(val)) {
-              shared[v] = managed_storage_.size() - 1;
+      const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
+          val->debugName() + " of node " + c10::to_string(n) +
+          " which has kind " + pnode.node()->kind().toQualString() +
+          " was not cleaned up";
+      if (output_ivalues.count(ival) == 0) {
+        // check for intermediates
+        if (!ival->isNone()) {
+          TORCH_CHECK(
+              ival->isTensor() ||
+                  block_info_.node_is_optimizable_container_type(
+                      pnode.node()) ||
+                  doesNotHeapAllocateWhenStoredInIValue(*val->type()),
+              error_msg);
+          if (ival->isTensor()) {
+            const auto& t = ival->toTensor();
+            if (t.defined()) {
+              auto* storage_impl = t.storage().unsafeGetStorageImpl();
+              TORCH_CHECK(
+                  storage_impl->data() == nullptr ||
+                      (planner_ &&
+                       planner_->isManagedStorageImpl(storage_impl)),
+                  error_msg);
             }
           }
         }
+      } else {
+        // check for outputs
+        if (output_returned) {
+          TORCH_CHECK(ival->isNone(), error_msg);
+        }
+      }
+    }
+
+    auto* block_runners = pnode.block_runners();
+    if (recurse_on_sub_blocks && block_runners) {
+      for (auto& block_runner : *block_runners) {
+        block_runner.check_for_memory_leak(
+            output_returned, recurse_on_sub_blocks);
+      }
+    }
+  }
+  VLOG(1) << "Finished checking for memory leak";
+  return true;
+}
+
+void BlockRunner::deallocateOutputTensors() {
+  if (!static_module_.opts().manage_output_tensors) {
+    TORCH_CHECK(
+        !planner_ || planner_->numOutputBufferBytes() == 0,
+        "manage_output_tensors is disabled, but output tensor buffer is not empty.");
+    return;
+  }
+  if (planner_) {
+    planner_->deallocateOutputTensors();
+    DCHECK(checkOutputTensorMemoryLeaks());
+  }
+}
+
+bool BlockRunner::checkOutputTensorMemoryLeaks() {
+  if (!static_module_.opts().manage_output_tensors || !planner_) {
+    return true;
+  }
+  for (const auto n : c10::irange(nodes_.size())) {
+    auto& pnode = nodes_[n];
+    for (const auto i : c10::irange(pnode.num_outputs())) {
+      const IValue* ival = &pnode.Output(i);
+      const Value* val = pnode.node()->output(i);
+      if (!isManagedOutputTensorValue(val) || !ival->isTensor()) {
+        // ival can not be a tensor if it's being managed by ops like
+        // to_maybe_copy_out; see ReplaceWithMaybeCopy for details.
+        continue;
+      }
+      const auto& t = ival->toTensor();
+      if (t.defined()) {
+        auto* storage_impl = t.storage().unsafeGetStorageImpl();
+        const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
+            val->debugName() + " of node " + c10::to_string(n) +
+            " was not cleaned up";
+        TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
+      }
+    }
+  }
+  VLOG(1) << "Finished checking for memory leak from output tensors";
+  return true;
+}
+
+bool BlockRunner::isManagedOutputTensor(const IValue& ivalue) const {
+  return planner_ && planner_->isManagedOutputTensor(ivalue);
+}
+
+bool BlockRunner::isManagedOutputTensorValue(const Value* value) const {
+  // It's possible that manage_output_tensors_ was disabled after initializing
+  // managed_output_tensor_values, so we have to check that flag here.
+  if (!planner_ || !manage_output_tensors_enabled_) {
+    return false;
+  }
+  const auto& managed_outputs = block_info_.managed_output_tensor_values();
+  return managed_outputs.find(value) != managed_outputs.end();
+}
+
+void BlockRunner::disableManageOutputTensors() {
+  if (!manage_output_tensors_enabled_) {
+    return;
+  }
+  manage_output_tensors_enabled_ = false;
+  if (!planner_) {
+    return;
+  }
+  // Reset all IValues and destruct planner_ so that it can be reconstructed in
+  // the next run.
+  for (auto& n : nodes_) {
+    for (const auto i : c10::irange(n.outputs().size())) {
+      n.Output(i) = IValue();
+    }
+  }
+  planner_.reset();
+}
+
+ProcessedFunction::ProcessedFunction(
+    Node* node,
+    bool enable_out_variant,
+    bool check_memory_overlap)
+    : check_memory_overlap_(check_memory_overlap),
+      num_outputs_(node->outputs().size()) {
+  if (enable_out_variant) {
+    f_ = getOutOfPlaceOperation(node);
+    if (f_) {
+      kind_ = ProcessedFunction::Kind::kOutVariant;
+      // do not check memory overlap for out variants
+      check_memory_overlap_ = false;
+      VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
+      return;
+    }
+  }
+  {
+    f_ = getNativeOperation(node);
+    if (f_) {
+      kind_ = ProcessedFunction::Kind::kNativeFunction;
+#ifdef NDEBUG
+      // skip this check in opt mode because these ops are better vetted
+      check_memory_overlap_ = false;
+#endif
+      VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
+      return;
+    }
+  }
+  {
+    const Operator& op = node->getOperator();
+    f_ = [node_op = op.getOperation(node),
+          has_var_args = hasVarArgs(node)](ProcessedNode* pnode) mutable {
+      std::vector<IValue> stack;
+      const size_t size = pnode->num_inputs();
+      stack.reserve(size + has_var_args);
+      for (const auto i : c10::irange(size)) {
+        stack.emplace_back(pnode->Input(i));
+      }
+      // Need to store the number of inputs in stack for variadic ops.
+      if (has_var_args) {
+        stack.emplace_back(static_cast<int>(size));
+      }
+      node_op(stack);
+      DCHECK_EQ(stack.size(), pnode->num_outputs());
+      for (const auto i : c10::irange(pnode->num_outputs())) {
+        pnode->Output(i) = std::move(stack[i]);
+      }
+    };
+    kind_ = ProcessedFunction::Kind::kInterpreterFallback;
+    VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
+  }
+}
+
+StaticNodeInfo::StaticNodeInfo(
+    Node* node,
+    ProcessedFunction* fn,
+    ProcessedNodeInputs inputs,
+    uint16_t outputs_offset)
+    : node_(node),
+      fn_(fn),
+      inputs_(std::move(inputs)),
+      outputs_offset_(outputs_offset) {
+  TORCH_CHECK(num_outputs() == node->outputs().size());
+}
+
+std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
+  std::vector<IValue> result;
+  result.reserve(inputs_.size());
+  for (const auto idx : c10::irange(num_inputs())) {
+    result.emplace_back(Input(idx));
+  }
+  return result;
+}
+
+void ProcessedNode::run() {
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  auto step_callbacks =
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_OP);
+  if (!step_callbacks.empty()) {
+    at::RecordFunction guard(std::move(step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    if (guard.needsInputs()) {
+      const auto inputs = inputs_ivalue_vec();
+      guard.before(
+          get_op_name(),
+          c10::ArrayRef<const IValue>(inputs.data(), inputs.size()));
+    } else {
+      guard.before(get_op_name());
+    }
+    if (has_out_variant()) {
+      guard._setStaticRuntimeOutVariant();
+    }
+
+    fn_->run(this);
+  } else {
+    fn_->run(this);
+  }
+#else
+  fn_->run(this);
+#endif
+#ifndef NDEBUG
+  if (FLAGS_static_runtime_disable_debug_memory_overlap_check) {
+    // run check but do not enforce
+    verify_no_memory_overlap();
+  } else {
+    DCHECK(verify_no_memory_overlap());
+  }
+#endif
+}
+
+static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
+  at::MemOverlapStatus status = at::get_overlap_status(a, b);
+  if (status == at::MemOverlapStatus::FULL ||
+      status == at::MemOverlapStatus::PARTIAL) {
+    return false;
+  }
+  if (status == at::MemOverlapStatus::TOO_HARD) {
+    VLOG(1) << "Detected TOO_HARD memory overlap status";
+  }
+  return true;
+}
+
+bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
+  const static std::array<c10::Symbol, 7> special_case_ops = {
+      fromQualString("prim::TypeCheck"),
+      fromQualString("prim::IfThenElse"),
+      fromQualString("static_runtime::select_tensor"),
+      fromQualString("static_runtime::VarTupleUnpack"),
+      fromQualString("static_runtime::dict_unpack"),
+      fromQualString("static_runtime::fused_split_and_squeeze"),
+      fromQualString("static_runtime::create_owned_ref")};
+  if (!force_check &&
+      std::find(
+          begin(special_case_ops), end(special_case_ops), node()->kind()) !=
+          end(special_case_ops)) {
+    return true;
+  }
+
+  return verify_outputs_dont_overlap_each_other() &&
+      verify_inputs_dont_overlap_outputs(force_check);
+}
+
+bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
+  for (const auto i : c10::irange(num_outputs())) {
+    if (!Output(i).isTensor()) {
+      continue;
+    }
+    const auto& out0_t = Output(i).toTensor();
+    for (const auto j : c10::irange(i + 1, num_outputs())) {
+      if (!Output(j).isTensor()) {
+        continue;
+      }
+      const auto& out1_t = Output(j).toTensor();
+      if (!checkNoMemoryOverlap(out0_t, out1_t)) {
+        LOG(INFO) << "Node output " << i << " overlaps with output " << j
+                  << ", " << PrintNode(node_);
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
+  auto schema = node()->maybeSchema();
+  // skip memory overlap check for mutable or view ops with only one output
+  bool skip_check = !schema ||
+      ((schema->is_mutable() || !fn_->checkMemoryOverlap()) &&
+       num_outputs() == 1);
+  if (!force_check && skip_check) {
+    if (!schema) {
+      VLOG(2) << "Detected that op schema is null";
+      return true;
+    }
+    VLOG(2) << "schema->is_mutable: " << schema->is_mutable()
+            << ", fn_->checkMemoryOverlap: " << fn_->checkMemoryOverlap()
+            << ", num_outputs_: " << num_outputs();
+    return true;
+  }
+
+  for (const auto i : c10::irange(inputs_.size())) {
+    const IValue* in = &Input(i);
+    if (!in->isTensor()) {
+      continue;
+    }
+    const auto& in_t = in->toTensor();
+    for (const auto j : c10::irange(num_outputs())) {
+      const IValue& out = Output(j);
+      if (!out.isTensor()) {
+        continue;
+      }
+      const auto& out_t = out.toTensor();
+      if (!checkNoMemoryOverlap(in_t, out_t)) {
+        LOG(INFO) << "Node input " << i << " overlaps with output " << j << ", "
+                  << PrintNode(node_);
+        LOG(INFO) << *schema;
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool ProcessedNode::check_and_correct_overlap_with(
+    const at::Tensor& input,
+    c10::IValue& output_ival) {
+  auto& tensor = output_ival.toTensor();
+  if (!checkNoMemoryOverlap(input, tensor)) {
+    DLOG(INFO) << "Detected alias for node: " << PrintNode(node());
+    output_ival = at::native::clone(tensor, c10::nullopt);
+    set_outputs_memory_overlap_detected();
+    return true;
+  }
+  return false;
+}
+
+void ProcessedNode::verify_and_correct_memory_overlap() {
+  for (const auto i : c10::irange(inputs_.size())) {
+    const IValue& in = Input(i);
+    if (!in.isTensor()) {
+      continue;
+    }
+    const auto& in_t = in.toTensor();
+    for (const auto j : c10::irange(num_outputs())) {
+      auto& output = Output(j);
+      if (output.isTensor()) {
+        check_and_correct_overlap_with(in_t, output);
+      } else if (output.isTensorList()) {
+        auto tensors = output.toListRef();
+        for (const auto& ival : tensors) {
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          check_and_correct_overlap_with(in_t, const_cast<c10::IValue&>(ival));
+        }
+#ifdef FBCODE_CAFFE2
+        if (outputs_memory_overlap_detected()) {
+          LOG_EVERY_MS(WARNING, 60000)
+              << "Detected alias for node: " << PrintNode(node());
+        }
+#endif
       }
     }
   }
 }
 
-// Don't change the size if it is already aligned, otherwise increase the size
-// to make it aligned.
-size_t MemoryPlanner::compute_aligned_tensor_size(size_t nbytes) {
-  // Note: everything below is size_t
-  return (nbytes + c10::gAlignment - 1) & (~(c10::gAlignment - 1));
+StaticRuntime::StaticRuntime(const StaticModule& sm)
+    : values_(sm.value_buffer_size()) {
+  std::copy(sm.constants().begin(), sm.constants().end(), values_.data());
+  block_ = std::make_unique<BlockRunner>(
+      sm, values_.data(), sm.root_block(), /*is_root_block*/ true);
+  ;
 }
 
-at::DataPtr MemoryPlanner::allocate_buffer(size_t size) {
-  at::Allocator* allocator = c10::GetCPUCachingAllocator();
-  return allocator->allocate(size);
+c10::IValue StaticRuntime::operator()(
+    const std::vector<c10::IValue>& args,
+    const KeywordArgs& kwargs) {
+  return (*block_)(args, kwargs);
 }
 
-void MemoryPlanner::allocate() {
-  if (managed_bytes_ == 0) {
-    return;
-  }
-  buffer_ = allocate_buffer(managed_bytes_);
-
-  size_t offset = 0;
-  uint8_t* start = static_cast<uint8_t*>(buffer_.get());
-  for (const auto& ms : managed_storage_) {
-    auto tensor_size = ms.first;
-    if (tensor_size == 0) {
-      continue;
-    }
-    const auto& impls = ms.second;
-    DCHECK_LE(offset + tensor_size, managed_bytes_);
-    void* src = static_cast<void*>(start + offset);
-
-    for (auto& impl : impls) {
-      impl->set_data_ptr(at::DataPtr(src, src, nullptr, impl->device()));
-      impl->set_nbytes(tensor_size);
-    }
-
-    offset += tensor_size;
-  }
-  DCHECK_EQ(offset, managed_bytes_);
+c10::IValue StaticRuntime::operator()(
+    std::vector<c10::IValue>&& args,
+    const KeywordArgs& kwargs) {
+  return (*block_)(std::move(args), kwargs);
 }
 
-void MemoryPlanner::deallocate() {
-  managed_bytes_ = 0;
-
-  // free memory used by outputs of ops in out variants
-  // but keep the TensorImpl and StorageImpl around
-  for (auto& ms : managed_storage_) {
-    const auto& impls = ms.second;
-    size_t max = 0;
-    for (auto& impl : impls) {
-      size_t current_size = compute_aligned_tensor_size(impl->nbytes());
-      impl->reset();
-      max = std::max(max, current_size);
-    }
-    ms.first = max;
-    managed_bytes_ += max;
-  }
-  for (auto& iv : unmanaged_values_) {
-    *iv = IValue();
-  }
-  buffer_ = {};
+bool StaticRuntime::check_for_memory_leak(bool output_returned) {
+  return block_->check_for_memory_leak(
+      output_returned, /* recurse_on_sub_blocks */ true);
 }
 
-ProcessedNode::ProcessedNode(
-    Node* node,
-    std::vector<const IValue*>&& inputs,
-    bool enable_out_variants)
-    : node_(node), inputs_(std::move(inputs)) {
-  // TODO leverage type information
-  outputs_.resize(node->outputs().size());
-  if (node->kind() != prim::ListConstruct &&
-      node->kind() != prim::TupleConstruct &&
-      node->kind() != prim::ListUnpack) {
-    const Operator& op = node->getOperator();
-    TORCH_CHECK(op.hasOperation());
-    op_ = op.getOperation(node);
-  }
-  if (enable_out_variants && canRunOutOfPlace(node)) {
-    fn_ = getOutOfPlaceOperation(node);
-    std::ostringstream ss;
-    node->print(ss, 0, nullptr, false);
-    VLOG(1) << "Switch to out variant for node: " << ss.str();
-  } else if (canRunNatively(node)) {
-    native_fn_ = getNativeOperation(node);
-    std::ostringstream ss;
-    node->print(ss, 0, nullptr, false);
-    VLOG(1) << "Switch to native impl for node: " << ss.str();
-  } else {
-    std::ostringstream ss;
-    node->print(ss, 0, nullptr, false);
-    VLOG(1) << "Fallback interpreter for node: " << ss.str();
-  }
+bool StaticRuntime::checkOutputTensorMemoryLeaks() {
+  return block_->checkOutputTensorMemoryLeaks();
 }
 
-void ProcessedNode::run() {
-  if (fn_) {
-    fn_(this);
-  } else if (native_fn_) {
-    native_fn_(this);
-  } else {
-    std::vector<IValue> stack;
-    const size_t size = node_->inputs().size();
-    stack.reserve(size);
-    for (size_t i = 0; i < size; i++) {
-      stack.emplace_back(Input(i));
-    }
+void StaticRuntime::deallocateOutputTensors() {
+  block_->deallocateOutputTensors();
+}
 
-    DCHECK(op_);
-    op_->operator()(&stack);
+bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) const {
+  return block_->isManagedOutputTensor(ivalue);
+}
 
-    DCHECK_EQ(stack.size(), node_->outputs().size());
-    for (auto i = 0; i < node_->outputs().size(); i++) {
-      Output(i) = std::move(stack[i]);
-    }
-  }
+void StaticRuntime::disableManageOutputTensors() {
+  block_->disableManageOutputTensors();
+}
+
+const MemoryPlanner* StaticRuntime::get_memory_planner() const {
+  return block_->get_memory_planner();
 }
 
 } // namespace jit

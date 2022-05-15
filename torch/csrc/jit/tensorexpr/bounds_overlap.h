@@ -13,8 +13,8 @@ namespace analysis {
 
 // A simple class containing the start and end of a range in a single dimension.
 struct TORCH_API Bound {
-  const Expr* start{nullptr};
-  const Expr* end{nullptr};
+  ExprPtr start{nullptr};
+  ExprPtr end{nullptr};
 
   // This stores whether or not the start and end of this Bound have previously
   // been swapped. This occurs when the bound is in a loop with a negative
@@ -22,7 +22,7 @@ struct TORCH_API Bound {
   bool swapped{false};
 
   Bound() = default;
-  Bound(const Expr* s, const Expr* e) : start(s), end(e) {}
+  Bound(ExprPtr s, ExprPtr e) : start(s), end(e) {}
 
   void print() const {
     std::cout << "(" << *start << ", " << *end << ")";
@@ -44,7 +44,7 @@ struct TORCH_API Bound {
 
 struct BoundHash {
   size_t operator()(const Bound& b) const {
-    return std::hash<const Expr*>()(b.start) ^ std::hash<const Expr*>()(b.end);
+    return std::hash<ExprPtr>()(b.start) ^ std::hash<ExprPtr>()(b.end);
   }
 };
 
@@ -78,11 +78,17 @@ OverlapKind TORCH_API overlaps(const IndexBounds& a, const IndexBounds& b);
 // Multiple Bounds can be returned in the case where B slices A into two
 // distinct regions with no overlap.
 //
+// For example:
+//    subtractBound((0, 10), (2, 4)) => [(0, 1), (5, 10)]
+//       bound A: (0, 10)
+//       bound B: (2, 4)
+//       If we remove slice (2, 4) from the slice (0, 10), we will be left
+//       with 2 slices, one at the start (0, 1), and one at the end (5, 10).
+//       So, the result of this subtraction is [(0, 1), (5, 10)].
+//
 // Note: this doesn't use IndexBounds because the Bounds returned do not
 // represent multiple different dimensions.
 std::vector<Bound> TORCH_API subtractBound(Bound a, Bound b);
-std::vector<Bound> TORCH_API
-subtractBound(Bound a, Bound b, OverlapKind overlap);
 
 // Returns the bound slices created by subtracting the IndexBounds B from A.
 std::vector<IndexBounds> TORCH_API subtractIndicesBounds(

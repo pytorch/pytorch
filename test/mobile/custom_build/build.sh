@@ -11,10 +11,9 @@
 # toolchain), which doesn't contain autograd function nor backward ops thus is
 # smaller than full LibTorch.
 #
-# 2. `TEST_CUSTOM_BUILD_DYNAMIC=1 ./build.sh` - it further optimizes libtorch
-# size by only including ops used by a specific model.
-# Note that LLVM_DIR environment variable should be set to the location of
-# LLVM-dev toolchain.
+# 2. `TEST_CUSTOM_BUILD_STATIC=1 ./build.sh` - optimizes libtorch size by only
+# including ops used by a specific model. It relies on the static dispatch +
+# linker to prune code.
 #
 ###############################################################################
 
@@ -34,18 +33,6 @@ prepare_model_and_dump_root_ops() {
   python "${TEST_SRC_ROOT}/prepare_model.py"
 }
 
-generate_op_dependency_graph() {
-  # Regular users should get this graph from prebuilt package.
-  ANALYZER_BUILD_ROOT="${BUILD_ROOT}/build_analyzer"
-  OP_DEPENDENCY="${ANALYZER_BUILD_ROOT}/work/torch_result.yaml"
-
-  if [ ! -f "${OP_DEPENDENCY}" ]; then
-    BUILD_ROOT="${ANALYZER_BUILD_ROOT}" \
-      ANALYZE_TORCH=1 \
-      "${SRC_ROOT}/tools/code_analyzer/build.sh"
-  fi
-}
-
 run_default_build() {
   LIBTORCH_BUILD_ROOT="${BUILD_ROOT}/build_default_libtorch"
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
@@ -54,15 +41,20 @@ run_default_build() {
     "${SRC_ROOT}/scripts/build_mobile.sh"
 }
 
-run_custom_build_with_dynamic_dispatch() {
-  LIBTORCH_BUILD_ROOT="${BUILD_ROOT}/build_custom_libtorch_dynamic"
+run_custom_build_with_static_dispatch() {
+  LIBTORCH_BUILD_ROOT="${BUILD_ROOT}/build_custom_libtorch_static"
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
 
+  # Here it generates registration code for used ROOT ops only, whose unboxing
+  # kernels are still needed by the JIT runtime. The intermediate ops will be
+  # automatically kepted by the linker as they are statically referenced by the
+  # static dispatch code, for which we can bypass the registration.
+  # We don't set '-DSTATIC_DISPATCH_BACKEND=CPU' explicitly to test automatic
+  # fallback to static dispatch.
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
     "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
-    -DSELECTED_OP_LIST="${ROOT_OPS}" \
-    -DOP_DEPENDENCY="${OP_DEPENDENCY}"
+    -DSELECTED_OP_LIST="${ROOT_OPS}"
 }
 
 build_predictor() {
@@ -98,10 +90,9 @@ test_default_build() {
   run_predictor
 }
 
-test_custom_build_with_dynamic_dispatch() {
+test_custom_build_with_static_dispatch() {
   prepare_model_and_dump_root_ops
-  generate_op_dependency_graph
-  run_custom_build_with_dynamic_dispatch
+  run_custom_build_with_static_dispatch
   build_predictor
   run_predictor
 }
@@ -110,6 +101,6 @@ if [ -n "${TEST_DEFAULT_BUILD}" ]; then
   test_default_build
 fi
 
-if [ -n "${TEST_CUSTOM_BUILD_DYNAMIC}" ]; then
-  test_custom_build_with_dynamic_dispatch
+if [ -n "${TEST_CUSTOM_BUILD_STATIC}" ]; then
+  test_custom_build_with_static_dispatch
 fi

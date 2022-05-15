@@ -1,12 +1,64 @@
-from torch.utils.data.datapipes.iter.listdirfiles import ListDirFilesIterDataPipe as ListDirFiles
-from torch.utils.data.datapipes.iter.loadfilesfromdisk import LoadFilesFromDiskIterDataPipe as LoadFilesFromDisk
-from torch.utils.data.datapipes.iter.readfilesfromtar import ReadFilesFromTarIterDataPipe as ReadFilesFromTar
-from torch.utils.data.datapipes.iter.readfilesfromzip import ReadFilesFromZipIterDataPipe as ReadFilesFromZip
+from torch.utils.data.datapipes.iter.utils import (
+    IterableWrapperIterDataPipe as IterableWrapper,
+)
+from torch.utils.data.datapipes.iter.callable import (
+    CollatorIterDataPipe as Collator,
+    MapperIterDataPipe as Mapper,
+)
+from torch.utils.data.datapipes.iter.combinatorics import (
+    SamplerIterDataPipe as Sampler,
+    ShufflerIterDataPipe as Shuffler,
+)
+from torch.utils.data.datapipes.iter.combining import (
+    ConcaterIterDataPipe as Concater,
+    DemultiplexerIterDataPipe as Demultiplexer,
+    ForkerIterDataPipe as Forker,
+    MultiplexerIterDataPipe as Multiplexer,
+    ZipperIterDataPipe as Zipper,
+)
+from torch.utils.data.datapipes.iter.filelister import (
+    FileListerIterDataPipe as FileLister,
+)
+from torch.utils.data.datapipes.iter.fileopener import (
+    FileLoaderIterDataPipe as FileLoader,
+    FileOpenerIterDataPipe as FileOpener,
+)
+from torch.utils.data.datapipes.iter.grouping import (
+    BatcherIterDataPipe as Batcher,
+    GrouperIterDataPipe as Grouper,
+    ShardingFilterIterDataPipe as ShardingFilter,
+    UnBatcherIterDataPipe as UnBatcher,
+)
+from torch.utils.data.datapipes.iter.routeddecoder import (
+    RoutedDecoderIterDataPipe as RoutedDecoder,
+)
+from torch.utils.data.datapipes.iter.selecting import (
+    FilterIterDataPipe as Filter,
+)
+from torch.utils.data.datapipes.iter.streamreader import (
+    StreamReaderIterDataPipe as StreamReader,
+)
 
-# Functional DataPipe
-from torch.utils.data.datapipes.iter.batch import BatchIterDataPipe as Batch, BucketBatchIterDataPipe as BucketBatch
-from torch.utils.data.datapipes.iter.callable import CallableIterDataPipe as Callable, CollateIterDataPipe as Collate
-from torch.utils.data.datapipes.iter.sampler import SamplerIterDataPipe as Sampler
+__all__ = ['Batcher',
+           'Collator',
+           'Concater',
+           'Demultiplexer',
+           'FileLister',
+           'FileLoader',
+           'FileOpener',
+           'Filter',
+           'Forker',
+           'Grouper',
+           'IterableWrapper',
+           'Mapper',
+           'Multiplexer',
+           'RoutedDecoder',
+           'Sampler',
+           'ShardingFilter',
+           'Shuffler',
+           'StreamReader',
+           'UnBatcher',
+           'Zipper']
 
-__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFormTar', 'ReadFilesFromZip'
-           'Batch', 'BucketBatch', 'Callable', 'Collate', 'Sampler']
+# Please keep this list sorted
+assert __all__ == sorted(__all__)

@@ -156,6 +156,7 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
            .sum();
   if (use_ndcg_as_loss_) {
     // DCG loss function
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     loss = (idcg - dcg);
   } else {
     loss = -(lambda_mat *

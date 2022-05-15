@@ -43,7 +43,7 @@ class Requantization : public benchmark::Fixture {
     n_ = n_ / 16 * 16;
   }
 
-  virtual void SetUp(const benchmark::State&) override {
+   void SetUp(const benchmark::State&) override {
     const uint_fast32_t seed =
         std::chrono::system_clock::now().time_since_epoch().count();
     auto rng =
@@ -55,7 +55,7 @@ class Requantization : public benchmark::Fixture {
     std::fill(output_.begin(), output_.end(), 0xA5);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(uint64_t(state.iterations()) * n());
     state.SetBytesProcessed(
         uint64_t(state.iterations()) * n() *

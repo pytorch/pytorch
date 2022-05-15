@@ -1,4 +1,5 @@
 import torch
+from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.uniform import Uniform
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -21,7 +22,7 @@ class Kumaraswamy(TransformedDistribution):
 
     Example::
 
-        >>> m = Kumaraswamy(torch.Tensor([1.0]), torch.Tensor([1.0]))
+        >>> m = Kumaraswamy(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Kumaraswamy distribution with concentration alpha=1 and beta=1
         tensor([ 0.1729])
 
@@ -39,7 +40,8 @@ class Kumaraswamy(TransformedDistribution):
         self.concentration1, self.concentration0 = broadcast_all(concentration1, concentration0)
         finfo = torch.finfo(self.concentration0.dtype)
         base_dist = Uniform(torch.full_like(self.concentration0, 0),
-                            torch.full_like(self.concentration0, 1))
+                            torch.full_like(self.concentration0, 1),
+                            validate_args=validate_args)
         transforms = [PowerTransform(exponent=self.concentration0.reciprocal()),
                       AffineTransform(loc=1., scale=-1.),
                       PowerTransform(exponent=self.concentration1.reciprocal())]
@@ -54,6 +56,14 @@ class Kumaraswamy(TransformedDistribution):
     @property
     def mean(self):
         return _moments(self.concentration1, self.concentration0, 1)
+
+    @property
+    def mode(self):
+        # Evaluate in log-space for numerical stability.
+        log_mode = self.concentration0.reciprocal() * \
+            (-self.concentration0).log1p() - (-self.concentration0 * self.concentration1).log1p()
+        log_mode[(self.concentration0 < 1) | (self.concentration1 < 1)] = nan
+        return log_mode.exp()
 
     @property
     def variance(self):

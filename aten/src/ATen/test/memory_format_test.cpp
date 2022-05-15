@@ -7,6 +7,7 @@ using namespace at;
 std::vector<std::vector<int64_t>> sizes = {{4, 4, 4, 4}, {4, 4, 1, 1}, {4, 1, 4, 4}, {4, 1, 4, 1}, {4, 1, 1, 4}, {1, 4, 1, 4}, {1, 4, 4, 1}};
 
 TEST(MemoryFormatTest, SetMemoryFormat) {
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
     Tensor t = at::rand(size);
     for (auto memory_format : {at::MemoryFormat::ChannelsLast, at::MemoryFormat::Contiguous}) {

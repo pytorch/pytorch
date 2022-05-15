@@ -62,6 +62,7 @@ TEST(TimeObserverTest, Test3Seconds) {
   net->AttachObserver(std::move(net_ob));
   net->Run();
   CAFFE_ENFORCE(ob);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
   LOG(INFO) << "av time children: " << ob->average_time_children();
   LOG(INFO) << "av time: " << ob->average_time();
   CAFFE_ENFORCE(ob->average_time_children() > 3000);

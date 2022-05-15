@@ -46,6 +46,7 @@ bool BucketizeOp<CUDAContext>::RunOnDevice() {
       boundaries_device_.data<float>(),
       input_data,
       output_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 };

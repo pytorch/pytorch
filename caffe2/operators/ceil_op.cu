@@ -14,7 +14,7 @@ __global__ void CeilKernel(const int N, const T* X, T* Y) {
 template <>
 bool CeilOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  
+
   CAFFE_ENFORCE_GT(X.numel(), 0);
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   CeilKernel<<<
@@ -23,6 +23,8 @@ bool CeilOp<float, CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       X.numel(), X.data<float>(), Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

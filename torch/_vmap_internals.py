@@ -80,15 +80,15 @@ def _create_batched_inputs(
     batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [arg if in_dim is None else
-                      torch._add_batch_dim(arg, in_dim, vmap_level)  # type: ignore
+                      torch._add_batch_dim(arg, in_dim, vmap_level)
                       for in_dim, arg in zip(flat_in_dims, flat_args)]
     return tree_unflatten(batched_inputs, args_spec), batch_size
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
         batched_outputs: Union[Tensor, Tuple[Tensor, ...]],
-        out_dims: out_dims_t,
-        vmap_level: int, batch_size: int, func: Callable) -> Tuple:
+        out_dims: out_dims_t, vmap_level: int, batch_size: int, func: Callable,
+        allow_none_pass_through: bool = False) -> Tuple:
     num_outputs = _num_outputs(batched_outputs)
     out_dims_as_tuple = _as_tuple(
         out_dims, num_outputs,
@@ -100,9 +100,13 @@ def _unwrap_batched(
     # with '_', see #40397.
     if isinstance(batched_outputs, Tensor):
         out_dim = out_dims_as_tuple[0]
-        return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore
-    return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)  # type: ignore
-                 for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
+        return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore[return-value]
+    if allow_none_pass_through:
+        return tuple((torch._remove_batch_dim(out, vmap_level, batch_size, out_dim) if out is not None else None)
+                     for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
+    else:
+        return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
+                     for out, out_dim in zip(batched_outputs, out_dims_as_tuple))
 
 # Checks that `fn` returned one or more Tensors and nothing else.
 # NB: A python function that return multiple arguments returns a single tuple,
@@ -153,15 +157,21 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
     examples with `vmap(func)`. vmap can also be used to compute batched
     gradients when composed with autograd.
 
+    .. note::
+        We have moved development of vmap to
+        `functorch. <https://github.com/pytorch/functorch>`_ functorch's
+        vmap is able to arbitrarily compose with gradient computation
+        and contains significant performance improvements.
+        Please give that a try if that is what you're looking for.
+
+        Furthermore, if you're interested in using vmap for your use case,
+        please `contact us! <https://github.com/pytorch/pytorch/issues/42368>`_
+        We're interested in gathering feedback from early adopters to inform
+        the design.
+
     .. warning::
         torch.vmap is an experimental prototype that is subject to
         change and/or deletion. Please use at your own risk.
-
-    .. note::
-        If you're interested in using vmap for your use case, please
-        `contact us! <https://github.com/pytorch/pytorch/issues/42368>`_
-        We're interested in gathering feedback from early adopters to inform
-        the design.
 
     Args:
         func (function): A Python function that takes one or more arguments.
@@ -238,17 +248,20 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         sequences out of the box.
     """
     warnings.warn(
-        'torch.vmap is an experimental prototype that is subject to '
-        'change and/or deletion. Please use at your own risk. There may be '
-        'unexpected performance cliffs due to certain operators not being '
-        'implemented. To see detailed performance warnings please use '
-        '`torch._C._debug_only_display_vmap_fallback_warnings(True) '
-        'before the call to `vmap`.',
+        'Please use functorch.vmap instead of torch.vmap '
+        '(https://github.com/pytorch/functorch). '
+        'We\'ve moved development on torch.vmap over to functorch; '
+        'functorch\'s vmap has a multitude of significant performance and '
+        'functionality improvements.',
         stacklevel=2)
     return _vmap(func, in_dims, out_dims)
 
 # A version of vmap but without the initial "experimental prototype" warning
-def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
+def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0, allow_none_pass_through: bool = False) -> Callable:
+    # The `allow_none_pass_through` argument is a temporary workaround may be removed.
+    # Currently it enables us to wrap the call in `autograd.grad` to the autograd engine,
+    # which may return None if any of the inputs are unused. See the issue discussing this:
+    # https://github.com/facebookresearch/functorch/issues/159.
     @functools.wraps(func)
     def wrapped(*args):
         _check_out_dims_is_int_or_int_tuple(out_dims, func)
@@ -256,8 +269,10 @@ def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> C
         try:
             batched_inputs, batch_size = _create_batched_inputs(in_dims, args, vmap_level, func)
             batched_outputs = func(*batched_inputs)
-            _validate_outputs(batched_outputs, func)
-            return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func)
+            if not allow_none_pass_through:
+                _validate_outputs(batched_outputs, func)
+            return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func,
+                                   allow_none_pass_through=allow_none_pass_through)
         finally:
             torch._C._vmapmode_decrement_nesting()
     return wrapped

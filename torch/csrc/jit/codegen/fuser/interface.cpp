@@ -8,16 +8,18 @@
 #include <c10/util/Flags.h>
 #include <stdexcept>
 
-C10_DEFINE_bool(torch_jit_enable_cpu_fusion, false, "enable cpu fusion");
-
 namespace torch {
 namespace jit {
 
 namespace detail {
 
-// Note: CPU fusion is currently disabled due to test flakiness
+#ifdef TORCH_ENABLE_LLVM
+bool cpu_fuser_enabled = true;
+#else
 bool cpu_fuser_enabled = false;
+#endif
 
+// note: this doesn't necessarily enable NNC because NVFuser might override it
 bool gpu_fuser_enabled = true;
 
 } // namespace detail
@@ -33,8 +35,7 @@ void runFusion(const int64_t key, Stack& stack) {
 }
 
 bool canFuseOnCPU() {
-  return fuser::hasFusionBackend(DeviceType::CPU) &&
-      (detail::cpu_fuser_enabled || FLAGS_torch_jit_enable_cpu_fusion);
+  return fuser::hasFusionBackend(DeviceType::CPU) && detail::cpu_fuser_enabled;
 }
 
 bool canFuseOnGPU() {

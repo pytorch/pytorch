@@ -55,8 +55,11 @@ bool ResizeNearest3DOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 
   CAFFE_ENFORCE_EQ(InputSize(), 1);
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_frames = input_frames * temporal_scale_;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_height = input_height * height_scale_;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_width = input_width * width_scale_;
   auto* Y = Output(
       0,
@@ -123,12 +126,15 @@ bool ResizeNearest3DGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     for (int c = 0; c < num_channels; ++c) {
       for (int f = 0; f < input_frames; ++f) {
         const int out_f =
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           std::min((int)(f / temporal_scale_), output_frames - 1);
         for (int y = 0; y < input_height; ++y) {
           const int out_y =
+              // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
               std::min((int)(y / height_scale_), (output_height - 1));
           for (int x = 0; x < input_width; ++x) {
             const int out_x =
+                // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
                 std::min((int)(x / width_scale_), (output_width - 1));
             dXdata[(out_f * output_height + out_y) * output_width + out_x] +=
               dYdata[(f * input_height + y) * input_width + x];

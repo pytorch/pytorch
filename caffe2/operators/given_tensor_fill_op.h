@@ -67,7 +67,8 @@ class GivenTensorFillOp final : public FillerOp<Context> {
         {static_cast<int64_t>(source_values.size())},
         at::dtype<Type>().device(CPU));
     Type* values_data = values_.template mutable_data<Type>();
-    for (int i = 0; i < source_values.size(); i++) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    for (const auto i : c10::irange(source_values.size())) {
       values_data[i] = static_cast<Type>(source_values[i]);
     }
     body_ = &GivenTensorFillOp::FillWithType<Type>;

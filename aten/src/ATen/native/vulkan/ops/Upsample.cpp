@@ -1,5 +1,6 @@
-#include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
+#include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
 namespace at {
@@ -39,6 +40,8 @@ Tensor upsample_nearest2d(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::upsample_nearest2d");
+
     if C10_LIKELY(v_input.has_image()) {
       const struct Block final {
         uvec3 extents;
@@ -73,6 +76,7 @@ Tensor upsample_nearest2d(
           },
           VK_KERNEL(upsample_nearest2d),
           v_output.extents(),
+          adaptive_work_group_size(v_output.extents()),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -100,7 +104,7 @@ Tensor upsample_nearest2d(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("upsample_nearest2d", TORCH_FN(upsample_nearest2d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::upsample_nearest2d"), TORCH_FN(upsample_nearest2d));
 }
 
 #endif /* USE_VULKAN_API */

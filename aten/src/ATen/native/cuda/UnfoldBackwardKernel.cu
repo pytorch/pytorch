@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UnfoldBackward.h>
 
 #include <ATen/native/cuda/Loops.cuh>
@@ -103,7 +104,7 @@ void _unfold_backward_internal_kernel(
       grad_out_data[grad_out_idx_dim * grad_out_dim_stride] = *grad_in_data;
     };
 
-    _launch_unfold_backward_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+    _launch_unfold_backward_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
   }
   else {
     auto offset_calc = make_offset_calculator<3>(iter);
@@ -138,7 +139,7 @@ void _unfold_backward_internal_kernel(
 
     };
 
-    _launch_unfold_backward_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+    _launch_unfold_backward_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
   }
 }
 

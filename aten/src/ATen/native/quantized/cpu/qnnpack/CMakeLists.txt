@@ -27,6 +27,15 @@ IF(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x8
   SET(PYTORCH_QNNPACK_TARGET_PROCESSOR "${CMAKE_OSX_ARCHITECTURES}")
 ENDIF()
 
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # TODO: See https://github.com/pytorch/pytorch/issues/56285
+  set_source_files_properties(src/operator-run.c PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  set_source_files_properties(src/conv-run.cc PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  set_source_files_properties(src/deconv-run.cc PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  set_source_files_properties(src/fc-run.cc PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  set_source_files_properties(src/fc-dynamic-run.cc PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+endif()
+
 # ---[ CMake options
 if(PYTORCH_QNNPACK_BUILD_TESTS)
   enable_testing()
@@ -185,6 +194,7 @@ set(PYTORCH_QNNPACK_ARM_NEON_UKERNELS
   src/q8conv/8x8-neon.c
   src/q8dwconv/mp8x25-neon.c
   src/q8dwconv/mp8x25-neon-per-channel.c
+  src/q8dwconv/mp8x27-neon.c
   src/q8dwconv/up8x9-neon.c
   src/q8dwconv/up8x9-neon-per-channel.c
   src/q8gavgpool/mp8x7p7q-neon.c
@@ -235,6 +245,7 @@ set(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8conv/4x4c2-sse2.c
   src/q8dwconv/mp8x25-sse2.c
   src/q8dwconv/mp8x25-sse2-per-channel.c
+  src/q8dwconv/mp8x27-sse2.c
   src/q8dwconv/up8x9-sse2.c
   src/q8dwconv/up8x9-sse2-per-channel.c
   src/q8gavgpool/mp8x7p7q-sse2.c
@@ -310,7 +321,6 @@ endif()
 target_include_directories(pytorch_qnnpack PUBLIC include)
 target_include_directories(pytorch_qnnpack PUBLIC src)
 set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/pytorch_qnnpack.h)
-set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/conv_utils.h)
 set_target_properties(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/qnnpack_func.h)
 
 # ---[ Configure clog

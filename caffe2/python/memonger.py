@@ -393,7 +393,7 @@ def _compute_tree_height(g, root):
         if children:
             child_heights = [_get_height(x) for x in children]
             height = max(child_heights) + 1
-        g.node[root]["height"] = height
+        g.nodes[root]["height"] = height
         return height
 
     _get_height(root)
@@ -404,7 +404,7 @@ def _sort_tree_leaves(g, root):
         Return the leaf nodes of the tree after sorting.
     '''
     def _get_height(root):
-        return g.node[root]["height"]
+        return g.nodes[root]["height"]
 
     def _get_sorted_leaves(root):
         children = list(g.successors(root))
@@ -459,7 +459,7 @@ def topological_sort_traversal_longest_path(g):
         ret = nx.algorithms.dag.lexicographical_topological_sort(
             g, key=lambda x: sort_key[x])
         ret = list(ret)
-    assert(len(ret) == len(g.node))
+    assert(len(ret) == len(g.nodes))
     return ret
 
 
@@ -798,15 +798,29 @@ def apply_assignments(net, blob_assignments):
             op.output[i] = canonical_name(output)
 
 
-
 def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
     log.debug("Applying assignments to recurrent op: {}".format(op.type))
+
+    # Apply on alias_dst
+    alias_dst_args = [a for a in op.arg if a.name.endswith("alias_dst")]
+    for alias_dst in alias_dst_args:
+        for i, blob in enumerate(alias_dst.strings):
+            alias_dst.strings[i] = canonical_name(blob.decode()).encode()
+
+    # Apply on link_external
+    link_external_args = [a for a in op.arg if a.name.endswith("link_external")]
+    for link_external in link_external_args:
+        for i, blob in enumerate(link_external.strings):
+            link_external.strings[i] = canonical_name(blob.decode()).encode()
+
+    # Recurse into step nets
     step_args = [a for a in op.arg if a.name.endswith("step_net")]
     for step_arg in step_args:
         apply_assignments(step_arg.n, blob_assignments)
         for i, einp in enumerate(step_arg.n.external_input):
             if einp in blob_assignments:
                 step_arg.n.external_input[i] = canonical_name(einp)
+
     # Store renamings
     for blob, renamed in viewitems(blob_assignments):
         if blob in list(op.input) + list(op.output):

@@ -1,3 +1,5 @@
+# Owner(s): ["module: cpp-extensions"]
+
 import os
 import shutil
 import sys
@@ -42,12 +44,14 @@ class TestCppExtensionJIT(common.TestCase):
     """
 
     def setUp(self):
+        super().setUp()
         # cpp extensions use relative paths. Those paths are relative to
         # this file, so we'll change the working directory temporarily
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     def tearDown(self):
+        super().tearDown()
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
@@ -415,8 +419,6 @@ class TestCppExtensionJIT(common.TestCase):
         for the corresponding issue.
         """
         cuda_source = """
-        #include <THC/THCNumerics.cuh>
-
         template<typename T, typename U>
         __global__ void half_test_kernel(const T* input, U* output) {
             if (input[0] < input[1] || input[0] >= input[1]) {

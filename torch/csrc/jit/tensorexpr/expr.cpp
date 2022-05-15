@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/expr.h>
 
 #include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch {
 namespace jit {
@@ -50,6 +51,22 @@ ExprHandle ExprHandle::operator<=(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kLE);
 }
 
+ExprHandle ExprHandle::operator&&(const ExprHandle& other) const {
+  if (!this->node()->dtype().is_integral()) {
+    throw unsupported_dtype();
+  }
+  return IfThenElse::make(
+      *this, other, ExprHandle(getImmediateByType(other.dtype(), 0)));
+}
+
+ExprHandle ExprHandle::operator||(const ExprHandle& other) const {
+  if (!this->node()->dtype().is_integral()) {
+    throw unsupported_dtype();
+  }
+  return IfThenElse::make(
+      *this, ExprHandle(getImmediateByType(other.dtype(), 1)), other);
+}
+
 ExprHandle ExprHandle::operator&(const ExprHandle& other) const {
   return And::make(*this, other);
 }
@@ -73,7 +90,7 @@ ExprHandle ExprHandle::operator>>(const ExprHandle& other) const {
 // NOLINTNEXTLINE
 #define IMM_EXPR_DECLARE(Type, Name) \
   ExprHandle::ExprHandle(Type v) : ExprHandle(Name##Imm::make(v)) {}
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_EXPR_DECLARE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE);
 #undef IMM_EXPR_DECLARE
 
 ExprHandle sin(const ExprHandle& v) {
@@ -131,7 +148,6 @@ ExprHandle abs(const ExprHandle& v) {
 // The default tanh is quite slow, use the Eigen version from here:
 // https://bitbucket.org/eigen/eigen/src/94875feeeeb9abe5509b314197da1991ba2070f5/Eigen/src/Core/MathFunctionsImpl.h#lines-26
 ExprHandle fast_tanh(const ExprHandle& v) {
-  Dtype dtype = v.dtype();
   // TODO: use a dedicated bind-var to make sure v is not evalualted multiple
   // times. Clamp the input expression to [-9, 9]
   ExprHandle plus_9 = FloatImm::make(9.0f);
@@ -221,6 +237,42 @@ ExprHandle fast_log(const ExprHandle& v) {
   return x;
 }
 
+ExprHandle log_vml(const ExprHandle& v) {
+  auto mlaf = [](ExprHandle x, ExprHandle y, float z) {
+    return x * y + FloatImm::make(z);
+  };
+
+  auto in = bitcast<int32_t>(v);
+  auto a = in - IntImm::make(0x3f2aaaab);
+  auto e = cast<float>(a >> IntImm::make(23));
+
+  auto x = (a & IntImm::make(0x7fffff)) + IntImm::make(0x3f2aaaab);
+  x = bitcast<float>(x) - 1.0f;
+
+  auto t = FloatImm::make(-0.12891686f);
+  t = mlaf(x, t, 0.139844373f);
+  t = mlaf(x, t, -0.121842608f);
+  t = mlaf(x, t, 0.140058696f);
+  t = mlaf(x, t, -0.16680488f);
+  t = mlaf(x, t, 0.200104058f);
+  t = mlaf(x, t, -0.249997973f);
+  t = mlaf(x, t, 0.333332151f);
+  t = mlaf(x, t, -0.5f);
+  t = x * t;
+  t = x * t + x;
+
+  auto z = e * FloatImm::make(1.42860677e-06f) + t;
+  z = e * FloatImm::make(0.693145752f) + z;
+
+  return CompareSelect::make(
+      IntImm::make(0x1000000),
+      in + IntImm::make(0x800000),
+      log(v),
+      z,
+      kGT,
+      kUnlikely);
+}
+
 ExprHandle log(const ExprHandle& v) {
   return Intrinsics::make(kLog, v);
 }
@@ -304,16 +356,198 @@ ExprHandle ifThenElse(
   return IfThenElse::make(c, t, f);
 }
 
-ExprHandle Buf::make(
-    const std::string& name_hint,
-    const std::vector<ExprHandle>& dims,
-    Dtype dtype) {
-  return ExprHandle(
-      new Buf(name_hint, ExprHandleVectorToExprVector(dims), dtype));
+std::vector<ExprPtr> make_contiguous_strides(
+    const std::vector<ExprHandle>& dims) {
+  std::vector<ExprPtr> strides;
+
+  if (dims.size() > 0) {
+    strides.resize(dims.size());
+    auto si = immLike(dims[0], 1);
+    // NOLINTNEXTLINE
+    for (int i = dims.size() - 1; i >= 0; --i) {
+      // NOLINTNEXTLINE
+      strides[i] = si;
+      si = alloc<Mul>(si, dims[i].node());
+    }
+  }
+  return strides;
 }
 
-ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
+std::vector<ExprPtr> make_channels_last_strides(
+    const std::vector<ExprHandle>& dims) {
+  std::vector<ExprPtr> strides;
+  TORCH_INTERNAL_ASSERT(
+      dims.size() == 4 || dims.size() == 3, "got size:", dims.size());
+  if (dims.size() == 4) {
+    strides.resize(dims.size());
+    ExprHandle handle = ExprHandle(immLike(dims[0], 1));
+    // dims:               n   c    h  w
+    // strides(nhwc):  w*c*h   1  w*c  c
+    strides[1] = handle.node();
+    handle = handle * dims[1];
+    strides[3] = handle.node();
+    handle = handle * dims[3];
+    strides[2] = handle.node();
+    handle = handle * dims[2];
+    strides[0] = handle.node();
+  }
+  if (dims.size() == 3) {
+    strides.resize(dims.size());
+    ExprHandle handle = ExprHandle(immLike(dims[0], 1));
+    // dims:              n   c    l
+    // strides(nlc):    c*l   1    c
+    strides[1] = handle.node();
+    handle = handle * dims[1];
+    strides[2] = handle.node();
+    handle = handle * dims[2];
+    strides[0] = handle.node();
+  }
+  return strides;
+}
+
+Buf::Buf(
+    VarPtr var,
+    std::vector<ExprPtr> dims,
+    Dtype dtype,
+    ExprPtr initializer,
+    c10::optional<std::vector<ExprPtr>> strides,
+    ExprPtr qscale,
+    ExprPtr qzero)
+    : ExprNodeBase(dtype, kPrimitive),
+      base_handle_(var),
+      dims_(std::move(dims)),
+      strides_(
+          strides
+              ? *strides
+              : make_contiguous_strides(ExprVectorToExprHandleVector(dims_))),
+      initializer_(std::move(initializer)),
+      qscale_(std::move(qscale)),
+      qzero_(std::move(qzero)) {
+  TORCH_CHECK(var);
+}
+
+BufHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
   return Buf::make("", dims, dtype);
+}
+
+BufHandle Buf::make(
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims,
+    const std::vector<ExprHandle>& strides,
+    Dtype dtype) {
+  return BufHandle(alloc<Buf>(
+      name_hint,
+      ExprHandleVectorToExprVector(dims),
+      dtype,
+      nullptr,
+      ExprHandleVectorToExprVector(strides)));
+}
+
+BufHandle Buf::make(
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    c10::optional<ExprHandle> initializer,
+    c10::optional<std::vector<ExprHandle>> strides,
+    c10::optional<ExprHandle> qscale,
+    c10::optional<ExprHandle> qzero) {
+  c10::optional<std::vector<ExprPtr>> opt_strides;
+  if (strides) {
+    opt_strides = ExprHandleVectorToExprVector(*strides);
+  }
+  return BufHandle(alloc<Buf>(
+      name_hint,
+      ExprHandleVectorToExprVector(dims),
+      dtype,
+      initializer ? initializer->node() : nullptr,
+      opt_strides,
+      qscale ? qscale->node() : nullptr,
+      qzero ? qzero->node() : nullptr));
+}
+
+bool Buf::is_contiguous(at::MemoryFormat memory_format) const {
+  auto ndims = dims_.size();
+  std::vector<int64_t> dim_order(ndims);
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    if (dims_.size() != 4)
+      return false;
+    dim_order = {1, 3, 2, 0};
+  } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+    if (dims_.size() != 5)
+      return false;
+    dim_order = {1, 4, 3, 2, 0};
+  } else {
+    if (dims_.empty()) {
+      // Scalar tensor
+      TORCH_CHECK(strides_.empty());
+      return true; // Align with the isContiguous logic in the kernel.cpp
+    }
+    for (size_t i = 0; i < ndims; i++) {
+      dim_order[i] = ndims - i - 1; // Reverse
+    }
+  }
+
+  bool res = is_stride_one(dim_order[0]);
+  if (!res)
+    return false;
+
+  for (size_t i = 1; i < ndims; i++) {
+    auto cur_dim = dim_order[i];
+    auto pre_dim = dim_order[i - 1];
+    res &= is_cont_with(cur_dim, pre_dim);
+    if (!res)
+      return false;
+  }
+
+  return true;
+}
+
+std::vector<ExprHandle> BufHandle::dims() const {
+  return ExprVectorToExprHandleVector(node()->dims());
+}
+
+bool Buf::is_cont_with(int cur_dim, int adjacent_dim) const {
+  auto is_cont_fn = [](ExprPtr adjacent_dim,
+                       ExprPtr adjacent_stride,
+                       ExprPtr cur_stride) {
+    // For static shape
+    bool res = exprEquals(
+        cur_stride,
+        (ExprHandle(adjacent_dim) * ExprHandle(adjacent_stride)).node());
+    if (res)
+      return res;
+
+    // For symbolic shape
+    auto mul_node = to<Mul>(cur_stride);
+    if (!mul_node) {
+      return false;
+    }
+
+    // lhs and rhs could be other dim or stride
+    auto lhs_ = mul_node->lhs();
+    auto rhs_ = mul_node->rhs();
+
+    bool same_stride = false;
+    auto same_dim = exprEquals(lhs_, adjacent_dim) || (adjacent_dim == lhs_);
+    if (same_dim) {
+      // lhs_ is dim while rhs_ is stride
+      same_stride =
+          exprEquals(rhs_, adjacent_stride) || (adjacent_stride == rhs_);
+    } else {
+      // lhs_ is stride while rhs_ is dim
+      same_dim = exprEquals(rhs_, adjacent_dim) || (adjacent_dim == rhs_);
+      same_stride =
+          exprEquals(lhs_, adjacent_stride) || (adjacent_stride == lhs_);
+    }
+
+    return same_dim && same_stride;
+  };
+  return is_cont_fn(
+      dims_[adjacent_dim], strides_[adjacent_dim], strides_[cur_dim]);
+}
+
+bool Buf::is_stride_one(int cur_dim) const {
+  return exprEquals(strides_[cur_dim], alloc<LongImm>(1));
 }
 
 ExprHandle expr_to_vec(ExprHandle v, int lanes) {

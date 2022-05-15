@@ -1,8 +1,10 @@
 #include <pytorch_qnnpack.h>
+#include <qnnpack/log.h>
 #include <qnnpack/pack.h>
 #include <qnnpack_func.h>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
+#include <cmath>
 
 namespace qnnpack {
 // For runtime quantization packing.
@@ -21,7 +23,7 @@ PackBMatrix::PackBMatrix(
           "%.7g for output channel %d."
           "Scale must be finite and positive",
           requantization_scales[i], (int)i);
-      assert("QNNPACK Runtime Error.");
+      assert(false && "QNNPACK Runtime Error.");
     }
   }
 
@@ -39,7 +41,7 @@ PackBMatrix::PackBMatrix(
     pytorch_qnnp_log_error(
         "failed to allocate %zu bytes for packed weights",
         n_stride * (k_stride * sizeof(uint8_t) + sizeof(int32_t)));
-    assert("QNNPACK Runtime Error.");
+    assert(false && "QNNPACK Runtime Error.");
   }
 
   pytorch_pack_q8gemm_wrq(

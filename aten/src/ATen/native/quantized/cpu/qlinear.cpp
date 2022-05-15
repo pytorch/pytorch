@@ -2,23 +2,28 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/xnnpack_utils.h>
+#include <ATen/native/quantized/cpu/onednn_utils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <string>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
-at::Tensor PackedLinearWeight::apply_impl(
-    at::Tensor input,
+at::Tensor& PackedLinearWeight::apply_impl(
+    const at::Tensor& input,
     double output_scale,
-    int64_t output_zero_point) {
+    int64_t output_zero_point,
+    at::Tensor& output) {
   // uint8 * int8 -> uint8 (no quantization/dequantization)
 
   // We make a strong guarantee that models using these operators will have
@@ -26,28 +31,35 @@ at::Tensor PackedLinearWeight::apply_impl(
   // a fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+                "Expected input data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(input.scalar_type()));
 
   // TODO: contiguous is called for further jit optimizations.
-  auto input_contig = input.contiguous();
+  auto input_contig = input.expect_contiguous();
   const auto* input_ptr =
-      reinterpret_cast<uint8_t*>(input_contig.data_ptr<c10::quint8>());
+      reinterpret_cast<uint8_t*>(input_contig->data_ptr<c10::quint8>());
 
   TORCH_CHECK(
       input.dim() >= 2,
       "The dimension of input tensor should be larger than or equal to 2");
   // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
   // matrices, respectively.
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
 
   auto packB = w.get();
 
   int64_t N = static_cast<int64_t>(packB->numCols());
-  int64_t K = input.size(input.dim() - 1);
+  int64_t K = input.sizes()[input.dim() - 1];
   TORCH_CHECK(
       K == static_cast<int64_t>(packB->numRows()),
       "The number of rows in the packB should be equal to K: " +
           std::to_string(K));
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float input_scale_float = input.q_scale();
   int32_t input_zero_point_int32 = input.q_zero_point();
 
@@ -65,7 +77,7 @@ at::Tensor PackedLinearWeight::apply_impl(
     // Process the per channel quantization.
     output_multiplier_float.resize(N, 0.0);
     act_times_w_scale.resize(N, 1.0f);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       act_times_w_scale[i] = (input_scale_float * w_scale[i]);
       output_multiplier_float[i] =
           act_times_w_scale[i] / static_cast<float>(output_scale);
@@ -74,34 +86,31 @@ at::Tensor PackedLinearWeight::apply_impl(
   int32_t output_zero_point_int32 = static_cast<int32_t>(output_zero_point);
 
   const float* bias_ptr = nullptr;
-  at::Tensor bias;
+  c10::MaybeOwned<at::Tensor> bias_contig;
   if (this->bias_.has_value()) {
-    bias = this->bias_.value();
-    bias = bias.contiguous();
-    TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
+    auto& bias = this->bias_.value();
+    bias_contig = bias.expect_contiguous();
+    TORCH_CHECK(bias_contig->dim() == 1, "bias should be a vector (1D Tensor)");
     TORCH_CHECK(
-        bias.size(0) == N, "bias should have N elements: " + std::to_string(N));
-    bias_ptr = reinterpret_cast<float*>(bias.data_ptr<float>());
+        bias_contig->sizes()[0] == N, "bias should have N elements: " + std::to_string(N));
+    bias_ptr = reinterpret_cast<float*>(bias_contig->data_ptr<float>());
   }
 
   // The resulting matrix here is 2-D, let's view it with the original
   // left hand dimensions of the input. Here are two examples:
   // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
   // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
-  std::vector<int64_t> out_sizes = input.sizes().vec();
+  at::DimVector out_sizes(input.sizes());
   out_sizes.back() = N;
-  // Allocate output Tensor and a buffer for fbgemmPacked to use
-  auto output = at::_empty_affine_quantized(
-      out_sizes,
-      at::device(c10::kCPU).dtype(c10::kQUInt8),
-      output_scale,
-      output_zero_point);
+  // Resize output Tensor
+  output.resize_(out_sizes);
 
+  // Allocate a buffer for fbgemmPacked to use
   auto buffer = at::empty(out_sizes, output.options().dtype(at::kInt));
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
-    for (int task_id = begin; task_id < end; ++task_id) {
+    for (const auto task_id : c10::irange(begin, end)) {
       // This operation does the following:
       // 1) Creates a "row buffer" vector with offset values that must be
       //    added to the integer matrix multiplication operation to ensure
@@ -187,6 +196,7 @@ at::Tensor PackedLinearWeight::apply_impl(
                 packA.getRowOffsetBuffer(),
                 col_offsets.data(),
                 bias_ptr,
+                // NOLINTNEXTLINE(bugprone-argument-comment)
                 N, /*nCol=*/
                 1, /* groups*/
                 act_times_w_scale.data());
@@ -212,19 +222,211 @@ at::Tensor PackedLinearWeight::apply(
     at::Tensor input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<false>(std::move(input), output_scale, output_zero_point);
+  // Allocate output Tensor
+  auto output = at::_empty_affine_quantized(
+      {0},
+      at::device(c10::kCPU).dtype(c10::kQUInt8),
+      output_scale,
+      output_zero_point);
+  apply_impl<false>(input, output_scale, output_zero_point, output);
+  return output;
 }
 
 at::Tensor PackedLinearWeight::apply_relu(
     at::Tensor input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<true>(std::move(input), output_scale, output_zero_point);
+  auto output = at::_empty_affine_quantized(
+      {0},
+      at::device(c10::kCPU).dtype(c10::kQUInt8),
+      output_scale,
+      output_zero_point);
+  apply_impl<true>(input, output_scale, output_zero_point, output);
+  return output;
+}
+
+at::Tensor& PackedLinearWeight::apply_out(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point,
+    at::Tensor& output) {
+  TORCH_CHECK(
+      (output.device() == c10::kCPU) && (output.dtype() == c10::kQUInt8) &&
+      (output.q_scale() == output_scale) &&
+      (output.q_zero_point() == output_zero_point));
+  return apply_impl<false>(input, output_scale, output_zero_point, output);
+}
+
+at::Tensor& PackedLinearWeight::apply_relu_out(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point,
+    at::Tensor& output) {
+  TORCH_CHECK(
+      (output.device() == c10::kCPU) && (output.dtype() == c10::kQUInt8) &&
+      (output.q_scale() == output_scale) &&
+      (output.q_zero_point() == output_zero_point));
+  return apply_impl<true>(input, output_scale, output_zero_point, output);
 }
 
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
+
+#ifdef USE_XNNPACK
+// TODO: add per_channel support in the future when xnnp supports it
+template <typename scalar_t, bool kReluFused>
+at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
+    const at::Tensor& input,
+    double output_scale,
+    int64_t output_zero_point) {
+  using underlying_t = typename scalar_t::underlying;
+
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
+
+  const std::string func_name = kReluFused ? "quantized::linear_relu (xnnpack)"
+                                           : "quantized::linear (xnnpack)";
+  TORCH_CHECK(
+      input.dim() >= 2, func_name, ": Input tensor rank should be >= 2.");
+  TORCH_CHECK(
+      !per_channel(),
+      func_name,
+      ": xnnpack does not currently have per_channel support.");
+
+  const auto input_contig = input.contiguous();
+  const auto input_scale = input_contig.q_scale();
+
+  const size_t rows_w = bias_.size(0);
+  const size_t cols_w = input_contig.size(input_contig.dim() - 1);
+
+  auto status = xnn_status_invalid_state;
+
+  // Create an operator iff not already created
+  if (!xnnp_linear_op ||
+      (!this->input_scale.has_value() ||
+       this->input_scale.value() != input_scale)) {
+    // Update the input scale so we may cache the op
+    this->input_scale = input_scale;
+
+    xnn_operator_t xnnp_op = nullptr;
+
+    const float* weight_scales_data = w_scales.data_ptr<float>();
+
+    // prepare weights
+    underlying_t w_zp = static_cast<underlying_t>(
+        orig_weight.q_zero_point() +
+        (std::is_same<underlying_t, uint8_t>::value ? 128 : 0));
+
+   at::Tensor xnnp_weight = at::_empty_affine_quantized(
+        orig_weight.sizes(),
+        c10::CppTypeToScalarType<scalar_t>::value,
+        weight_scales_data[0],
+        w_zp);
+
+    // copy from the original weight and take care of dtype change if necessary
+    at::native::xnnp_utils::q8_copy_int8_weight_and_add_offset<scalar_t>(
+        orig_weight, xnnp_weight);
+
+    // Original bias was float, so we requantize it here.
+    at::Tensor qbias = at::native::quantize_per_tensor(
+          bias_, orig_weight.q_scale() * input_scale, 0, c10::kQInt32);
+
+    // output limits
+   auto output_min = kReluFused
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        ? activationLimits<underlying_t>(output_scale, output_zero_point, Activation::RELU).first
+        : std::numeric_limits<underlying_t>::min();
+    auto output_max = kReluFused
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        ? activationLimits<underlying_t>(output_scale, output_zero_point, Activation::RELU).second
+        : std::numeric_limits<underlying_t>::max();
+
+    // Create an operator
+    status = at::native::xnnp_utils::xnnp_create_fully_connected_nc(
+        cols_w, /* input_channels */
+        rows_w, /* output_channels */
+        cols_w, /* input_stride */
+        rows_w, /* output_stride */
+        input_contig.q_zero_point(),
+        input_contig.q_scale(),
+        w_zp,
+        weight_scales_data[0],
+        reinterpret_cast<const underlying_t*>(
+            xnnp_weight.template data_ptr<scalar_t>()),
+        reinterpret_cast<int32_t*>(qbias.data_ptr<c10::qint32>()),
+        output_zero_point,
+        output_scale,
+        output_min,
+        output_max,
+        0, /* flags */
+        &xnnp_op);
+    xnnp_linear_op = xnnpack_operator(xnnp_op);
+
+    TORCH_CHECK(
+        status == xnn_status_success,
+        func_name,
+        ": xnn create operator failed(",
+        status,
+        ")");
+  }
+
+  /*
+   * Allocate output Tensor and a buffer for XNNPACK to use
+   * The resulting matrix here is 2-D, let's view it with the original
+   * left hand dimensions of the input. Here are two examples:
+   * 1. If the input tensor is {M, K}, the output tensor is {M, N}.
+   * 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
+   */
+  std::vector<int64_t> out_sizes = input.sizes().vec();
+  out_sizes.back() = static_cast<int64_t>(rows_w);
+  at::Tensor output = at::native::empty_affine_quantized(
+      out_sizes,
+      c10::CppTypeToScalarType<scalar_t>::value,
+      c10::nullopt /* layout */,
+      c10::kCPU,
+      c10::nullopt /* pin_memory */,
+      output_scale,
+      output_zero_point,
+      input.suggest_memory_format());
+
+  // calculate batch_size
+  size_t rows_input = 1;
+  for (const auto i : c10::irange(input_contig.dim() - 1)) {
+    rows_input *= input_contig.size(i);
+  }
+
+  // Setup the operator
+  status = at::native::xnnp_utils::xnnp_setup_fully_connected_nc(
+      xnnp_linear_op.get(),
+      rows_input, /* batch_size */
+      reinterpret_cast<const underlying_t*>(
+          input_contig.template data_ptr<scalar_t>()),
+      reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>()),
+      caffe2::pthreadpool_());
+
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name,
+      ": xnn setup operator failed(",
+      status,
+      ")");
+
+  // Run the opeator
+  status = xnn_run_operator(
+      xnnp_linear_op.get(), // Linear op
+      caffe2::pthreadpool_() // threadpool
+  );
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name,
+      ": xnn run operator failed(",
+      status,
+      ")");
+
+  return output;
+}
+#endif // USE_XNNPACK
+
 template <bool ReluFused>
 at::Tensor PackedLinearWeightsQnnp::apply_impl(
     at::Tensor input,
@@ -233,8 +435,16 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
   TORCH_CHECK(
       input.dim() >= 2,
       "quantized::linear(): Input tensor rank should be >= 2");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+                "quantized::linear (qnnpack): Expected input data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(input.scalar_type()));
+
   auto input_contig = input.contiguous();
 
+  // Weight packing is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   auto packB = w.get();
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
@@ -251,6 +461,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         w_scales, input_scale, output_scale, requantization_scales);
 
     at::Tensor qnnp_weight = at::_empty_affine_quantized(
@@ -260,7 +471,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
         w_zero_points[0]);
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
-    for (int i = 0; i < wt_numel; ++i) {
+    for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // Original bias was float, so we requantize it here.
@@ -271,7 +482,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       at::Tensor bias_quant_scales =
           weight_contig.q_per_channel_scales() * input_scale;
       at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel_cpu(
+      qbias = at::native::quantize_per_channel(
           bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
     } else {
       qbias = at::native::quantize_per_tensor(
@@ -298,7 +509,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
 
   size_t rows_input = 1;
   size_t cols_input = input_contig.size(input_contig.dim() - 1);
-  for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
+  for (const auto i : c10::irange(input_contig.dim() -1)) {
     rows_input *= input_contig.size(i);
   }
 
@@ -324,11 +535,13 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       output_zero_point);
 
   auto output_min = ReluFused
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = ReluFused
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
   TORCH_INTERNAL_ASSERT(packB != nullptr, "Packed Weights are NULL");
@@ -358,10 +571,35 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
   return output;
 }
 
+#ifdef USE_XNNPACK
+bool can_use_xnnp(c10::ScalarType dtype, bool per_channel) {
+  if(!at::native::xnnpack::available()) {
+    return false;
+  }
+
+  bool supported_dtypes = dtype == c10::kQInt8;
+  bool invalid_config = per_channel; /* xnnp does not currently support
+                                        per-channel fully connected op */
+  if (supported_dtypes && invalid_config) {
+    /* don't want this to fall through to QNNPACK */
+    TORCH_CHECK(
+        false,
+        "quantized::linear (xnnpack): Unsupported config for dtype KQInt8");
+  }
+  return supported_dtypes && !invalid_config;
+}
+#endif // USE_XNNPACK
+
 at::Tensor PackedLinearWeightsQnnp::apply(
     at::Tensor input,
     double output_scale,
     int64_t output_zero_point) {
+#ifdef USE_XNNPACK
+  if (can_use_xnnp(input.scalar_type(), per_channel())) {
+    return apply_impl_xnnp<c10::qint8, false>(
+        input, output_scale, output_zero_point);
+  } /* fall through for unsupported types, configs, or shapes */
+#endif // USE_XNNPACK
   return apply_impl<false>(std::move(input), output_scale, output_zero_point);
 }
 
@@ -369,10 +607,91 @@ at::Tensor PackedLinearWeightsQnnp::apply_relu(
     at::Tensor input,
     double output_scale,
     int64_t output_zero_point) {
+#ifdef USE_XNNPACK
+  if (can_use_xnnp(input.scalar_type(), per_channel())) {
+    return apply_impl_xnnp<c10::qint8, true>(
+        input, output_scale, output_zero_point);
+  } /* fall through for unsupported types, configs, or shapes */
+#endif // USE_XNNPACK
   return apply_impl<true>(std::move(input), output_scale, output_zero_point);
 }
 
 #endif // USE_PYTORCH_QNNPACK
+
+#if AT_MKLDNN_ENABLED()
+template <bool ReluFused>
+at::Tensor PackedLinearWeightsOnednn::apply_impl(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  const int64_t dim = input.dim();
+  TORCH_CHECK(
+      dim != 0,
+      "qlinear (ONEDNN): input dim should be at least 1, but got 0");
+  TORCH_CHECK(input.scalar_type() == c10::ScalarType::QUInt8,
+      "qlinear (ONEDNN): data type of input should be QUint8.");
+
+  auto input_contig = input.expect_contiguous();
+  auto& w = *(weight_.get());
+  auto K = input.size(dim - 1), M = input.numel() / K, N = w.get_dim(1);
+  auto input_dims = {M, K};
+  auto input_data_type = dnnl::memory::data_type::u8;
+  auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
+  ideep::attr_t op_attr = ReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  ideep::tensor x(input_desc, input_contig->data_ptr<c10::quint8>());
+  auto dst_dims = {M, N};
+  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/input.q_scale());
+  const ideep::scale_t& weights_scales = w.get_scale();
+  const ideep::scale_t& dst_scales = ideep::scale_t(1, 1.0/output_scale); // Scales of ONEDNN and PyTorch are reciprocal
+  const ideep::zero_point_t& src_zero_point = ideep::zero_point_t(1, input.q_zero_point());
+  const ideep::zero_point_t& dst_zero_point = ideep::zero_point_t(1, output_zero_point);
+  // Compute: Use ideep::matmul_forward to support asymmetric quantization
+  // Allocate output Tensor
+  at::Tensor output = at::_empty_affine_quantized(
+      dst_dims,
+      at::device(c10::kCPU).dtype(c10::kQUInt8),
+      output_scale,
+      output_zero_point);
+  if (output.numel() == 0) {
+    return output;
+  }
+  ideep::tensor y({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
+                  output.data_ptr());
+  if (bias_.has_value()) {
+    // Bias might be modified outside (e.g. by quantization bias correction).
+    // If so, update the prepacked bias as well.
+    if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
+      bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
+    }
+    const auto& b = bias_.value();
+    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales, dst_scales,
+                                      src_zero_point, dst_zero_point, op_attr);
+  } else {
+    ideep::matmul_forward::compute_v2(x, w, y, 1.0f, 1.0f, src_scales, weights_scales, dst_scales,
+                                      src_zero_point, dst_zero_point, op_attr);
+  }
+  auto out_sizes = input.sizes().vec();
+  out_sizes.back() = N;
+  if (output.sizes().vec() == out_sizes)
+    return output;
+  return output.reshape(out_sizes);
+}
+
+at::Tensor PackedLinearWeightsOnednn::apply(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<false>(std::move(input), output_scale, output_zero_point);
+}
+
+at::Tensor PackedLinearWeightsOnednn::apply_relu(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<true>(std::move(input), output_scale, output_zero_point);
+}
+
+#endif // #if AT_MKLDNN_ENABLED()
 
 namespace at {
 namespace native {

@@ -21,6 +21,15 @@ struct TORCH_API QTensorImpl : public c10::TensorImpl {
       const caffe2::TypeMeta data_type,
       QuantizerPtr quantizer);
 
+  // See Note [Enum ImplType]
+  QTensorImpl(
+      ImplType type,
+      Storage&& storage,
+      DispatchKeySet key_set,
+      const caffe2::TypeMeta data_type,
+      QuantizerPtr quantizer);
+
+
   // TODO: Expose in PyTorch Frontend
   QuantizerPtr quantizer() {
     return quantizer_;
@@ -92,6 +101,8 @@ struct TORCH_API QTensorImpl : public c10::TensorImpl {
 
  private:
   QuantizerPtr quantizer_;
+
+  const char* tensorimpl_type_name() const override;
 
   /**
    * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)

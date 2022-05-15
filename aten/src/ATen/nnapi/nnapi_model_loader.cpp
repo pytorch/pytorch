@@ -1,8 +1,10 @@
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdint.h>
 
 #include <ATen/nnapi/NeuralNetworks.h>
 #include <ATen/nnapi/nnapi_wrapper.h>
 #include <ATen/nnapi/nnapi_model_loader.h>
+#include <c10/util/irange.h>
 
 
 #ifndef NNAPI_LOADER_STANDALONE
@@ -16,7 +18,7 @@
 #endif
 
 
-#define NNAPI_CHECK(res) CAFFE_ENFORCE(res == ANEURALNETWORKS_NO_ERROR)
+#define NNAPI_CHECK(res) CAFFE_ENFORCE(res == ANEURALNETWORKS_NO_ERROR, "NNAPI returned error: ", res)
 
 
 namespace caffe2 {
@@ -95,9 +97,9 @@ int load_nnapi_model(
     size_t num_buffers,
     const void** buffer_ptrs,
     int32_t* buffer_sizes,
-    size_t num_memories,
-    ANeuralNetworksMemory** memories,
-    int32_t* memory_sizes,
+    size_t /*num_memories*/,
+    ANeuralNetworksMemory** /*memories*/,
+    int32_t* /*memory_sizes*/,
     int32_t* out_input_count,
     int32_t* out_output_count,
     size_t* out_bytes_consumed) {
@@ -137,15 +139,15 @@ int load_nnapi_model(
   next_pointer = (uint8_t*)serialized_model + required_size;
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
-  for (int i = 0; i < ser_model->operand_count; i++) {
+  for (const auto i : c10::irange(ser_model->operand_count)) {
     required_size += 4 * operands[i].dimension_count;
   }
 
-  for (int i = 0; i < ser_model->value_count; i++) {
+  for (const auto i : c10::irange(ser_model->value_count)) {
     required_size += value_physical_size(values[i].source_length);
   }
 
-  for (int i = 0; i < ser_model->operation_count; i++) {
+  for (const auto i : c10::irange(ser_model->operation_count)) {
     required_size += 4 * (operations[i].input_count + operations[i].output_count);
   }
 
@@ -154,12 +156,13 @@ int load_nnapi_model(
   CAFFE_ENFORCE(model_length >= required_size, "Model is too small.  Size = ", model_length);
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
-  for (int i = 0; i < ser_model->operand_count; i++) {
+  for (const auto i : c10::irange(ser_model->operand_count)) {
     ANeuralNetworksOperandType operand;
     operand.type = operands[i].type;
     operand.scale = operands[i].scale;
     operand.zeroPoint = operands[i].zero_point;
     operand.dimensionCount = operands[i].dimension_count;
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     operand.dimensions = operands[i].dimension_count ? (const uint32_t*)next_pointer : NULL;
 
     next_pointer += 4 * operands[i].dimension_count;
@@ -169,10 +172,12 @@ int load_nnapi_model(
     NNAPI_CHECK(result);
   }
 
-  for (int i = 0; i < ser_model->value_count; i++) {
+  for (const auto i : c10::irange(ser_model->value_count)) {
     uint32_t len = values[i].source_length;
     const uint8_t* stored_pointer = next_pointer;
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     const void* value_pointer = NULL;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t value_length;
 
     switch ((SourceType)values[i].source_type) {
@@ -202,6 +207,7 @@ int load_nnapi_model(
         CAFFE_ENFORCE(false, "Unknown source type: ", values[i].source_type);
     }
 
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     CAFFE_ENFORCE(value_pointer != NULL);
 
     next_pointer += value_physical_size(len);
@@ -215,7 +221,7 @@ int load_nnapi_model(
     NNAPI_CHECK(result);
   }
 
-  for (int i = 0; i < ser_model->operation_count; i++) {
+  for (const auto i : c10::irange(ser_model->operation_count)) {
     const uint32_t* inputs = (const uint32_t*)next_pointer;
     next_pointer += 4 * operations[i].input_count;
     CAFFE_ENFORCE(next_pointer <= end_of_buf);
@@ -254,6 +260,7 @@ int load_nnapi_model(
   // TODO: Maybe eliminate required_size and just rely on next_pointer for bounds checking.
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
   CAFFE_ENFORCE(next_pointer == (const uint8_t*)serialized_model + required_size);
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   if (out_bytes_consumed != NULL) {
     *out_bytes_consumed = next_pointer - (const uint8_t*)serialized_model;
   }

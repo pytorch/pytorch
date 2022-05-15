@@ -23,11 +23,11 @@ class Categorical(Distribution):
     relative probability vectors.
 
     .. note:: The `probs` argument must be non-negative, finite and have a non-zero sum,
-              and it will be normalized to sum to 1 along the last dimension. attr:`probs`
+              and it will be normalized to sum to 1 along the last dimension. :attr:`probs`
               will return this normalized value.
               The `logits` argument will be interpreted as unnormalized log probabilities
               and can therefore be any real number. It will likewise be normalized so that
-              the resulting probabilities sum to 1 along the last dimension. attr:`logits`
+              the resulting probabilities sum to 1 along the last dimension. :attr:`logits`
               will return this normalized value.
 
     See also: :func:`torch.multinomial`
@@ -100,6 +100,10 @@ class Categorical(Distribution):
     @property
     def mean(self):
         return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
+
+    @property
+    def mode(self):
+        return self.probs.argmax(axis=-1)
 
     @property
     def variance(self):

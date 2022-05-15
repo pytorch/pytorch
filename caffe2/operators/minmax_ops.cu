@@ -16,7 +16,7 @@ __global__ void SelectGradientCUDAKernel(
     T* dX) {
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     dX[i] = __ldg(X + i) == __ldg(Y + i) ? __ldg(dY + i) : T(0);
 #else
     dX[i] = X[i] == Y[i] ? dY[i] : T(0);
@@ -43,6 +43,7 @@ bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
       SelectGradientCUDAKernel<float>
           <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
               N, dY_data, Xi_data, Y_data, dXi_data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
   return true;

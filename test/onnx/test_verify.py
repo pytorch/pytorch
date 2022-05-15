@@ -1,10 +1,12 @@
+# Owner(s): ["module: onnx"]
+
+from test_pytorch_common import TestCase, run_tests
+from verify import verify
+
+import caffe2.python.onnx.backend as backend
 import torch
 from torch.autograd import Function
 from torch.nn import Module, Parameter
-import caffe2.python.onnx.backend as backend
-from verify import verify
-
-from test_pytorch_common import TestCase, run_tests
 
 
 class TestVerify(TestCase):
@@ -103,5 +105,5 @@ class TestVerify(TestCase):
         self.assertVerifyExpectFail(MyModel(), x, backend, test_args=[(y,)])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

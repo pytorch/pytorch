@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/utils/ParamUtils.h>
 
 namespace at { namespace native {
@@ -29,11 +30,11 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dt
       : stensor.to_public(cpu_tensor.template data_ptr<BFloat16>(),
                          ideep::tensor::data_type::bf16);
   cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
-  return cpu_tensor;
+  return cpu_tensor.contiguous();
 }
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(cpu_tensor.device().type() == DeviceType::CPU,
+  TORCH_CHECK(cpu_tensor.device().is_cpu(),
              "dense_to_mkldnn expects CPU tensor input");
   TORCH_CHECK(cpu_tensor.layout() == Layout::Strided,
              "dense_to_mkldnn expects strided tensor input");
@@ -42,7 +43,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype
              "dense_to_mkldnn expects float or bfloat16 tensor input");
   TORCH_CHECK(cpu_tensor.dim() <= 5,
              "Can't convert cpu tensor with the number of dimensions > 5");
-  // TODO: consider to convert non-contiguous tensor to `ideep::tensor` directly.
+  // NOTE: forbid direct convert from non-contiguous (or channels last) to `ideep::tensor`.
   auto cpu_tensor_cont = cpu_tensor.contiguous();
   auto data_type = dtype.has_value() ? dtype.value() : cpu_tensor.scalar_type();
   TORCH_CHECK(data_type == ScalarType::Float || data_type == ScalarType::BFloat16,
@@ -75,6 +76,10 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
+  if (self.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
 
   auto w = itensor_from_mkldnn(self);
 
@@ -112,6 +117,10 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
+  if (self.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_reorder_conv3d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
 
   auto w = itensor_from_mkldnn(self);
 

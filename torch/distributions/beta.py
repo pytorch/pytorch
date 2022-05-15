@@ -33,7 +33,7 @@ class Beta(ExponentialFamily):
         else:
             concentration1, concentration0 = broadcast_all(concentration1, concentration0)
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)
-        self._dirichlet = Dirichlet(concentration1_concentration0)
+        self._dirichlet = Dirichlet(concentration1_concentration0, validate_args=validate_args)
         super(Beta, self).__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -47,6 +47,10 @@ class Beta(ExponentialFamily):
     @property
     def mean(self):
         return self.concentration1 / (self.concentration1 + self.concentration0)
+
+    @property
+    def mode(self):
+        return self._dirichlet.mode[..., 0]
 
     @property
     def variance(self):

@@ -6,26 +6,19 @@ if exist "%TMP_DIR%/ci_scripts/pytorch_env_restore.bat" (
 set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;%PATH%
 
 :: Install Miniconda3
-if "%BUILD_ENVIRONMENT%"=="" (
-    set CONDA_PARENT_DIR=%CD%
-) else (
-    set CONDA_PARENT_DIR=C:\Jenkins
-)
+set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
+call :retry %INSTALLER_DIR%\install_miniconda3.bat
+
+:retry
+call %* || (powershell -nop -c "& {sleep 1}" && call %*) || (powershell -nop -c "& {sleep 2}" && call %*)
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
+
+:: extra conda dependencies for testing purposes
 if NOT "%BUILD_ENVIRONMENT%"=="" (
-    IF EXIST %CONDA_PARENT_DIR%\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\Miniconda3 )
-    curl --retry 3 https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe
-    if %errorlevel% neq 0 ( exit /b %errorlevel% )
-    %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\Miniconda3
-    if %errorlevel% neq 0 ( exit /b %errorlevel% )
-)
-call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
-if NOT "%BUILD_ENVIRONMENT%"=="" (
-    :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
-    :: Numba is pinned to 0.44.0 to avoid https://github.com/numba/numba/issues/4352
-    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0 scipy==1.5.0 typing_extensions dataclasses
-    if %errorlevel% neq 0 ( exit /b %errorlevel% )
-    call conda install -y -q -c conda-forge cmake
-    if %errorlevel% neq 0 ( exit /b %errorlevel% )
+    call conda install -y -q mkl protobuf numba scipy=1.6.2 typing_extensions dataclasses
+    if errorlevel 1 exit /b
+    if not errorlevel 0 exit /b
 )
 
 pushd .
@@ -34,13 +27,18 @@ if "%VC_VERSION%" == "" (
 ) else (
     call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%VC_VERSION%
 )
-if %errorlevel% neq 0 ( exit /b %errorlevel% )
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
 @echo on
 popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest coverage
-if %errorlevel% neq 0 ( exit /b %errorlevel% )
+=======
+:: Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
+
+pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "expecttest==0.1.3" "librosa>=0.6.2" "scipy==1.6.3" psutil pillow "unittest-xml-reporting<=3.2.0,>=2.0.0" pytest
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
 
 set DISTUTILS_USE_SDK=1
 

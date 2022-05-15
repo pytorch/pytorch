@@ -1,6 +1,9 @@
-from typing import List, Optional, Tuple
 import ast
+import sys
+from typing import List, Optional, Tuple
+
 from ._importlib import _resolve_name
+
 
 class _ExtractModuleReferences(ast.NodeVisitor):
     """
@@ -34,9 +37,66 @@ class _ExtractModuleReferences(ast.NodeVisitor):
             # from my_package import foo
             # foo may be a module, so we have to add it to the list of
             # potential references, if import of it fails, we will ignore it
-            if alias.name != '*':
+            if alias.name != "*":
                 self.references[(name, alias.name)] = True
             else:
                 self.references[(name, None)] = True
+
+    def _grab_node_int(self, node):
+        if sys.version_info[:2] < (3, 8):
+            return node.n
+        else:
+            return node.value
+
+    def _grab_node_str(self, node):
+        if sys.version_info[:2] < (3, 8):
+            return node.s
+        else:
+            return node.value
+
+    def visit_Call(self, node):
+        # __import__ calls aren't routed to the visit_Import/From nodes
+        if hasattr(node.func, "id") and node.func.id == "__import__":
+            try:
+                name = self._grab_node_str(node.args[0])
+                fromlist = []
+                level = 0
+                if len(node.args) > 3:
+                    for v in node.args[3].elts:
+                        fromlist.append(self._grab_node_str(v))
+                elif hasattr(node, "keywords"):
+                    for keyword in node.keywords:
+                        if keyword.arg == "fromlist":
+                            for v in keyword.value.elts:
+                                fromlist.append(self._grab_node_str(v))
+                if len(node.args) > 4:
+                    level = self._grab_node_int(node.args[4])
+                elif hasattr(node, "keywords"):
+                    for keyword in node.keywords:
+                        if keyword.arg == "level":
+                            level = self._grab_node_int(keyword.value)
+                if fromlist == []:
+                    # the top-level package (the name up till the first dot) is returned
+                    # when the fromlist argument is empty in normal import system,
+                    # we need to include top level package to match this behavior and last
+                    # level package to capture the intended dependency of user
+                    self.references[(name, None)] = True
+                    top_name = name.rsplit(".", maxsplit=1)[0]
+                    if top_name != name:
+                        top_name = self._absmodule(top_name, level)
+                        self.references[(top_name, None)] = True
+                else:
+                    name = self._absmodule(name, level)
+                    for alias in fromlist:
+                        # fromlist args may be submodules, so we have to add the fromlist args
+                        # to the list of potential references. If import of an arg fails we
+                        # will ignore it, similar to visit_ImportFrom
+                        if alias != "*":
+                            self.references[(name, alias)] = True
+                        else:
+                            self.references[(name, None)] = True
+            except Exception as e:
+                return
+
 
 find_files_source_depends_on = _ExtractModuleReferences.run

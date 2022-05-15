@@ -82,7 +82,7 @@ template <typename T>
   "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
 Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // None of this should trace, so turn off Tracer dispatching
-  at::AutoNonVariableTypeMode guard;  // TODO: remove
+  at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   // We store this instance away in a Tensor and register a deleter function
@@ -95,7 +95,7 @@ Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // size doesn't really matter, but we can align it to the actual size
   // returning variables because one likely want to use this hack from python
   auto retval = at::empty({sizeof(T)}, options.device(kCPU).dtype(at::kByte));
-  retval.storage().set_data_ptr(std::move(at_ptr));
+  retval.storage().set_data_ptr_noswap(std::move(at_ptr));
   return retval;
 }
 

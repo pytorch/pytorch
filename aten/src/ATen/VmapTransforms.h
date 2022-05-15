@@ -47,7 +47,7 @@ using VmapDimVector = SmallVector<int64_t, kVmapStaticDimVecSize>;
 // argument.
 
 // VmapTransform for operators that take tensors with multiple batch dims.
-// Given one or more logical views on Tensors, `logicalToPhysical` 
+// Given one or more logical views on Tensors, `logicalToPhysical`
 // permutes all of the batch dims to the front of the tensor, aligns
 // and expands the batch dims to match each other (according to their `level`),
 // and returns a VmapPhysicalView on the tensor(s).

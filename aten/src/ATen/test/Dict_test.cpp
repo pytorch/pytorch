@@ -232,6 +232,7 @@ TEST(DictTest, whenCallingAtWithNonExistingKey_thenReturnsCorrectElement) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(dict.at(5), std::out_of_range);
 }
 
@@ -295,6 +296,7 @@ TEST(DictTest, whenCopyConstructingDict_thenAreEqual) {
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   Dict<int64_t, string> dict2(dict1);
 
   EXPECT_EQ(2, dict2.size());
@@ -352,23 +354,27 @@ TEST(DictTest, whenMoveAssigningDict_thenNewIsCorrect) {
   EXPECT_EQ("4", dict2.at(4));
 }
 
-TEST(DictTest, whenMoveConstructingDict_thenOldIsEmpty) {
+TEST(DictTest, whenMoveConstructingDict_thenOldIsUnchanged) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
   Dict<int64_t, string> dict2(std::move(dict1));
-  EXPECT_TRUE(dict1.empty());
+  EXPECT_EQ(2, dict1.size());
+  EXPECT_EQ("3", dict1.at(3));
+  EXPECT_EQ("4", dict1.at(4));
 }
 
-TEST(DictTest, whenMoveAssigningDict_thenOldIsEmpty) {
+TEST(DictTest, whenMoveAssigningDict_thenOldIsUnchanged) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
   Dict<int64_t, string> dict2;
   dict2 = std::move(dict1);
-  EXPECT_TRUE(dict1.empty());
+  EXPECT_EQ(2, dict1.size());
+  EXPECT_EQ("3", dict1.at(3));
+  EXPECT_EQ("4", dict1.at(4));
 }
 
 TEST(DictTest, givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
@@ -456,6 +462,7 @@ TEST(ListTest_IValueBasedList, givenIterator_whenWritingToValueFromIterator_then
 
 TEST(DictTest, isReferenceType) {
   Dict<int64_t, string> dict1;
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   Dict<int64_t, string> dict2(dict1);
   Dict<int64_t, string> dict3;
   dict3 = dict1;

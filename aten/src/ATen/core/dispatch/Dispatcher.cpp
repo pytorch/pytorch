@@ -32,7 +32,7 @@ private:
 };
 }
 
-OpRegistrationListener::~OpRegistrationListener() {}
+OpRegistrationListener::~OpRegistrationListener()= default;
 
 Dispatcher::Dispatcher()
 : operators_()
@@ -41,7 +41,7 @@ Dispatcher::Dispatcher()
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
-Dispatcher::~Dispatcher() {}
+Dispatcher::~Dispatcher() = default;
 
 C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   static Dispatcher _singleton;
@@ -87,6 +87,16 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
   return it.value();
 }
 
+const std::vector<OperatorName> Dispatcher::getAllOpNames() {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
+    std::vector<OperatorName> allOpNames;
+    for (const auto& op : operatorLookupTable) {
+        allOpNames.push_back(op.first);
+    }
+    return allOpNames;
+  });
+}
+
 // Postcondition: caller is responsible for disposing of registration when they
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
@@ -104,6 +114,13 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   return handle;
 }
 
+
+// Adding explicit destructor definition in the cpp to over linker error in Windows builds.
+// Windows build doesn't produce the destructor symbol in PyTorch libs
+// causing a linker failure in downstream projects.
+// x-ref https://github.com/pytorch/pytorch/issues/70032
+OperatorHandle::~OperatorHandle() = default;
+
 RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto found = libraries_.find(ns);
@@ -112,7 +129,10 @@ RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string d
     "Only a single TORCH_LIBRARY can be used to register the namespace ", ns,
     "; please put all of your definitions in a single TORCH_LIBRARY block.  "
     "If you were trying to specify implementations, consider using TORCH_LIBRARY_IMPL "
-    "(which can be duplicated).  Previous registration of TORCH_LIBRARY was ",
+    "(which can be duplicated).  If you really intended to define operators for a "
+    "single namespace in a distributed way, you can use TORCH_LIBRARY_FRAGMENT to "
+    "explicitly indicate this.  "
+    "Previous registration of TORCH_LIBRARY was ",
     found->second, "; latest registration was ", debug
   );
   libraries_.emplace(ns, std::move(debug));
@@ -134,15 +154,15 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
   OperatorName op_name = schema.operator_name();
   auto op = findOrRegisterName_(op_name);
 
-  TORCH_CHECK(op.operatorIterator_->def_count == 0, "Tried to register an operator (", schema, ") with the same name and overload name multiple times.",
+  TORCH_CHECK(op.operatorDef_->def_count == 0, "Tried to register an operator (", schema, ") with the same name and overload name multiple times.",
                                                     " Each overload's schema should only be registered with a single call to def().",
-                                                    " Duplicate registration: ", debug, ". Original registration: ", op.operatorIterator_->op.debug());
-  op.operatorIterator_->op.registerSchema(std::move(schema), std::move(debug));
+                                                    " Duplicate registration: ", debug, ". Original registration: ", op.operatorDef_->op.debug());
+  op.operatorDef_->op.registerSchema(std::move(schema), std::move(debug));
   listeners_->callOnOperatorRegistered(op);
 
   // NB: do not increment the counts until AFTER error checking
-  ++op.operatorIterator_->def_count;
-  ++op.operatorIterator_->def_and_impl_count;
+  ++op.operatorDef_->def_count;
+  ++op.operatorDef_->def_and_impl_count;
 
   return RegistrationHandleRAII([this, op, op_name] {
     deregisterDef_(op, op_name);
@@ -156,17 +176,17 @@ void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op
   TORCH_INTERNAL_ASSERT(op.schema().operator_name() == op_name);
 
   // reduce def_count and actually deregister if no references left
-  TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_count > 0);
-  TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count > 0);
+  TORCH_INTERNAL_ASSERT(op.operatorDef_->def_count > 0);
+  TORCH_INTERNAL_ASSERT(op.operatorDef_->def_and_impl_count > 0);
 
-  --op.operatorIterator_->def_count;
-  --op.operatorIterator_->def_and_impl_count;
-  if (0 == op.operatorIterator_->def_count) {
+  --op.operatorDef_->def_count;
+  --op.operatorDef_->def_and_impl_count;
+  if (0 == op.operatorDef_->def_count) {
     // note: call listeners *before* operator is removed, i.e. dispatcher is still valid for removed op
     // TODO: check that listeners are not relying on prepareForDeregistration()
     // invariant
     listeners_->callOnOperatorDeregistered(op);
-    op.operatorIterator_->op.deregisterSchema();
+    op.operatorDef_->op.deregisterSchema();
   }
 
   cleanup(op, op_name);
@@ -184,31 +204,32 @@ RegistrationHandleRAII Dispatcher::registerImpl(
 
   auto op = findOrRegisterName_(op_name);
 
-  auto handle = op.operatorIterator_->op.registerKernel(
+  auto handle = op.operatorDef_->op.registerKernel(
     *this,
     dispatch_key,
     std::move(kernel),
+    // NOLINTNEXTLINE(performance-move-const-arg)
     std::move(cpp_signature),
     std::move(inferred_function_schema),
     std::move(debug)
   );
 
-  ++op.operatorIterator_->def_and_impl_count;
+  ++op.operatorDef_->def_and_impl_count;
 
   return RegistrationHandleRAII([this, op, op_name, dispatch_key, handle] {
     deregisterImpl_(op, op_name, dispatch_key, handle);
   });
 }
 
-void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::AnnotatedKernel>::iterator handle) {
+void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  op.operatorIterator_->op.deregisterKernel_(*this, dispatch_key, handle);
+  op.operatorDef_->op.deregisterKernel_(*this, dispatch_key, handle);
 
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
 
-  TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count > 0);
-  --op.operatorIterator_->def_and_impl_count;
+  TORCH_INTERNAL_ASSERT(op.operatorDef_->def_and_impl_count > 0);
+  --op.operatorDef_->def_and_impl_count;
 
   cleanup(op, op_name);
 }
@@ -216,7 +237,7 @@ void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& o
 RegistrationHandleRAII Dispatcher::registerName(OperatorName op_name) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto op = findOrRegisterName_(op_name);
-  ++op.operatorIterator_->def_and_impl_count;
+  ++op.operatorDef_->def_and_impl_count;
   return RegistrationHandleRAII(
       [this, op, op_name] { deregisterName_(op, op_name); });
 }
@@ -226,14 +247,16 @@ void Dispatcher::deregisterName_(
     const OperatorName& op_name) {
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
-  TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count > 0);
-  --op.operatorIterator_->def_and_impl_count;
+  TORCH_INTERNAL_ASSERT(op.operatorDef_->def_and_impl_count > 0);
+  --op.operatorDef_->def_and_impl_count;
   cleanup(op, op_name);
 }
 
 // Test if the operator entry is completely dead, and if so remove it completely
 void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) {
-  if (0 == op.operatorIterator_->def_and_impl_count) {
+  if (0 == op.operatorDef_->def_and_impl_count) {
+    // NOTE: Making this call fast is the only reason OperatorHandle
+    // stores operatorIterator_!
     operators_.erase(op.operatorIterator_);
     operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
       operatorLookupTable.erase(op_name);
@@ -244,14 +267,16 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
 
+  auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
+  TORCH_CHECK(idx >= 0 && static_cast<uint64_t>(idx) < backendFallbackKernels_.size(), "idx=", idx);
   TORCH_CHECK(
-    !backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)].kernel.isValid(),
+    !backendFallbackKernels_[idx].kernel.isValid(),
     "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, "; previous registration ",
-    backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)].debug, ", new registration ", debug
+    backendFallbackKernels_[idx].debug, ", new registration ", debug
   );
   // NB: inferred function schema is always nullptr for fallbacks, as fallbacks
   // cannot be unobxed
-  backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
+  backendFallbackKernels_[idx] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
 
   for (auto& op : operators_) {
     op.op.updateFallback(*this, dispatchKey);
@@ -265,7 +290,8 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)] = {};
+  auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
+  backendFallbackKernels_[idx] = {};
 
   for (auto& op : operators_) {
     op.op.updateFallback(*this, dispatchKey);
@@ -307,6 +333,19 @@ std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
   });
 }
 
+std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
+    std::vector<OperatorName> op_names;
+    for (const auto& op : operatorLookupTable) {
+      // If no DispatchKey is specified, print all of the operators.
+      if (!k || op.second.hasKernelForDispatchKey(*k)) {
+          op_names.push_back(op.first);
+      }
+    }
+    return op_names;
+  });
+}
+
 int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey) {
   int64_t seq_num = -1;
   // Setting sequence number in the Autograd case to associate
@@ -317,18 +356,18 @@ int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchK
   return seq_num;
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, const torch::jit::Stack &stack) {
-  guard.before(op, stack, sequenceNumberForRunningRecordFunction(dispatchKey));
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, const torch::jit::Stack &stack) {
+  guard.before(schema_ref, c10::ArrayRef<const IValue>(stack.data(), stack.size()), sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, torch::jit::Stack &&stack) {
-  guard.before(op, std::move(stack), sequenceNumberForRunningRecordFunction(dispatchKey));
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, torch::jit::Stack &&stack) {
+  guard.before(schema_ref, c10::ArrayRef<const IValue>(stack.data(), stack.size()), sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey) {
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey) {
   // Setting sequence number in the Autograd case to associate
   // the forward range with the coresponding Autograd's node
-  guard.before(op, sequenceNumberForRunningRecordFunction(dispatchKey));
+  guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
 }

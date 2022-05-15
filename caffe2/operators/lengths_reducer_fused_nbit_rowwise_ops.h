@@ -137,7 +137,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
 
     // Error handling
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       for (int i = 0; i < lengths_data[m]; ++i) {
         CAFFE_ENFORCE_LT(current, index_size);
         IndexType idx = indices_data[current];
@@ -164,7 +164,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
         << "Running slow path because FBGEMM is not available";
 
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       memset(output_data, 0, block_size * sizeof(float));
       if (current + lengths_data[m] > index_size) {
         return false;
@@ -185,7 +185,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
         const float scale = weight * scale_bias[0];
         const float bias = weight * scale_bias[1];
 
-        for (int j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           uint8_t quantized =
               input_data[idx * data.size(1) + j / NUM_ELEM_PER_BYTE];
           quantized >>= (j % NUM_ELEM_PER_BYTE) * BIT_RATE;
@@ -196,7 +196,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
       } // for each i
       if (is_mean && lengths_data[m]) {
         float scale = 1.0f / lengths_data[m];
-        for (int j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           output_data[j] *= scale;
         }
       }
@@ -284,13 +284,14 @@ class SparseLengthsSumSparseLookupOp final : public Operator<CPUContext> {
     const IndexType compressed_data_size = compressed_indices_mapping.size(0);
     IndexType current = 0;
     IndexType current_output = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       const auto current_length = lengths_data[m];
       if (current + current_length > index_size) {
         return false;
       }
       int32_t skipped = 0;
-      for (int i = 0; i < current_length; ++i) {
+      for (const auto i : c10::irange(current_length)) {
+        (void)i; // Suppress unused variable warning
         IndexType compressed_idx = indices_data[current];
         if (compressed_idx < 0 || compressed_idx >= compressed_data_size) {
           return false;
@@ -554,7 +555,7 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
 
     // Error handling
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       for (int i = 0; i < lengths_data[m]; ++i) {
         CAFFE_ENFORCE_LT(current, index_size);
         IndexType idx = indices_data[current];
@@ -592,7 +593,7 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
         << "Running slow path because FBGEMM is not available";
 
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       memset(output_data, 0, block_size * sizeof(float));
       if (current + lengths_data[m] > index_size) {
         return false;
@@ -632,7 +633,7 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
           bias = weight * reinterpret_cast<const at::Half*>(scale_bias)[1];
         }
 
-        for (int j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           uint8_t quantized =
               input_data[idx * data.size(1) + j / NUM_ELEM_PER_BYTE];
           quantized >>= (j % NUM_ELEM_PER_BYTE) * BIT_RATE;
@@ -643,7 +644,7 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
       } // for each i
       if (is_mean && lengths_data[m]) {
         float scale = 1.0f / lengths_data[m];
-        for (int j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           output_data[j] *= scale;
         }
       }

@@ -12,12 +12,14 @@
 
 using namespace at;
 
+#ifndef ATEN_CPU_STATIC_DISPATCH
 namespace {
 
 constexpr auto kCustomRNG = DispatchKey::CustomRNGKeyId;
 
 struct TestCPUGenerator : public c10::GeneratorImpl {
   TestCPUGenerator(uint64_t value) : GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(kCustomRNG)}, value_(value) { }
+  // NOLINTNEXTLINE(modernize-use-override)
   ~TestCPUGenerator() = default;
   uint32_t random() { return value_; }
   uint64_t random64() { return value_; }
@@ -464,3 +466,4 @@ TEST_F(RNGTest, Bernoulli_out) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 }
+#endif // ATEN_CPU_STATIC_DISPATCH

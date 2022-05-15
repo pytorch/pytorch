@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/ScalarType.h>
+#include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
 
 // these just expose TypeMeta/ScalarType bridge functions in c10
@@ -26,7 +27,8 @@ static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
 /**
  * typeMetaToScalarType(), lifted to optional
  */
-static inline optional<at::ScalarType> optTypeMetaToScalarType(optional<caffe2::TypeMeta> type_meta) {
+static inline optional<at::ScalarType> optTypeMetaToScalarType(
+    optional<caffe2::TypeMeta> type_meta) {
   if (!type_meta.has_value()) {
     return c10::nullopt;
   }

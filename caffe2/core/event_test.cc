@@ -28,6 +28,7 @@ TEST(EventCPUTest, EventErrors) {
   Event event(device_option);
 
   event.SetFinished();
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(event.SetFinished("error"), caffe2::EnforceNotMet);
   ASSERT_EQ(event.ErrorMessage(), "No error");
 

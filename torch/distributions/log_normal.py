@@ -27,7 +27,7 @@ class LogNormal(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, loc, scale, validate_args=None):
-        base_dist = Normal(loc, scale)
+        base_dist = Normal(loc, scale, validate_args=validate_args)
         super(LogNormal, self).__init__(base_dist, ExpTransform(), validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -45,6 +45,10 @@ class LogNormal(TransformedDistribution):
     @property
     def mean(self):
         return (self.loc + self.scale.pow(2) / 2).exp()
+
+    @property
+    def mode(self):
+        return (self.loc - self.scale.square()).exp()
 
     @property
     def variance(self):

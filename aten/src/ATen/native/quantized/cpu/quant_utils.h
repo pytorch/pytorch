@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <cmath>
 
@@ -49,6 +50,12 @@ struct TensorQuantizationParams {
   int precision;
 };
 
+// Use fp16_min as the small scale cutoff because we don't want to use scales in
+// fp16 subnormal range. This is to be consistent with Glow and FakeLowP
+// implementation for NNPI.
+constexpr float SMALL_SCALE_THRESHOLD = 6.1e-5f;
+
+// Following implementation should be identical to fbgemm::ChooseQuantizationParams
 inline TensorQuantizationParams ChooseQuantizationParams(
     float min,
     float max,
@@ -104,6 +111,22 @@ inline TensorQuantizationParams ChooseQuantizationParams(
     }
   }
 
+  // Cut off small scale
+  if (scale < SMALL_SCALE_THRESHOLD) {
+    float org_scale = scale;
+    scale = SMALL_SCALE_THRESHOLD;
+    // Adjust the min and max based on the new scale
+    if (min == 0.0f) {
+      max = SMALL_SCALE_THRESHOLD * (qmax - qmin);
+    } else if (max == 0.0f) {
+      min = -SMALL_SCALE_THRESHOLD * (qmax - qmin);
+    } else {
+      float amplifier = SMALL_SCALE_THRESHOLD / org_scale;
+      min *= amplifier;
+      max *= amplifier;
+    }
+  }
+
   // Zero-point computation.
   // First the initial floating-point computation. The zero-point can be
   // determined from solving an affine equation for any known pair
@@ -127,8 +150,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   // to be a middle value between qmin and qmax.
   // If either min or max is 0, then we just use 0 as zero_point.
   if (min < 0 && max > 0 && preserve_sparsity) {
-    const auto midpoint = qmin + (qmax - qmin) / 2;  // Overflow-safe midpoint
-    initial_zero_point = midpoint + 1;
+    initial_zero_point = static_cast<double>(qmin + qmax) / 2;
   }
 
   // Now we need to nudge the zero point to be an integer
@@ -153,7 +175,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
 
 // This function helps to convert the Conv1D dimensions usable by the Conv2d op.
 constexpr int64_t kConv1dSqueezeDim = 0;
-static torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
+static C10_UNUSED torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
                                              int64_t base_value) {
   TORCH_CHECK(arg.size() > 0, "Argument must have elements.");
   torch::List<int64_t> result({arg.get(0), base_value});
@@ -172,7 +194,7 @@ static torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
 inline void HandleWeightsSaturation(int64_t N, float* weight) {
   const float kFp16Max = RawUint16ToFp16(0x7BFF);
   bool found_out_of_range = false;
-  for (int64_t i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     bool saturate = CheckAndSaturate<float>(kFp16Max, weight + i);
     if (saturate) {
       found_out_of_range = true;

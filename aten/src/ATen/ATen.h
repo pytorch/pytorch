@@ -11,7 +11,6 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/DimVector.h>
 #include <ATen/Dispatch.h>
-#include <ATen/DynamicLibrary.h>
 #include <ATen/Formatting.h>
 #include <ATen/Functions.h>
 #include <ATen/NamedTensor.h>
@@ -32,3 +31,4 @@
 #include <ATen/core/UnsafeFromTH.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
+#include <c10/core/InferenceMode.h>

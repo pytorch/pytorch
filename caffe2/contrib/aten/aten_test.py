@@ -1,9 +1,4 @@
-
-
-
-
-
-from caffe2.python import core, dyndep
+from caffe2.python import core
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
@@ -86,7 +81,7 @@ class TestATen(hu.HypothesisTestCase):
             operator="index")
 
         def ref(self, mask):
-            return (self[mask.astype(np.bool)],)
+            return (self[mask.astype(np.bool_)],)
 
         tensor = np.random.randn(2, 3, 4).astype(np.float32)
         mask = np.array([[1, 0, 0], [1, 1, 0]]).astype(np.uint8)

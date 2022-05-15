@@ -1,3 +1,5 @@
+# Owner(s): ["module: numpy"]
+
 import torch
 import numpy as np
 
@@ -6,7 +8,8 @@ from itertools import product
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes)
+    (instantiate_device_type_tests, onlyCPU, dtypes, skipMeta)
+from torch.testing._internal.common_dtype import all_types_and_complex_and
 
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.
@@ -85,7 +88,7 @@ class TestNumPyInterop(TestCase):
                         self.assertEqual(x[i][j], y[i][j])
 
             # empty
-            x = torch.Tensor().to(dtp)
+            x = torch.tensor([]).to(dtp)
             y = x.numpy()
             self.assertEqual(y.size, 0)
 
@@ -142,7 +145,7 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(x.dtype, torch.bool)
 
         y = x.numpy()
-        self.assertEqual(y.dtype, np.bool)
+        self.assertEqual(y.dtype, np.bool_)
         for i in range(len(x)):
             self.assertEqual(x[i], y[i])
 
@@ -150,13 +153,13 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(x.dtype, torch.bool)
 
         y = x.numpy()
-        self.assertEqual(y.dtype, np.bool)
+        self.assertEqual(y.dtype, np.bool_)
         self.assertEqual(x[0], y[0])
 
     def test_from_numpy(self, device) -> None:
         dtypes = [
             np.double,
-            np.float,
+            np.float64,
             np.float16,
             np.complex64,
             np.complex128,
@@ -166,7 +169,7 @@ class TestNumPyInterop(TestCase):
             np.int8,
             np.uint8,
             np.longlong,
-            np.bool,
+            np.bool_,
         ]
         complex_dtypes = [
             np.complex64,
@@ -225,24 +228,52 @@ class TestNumPyInterop(TestCase):
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
+    @skipMeta
+    def test_from_list_of_ndarray_warning(self, device):
+        warning_msg = r"Creating a tensor from a list of numpy.ndarrays is extremely slow"
+        with self.assertWarnsOnceRegex(UserWarning, warning_msg):
+            torch.tensor([np.array([0]), np.array([1])], device=device)
+
+    def test_ctor_with_invalid_numpy_array_sequence(self, device):
+        # Invalid list of numpy array
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
+            torch.tensor([np.random.random(size=(3, 3)), np.random.random(size=(3, 0))], device=device)
+
+        # Invalid list of list of numpy array
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
+            torch.tensor([[np.random.random(size=(3, 3)), np.random.random(size=(3, 2))]], device=device)
+
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
+            torch.tensor([[np.random.random(size=(3, 3)), np.random.random(size=(3, 3))],
+                          [np.random.random(size=(3, 3)), np.random.random(size=(3, 2))]], device=device)
+
+        # expected shape is `[1, 2, 3]`, hence we try to iterate over 0-D array
+        # leading to type error : not a sequence.
+        with self.assertRaisesRegex(TypeError, "not a sequence"):
+            torch.tensor([[np.random.random(size=(3)), np.random.random()]], device=device)
+
+        # list of list or numpy array.
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
+            torch.tensor([[1, 2, 3], np.random.random(size=(2,)), ], device=device)
+
     @onlyCPU
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
         dtypes = [
             np.double,
-            np.float,
+            np.float64,
             np.float16,
             np.int64,
             np.int32,
             np.int16,
             np.uint8,
-            np.bool,
+            np.bool_,
         ]
         for dtype in dtypes:
             self.assertEqual(dtype(42), torch.tensor(dtype(42)).item())
 
     @onlyCPU
     def test_numpy_index(self, device):
-        i = np.int32([0, 1, 2])
+        i = np.array([0, 1, 2], dtype=np.int32)
         x = torch.randn(5, 5)
         for idx in i:
             self.assertFalse(isinstance(idx, int))
@@ -269,13 +300,14 @@ class TestNumPyInterop(TestCase):
             np.uint8,
         ]
         for tp, dtype in zip(types, dtypes):
-            if np.dtype(dtype).kind == 'u':
+            # Only concrete class can be given where "Type[number[_64Bit]]" is expected
+            if np.dtype(dtype).kind == 'u':  # type: ignore[misc]
                 # .type expects a XxxTensor, which have no type hints on
                 # purpose, so ignore during mypy type checking
-                x = torch.Tensor([1, 2, 3, 4]).type(tp)  # type: ignore
+                x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
                 array = np.array([1, 2, 3, 4], dtype=dtype)
             else:
-                x = torch.Tensor([1, -2, 3, -4]).type(tp)  # type: ignore
+                x = torch.tensor([1, -2, 3, -4]).type(tp)  # type: ignore[call-overload]
                 array = np.array([1, -2, 3, -4], dtype=dtype)
 
             # Test __array__ w/o dtype argument
@@ -297,7 +329,8 @@ class TestNumPyInterop(TestCase):
             x = torch.IntTensor([1, -2, 3, -4])
             asarray = np.asarray(x, dtype=dtype)
             self.assertEqual(asarray.dtype, dtype)
-            if np.dtype(dtype).kind == 'u':
+            # Only concrete class can be given where "Type[number[_64Bit]]" is expected
+            if np.dtype(dtype).kind == 'u':  # type: ignore[misc]
                 wrapped_x = np.array([1, -2, 3, -4], dtype=dtype)
                 for i in range(len(x)):
                     self.assertEqual(asarray[i], wrapped_x[i])
@@ -309,7 +342,7 @@ class TestNumPyInterop(TestCase):
         float_types = [torch.DoubleTensor, torch.FloatTensor]
         float_dtypes = [np.float64, np.float32]
         for tp, dtype in zip(float_types, float_dtypes):
-            x = torch.Tensor([1, 2, 3, 4]).type(tp)  # type: ignore
+            x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
             array = np.array([1, 2, 3, 4], dtype=dtype)
             for func in ['sin', 'sqrt', 'ceil']:
                 ufunc = getattr(np, func)
@@ -321,7 +354,7 @@ class TestNumPyInterop(TestCase):
 
         # Test functions with boolean return value
         for tp, dtype in zip(types, dtypes):
-            x = torch.Tensor([1, 2, 3, 4]).type(tp)  # type: ignore
+            x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
             array = np.array([1, 2, 3, 4], dtype=dtype)
             geq2_x = np.greater_equal(x, 2)
             geq2_array = np.greater_equal(array, 2).astype('uint8')
@@ -333,7 +366,9 @@ class TestNumPyInterop(TestCase):
     def test_multiplication_numpy_scalar(self, device) -> None:
         for np_dtype in [np.float32, np.float64, np.int32, np.int64, np.int16, np.uint8]:
             for t_dtype in [torch.float, torch.double]:
-                np_sc = np_dtype(2.0)
+                # mypy raises an error when np.floatXY(2.0) is called
+                # even though this is valid code
+                np_sc = np_dtype(2.0)  # type: ignore[abstract, arg-type]
                 t = torch.ones(2, requires_grad=True, dtype=t_dtype)
                 r1 = t * np_sc
                 self.assertIsInstance(r1, torch.Tensor)
@@ -346,8 +381,9 @@ class TestNumPyInterop(TestCase):
 
     @onlyCPU
     def test_parse_numpy_int(self, device):
+        # Only concrete class can be given where "Type[number[_64Bit]]" is expected
         self.assertRaisesRegex(RuntimeError, "Overflow",
-                               lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))
+                               lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))  # type: ignore[call-overload]
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
             scalar = 3
@@ -360,7 +396,7 @@ class TestNumPyInterop(TestCase):
             self.assertEqual(torch.ones([2, 2, 2, 2]).mean(scalar), torch.ones([2, 2, 2, 2]).mean(np_val))
 
             # numpy integral type parses like a python int in custom python bindings:
-            self.assertEqual(torch.Storage(np_val).size(), scalar)  # type: ignore
+            self.assertEqual(torch.Storage(np_val).size(), scalar)  # type: ignore[attr-defined]
 
             tensor = torch.tensor([2], dtype=torch.int)
             tensor[0] = np_val
@@ -383,7 +419,7 @@ class TestNumPyInterop(TestCase):
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.long).storage())
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.uint8).storage())
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_numpy_scalar_cmp(self, device, dtype):
         if dtype.is_complex:
             tensors = (torch.tensor(complex(1, 3), dtype=dtype, device=device),

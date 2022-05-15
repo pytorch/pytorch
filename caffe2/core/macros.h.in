@@ -57,7 +57,9 @@ static_assert(
   {"BLAS_INFO", "${BLAS_INFO}"}, \
   {"LAPACK_INFO", "${LAPACK_INFO}"}, \
   {"USE_CUDA", "${USE_CUDA}"}, \
+  {"USE_ROCM", "${USE_ROCM}"}, \
   {"CUDA_VERSION", "${CUDA_VERSION}"}, \
+  {"ROCM_VERSION", "${ROCM_VERSION}"}, \
   {"USE_CUDNN", "${USE_CUDNN}"}, \
   {"CUDNN_VERSION", "${CUDNN_VERSION}"}, \
   {"USE_NCCL", "${USE_NCCL}"}, \

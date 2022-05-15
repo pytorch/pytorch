@@ -86,9 +86,15 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
     set(OMP_FLAG_GNU "-fopenmp")
     set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
 
-    # AppleClang may need a header file, search for omp.h with hints to brew
-    # default include dir
-    find_path(__header_dir "omp.h" HINTS "/usr/local/include")
+    if(WIN32)
+      # Prefer Intel OpenMP header which can be provided by CMAKE_INCLUDE_PATH.
+      # Note that CMAKE_INCLUDE_PATH is searched before CMAKE_SYSTEM_INCLUDE_PATH (MSVC path in this case)
+      find_path(__header_dir "omp.h")
+    else()
+      # AppleClang may need a header file, search for omp.h with hints to brew
+      # default include dir
+      find_path(__header_dir "omp.h" HINTS "/usr/local/include")
+    endif()
     set(OMP_FLAG_AppleClang "-Xpreprocessor -fopenmp" "-Xpreprocessor -fopenmp -I${__header_dir}")
 
     set(OMP_FLAG_HP "+Oopenmp")
@@ -101,7 +107,12 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
       set(OMP_FLAG_Intel "-qopenmp")
     endif()
     set(OMP_FLAG_MIPSpro "-mp")
-    set(OMP_FLAG_MSVC "-openmp:experimental" "-openmp")
+    if(__header_dir MATCHES ".*Microsoft Visual Studio.*")
+      # MSVC header. No need to pass it as additional include.
+      set(OMP_FLAG_MSVC "-openmp:experimental" "-openmp")
+    else()
+      set(OMP_FLAG_MSVC "-openmp:experimental -I${__header_dir}" "-openmp -I${__header_dir}")
+    endif()
     set(OMP_FLAG_PathScale "-openmp")
     set(OMP_FLAG_NAG "-openmp")
     set(OMP_FLAG_Absoft "-openmp")

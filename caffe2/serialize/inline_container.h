@@ -5,7 +5,9 @@
 #include <cstring>
 #include <fstream>
 #include <istream>
+#include <mutex>
 #include <ostream>
+#include <unordered_set>
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Backend.h>
@@ -121,6 +123,7 @@ class TORCH_API PyTorchStreamReader final {
   std::string archive_name_plus_slash_;
   std::shared_ptr<ReadAdapterInterface> in_;
   int64_t version_;
+  std::mutex reader_lock_;
 };
 
 class TORCH_API PyTorchStreamWriter final {
@@ -138,6 +141,8 @@ class TORCH_API PyTorchStreamWriter final {
       bool compress = false);
   void writeEndOfFile();
 
+  const std::unordered_set<std::string>& getAllWrittenRecords();
+
   bool finalized() const {
     return finalized_;
   }
@@ -152,13 +157,20 @@ class TORCH_API PyTorchStreamWriter final {
   void setup(const std::string& file_name);
   void valid(const char* what, const char* info = "");
   size_t current_pos_ = 0;
+  std::unordered_set<std::string> files_written_;
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
   std::string archive_name_plus_slash_;
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
+  // This number will be updated when the model has operators
+  // that have valid upgraders.
+#if ENABLE_UPGRADERS
+  uint64_t version_ = kMinProducedFileFormatVersion;
+#else
   uint64_t version_ = kProducedFileFormatVersion;
+#endif
   bool finalized_ = false;
   bool err_seen_ = false;
   friend size_t ostream_write_func(
@@ -179,7 +191,7 @@ size_t getPadding(
     size_t filename_size,
     size_t size,
     std::string& padding_buf);
-}
+} // namespace detail
 
 } // namespace serialize
 } // namespace caffe2

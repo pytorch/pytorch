@@ -27,7 +27,7 @@ here is the basic process.
       tracker <https://github.com/pytorch/pytorch/issues/>`__ and see if
       there are any issues you know how to fix. Issues that are
       confirmed by other contributors tend to be better to investigate.
-      We also maintain some labels for issues which are likely to be
+      We also maintain some labels for issues that are likely to be
       good for new people, e.g., **bootcamp** and **1hr**, although
       these labels are less well maintained.
    -  Join us on Slack and let us know you're interested in getting to
@@ -51,7 +51,7 @@ here is the basic process.
       bit when making this case.
 
       - **Adding operators / algorithms from recently-released research**
-        is generally not accepted, unless there is overwhelming evidence that
+        is generally not accepted unless there is overwhelming evidence that
         this newly published work has ground-breaking results and will eventually
         become a standard in the field. If you are not sure where your method falls,
         open an issue first before implementing a PR.
@@ -97,7 +97,7 @@ Proposing new features
 
 New feature ideas are best discussed on a specific issue. Please include
 as much information as you can, any accompanying data, and your proposed
-solution. The PyTorch team and community frequently reviews new issues
+solution. The PyTorch team and community frequently review new issues
 and comments where they think they can help. If you feel confident in
 your solution, go ahead and implement it.
 
@@ -171,7 +171,7 @@ We appreciate your help reviewing and commenting on pull requests. Our
 team strives to keep the number of open pull requests at a manageable
 size, we respond quickly for more information if we need it, and we
 merge PRs that we think are useful. However, due to the high level of
-interest, additional eyes on pull requests is appreciated.
+interest, additional eyes on the pull requests are appreciated.
 
 Improving code readability
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -200,8 +200,8 @@ Triaging issues
 ~~~~~~~~~~~~~~~
 
 If you feel that an issue could benefit from a particular tag or level
-of complexity comment on the issue and share your opinion. If an you
-feel an issue isn't categorized properly comment and let the team know.
+of complexity, comment on the issue and share your opinion. If you
+feel an issue isn't categorized properly, comment and let the team know.
 
 About open source development
 -----------------------------
@@ -218,11 +218,11 @@ aspects of the development process may seem unusual to you.
    will take running code and rough consensus.
 -  **There is a high bar for new functionality that is added.** Unlike
    in a corporate environment, where the person who wrote code
-   implicitly “owns” it and can be expected to take care of it in the
+   implicitly “owns” it and can be expected to take care of it at the
    beginning of its lifetime, once a pull request is merged into an open
    source project, it immediately becomes the collective responsibility
    of all maintainers on the project. When we merge code, we are saying
-   that we, the maintainers, are able to review subsequent changes and
+   that we, the maintainers, can review subsequent changes and
    make a bugfix to the code. This naturally leads to a higher standard
    of contribution.
 
@@ -243,13 +243,13 @@ Common Mistakes To Avoid
    -  When is it OK not to add a test? Sometimes a change can't be
       conveniently tested, or the change is so obviously correct (and
       unlikely to be broken) that it's OK not to test it. On the
-      contrary, if a change is seems likely (or is known to be likely)
+      contrary, if a change seems likely (or is known to be likely)
       to be accidentally broken, it's important to put in the time to
       work out a testing strategy.
 
 -  **Is your PR too long?**
 
-   -  It's easier for us to review and merge small PRs. Difficulty of
+   -  It's easier for us to review and merge small PRs. The difficulty of
       reviewing a PR scales nonlinearly with its size.
    -  When is it OK to submit a large PR? It helps a lot if there was a
       corresponding design discussion in an issue, with sign off from
@@ -259,20 +259,20 @@ Common Mistakes To Avoid
       description of the contents of the PR: it's easier to review code
       if we know what's inside!
 
--  **Comments for subtle things?** In cases where behavior of your code
+-  **Comments for subtle things?** In cases where the behavior of your code
    is nuanced, please include extra comments and documentation to allow
    us to better understand the intention of your code.
--  **Did you add a hack?** Sometimes a hack is the right answer. But
-   usually we will have to discuss it.
--  **Do you want to touch a very core component?** In order to prevent
+-  **Did you add a hack?** Sometimes, the right answer is a hack. But
+   usually, we will have to discuss it.
+-  **Do you want to touch a very core component?** To prevent
    major regressions, pull requests that touch core components receive
    extra scrutiny. Make sure you've discussed your changes with the team
    before undertaking major changes.
 -  **Want to add a new feature?** If you want to add new features,
    comment your intention on the related issue. Our team tries to
    comment on and provide feedback to the community. It's better to have
-   an open discussion with the team and the rest of the community prior
-   to building new features. This helps us stay aware of what you're
+   an open discussion with the team and the rest of the community before
+   building new features. This helps us stay aware of what you're
    working on and increases the chance that it'll be merged.
 -  **Did you touch unrelated code to the PR?** To aid in code review,
    please only include files in your pull request that are directly
@@ -282,7 +282,7 @@ Frequently asked questions
 --------------------------
 
 -  **How can I contribute as a reviewer?** There is lots of value if
-   community developer reproduce issues, try out new functionality, or
+   community developers reproduce issues, try out new functionality, or
    otherwise help us identify or troubleshoot issues. Commenting on
    tasks or pull requests with your environment details is helpful and
    appreciated.
@@ -291,7 +291,7 @@ Frequently asked questions
    re-trigger CI tests. If the tests persist, you'll want to trace
    through the error messages and resolve the related issues.
 -  **What are the most high risk changes?** Anything that touches build
-   configuration is an risky area. Please avoid changing these unless
+   configuration is a risky area. Please avoid changing these unless
    you've had a discussion with the team beforehand.
 -  **Hey, a commit showed up on my branch, what's up with that?**
    Sometimes another community member will provide a patch or fix to
@@ -345,7 +345,7 @@ Tutorials Build Overview
 
 For tutorials, `pull
 requests <https://github.com/pytorch/tutorials/pulls>`__ trigger a
-rebuild the entire site using CircleCI to test the effects of the
+rebuild of the entire site using CircleCI to test the effects of the
 change. This build is sharded into 9 worker builds and takes around 40
 minutes total. At the same time, we do a Netlify build using *make
 html-noplot*, which builds the site without rendering the notebook

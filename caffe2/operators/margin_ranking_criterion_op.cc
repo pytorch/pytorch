@@ -25,6 +25,7 @@ bool MarginRankingCriterionOp<CPUContext>::RunOnDevice() {
   const int* Ydata = Y.data<int>();
   float* output = loss->template mutable_data<float>();
   for (int i = 0; i < X1.numel(); ++i) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     output[i] = std::max(-Ydata[i] * (X1data[i] - X2data[i]) + margin_, 0.f);
   }
   return true;
@@ -48,11 +49,14 @@ bool MarginRankingCriterionGradientOp<CPUContext>::RunOnDevice() {
   float* dX1_data = dX1->template mutable_data<float>();
   float* dX2_data = dX2->template mutable_data<float>();
   for (int i = 0; i < X1.numel(); ++i) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     auto dist = -Ydata[i] * (X1data[i] - X2data[i]) + margin_;
     if (dist < 0.f) {
       dX1_data[i] = dX2_data[i] = 0.f;
     } else {
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       dX1_data[i] = -Ydata[i] * dLoss_data[i];
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       dX2_data[i] = Ydata[i] * dLoss_data[i];
     }
   }

@@ -53,7 +53,7 @@ void addObjectMethods(pybind11::module& m);
 Workspace* GetCurrentWorkspace();
 
 // Get workspace by name. Returns nullptr if none exists by name.
-Workspace* GetWorkspaceByName(const std::string &name);
+Workspace* GetWorkspaceByName(const std::string& name);
 
 class C10_EXPORT BlobFetcherBase {
  public:
@@ -153,12 +153,12 @@ class TensorFetcher : public BlobFetcherBase {
     if (numpy_type == NPY_OBJECT) {
       PyObject** outObj = reinterpret_cast<PyObject**>(outPtr);
       auto* str = tensor.template data<std::string>();
-      for (int i = 0; i < tensor.numel(); ++i) {
+      for (const auto i : c10::irange(tensor.numel())) {
         outObj[i] = PyBytes_FromStringAndSize(str->data(), str->size());
         str++;
         // cleanup on failure
         if (outObj[i] == nullptr) {
-          for (int j = 0; j < i; ++j) {
+          for (const auto j : c10::irange(i)) {
             Py_DECREF(outObj[j]);
           }
           CAFFE_THROW("Failed to allocate string for ndarray of strings.");
@@ -212,7 +212,7 @@ class TensorFeeder : public BlobFeederBase {
     int ndim = PyArray_NDIM(array);
     npy_intp* npy_dims = PyArray_DIMS(array);
     std::vector<int64_t> dims;
-    for (int i = 0; i < ndim; ++i) {
+    for (const auto i : c10::irange(ndim)) {
       dims.push_back(npy_dims[i]);
     }
 
@@ -229,7 +229,7 @@ class TensorFeeder : public BlobFeederBase {
               dims, at::dtype<std::string>().device(Context::GetDeviceType()));
         }
         auto* outPtr = tensor.template mutable_data<std::string>();
-        for (int i = 0; i < tensor.numel(); ++i) {
+        for (const auto i : c10::irange(tensor.numel())) {
           char* str;
           Py_ssize_t strSize;
           if (PyBytes_Check(input[i])) {
@@ -350,10 +350,10 @@ class PythonOpBase : public Operator<Context> {
         auto kwargs = builder_call[2].cast<py::dict>();
         auto built_func = func(*args, **kwargs);
         CAFFE_ENFORCE(built_func);
-        built_func_.reset(
-            new Func{built_func,
-                     OperatorBase::template GetSingleArgument<bool>(
-                         "pass_workspace", false)});
+        built_func_.reset(new Func{
+            built_func,
+            OperatorBase::template GetSingleArgument<bool>(
+                "pass_workspace", false)});
       } catch (const py::error_already_set& e) {
         LOG(ERROR) << "Python exception encountered while creating PythonOp: "
                    << e.what();
@@ -375,7 +375,7 @@ class PythonOpBase : public Operator<Context> {
 
       std::vector<py::object> inputs;
       inputs.reserve(InputSize());
-      for (auto i = 0; i < InputSize(); ++i) {
+      for (const auto i : c10::irange(InputSize())) {
         const auto* blob = &InputBlob(i);
         // Allow CPU tensors in addition to operator context's tensors
         py::object py_obj;
@@ -395,7 +395,7 @@ class PythonOpBase : public Operator<Context> {
       }
       std::vector<py::object> outputs;
       outputs.reserve(OutputSize());
-      for (auto i = 0; i < OutputSize(); ++i) {
+      for (const auto i : c10::irange(OutputSize())) {
         auto* blob = OutputBlob(i);
 
         // Python op is always used with CPUContext only and treats inputs and

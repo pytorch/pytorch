@@ -1,25 +1,21 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/DispatchStub.h>
-#include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAMathCompat.h>
+#include <c10/util/TypeSafeSignMath.h>
+
+#include <type_traits>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
 namespace at { namespace native {
-
-template<typename scalar_t, typename accscalar_t>
-struct MulScalarFunctor {
-    MulScalarFunctor(accscalar_t b_): b(b_) {}
-    __device__ scalar_t operator() (scalar_t a) const {
-      return a * b;
-    }
-  private:
-    accscalar_t b;
-};
 
 template<typename scalar_t>
 struct DivFunctor {
@@ -28,9 +24,9 @@ struct DivFunctor {
   }
 };
 
-template<typename scalar_t>
+template<typename T>
 struct MulFunctor {
-  __device__ scalar_t operator() (scalar_t a, scalar_t b) const {
+  __device__ T operator() (T a, T b) const {
     return a * b;
   }
 };
@@ -44,17 +40,17 @@ struct MulFunctor<bool> {
 };
 
 
-void div_true_kernel_cuda(TensorIterator& iter) {
+void div_true_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_true_cuda", [&]() {
-      using accscalar_t = at::acc_type<scalar_t, true>;
-      auto inv_b = accscalar_t(1.0) / iter.scalar_value<accscalar_t>(2);
+      using opmath_t = at::opmath_type<scalar_t>;
+      auto inv_b = opmath_t(1.0) / iter.scalar_value<opmath_t>(2);
       iter.remove_operand(2);
-      MulScalarFunctor<scalar_t, decltype(inv_b)> f(inv_b);
-      gpu_kernel(iter, f);
+      gpu_kernel(iter, BUnaryFunctor<scalar_t, scalar_t, scalar_t, MulFunctor<opmath_t>>(
+        MulFunctor<opmath_t>(), inv_b));
     });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_true_cuda", [&]() {
@@ -64,7 +60,7 @@ void div_true_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void div_trunc_kernel_cuda(TensorIterator& iter) {
+void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if (isIntegralType(dtype, /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_trunc_cuda", [&]() {
@@ -93,7 +89,7 @@ void div_trunc_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void div_floor_kernel_cuda(TensorIterator& iter) {
+void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   // See NOTE: [Floor Division in Python]
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {
@@ -104,7 +100,7 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
   } else if (isIntegralType(dtype, /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
-        if ((a < 0) != (b < 0)) {
+        if (c10::signs_differ(a, b)) {
           // Subtracts one from the results of truncation division if the
           // divisor and dividend have different sign(bit)s and the remainder of
           // the division is nonzero
@@ -123,6 +119,10 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
       using accscalar_t = at::acc_type<scalar_t, true>;
       auto b = iter.scalar_value<accscalar_t>(2);
+      if (C10_UNLIKELY(b == 0)) {
+        return div_true_kernel_cuda(iter);
+      }
+
       auto inv_b = accscalar_t(1.0) / b;
       iter.remove_operand(2);
       gpu_kernel(iter, [b, inv_b] GPU_LAMBDA (scalar_t a) -> scalar_t {
@@ -139,7 +139,7 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
             floordiv += scalar_t(1.0);
           }
         } else {
-          floordiv = std::copysign(scalar_t(0), a * inv_b);
+          floordiv = c10::cuda::compat::copysign(scalar_t(0), a * inv_b);
         }
         return floordiv;
       });
@@ -147,6 +147,10 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
+        if (C10_UNLIKELY(b == 0)) {
+          return a / b;
+        }
+
         auto mod = std::fmod(a, b);
         auto div = (a - mod) / b;
         if ((mod != 0) && (b < 0) != (mod < 0)) {
@@ -160,7 +164,7 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
             floordiv += scalar_t(1.0);
           }
         } else {
-          floordiv = std::copysign(scalar_t(0), a / b);
+          floordiv = c10::cuda::compat::copysign(scalar_t(0), a / b);
         }
         return floordiv;
       });
@@ -168,24 +172,27 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void mul_kernel_cuda(TensorIterator& iter) {
-  if (!isIntegralType(iter.common_dtype(), /*includeBool*/ true) &&
-    (iter.is_cpu_scalar(1) || iter.is_cpu_scalar(2))) {
-    //if common dtype is half the scalar constant can overflow in half precision, and yet the result can
-    //still be representable in the half dtype. Cast scalar to acc_type to have better accuracy
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
-      using accscalar_t = at::acc_type<scalar_t, true>;
-      int scalar_arg = iter.is_cpu_scalar(1) ? 1 : 2;
-      auto b = iter.scalar_value<accscalar_t>(scalar_arg);
-      iter.remove_operand(scalar_arg);
-      const cuda::OptionalCUDAGuard device_guard(device_of(iter.tensor(1)));
-      MulScalarFunctor<scalar_t, decltype(b)> f(b);
-      gpu_kernel(iter, f);
-    });
+const char mul_name[] = "mul_kernel";
+void mul_kernel_cuda(TensorIteratorBase& iter) {
+  auto common_dtype = iter.common_dtype();
+  if (common_dtype == kComplexHalf) {
+    using scalar_t = c10::complex<at::Half>;
+    #if AT_USE_JITERATOR()
+      static const auto mul_string = jiterator_stringify(
+        template <typename T>
+        T mul_kernel(T a, T b) {
+          return a * b;
+        }
+      );
+      opmath_jitted_gpu_kernel_with_scalars<mul_name, scalar_t, scalar_t>(iter, mul_string);
+    #else
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_gpu_kernel_with_scalars<scalar_t>(iter, MulFunctor<opmath_t>());
+    #endif
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "mul_cuda", [&]() {
-      MulFunctor<scalar_t> f;
-      gpu_kernel_with_scalars(iter, f);
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_gpu_kernel_with_scalars<scalar_t>(iter, MulFunctor<opmath_t>());
     });
   }
 }

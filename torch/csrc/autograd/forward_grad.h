@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 
 namespace torch { namespace autograd {
@@ -84,23 +84,23 @@ struct ForwardGrad;
 #define EXPECTED_MAX_LEVEL 2
 
 struct TORCH_API ForwardADLevel {
-    ForwardADLevel(uint64_t idx): idx_(idx) {}
-    ~ForwardADLevel();
+  ForwardADLevel(uint64_t idx) : idx_(idx) {}
+  ~ForwardADLevel();
 
-    static uint64_t get_next_idx();
-    static void release_idx(uint64_t idx);
-    static std::shared_ptr<ForwardADLevel> get_by_idx(uint64_t idx);
-    static std::shared_ptr<ForwardADLevel> try_get_by_idx(uint64_t idx);
+  static uint64_t get_next_idx();
+  static void release_idx(uint64_t idx);
+  static std::shared_ptr<ForwardADLevel> get_by_idx(uint64_t idx);
+  static std::shared_ptr<ForwardADLevel> try_get_by_idx(uint64_t idx);
 
-    void erase(const std::shared_ptr<ForwardGrad>& grad) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        grads_.erase(grad);
-    }
+  void erase(const std::shared_ptr<ForwardGrad>& grad) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    grads_.erase(grad);
+  }
 
-    void insert(const std::shared_ptr<ForwardGrad>& grad) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        grads_.insert(grad);
-    }
+  void insert(const std::shared_ptr<ForwardGrad>& grad) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    grads_.insert(grad);
+  }
 
 private:
     std::unordered_set<std::shared_ptr<ForwardGrad>> grads_;
@@ -110,72 +110,80 @@ private:
 };
 
 struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
+  ForwardGrad() = default;
 
-    ForwardGrad() {}
+  // This function must only be called when AutogradMeta or SavedVariable is
+  // being destructed as it ensures that:
+  //   - The only (potential) other references to this ForwardGrad are the
+  //     different level it is registered to
+  //   - No other thread will try to call `set_value` or `value` ever from now
+  //   on
+  //   - Any of the ForwardADLevel that this ForwardGrad is registered with
+  //   might
+  //     call `reset` at any point during this function
+  void clear() {
+    c10::SmallVector<uint64_t, EXPECTED_MAX_LEVEL> levels_idx;
 
-    // This function must only be called when AutogradMeta or SavedVariable is being
-    // destructed as it ensures that:
-    //   - The only (potential) other references to this ForwardGrad are the
-    //     different level it is registered to
-    //   - No other thread will try to call `set_value` or `value` ever from now on
-    //   - Any of the ForwardADLevel that this ForwardGrad is registered with might
-    //     call `reset` at any point during this function
-    void clear() {
-        c10::SmallVector<uint64_t, EXPECTED_MAX_LEVEL> levels_idx;
-
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            for (auto& c: content_) {
-                levels_idx.push_back(c.first);
-            }
-        }
-
-        for (auto l_idx: levels_idx) {
-            // Use "try" version here as another thread might have deleted this
-            // level before we got here
-            // This is an owning reference as we want to keep the level alive
-            // until we successfully unregister ourselves
-            auto level = ForwardADLevel::try_get_by_idx(l_idx);
-            if (level) {
-                level->erase(shared_from_this());
-            }
-        }
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      for (auto& c : content_) {
+        levels_idx.push_back(c.first);
+      }
     }
 
-    void set_value(const at::Tensor& value, uint64_t level) {
-        // Owning reference to ensure the forward_level is not destroyed
-        // while we are updating our internal state
-        auto forward_level = ForwardADLevel::get_by_idx(level);
-        forward_level->insert(shared_from_this());
-
-        std::lock_guard<std::mutex> lock(mutex_);
-        content_.insert({level, value});
+    for (auto l_idx : levels_idx) {
+      // Use "try" version here as another thread might have deleted this
+      // level before we got here
+      // This is an owning reference as we want to keep the level alive
+      // until we successfully unregister ourselves
+      auto level = ForwardADLevel::try_get_by_idx(l_idx);
+      if (level) {
+        level->erase(shared_from_this());
+      }
     }
+  }
 
-    // This function removes the tangent for a given level from this ForwardGrad
-    // Use the update_level flag to disable notifying the level about this reset
-    // This flag is most notably used by the ForwardADLevel destructor.
-    void reset(uint64_t level, bool update_level=true) {
-        if (update_level) {
-            ForwardADLevel::get_by_idx(level)->erase(shared_from_this());
-        }
+  void set_value(const at::Tensor& value, uint64_t level) {
+      // Owning reference to ensure the forward_level is not destroyed
+      // while we are updating our internal state
+      auto forward_level = ForwardADLevel::get_by_idx(level);
+      forward_level->insert(shared_from_this());
 
-        std::lock_guard<std::mutex> lock(mutex_);
-        content_.erase(level);
-    }
+      std::lock_guard<std::mutex> lock(mutex_);
+      content_.insert({level, value});
+  }
 
-    const at::Tensor& value(uint64_t level) const;
+  // This function removes the tangent for a given level from this ForwardGrad
+  // Use the update_level flag to disable notifying the level about this reset
+  // This flag is most notably used by the ForwardADLevel destructor.
+  void reset(uint64_t level, bool update_level=true) {
+      if (update_level) {
+          ForwardADLevel::get_by_idx(level)->erase(shared_from_this());
+      }
 
-    bool contains(uint64_t level) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return content_.count(level) > 0;
-    }
+      std::unique_lock<std::mutex> lock(mutex_);
+      const auto& it = content_.find(level);
+      TORCH_INTERNAL_ASSERT(it != content_.end(), "Resetting a non-existent level.");
+      // Keep the Tensor alive until we have released the lock
+      // This is needed as we can be in a case where this function is called by
+      // ForwardADLevel destructor
+      auto t = (*it).second;
+      content_.erase(level);
+      lock.unlock();
+  }
 
-    bool empty() const {
-        return content_.empty();
-    }
+  const at::Tensor& value(uint64_t level) const;
 
-    static const at::Tensor& undef_grad();
+  bool contains(uint64_t level) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      return content_.count(level) > 0;
+  }
+
+  bool empty() const {
+      return content_.empty();
+  }
+
+  static const at::Tensor& undef_grad();
 
 
 private:
@@ -184,10 +192,5 @@ private:
     mutable std::mutex mutex_;
 
 };
-
-// Temporary functions to disable forward AD
-// TODO(alband) remove these when perf issues are solved
-bool TORCH_API isForwardADEnabled();
-void TORCH_API setForwardADEnabled(bool value);
 
 }} // namespace torch::autograd

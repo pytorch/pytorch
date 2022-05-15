@@ -52,7 +52,7 @@ run it. Ensuring that the inputs and outputs of your FX transform are a
         import torch
         import torch.fx
 
-        def transform(m : nn.Module) -> nn.Module):
+        def transform(m : nn.Module) -> nn.Module:
             gm : torch.fx.GraphModule = torch.fx.symbolic_trace(m)
 
             # Modify gm.graph
@@ -228,7 +228,7 @@ Graph Manipulation Examples
 -  `Replace one
    op <https://github.com/pytorch/examples/blob/master/fx/replace_op.py>`__
 -  `Conv/Batch Norm
-   fusion <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/fuser.py>`__
+   fusion <https://github.com/pytorch/pytorch/blob/40cbf342d3c000712da92cfafeaca651b3e0bd3e/torch/fx/experimental/optimization.py#L50>`__
 -  `replace_pattern: Basic usage <https://github.com/pytorch/examples/blob/master/fx/subgraph_rewriter_basic_use.py>`__
 -  `Quantization <https://pytorch.org/docs/master/quantization.html#prototype-fx-graph-mode-quantization>`__
 -  `Invert Transformation <https://github.com/pytorch/examples/blob/master/fx/invert.py>`__
@@ -247,7 +247,7 @@ multiplication after the ``F.relu``, and then clean up the original
 objects to automatically record operations into the :class:`Graph`.
 
 To use this method, we write the operations that we want inserted as regular
-PyTorch code and invoke that code with :class:`Proxy` objects as arugments.
+PyTorch code and invoke that code with :class:`Proxy` objects as arguments.
 These :class:`Proxy` objects will capture the operations that are performed
 on them and append them to the :class:`Graph`.
 
@@ -270,6 +270,7 @@ on them and append them to the :class:`Graph`.
         graph : fx.Graph = tracer_class().trace(model)
         new_graph = fx.Graph()
         env = {}
+        tracer = torch.fx.proxy.GraphAppendingTracer(graph)
         for node in graph.nodes:
             if node.op == 'call_function' and node.target in decomposition_rules:
                 # By wrapping the arguments with proxies,
@@ -277,7 +278,7 @@ on them and append them to the :class:`Graph`.
                 # decomposition rule and implicitly add it
                 # to the Graph by symbolically tracing it.
                 proxy_args = [
-                    fx.Proxy(env[x.name]) if isinstance(x, fx.Node) else x for x in node.args]
+                    fx.Proxy(env[x.name], tracer) if isinstance(x, fx.Node) else x for x in node.args]
                 output_proxy = decomposition_rules[node.target](*proxy_args)
 
                 # Operations on `Proxy` always yield new `Proxy`s, and the
@@ -297,7 +298,13 @@ In addition to avoiding explicit graph manipulation, using :class:`Proxy`\s
 also allows you to specify your rewrite rules as native Python code.
 For transformations that require a large amount of rewrite rules
 (such as vmap or grad), this can often improve readability and
-maintainability of the rules.
+maintainability of the rules. Note that while calling :class:`Proxy` we also
+passed a tracer pointing to the underlying variable `graph`. This is done so
+if in case the operations in graph are n-ary (e.g. add is a binary operator)
+the call to :class:`Proxy` does not create multiple instances of a graph
+tracer which can lead to unexpected runtime errors. We recommend this method
+of using :class:`Proxy` especially when the underlying operators can not be
+safely assumed to be unary.
 
 A worked example of using :class:`Proxy`\s for :class:`Graph` manipulation
 can be found
@@ -397,7 +404,7 @@ Examples of the Interpreter Pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Shape
-   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/shape_prop.py>`__
+   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__
 -  `Performance Profiler <https://github.com/pytorch/tutorials/pull/1319>`__
 
 
@@ -415,6 +422,21 @@ process of transformations that led to the generated code.
 
 If you’re not familiar with debuggers, please see the auxiliary section
 :ref:`Available Debuggers`.
+
+
+Common Pitfalls in Transform Authoring
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* Nondeterministic ``set`` iteration order. In Python, the ``set`` datatype is
+  unordered. Using ``set`` to contain collections of objects like ``Node``\ s,
+  for example, can cause unexpected nondeterminism. An example is iterating
+  over a set of ``Node``\ s to insert them into a ``Graph``. Because the
+  ``set`` data type is unordered, the ordering of the operations in the output
+  program will be nondeterministic and can change across program invocations.
+  The recommended alternative is to use a ``dict`` data type, which is
+  `insertion ordered <https://mail.python.org/pipermail/python-dev/2017-December/151283.html>`_
+  as of Python 3.7 (and as of cPython 3.6). A ``dict`` can be used equivalently
+  to a set by storing values to be deduplicated in the keys of the ``dict``.
 
 Checking Correctness of Modules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -474,7 +496,7 @@ Debugging the Generated Code
 
 Because FX generates the ``forward()`` function on :class:`GraphModule`\s, using
 traditional debugging techniques like ``print`` statements or ``pdb`` is
-not as straightfoward. Luckily, we have several techniques we can use
+not as straightforward. Luckily, we have several techniques we can use
 for debugging the generated code.
 
 Use ``pdb``
@@ -602,28 +624,31 @@ examine our traced module:
     # The generated `forward` function is:
     """
     def forward(self, x, y):
-        add_1 = x + y;  x = y = None
-        return add_1
+        add = x + y;  x = y = None
+        return add
     """
 
     # Print the internal Graph.
     print(traced.graph)
     # This print-out returns:
     """
-    graph(x, y):
-        %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %y), kwargs = {})
-        return add_1
+    graph():
+        %x : [#users=1] = placeholder[target=x]
+        %y : [#users=1] = placeholder[target=y]
+        %add : [#users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
+        return add
     """
 
     # Print a tabular representation of the internal Graph.
     traced.graph.print_tabular()
     # This gives us:
     """
-    opcode         name    target                   args      kwargs
-    -------------  ------  -----------------------  --------  --------
-    placeholder    x       x                        ()        {}
-    placeholder    y       y                        ()        {}
-    call_function  add_1   <built-in function add>  (x, y)    {}
+    opcode         name    target                   args    kwargs
+    -------------  ------  -----------------------  ------  --------
+    placeholder    x       x                        ()      {}
+    placeholder    y       y                        ()      {}
+    call_function  add     <built-in function add>  (x, y)  {}
+    output         output  output                   (add,)  {}
     """
 
 Using the utility functions above, we can compare our traced Module
@@ -725,8 +750,7 @@ For example, let’s examine the following program:
 ::
 
     def func_to_trace(x):
-        dim0 = x.size[0]
-        if dim0 == 3:
+        if x.sum() > 0:
             return torch.relu(x)
         else:
             return torch.neg(x)
@@ -735,7 +759,7 @@ For example, let’s examine the following program:
     """
       <...>
       File "dyn.py", line 6, in func_to_trace
-        if dim0 == 3:
+        if x.sum() > 0:
       File "pytorch/torch/fx/proxy.py", line 155, in __bool__
         return self.tracer.to_bool(self)
       File "pytorch/torch/fx/proxy.py", line 85, in to_bool
@@ -743,8 +767,8 @@ For example, let’s examine the following program:
     torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
     """
 
-The condition to the ``if`` statement relies on the value of ``dim0``,
-which eventually relies on the value of ``x``, a function input. Since
+The condition to the ``if`` statement relies on the value of ``x.sum()``,
+which relies on the value of ``x``, a function input. Since
 ``x`` can change (i.e. if you pass a new input tensor to the traced
 function), this is *dynamic control flow*. The traceback walks back up
 through your code to show you where this situation happens.
@@ -807,8 +831,8 @@ code. This is a valid pattern that is supported by symbolic tracing.
 Many instances of dynamic control flow are semantically static control
 flow. These instances can be made to support symbolic tracing by
 removing the data dependencies on input values, for example by moving
-values to ``Module`` attributes or by passing constant values during
-symbolic tracing:
+values to ``Module`` attributes or by binding concrete values to arguments
+during symbolic tracing:
 
 ::
 
@@ -818,11 +842,7 @@ symbolic tracing:
 
         fx.symbolic_trace(f) # Fails!
 
-        def wrapper(flag):
-            return lambda x: f(x, flag)
-
-        new_f = wrapper(flag=True)
-        fx.symbolic_trace(new_f)
+        fx.symbolic_trace(f, concrete_args={'flag': True})
 
 In the case of truly dynamic control flow, the sections of the program
 that contain this code can be traced as calls to the Method (see
@@ -836,9 +856,9 @@ FX uses ``__torch_function__`` as the mechanism by which it intercepts
 calls (see the `technical
 overview <https://github.com/pytorch/pytorch/blob/master/torch/fx/OVERVIEW.md#technical-details>`__
 for more information about this). Some functions, such as builtin Python
-functions or those in the ``math`` module, are things that are not
-covered by ``__torch_function__``, but we would still like to capture
-them in symbolic tracing. For example:
+functions or those in the ``math`` module, are not covered by
+``__torch_function__``, but we would still like to capture them in
+symbolic tracing. For example:
 
 ::
 
@@ -968,7 +988,18 @@ Miscellanea
       ``ones_like`` or ``zeros_like`` may be a viable substitute.
    -  Nondeterministic constructors (``rand``, ``randn``) will have a
       single random value embedded in the trace. This is likely not the
-      intended behavior.
+      intended behavior. One workaround is to wrap ``torch.randn`` in a ``torch.fx.wrap`` function and call that instead.
+
+    ::
+
+        @torch.fx.wrap
+        def torch_randn(x, shape):
+            return torch.randn(shape)
+
+        def f(x):
+            return x + torch_randn(x, 5)
+        fx.symbolic_trace(f)
+
    -  This behavior may be fixed in a future release.
 
 -  Type annotations
@@ -981,6 +1012,69 @@ Miscellanea
       supported.
    -  Annotations on local names within a function are not currently
       supported.
+
+
+-  Gotcha around ``training`` flag and submodules
+
+   -  When using functionals like ``torch.nn.functional.dropout``, it will be common for the training argument to be passed in as ``self.training``. During FX tracing, this will likely be baked in as a constant value.
+
+    ::
+
+        import torch
+        import torch.fx
+
+        class DropoutRepro(torch.nn.Module):
+          def forward(self, x):
+            return torch.nn.functional.dropout(x, training=self.training)
+
+
+        traced = torch.fx.symbolic_trace(DropoutRepro())
+        print(traced.code)
+        """
+        def forward(self, x):
+          dropout = torch.nn.functional.dropout(x, p = 0.5, training = True, inplace = False);  x = None
+          return dropout
+        """
+
+        traced.eval()
+
+        x = torch.randn(5, 3)
+        torch.testing.assert_allclose(traced(x), x)
+        """
+        AssertionError: Tensor-likes are not close!
+
+        Mismatched elements: 15 / 15 (100.0%)
+        Greatest absolute difference: 1.6207983493804932 at index (0, 2) (up to 1e-05 allowed)
+        Greatest relative difference: 1.0 at index (0, 0) (up to 0.0001 allowed)
+        """
+
+   - However, when the standard ``nn.Dropout()`` submodule is used, the training flag is encapsulated and--because of the preservation of the ``nn.Module`` object model--can be changed.
+
+    ::
+
+        class DropoutRepro2(torch.nn.Module):
+          def __init__(self):
+            super().__init__()
+            self.drop = torch.nn.Dropout()
+
+          def forward(self, x):
+            return self.drop(x)
+
+        traced = torch.fx.symbolic_trace(DropoutRepro2())
+        print(traced.code)
+        """
+        def forward(self, x):
+          drop = self.drop(x);  x = None
+          return drop
+        """
+
+        traced.eval()
+
+        x = torch.randn(5, 3)
+        torch.testing.assert_allclose(traced(x), x)
+
+  - Because of this difference, consider marking modules that interact with the ``training`` flag dynamically as leaf modules.
+
 
 API Reference
 -------------
@@ -1004,6 +1098,7 @@ API Reference
 
 .. autoclass:: torch.fx.Tracer
   :members:
+  :inherited-members:
 
 .. autoclass:: torch.fx.Proxy
 
@@ -1014,3 +1109,13 @@ API Reference
   :members:
 
 .. autofunction:: torch.fx.replace_pattern
+
+
+.. The experimental and passes submodules are missing docs.
+.. Adding it here for coverage but this doesn't add anything to the
+.. rendered doc.
+.. py:module:: torch.fx.passes
+.. py:module:: torch.fx.passes.tests
+.. py:module:: torch.fx.experimental
+.. py:module:: torch.fx.experimental.unification
+.. py:module:: torch.fx.experimental.unification.multipledispatch

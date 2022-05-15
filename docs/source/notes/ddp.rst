@@ -58,6 +58,11 @@ updated, and all models on different processes should be exactly the same.
             join=True)
 
     if __name__=="__main__":
+        # Environment variables which need to be
+        # set when using c10d's default "env"
+        # initialization mode.
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29500"
         main()
 
 
@@ -146,9 +151,9 @@ ProcessGroup
 - `ProcessGroup.hpp <https://github.com/pytorch/pytorch/blob/v1.7.0/torch/lib/c10d/ProcessGroup.hpp>`__:
   contains the abstract API of all process group implementations. The ``c10d``
   library provides 3 implementations out of the box, namely,
-  `ProcessGroupGloo`, `ProcessGroupNCCL`, and `ProcessGroupMPI`. 
-  ``DistributedDataParallel`` uses ``ProcessGroup::broadcast()`` to send  
-  model states from the process with rank 0 to others during initialization  
+  `ProcessGroupGloo`, `ProcessGroupNCCL`, and `ProcessGroupMPI`.
+  ``DistributedDataParallel`` uses ``ProcessGroup::broadcast()`` to send
+  model states from the process with rank 0 to others during initialization
   and ``ProcessGroup::allreduce()`` to sum gradients.
 
 

@@ -72,19 +72,21 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   // bt.actualDim(2) -> Error
   int64_t actualDim(int64_t dim, bool wrap_dim = true) const;
 
+  // We have to override this because we opted into CustomStrides
+  IntArrayRef strides_custom() const override;
   // Override a bunch of methods inherited from TensorImpl to return error messages.
-  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
+  bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
 #ifdef DEBUG
   bool has_storage() const override;
 #endif
-  const Storage& storage() const override;
 
  private:
   // see NOTE: [BatchedTensorImpl levels invariant]
   void checkInvariants() const;
+  const char* tensorimpl_type_name() const override;
 
   Tensor value_;
 

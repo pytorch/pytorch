@@ -1,12 +1,20 @@
-#import <ATen/native/metal/MetalConvolution.h>
-#import <Foundation/Foundation.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
-using namespace at::native::metal;
 @interface MPSCNNNeuronOp : NSObject
 
++ (MPSCNNNeuronHardSigmoid*)hardSigmoid API_AVAILABLE(ios(11.0), macos(10.13));
 + (MPSCNNNeuronReLU*)relu;
 + (MPSCNNNeuronSigmoid*)sigmoid;
 + (MPSCNNNeuronTanH*)tanh;
+
+@end
+
+API_AVAILABLE(ios(11.3), macos(10.13), macCatalyst(13.0))
+@interface MPSCNNNeuronOpDescriptor : NSObject
+
++ (MPSNNNeuronDescriptor*)hardSigmoidDescriptor;
++ (MPSNNNeuronDescriptor*)reluDescriptor;
++ (MPSNNNeuronDescriptor*)sigmoidDescriptor;
++ (MPSNNNeuronDescriptor*)tanhDescriptor;
 
 @end

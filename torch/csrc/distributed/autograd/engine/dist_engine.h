@@ -44,9 +44,9 @@ class TORCH_API DistEngine {
   // This method is used to kick off the autograd computation on a node when it
   // receives gradients from the corresponding 'recv' method on another node.
   // The gradients are accumulated in the provided autograd context.
-  std::shared_ptr<c10::ivalue::Future> executeSendFunctionAsync(
+  c10::intrusive_ptr<c10::ivalue::Future> executeSendFunctionAsync(
       const ContextPtr& autogradContext,
-      const std::shared_ptr<torch::autograd::Node>& sendFunction,
+      const std::shared_ptr<SendRpcBackward>& sendFunction,
       bool retainGraph);
 
   // Number of backward passes currently running for the Distributed Engine.
@@ -56,15 +56,14 @@ class TORCH_API DistEngine {
   // to distributed autograd.
   std::unordered_map<std::string, int> getDebugInfo() const;
 
- private:
-  // Make sure this is a singleton.
-  DistEngine();
-  ~DistEngine();
-
   DistEngine(const DistEngine&) = delete;
   DistEngine& operator=(const DistEngine&) = delete;
   DistEngine(DistEngine&&) = delete;
   DistEngine& operator=(DistEngine&&) = delete;
+ private:
+  // Make sure this is a singleton.
+  DistEngine();
+  ~DistEngine();
 
   // Validates the input roots for the backward computations and retrieves the
   // appropriate root edges and corresponding gradients. Populates root_edges
@@ -125,7 +124,7 @@ class TORCH_API DistEngine {
   // Run the local autograd engine using the provided graphTask and graphRoot
   // and accumulate the gradients part 'outputEdges' in the provided autograd
   // context.
-  std::shared_ptr<c10::ivalue::Future> runEngineAndAccumulateGradients(
+  c10::intrusive_ptr<c10::ivalue::Future> runEngineAndAccumulateGradients(
       const ContextPtr& autogradContext,
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges,
@@ -160,6 +159,7 @@ class TORCH_API DistEngine {
 // Guard to clean up resources once the backward pass is done.
 class BackwardPassCleanupGuard {
  public:
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   explicit BackwardPassCleanupGuard(const ContextPtr& autogradContext)
       : autogradContext_(autogradContext) {}
 

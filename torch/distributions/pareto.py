@@ -23,7 +23,7 @@ class Pareto(TransformedDistribution):
 
     def __init__(self, scale, alpha, validate_args=None):
         self.scale, self.alpha = broadcast_all(scale, alpha)
-        base_dist = Exponential(self.alpha)
+        base_dist = Exponential(self.alpha, validate_args=validate_args)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
         super(Pareto, self).__init__(base_dist, transforms, validate_args=validate_args)
 
@@ -40,6 +40,10 @@ class Pareto(TransformedDistribution):
         return a * self.scale / (a - 1)
 
     @property
+    def mode(self):
+        return self.scale
+
+    @property
     def variance(self):
         # var is inf for alpha <= 2
         a = self.alpha.clamp(min=2)
@@ -47,7 +51,7 @@ class Pareto(TransformedDistribution):
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self):
-        return constraints.greater_than(self.scale)
+        return constraints.greater_than_eq(self.scale)
 
     def entropy(self):
         return ((self.scale / self.alpha).log() + (1 + self.alpha.reciprocal()))

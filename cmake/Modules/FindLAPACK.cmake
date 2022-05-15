@@ -119,6 +119,18 @@ if(BLAS_FOUND)
     endif()
   endif()
 
+  # FlexiBLAS
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "flexi"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" FLEXIBLAS_LAPACK_WORKS)
+    set(CMAKE_REQUIRED_LIBRARIES)
+    if(FLEXIBLAS_LAPACK_WORKS)
+      SET(LAPACK_INFO "flexi")
+    else()
+      message(STATUS "Strangely, this FlexiBLAS library does not support Lapack?!")
+    endif()
+  endif()
+
   # OpenBlas
   IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "open"))
     SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
@@ -128,13 +140,7 @@ if(BLAS_FOUND)
       if(NOT LAPACK_CGESDD_WORKS)
         find_library(GFORTRAN_LIBRARY
           NAMES libgfortran.a gfortran
-          PATHS /usr/lib/gcc/aarch64-linux-gnu/9/
-                /usr/lib/gcc/x86_64-redhat-linux/9/
-                /usr/lib/gcc/aarch64-linux-gnu/8/
-                /usr/lib/gcc/x86_64-redhat-linux/8/
-                /usr/lib/gcc/aarch64-linux-gnu/7/
-                /usr/lib/gcc/x86_64-redhat-linux/7/
-                )
+          PATHS ${CMAKE_C_IMPLICIT_LINK_DIRECTORIES})
        list(APPEND CMAKE_REQUIRED_LIBRARIES "${GFORTRAN_LIBRARY}")
        unset(LAPACK_CGESDD_WORKS CACHE)
        check_function_exists("cgesdd_" LAPACK_CGESDD_WORKS)

@@ -89,7 +89,7 @@ Module Finalize(
   // To prevent the JIT optimizations from leveraging the annotated shape info,
   // clear shape information in the graph.
   for (auto func : module.type()->methods()) {
-    ClearProfilingInformation(func->graph());
+    ClearProfilingInformation(toGraphFunction(*func).graph());
   }
 
   auto graph = module.get_method("forward").graph();

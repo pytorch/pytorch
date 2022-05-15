@@ -41,6 +41,7 @@ bool UniqueOp<CPUContext>::DoRunWithType() {
   order_.resize(N);
   std::iota(order_.begin(), order_.end(), 0);
   std::sort(order_.begin(), order_.end(), [input](const int x, const int y) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     return input[x] < input[y];
   });
   int K = N;

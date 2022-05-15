@@ -22,7 +22,7 @@ ext_modules = [
         'torch_test_cpp_extension.cpp', ['extension.cpp'],
         extra_compile_args=CXX_FLAGS),
     CppExtension(
-        'torch_test_cpp_extension.msnpu', ['msnpu_extension.cpp'],
+        'torch_test_cpp_extension.ort', ['ort_extension.cpp'],
         extra_compile_args=CXX_FLAGS),
     CppExtension(
         'torch_test_cpp_extension.rng', ['rng_extension.cpp'],
@@ -40,15 +40,31 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
 
-if not IS_WINDOWS:  # MSVC has bug compiling this example
-    if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
-        extension = CUDAExtension(
-            'torch_test_cpp_extension.torch_library', [
-                'torch_library.cu'
-            ],
-            extra_compile_args={'cxx': CXX_FLAGS,
-                                'nvcc': ['-O2']})
-        ext_modules.append(extension)
+if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
+    extension = CUDAExtension(
+        'torch_test_cpp_extension.torch_library', [
+            'torch_library.cu'
+        ],
+        extra_compile_args={'cxx': CXX_FLAGS,
+                            'nvcc': ['-O2']})
+    ext_modules.append(extension)
+
+# todo(mkozuki): Figure out the root cause
+if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
+    # malfet: One shoudl not assume that PyTorch re-exports CUDA dependencies
+    cublas_extension = CUDAExtension(
+        name='torch_test_cpp_extension.cublas_extension',
+        sources=['cublas_extension.cpp'],
+        libraries=['cublas'] if torch.version.hip is None else [],
+    )
+    ext_modules.append(cublas_extension)
+
+    cusolver_extension = CUDAExtension(
+        name='torch_test_cpp_extension.cusolver_extension',
+        sources=['cusolver_extension.cpp'],
+        libraries=['cusolver'] if torch.version.hip is None else [],
+    )
+    ext_modules.append(cusolver_extension)
 
 setup(
     name='torch_test_cpp_extension',

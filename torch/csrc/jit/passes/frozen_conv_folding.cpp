@@ -1,6 +1,8 @@
 #include <ATen/Utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -8,21 +10,23 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
+#include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace torch {
 namespace jit {
 
-using Tensor = at::Tensor;
+namespace {
 
-bool nonConstantParameters(Node* n) {
-  for (size_t i = 1; i < n->inputs().size(); i++) {
-    if (n->inputs().at(i)->node()->kind() != prim::Constant) {
-      return true;
-    }
-  }
-  return false;
-}
+using Tensor = at::Tensor;
 
 bool supportedConvNode(Node* n) {
   switch (n->kind()) {
@@ -41,10 +45,11 @@ bool supportedConvNode(Node* n) {
   }
 }
 
-void FoldFrozenConvBatchnorm(Block* b) {
+bool FoldFrozenConvBatchnorm(Block* b) {
+  bool graph_modified = false;
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldFrozenConvBatchnorm(block);
+      graph_modified |= FoldFrozenConvBatchnorm(block);
     }
 
     if (n->kind() == aten::batch_norm &&
@@ -55,6 +60,15 @@ void FoldFrozenConvBatchnorm(Block* b) {
         continue;
       }
       if (conv->output()->uses().size() > 1) {
+        continue;
+      }
+
+      auto bn_rm_ivalue = bn->namedInput("running_mean");
+      auto bn_rv_ivalue = bn->namedInput("running_var");
+      // check running_mean and running_var has value, if they are
+      // None(track_running_stats=False), skiping the folding path.
+      if (bn_rm_ivalue->type() == NoneType::get() &&
+          bn_rv_ivalue->type() == NoneType::get()) {
         continue;
       }
 
@@ -105,8 +119,10 @@ void FoldFrozenConvBatchnorm(Block* b) {
       conv->replaceInputWith(conv_b_value, fused_conv_b);
 
       bn->output()->replaceAllUsesWith(conv->output());
+      graph_modified = true;
     }
   }
+  return graph_modified;
 }
 
 bool supportedAddOrSub(Node* n) {
@@ -160,7 +176,6 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
     return false;
   }
 
-  auto conv_w = constant_as<Tensor>(conv->namedInput("weight")).value();
   Tensor weight_tensor =
       constant_as<Tensor>(conv->namedInput("weight")).value();
 
@@ -175,12 +190,11 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
     if (!opDoesNotBroadCastWithConv(op_tensor, weight_tensor)) {
       return false;
     }
-    if (!op_tensor.is_floating_point()) {
-      return false;
-    }
-    if (c10::promoteTypes(
+
+    if (!op_tensor.is_floating_point() &&
+        c10::promoteTypes(
             op_tensor.scalar_type(), weight_tensor.scalar_type()) !=
-        weight_tensor.scalar_type()) {
+            weight_tensor.scalar_type()) {
       return false;
     }
   }
@@ -208,23 +222,24 @@ Tensor resizeConstantScalarOrTensorToShape(
     ret_tensor = ret_tensor.reshape({1});
     ret_tensor = ret_tensor.expand(shape);
   } else {
-    TORCH_INTERNAL_ASSERT(ret_tensor.numel() == at::prod_intlist(shape));
+    TORCH_INTERNAL_ASSERT(ret_tensor.numel() == c10::multiply_integers(shape));
     ret_tensor = ret_tensor.view(shape);
   }
   return ret_tensor;
 }
 
-void FoldFrozenConvAddOrSub(Block* b) {
+bool FoldFrozenConvAddOrSub(Block* b) {
+  bool graph_modified = false;
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldFrozenConvAddOrSub(block);
+      graph_modified |= FoldFrozenConvAddOrSub(block);
     }
 
     if (supportedAddOrSub(n) && supportedConvNode(n->inputs().at(0)->node())) {
       auto conv = n->inputs().at(0)->node();
-      auto add_or_div = n;
+      auto add_or_sub = n;
 
-      if (!checkConvAndBroadcastingOpPreConditions(conv, add_or_div)) {
+      if (!checkConvAndBroadcastingOpPreConditions(conv, add_or_sub)) {
         continue;
       }
 
@@ -232,38 +247,40 @@ void FoldFrozenConvAddOrSub(Block* b) {
           constant_as<Tensor>(conv->namedInput("weight")).value();
 
       Tensor add_or_sub_tensor = resizeConstantScalarOrTensorToShape(
-          add_or_div->inputs().at(1),
+          add_or_sub->inputs().at(1),
           {weight_tensor.size(0)},
           weight_tensor.options());
       Tensor bias;
       if (conv->namedInput("bias")->type() == NoneType::get()) {
-        bias = at::zeros_like(add_or_sub_tensor);
+        bias = at::zeros_like(add_or_sub_tensor, weight_tensor.dtype());
       } else {
         bias = constant_as<Tensor>(conv->namedInput("bias")).value();
       }
 
       WithInsertPoint guard(conv);
 
-      add_or_div->replaceInputWith(
+      add_or_sub->replaceInputWith(
           conv->output(), b->owningGraph()->insertConstant(bias));
-      add_or_div->replaceInput(
+      add_or_sub->replaceInput(
           1, b->owningGraph()->insertConstant(add_or_sub_tensor));
 
-      auto stack_out = runNodeIfInputsAreConstant(add_or_div);
+      auto stack_out = runNodeIfInputsAreConstant(add_or_sub);
       TORCH_INTERNAL_ASSERT(stack_out && stack_out->size() == 1);
-      Tensor fuse_bias = (*stack_out)[0].toTensor();
+      Tensor fuse_bias = (*stack_out)[0].toTensor().to(bias.dtype());
 
       auto fused_conv_b = b->owningGraph()->insertConstant(fuse_bias);
       auto conv_b_value = conv->namedInput("bias");
 
       fused_conv_b->setDebugName(
           conv_b_value->debugName() + "_fused_" +
-          add_or_div->kind().toUnqualString());
+          add_or_sub->kind().toUnqualString());
       conv->replaceInputWith(conv_b_value, fused_conv_b);
-      add_or_div->output()->replaceAllUsesWith(conv->output());
+      add_or_sub->output()->replaceAllUsesWith(conv->output());
+      graph_modified = true;
       // DCE run after cleans up nodes
     }
   }
+  return graph_modified;
 }
 
 bool supportedMulOrDiv(Node* n) {
@@ -277,10 +294,11 @@ bool supportedMulOrDiv(Node* n) {
   return n->isMemberOf(add_set);
 }
 
-void FoldFrozenConvMulOrDiv(Block* b) {
+bool FoldFrozenConvMulOrDiv(Block* b) {
+  bool graph_modified = false;
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldFrozenConvMulOrDiv(block);
+      graph_modified |= FoldFrozenConvMulOrDiv(block);
     }
 
     if (supportedMulOrDiv(n) && supportedConvNode(n->inputs().at(0)->node())) {
@@ -299,7 +317,8 @@ void FoldFrozenConvMulOrDiv(Block* b) {
       // channels-out resize it to the shape that will broadcast to
       // weight_tensor when the op is run so we dont change weight size
       std::vector<int64_t> weight_compatible_size = {out_channels};
-      for (int64_t i = 1; i < weight_tensor.ndimension(); ++i) {
+      for (const auto i : c10::irange(1, weight_tensor.ndimension())) {
+        (void)i; // Suppress unused variable warning
         weight_compatible_size.push_back(1);
       }
 
@@ -317,7 +336,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
 
       auto stack_out = runNodeIfInputsAreConstant(mul_or_div);
       TORCH_INTERNAL_ASSERT(stack_out && stack_out->size() == 1);
-      Tensor fuse_weight = (*stack_out)[0].toTensor();
+      Tensor fuse_weight = (*stack_out)[0].toTensor().to(weight_tensor.dtype());
 
       auto fused_conv_weight = b->owningGraph()->insertConstant(fuse_weight);
       auto conv_weight_value = conv->namedInput("weight");
@@ -341,7 +360,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
 
         auto stack_out = runNodeIfInputsAreConstant(mul_or_div);
         TORCH_INTERNAL_ASSERT(stack_out && stack_out->size() == 1);
-        Tensor fuse_bias = (*stack_out)[0].toTensor();
+        Tensor fuse_bias = (*stack_out)[0].toTensor().to(bias.dtype());
 
         auto fused_conv_bias = b->owningGraph()->insertConstant(fuse_bias);
         auto conv_b_value = conv->namedInput("bias");
@@ -351,24 +370,31 @@ void FoldFrozenConvMulOrDiv(Block* b) {
             mul_or_div->kind().toUnqualString());
         conv->replaceInputWith(conv_b_value, fused_conv_bias);
       }
+      graph_modified = true;
       // DCE run after cleans up nodes
     }
   }
+  return graph_modified;
 }
 
-void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
-  FoldFrozenConvBatchnorm(graph->block());
+} // namespace
+
+bool FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
+  bool graph_modified = FoldFrozenConvBatchnorm(graph->block());
   EliminateDeadCode(graph);
+  return graph_modified;
 }
 
-void FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph) {
-  FoldFrozenConvAddOrSub(graph->block());
+bool FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph) {
+  bool graph_modified = FoldFrozenConvAddOrSub(graph->block());
   EliminateDeadCode(graph);
+  return graph_modified;
 }
 
-void FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph) {
-  FoldFrozenConvMulOrDiv(graph->block());
+bool FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph) {
+  bool graph_modified = FoldFrozenConvMulOrDiv(graph->block());
   EliminateDeadCode(graph);
+  return graph_modified;
 }
 
 } // namespace jit

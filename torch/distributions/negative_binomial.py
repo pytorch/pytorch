@@ -10,14 +10,14 @@ class NegativeBinomial(Distribution):
     Creates a Negative Binomial distribution, i.e. distribution
     of the number of successful independent and identical Bernoulli trials
     before :attr:`total_count` failures are achieved. The probability
-    of failure of each Bernoulli trial is :attr:`probs`.
+    of success of each Bernoulli trial is :attr:`probs`.
 
     Args:
         total_count (float or Tensor): non-negative number of negative Bernoulli
             trials to stop, although the distribution is still valid for real
             valued count
-        probs (Tensor): Event probabilities of failure in the half open interval [0, 1)
-        logits (Tensor): Event log-odds for probabilities of failure
+        probs (Tensor): Event probabilities of success in the half open interval [0, 1)
+        logits (Tensor): Event log-odds for probabilities of success
     """
     arg_constraints = {'total_count': constraints.greater_than_eq(0),
                        'probs': constraints.half_open_interval(0., 1.),
@@ -60,6 +60,10 @@ class NegativeBinomial(Distribution):
         return self.total_count * torch.exp(self.logits)
 
     @property
+    def mode(self):
+        return ((self.total_count - 1) * self.logits.exp()).floor().clamp(min=0.)
+
+    @property
     def variance(self):
         return self.mean / torch.sigmoid(-self.logits)
 
@@ -96,5 +100,6 @@ class NegativeBinomial(Distribution):
 
         log_normalization = (-torch.lgamma(self.total_count + value) + torch.lgamma(1. + value) +
                              torch.lgamma(self.total_count))
+        log_normalization[self.total_count + value == 0.] = 0.
 
         return log_unnormalized_prob - log_normalization

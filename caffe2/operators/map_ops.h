@@ -1,6 +1,11 @@
 #ifndef CAFFE2_OPERATORS_MAP_OPS_H_
 #define CAFFE2_OPERATORS_MAP_OPS_H_
 
+#include "caffe2/core/blob_serialization.h"
+#include "caffe2/core/context.h"
+#include "caffe2/core/operator.h"
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <iterator>
 #include <string>
@@ -8,10 +13,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include "caffe2/core/blob_serialization.h"
-#include "caffe2/core/context.h"
-#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
@@ -130,7 +131,7 @@ class KeyValueToMapOp final : public Operator<Context> {
 
     auto* map_data = this->template Output<MapType>(MAP);
 
-    for (int i = 0; i < key_input.numel(); ++i) {
+    for (const auto i : c10::irange(key_input.numel())) {
       map_data->emplace(key_data[i], value_data[i]);
     }
 
@@ -257,7 +258,7 @@ class MapDeserializer : public BlobDeserializerBase {
     auto* value_data = value_tensor.data<VALUE_T>();
 
     auto* map_ptr = blob->template GetMutable<MapType>();
-    for (int i = 0; i < key_tensor.numel(); ++i) {
+    for (const auto i : c10::irange(key_tensor.numel())) {
       map_ptr->emplace(key_data[i], value_data[i]);
     }
   }

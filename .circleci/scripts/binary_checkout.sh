@@ -49,13 +49,14 @@ if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   git reset --hard "$CIRCLE_SHA1"
 elif [[ -n "${CIRCLE_SHA1:-}" ]]; then
   # Scheduled workflows & "smoke" binary build on master on PR merges
+  DEFAULT_BRANCH="$(git remote show $CIRCLE_REPOSITORY_URL | awk '/HEAD branch/ {print $NF}')"
   git reset --hard "$CIRCLE_SHA1"
-  git checkout -q -B master
+  git checkout -q -B $DEFAULT_BRANCH
 else
   echo "Can't tell what to checkout"
   exit 1
 fi
-retry git submodule update --init --recursive
+retry git submodule update --init --recursive --jobs 0
 echo "Using Pytorch from "
 git --no-pager log --max-count 1
 popd

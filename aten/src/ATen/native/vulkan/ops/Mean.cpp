@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
@@ -55,20 +56,19 @@ Tensor mean(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::mean.dim");
+
     if C10_LIKELY(v_input.has_image()) {
       const struct Block final {
         uvec3 extents;
         int32_t range;
-        ivec2 iextents;
+        uvec3 iextents;
       } block {
         v_output.extents(),
         safe_downcast<int32_t>(
             v_input_sizes[Layout::Activation4D::width] *
             v_input_sizes[Layout::Activation4D::height]),
-        {
-          safe_downcast<int32_t>(v_input_sizes[Layout::Activation4D::width]),
-          safe_downcast<int32_t>(v_input_sizes[Layout::Activation4D::height]),
-        },
+        v_input.extents()
       };
 
       context->dispatch(
@@ -79,7 +79,8 @@ Tensor mean(
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           keepdim ? VK_KERNEL(mean) : VK_KERNEL(mean2d),
-          v_output.extents(),
+          v_input.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -107,7 +108,7 @@ Tensor mean(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("mean.dim", TORCH_FN(mean));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mean.dim"), TORCH_FN(mean));
 }
 
 #endif /* USE_VULKAN_API */

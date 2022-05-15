@@ -3,9 +3,10 @@
 #else
 
 template <class io>
-void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size);
+void THPStorage_(writeFileRaw)(c10::StorageImpl *self, io fd, bool save_size, uint64_t element_size);
 
 template <class io>
-THWStorage * THPStorage_(readFileRaw)(io fd, THWStorage *storage);
+c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw)(
+    io fd, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size);
 
 #endif

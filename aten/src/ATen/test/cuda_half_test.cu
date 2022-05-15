@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAException.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <cuda.h>
 #include <cuda_fp16.h>
@@ -75,6 +76,13 @@ __device__ void test(){
   assert(::abs(::isnan(Half(0.0)) - ::isnan(0.0f)) <= threshold);
   assert(::abs(::isinf(Half(0.0)) - ::isinf(0.0f)) <= threshold);
 #endif
+
+  // test complex<32>
+  Half real = 3.0f;
+  Half imag = -10.0f;
+  auto complex = c10::complex<Half>(real, imag);
+  assert(complex.real() == real);
+  assert(complex.imag() == imag);
 }
 
 __global__ void kernel(){
@@ -83,6 +91,7 @@ __global__ void kernel(){
 
 void launch_function(){
   kernel<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // half common math functions tests in device

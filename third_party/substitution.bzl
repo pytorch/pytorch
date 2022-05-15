@@ -31,11 +31,11 @@ def template_rule_impl(ctx):
 
 template_rule = rule(
     attrs = {
+        "out": attr.output(mandatory = True),
         "src": attr.label(
             mandatory = True,
             allow_single_file = True,
         ),
-        "out": attr.output(mandatory = True),
         "substitutions": attr.string_dict(mandatory = True),
     },
     # output_to_genfiles is required for header files.
@@ -53,25 +53,26 @@ def header_template_rule_impl(ctx):
         substitutions = ctx.attr.substitutions,
     )
     return [
-            # create a provider which says that this
-            # out file should be made available as a header
-            CcInfo(compilation_context=cc_common.create_compilation_context(
+        # create a provider which says that this
+        # out file should be made available as a header
+        CcInfo(compilation_context = cc_common.create_compilation_context(
 
-                # pass out the include path for finding this header
-                includes=depset([ctx.outputs.out.dirname, ctx.bin_dir.path]),
+            # pass out the include path for finding this header
+            system_includes = depset([ctx.attr.include, ctx.outputs.out.dirname, ctx.bin_dir.path]),
 
-                # and the actual header here.
-                headers=depset([ctx.outputs.out])
-            ))
-        ]
+            # and the actual header here.
+            headers = depset([ctx.outputs.out]),
+        )),
+    ]
 
 header_template_rule = rule(
     attrs = {
+        "include": attr.string(),
+        "out": attr.output(mandatory = True),
         "src": attr.label(
             mandatory = True,
             allow_single_file = True,
         ),
-        "out": attr.output(mandatory = True),
         "substitutions": attr.string_dict(mandatory = True),
     },
     # output_to_genfiles is required for header files.

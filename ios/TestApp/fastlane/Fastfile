@@ -4,7 +4,14 @@ platform :ios do
   before_all do
     setup_circle_ci
   end
-  lane :install_cert do
+  lane :install_root_cert do
+    import_certificate(
+      certificate_path: "AppleWWDRCAG3.cer",
+      keychain_path: "/Users/distiller/Library/Keychains/fastlane_tmp_keychain-db",
+      keychain_password: ""
+    )
+  end
+  lane :install_dev_cert do
     puts "Installing Certificates.p12"
     import_certificate(
       keychain_name: ENV["MATCH_KEYCHAIN_NAME"],
