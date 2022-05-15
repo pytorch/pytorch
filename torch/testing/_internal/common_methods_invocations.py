@@ -14834,7 +14834,7 @@ op_db: List[OpInfo] = [
                        # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_zero_to_zero_correspondence_unary',
                                     dtypes=(torch.chalf,),),
-                   ),
+                   )),
     UnaryUfuncInfo('square',
                    ref=np.square,
                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
