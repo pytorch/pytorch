@@ -2002,6 +2002,7 @@ class TestSparseCSR(TestCase):
                 return a.to_sparse_bsr((2, 2))
             if target_layout is torch.sparse_bsc:
                 return a.to_sparse_bsc((2, 2))
+            raise NotImplementedError(repr(a))
 
         def _to_from_layout(layout_a, layout_b):
             a = make_tensor((6, 10), dtype=torch.float, device=device)

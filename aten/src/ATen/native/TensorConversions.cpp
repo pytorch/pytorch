@@ -470,23 +470,23 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
 
 Tensor dense_to_sparse_csc(const Tensor& self) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to CSC is currently not supported.");
+      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
   return self;
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to BSR is currently not supported.");
+      "Conversion from ", self.layout(), " to SparseBsr is currently not supported.");
   return self;
 }
 
 Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to BSC is currently not supported.");
+      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
   return self;
 }
 
-Tensor csr_to_sparse_csr(const Tensor& self) {
+Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
   // Just returning self doesn't work
   // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
   // "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152, please
@@ -523,19 +523,19 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
 
 Tensor coo_to_sparse_csc(const Tensor& self) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to CSC is currently not supported.");
+      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
   return self;
 }
 
 Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to BSR is currently not supported.");
+      "Conversion from ", self.layout(), " to SparseBsr is currently not supported.");
   return self;
 }
 
 Tensor coo_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to BSC is currently not supported.");
+      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
   return self;
 }
 
@@ -609,7 +609,7 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu)
   if (out_int32) {
     AT_DISPATCH_INTEGRAL_TYPES(
         input.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
-          convert_indices_from_coo_to_csr_cpu<scalar_t, int>(
+          convert_indices_from_coo_to_csr_cpu<scalar_t, int32_t>(
               result, input, size);
         });
   } else {
@@ -820,10 +820,10 @@ Tensor _csr_to_block_csr_cpu(const Tensor& self, IntArrayRef blocksize) {
       result_values.device());
 }
 
-Tensor csr_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
+Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   TORCH_CHECK(
       self.is_sparse_csr(),
-      "Can only convert CSR to BSR, but got ",
+      "Can only convert CSR to SparseBsr, but got ",
       self.layout(),
       " instead.");
   Tensor self_values = self.values();
@@ -854,15 +854,15 @@ Tensor csr_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
       result_values.device());
 }
 
-Tensor csr_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
+Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to BSC is currently not supported.");
+      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
   return self;
 }
 
-Tensor csr_to_sparse_csc(const Tensor& self) {
+Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to CSC is currently not supported.");
+      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
   return self;
 }
 

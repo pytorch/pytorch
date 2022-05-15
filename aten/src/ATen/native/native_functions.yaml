@@ -5800,28 +5800,28 @@
   dispatch:
     CPU, CUDA: dense_to_sparse_csr
     SparseCPU, SparseCUDA: coo_to_sparse_csr
-    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_csr
 
 - func: to_sparse_csc(Tensor self) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_csc
     SparseCPU, SparseCUDA: coo_to_sparse_csc
-    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_csc
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_csc
 
 - func: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_bsr
     SparseCPU, SparseCUDA: coo_to_sparse_bsr
-    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_bsr
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_bsr
 
 - func: to_sparse_bsc(Tensor self, int[2] blocksize) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_bsc
     SparseCPU, SparseCUDA: coo_to_sparse_bsc
-    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_bsc
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_bsc
 
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
