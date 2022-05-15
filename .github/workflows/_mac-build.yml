@@ -77,6 +77,7 @@ jobs:
           fi
 
       - name: Setup miniconda
+        shell: bash -l {0}
         uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
@@ -96,6 +97,7 @@ jobs:
           echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
 
       - name: Build
+        shell: bash -l {0}
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
