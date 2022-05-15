@@ -63,6 +63,13 @@ jobs:
             echo "DEVELOPER_DIR=/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer" >> "${GITHUB_ENV}"
           fi
 
+      - name: Install miniconda
+        run: |
+          if ! command -v conda &> /dev/null
+          then
+            echo "GOood!"
+          fi
+
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
