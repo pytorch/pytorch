@@ -63,26 +63,26 @@ jobs:
             echo "DEVELOPER_DIR=/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer" >> "${GITHUB_ENV}"
           fi
 
-      - name: Install miniconda
-        run: |
-          if ! command -v conda &> /dev/null
-          then
-            brew install --cask miniconda
-            conda info
-            conda init bash
-            source /Users/runner/.bash_profile
-            conda info
-            conda activate
-            conda info
-          fi
+      # - name: Install miniconda
+      #   run: |
+      #     if ! command -v conda &> /dev/null
+      #     then
+      #       brew install --cask miniconda
+      #       conda info
+      #       conda init bash
+      #       source /Users/runner/.bash_profile
+      #       conda info
+      #       conda activate
+      #       conda info
+      #     fi
 
       - name: Setup miniconda
-        shell: bash -l {0}
         uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
           python-version: 3.8
           activate-environment: build
+          miniconda-version: 4.11.0
 
       - name: Install macOS homebrew dependencies
         run: |
@@ -97,7 +97,6 @@ jobs:
           echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
 
       - name: Build
-        shell: bash -l {0}
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
