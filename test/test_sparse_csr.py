@@ -145,6 +145,12 @@ all_sparse_compressed_layouts = parametrize('layout', [
     subtest(torch.sparse_bsc, name='SparseBSC')])
 
 
+def sparse_compressed_nonblock_layouts(test_name='layout'):
+    return parametrize(test_name, [
+        subtest(torch.sparse_csr, name='SparseCSR'),
+        subtest(torch.sparse_csc, name='SparseCSC')])
+
+
 class TestSparseCompressed(TestCase):
     """Testing sparse compressed (CSR, CSC, BSR, BSC) tensor generic features.
     """
@@ -260,6 +266,51 @@ class TestSparseCompressed(TestCase):
                 self.assertEqual(plain_indices, plain_indices_mth(sparse))
                 self.assertEqual(values, sparse.values())
 
+    @skipMeta
+    @sparse_compressed_nonblock_layouts()
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
+    def test_empty(self, layout, device, dtype):
+        ns = [5, 2, 0]
+        batch_shapes = [(), (2,), (2, 3)]
+        compressed_indices_mth = {
+            torch.sparse_csr: torch.Tensor.crow_indices,
+            torch.sparse_csc: torch.Tensor.ccol_indices,
+        }[layout]
+        plain_indices_mth = {
+            torch.sparse_csr: torch.Tensor.col_indices,
+            torch.sparse_csc: torch.Tensor.row_indices,
+        }[layout]
+        compressed_dim = {
+            torch.sparse_csr: -2,
+            torch.sparse_csc: -1,
+        }[layout]
+        for m, n, b in itertools.product(ns, ns, batch_shapes):
+            shape = (*b, m, n)
+            result = torch.empty(shape, dtype=dtype, device=device, layout=layout)
+            self.assertEqual(result.shape, shape)
+            self.assertEqual(result.dtype, dtype)
+            self.assertEqual(result.device, torch.device(device))
+            self.assertEqual(result.layout, layout)
+            self.assertEqual(compressed_indices_mth(result).shape, (*b, shape[compressed_dim] + 1,))
+            self.assertEqual(plain_indices_mth(result).shape, (*b, 0,))
+            self.assertEqual(result.values().shape, (*b, 0,))
+            self.assertEqual(result._nnz(), 0)
+            self.assertEqual(compressed_indices_mth(result).device, torch.device(device))
+            self.assertEqual(plain_indices_mth(result).device, torch.device(device))
+            self.assertEqual(result.values().device, torch.device(device))
+            self.assertEqual(compressed_indices_mth(result).dtype, torch.int64)
+            self.assertEqual(plain_indices_mth(result).dtype, torch.int64)
+            self.assertEqual(result.values().dtype, dtype)
+
+    @skipMeta
+    @sparse_compressed_nonblock_layouts()
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    def test_empty_errors(self, layout, device, dtype):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "torch.empty: Only batched sparse compressed \\(non-block\\) tensors are supported"
+                                    ", but got size"):
+            torch.empty((5,), dtype=dtype, device=device, layout=layout)
+
 
 class TestSparseCSR(TestCase):
 
@@ -331,35 +382,6 @@ class TestSparseCSR(TestCase):
         # assigning to sparse trhough indexing is disabled
         with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
             sparse[0, 0, 0, 0] = 99.0
-
-    @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
-    def test_empty(self, device, dtype):
-        ns = [5, 2, 0]
-        batch_shapes = [(), (2,), (2, 3)]
-        for m, n, b in itertools.product(ns, ns, batch_shapes):
-            shape = (*b, m, n)
-            result = torch.empty(shape, dtype=dtype, device=device, layout=torch.sparse_csr)
-            self.assertEqual(result.shape, shape)
-            self.assertEqual(result.dtype, dtype)
-            self.assertEqual(result.device, torch.device(device))
-            self.assertEqual(result.layout, torch.sparse_csr)
-            self.assertEqual(result.crow_indices().shape, (*b, shape[-2] + 1,))
-            self.assertEqual(result.col_indices().shape, (*b, 0,))
-            self.assertEqual(result.values().shape, (*b, 0,))
-            self.assertEqual(result._nnz(), 0)
-            self.assertEqual(result.crow_indices().device, torch.device(device))
-            self.assertEqual(result.col_indices().device, torch.device(device))
-            self.assertEqual(result.values().device, torch.device(device))
-            self.assertEqual(result.crow_indices().dtype, torch.int64)
-            self.assertEqual(result.col_indices().dtype, torch.int64)
-            self.assertEqual(result.values().dtype, dtype)
-
-    @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
-    def test_empty_errors(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only batched sparse CSR matrices are supported, but got size"):
-            torch.empty((5,), dtype=dtype, device=device, layout=torch.sparse_csr)
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
