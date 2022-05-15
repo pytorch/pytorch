@@ -28,6 +28,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+from torch.distributed.utils import _to_kwargs
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -429,8 +430,12 @@ class FullyShardedDataParallel(nn.Module):
     .. warning::
         Module should be already placed on the destination device or
         device is set properly using ``torch.cuda.set_device(device_id)``.
+        Alternatively, if module is input on CPU, ``device_id`` argument can
+        be specified to move module to CUDA device during initialization.
         FSDP will get compute device from module first, if module device
-        is CPU, FSDP will then get compute device from current device.
+        is CPU, FSDP will then get compute device from current device. Note
+        that if ``device_id`` is specified, compute device will always match
+        ``device_id``.
 
     .. warning::
         FSDP currently does not support gradient accumulation outside
@@ -441,6 +446,11 @@ class FullyShardedDataParallel(nn.Module):
     .. warning::
         Changing the original parameter variable names after construction will
         lead to undefined behavior.
+
+    .. note::
+        Inputs into FSDP ``forward`` function will be moved to compute device
+        (same device FSDP module is on) before running ``forward``, so user does
+        not have to manually move inputs from CPU -> GPU.
 
     Args:
         module (nn.Module):
@@ -548,6 +558,15 @@ class FullyShardedDataParallel(nn.Module):
                 >>> # Will initialize via deferred_init.materialize_module().
                 >>> fsdp_model = FSDP(module, auto_wrap_policy=size_based_auto_wrap_policy)
 
+        device_id (Optional[Union[int, torch.device]]): An ``int`` or ``torch.device``
+            describing the CUDA device the FSDP module should be moved to determining where
+            initialization such as sharding takes place. If this argument is not specified
+            and ``module`` is on CPU, we will move ``module`` to current CUDA device for faster
+            initialization and move ``module`` back to CPU before returning.
+            If specified, resulting FSDP instances will reside on this device.
+            Note that if ``device_id`` is specified but ``module`` is already
+            on a different CUDA device, an error will be thrown. (Default: ``None``)
+
     """
 
     def __init__(
@@ -561,6 +580,7 @@ class FullyShardedDataParallel(nn.Module):
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
+        device_id: Optional[Union[int, torch.device]] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -628,6 +648,24 @@ class FullyShardedDataParallel(nn.Module):
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
+        if device_id is not None:
+            self.device_id = (
+                device_id if isinstance(device_id, torch.device)
+                else torch.device(device_id)
+            )
+            # If user passed in something like torch.device("cuda"),
+            # device index of current device is unclear, make it explicit.
+            if self.device_id == torch.device("cuda"):
+                warnings.warn(
+                    f"Passed in {self.device_id} does not have explicit index, "
+                    f"setting it to current index: {torch.cuda.current_device()}. "
+                    "If this is not correct, please explicitly call torch.cuda.set_device()"
+                    "before FSDP initialization or pass in explicit device index as device_id argument."
+                )
+                self.device_id = torch.device("cuda", torch.cuda.current_device())
+        else:
+            self.device_id = None
+
 
         is_meta_module = any(p.is_meta for p in module.parameters())
         is_torchdistX_deferred_init = (
@@ -660,9 +698,27 @@ class FullyShardedDataParallel(nn.Module):
                 check_fn = lambda k: not isinstance(k, FullyShardedDataParallel)  # noqa: E731
                 deferred_init.materialize_module(module, check_fn=check_fn)
 
+        # Check that module was placed onto a single device.
+        module_devices = set(
+            p.device for p in module.parameters() if p not in ignored_params and not isinstance(p, FlatParameter)
+        )
+
+        if len(module_devices) > 1:
+            raise RuntimeError(
+                f"FSDP only supports single device modules, but got params on {module_devices}"
+            )
+
+        # Move module appropriately depending on device_id and whether module is on CPU.
+        needs_move_back_to_cpu = self._move_module_if_needed(module)
+
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
+
+        # if device_id is specified, ensure it is the same
+        assert (
+            self.device_id is None or self.compute_device == self.device_id
+        ), f"Inconsistent compute_device and device_id: {self.compute_device} vs {self.device_id}"
 
         # Enum to indicate if we're in the forward/backward pass, idle, etc.
         self.training_state = TrainingState_.IDLE
@@ -753,8 +809,76 @@ class FullyShardedDataParallel(nn.Module):
             for p in self.params:
                 self._offload_to_cpu(p)
 
+        if needs_move_back_to_cpu:
+            # _fsdp_wrapped_module took ownership of module and we deleted
+            # module, so move _fsdp_wrapped_module back.
+            self._fsdp_wrapped_module = self._fsdp_wrapped_module.to(
+                torch.device("cpu")
+            )
+
         # For validating execution order across ranks
         self._exec_order_data = _ExecOrderData()
+
+    def _move_module_if_needed(self, module) -> bool:
+        """
+        Moves module appropriately depending on device_id and
+        whether module is on CPU. Returns a ``bool`` indicating
+        whether the module needs to be moved back to CPU before
+        returning to user.
+        """
+        # Move module to device specified. Note that this is done prior to
+        # setting compute_device to ensure that they align.
+        needs_move_back_to_cpu = False
+        if self.device_id is not None:
+            param = None
+            try:
+                # Get the next unflat param
+                param_gen = module.parameters()
+                while True:
+                    param = next(param_gen)
+                    if not isinstance(param, FlatParameter):
+                        break
+
+                if param.device == torch.device("cpu"):
+                    module = module.to(self.device_id)
+            except StopIteration:
+                # this FSDP instance manages no parameters.
+                pass
+
+            # For GPU modules, module device should match device_id.
+            if param is not None and param.device != self.device_id:
+                raise RuntimeError(
+                    f"Module on rank {self.rank} is given device_id argument "
+                    f"{self.device_id}, but is on {param.device}. "
+                    " Either move module before FSDP init or omit device_id argument."
+                )
+        else:
+            # device_id argument is not specified
+            # If module is on CPU, move it to current device and log a warning.
+            try:
+                # Get the next unflat param
+                param_gen = module.parameters()
+                while True:
+                    param = next(param_gen)
+                    if not isinstance(param, FlatParameter):
+                        break
+
+                if param.device == torch.device("cpu"):
+                    warnings.warn(
+                        f"Module is input on CPU, we are moving it to {torch.cuda.current_device()}"
+                        " to perform parameter verification, flattening, sharding, and will"
+                        " move it back after."
+                    )
+                    needs_move_back_to_cpu = True
+                    # Note that this will match self.compute_device, because
+                    # compute_device is computed as current_device for CPU
+                    # modules.
+                    module = module.to(torch.cuda.current_device())
+            except StopIteration:
+                # this FSDP instance manages no parameters
+                pass
+
+        return needs_move_back_to_cpu
 
     def _init_reshard_after_forward(self):
         if self.sharding_strategy == ShardingStrategy.FULL_SHARD:
@@ -1933,6 +2057,17 @@ class FullyShardedDataParallel(nn.Module):
 
             # Start of a forward pass.
             self.training_state = TrainingState_.FORWARD
+            if self._is_root:
+                # TODO: disabling side stream for tensor copies for now, investigate
+                # perf with it on / off.
+                # Place inputs on compute_device. This is a noop if inputs are already
+                # on compute_device. Note that when device_id is specified,
+                # device_id == self.compute_device is guaranteed.
+                # TODO: for mixed precision, move inputs to right device + cast might
+                # be done in one go for performance.
+                args, kwargs = _to_kwargs(args, kwargs, self.compute_device.index, False)
+                args = args[0]
+                kwargs = kwargs[0]
 
             # Cast inputs to their mixed precision type.
             if (
@@ -3519,7 +3654,7 @@ def _get_default_cuda_device(module: nn.Module) -> torch.device:
     except StopIteration:
         pass
     # Fall back to current CUDA device
-    return torch.device("cuda")
+    return torch.device("cuda", torch.cuda.current_device())
 
 
 def _free_storage(data: torch.Tensor) -> None:
