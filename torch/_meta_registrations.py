@@ -82,7 +82,11 @@ def meta_dot(self, tensor):
 
 @torch.library.impl(meta_lib, "var_mean.correction")
 def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
-    output_shape = utils.compute_reduction_output_shape(self.shape, dim)
+    dim = utils.reduction_dims(self.shape, dim)
+    if keepdim:
+        output_shape = [self.shape[i] if i not in dim else 1 for i in range(self.ndim)]
+    else:
+        output_shape = utils.compute_reduction_output_shape(self.shape, dim)
     result1 = self.new_empty(output_shape, dtype=toRealValueType(self.dtype))
     result2 = self.new_empty(output_shape)
     return result1, result2

@@ -349,7 +349,6 @@ meta_function_expected_failures = {
     torch.cov: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.diag: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
     torch.diagflat: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
-    torch.dot: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::dot
     torch.fft.fft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.fft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
     torch.fft.fftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
@@ -405,8 +404,6 @@ meta_function_expected_failures = {
     torch.nn.functional.embedding_bag: {f16, f32, f64},  # aten::_embedding_bag_forward_only
     torch.nn.functional.gaussian_nll_loss: {bf16, f32, f64},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f32, f64},  # aten::grid_sampler_2d, aten::grid_sampler_3d
-    torch.nn.functional.group_norm: {bf16, f32, f64},  # aten::var_mean.correction
-    torch.nn.functional.instance_norm: {f32, f64},  # aten::var_mean.correction
     torch.nn.functional.layer_norm: {bf16, f32, f64},
     torch.nn.functional.max_pool3d: {f32, f64},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {f32, f64},  # aten::max_pool3d_with_indices
@@ -431,7 +428,6 @@ meta_function_expected_failures = {
     torch.std_mean: {bf16, f16, f32, f64},  # aten::std_mean.correction
     torch.take: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::take, aten::take.out
     torch.trace: {f32, f64, i16, i32, i64, i8, u8},  # aten::trace
-    torch.var_mean: {bf16, f16, f32, f64},  # aten::var_mean.correction
     torch.vdot: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::vdot
     torch.view_as_complex: {f16, f32, f64},  # aten::view_as_complex
     torch.qr: {f32, f64},
@@ -520,7 +516,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.cov: {f16},  # aten::_local_scalar_dense
     torch.diag: {bf16, f16},  # aten::diag.out
     torch.diagflat: {bf16, f16},  # aten::diag.out
-    torch.dot: {f16},  # aten::dot
     torch.fft.fft2: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
     torch.fft.fft: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
     torch.fft.fftn: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
@@ -568,8 +563,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.embedding_bag: {bf16},  # aten::_embedding_bag_forward_only
     torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f16},  # aten::grid_sampler_2d, aten::grid_sampler_3d
-    torch.nn.functional.group_norm: {bf16, f16},  # aten::var_mean.correction
-    torch.nn.functional.instance_norm: {bf16, f16},  # aten::var_mean.correction
     torch.nn.functional.layer_norm: {f16},
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -731,7 +724,6 @@ meta_dispatch_expected_failures = {
     aten.nanmedian.dim: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.nansum.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nansum.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.native_group_norm.default: {bf16, f64, f32},
     aten.nll_loss2d_forward.default: {bf16, f64, f32},
     aten.nonzero.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
@@ -760,7 +752,6 @@ meta_dispatch_expected_failures = {
     aten.unique_consecutive.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.unique_dim.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.upsample_nearest3d.vec: {bf16, u8, f64, f32},
-    aten.var_mean.correction: {bf16, f16, f64, f32},
     aten.vdot.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.vdot.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.view_as_complex.default: {c64, f64, c128, f16, f32},
@@ -877,10 +868,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.mvlgamma.out: {f16},  # aten::mvlgamma.out
     aten.nanmedian.default: {f16},  # aten::nanmedian
     aten.nanmedian.dim: {f16},  # aten::nanmedian.dim_values
-    aten.native_batch_norm.default: {bf16, f16},  # aten::var_mean.correction
     aten.native_dropout.default: {bf16, f16, f32, f64},
-    aten.native_group_norm.default: {bf16, f16},  # aten::var_mean.correction
-    aten.native_layer_norm.default: {f16},  # aten::var_mean.correction
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
