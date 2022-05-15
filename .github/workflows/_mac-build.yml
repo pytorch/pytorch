@@ -69,6 +69,8 @@ jobs:
           then
             brew install --cask miniconda
             conda info
+            conda init bash
+            conda info
             conda activate
             conda info
           fi
