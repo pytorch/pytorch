@@ -39,7 +39,7 @@ def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIN
                 return x
 
         def decrease_prec(x):
-            if isinstance(x, Tensor) and x.dtype == computation_dtype:
+            if isinstance(x, Tensor):
                 return x.to(result_dtype)
             else:
                 return x
@@ -699,7 +699,6 @@ def logit_backward(
 
 
 @register_decomposition(aten.native_dropout)
-@pw_cast_for_opmath
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train:
         bool_mask = torch.rand_like(input) < p
@@ -917,7 +916,10 @@ def native_layer_norm_backward(
     input_shape = input.shape
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
-    grad_out_cast, input_cast, weight_cast, bias_cast = [x.to(computation_dtype) if x is not None else x for x in (grad_out, input, weight, bias)]
+    grad_out_cast, input_cast, weight_cast, bias_cast = [
+        x.to(computation_dtype) if x is not None else x
+        for x in (grad_out, input, weight, bias)
+    ]
     assert grad_out_cast is not None
 
     axis = input_ndim - len(normalized_shape)
