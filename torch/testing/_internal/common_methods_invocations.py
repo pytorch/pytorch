@@ -14834,6 +14834,12 @@ op_db: List[OpInfo] = [
                        # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_zero_to_zero_correspondence_unary',
                                     dtypes=(torch.chalf,),),
+                       # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                                    dtypes=(torch.chalf,),),
+                       # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                                    dtypes=(torch.chalf,),),
                    )),
     UnaryUfuncInfo('square',
                    ref=np.square,
