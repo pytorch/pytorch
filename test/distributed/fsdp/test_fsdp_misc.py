@@ -217,6 +217,38 @@ class TestFSDPMisc(FSDPTest):
         inp = mod.get_input(device=torch.device("cpu"))
         fsdp(inp[0]).sum().backward()
 
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_same_model_across_ranks(self):
+        """
+        FSDP broadcasts model from rank 0 to ensure it starts off with the same
+        values.
+        """
+        class MyModel(nn.Module):
+            def __init__(self, rank):
+                super().__init__()
+                # Seed via rank to make model different across ranks
+                torch.manual_seed(rank)
+                torch.cuda.manual_seed(rank)
+                self.lin = nn.Linear(10, 10, bias=False)
+
+        m = MyModel(self.rank).cuda()
+
+        def _validate(model, assert_fn):
+            module_states = [param.detach().cpu() for param in model.parameters()]
+            module_states.extend([buffer.detach().cpu() for buffer in model.buffers()])
+            olist = [None for _ in range(self.world_size)]
+            dist.all_gather_object(olist, module_states, process_group=self.process_group)
+            rank0_states = olist[0]
+            for state in olist[1:]:
+                for p1, p2 in zip(rank0_states, state):
+                    assert_fn(p1, p2)
+
+        _validate(m, equal=False)
+        # FSDP makes the model the same during init
+        fsdp = FSDP(m)
+        with fsdp.summon_full_params(fsdp):
+            _validate(fsdp, equal=True)
+
 instantiate_parametrized_tests(TestFSDPMisc)
 
 if __name__ == "__main__":
