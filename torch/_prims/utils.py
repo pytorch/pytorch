@@ -929,8 +929,9 @@ def compute_reduction_output_shape(
 
     return tuple(new_shape)
 
-def validate_no_repeating_dims(dims: Sequence) -> bool:
-    if (len(dims) != len(set(dims))):
+
+def validate_no_repeating_dims(dims: Sequence):
+    if len(dims) != len(set(dims)):
         raise RuntimeError("duplicate value in the list of dims")
 
 
@@ -938,7 +939,7 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
     if dims is None:
         return tuple(range(len(shape)))
     dims = tuple(canonicalize_dim(len(shape), idx) for idx in dims)
-    validate_no_repeating_dims()
+    validate_no_repeating_dims(dims)
     return dims
 
 
