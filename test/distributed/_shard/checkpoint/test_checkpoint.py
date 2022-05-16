@@ -99,7 +99,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
     def test_validate_metadata(self) -> None:
         module = TestModule()
 
-        metadata, _, _ = _prepare(module.state_dict())
+        metadata, _, _ = _prepare(module.state_dict(), True)
         self.assertTrue(
             "regular" in metadata.state_dict_metadata,
             f"keys: {metadata.state_dict_metadata.keys()}",
@@ -132,7 +132,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
     def gen_metadata(self) -> Metadata:
         module = TestModule()
         # compute the default saved metadata (must pass include_non_replicated_tensors or we'll get incomplete MD)
-        metadata, _, _ = _prepare(module.state_dict())
+        metadata, _, _ = _prepare(module.state_dict(), True)
 
         # _prepare only produc
         metadata = [metadata]
@@ -248,7 +248,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
             'bytes': [1, 2, 3, 4],
         }
 
-        metadata, bytes_reqs, tensor_reqs = _prepare(state_dict)
+        metadata, bytes_reqs, tensor_reqs = _prepare(state_dict, write_replicated_data=self.rank == 0)
 
         if self.rank == 0:
             self.assertEqual(1, len(bytes_reqs))
@@ -409,21 +409,28 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
 
     def _test_save(self, state_dict, coordinator=0, **kwargs):
+        no_dist = not dist.is_initialized()
+
         def _save():
             save_state_dict(
                 state_dict,
                 storage_writer=FaultyStorageWriter(kwargs),
                 coordinator_rank=coordinator,
+                no_dist=no_dist,
             )
         self._test_dist_failure(_save, kwargs)
 
     def _test_load(self, state_dict, coordinator=0, **kwargs):
+        no_dist = not dist.is_initialized()
+        write_replicated = dist.is_initialized() and dist.get_rank() == coordinator
+
         def _load():
-            metadata, _, _ = _prepare(state_dict)
+            metadata, _, _ = _prepare(state_dict, write_replicated)
             load_state_dict(
                 state_dict,
                 storage_reader=FaultyStorageReader(metadata, kwargs),
                 coordinator_rank=coordinator,
+                no_dist=no_dist,
             )
 
         self._test_dist_failure(_load, kwargs)

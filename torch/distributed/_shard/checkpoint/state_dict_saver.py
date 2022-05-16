@@ -31,7 +31,8 @@ from .api import CheckpointException
 
 def _prepare(
     state_dict: Dict[str, Any],
-    process_group: Optional[dist.ProcessGroup] = None
+    write_replicated_data: bool,
+    process_group: Optional[dist.ProcessGroup] = None,
 ) -> Tuple[Metadata, List[BytesWriteRequest], List[TensorWriteRequest]]:
     """
     Build the serialization plan for a given state_dict
@@ -61,9 +62,6 @@ def _prepare(
     tensor_write_requests: List[TensorWriteRequest] = []
     bytes_write_requests: List[BytesWriteRequest] = []
     storage_key_to_fqn: Dict[str, str] = dict()
-    # The assumption is that all non ShardedTensor items are replicated
-    #   and we can save them from rank 0.
-    write_replicated_data = not (dist.is_initialized() and dist.get_rank(process_group) != 0)
 
     for fqn, obj in state_dict.items():
         if isinstance(obj, ShardedTensor):
@@ -93,6 +91,7 @@ def save_state_dict(
     storage_writer: StorageWriter,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
+    no_dist: bool = False
 ) -> None:
     """
     Save a distributed model in SPMD style.
@@ -111,11 +110,16 @@ def save_state_dict(
     If using the `process_group` argument, make sure that only its ranks
     call `save_state_dict` and that all data in state_dict belong to it.
 
+    This function can be used to save a state_dict with an intialized process
+    group by passing `no_dist=True`. This can be used to produce a checkpoint
+    that can consumed by load_state_dict is a SPMD fashion.
+
     Args:
         state_dict (Dict[str, Any]) : A state_dict
         storage_writer (StorageWriter): Instance of StorageWrite use to perform writes.
         process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
         coordinator_rank (int): Rank to use to coordinate the checkpoint, rank0 is used by default
+        no_dist (bool): Don't attempt to save in SPMD style. Default to false
 
     Example:
         >>> my_model = MyModule()
@@ -137,7 +141,8 @@ def save_state_dict(
         is the user's responsibility to ensure that this is set so that each rank
         has an individual GPU, via ``torch.cuda.set_device()``
     """
-    is_coordinator = not dist.is_initialized() or dist.get_rank(process_group) == coordinator_rank
+    is_coordinator = no_dist or dist.get_rank(process_group) == coordinator_rank
+
     exceptions: List[Optional[BaseException]] = [None]
     if is_coordinator:
         try:
@@ -146,7 +151,7 @@ def save_state_dict(
             exceptions = [e]
 
     # Writing can only start once prepare has finished
-    if dist.is_initialized():
+    if not no_dist:
         dist.broadcast_object_list(exceptions, group=process_group, src=coordinator_rank)
 
     if exceptions[0] is not None:
@@ -158,7 +163,7 @@ def save_state_dict(
             metadata,
             bytes_write_requests,
             tensor_write_requests,
-        ) = _prepare(state_dict, process_group)
+        ) = _prepare(state_dict, is_coordinator, process_group)
 
         combined_writes: List[Union[TensorWriteRequest, BytesWriteRequest]] = []
         combined_writes.extend(tensor_write_requests)
@@ -174,7 +179,7 @@ def save_state_dict(
 
     all_errors: List[Optional[BaseException]]
     # collect all write errors
-    if dist.is_initialized():
+    if not no_dist:
         all_errors = [None] * dist.get_world_size(process_group)
         dist.gather_object(
             obj=rank_write_error,
@@ -201,7 +206,7 @@ def save_state_dict(
             node_failures = {i: err for i, err in enumerate(all_errors) if err is not None}
             result[0] = CheckpointException(message, node_failures)
 
-    if dist.is_initialized():
+    if not no_dist:
         dist.broadcast_object_list(
             result,
             group=process_group,

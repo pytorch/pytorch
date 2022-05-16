@@ -94,6 +94,7 @@ def load_state_dict(
     storage_reader: StorageReader,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
+    no_dist: bool = False
 ) -> None:
     """
     Load a distributed state_dict in SPMD style.
@@ -113,12 +114,17 @@ def load_state_dict(
     Users must call `load_state_dict` on the root module to ensure load
     pos-processing and non-tensor data properly propagates.
 
+    This function can be used for local inference and load a checkpoint
+    produced by ``save_state_dict`` without having a process group initialized
+    by passing `no_dist=True` and by using Tensors instead of ShardedTensors.
+
     Args:
         state_dict (Dict[str, Any]) : The state_dict to load. Note that this
             state dict will updated in places.
         storage_reader (StorageReader): StorageReader used to load data from.
         process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
         coordinator_rank (int): Rank to use to coordinate the checkpoint, rank0 is used by default
+        no_dist (bool): Don't attempt to load in SPMD style. Default to false
 
     Returns:
         None.
@@ -146,7 +152,7 @@ def load_state_dict(
         is the user's responsibility to ensure that this is set so that each rank
         has an individual GPU, via ``torch.cuda.set_device()``
     """
-    is_coordinator = not dist.is_initialized() or dist.get_rank(process_group) == coordinator_rank
+    is_coordinator = no_dist or dist.get_rank(process_group) == coordinator_rank
 
     try:
         metadata = storage_reader.read_metadata()
@@ -171,31 +177,24 @@ def load_state_dict(
     except BaseException as e:
         result = e
 
-    global_result: List[Optional[CheckpointException]] = [None]
-    if dist.is_initialized():
+    global_result: Optional[CheckpointException] = None
+    if not no_dist:
         # FIXME we could do an all_to_all_object if once existed
         all_errors = [None] * dist.get_world_size(process_group)
 
-        dist.gather_object(
+        dist.all_gather_object(
+            object_list=all_errors,
             obj=result,
-            object_gather_list=all_errors if is_coordinator else None,
-            dst=coordinator_rank,
-        )
+            group=process_group)
 
-        if is_coordinator:
-            node_failures = cast(Dict[int, BaseException], {i: err for i, err in enumerate(all_errors) if err is not None})
-            if len(node_failures) > 0:
-                global_result[0] = CheckpointException("failed to read checkpoint", node_failures)
-
-        dist.broadcast_object_list(
-            object_list=global_result,
-            group=process_group,
-            src=coordinator_rank)
+        node_failures = cast(Dict[int, BaseException], {i: err for i, err in enumerate(all_errors) if err is not None})
+        if len(node_failures) > 0:
+            global_result = CheckpointException("failed to read checkpoint", node_failures)
     elif result is not None:
-        global_result = [CheckpointException("failed to read storage", {coordinator_rank : result})]
+        global_result = CheckpointException("failed to read storage", {coordinator_rank : result})
 
-    if global_result[0] is not None:
-        raise global_result[0]
+    if global_result is not None:
+        raise global_result
 
 
 def _validate_sharded_tensor(
