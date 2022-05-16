@@ -171,13 +171,13 @@ class MetaConverter:
 
 
 def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
-    def test_assert(cond, msg):
-        if not cond:
-            raise RuntimeError(msg_callable(msg))
     flat_meta_rs, _ = tree_flatten(meta_rs)
     flat_rs, _ = tree_flatten(rs)
     test_case.assertEqual(len(flat_meta_rs), len(flat_rs))
     for i, meta_r, r in zip(range(len(flat_rs)), flat_meta_rs, flat_rs):
+        def test_assert(cond, msg):
+            if not cond:
+                raise RuntimeError(f"output {i}: {msg_callable(msg)}")
         if not isinstance(r, torch.Tensor):
             continue
         test_assert(isinstance(meta_r, torch.Tensor), f"but real {i}th result is Tensor")
@@ -305,12 +305,15 @@ failed to run: {resolve_name(func)}(
 )""") from e
         else:
             try:
+                delim = ',\n  '
                 assert_ref_meta_equal(test_case, meta_rs, rs, lambda msg: f"""\
 meta disagrees with real impl:
 {resolve_name(func)}(
-*{verbose_print(meta_args)},
-**{verbose_print(meta_kwargs)}
-) = {verbose_print(meta_rs)}
+  {delim.join(map(verbose_print, meta_args))},
+  {delim.join(k + ": " + verbose_print(v) for k, v in meta_kwargs.items())}
+) = (
+  {delim.join(map(verbose_print, meta_rs))}
+)
 {msg}
 """)
             except Exception:
@@ -802,6 +805,8 @@ meta_dispatch_skips = {
     aten.index_add.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},  # TODO
     aten.index_add.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},  # TODO
     aten.isnan.default: {f64, f32},
+    aten.native_batch_norm.default: {f64, f32},  # waiting on https://github.com/pytorch/pytorch/pull/77407
+    aten.native_layer_norm.default: {bf16, f64, f32},
     aten.mul.Scalar: {i64, bf16, f16, f32, i8, f64, i16, i32},  # test_dispatch_meta_gradient_cpu_bfloat16
     aten.slice.Tensor: {c32},  # TODO
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
@@ -868,7 +873,9 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.mvlgamma.out: {f16},  # aten::mvlgamma.out
     aten.nanmedian.default: {f16},  # aten::nanmedian
     aten.nanmedian.dim: {f16},  # aten::nanmedian.dim_values
+    aten.native_batch_norm.default: {bf16, f16},  # waiting on https://github.com/pytorch/pytorch/pull/77407
     aten.native_dropout.default: {bf16, f16, f32, f64},
+    aten.native_layer_norm.default: {f16},  # aten::var_mean.correction
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
