@@ -268,23 +268,23 @@ auto steal_or_default(T& it) {
   }
 }
 
-std::deque<Result> RecordQueue::getRecords(
+std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     std::function<time_t(approx_time_t)> time_converter) {
   auto converter = [&](approx_time_t t) {
     return t == std::numeric_limits<approx_time_t>::min()
         ? std::numeric_limits<int64_t>::min()
         : time_converter(t) / 1000; // ns to ms
   };
-  std::deque<Result> out;
+  std::vector<std::shared_ptr<Result>> out;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
     for (auto& i : queue.backend_events_) {
       auto start_time = i.start_time_us_;
-      out.emplace_back(
+      out.emplace_back(Result::create(
           start_time,
           /*start_tid_=*/queue.tid(),
           /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/std::move(i));
+          /*extra_fields_=*/std::move(i)));
     }
     queue.backend_events_.clear();
 
@@ -295,7 +295,7 @@ std::deque<Result> RecordQueue::getRecords(
     auto gpu_fallback_it = queue.gpu_fallback_.begin();
     for (auto& i : queue.op_events_) {
       auto start_time = converter(i.start_time_);
-      out.emplace_back(
+      out.emplace_back(Result::create(
           start_time,
           /*start_tid_=*/queue.tid(),
           /*kineto_info_=*/queue.kineto_info(),
@@ -307,7 +307,7 @@ std::deque<Result> RecordQueue::getRecords(
               steal_or_default(jit_stack_it),
               steal_or_default(jit_module_it),
               steal_or_default(extra_args_it),
-              steal_or_default(gpu_fallback_it)));
+              steal_or_default(gpu_fallback_it))));
     }
     queue.op_events_.clear();
     queue.inputs_outputs_.clear();
@@ -318,17 +318,17 @@ std::deque<Result> RecordQueue::getRecords(
 
     for (auto& i : queue.allocations_) {
       auto start_time = converter(i.start_time_);
-      out.emplace_back(
+      out.emplace_back(Result::create(
           start_time,
           /*start_tid_=*/queue.tid(),
           /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/std::move(i));
+          /*extra_fields_=*/std::move(i)));
     }
     queue.allocations_.clear();
   }
 
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-    return a.start_time_us_ < b.start_time_us_;
+    return a->start_time_us_ < b->start_time_us_;
   });
   return out;
 }
