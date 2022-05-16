@@ -252,6 +252,7 @@ void FusionExecutor::compileFusion(
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "failed to assign a fusion_id_ after compilation.");
 
+#ifndef __HIP_PLATFORM_HCC__
   // The driver API call requires an int argument.
   int max_dynamic_smem = 0;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncGetAttribute(
@@ -259,6 +260,7 @@ void FusionExecutor::compileFusion(
       CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
       compiled_kernel_.function));
   maybe_available_dynamic_smem_ = max_dynamic_smem;
+#endif
 }
 
 namespace {
@@ -949,11 +951,16 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (execute_kernel_) {
     if (maybe_available_dynamic_smem_.has_value() &&
         launch_params_.smem() > maybe_available_dynamic_smem_.value()) {
+#ifndef __HIP_PLATFORM_HCC__
       // Increase limit of dynamic shared memory if needed.
       AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncSetAttribute(
           compiled_kernel_.function,
           CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
           launch_params_.smem()));
+#else
+      TORCH_INTERNAL_ASSERT(
+          false, "cuFuncSetAttribute not supported with HIP.");
+#endif
     }
     if (!kernel()->summary().has_cooperative_grid_reduction) {
       FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchKernel");
