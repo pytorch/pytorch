@@ -1305,7 +1305,7 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
           sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
     }
 
-    const auto nneg_index = [&index, size, dim]() -> Tensor {
+    const auto nneg_index = [&index, size]() -> Tensor {
       auto nneg_index = at::empty_like(index, at::MemoryFormat::Contiguous);
 
       auto iter = TensorIteratorConfig()
