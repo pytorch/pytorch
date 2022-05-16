@@ -8,7 +8,6 @@ on:
       - ciflow/nightly/*
   workflow_dispatch:
 
-
 concurrency:
   group: ${{ github.workflow }}--${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -31,3 +30,22 @@ jobs:
       push: true
     secrets:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  pytorch-xla-linux-bionic-py3_7-clang8-build:
+    name: pytorch-xla-linux-bionic-py3.7-clang8
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: pytorch-xla-linux-bionic-py3.7-clang8
+      docker-image-name: xla_base
+
+  pytorch-xla-linux-bionic-py3_7-clang8-test:
+    name: pytorch-xla-linux-bionic-py3.7-clang8
+    uses: ./.github/workflows/_linux-test.yml
+    needs: pytorch-xla-linux-bionic-py3_7-clang8-build
+    with:
+      build-environment: pytorch-xla-linux-bionic-py3.7-clang8
+      docker-image: ${{ needs.pytorch-xla-linux-bionic-py3_7-clang8-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "xla", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}

@@ -99,6 +99,14 @@ function checkout_install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive https://github.com/pytorch/xla.git
+    git clone --recursive https://github.com/pytorch/xla.git --quiet
+    pushd xla
+    # if this is a scheduled workflow (should be nightly), we will update the file containing the commit hash
+    # if the workflow succeeds, then in the "Update XLA commit hash" step it will commit this change to master
+    if [[ $GITHUB_EVENT_NAME == 'schedule' ]]; then
+      git rev-parse master > .github/xla_commit_hash.txt
+    fi
+    git checkout "$(cat .github/xla_commit_hash.txt)"
+    popd
   fi
 }
