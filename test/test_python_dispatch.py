@@ -1157,10 +1157,10 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
                 kwargs["dtype"] = data.dtype
                 kwargs["layout"] = data.layout
                 kwargs["requires_grad"] = True
-                kwargs['use_custom_strides'] = True
+                kwargs['dispatch_strides'] = True
                 return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
             else:
-                return torch.Tensor._make_subclass(cls, data, require_grad=True, use_custom_strides=True)
+                return torch.Tensor._make_subclass(cls, data, True, dispatch_strides=True)
 
         for use_wrapper_subclass in [True, False]:
             class ExampleTensor1(torch.Tensor):

@@ -32,7 +32,6 @@ RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 meta_exclude_set = {
     torch.Tensor.__lshift__,  # MISSING aten::__lshift__.Scalar
     torch.Tensor.__lshift__,  # MISSING aten::__lshift__.Tensor
-    torch.Tensor.__reversed__,  # MISSING aten::flip
     torch.Tensor.__rmatmul__,  # MISSING aten::dot
     torch.Tensor.__rshift__,  # MISSING aten::__rshift__.Scalar
     torch.Tensor.__rshift__,  # MISSING aten::__rshift__.Tensor
@@ -62,9 +61,6 @@ meta_exclude_set = {
     torch.Tensor.dot,  # MISSING aten::dot
     torch.Tensor.eig,  # MISSING aten::_local_scalar_dense
     torch.Tensor.equal,  # MISSING aten::equal
-    torch.Tensor.flip,  # MISSING aten::flip
-    torch.Tensor.fliplr,  # MISSING aten::flip
-    torch.Tensor.flipud,  # MISSING aten::flip
     torch.Tensor.floor_divide,  # MISSING aten::floor_divide
     torch.Tensor.frexp,  # MISSING aten::frexp.Tensor_out
     torch.Tensor.geqrf,  # MISSING aten::geqrf
@@ -72,15 +68,12 @@ meta_exclude_set = {
     torch.Tensor.histogram,  # MISSING aten::histogram.bin_ct
     torch.Tensor.inverse,  # MISSING aten::_local_scalar_dense
     torch.Tensor.is_set_to,  # MISSING aten::is_set_to
-    torch.Tensor.isnan,  # MISSING aten::isnan
     torch.Tensor.istft,  # MISSING aten::view_as_complex
     torch.Tensor.kthvalue,  # MISSING aten::kthvalue.values
     torch.Tensor.logcumsumexp,  # MISSING aten::_logcumsumexp
     torch.Tensor.logdet,  # MISSING aten::_local_scalar_dense
-    torch.Tensor.logical_and,  # MISSING aten::logical_and.out
     torch.Tensor.logical_and_,  # MISSING aten::logical_and.out
     torch.Tensor.logical_not,  # MISSING aten::logical_not.out
-    torch.Tensor.logical_or,  # MISSING aten::logical_or.out
     torch.Tensor.logical_or_,  # MISSING aten::logical_or.out
     torch.Tensor.logical_xor,  # MISSING aten::logical_xor.out
     torch.Tensor.logical_xor_,  # MISSING aten::logical_xor.out
@@ -109,7 +102,6 @@ meta_exclude_set = {
     torch.Tensor.nonzero,  # MISSING aten::nonzero
     torch.Tensor.orgqr,  # MISSING aten::linalg_householder_product
     torch.Tensor.ormqr,  # MISSING aten::ormqr
-    torch.Tensor.pinverse,  # MISSING aten::where.self
     torch.Tensor.prod,  # MISSING aten::prod
     torch.Tensor.qr,  # MISSING aten::_linalg_qr_helper
     torch.Tensor.quantile,  # MISSING aten::sort
@@ -117,7 +109,6 @@ meta_exclude_set = {
     torch.Tensor.renorm_,  # MISSING aten::_local_scalar_dense
     torch.Tensor.repeat_interleave,  # MISSING aten::repeat_interleave.Tensor
     torch.Tensor.roll,  # MISSING aten::roll
-    torch.Tensor.rot90,  # MISSING aten::flip
     torch.Tensor.slogdet,  # MISSING aten::linalg_slogdet
     torch.Tensor.solve,  # MISSING aten::_solve_helper
     torch.Tensor.sort,  # MISSING aten::sort
@@ -135,7 +126,6 @@ meta_exclude_set = {
     torch.Tensor.unsqueeze,  # MISSING aten::_local_scalar_dense
     torch.Tensor.var,  # MISSING aten::var.correction
     torch.Tensor.vdot,  # MISSING aten::vdot
-    torch.Tensor.where,  # MISSING aten::where.self
     torch._add_relu,  # MISSING aten::_add_relu.Tensor
     torch._aminmax,  # MISSING aten::_aminmax
     torch._assert_async,  # MISSING aten::_assert_async
@@ -269,9 +259,6 @@ meta_exclude_set = {
     torch.fft.rfft,  # MISSING aten::_fft_r2c
     torch.fft.rfft2,  # MISSING aten::_fft_r2c
     torch.fft.rfftn,  # MISSING aten::_fft_r2c
-    torch.flip,  # MISSING aten::flip
-    torch.fliplr,  # MISSING aten::flip
-    torch.flipud,  # MISSING aten::flip
     torch.floor_divide,  # MISSING aten::floor_divide
     torch.frexp,  # MISSING aten::frexp.Tensor_out
     torch.functional.cdist,  # MISSING aten::_cdist_forward
@@ -291,7 +278,6 @@ meta_exclude_set = {
     torch.histogramdd,  # MISSING aten::_histogramdd_bin_edges
     torch.inner,  # MISSING aten::tensordot.out
     torch.inverse,  # MISSING aten::_local_scalar_dense
-    torch.isnan,  # MISSING aten::isnan
     torch.kthvalue,  # MISSING aten::kthvalue.values
     torch.layer_norm,  # MISSING aten::native_batch_norm
     torch.linalg.cholesky,  # MISSING aten::linalg_cholesky_ex
@@ -312,7 +298,6 @@ meta_exclude_set = {
     torch.linalg.matrix_power,  # MISSING aten::_local_scalar_dense
     torch.linalg.matrix_power,  # MISSING aten::eye.m_out
     torch.linalg.norm,  # MISSING aten::linalg_vector_norm
-    torch.linalg.pinv,  # MISSING aten::where.self
     torch.linalg.qr,  # MISSING aten::_linalg_qr_helper
     torch.linalg.slogdet,  # MISSING aten::linalg_slogdet
     torch.linalg.solve,  # MISSING aten::linalg_solve
@@ -322,9 +307,7 @@ meta_exclude_set = {
     torch.linalg.vector_norm,  # MISSING aten::linalg_vector_norm
     torch.logcumsumexp,  # MISSING aten::_logcumsumexp
     torch.logdet,  # MISSING aten::_local_scalar_dense
-    torch.logical_and,  # MISSING aten::logical_and.out
     torch.logical_not,  # MISSING aten::logical_not.out
-    torch.logical_or,  # MISSING aten::logical_or.out
     torch.logical_xor,  # MISSING aten::logical_xor.out
     torch.logit,  # MISSING aten::logit
     torch.lstsq,  # MISSING aten::lstsq
@@ -350,7 +333,6 @@ meta_exclude_set = {
     torch.nn.functional.batch_norm,  # MISSING aten::native_batch_norm
     torch.nn.functional.binary_cross_entropy,  # MISSING aten::binary_cross_entropy
     torch.nn.functional.channel_shuffle,  # MISSING aten::channel_shuffle
-    torch.nn.functional.cosine_embedding_loss,  # MISSING aten::clamp_min.out
     torch.nn.functional.cross_entropy,  # MISSING aten::_local_scalar_dense
     torch.nn.functional.cross_entropy,  # MISSING aten::nll_loss2d_forward
     torch.nn.functional.ctc_loss,  # MISSING aten::_ctc_loss
@@ -361,10 +343,7 @@ meta_exclude_set = {
     torch.nn.functional.group_norm,  # MISSING aten::native_batch_norm
     torch.nn.functional.hardswish,  # MISSING aten::hardswish
     torch.nn.functional.hardtanh,  # MISSING aten::hardtanh
-    torch.nn.functional.hinge_embedding_loss,  # MISSING aten::clamp_min.out
-    torch.nn.functional.huber_loss,  # MISSING aten::huber_loss
     torch.nn.functional.instance_norm,  # MISSING aten::native_batch_norm
-    torch.nn.functional.kl_div,  # MISSING aten::where.self
     torch.nn.functional.layer_norm,  # MISSING aten::native_batch_norm
     torch.nn.functional.logsigmoid,  # MISSING aten::log_sigmoid_forward
     torch.nn.functional.max_pool3d,  # MISSING aten::max_pool3d_with_indices
@@ -388,7 +367,6 @@ meta_exclude_set = {
     torch.normal,  # MISSING aten::_local_scalar_dense
     torch.orgqr,  # MISSING aten::linalg_householder_product
     torch.ormqr,  # MISSING aten::ormqr
-    torch.pinverse,  # MISSING aten::where.self
     torch.poisson,  # MISSING aten::poisson
     torch.polar,  # MISSING aten::polar.out
     torch.prod,  # MISSING aten::prod
@@ -401,7 +379,6 @@ meta_exclude_set = {
     torch.rnn_relu,  # MISSING aten::relu
     torch.rnn_relu_cell,  # MISSING aten::relu
     torch.roll,  # MISSING aten::roll
-    torch.rot90,  # MISSING aten::flip
     torch.rsub,  # MISSING aten::rsub.Tensor
     torch.searchsorted,  # MISSING aten::searchsorted.Tensor
     torch.slogdet,  # MISSING aten::linalg_slogdet
@@ -419,9 +396,7 @@ meta_exclude_set = {
     torch.var,  # MISSING aten::var.correction
     torch.var_mean,  # MISSING aten::var_mean.correction
     torch.vdot,  # MISSING aten::vdot
-    torch.where,  # MISSING aten::where.self
-    torch.quantile,  # MISSING aten::isnan
-    torch.nanquantile,  # MISSING aten::isnan
+    torch.nanquantile,  # MISSING aten::logical_not.out
 }
 
 # Only some overloads/configurations are covered with meta tensors,
@@ -434,6 +409,7 @@ overload_exclude_set = {
     torch.remainder,  # MISSING aten::remainder.Scalar_Tensor
     torch.linalg.matrix_rank,  # MISSING aten::linalg_eigh
     torch.diff,  # MISSING aten::logical_xor.out
+    torch.linalg.pinv,  # CompositeExplicitAutograd but mH fails
 }
 
 # These are fine in OpInfo tests, but triggered errors in full test suite
@@ -480,8 +456,6 @@ meta_exclude_set |= {
     torch.Tensor.clone,
     torch.Tensor.detach,
     torch.Tensor.div,
-    torch.Tensor.gt,
-    torch.Tensor.lt,
     torch.Tensor.mul,
     torch.Tensor.reshape,
     torch.Tensor.sub,
@@ -525,6 +499,8 @@ meta_exclude_set |= {
     torch.Tensor.argwhere,
     torch.allclose,
     torch.argwhere,
+    torch.tensor_split,
+    torch.Tensor.tensor_split,
     torch.Tensor.__array__,  # doesn't raise NotImplementedError
     torch.Tensor.__dlpack_device__,  # doesn't raise NotImplementedError
     torch.Tensor.__dlpack__,  # doesn't raise NotImplementedError
@@ -587,13 +563,11 @@ meta_exclude_set |= {
     torch._sobol_engine_draw,
     torch._sobol_engine_scramble_,
     torch._sobol_engine_ff_,
-    torch.tensor_split,
-    torch.Tensor.tensor_split,
     torch._pack_padded_sequence,
     torch._pad_packed_sequence,
     torch.sparse_coo_tensor,
     torch.linalg.ldl_factor,
-    torch._index_reduce,
+    torch.index_reduce,
     # IndexError: select() cannot be applied to a 0-dim tensor.
     # e.g. test_fn_fwgrad_bwgrad_index_add_cpu_complex128 (__main__.TestGradientsCPU)
     torch.index_add,
