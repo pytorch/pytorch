@@ -2060,6 +2060,7 @@ class TestSparseCSR(TestCase):
 
         for shape in [(0, 10), (6, 0), (6, 10), (0, 0)]:
             dense = make_tensor(shape, dtype=torch.float, device=device)
+            dense = dense.relu() # Introduce some sparsity
             sp_matrix = self._construct_sp_matrix(dense, layout)
             pt_matrix = self._convert_to_layout(dense, layout)
 
