@@ -105,8 +105,8 @@ Tensor _to_copy(
                   (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
+    Tensor r;
     if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
-      Tensor r;
       if (self.is_quantized()) {
         r = at::empty_quantized(self.sizes(), self, options);
         at::QuantizerPtr quantizer = r.quantizer();
@@ -121,7 +121,15 @@ Tensor _to_copy(
       }
       return r;
     } else {
-      memory_format = self.suggest_memory_format();
+      if (self.is_quantized()) {
+      //quantized logic is copied from below, see comments below on why empty_like is used
+        memory_format = self.suggest_memory_format();
+        r = at::empty_like(self, memory_format);
+      } else {
+        r = at::empty_like(self, options.pinned_memory(pin_out));
+      }
+      r.copy_(self, non_blocking);
+      return r;
     }
   }
   // See Note [Explicit nullopt MemoryFormat argument]
