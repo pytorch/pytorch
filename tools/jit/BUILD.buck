@@ -1,0 +1,13 @@
+python_library(
+    name = "jit",
+    srcs = glob([
+        "*.py",
+        "templates/*",
+    ]),
+    base_module = "tools.jit",
+    visibility = ["PUBLIC"],
+    deps = [
+        "//:aten_code_template",
+        "//torchgen:torchgen",
+    ],
+)
