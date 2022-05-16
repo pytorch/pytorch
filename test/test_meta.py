@@ -171,13 +171,13 @@ class MetaConverter:
 
 
 def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
-    def test_assert(cond, msg):
-        if not cond:
-            raise RuntimeError(msg_callable(msg))
     flat_meta_rs, _ = tree_flatten(meta_rs)
     flat_rs, _ = tree_flatten(rs)
     test_case.assertEqual(len(flat_meta_rs), len(flat_rs))
     for i, meta_r, r in zip(range(len(flat_rs)), flat_meta_rs, flat_rs):
+        def test_assert(cond, msg):
+            if not cond:
+                raise RuntimeError(f"output {i}: {msg_callable(msg)}")
         if not isinstance(r, torch.Tensor):
             continue
         test_assert(isinstance(meta_r, torch.Tensor), f"but real {i}th result is Tensor")
@@ -236,6 +236,22 @@ if COLLECT_EXPECT:
 # Success forces pass; failure forces fail; skip unconditionally skips testing
 TestExpect = Enum("TestExpect", ("SUCCESS", "FAILURE", "SKIP"))
 
+# unlike print produce strides
+def verbose_print(e):
+    class Lit:
+        def __init__(self, s):
+            self.s = s
+        def __repr__(self):
+            return self.s
+
+    def go(t):
+        if isinstance(t, torch.Tensor):
+            return Lit(f"{t} stride={t.stride()}")
+        else:
+            return t
+
+    return repr(tree_map(go, e))
+
 def run_meta_crossref(
     test_case,
     test_expect,
@@ -284,17 +300,20 @@ def run_meta_crossref(
                 return rs
             raise RuntimeError(f"""\
 failed to run: {resolve_name(func)}(
-*{meta_args},
-**{meta_kwargs}
+*{verbose_print(meta_args)},
+**{verbose_print(meta_kwargs)}
 )""") from e
         else:
             try:
-                assert_ref_meta_equal(test_case, rs, meta_rs, lambda msg: f"""\
+                delim = ',\n  '
+                assert_ref_meta_equal(test_case, meta_rs, rs, lambda msg: f"""\
 meta disagrees with real impl:
 {resolve_name(func)}(
-*{meta_args},
-**{meta_kwargs}
-) = {meta_rs}
+  {delim.join(map(verbose_print, meta_args))},
+  {delim.join(k + ": " + verbose_print(v) for k, v in meta_kwargs.items())}
+) = (
+  {delim.join(map(verbose_print, meta_rs))}
+)
 {msg}
 """)
             except Exception:
