@@ -51,7 +51,7 @@ TORCH_META_FUNC(upsample_trilinear3d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options());
+  set_output(input_size, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
 } // namespace meta
@@ -90,7 +90,7 @@ using at::native::upsample::get_scale_value;
 
 Tensor upsample_trilinear3d(
     const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
@@ -102,7 +102,7 @@ Tensor upsample_trilinear3d(
 
 Tensor upsample_trilinear3d_backward(
     const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {

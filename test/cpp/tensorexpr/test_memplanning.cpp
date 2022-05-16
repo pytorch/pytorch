@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <test/cpp/tensorexpr/test_base.h>
 
+#include <c10/util/irange.h>
+#include <test/cpp/tensorexpr/padded_buffer.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
@@ -83,6 +85,232 @@ TEST(BufLiveRange, MulRangeLine) {
   auto range_b = BufLiveRange::liveRange(stmt, b.node());
   ASSERT_TRUE(std::get<0>(range_b) == 0);
   ASSERT_TRUE(std::get<1>(range_b) == 1);
+}
+
+TEST(MemPlanning, MemReuseWithTypeCast) {
+  int M = 4;
+  int N = 4;
+  int K = 4;
+
+  BufHandle AP("A", {M, K}, kFloat);
+  BufHandle BP("B", {K, N}, kFloat);
+
+  Tensor CT = Reduce(
+      "gemm",
+      {M, N},
+      Sum(),
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+        return AP.load(m, k) * BP.load(k, n);
+      },
+      {K});
+  Tensor DT =
+      Compute("relu", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return CompareSelect::make(
+            CT.load(m, n), 0.0f, 0.0f, CT.load(m, n), kLT);
+      });
+  Tensor ET =
+      Compute("E", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return Cast::make(kQUInt8, DT.load(m, n) + DT.load(m, n));
+      });
+  Tensor FT =
+      Compute("F", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return ET.load(m, n);
+      });
+  StmtPtr stmt =
+      tensorexpr::Block::make({CT.stmt(), DT.stmt(), ET.stmt(), FT.stmt()});
+
+  // Constructed stmt:
+  // Intermediate buffers and their liveness ranges: gemm [0, 1], relu [1, 2],
+  // E [2, 3]. The dimensions of 'gemm' and 'E' are the same but their types are
+  // different: 'E' type quint8 < 'gemm' type float. We'll reuse 'gemm' for 'E'
+  // with typecasting.
+  //{
+  //  for (int i = 0; i < 4; i++) {
+  //    for (int i_1 = 0; i_1 < 4; i_1++) {
+  //      gemm[i, i_1] = float(0);
+  //      for (int i_2 = 0; i_2 < 4; i_2++) {
+  //        gemm[i, i_1] = ReduceOp((gemm[i, i_1]) + (A[i, i_2]) * (B[i_2,
+  //        i_1]), reduce_args={i_2});
+  //      }
+  //    }
+  //  }
+  //  for (int i_3 = 0; i_3 < 4; i_3++) {
+  //    for (int i_4 = 0; i_4 < 4; i_4++) {
+  //      relu[i_3, i_4] = (gemm[i_3, i_4])<0.f ? 0.f : (gemm[i_3, i_4]);
+  //    }
+  //  }
+  //  for (int i_5 = 0; i_5 < 4; i_5++) {
+  //    for (int i_6 = 0; i_6 < 4; i_6++) {
+  //      E[i_5, i_6] = quint8((relu[i_5, i_6]) + (relu[i_5, i_6]));
+  //    }
+  //  }
+  //  for (int i_7 = 0; i_7 < 4; i_7++) {
+  //    for (int i_8 = 0; i_8 < 4; i_8++) {
+  //      F[i_7, i_8] = E[i_7, i_8];
+  //    }
+  //  }
+  //}
+
+  LoopNest l(stmt, {FT.buf()});
+  l.prepareForCodegen();
+  SimpleIREvaluator cg(Stmt::clone(l.root_stmt()), {AP, BP, FT});
+
+  checkIR(cg.stmt(), R"IR(
+# CHECK: Allocate(gemm); // dtype=float, dims=[4, 4]
+# CHECK: Allocate(relu); // dtype=float, dims=[4, 4]
+# CHECK: Alias(E,gemm);
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
+
+  PaddedBuffer<float> a_v(M, K, "a");
+  PaddedBuffer<float> b_v(K, N, "b");
+  PaddedBuffer<uint8_t> o1(M, N, "e_before");
+  PaddedBuffer<uint8_t> o2(M, N, "e_after");
+
+  for (const auto m : c10::irange(M)) {
+    for (const auto k : c10::irange(K)) {
+      a_v(m, k) = at::randn({1}).item().to<float>();
+    }
+  }
+
+  for (const auto k : c10::irange(K)) {
+    for (const auto n : c10::irange(N)) {
+      b_v(k, n) = at::randn({1}).item().to<float>();
+    }
+  }
+
+  cg.call({a_v, b_v, o1});
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen cg_llvm(Stmt::clone(l.root_stmt()), {AP, BP, FT});
+
+  checkIR(cg_llvm.stmt(), R"IR(
+# CHECK: Allocate(gemm); // dtype=float, dims=[4, 4]
+# CHECK: Allocate(relu); // dtype=float, dims=[4, 4]
+# CHECK: Alias(E,gemm);
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
+
+  cg_llvm.call({a_v, b_v, o2});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(o1, o2, 1e-5);
+#endif
+}
+
+TEST(MemPlanning, NoMemReuseForLargerType) {
+  int M = 4;
+  int N = 4;
+  int K = 4;
+
+  BufHandle AP("A", {M, K}, kShort);
+  BufHandle BP("B", {K, N}, kShort);
+
+  Tensor CT = Reduce(
+      "gemm",
+      {M, N},
+      Sum(),
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+        return AP.load(m, k) * BP.load(k, n);
+      },
+      {K});
+  auto zero = Cast::make(CT.buf()->dtype(), 0);
+  Tensor DT =
+      Compute("relu", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return CompareSelect::make(
+            CT.load(m, n), zero, zero, CT.load(m, n), kLT);
+      });
+  Tensor ET =
+      Compute("E", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return Cast::make(kFloat, DT.load(m, n) + DT.load(m, n));
+      });
+  Tensor FT =
+      Compute("F", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return ET.load(m, n);
+      });
+  StmtPtr stmt =
+      tensorexpr::Block::make({CT.stmt(), DT.stmt(), ET.stmt(), FT.stmt()});
+
+  // Constructed stmt:
+  // Intermediate buffers and their liveness ranges: gemm [0, 1], relu [1, 2],
+  // E [2, 3]. The dimensions of 'gemm' and 'E' are the same but their types are
+  // different: 'E' type float > 'gemm' type int16. We won't reuse 'gemm' for
+  // 'E'.
+  //{
+  //  for (int i = 0; i < 4; i++) {
+  //    for (int i_1 = 0; i_1 < 4; i_1++) {
+  //      gemm[i, i_1] = int16_t(0);
+  //      for (int i_2 = 0; i_2 < 4; i_2++) {
+  //        gemm[i, i_1] = ReduceOp((gemm[i, i_1]) + (A[i, i_2]) * (B[i_2,
+  //        i_1]), reduce_args={i_2});
+  //      }
+  //    }
+  //  }
+  //  for (int i_3 = 0; i_3 < 4; i_3++) {
+  //    for (int i_4 = 0; i_4 < 4; i_4++) {
+  //      relu[i_3, i_4] = (gemm[i_3, i_4])<int16_t(0) ? int16_t(0) : (gemm[i_3,
+  //      i_4]);
+  //    }
+  //  }
+  //  for (int i_5 = 0; i_5 < 4; i_5++) {
+  //    for (int i_6 = 0; i_6 < 4; i_6++) {
+  //      E[i_5, i_6] = float((relu[i_5, i_6]) + (relu[i_5, i_6]));
+  //    }
+  //  }
+  //  for (int i_7 = 0; i_7 < 4; i_7++) {
+  //    for (int i_8 = 0; i_8 < 4; i_8++) {
+  //      F[i_7, i_8] = E[i_7, i_8];
+  //    }
+  //  }
+  //}
+
+  LoopNest l(stmt, {FT.buf()});
+  l.prepareForCodegen();
+  SimpleIREvaluator cg(Stmt::clone(l.root_stmt()), {AP, BP, FT.buf()});
+
+  checkIR(cg.stmt(), R"IR(
+# CHECK: Allocate(gemm); // dtype=int16_t, dims=[4, 4]
+# CHECK: Allocate(relu); // dtype=int16_t, dims=[4, 4]
+# CHECK: Allocate(E); // dtype=float, dims=[4, 4]
+# CHECK: Free(E);
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
+
+  PaddedBuffer<short> a_v(M, K, "a");
+  PaddedBuffer<short> b_v(K, N, "b");
+  PaddedBuffer<float> o1(M, N, "e_before");
+  PaddedBuffer<float> o2(M, N, "e_after");
+
+  for (const auto m : c10::irange(M)) {
+    for (const auto k : c10::irange(K)) {
+      a_v(m, k) = at::randn({1}).item().to<float>();
+    }
+  }
+
+  for (const auto k : c10::irange(K)) {
+    for (const auto n : c10::irange(N)) {
+      b_v(k, n) = at::randn({1}).item().to<float>();
+    }
+  }
+
+  cg.call({a_v, b_v, o1});
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen cg_llvm(Stmt::clone(l.root_stmt()), {AP, BP, FT});
+
+  checkIR(cg_llvm.stmt(), R"IR(
+# CHECK: Allocate(gemm); // dtype=int16_t, dims=[4, 4]
+# CHECK: Allocate(relu); // dtype=int16_t, dims=[4, 4]
+# CHECK: Allocate(E); // dtype=float, dims=[4, 4]
+# CHECK: Free(E);
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
+
+  cg_llvm.call({a_v, b_v, o2});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(o1, o2, 1e-5);
+#endif
 }
 
 TEST(MemPlanning, SameBufSizeMemReuse) {

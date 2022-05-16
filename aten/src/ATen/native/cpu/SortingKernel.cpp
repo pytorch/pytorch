@@ -4,10 +4,11 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
 #include <ATen/native/TopKImpl.h>
+#include <c10/core/WrapDimMinimal.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace native {
@@ -21,12 +22,6 @@ void _dim_apply(
     int64_t dim,
     const std::string& method_name,
     const func_t& f) {
-  dim = maybe_wrap_dim(dim, values.dim());
-  TORCH_CHECK(
-    dim >= 0 && dim < values.dim(),
-    method_name, "(): invalid dimension parameter ", dim
-  );
-
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
@@ -45,6 +40,10 @@ void _dim_apply(
       auto loop = [&](char** data, const int64_t* strides, int64_t n) {
         auto* values_data_bytes = data[0];
         auto* indices_data_bytes = data[1];
+
+        if(values_data_bytes==nullptr || indices_data_bytes==nullptr){
+          return;
+        }
 
         for (const auto i : c10::irange(n)) {
           (void)i; //Suppress unused variable warning
@@ -85,8 +84,9 @@ struct KeyValueCompDesc {
 };
 
 static void sort_kernel(
-    const TensorBase &values,
-    const TensorBase &indices,
+    const TensorBase& self,
+    const TensorBase& values,
+    const TensorBase& indices,
     int64_t dim,
     bool descending,
     bool stable) {

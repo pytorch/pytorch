@@ -1,7 +1,7 @@
 #pragma once
-#include <c10/util/Optional.h>
 #include <dlfcn.h>
 #include <elf.h>
+#include <torch/csrc/deploy/interpreter/Optional.hpp>
 #include <memory>
 
 namespace torch {
@@ -19,8 +19,8 @@ struct TLSIndex {
 
 struct SymbolProvider {
   SymbolProvider() = default;
-  virtual at::optional<Elf64_Addr> sym(const char* name) const = 0;
-  virtual at::optional<TLSIndex> tls_sym(const char* name) const = 0;
+  virtual multipy::optional<Elf64_Addr> sym(const char* name) const = 0;
+  virtual multipy::optional<TLSIndex> tls_sym(const char* name) const = 0;
   SymbolProvider(const SymbolProvider&) = delete;
   SymbolProvider& operator=(const SymbolProvider&) = delete;
   virtual ~SymbolProvider() = default;
