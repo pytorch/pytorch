@@ -492,8 +492,9 @@ def hook_iterator(namespace, profile_name):
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
                 with context():
-                    datapipe = args[0]
-                    _check_iterator_valid(datapipe, None, next_method_exists=True)
+                    # Commented out since we do not wish to invalidate `datapipe` for now
+                    # datapipe = args[0]
+                    # _check_iterator_valid(datapipe, None, next_method_exists=True)
                     return next_func(*args, **kwargs)
 
             namespace['__next__'] = wrap_next
