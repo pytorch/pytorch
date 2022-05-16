@@ -2056,7 +2056,7 @@ class TestSparseCSR(TestCase):
         thrown.
         """
         dense = make_tensor((6, 10), dtype=torch.float, device=device)
-        dense = dense.relu() # Introduce some sparsity
+        dense = dense.relu()  # Introduce some sparsity
         pt_matrix = self._convert_to_layout(dense, torch.sparse_csc)
         with self.assertRaises(RuntimeError):
             pt_matrix.to_dense()
@@ -2077,7 +2077,7 @@ class TestSparseCSR(TestCase):
 
         for shape in [(0, 10), (6, 0), (6, 10), (0, 0)]:
             dense = make_tensor(shape, dtype=torch.float, device=device)
-            dense = dense.relu() # Introduce some sparsity
+            dense = dense.relu()  # Introduce some sparsity
             sp_matrix = self._construct_sp_matrix(dense, layout)
             pt_matrix = self._convert_to_layout(dense, layout)
 
