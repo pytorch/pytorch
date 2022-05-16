@@ -244,11 +244,20 @@ infer_aten_op = object()
 
 # TODO: add type promotion support
 def _make_elementwise_unary_reference(
-    prim: Callable, *, type_promotion_kind, aten_op=infer_aten_op, extra_meta=None
+    prim: Callable, *,
+    type_promotion_kind,
+    CPU_type_promotion_kind=None,
+    CUDA_type_promotion_kind=None,
+    aten_op=infer_aten_op,
+    extra_meta=None
 ) -> Callable:
+
     @out_wrapper
     @elementwise_type_promotion_wrapper(
-        type_promoting_args=("a",), type_promotion_kind=type_promotion_kind
+        type_promoting_args=("a",),
+        type_promotion_kind=type_promotion_kind,
+        CPU_type_promotion_kind=CPU_type_promotion_kind,
+        CUDA_type_promotion_kind=CUDA_type_promotion_kind,
     )
     def _ref(a: TensorLikeType) -> TensorLikeType:
         if not isinstance(a, TensorLike):
