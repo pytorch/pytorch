@@ -17,7 +17,6 @@
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
-#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
@@ -1760,8 +1759,6 @@ void initJitScriptBindings(PyObject* module) {
     Parser p(std::make_shared<Source>(comment));
     return Decl(p.parseTypeComment());
   });
-
-  m.def("_is_upgraders_enabled", &is_upgraders_enabled);
 
   m.def("_get_upgraders_map_size", &get_upgraders_map_size);
   m.def("_dump_upgraders_map", &dump_upgraders_map);
