@@ -3547,7 +3547,7 @@
     "_validate_sparse_csr_tensor_args",
     "_values_copy",
     "_weight_norm",
-    "_weight_norm_cuda_interface",
+    "_weight_norm_interface",
     "autocast",
     "broadcast_shapes",
     "candidate",
