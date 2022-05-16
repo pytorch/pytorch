@@ -2020,7 +2020,6 @@ class TestSparseCSR(TestCase):
         that an exception is thrown for unsupported conversions.
         """
 
-
         def _to_from_layout(layout_a, layout_b):
             a = make_tensor((6, 10), dtype=torch.float, device=device)
             expect_error = (layout_a in [torch.sparse_csc, torch.sparse_bsc]
@@ -2062,7 +2061,6 @@ class TestSparseCSR(TestCase):
         print(sp_matrix)
         print("pt_matrix")
         print(pt_matrix)
-
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
