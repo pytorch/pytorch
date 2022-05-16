@@ -585,7 +585,7 @@ class Quantized:
         output = opset9.conv2d(
             g, input, weight, bias, stride, padding, dilation, groups
         )
-        output = opest9.relu(g, output)
+        output = opset9.relu(g, output)
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
