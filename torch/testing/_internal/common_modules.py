@@ -25,6 +25,7 @@ MODULE_NAMESPACES: List[ModuleType] = [
     torch.nn.qat.modules,
     torch.nn.quantizable.modules,
     torch.nn.quantized.modules,
+    torch.ao.nn.quantized.modules,
 ]
 
 # Modules that shouldn't be tested for one reason or another.
@@ -34,6 +35,8 @@ MODULES_TO_SKIP: Set[Type] = {
     torch.nn.NLLLoss2d,  # deprecated
     torch.nn.quantized.modules._ConvNd,  # abstract base class
     torch.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
+    torch.ao.nn.quantized.modules._ConvNd,  # abstract base class
+    torch.ao.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
 }
 
 # List of all module classes to test.

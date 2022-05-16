@@ -1,5 +1,4 @@
 import torch
-import torch.nn.quantized.functional
 import torch.nn.intrinsic as nni
 from torch import Tensor
 

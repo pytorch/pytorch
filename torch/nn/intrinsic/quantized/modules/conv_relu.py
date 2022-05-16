@@ -3,7 +3,7 @@ import torch
 import torch.nn.intrinsic
 import torch.nn.intrinsic.qat
 import torch.nn.functional as F
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 
 from torch.nn.utils import fuse_conv_bn_weights
 
@@ -14,10 +14,10 @@ class ConvReLU1d(nnq.Conv1d):
     r"""
     A ConvReLU1d module is a fused module of Conv1d and ReLU
 
-    We adopt the same interface as :class:`torch.nn.quantized.Conv1d`.
+    We adopt the same interface as :class:`torch.ao.nn.quantized.Conv1d`.
 
     Attributes:
-        Same as torch.nn.quantized.Conv1d
+        Same as torch.ao.nn.quantized.Conv1d
 
     """
     _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d  # type: ignore[assignment]
@@ -64,10 +64,10 @@ class ConvReLU2d(nnq.Conv2d):
     r"""
     A ConvReLU2d module is a fused module of Conv2d and ReLU
 
-    We adopt the same interface as :class:`torch.nn.quantized.Conv2d`.
+    We adopt the same interface as :class:`torch.ao.nn.quantized.Conv2d`.
 
     Attributes:
-        Same as torch.nn.quantized.Conv2d
+        Same as torch.ao.nn.quantized.Conv2d
 
     """
     _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d  # type: ignore[assignment]
@@ -114,9 +114,9 @@ class ConvReLU3d(nnq.Conv3d):
     r"""
     A ConvReLU3d module is a fused module of Conv3d and ReLU
 
-    We adopt the same interface as :class:`torch.nn.quantized.Conv3d`.
+    We adopt the same interface as :class:`torch.ao.nn.quantized.Conv3d`.
 
-    Attributes: Same as torch.nn.quantized.Conv3d
+    Attributes: Same as torch.ao.nn.quantized.Conv3d
 
     """
     _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d  # type: ignore[assignment]
