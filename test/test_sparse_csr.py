@@ -2090,6 +2090,8 @@ class TestSparseCSR(TestCase):
         print(sp_matrix.indptr)
         print("sp_matrix.indices")
         print(sp_matrix.indices)
+        print("sp_matrix.data")
+        print(sp_matrix.data)
         print("pt_matrix.ccol_indices()")
         print(pt_matrix.ccol_indices())
         print("pt_matrix.row_indices()")

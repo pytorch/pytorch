@@ -505,7 +505,7 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
 Tensor coo_to_sparse_csr(const Tensor& self) {
   TORCH_CHECK(
       self.dim() == 2,
-      "Only 2D tensors can be converted to the CSR format but got shape: ",
+      "Only 2D tensors can be converted to the SparseCsr format but got shape: ",
       self.sizes());
   auto coalesced_self = self.coalesce();
   auto row_indices = coalesced_self.indices()[0];
@@ -525,18 +525,17 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
 Tensor coo_to_sparse_csc(const Tensor& self) {
   TORCH_CHECK(
       self.dim() == 2,
-      "Only 2D tensors can be converted to the CSR format but got shape: ",
+      "Only 2D tensors can be converted to the SparseCsc format but got shape: ",
       self.sizes());
-  auto csr_format_indices = self.transpose(0, 1).to_sparse_csr();
-  auto csc_format_values = csr_format_indices.transpose(0, 1);
+  auto coalesced_self = self.transpose(0, 1).coalesce().to_sparse_csr();
   return at::native::_sparse_csc_tensor_unsafe(
-      csr_format_indices.crow_indices(),
-      csr_format_indices.col_indices(),
-      csc_format_values.values(),
-      csc_format_values.sizes(),
-      csc_format_values.scalar_type(),
+      coalesced_self.crow_indices(),
+      coalesced_self.col_indices(),
+      coalesced_self.values(),
+      self.sizes(),
+      coalesced_self.scalar_type(),
       c10::kSparseCsc,
-      csc_format_values.device());
+      coalesced_self.device());
 }
 
 Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
