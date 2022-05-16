@@ -312,7 +312,7 @@ Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
   if (tensor.layout() == c10::kSparse) {
     return tensor._to_dense(dtype);
   }
-  if (tensor.layout() == c10::kSparseCsr) {
+  if (tensor.layout() == c10::kSparseCsr || tensor.layout() == c10::kSparseCsc) {
     return tensor._to_dense(dtype);
   }
   if (tensor.layout() == c10::kMkldnn) {
@@ -334,13 +334,16 @@ Tensor sparse_to_dense(
   return dst.add_(self);
 }
 
-Tensor sparse_csr_to_dense(
+Tensor sparse_compressed_to_dense(
     const Tensor& self,
     c10::optional<ScalarType> dtype) {
   TORCH_CHECK(
       !dtype.has_value(), "dtype argument is not supported by sparse_csr_to_dense");
-  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
-  return dst.add_(self);
+  if (self.layout() == kSparseCsr) {
+    Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
+    return dst.add_(self);
+  }
+  return self.to_sparse().to_dense();
 }
 
 // Computes the strides for view_dtype output when the view dtype is
@@ -883,6 +886,13 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
   TORCH_CHECK(self.layout() == kSparseCsr || self.layout() == kSparseCsc,
       "Expected input to have layout SparseCsr or SparseCsc, but got ", self.layout(), " instead.");
   if (sparse_dim == 2) {
+    if (self.layout() == kSparseCsc) {
+      Tensor ccol_indices = self.ccol_indices();
+      Tensor row_indices = self.row_indices();
+      Tensor values = self.values();
+      Tensor indices = at::_convert_indices_from_csr_to_coo(ccol_indices, row_indices, false, false);
+      return at::native::_sparse_coo_tensor_unsafe(indices, values, sizes)._coalesced_(true);
+    }
     auto sizes = self.sizes();
     Tensor crow_indices = self.crow_indices();
     Tensor col_indices = self.col_indices();

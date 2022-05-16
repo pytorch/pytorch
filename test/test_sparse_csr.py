@@ -2096,6 +2096,8 @@ class TestSparseCSR(TestCase):
         print(pt_matrix.row_indices())
         print("pt_matrix.values()")
         print(pt_matrix.values())
+        print("pt_matrix.to_dense()")
+        print(pt_matrix.to_dense())
         self.assertEqual(layout, pt_matrix.layout)
         self.assertEqual(sp_matrix.shape, pt_matrix.shape)
         self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
