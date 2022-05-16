@@ -9,26 +9,6 @@ from ._common import (
     _register_sharded_op_on_local_shards,
 )
 
-@sharded_op_impl(torch.Tensor.__deepcopy__)
-def tensor_deepcopy(types, args=(), kwargs=None, pg=None):
-    # NOTE: we directly implement deepcopy magic method
-    # instead of using the default tensor.__deepcopy__
-    # and implement clone(). This is because the default
-    # tensor deepcopy copies every attribute, but the
-    # process_group in ShardedTensor cannot be deep copied.
-    self_st = args[0]
-    # Validate types
-    if not isinstance(self_st, ShardedTensor):
-        raise TypeError("input needs to be a ShardedTensor")
-
-    return ShardedTensor._init_from_local_shards_and_global_metadata(
-        local_shards=copy.deepcopy(self_st.local_shards()),
-        sharded_tensor_metadata=copy.deepcopy(self_st.metadata()),
-        process_group=self_st._process_group,
-        init_rrefs=self_st._init_rrefs
-    )
-
-
 def register_default_op(op):
     @sharded_op_impl(op)
     def tensor_default_op(types, args=(), kwargs=None, pg=None):
@@ -113,3 +93,75 @@ _register_sharded_op_on_local_shards(
     extra_check=sharded_type_as_check,
     customized_func=sharded_type_as,
 )
+
+def sharded_deepcopy(args, kwargs, pg):
+    # NOTE: we directly implement deepcopy magic method
+    # instead of using the default tensor.__deepcopy__
+    # and implement clone(). This is because the default
+    # tensor deepcopy copies every attribute, but the
+    # process_group in ShardedTensor cannot be deep copied.
+    self_st = args[0]
+    new_local_shards = copy.deepcopy(self_st.local_shards())
+    new_metadata = copy.deepcopy(self_st.metadata())
+    return new_local_shards, new_metadata
+
+_register_sharded_op_on_local_shards(
+    torch.Tensor.__deepcopy__,
+    customized_func=sharded_deepcopy,
+)
+
+def sharded_clone(args, kwargs, pg):
+    self_st = args[0]
+    desire_memory_format = kwargs.get("memory_format", None)
+    if desire_memory_format and desire_memory_format != torch.preserve_format:
+        raise RuntimeError("Only support torch.preserve_format for ShardedTensor!")
+    cloned_local_shards = [
+        Shard(
+            local_shard.tensor.clone(memory_format=desire_memory_format),
+            metadata=copy.deepcopy(local_shard.metadata),
+        )
+        for local_shard in self_st.local_shards()
+    ]
+    new_metadata = copy.deepcopy(self_st.metadata())
+    return cloned_local_shards, new_metadata
+
+_register_sharded_op_on_local_shards(
+    torch.Tensor.clone,
+    customized_func=sharded_clone,
+)
+
+def sharded_detach(args, kwargs, pg):
+    self_st = args[0]
+    detached_local_shards = [
+        Shard(
+            local_shard.tensor.detach(),
+            metadata=copy.deepcopy(local_shard.metadata),
+        )
+        for local_shard in self_st.local_shards()
+    ]
+    new_metadata = copy.deepcopy(self_st.metadata())
+    new_metadata.tensor_properties.requires_grad = False
+    return detached_local_shards, new_metadata
+
+_register_sharded_op_on_local_shards(
+    torch.Tensor.detach,
+    customized_func=sharded_detach,
+)
+
+@sharded_op_impl(torch.Tensor.requires_grad_)
+def tensor_requires_grad_set(types, args=(), kwargs=None, pg=None):
+    self_st = args[0]
+    requires_grad = args[1]
+    # Validate types
+    if not isinstance(self_st, ShardedTensor):
+        raise TypeError("input needs to be a ShardedTensor")
+
+    if requires_grad == self_st.requires_grad:
+        return self_st
+
+    for local_shard in self_st.local_shards():
+        local_shard.tensor.requires_grad_(requires_grad)
+
+    # update the metadata in the meanwhile
+    self_st._metadata.tensor_properties.requires_grad = requires_grad
+    return self_st
