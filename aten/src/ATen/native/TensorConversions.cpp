@@ -524,19 +524,16 @@ Tensor coo_to_sparse_csc(const Tensor& self) {
       self.dim() == 2,
       "Only 2D tensors can be converted to the CSR format but got shape: ",
       self.sizes());
-  auto coalesced_self = self.coalesce();
-  auto col_indices = coalesced_self.indices()[1];
-  bool out_int32 = (col_indices.scalar_type() == at::kInt);
-  auto ccol_indices = at::_convert_indices_from_coo_to_csr(
-      col_indices, self.size(1), out_int32);
+  auto csr_format_indices = self.transpose(0, 1).to_sparse_csr();
+  auto csc_format_values = csr_format_indices.transpose(0, 1);
   return at::native::_sparse_csc_tensor_unsafe(
-      ccol_indices,
-      coalesced_self.indices()[0].contiguous(),
-      coalesced_self.values(),
-      coalesced_self.sizes(),
-      coalesced_self.scalar_type(),
+      csr_format_indices.crow_indices(),
+      csr_format_indices.col_indices(),
+      csc_format_values.values(),
+      csc_format_values.sizes(),
+      csc_format_values.scalar_type(),
       c10::kSparseCsc,
-      coalesced_self.device());
+      csc_format_values.device());
 }
 
 Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
@@ -876,6 +873,31 @@ Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
   AT_ERROR(
       "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
   return self;
+}
+
+Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
+  TORCH_CHECK(sparse_dim <= 2,
+              "sparse_dim must be less than or equal to 2");
+  TORCH_CHECK(self.layout() == kSparseCsr || self.layout() == kSparseCsc,
+      "Expected input to have layout SparseCsr or SparseCsc, but got ", self.layout(), " instead.");
+  if (sparse_dim == 2) {
+    auto sizes = self.sizes();
+    Tensor crow_indices = self.crow_indices();
+    Tensor col_indices = self.col_indices();
+    Tensor values = self.values();
+    Tensor indices = at::_convert_indices_from_csr_to_coo(crow_indices, col_indices, false, false);
+    return at::native::_sparse_coo_tensor_unsafe(indices, values, sizes)._coalesced_(true);
+  } else {
+    TORCH_CHECK(false, "sparse dim 1 is not supported by sparse_csr_to_dense");
+    // TODO: implement coo.to_sparse(sparse_dim) and then use
+    // return self.to_sparse().to_sparse(sparse_dim);
+  }
+}
+
+Tensor sparse_compressed_to_sparse(const Tensor& self) {
+  return sparse_compressed_to_sparse(self, 2);
 }
 
 // Sparse layout conversions End
