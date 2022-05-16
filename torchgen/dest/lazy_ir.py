@@ -128,7 +128,9 @@ class GenLazyIR(ABC):
     def can_be_reused_function(
         self, f: Union[NativeFunctionsGroup, NativeFunction], node_ctor_args: str
     ) -> str:
-        return ""
+        return f"""bool CanBeReused({node_ctor_args}) const {{
+    return false;
+    }}"""
 
     def node_base_ctor_call(self, schema: LazyIrSchema) -> str:
         # backends can customize the way the node base class constructor is called,
