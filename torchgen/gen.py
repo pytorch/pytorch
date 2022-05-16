@@ -1381,6 +1381,7 @@ def get_composite_headers(
             return None
         name = f.func.name.remove_inplace().name
         return f"#include <ATen/native/composite/{name}.h>"
+
     return sorted(set(mapMaybe(maybe_get_header, native_functions)))
 
 
