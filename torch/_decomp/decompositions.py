@@ -24,11 +24,13 @@ class Reduction(Enum):
 # This wraps a decomposition and performs various type promotion logic within it, depending on the strategy provided
 # We're currently re-using ELEMENTWISE_TYPE_PROMOTION_KIND, although some of the usages are on non-elementwise ops
 # Will need to validate the non-elementwise uses
-def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND):
+def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND, use_opmath=True):
     @functools.wraps(f)
     def inner(*args, **kwargs):
         flat_args = [x for x in tree_flatten((args, kwargs))[0] if isinstance(x, Tensor)]
-        computation_dtype, result_dtype = utils.elementwise_dtypes(*flat_args, type_promotion_kind=type_promotion)
+        computation_dtype, result_dtype = utils.elementwise_dtypes(*flat_args,
+                                                                   type_promotion_kind=type_promotion,
+                                                                   use_opmath=use_opmath)
 
         # TODO: pretty sure this is not quite right
         def increase_prec(x):
@@ -48,7 +50,7 @@ def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIN
 
     return inner
 
-pw_cast_for_opmath = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH)
+pw_cast_for_opmath = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 reduction_complex_to_real = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
 pw_cast_for_int_to_real = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 

@@ -23,11 +23,9 @@ def _maybe_convert_to_dtype(
 ) -> Union[TensorLikeType, NumberType, Sequence]:
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
-            # NOTE: type promotion is implemented by a cast before the
-            # the kernel is invoked on cpu, so it makes strides contiguous
-            if a.device.type == "cpu":
-                return prims.convert_element_type(a, dtype)
-            return prims._to_dtype(a, dtype)
+            # NOTE: this is incorrect on the CPU
+            # See https://github.com/pytorch/pytorch/issues/77553
+            return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
         return utils.dtype_to_type(dtype)(a)
@@ -84,10 +82,19 @@ class elementwise_type_promotion_wrapper(object):
         self,
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
+        use_opmath,
+        CPU_use_opmath=None,
+        CUDA_use_opmath=None,
         type_promoting_args: Sequence[str] = None,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
+
+        self.use_opmath = use_opmath
+        self.CPU_use_opmath = use_opmath if CPU_use_opmath is None else CPU_use_opmath
+        self.CUDA_use_opmath = (
+            use_opmath if CUDA_use_opmath is None else CUDA_use_opmath
+        )
 
     def __call__(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
@@ -101,11 +108,26 @@ class elementwise_type_promotion_wrapper(object):
                 if x in bound.arguments.keys()
             )
 
-            flattened_type_promoting_args = tree_flatten(type_promoting_args)[0]
+            # Acquires the device type of the input's
+            device_type = "cpu"
+            for x in bound.arguments.values():
+                flattened = tree_flatten(x)[0]
+                for y in flattened:
+                    if isinstance(y, TensorLike) and y.device.type != "cpu":
+                        device_type = y.device.type
 
+            # Determines the type promotion kind
+            use_opmath = self.use_opmath
+            if device_type == "cpu":
+                use_opmath = self.CPU_use_opmath
+            if device_type == "cuda":
+                use_opmath = self.CUDA_use_opmath
+
+            flattened_type_promoting_args = tree_flatten(type_promoting_args)[0]
             compute_dtype, result_dtype = utils.elementwise_dtypes(
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,
+                use_opmath=use_opmath,
             )
 
             promoted_args = {

@@ -127,6 +127,7 @@ __all__ = [
     "clone",
     "convert_element_type",
     "device_put",
+    "to_dtype",
     #
     # Inplace prims
     #
@@ -1606,13 +1607,21 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
     assert isinstance(a, TensorLike)
     assert isinstance(dtype, torch.dtype)
 
-    return TensorMeta(
-        a, strides=utils.make_contiguous_strides_for(a.shape), dtype=dtype
-    )
+    strides = utils.compute_elementwise_output_strides(a)
+
+    return TensorMeta(a, strides=strides, dtype=dtype)
 
 
 def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
-    return a.to(dtype)
+    # TODO: update meta objects so this can be acquired directly
+    try:
+        requires_grad = a.requires_grad
+    except Exception as e:
+        requires_grad = False
+
+    result = empty_like(a, device=a.device, dtype=dtype, requires_grad=requires_grad)
+    with torch.no_grad():
+        return copy_to(result, a)
 
 
 def _convert_element_type_nvfuser(fd: Any, a: Tensor, dtype: torch.dtype) -> Tensor:
@@ -1632,23 +1641,6 @@ convert_element_type = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_convert_element_type_doc,
 )
-
-# NOTE: _to_dtype
-# This private op casts the input to the desired type while preserving its stride
-# permutation, unlike .to(dtype) which will create a tensor with contiguous strides
-# TODO: review how best to model this behavior
-def _to_dtype(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
-    # FIXME: improve this so it doesn't error on Meta testing
-    try:
-        requires_grad = a.requires_grad
-    except Exception as e:
-        requires_grad = False
-
-    result = empty_like(a, device=a.device, dtype=dtype, requires_grad=requires_grad)
-
-    # TODO: review if the no_grad context is the best way to model this
-    with torch.no_grad():
-        return copy_to(result, a)
 
 
 def _device_put_meta(
@@ -1674,6 +1666,28 @@ device_put = _make_prim(
     impl_aten=_device_put_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_device_put_doc,
+)
+
+# TODO: FIXME: strides are incorrect
+def _to_dtype_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
+    strides = utils.make_contiguous_strides_for(a.shape)
+    return TensorMeta(a, strides=strides, dtype=dtype)
+
+
+def _to_dtype_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
+    return a.to(dtype)
+
+
+_to_dtype_doc = """
+    Creates a contiguous copy of a tensor with the given dtype.
+"""
+
+to_dtype = _make_prim(
+    schema=("to_dtype(Tensor a, ScalarType dtype) -> Tensor"),
+    meta=_to_dtype_meta,
+    impl_aten=_to_dtype_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_to_dtype_doc,
 )
 
 #
@@ -1918,8 +1932,9 @@ def _full_aten(
     device: torch.device,
     requires_grad: bool,
 ) -> Tensor:
+    # Note that Mypy thinks torch.full can't accept a complex fill_value
     return torch.full(
-        shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
+        shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
     )
 
 
@@ -1960,8 +1975,9 @@ def _full_like_aten(
     device: torch.device,
     requires_grad: bool,
 ) -> Tensor:
+    # Note that Mypy thinks torch.full can't accept a complex fill_value
     return torch.full_like(
-        a, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
+        a, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
     )
 
 

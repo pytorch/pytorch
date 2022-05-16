@@ -61,7 +61,7 @@ class TensorMeta(torch.Tensor):
         shape: Optional[ShapeType] = None,
         strides: Optional[StrideType] = None,
         dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
+        device: Optional[Union[torch.device, str]] = None,
     ):
 
         if isinstance(tensorlike, Number):
@@ -192,9 +192,8 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
             msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
             raise AssertionError(msg)
 
-    # NOTE: currently we are only validating strides on CUDA, because
-    # we are using opmath on both CPU and CUDA, which causes
-    # divergance stride behavior vs. the CPU, which does not use opmath
+    # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
+    # See https://github.com/pytorch/pytorch/issues/77553
     if a.device.type == "cuda" or b.device.type == "cuda":
         compare_significant_strides(a, b)
 
@@ -207,8 +206,10 @@ def compare_significant_strides(a: TensorLikeType, b: TensorLikeType):
         if a.shape[idx] == 0 or a.shape[idx] == 1:
             continue
         if a.stride()[idx] != b.stride()[idx]:
-            msg = "Stride mismatch! Strides are {0} and {1}!".format(
-                a.stride(), b.stride()
+            msg = (
+                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+                    a.stride(), b.stride(), idx
+                )
             )
             raise RuntimeError(msg)
 
@@ -239,6 +240,7 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
         return ()
 
     # Short-circuits for shapes with zero or one dimensions
+    # TODO: are these necessary?
     ndim = tensors[0].ndim
     if ndim == 0:
         return ()
@@ -274,7 +276,7 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
         return 0
 
     perm = tuple(range(ndim))
-    perm = sorted(perm, key=cmp_to_key(_cmp), reverse=True)
+    perm = tuple(sorted(perm, key=cmp_to_key(_cmp), reverse=True))
 
     permuted_shape = [-1] * ndim
     for idx, x in enumerate(perm):
@@ -285,7 +287,7 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
     for idx, x in enumerate(perm):
         permuted_strides[x] = new_strides[idx]
 
-    return permuted_strides
+    return tuple(permuted_strides)
 
 
 #
@@ -773,14 +775,15 @@ class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     DEFAULT = (0,)
     INT_TO_FLOAT = (1,)
     ALWAYS_BOOL = (2,)
-    OP_MATH = (3,)
-    COMPLEX_TO_FLOAT = (4,)
-    BOOL_TO_LONG = (5,)
+    COMPLEX_TO_FLOAT = (3,)
+    BOOL_TO_LONG = (4,)
 
 
 # TODO: document type promotion kinds
 def elementwise_dtypes(
-    *_args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+    *_args,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
+    use_opmath=False,
 ) -> Tuple[torch.dtype, torch.dtype]:
     """
     Computes the computation and result dtypes for elementwise type promotion
@@ -833,40 +836,39 @@ def elementwise_dtypes(
 
     The DEFAULT type promotion option computes per above, and uses the result dtype as the computation dtype.
 
-    The OP_MATH, INT_TO_FLOAT, COMPLEX_TO_FLOAT and BOOL_TO_LONG type promotion options tweak the above slightly.
-    OP_MATH determines a "computation dtype" from the result dtype, and the mapping is simple:
+    The INT_TO_FLOAT and BOOL_TO_LONG options map the result dtype to another dtype first, while COMPLEX_TO_FLOAT
+    maps the result dtype to another dtype, as follows:
 
-      float16   -> float32
-      bfloat16  -> float32
-      complex32 -> complex64
+        INT_TO_FLOAT  maps all boolean and integer result dtypes to the default floating point dtype
+        COMPLEX_TO_FLOAT  maps complex result dtypes to their corresponding floating point dtype
+        BOOL_TO_LONG maps the boolean result dtype to long
 
-    INT_TO_FLOAT, COMPLEX_TO_FLOAT, and BOOL_TO_LONG compute the computation type in the same way, but INT_TO_FLOAT
-    and BOOL_TO_LONG map the result dtype to another dtype first, and COMPLEX_TO_FLOAT maps its result dtype
-    after the compuation dtype is determined, as follows:
+    The "corresponding floating point dtypes" used by COMPLEX_TO_FLOAT are:
 
-      INT_TO_FLOAT  maps all boolean and integer result dtypes to the default floating point dtype
-      COMPLEX_TO_FLOAT  maps complex result dtypes to their corresponding floating point dtype
-      BOOL_TO_LONG maps the boolean result dtype to long
+        complex32  -> float16
+        complex64  -> float32
+        complex128 -> float64
 
-    The "corresponding floating point dtypes" are:
-      complex32  -> float16
-      complex64  -> float32
-      complex128 -> float64
+
+    The optional use_opmath flag tweaks the above slightly. If use_opmath=True then the "computation dtype" is
+    determined by mapping the result_dtype above as follows:
+
+        float16   -> float32
+        bfloat16  -> float32
+        complex32 -> complex64
 
     The ALWAYS_BOOL type promotion option always maps the result dtype to bool.
 
     Example operators for each type promotion option:
-      DEFAULT          : nextafter
-      OP_MATH          : add
-      INT_TO_FLOAT     : sin
-      COMPLEX_TO_FLOAT : abs
-      BOOL_TO_LONG     : pow
-      ALWAYS_BOOL      : eq
+      DEFAULT                 : nextafter
+      INT_TO_FLOAT            : sin
+      COMPLEX_TO_FLOAT        : abs
+      BOOL_TO_LONG            : pow
+      ALWAYS_BOOL             : eq
 
     """
 
     args = tuple(x for x in _args if x is not None)
-    device_type = "cpu"
 
     highest_type: type = bool
     for x in args:
@@ -883,8 +885,6 @@ def elementwise_dtypes(
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
-            if x.device.type != "cpu":
-                device_type = x.device.type
 
     result_dtype = None
 
@@ -956,23 +956,29 @@ def elementwise_dtypes(
         result_dtype = torch.bool
 
     if type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
+        if use_opmath:
+            return _get_computation_dtype(result_dtype), result_dtype
         return result_dtype, result_dtype
-    elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH:
-        return _get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
         if is_integer_dtype(result_dtype) or is_boolean_dtype(result_dtype):
             result_dtype = torch.get_default_dtype()
-        return _get_computation_dtype(result_dtype), result_dtype
+        if use_opmath:
+            return _get_computation_dtype(result_dtype), result_dtype
+        return result_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
         if is_complex_dtype(result_dtype):
             # Note: computation still occurs in complex
             return _get_computation_dtype(result_dtype), corresponding_real_dtype(
                 result_dtype
             )
-        return _get_computation_dtype(result_dtype), result_dtype
+        if use_opmath:
+            return _get_computation_dtype(result_dtype), result_dtype
+        return result_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG:
         if is_boolean_dtype(result_dtype):
             return torch.long, torch.long
+        if use_opmath:
+            return _get_computation_dtype(result_dtype), result_dtype
         return result_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
         return result_dtype, torch.bool
@@ -994,30 +1000,6 @@ def wrap_device(d: Union[str, torch.device]) -> torch.device:
         return torch.device(d)
 
     return d
-
-
-# See implementation in TensorImpl.cpp
-# Returns true when a tensor is "dense" -- filling all of its storage
-# and "non-overlapping" -- each element in the tensor has a unique index.
-# This is equivalent to verifying that tensors with more than zero elements
-# have their sorted strides for dimensions of length greater than one
-# "nested" properly.
-def is_non_overlapping_and_dense(a: TensorLikeType) -> bool:
-    relevant_pairs = []
-    for x, y in zip(a.shape, a.stride()):
-        if x == 0:
-            return True
-        if x == 1:
-            pass
-        relevant_pairs.append((x, y))
-
-    expected = 1
-    for x, y in sorted(relevant_pairs, key=lambda p: p[1]):
-        if y != expected:
-            return False
-        expected = expected * x
-
-    return True
 
 
 def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:

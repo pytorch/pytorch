@@ -18658,19 +18658,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.add",
         torch_opinfo_name="add",
-        decorators=(
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.bfloat16: tol(atol=1, rtol=0),
-                        torch.float16: tol(atol=1e-2, rtol=0),
-                    }
-                ),
-                "TestCommon",
-                "test_python_reference_consistency",
-                device_type='cpu'
-            ),
-        ),
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
@@ -18705,7 +18692,7 @@ python_ref_db = [
         skips=(
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-            # TODO: FIXME
+            # TODO: FIXME: meta strides for to_dtype are incorrect
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_reference_meta_functions',
                          device_type='cuda'),
         )
@@ -18753,20 +18740,16 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.maximum",
         torch_opinfo_name="maximum",
-        # https://github.com/pytorch/pytorch/issues/76555
-        # supports_one_python_scalar=True
         skips=(
-            # https://github.com/pytorch/pytorch/issues/76555
+            # refs.maximum supports scalars, unlike torch.maximum
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_errors'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.minimum",
         torch_opinfo_name="minimum",
-        # https://github.com/pytorch/pytorch/issues/76555
-        # supports_one_python_scalar=True
         skips=(
-            # https://github.com/pytorch/pytorch/issues/76555
+            # refs.minimum supports scalars, unlike torch.minimum
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_errors'),
         ),
     ),
@@ -18796,20 +18779,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.sub",
         torch_opinfo_name="sub",
-        decorators=(
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.bfloat16: tol(atol=1, rtol=0),
-                        torch.float16: tol(atol=1e-2, rtol=0),
-                        torch.chalf: tol(atol=1e-2, rtol=0),
-                    }
-                ),
-                "TestCommon",
-                "test_python_reference_consistency",
-                device_type='cpu'
-            ),
-        ),
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,

@@ -13,7 +13,6 @@ from torch._prims.utils import (
     Number,
     NumberType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
-    elementwise_dtypes,
 )
 from torch._prims.wrappers import (
     elementwise_type_promotion_wrapper,
@@ -247,19 +246,20 @@ def _make_elementwise_unary_reference(
     prim: Callable,
     *,
     type_promotion_kind,
-    CPU_type_promotion_kind=None,
-    CUDA_type_promotion_kind=None,
+    use_opmath,
+    CPU_use_opmath=None,
+    CUDA_use_opmath=None,
     aten_op=infer_aten_op,
     register_meta=False,
     extra_meta=None,
 ) -> Callable:
-
     @out_wrapper
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a",),
         type_promotion_kind=type_promotion_kind,
-        CPU_type_promotion_kind=CPU_type_promotion_kind,
-        CUDA_type_promotion_kind=CUDA_type_promotion_kind,
+        use_opmath=use_opmath,
+        CPU_use_opmath=CPU_use_opmath,
+        CUDA_use_opmath=CUDA_use_opmath,
     )
     def _ref(a: TensorLikeType) -> TensorLikeType:
         if not isinstance(a, TensorLike):
@@ -281,65 +281,106 @@ def _make_elementwise_unary_reference(
 
 
 abs = _make_elementwise_unary_reference(
-    prims.abs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+    prims.abs,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    use_opmath=False,
 )
 
 acos = _make_elementwise_unary_reference(
-    prims.acos, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.acos,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 acosh = _make_elementwise_unary_reference(
-    prims.acosh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.acosh,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 asin = _make_elementwise_unary_reference(
-    prims.asin, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.asin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 atan = _make_elementwise_unary_reference(
-    prims.atan, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.atan,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 ceil = _make_elementwise_unary_reference(
-    prims.ceil, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.ceil,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    use_opmath=False,
 )
 
 cos = _make_elementwise_unary_reference(
-    prims.cos, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.cos,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 cosh = _make_elementwise_unary_reference(
-    prims.cosh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.cosh,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 digamma = _make_elementwise_unary_reference(
-    prims.digamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.digamma,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 erf = _make_elementwise_unary_reference(
-    prims.erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.erf,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 erfinv = _make_elementwise_unary_reference(
     prims.erf_inv,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.erfinv,  # prim/aten name mismatch
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 erfc = _make_elementwise_unary_reference(
-    prims.erfc, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.erfc,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 exp = _make_elementwise_unary_reference(
-    prims.exp, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.exp,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 expm1 = _make_elementwise_unary_reference(
-    prims.expm1, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.expm1,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 floor = _make_elementwise_unary_reference(
-    prims.floor, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.floor,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    use_opmath=False,
 )
 
 
@@ -354,6 +395,7 @@ isfinite = _make_elementwise_unary_reference(
     _isfinite,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
+    use_opmath=False,
 )
 
 
@@ -366,18 +408,28 @@ isnan = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
     register_meta=True,
+    use_opmath=False,
 )
 
 lgamma = _make_elementwise_unary_reference(
-    prims.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.lgamma,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 log = _make_elementwise_unary_reference(
-    prims.log, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.log,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 log1p = _make_elementwise_unary_reference(
-    prims.log1p, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.log1p,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 
@@ -391,10 +443,14 @@ neg = _make_elementwise_unary_reference(
     prims.neg,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     extra_meta=_neg_meta,
+    use_opmath=False,
 )
 
 reciprocal = _make_elementwise_unary_reference(
-    prims.reciprocal, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.reciprocal,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 # TODO: round takes additional kwargs
@@ -402,32 +458,49 @@ round = _make_elementwise_unary_reference(
     prims.round,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
+    use_opmath=False,
 )
 
 sign = _make_elementwise_unary_reference(
-    prims.sign, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.sign,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    use_opmath=False,
 )
 
 sin = _make_elementwise_unary_reference(
-    prims.sin, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.sin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 sinh = _make_elementwise_unary_reference(
-    prims.sinh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.sinh,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 sqrt = _make_elementwise_unary_reference(
-    prims.sqrt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.sqrt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 square = _make_elementwise_unary_reference(
     prims.square,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
-    aten_op=None,  # CompositeImplicitAutograd
+    aten_op=None,  # CompositeImplicitAutograd,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 tan = _make_elementwise_unary_reference(
-    prims.tan, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.tan,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 
@@ -435,6 +508,9 @@ def _make_elementwise_binary_reference(
     prim: Callable,
     *,
     type_promotion_kind,
+    use_opmath,
+    CPU_use_opmath=None,
+    CUDA_use_opmath=None,
     aten_op=infer_aten_op,
     has_out=True,
     supports_lhs_python_scalar=True,
@@ -442,7 +518,11 @@ def _make_elementwise_binary_reference(
     register_meta=False,
 ) -> Callable:
     @elementwise_type_promotion_wrapper(
-        type_promoting_args=("a", "b"), type_promotion_kind=type_promotion_kind
+        type_promoting_args=("a", "b"),
+        type_promotion_kind=type_promotion_kind,
+        use_opmath=use_opmath,
+        CPU_use_opmath=CPU_use_opmath,
+        CUDA_use_opmath=CUDA_use_opmath,
     )
     def _ref(
         a: Union[Tensor, NumberType],
@@ -482,7 +562,9 @@ def _make_elementwise_binary_reference(
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 def add(
     a: Union[TensorLikeType, NumberType],
@@ -522,6 +604,8 @@ atan2 = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 # TODO: add docstring
@@ -529,6 +613,7 @@ bitwise_and = _make_elementwise_binary_reference(
     prims.bitwise_and,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
+    use_opmath=False,
 )
 
 # TODO: add docstring
@@ -536,6 +621,7 @@ bitwise_left_shift = _make_elementwise_binary_reference(
     prims.shift_left,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_left_shift,  # prim/aten name mismatch
+    use_opmath=False,
 )
 
 # TODO: add docstring
@@ -543,6 +629,7 @@ bitwise_or = _make_elementwise_binary_reference(
     prims.bitwise_or,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
+    use_opmath=False,
 )
 
 # TODO: add docstring
@@ -550,6 +637,7 @@ bitwise_right_shift = _make_elementwise_binary_reference(
     prims.shift_right_arithmetic,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_right_shift,  # prim/aten name mismatch
+    use_opmath=False,
 )
 
 # TODO: add docstring
@@ -557,6 +645,7 @@ bitwise_xor = _make_elementwise_binary_reference(
     prims.bitwise_xor,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
+    use_opmath=False,
 )
 
 # TODO: add docstring
@@ -567,6 +656,7 @@ eq = _make_elementwise_binary_reference(
     prims.eq,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
+    use_opmath=False,
 )
 
 # TODO: add docstring
@@ -591,10 +681,12 @@ def float_power(
     else:
         dtype = torch.float64
 
+    # Float power has the following contiguous cast behavior to be
+    # consistent with its C++ impl
     if isinstance(a, TensorLike) and a.dtype != dtype:
-        a = prims.convert_element_type(a, dtype)
+        a = prims.to_dtype(a, dtype)
     if isinstance(b, TensorLike) and b.dtype != dtype:
-        b = prims.convert_element_type(b, dtype)
+        b = prims.to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
     return prims.pow(a, b)
@@ -605,6 +697,7 @@ ge = _make_elementwise_binary_reference(
     prims.ge,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
+    use_opmath=False,
 )
 
 # TODO: add docstring
@@ -612,6 +705,7 @@ gt = _make_elementwise_binary_reference(
     prims.gt,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
+    use_opmath=False,
 )
 
 igamma = _make_elementwise_binary_reference(
@@ -619,6 +713,8 @@ igamma = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 igammac = _make_elementwise_binary_reference(
@@ -626,6 +722,8 @@ igammac = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 
@@ -666,8 +764,8 @@ def isclose(
     # If the values of the integer tensors cannot be exactly represented
     # by the default scalar type then this may cause an incorrect result.
     if not utils.is_float_dtype(a.dtype) and not utils.is_complex_dtype(a.dtype):
-        a = prims._to_dtype(a, torch.get_default_dtype())
-        b = prims._to_dtype(b, torch.get_default_dtype())
+        a = prims.convert_element_type(a, torch.get_default_dtype())
+        b = prims.convert_element_type(b, torch.get_default_dtype())
 
     allowed_error = add(atol, abs(mul(b, rtol)))
     actual_error = abs(sub(a, b))
@@ -685,6 +783,7 @@ le = _make_elementwise_binary_reference(
     prims.le,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
+    use_opmath=False,
 )
 
 
@@ -701,6 +800,7 @@ logical_and = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_and,
     register_meta=True,
+    use_opmath=False,
 )
 
 
@@ -717,6 +817,7 @@ logical_or = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_or,
     register_meta=True,
+    use_opmath=False,
 )
 
 # TODO: add docstring
@@ -724,24 +825,29 @@ lt = _make_elementwise_binary_reference(
     prims.lt,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
+    use_opmath=False,
 )
 
 # TODO: add docstring
 maximum = _make_elementwise_binary_reference(
     prims.maximum,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    use_opmath=False,
 )
 
 # TODO: add docstring
 minimum = _make_elementwise_binary_reference(
     prims.minimum,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    use_opmath=False,
 )
 
 # TODO: add docstring
 mul = _make_elementwise_binary_reference(
     prims.mul,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 # TODO: add docstring
@@ -749,6 +855,7 @@ ne = _make_elementwise_binary_reference(
     prims.ne,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
+    use_opmath=False,
 )
 
 # TODO: add docstring
@@ -757,11 +864,15 @@ nextafter = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
+    use_opmath=False,
 )
 
 # TODO: add docstring
 pow = _make_elementwise_binary_reference(
-    prims.pow, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
+    prims.pow,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 # TODO: add docstring
@@ -771,7 +882,9 @@ pow = _make_elementwise_binary_reference(
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 def sub(
     a: Union[TensorLikeType, NumberType],
@@ -810,6 +923,8 @@ true_divide = _make_elementwise_binary_reference(
     prims.div,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # CompositeImplicitAutograd
+    use_opmath=True,
+    CPU_use_opmath=False,
 )
 
 #
@@ -823,6 +938,7 @@ true_divide = _make_elementwise_binary_reference(
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    use_opmath=False,
 )
 def where(
     pred: Tensor,
@@ -1024,6 +1140,7 @@ def as_strided(
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    use_opmath=False,
 )
 def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     _dim = utils.canonicalize_dims(tensors[0].ndim, dim)
