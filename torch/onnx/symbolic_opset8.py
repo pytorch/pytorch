@@ -2,32 +2,32 @@
 Note [ONNX operators that are added/updated from opset 8 to opset 9]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 New operators:
-      Compress
-      ConstantOfShape
-      EyeLike
-      MaxUnpool
-      OneHot
-      Sinh
-      Cosh
-      Asinh
-      Acosh
-      Atanh
-      Shrink
-      IsNaN
-      Sign
-      Erf
-      Scatter
-      Where
-      NonZero
-      TfIdfVectorizer
-      MeanVarianceNormalization
+    Compress
+    ConstantOfShape
+    EyeLike
+    MaxUnpool
+    OneHot
+    Sinh
+    Cosh
+    Asinh
+    Acosh
+    Atanh
+    Shrink
+    IsNaN
+    Sign
+    Erf
+    Scatter
+    Where
+    NonZero
+    TfIdfVectorizer
+    MeanVarianceNormalization
 
 Updated operators:
-      BatchNormalization: removed spatial attribute.
-      Greater, Less, Constant, MatMul, PRelu, Gemm, Flatten: more data types{integers} supported.
-      Cast: more data types{string} supported.
-      Upsample: moved scales from attribute to input.
-      Scan
+    BatchNormalization: removed spatial attribute.
+    Greater, Less, Constant, MatMul, PRelu, Gemm, Flatten: more data types{integers} supported.
+    Cast: more data types{string} supported.
+    Upsample: moved scales from attribute to input.
+    Scan
 """
 
 import warnings

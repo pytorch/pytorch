@@ -8,8 +8,8 @@ import torch.onnx
 # ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx import symbolic_helper
-from torch.onnx._globals import GLOBALS
 from torch.onnx import symbolic_opset9 as opset9
+from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import parse_args, quantized_args
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -436,9 +436,7 @@ def fake_quantize_per_tensor_affine(
 
 
 def isinf(g, input):
-    from torch.onnx.symbolic_opset9 import (
-        _cast_Double,  # type: ignore[attr-defined]
-    )
+    from torch.onnx.symbolic_opset9 import _cast_Double  # type: ignore[attr-defined]
 
     return g.op("IsInf", _cast_Double(g, input, False))
 
