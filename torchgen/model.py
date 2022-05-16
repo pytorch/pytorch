@@ -144,10 +144,17 @@ class DispatchKey(Enum):
 # We need to store both the 'NativeFunction' it depends on, as well as the
 # 'NativeFunctionsGroup' it belongs to in order to find out whether the
 # operation has a kernel registered for a given dispatch key.
-CompositeGraph = Dict["OperatorName", List[Tuple["NativeFunction", Optional["NativeFunctionsGroup"]]]]
+CompositeGraph = Dict[
+    "OperatorName", List[Tuple["NativeFunction", Optional["NativeFunctionsGroup"]]]
+]
 
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
-COMPOSITE_DISPATCH_KEYS = {DispatchKey.Meta, DispatchKey.CUDA, DispatchKey.CPU, DispatchKey.CompositeExplicitAutograd}
+COMPOSITE_DISPATCH_KEYS = {
+    DispatchKey.Meta,
+    DispatchKey.CUDA,
+    DispatchKey.CPU,
+    DispatchKey.CompositeExplicitAutograd,
+}
 
 # Set of supported dispatch keys
 dispatch_keys = [
@@ -525,8 +532,11 @@ class NativeFunction:
 
         composite_s = e.pop("composite", None)
         assert composite_s is None or isinstance(composite_s, str)
-        composite = set(OperatorName.parse(c.strip()) for c in composite_s.split(",")) \
-            if composite_s is not None else set()
+        composite = (
+            set(OperatorName.parse(c.strip()) for c in composite_s.split(","))
+            if composite_s is not None
+            else set()
+        )
 
         from torchgen.api import cpp
 
@@ -971,10 +981,7 @@ class BackendIndex:
     def should_gen_dispatchless_composite(self, f: NativeFunction) -> bool:
         if f.func.name in self.index:
             return False
-        return (
-            len(f.composite) > 0
-            and self.dispatch_key in COMPOSITE_DISPATCH_KEYS
-        )
+        return len(f.composite) > 0 and self.dispatch_key in COMPOSITE_DISPATCH_KEYS
 
     def dispatchless_composite_struct(self, f: NativeFunction) -> str:
         name = f.func.name.unambiguous_name()
@@ -992,14 +999,12 @@ class BackendIndex:
         return f"{name}<{struct_name}>"
 
     def has_registered_kernel(
-            self, f: NativeFunction, g: Optional[NativeFunctionsGroup]
+        self, f: NativeFunction, g: Optional[NativeFunctionsGroup]
     ) -> bool:
-        if (
-                g is not None
-                and g.structured
-        ):
+        if g is not None and g.structured:
             return self.has_kernel(g) or self.dispatch_key == DispatchKey.Meta
         return self.has_kernel(f)
+
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
