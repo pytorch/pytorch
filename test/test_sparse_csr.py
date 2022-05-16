@@ -316,6 +316,17 @@ class TestSparseCompressed(TestCase):
                                     ", but got size"):
             torch.empty((5,), dtype=dtype, device=device, layout=layout)
 
+    @skipMeta
+    @all_sparse_compressed_layouts
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    def test_clone(self, layout, device, dtype):
+        for compressed_indices, plain_indices, values, size in self._generate_small_inputs(
+                layout, device, dtype, index_dtype=torch.int32):
+            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
+                                                    dtype=dtype, layout=layout, device=device)
+            cloned_sparse = sparse.clone()
+            self.assertEqual(sparse, cloned_sparse)
+
 
 class TestSparseCSR(TestCase):
 
