@@ -28,6 +28,7 @@
 #include <ATen/ops/_validate_sparse_csc_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsr_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsc_tensor_args_native.h>
+#include <ATen/ops/ccol_indices_native.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/col_indices_native.h>
 #include <ATen/ops/copy_native.h>
@@ -37,6 +38,7 @@
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
+#include <ATen/ops/row_indices_native.h>
 #include <ATen/ops/select_native.h>
 #include <ATen/ops/sparse_compressed_tensor_native.h>
 #include <ATen/ops/sparse_csr_tensor_native.h>
@@ -535,11 +537,27 @@ Tensor values_sparse_csr(const Tensor& self) {
 }
 
 Tensor crow_indices_sparse_csr(const Tensor& self) {
-  return get_sparse_csr_impl(self)->crow_indices().alias();
+  return AT_DISPATCH_SPARSE_ROW_COMPRESSED_LAYOUTS(self.layout(),
+                                                   "crow_indices",
+                                                   [&]{ return get_sparse_csr_impl(self)->compressed_indices().alias(); });
 }
 
 Tensor col_indices_sparse_csr(const Tensor& self) {
-  return get_sparse_csr_impl(self)->col_indices().alias();
+  return AT_DISPATCH_SPARSE_ROW_COMPRESSED_LAYOUTS(self.layout(),
+                                                   "col_indices",
+                                                   [&]{ return get_sparse_csr_impl(self)->plain_indices().alias(); });
+}
+
+Tensor ccol_indices_sparse_csr(const Tensor& self) {
+  return AT_DISPATCH_SPARSE_COL_COMPRESSED_LAYOUTS(self.layout(),
+                                                   "ccol_indices",
+                                                   [&]{ return get_sparse_csr_impl(self)->compressed_indices().alias(); });
+}
+
+Tensor row_indices_sparse_csr(const Tensor& self) {
+  return AT_DISPATCH_SPARSE_COL_COMPRESSED_LAYOUTS(self.layout(),
+                                                   "row_indices",
+                                                   [&]{ return get_sparse_csr_impl(self)->plain_indices().alias(); });
 }
 
 bool _is_same_size_as_sparse_csr(
