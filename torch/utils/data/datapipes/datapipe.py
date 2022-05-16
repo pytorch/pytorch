@@ -1,8 +1,20 @@
 import functools
+import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
 from torch.utils.data.dataset import Dataset, IterableDataset
+
+try:
+    import dill
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
+    HAS_DILL = True
+except ImportError:
+    HAS_DILL = False
 
 __all__ = [
     "DataChunk",
@@ -249,6 +261,49 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
             return self.str_hook(self)
         # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
+
+
+class _DataPipeSerializationWrapper:
+    def __init__(self, datapipe):
+        self._datapipe = datapipe
+
+    def __getstate__(self):
+        use_dill = False
+        try:
+            value = pickle.dumps(self._datapipe)
+        except Exception:
+            if HAS_DILL:
+                value = dill.dumps(self._datapipe)
+                use_dill = True
+            else:
+                raise
+        return (value, use_dill)
+
+    def __setstate__(self, state):
+        value, use_dill = state
+        if use_dill:
+            self._datapipe = dill.loads(value)
+        else:
+            self._datapipe = pickle.loads(value)
+
+    def __len__(self):
+        try:
+            return len(self._datapipe)
+        except Exception:
+            raise TypeError(
+                "{} instance doesn't have valid length".format(type(self).__name__)
+            )
+
+
+class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
+    def __iter__(self):
+        yield from self._datapipe
+
+
+class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):
+    def __getitem__(self, idx):
+        return self._datapipe[idx]
+
 
 class DataChunk(list, Generic[T]):
     def __init__(self, items):
