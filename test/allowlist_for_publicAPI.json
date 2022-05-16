@@ -2505,7 +2505,7 @@
     "Tensor",
     "Tuple"
   ],
-  "torch.nn.quantized": [
+  "torch.ao.nn.quantized": [
     "MaxPool2d"
   ],
   "torch.nn.quantized.dynamic.modules.conv": [
@@ -2525,31 +2525,31 @@
     "Optional",
     "Tensor"
   ],
-  "torch.nn.quantized.modules": [
+  "torch.ao.nn.quantized.modules": [
     "MaxPool2d",
     "_ConvNd"
   ],
-  "torch.nn.quantized.modules.batchnorm": [
+  "torch.ao.nn.quantized.modules.batchnorm": [
     "Tensor"
   ],
-  "torch.nn.quantized.modules.conv": [
+  "torch.ao.nn.quantized.modules.conv": [
     "List",
     "Optional",
     "TypeVar",
     "WeightedQuantizedModule",
     "fuse_conv_bn_weights"
   ],
-  "torch.nn.quantized.modules.embedding_ops": [
+  "torch.ao.nn.quantized.modules.embedding_ops": [
     "List",
     "Optional",
     "Tensor",
     "hide_packed_params_repr"
   ],
-  "torch.nn.quantized.modules.functional_modules": [
+  "torch.ao.nn.quantized.modules.functional_modules": [
     "List",
     "Tensor"
   ],
-  "torch.nn.quantized.modules.linear": [
+  "torch.ao.nn.quantized.modules.linear": [
     "Iterable",
     "Optional",
     "WeightedQuantizedModule",
@@ -2557,7 +2557,7 @@
     "hide_packed_params_repr",
     "type_before_parametrizations"
   ],
-  "torch.nn.quantized.modules.utils": [
+  "torch.ao.nn.quantized.modules.utils": [
     "repeat"
   ],
   "torch.nn.utils.clip_grad": [

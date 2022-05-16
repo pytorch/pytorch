@@ -316,11 +316,11 @@ c10::optional<Assign> SourceImporterImpl::
 
   // module demangled qualname -> ReplacementDescr
   static std::unordered_map<std::string, AttrTypeReplacementDescr> replacements{
-      {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams",
+      {"__torch__.torch.ao.nn.quantized.modules.linear.LinearPackedParams",
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
-      {"__torch__.torch.nn.quantized.modules.linear.Linear",
+      {"__torch__.torch.ao.nn.quantized.modules.linear.Linear",
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
@@ -328,7 +328,7 @@ c10::optional<Assign> SourceImporterImpl::
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
-      {"__torch__.torch.nn.quantized.modules.conv.Conv2d",
+      {"__torch__.torch.ao.nn.quantized.modules.conv.Conv2d",
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
@@ -336,7 +336,7 @@ c10::optional<Assign> SourceImporterImpl::
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
-      {"__torch__.torch.nn.quantized.modules.conv.Conv3d",
+      {"__torch__.torch.ao.nn.quantized.modules.conv.Conv3d",
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},

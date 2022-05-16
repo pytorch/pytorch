@@ -12318,7 +12318,7 @@ class _TestONNXRuntime:
     #       Otherwise test results could be inaccurate.
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_linear(self):
-        model = torch.nn.quantized.Linear(4, 8)
+        model = torch.ao.nn.quantized.Linear(4, 8)
         # Set fixed weight to avoid flaky test.
         weight = torch.quantize_per_tensor(
             torch.arange(32, dtype=torch.float).view(8, 4), 0.5, 0, torch.qint8
@@ -12334,7 +12334,7 @@ class _TestONNXRuntime:
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv2d(self):
-        model = torch.nn.quantized.Conv2d(16, 33, 3, stride=2)
+        model = torch.ao.nn.quantized.Conv2d(16, 33, 3, stride=2)
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
         q_weight = torch.quantize_per_tensor(
@@ -12369,7 +12369,7 @@ class _TestONNXRuntime:
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_hardswish(self):
-        model = torch.nn.quantized.Hardswish(1.0, 0)
+        model = torch.ao.nn.quantized.Hardswish(1.0, 0)
         input = torch.randn(2, 6)
         q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
         self.run_test(model, q_input)
@@ -12398,8 +12398,8 @@ class _TestONNXRuntime:
 
         class ArithmeticModel(torch.nn.Module):
             def forward(self, x, y):
-                o = torch.nn.quantized.QFunctional().add(x, y)
-                o = torch.nn.quantized.QFunctional().mul(o, x)
+                o = torch.ao.nn.quantized.QFunctional().add(x, y)
+                o = torch.ao.nn.quantized.QFunctional().mul(o, x)
                 return o
 
         self.run_test(ArithmeticModel(), (x, y))

@@ -8,7 +8,7 @@ import onnx
 
 import caffe2.python.onnx.backend as c2
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 import torch.onnx
 
 
