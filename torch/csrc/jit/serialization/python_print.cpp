@@ -761,7 +761,7 @@ struct PythonPrintImpl {
         if (get_version_calculator_flag()) {
           min_version_ = std::max(min_version_, current_version);
         } else {
-          if (historic_version != 0) {
+          if (legacy_version_map_version != 0) {
             min_version_ = std::max(min_version_, legacy_version_map_version);
           } else {
             min_version_ = std::max(min_version_, current_version);
