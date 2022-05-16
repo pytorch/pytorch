@@ -2011,6 +2011,18 @@ class TestSparseCSR(TestCase):
             return a.to_sparse_bsc((2, 2))
         raise NotImplementedError(repr(a))
 
+    def _construct_sp_matrix(self, tensor, layout):
+        if tensor.layout == torch.sparse_coo:
+            tensor = tensor.to_dense()
+        if layout is torch.sparse_csr:
+            return sp.csr_matrix(tensor.cpu().numpy())
+        if layout is torch.sparse_csc:
+            return sp.csc_matrix(tensor.cpu().numpy())
+        if layout is torch.sparse_bsr:
+            return sp.bsr_matrix(tensor.cpu().numpy())
+        # No native scipy BSC support?
+        raise NotImplementedError(repr(tensor))
+
     @skipMeta
     @all_sparse_compressed_layouts('to_layout')
     @all_sparse_compressed_layouts('from_layout')
@@ -2038,7 +2050,7 @@ class TestSparseCSR(TestCase):
 
     @skipMeta
     @all_sparse_compressed_layouts()
-    def test_dense_to_sparse(self, device, layout):
+    def test_dense_to_sparse_compressed(self, device, layout):
         if layout is torch.sparse_bsc:
             # TODO: Remove this once support has been enabled
             return
@@ -2046,40 +2058,61 @@ class TestSparseCSR(TestCase):
             # TODO: Remove this once support has been enabled
             return
 
-        def _construct_sp_matrix(dense, layout):
-            if layout is torch.sparse_csr:
-                return sp.csr_matrix(dense.cpu().numpy())
-            if layout is torch.sparse_csc:
-                return sp.csc_matrix(dense.cpu().numpy())
-            if layout is torch.sparse_bsr:
-                return sp.bsr_matrix(dense.cpu().numpy())
-            # No native scipy BSC support?
-            raise NotImplementedError(repr(dense))
-        dense = torch.randn(4, 5).relu()
-        sp_matrix = _construct_sp_matrix(dense, layout)
-        pt_matrix = self._convert_to_layout(dense, layout)
+        for shape in [(0, 10), (6, 0), (6, 10), (0, 0)]:
+            dense = make_tensor(shape, dtype=torch.float, device=device)
+            sp_matrix = self._construct_sp_matrix(dense, layout)
+            pt_matrix = self._convert_to_layout(dense, layout)
 
-        compressed_indices_mth = {
-            torch.sparse_csr: torch.Tensor.crow_indices,
-            torch.sparse_csc: torch.Tensor.ccol_indices,
-            torch.sparse_bsr: torch.Tensor.crow_indices,
-            torch.sparse_bsc: torch.Tensor.ccol_indices,
-        }[layout]
+            compressed_indices_mth = {
+                torch.sparse_csr: torch.Tensor.crow_indices,
+                torch.sparse_csc: torch.Tensor.ccol_indices,
+            }[layout]
 
-        plain_indices_mth = {
-            torch.sparse_csr: torch.Tensor.col_indices,
-            torch.sparse_csc: torch.Tensor.row_indices,
-            torch.sparse_bsr: torch.Tensor.col_indices,
-            torch.sparse_bsc: torch.Tensor.row_indices,
-        }[layout]
+            plain_indices_mth = {
+                torch.sparse_csr: torch.Tensor.col_indices,
+                torch.sparse_csc: torch.Tensor.row_indices,
+            }[layout]
 
-        self.assertEqual(layout, pt_matrix.layout)
-        self.assertEqual(sp_matrix.shape, pt_matrix.shape)
-        self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
-        self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
-        self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
-        with self.assertRaises(RuntimeError):
-            pt_matrix.to_dense()
+            self.assertEqual(layout, pt_matrix.layout)
+            self.assertEqual(sp_matrix.shape, pt_matrix.shape)
+            self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
+            self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
+            self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
+
+    @skipMeta
+    @all_sparse_compressed_layouts()
+    @coalescedonoff
+    @dtypes(torch.double)
+    def test_sparse_to_sparse_compressed(self, device, dtype, coalesced, layout):
+        if layout is torch.sparse_bsc:
+            # TODO: Remove this once support has been enabled
+            return
+        if layout is torch.sparse_bsr:
+            # TODO: Remove this once support has been enabled
+            return
+
+        for shape in [(0, 10), (6, 0), (6, 10), (0, 0)]:
+            sparse_dim = 2
+            nnz = shape[0] * shape[1] // 2
+            sparse, _, _ = self.genSparseTensor(shape, sparse_dim, nnz, coalesced, device, dtype)
+            sp_matrix = self._construct_sp_matrix(sparse, layout)
+            pt_matrix = self._convert_to_layout(sparse, layout)
+
+            compressed_indices_mth = {
+                torch.sparse_csr: torch.Tensor.crow_indices,
+                torch.sparse_csc: torch.Tensor.ccol_indices,
+            }[layout]
+
+            plain_indices_mth = {
+                torch.sparse_csr: torch.Tensor.col_indices,
+                torch.sparse_csc: torch.Tensor.row_indices,
+            }[layout]
+
+            self.assertEqual(layout, pt_matrix.layout)
+            self.assertEqual(sp_matrix.shape, pt_matrix.shape)
+            self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
+            self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
+            self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
