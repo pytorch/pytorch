@@ -1944,7 +1944,7 @@
     Meta: empty_meta
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA: empty_sparse
-    SparseCsrCPU, SparseCsrCUDA: empty_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version

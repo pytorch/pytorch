@@ -73,6 +73,30 @@
     }                                                                   \
   } ()
 
+#define AT_DISPATCH_SPARSE_COMPRESSED_NONBLOCK_LAYOUTS(LAYOUT, NAME, ACTION) \
+  [&]() {                                                               \
+    const auto& the_layout = LAYOUT;                                    \
+    switch (the_layout) {                                               \
+    case kSparseCsr:                                                    \
+    case kSparseCsc:                                                    \
+      return (ACTION)();                                                \
+    default:                                                            \
+      AT_ERROR(#NAME, " expected sparse compressed (non-block) tensor layout but got ", the_layout); \
+    }                                                                   \
+  } ()
+
+#define AT_DISPATCH_SPARSE_COMPRESSED_BLOCK_LAYOUTS(LAYOUT, NAME, ACTION) \
+  [&]() {                                                               \
+    const auto& the_layout = LAYOUT;                                    \
+    switch (the_layout) {                                               \
+    case kSparseBsr:                                                    \
+    case kSparseBsc:                                                    \
+      return (ACTION)();                                                \
+    default:                                                            \
+      AT_ERROR(#NAME, " expected sparse compressed block tensor layout but got ", the_layout); \
+    }                                                                   \
+  } ()
+
 namespace at {
 namespace sparse_csr {
 
