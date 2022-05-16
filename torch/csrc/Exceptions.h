@@ -11,6 +11,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <c10/util/StringUtil.h>
 #include <ATen/detail/FunctionTraits.h>
@@ -104,6 +105,11 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     catch (const c10d::TimeoutError& e) {                            \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(PyExc_TimeoutError, msg);                      \
+      retstmnt;                                                      \
+    }                                                                \
+    catch (const c10d::C10dError& e) {                               \
+      auto msg = torch::processErrorMsg(e.what());                   \
+      PyErr_SetString(PyExc_RuntimeError, msg);                      \
       retstmnt;                                                      \
     }
 #else
@@ -274,8 +280,6 @@ namespace torch {
 TORCH_PYTHON_API void translate_exception_to_python(const std::exception_ptr &);
 
 TORCH_PYTHON_API std::string processErrorMsg(std::string str);
-
-TORCH_PYTHON_API bool get_cpp_stacktraces_enabled();
 
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {

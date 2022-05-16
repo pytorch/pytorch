@@ -81,6 +81,11 @@ struct C10_API Device final {
     return type_ == DeviceType::CUDA;
   }
 
+  /// Return true if the device is of MPS type.
+  bool is_mps() const noexcept {
+    return type_ == DeviceType::MPS;
+  }
+
   /// Return true if the device is of HIP type.
   bool is_hip() const noexcept {
     return type_ == DeviceType::HIP;
@@ -96,9 +101,19 @@ struct C10_API Device final {
     return type_ == DeviceType::XPU;
   }
 
+  /// Return true if the device is of IPU type.
+  bool is_ipu() const noexcept {
+    return type_ == DeviceType::IPU;
+  }
+
   /// Return true if the device is of HPU type.
   bool is_hpu() const noexcept {
     return type_ == DeviceType::HPU;
+  }
+
+  /// Return true if the device is of META type.
+  bool is_meta() const noexcept {
+    return type_ == DeviceType::Meta;
   }
 
   /// Return true if the device is of CPU type.

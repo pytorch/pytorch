@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
@@ -9,10 +10,11 @@ namespace {
 
 using namespace api::utils;
 
-Tensor clamp(
+Tensor _clamp(
     const Tensor& self_arg,
     const c10::optional<Scalar>& min,
-    const c10::optional<Scalar>& max) {
+    const c10::optional<Scalar>& max,
+    const std::string& op_name) {
   TORCH_CHECK(
       min || max,
       "At least one of 'min' or 'max' must not be None");
@@ -31,6 +33,8 @@ Tensor clamp(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
@@ -79,10 +83,18 @@ Tensor clamp(
   return convert(v_output);
 }
 
-Tensor& clamp_(
-    Tensor& self,
+Tensor clamp(
+    const Tensor& self_arg,
     const c10::optional<Scalar>& min,
     const c10::optional<Scalar>& max) {
+  return _clamp(self_arg, min, max, "aten::clamp");
+}
+
+Tensor& _clamp_(
+    Tensor& self,
+    const c10::optional<Scalar>& min,
+    const c10::optional<Scalar>& max,
+    const std::string& op_name) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
@@ -98,6 +110,8 @@ Tensor& clamp_(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY(v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
@@ -140,9 +154,17 @@ Tensor& clamp_(
   return self;
 }
 
+Tensor& clamp_(
+    Tensor& self,
+    const c10::optional<Scalar>& min,
+    const c10::optional<Scalar>& max) {
+  return _clamp_(self, min, max, "aten::clamp_");
+}
+
 Tensor activation(
     const Tensor& self_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -157,6 +179,8 @@ Tensor activation(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
@@ -202,7 +226,8 @@ Tensor activation(
 
 Tensor& activation_(
     Tensor& self,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
@@ -214,6 +239,8 @@ Tensor& activation_(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY(v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
@@ -255,44 +282,45 @@ Tensor hardtanh(
     const Tensor& self,
     const Scalar& min,
     const Scalar& max) {
-  return ops::clamp(self, min, max);
+  return ops::_clamp(self, min, max, "aten::hardtanh");
 }
 
 Tensor& hardtanh_(
     Tensor& self,
     const Scalar& min,
     const Scalar& max) {
-  return ops::clamp_(self, min, max);
+  return ops::_clamp_(self, min, max, "aten::hardtanh_");
 }
 
 Tensor relu(const Tensor& self) {
-  return ops::clamp(self, 0, c10::nullopt);
+  return ops::_clamp(self, 0, c10::nullopt, "aten::relu");
 }
 
 Tensor& relu_(Tensor& self) {
-  return ops::clamp_(self, 0, c10::nullopt);
+  return ops::_clamp_(self, 0, c10::nullopt, "aten::relu_");
 }
 
 Tensor hardswish(const Tensor& self) {
-  return ops::activation(self, VK_KERNEL(hardswish));
+  return ops::activation(self, VK_KERNEL(hardswish), "aten::hardswish");
 }
 
 Tensor& hardswish_(Tensor& self) {
-  return ops::activation_(self, VK_KERNEL(hardswish_));
+  return ops::activation_(self, VK_KERNEL(hardswish_), "aten::hardswish_");
 }
 
 Tensor hardsigmoid(const Tensor& self) {
-  return ops::activation(self, VK_KERNEL(hardsigmoid));
+  return ops::activation(self, VK_KERNEL(hardsigmoid), "aten::hardsigmoid");
 }
 
 Tensor& hardsigmoid_(Tensor& self) {
-  return ops::activation_(self, VK_KERNEL(hardsigmoid_));
+  return ops::activation_(self, VK_KERNEL(hardsigmoid_), "aten::hardsigmoid_");
 }
 
 Tensor activation_scalar(
     const Tensor& self_arg,
     const Scalar& scalar_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -307,6 +335,8 @@ Tensor activation_scalar(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
@@ -355,7 +385,8 @@ Tensor activation_scalar(
 Tensor& activation_scalar_(
     Tensor& self,
     const Scalar& scalar_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::Shader::Descriptor& shader_descriptor,
+    const std::string& op_name) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
@@ -367,6 +398,8 @@ Tensor& activation_scalar_(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+
     if C10_LIKELY(v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
@@ -409,41 +442,41 @@ Tensor& activation_scalar_(
 Tensor hardshrink(
     const Tensor& self_arg,
     const Scalar& lambd) {
-  return ops::activation_scalar(self_arg, lambd, VK_KERNEL(hardshrink));
+  return ops::activation_scalar(self_arg, lambd, VK_KERNEL(hardshrink), "aten::hardshrink");
 }
 
 Tensor& hardshrink_(
     Tensor& self,
     const Scalar& lambd) {
-  return ops::activation_scalar_(self, lambd, VK_KERNEL(hardshrink_));
+  return ops::activation_scalar_(self, lambd, VK_KERNEL(hardshrink_), "aten::hardshrink_");
 }
 
 Tensor leaky_relu(
     const Tensor& self_arg,
     const Scalar& negative_slope) {
-  return ops::activation_scalar(self_arg, negative_slope, VK_KERNEL(leaky_relu));
+  return ops::activation_scalar(self_arg, negative_slope, VK_KERNEL(leaky_relu), "aten::leaky_relu");
 }
 
 Tensor& leaky_relu_(
     Tensor& self,
     const Scalar& negative_slope) {
-  return ops::activation_scalar_(self, negative_slope, VK_KERNEL(leaky_relu_));
+  return ops::activation_scalar_(self, negative_slope, VK_KERNEL(leaky_relu_), "aten::leaky_relu_");
 }
 
 Tensor sigmoid(const Tensor& self) {
-  return ops::activation(self, VK_KERNEL(sigmoid));
+  return ops::activation(self, VK_KERNEL(sigmoid), "aten::sigmoid");
 }
 
 Tensor& sigmoid_(Tensor& self) {
-  return ops::activation_(self, VK_KERNEL(sigmoid_));
+  return ops::activation_(self, VK_KERNEL(sigmoid_), "aten::sigmoid_");
 }
 
 Tensor tanh(const Tensor& self) {
-  return ops::activation(self, VK_KERNEL(tanh));
+  return ops::activation(self, VK_KERNEL(tanh), "aten::tanh");
 }
 
 Tensor& tanh_(Tensor& self) {
-  return ops::activation_(self, VK_KERNEL(tanh_));
+  return ops::activation_(self, VK_KERNEL(tanh_), "aten::tanh_");
 }
 
 #ifdef USE_VULKAN_API

@@ -83,6 +83,10 @@ class RecursiveDependencies : public OptInDispatch {
     simpleVal(stmt);
   }
 
+  void handle(ComplexDouble* stmt) final {
+    simpleVal(stmt);
+  }
+
   void handle(NamedScalar* stmt) final {
     simpleVal(stmt);
   }
@@ -593,6 +597,9 @@ class DependentVals : public IterVisitor {
   std::unordered_set<Val*> outs_;
 
   // Boundary where we want to stop searching beyond
+  // TODO: Based on the todo below, shouldn't we stop just at the definition of?
+  // If we really wanted to make this traverse left, wouldn't we first check
+  // which outputs are outputs dependent on of?
   std::unordered_set<Val*> boundary_;
 
   std::vector<Statement*> next(Val* v) override {
@@ -616,6 +623,11 @@ class DependentVals : public IterVisitor {
   }
 
   // optimization to limit search path
+  // TODO: Is this valid? Couldn't something like:
+  // out0 = of + val0
+  // out1 = out0 + val1
+  // out2 = TernaryOp(out1, val0, of)
+  // Hide the dep of out1 on of?
   void createBoundary() {
     for (auto v_of : of_) {
       for (auto v_expr : v_of->uses()) {

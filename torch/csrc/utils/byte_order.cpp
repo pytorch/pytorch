@@ -309,7 +309,8 @@ void THP_encodeComplexFloatBuffer(uint8_t* dst, const c10::complex<float>* src, 
   auto new_src = complex_to_float(src, len);
   memcpy(dst, static_cast<void*>(&new_src), 2 * sizeof(float) * len);
   if (order != THP_nativeByteOrder()) {
-    for (size_t i = 0; i < (2 * len); i++) {
+    for (const auto i : c10::irange(2 * len)) {
+      (void)i; // Suppress unused variable warning
       swapBytes32(dst);
       dst += sizeof(float);
     }
@@ -321,7 +322,8 @@ void THP_encodeCompelxDoubleBuffer(uint8_t* dst, const c10::complex<double>* src
   auto new_src = complex_to_float(src, len);
   memcpy(dst, static_cast<void*>(&new_src), 2 * sizeof(double) * len);
   if (order != THP_nativeByteOrder()) {
-    for (size_t i = 0; i < (2 * len); i++) {
+    for (const auto i : c10::irange(2 * len)) {
+      (void)i; // Suppress unused variable warning
       swapBytes64(dst);
       dst += sizeof(double);
     }

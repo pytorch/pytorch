@@ -119,8 +119,8 @@ class C10_API ExcludeDispatchKeyGuard {
 
 struct C10_API ForceDispatchKeyGuard {
  public:
-  ForceDispatchKeyGuard(c10::impl::LocalDispatchKeySet key_set) :
-      saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {
+  ForceDispatchKeyGuard(c10::impl::LocalDispatchKeySet key_set)
+      : saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {
     c10::impl::_force_tls_local_dispatch_key_set(key_set);
   }
   ~ForceDispatchKeyGuard() {

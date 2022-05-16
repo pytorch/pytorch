@@ -665,6 +665,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
       auto gOut = Vec::loadu(gOut_slice[c].data() + offset, len);
 
       if (input_requires_grad) {
+        TORCH_INTERNAL_ASSERT(gInp_slice_ptr);
         auto gInp_slice_C_ptr = (*gInp_slice_ptr)[c].data();
 
         (nw * gOut).store(gInp_corner_arr);
@@ -769,7 +770,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
   inline void backward(TensorAccessor<scalar_t, 3>* gInp_slice_ptr,
                        TensorAccessor<scalar_t, 3>& gGrid_slice,
                        const TensorAccessor<scalar_t, 3>& gOut_slice,
-                       const TensorAccessor<scalar_t, 3>& inp_slice,
+                       const TensorAccessor<scalar_t, 3>& /*inp_slice*/,
                        int64_t offset, const Vec& grid_x, const Vec& grid_y,
                        int64_t len) const {
     if (input_requires_grad) {
