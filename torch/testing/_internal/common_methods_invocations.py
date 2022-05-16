@@ -14840,6 +14840,9 @@ op_db: List[OpInfo] = [
                        # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
                                     dtypes=(torch.chalf,),),
+                       # AssertionError: Tensor-likes are not close!
+                       DecorateInfo(unitted.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                                    device_type='cuda', dtypes=(torch.chalf,),),
                    )),
     UnaryUfuncInfo('square',
                    ref=np.square,
