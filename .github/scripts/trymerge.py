@@ -531,7 +531,6 @@ class GitHubPR:
                 checkruns = node["checkRuns"]
                 if workflow_run is not None:
                     conclusions[workflow_run["workflow"]["name"]] = node["conclusion"]
-                    continue
                 if checkruns is not None:
                     for checkrun_node in checkruns["nodes"]:
                         conclusions[checkrun_node["name"]] = checkrun_node["conclusion"]
