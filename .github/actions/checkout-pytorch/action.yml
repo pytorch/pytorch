@@ -36,6 +36,10 @@ runs:
       with:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         # --depth=1 for speed, manually fetch history and other refs as necessary
-        fetch-depth: ${{ inputs.fetch-depth }}
+        fetch-depth: 1
         submodules: ${{ inputs.submodules }}
-        quiet-checkout: true
+    - name: other refs
+      shell: bash
+      run: |
+        git fetch origin master
+        git fetch origin viable/strict
