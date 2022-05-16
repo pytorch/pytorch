@@ -27,6 +27,14 @@ static TensorAccessor<scalar_t, 1> conditional_accessor_1d(const Tensor& t) {
 }
 
 template <typename scalar_t>
+static TensorAccessor<scalar_t, 2> conditional_accessor_2d(const Tensor& t) {
+  if (!t.defined()) {
+    return TensorAccessor<scalar_t, 2>(nullptr, nullptr, nullptr);
+  }
+  return t.accessor<scalar_t, 2>();
+}
+
+template <typename scalar_t>
 static scalar_t* conditional_data_ptr(const Tensor& t) {
   return t.defined() ? t.contiguous().data_ptr<scalar_t>()
                      : nullptr;

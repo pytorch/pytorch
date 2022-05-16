@@ -3312,7 +3312,7 @@
 
 - func: batch_norm_gather_stats_with_counts(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, Tensor counts) -> (Tensor, Tensor)
   dispatch:
-    # CPU: batch_norm_gather_stats_with_counts_cpu
+    CPU: batch_norm_gather_stats_with_counts_cpu
     CUDA: batch_norm_gather_stats_with_counts_cuda
 
 - func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)

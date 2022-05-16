@@ -1,4 +1,6 @@
+from turtle import shape
 import torch
+from torch._C import Size
 import torch.distributed as dist
 
 from torch.autograd.function import Function
@@ -7,6 +9,7 @@ class SyncBatchNorm(Function):
 
     @staticmethod
     def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
+        print("input size: ", input.shape)
         if not input.is_contiguous(memory_format=torch.channels_last):
             input = input.contiguous()
         if weight is not None:
@@ -20,6 +23,8 @@ class SyncBatchNorm(Function):
         if input.numel() > 0:
             # calculate mean/invstd for input.
             mean, invstd = torch.batch_norm_stats(input, eps)
+            print("mean: ", mean)
+            print("invstd: ", invstd)
 
             count = torch.full(
                 (1,),
@@ -40,6 +45,7 @@ class SyncBatchNorm(Function):
                 dtype=input.dtype,
                 device=input.device
             )
+        print("combined: ", combined)
 
         # Use allgather instead of allreduce because count could be different across
         # ranks, simple all reduce op can not give correct results.
@@ -72,6 +78,14 @@ class SyncBatchNorm(Function):
         count_all = count_all[mask]
         mean_all = mean_all[mask]
         invstd_all = invstd_all[mask]
+        print("mean_all: ", mean_all)
+        print("  ")
+        print("invstd_all: ", invstd_all)
+        print("  ")
+        print("count_all: ", count_all.shape)
+        print("  ")
+        print("veiw -1: ", count_all.view(-1).shape)
+        print("  ")
 
         # calculate global mean & invstd
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
@@ -84,6 +98,10 @@ class SyncBatchNorm(Function):
             eps,
             count_all.view(-1)
         )
+        print("after gather mean: ", mean)
+        print("  ")
+        print("after gather invstd: ", invstd)
+        print("  ")
 
         self.save_for_backward(input, weight, mean, invstd, count_all.to(torch.int32))
         self.process_group = process_group

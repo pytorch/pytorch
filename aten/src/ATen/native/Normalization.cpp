@@ -647,12 +647,81 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cpu(
       });
 }
 
-// std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cpu(
-//     const Tensor& self, const Tensor& mean, const Tensor& invstd, const
-//     c10::optional<Tensor>& running_mean_opt /* optional */, const
-//     c10::optional<Tensor>& running_var_opt /* optional */, double momentum,
-//     double epsilon, const Tensor& counts) {
-// }
+template <typename scalar_t, template <typename T> class VarTransform>
+std::tuple<Tensor, Tensor> batch_norm_cpu_gather_stats_template(
+    const Tensor& mean,
+    const Tensor& invstd,
+    const Tensor& running_mean,
+    const Tensor& running_var,
+    double momentum,
+    double epsilon,
+    const Tensor& counts) {
+  using accscalar_t = at::acc_type<scalar_t, false>;
+
+  auto features = mean.size(1);
+  auto input_options = mean.options();
+  auto save_mean = at::empty({features}, input_options);
+  auto save_var = at::empty({features}, input_options);
+
+  auto mean_a = conditional_accessor_2d<scalar_t>(mean);
+  auto invstd_a = conditional_accessor_2d<scalar_t>(invstd);
+  auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
+  auto counts_a = conditional_accessor_1d<scalar_t>(counts);
+  auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
+  auto save_var_a = conditional_accessor_1d<scalar_t>(save_var);
+
+  auto feature_size = mean_a.size(1);
+  auto world_size = mean_a.size(0);
+  for (int i = 0; i < feature_size; i++) {
+    accscalar_t avg = 0;
+    accscalar_t var_n = 0;
+    int64_t n = 0;
+    for (int j = 0; j < world_size; j++) {
+      scalar_t count = counts_a[j];
+      accscalar_t m = mean_a[j][i];
+      accscalar_t v = accscalar_t(1.0) / (invstd_a[j][i]);
+      v = (v - epsilon) * count;
+      accscalar_t factor = 1.0 / (n + count);
+      var_n += v + (avg - m) * (avg - m) * n * count * factor;
+      avg = n * factor * avg + count * factor * m;
+      n += count;
+    }
+    save_mean_a[i] = avg;
+    save_var_a[i] = VarTransform<accscalar_t>{}(var_n / n, epsilon);
+    if (running_mean.defined()) {
+      running_mean_a[i] = static_cast<scalar_t>(
+          (1 - momentum) * running_mean_a[i] + momentum * avg);
+    }
+    if (running_var.defined()) {
+      accscalar_t unbiased_var = var_n / (n - 1);
+      running_var_a[i] = static_cast<scalar_t>(
+          (1 - momentum) * running_var_a[i] + momentum * unbiased_var);
+    }
+  }
+  return std::make_tuple(save_mean, save_var);
+}
+
+std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cpu(
+    const Tensor& self,
+    const Tensor& mean,
+    const Tensor& invstd,
+    const c10::optional<Tensor>& running_mean_opt /* optional */,
+    const c10::optional<Tensor>& running_var_opt /* optional */,
+    double momentum,
+    double epsilon,
+    const Tensor& counts) {
+  c10::MaybeOwned<Tensor> running_mean_maybe_owned =
+      at::borrow_from_optional_tensor(running_mean_opt);
+  const Tensor& running_mean = *running_mean_maybe_owned;
+  const Tensor& running_var =
+      c10::value_or_else(running_var_opt, [] { return Tensor(); });
+  return AT_DISPATCH_FLOATING_TYPES(
+      self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
+        return batch_norm_cpu_gather_stats_template<scalar_t, InvStd>(
+            mean, invstd, running_mean, running_var, momentum, epsilon, counts);
+      });
+}
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps) {
