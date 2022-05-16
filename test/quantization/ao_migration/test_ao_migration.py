@@ -95,7 +95,40 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
 
 
 class TestAOMigrationNNQuantized(AOMigrationTestCase):
+    def test_package_import_nn_quantized_modules(self):
+        r"""Tests the migration of the torch.nn.quantized.modules"""
+        self._test_package_import('modules', base='nn.quantized')
+        self._test_package_import('modules.activation', base='nn.quantized')
+        self._test_package_import('modules.batchnorm', base='nn.quantized')
+        self._test_package_import('modules.conv', base='nn.quantized')
+        self._test_package_import('modules.dropout', base='nn.quantized')
+        self._test_package_import('modules.embedding_ops', base='nn.quantized')
+        self._test_package_import('modules.functional_modules', base='nn.quantized')
+        self._test_package_import('modules.linear', base='nn.quantized')
+        self._test_package_import('modules.normalization', base='nn.quantized')
+        self._test_package_import('modules.utils', base='nn.quantized')
+
+    def test_package_import_nn_quantized(self):
+        skip = [
+            # These are added in the `torch.nn.quantized` to allow
+            # for the legacy import, s.a. `import torch.nn.quantized.conv`, etc.
+            'activation',
+            'batchnorm',
+            'conv',
+            'dropout',
+            'embedding_ops',
+            'functional_modules',
+            'linear',
+            'normalization',
+            # Skip the packages that are not yet migrated, but are still
+            # part of the `nn.quantized`.
+            '_reference',
+            'dynamic'
+        ]
+        self._test_package_import('quantized', base='nn', skip=skip)
+
     def test_functional_import(self):
+        r"""Tests the migration of the torch.nn.quantized.functional"""
         function_list = [
             'avg_pool2d',
             'avg_pool3d',
@@ -121,3 +154,39 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
             'upsample_nearest',
         ]
         self._test_function_import('functional', function_list, base='nn.quantized')
+
+    def test_modules_import(self):
+        module_list = [
+            # Modules
+            'BatchNorm2d',
+            'BatchNorm3d',
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+            'ConvTranspose1d',
+            'ConvTranspose2d',
+            'ConvTranspose3d',
+            'DeQuantize',
+            'ELU',
+            'Embedding',
+            'EmbeddingBag',
+            'GroupNorm',
+            'Hardswish',
+            'InstanceNorm1d',
+            'InstanceNorm2d',
+            'InstanceNorm3d',
+            'LayerNorm',
+            'LeakyReLU',
+            'Linear',
+            'MaxPool2d',
+            'Quantize',
+            'ReLU6',
+            'Sigmoid',
+            'Softmax',
+            'Dropout',
+            # Wrapper modules
+            'FloatFunctional',
+            'FXFloatFunctional',
+            'QFunctional',
+        ]
+        self._test_function_import('modules', module_list, base='nn.quantized')
