@@ -32,7 +32,7 @@ void angle_kernel_cuda(TensorIteratorBase& iter) {
     static const auto angle_string = jiterator_stringify(
         template <typename T>
         T angle_kernel(T v) {
-          return T{ std::arg(v) };
+          return T{std::arg(v)};
         }
     ); // angle string
     AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "angle_cuda", [&]() {
