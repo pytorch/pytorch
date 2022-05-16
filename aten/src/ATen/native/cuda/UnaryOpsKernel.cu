@@ -44,7 +44,7 @@ void exp_kernel_cuda(TensorIteratorBase& iter) {
           T exp_kernel(T x) {
             return std::exp(x);
       }); // exp_string
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "exp_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "exp_cuda", [&]() {
           jitted_gpu_kernel<
               /*name=*/exp_name,
               /*return_dtype=*/scalar_t,
@@ -52,9 +52,10 @@ void exp_kernel_cuda(TensorIteratorBase& iter) {
               /*arity=*/1>(iter, exp_string);
       });
     #else
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "exp_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "exp_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return std::exp(a);
+          using opmath_t = at::opmath_type<scalar_t>;
+          return std::exp(static_cast<opmath_t>(a));
         });
       });
     #endif
