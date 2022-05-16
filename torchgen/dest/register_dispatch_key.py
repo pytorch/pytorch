@@ -422,7 +422,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 if self.backend_index.should_gen_dispatchless_composite(f):
                     # define the native function as a wrapper static method, redirecting the call to
                     # the appropriate function (e.g. on CPU, on CUDA, or as a CompositeExplicitAutograd).
-                    def dispatchless_function_defn(f: NativeFunction, g: Optional[NativeFunctionsGroup]) -> str:
+                    def dispatchless_function_defn(
+                        f: NativeFunction, g: Optional[NativeFunctionsGroup]
+                    ) -> str:
                         dispatch_key = self.backend_index.dispatch_key
 
                         # the declaration signature is a static method (not a Tensor method).
@@ -440,7 +442,10 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                             # give preference to function variants instead of method.
                             is_method = {Variant.method} == f.variants
                             if Variant.function in f.variants:
-                                if dispatch_key == DispatchKey.CompositeExplicitAutograd:
+                                if (
+                                    dispatch_key
+                                    == DispatchKey.CompositeExplicitAutograd
+                                ):
                                     prefix = "at::"
                                 else:
                                     # dependent dispatch-less composite kernel headers are not included
@@ -467,9 +472,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
     return {prefix}{name}({args_str});
   }}"""
 
-                    assert f.func.name in self.composite_graph, (
-                        f"composite graph not generated for {f.func.name}."
-                    )
+                    assert (
+                        f.func.name in self.composite_graph
+                    ), f"composite graph not generated for {f.func.name}."
 
                     composite_signatures_s = "\n".join(
                         dispatchless_function_defn(cf, cg)
