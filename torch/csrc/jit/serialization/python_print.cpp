@@ -754,14 +754,15 @@ struct PythonPrintImpl {
         const auto& entry = version_entry->second;
         // TODO (tugsuu) move this calculation into a seperate step.
         uint64_t current_version = entry[entry.size() - 1].bumped_at_version;
-        uint64_t historic_version = get_min_version_for_kind(node->kind());
+        uint64_t legacy_version_map_version =
+            get_min_version_for_kind(node->kind());
 
         // True means we solely calculate based on upgrader version
         if (get_version_calculator_flag()) {
           min_version_ = std::max(min_version_, current_version);
         } else {
           if (historic_version != 0) {
-            min_version_ = std::max(min_version_, historic_version);
+            min_version_ = std::max(min_version_, legacy_version_map_version);
           } else {
             min_version_ = std::max(min_version_, current_version);
           }
