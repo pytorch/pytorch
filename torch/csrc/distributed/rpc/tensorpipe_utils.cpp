@@ -328,8 +328,13 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
     tensors.emplace_back(std::move(t));
   }
 
-  for (const auto i : c10::irange(tpDescriptor.tensors.size())) {
-    auto& tensor = tpDescriptor.tensors[i];
+  int metaTensorsCounter = 0;
+  for (const auto i : c10::irange(tensors.size())) {
+    if (tensors[i].is_meta()) {
+      metaTensorsCounter++;
+      continue;
+    }
+    auto& tensor = tpDescriptor.tensors[i - metaTensorsCounter];
     if (tensor.targetDevice.has_value() &&
         tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
       TORCH_INTERNAL_ASSERT(
