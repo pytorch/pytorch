@@ -14790,7 +14790,12 @@ op_db: List[OpInfo] = [
                    # TODO: Add complex32 backward dtype support. Currently, we get:
                    # AssertionError: The supported dtypes for rsqrt on device type cuda are incorrect!
                    backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.half: 5e-2}),),
+                   decorators=(
+                       precisionOverride({torch.half: 5e-2}),
+                       DecorateInfo(
+                           toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
+                           'TestUnaryUfuncs', 'test_reference_numerics_large'),
+                   ),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -14824,27 +14829,27 @@ op_db: List[OpInfo] = [
                                     active_if=IS_MACOS),
                        # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=(torch.bfloat16,),),
+                                    dtypes=(torch.bfloat16,)),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                        # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_consistency',
-                                    dtypes=(torch.chalf,),),
+                                    dtypes=(torch.chalf,)),
                        # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                                    dtypes=(torch.chalf,),),
+                                    dtypes=(torch.chalf,)),
                        # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                                    dtypes=(torch.chalf,),),
+                                    dtypes=(torch.chalf,)),
                        # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_zero_to_zero_correspondence_unary',
-                                    dtypes=(torch.chalf,),),
+                                    dtypes=(torch.chalf,)),
                        # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                                    dtypes=(torch.chalf,),),
+                                    dtypes=(torch.chalf,)),
                        # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                                    dtypes=(torch.chalf,),),
+                                    dtypes=(torch.chalf,)),
                    )),
     UnaryUfuncInfo('square',
                    ref=np.square,
