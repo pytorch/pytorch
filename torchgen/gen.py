@@ -1332,9 +1332,11 @@ def get_grouped_by_view_native_functions(
 
 
 def get_composite_graph(
-        grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]]
+    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]]
 ) -> CompositeGraph:
-    def nativefunction_with_group(g: Union[NativeFunction, NativeFunctionsGroup]) -> List[Tuple[NativeFunction, Optional[NativeFunctionsGroup]]]:
+    def nativefunction_with_group(
+        g: Union[NativeFunction, NativeFunctionsGroup]
+    ) -> List[Tuple[NativeFunction, Optional[NativeFunctionsGroup]]]:
         if isinstance(g, NativeFunction):
             fs = [g]
             group = None
@@ -1358,9 +1360,9 @@ def get_composite_graph(
                 continue
 
             for c in f.composite:
-                assert c in nativefunction_for, (
-                    f"composite function {c} not found in NativeFunction list."
-                )
+                assert (
+                    c in nativefunction_for
+                ), f"composite function {c} not found in NativeFunction list."
 
                 name = f.func.name
                 if name not in graph:
@@ -1369,16 +1371,19 @@ def get_composite_graph(
 
     return graph
 
+
 def get_composite_headers(
-        native_functions: Sequence[NativeFunction],
-        b: BackendIndex,
+    native_functions: Sequence[NativeFunction],
+    b: BackendIndex,
 ) -> List[str]:
     def maybe_get_header(f: NativeFunction):
         if not b.should_gen_dispatchless_composite(f):
             return None
         name = f.func.name.remove_inplace().name
         return f"#include <ATen/native/composite/{name}.h>"
+
     return sorted(set(mapMaybe(maybe_get_header, native_functions)))
+
 
 def get_grouped_native_functions(
     native_functions: Sequence[NativeFunction],
@@ -2009,7 +2014,8 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                 ),
                 "ops_headers": operator_headers(),
                 "composite_headers": get_composite_headers(
-                    native_functions, backend_index),
+                    native_functions, backend_index
+                ),
                 "DispatchKey": dispatch_key,
                 "dispatch_namespace": dispatch_key.lower(),
                 "dispatch_helpers": dest.gen_registration_helpers(backend_index),
