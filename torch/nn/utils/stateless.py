@@ -10,16 +10,16 @@ __all__ = ["functional_call"]
 # and using other types causes mypy errors
 def _change_class(module, params_and_buffers) -> None:
     cls = module.__class__
-    func_params : Dict[str, str] = module._attr_to_path
+    attr_to_path : Dict[str, str] = module._attr_to_path
 
     def _getattribute(self, name: str) -> Any:
-        if name in func_params:
-            return params_and_buffers[func_params[name]]
+        if name in attr_to_path:
+            return params_and_buffers[attr_to_path[name]]
         return cls.__getattribute__(self, name)
 
     def _setattr(self, name: str, value: Any) -> None:
-        if name in func_params:
-            params_and_buffers[func_params[name]] = value
+        if name in attr_to_path:
+            params_and_buffers[attr_to_path[name]] = value
         else:
             return cls.__setattr__(self, name, value)
 
