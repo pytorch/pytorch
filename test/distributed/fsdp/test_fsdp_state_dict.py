@@ -160,11 +160,11 @@ class TestFSDPStateDict(FSDPTest):
         if self.rank == 0:
             model_new.load_state_dict(state_dict)
 
-        _validate(model_new, assert_fn=self.assertNotEqual)
+        _validate(model_new, process_group=self.process_group, assert_fn=self.assertNotEqual)
         # FSDP with sync_module_states=True broadcasts the checkpointed states.
         model_new = FSDP(model_new, auto_wrap_policy=size_based_auto_wrap_policy, sync_module_states=True)
         # After wrapping with FSDP models are equal across ranks, and have loaded the checkpoint
-        _validate(model_new, assert_fn=self.assertEqual)
+        _validate(model_new, process_group=self.process_group, assert_fn=self.assertEqual)
 
         with FullyShardedDataParallel.summon_full_params(model):
             with FullyShardedDataParallel.summon_full_params(model_new):

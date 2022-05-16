@@ -233,11 +233,11 @@ class TestFSDPMisc(FSDPTest):
                 self.lin = nn.Linear(10, 10, bias=False)
 
         m = MyModel(self.rank).cuda()
-        _validate(m, assert_fn=self.assertNotEqual)
+        _validate(m, process_group=self.process_group, assert_fn=self.assertNotEqual)
         # Passing sync_module_states into FSDP makes model the same during init.
         fsdp = FSDP(m, sync_module_states=True)
         with fsdp.summon_full_params(fsdp):
-            _validate(m, assert_fn=self.assertEqual)
+            _validate(m, process_group=self.process_group, assert_fn=self.assertEqual)
 
 instantiate_parametrized_tests(TestFSDPMisc)
 
