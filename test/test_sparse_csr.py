@@ -2039,11 +2039,13 @@ class TestSparseCSR(TestCase):
     @skipMeta
     @all_sparse_compressed_layouts()
     def test_dense_to_sparse(self, device, layout):
-        print("layout: ", layout)
         if layout is torch.sparse_bsc:
+            # TODO: Remove this once support has been enabled
             return
         if layout is torch.sparse_bsr:
+            # TODO: Remove this once support has been enabled
             return
+
         def _construct_sp_matrix(dense, layout):
             if layout is torch.sparse_csr:
                 return sp.csr_matrix(dense.cpu().numpy())
@@ -2051,8 +2053,7 @@ class TestSparseCSR(TestCase):
                 return sp.csc_matrix(dense.cpu().numpy())
             if layout is torch.sparse_bsr:
                 return sp.bsr_matrix(dense.cpu().numpy())
-            if layout is torch.sparse_bsc:
-                return sp.bsr_matrix(dense.cpu().transpose(0, 1).numpy()).transpose()
+            # No native scipy BSC support?
             raise NotImplementedError(repr(dense))
         dense = torch.randn(4, 5).relu()
         sp_matrix = _construct_sp_matrix(dense, layout)
@@ -2072,39 +2073,13 @@ class TestSparseCSR(TestCase):
             torch.sparse_bsc: torch.Tensor.row_indices,
         }[layout]
 
-        print("dense")
-        print(dense)
-        print("dense.to_sparse()")
-        print(dense.to_sparse())
-        print("dense.transpose(0, 1).to_sparse()")
-        print( dense.transpose(0, 1).to_sparse())
-        print("sp_matrix.todense()")
-        print(sp_matrix.todense())
-        print("type(sp_matrix)")
-        print(type(sp_matrix))
-        print("sp_matrix")
-        print(sp_matrix)
-        print("sp_matrix.has_sorted_indices")
-        print(sp_matrix.has_sorted_indices)
-        print("sp_matrix.indptr")
-        print(sp_matrix.indptr)
-        print("sp_matrix.indices")
-        print(sp_matrix.indices)
-        print("sp_matrix.data")
-        print(sp_matrix.data)
-        print("pt_matrix.ccol_indices()")
-        print(pt_matrix.ccol_indices())
-        print("pt_matrix.row_indices()")
-        print(pt_matrix.row_indices())
-        print("pt_matrix.values()")
-        print(pt_matrix.values())
-        print("pt_matrix.to_dense()")
-        print(pt_matrix.to_dense())
         self.assertEqual(layout, pt_matrix.layout)
         self.assertEqual(sp_matrix.shape, pt_matrix.shape)
         self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
         self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
         self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
+        with self.assertRaises(RuntimeError):
+            pt_matrix.to_dense()
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA

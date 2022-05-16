@@ -881,17 +881,10 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
   TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
   TORCH_CHECK(sparse_dim <= 2,
               "sparse_dim must be less than or equal to 2");
-  TORCH_CHECK(self.layout() == kSparseCsr || self.layout() == kSparseCsc,
-      "Expected input to have layout SparseCsr or SparseCsc, but got ", self.layout(), " instead.");
+  TORCH_CHECK(self.layout() == kSparseCsr,
+      "Expected input to have layout SparseCsr, but got ", self.layout(), " instead.");
   if (sparse_dim == 2) {
     auto sizes = self.sizes();
-    if (self.layout() == kSparseCsc) {
-      Tensor ccol_indices = self.ccol_indices();
-      Tensor row_indices = self.row_indices();
-      Tensor values = self.values();
-      Tensor indices = at::_convert_indices_from_csr_to_coo(ccol_indices, row_indices, false, false);
-      return at::native::_sparse_coo_tensor_unsafe(indices, values, sizes)._coalesced_(true);
-    }
     Tensor crow_indices = self.crow_indices();
     Tensor col_indices = self.col_indices();
     Tensor values = self.values();
