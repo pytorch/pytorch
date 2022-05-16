@@ -755,7 +755,7 @@ class TestSparseCSR(TestCase):
     @dtypes((torch.double, torch.int32), (torch.double, torch.int64))
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @skipMeta
-    def test_csr_to_block_csr(self, device, dtypes, shape, blocksize):
+    def test_csr_to_block_csr(self, device, dtypes, blocksize):
         for shape in [(24, 24), (12, 24)]:
             dtype, index_dtype = dtypes
             m, k = shape
