@@ -65,7 +65,7 @@
 
 // Just for inferFunctionSchemaFromFunctor
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/enum_tags.h>
+#include <ATen/core/enum_tag.h>
 #include <c10/util/Optional.h>
 
 namespace torch {
@@ -596,7 +596,7 @@ class TORCH_API Library final {
   /// ```
 
   template <typename Schema>
-  Library& def(Schema&& raw_schema, const std::vector<Tags>& tags = {}) & {
+  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags = {}) & {
     c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
     return _def(std::move(s), nullptr, std::move(tags));
   }
@@ -814,7 +814,7 @@ class TORCH_API Library final {
   Library& _def(
       c10::FunctionSchema&& schema,
       c10::OperatorName* out_name = nullptr,
-      const std::vector<Tags>& tags = {}) &;
+      const std::vector<at::Tag>& tags = {}) &;
   Library& _def(
       c10::either<c10::OperatorName, c10::FunctionSchema>&&,
       CppFunction&& f) &;

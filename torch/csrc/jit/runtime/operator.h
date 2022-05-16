@@ -160,14 +160,14 @@ struct TORCH_API Operator {
         });
   }
 
-  std::vector<Tags> getTags() const {
-    return op_.fold<std::vector<Tags>>(
+  std::vector<at::Tag> getTags() const {
+    return op_.fold<std::vector<at::Tag>>(
         [](const C10Operator& op) { return op.handle_.getTags(); },
         [](const JitOnlyOperator& op) {
           // Disallowing access to tags for JitOnlyOperators now since it
           // doesn't save c10::OperatorHandle
           TORCH_CHECK(false, "Tags query on JitOnlyOperators is not allowed");
-          return std::vector<Tags>({});
+          return std::vector<at::Tag>({});
         });
   }
 

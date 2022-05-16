@@ -146,7 +146,7 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_sparse_functions.cpp",
         "torch/csrc/autograd/generated/python_special_functions.cpp",
         "torch/csrc/autograd/generated/python_return_types.cpp",
-        "torch/csrc/autograd/generated/enum_tags.cpp",
+        "torch/csrc/autograd/generated/python_enum_tag.cpp",
 ]
 
 filegroup(

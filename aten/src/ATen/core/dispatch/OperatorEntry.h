@@ -13,7 +13,7 @@
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
-#include <ATen/core/enum_tags.h>
+#include <ATen/core/enum_tag.h>
 
 #include <list>
 #include <array>
@@ -99,7 +99,7 @@ public:
   // attempt to register a schema when one is already present or vice
   // versa that is an error.  (Refcounting for the registrations is
   // handled in the OperatorHandle in Dispatcher)
-  void registerSchema(FunctionSchema&&, std::string&& debug, const std::vector<Tags>& tags = {});
+  void registerSchema(FunctionSchema&&, std::string&& debug, const std::vector<at::Tag>& tags = {});
   void deregisterSchema();
 
   const OperatorName& operator_name() const {
@@ -207,13 +207,13 @@ public:
   // Returns true if kernel_ has entry for a particular key.
   bool hasKernelForDispatchKey(DispatchKey k) const;
   // Returns all the operator tags added at the time of registration
-  const std::vector<Tags>& getTags() const;
+  const std::vector<at::Tag>& getTags() const;
 
 private:
 
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
-  std::vector<Tags> tags_;
+  std::vector<at::Tag> tags_;
   std::array<KernelFunction, c10::num_runtime_entries> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 

@@ -325,13 +325,13 @@ def gen(
     def gen_tags_enum() -> Dict[str, str]:
         return {
             "enum_of_valid_tags": (
-                'py::enum_<Tags>(m, "Tags")'
-                + "".join([f'\n.value("{tag}", Tags::{tag})' for tag in valid_tags])
+                'py::enum_<at::Tag>(m, "Tag")'
+                + "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
                 + "\n.export_values();\n"
             )
         }
 
-    fm.write("enum_tags.cpp", gen_tags_enum)
+    fm.write("python_enum_tag.cpp", gen_tags_enum)
 
 
 def group_filter_overloads(

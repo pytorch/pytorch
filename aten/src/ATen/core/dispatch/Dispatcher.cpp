@@ -147,7 +147,7 @@ void Dispatcher::deregisterLibrary_(const std::string& ns) {
   libraries_.erase(ns);
 }
 
-RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::string debug, const std::vector<Tags>& tags) {
+RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::string debug, const std::vector<at::Tag>& tags) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 

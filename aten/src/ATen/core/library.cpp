@@ -89,7 +89,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
 // merge everything
 
 #define DEF_PRELUDE "def(\"", schema.operator_name(), "\"): "
-Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name, const std::vector<Tags>& tags) & {
+Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name, const std::vector<at::Tag>& tags) & {
   TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
     DEF_PRELUDE,
     "Cannot define an operator inside of a ", toString(kind_), " block.  "

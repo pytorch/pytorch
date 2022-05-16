@@ -483,9 +483,7 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        if len(f.tags) == 0:
-            return f"m.def({cpp_string(str(f.func))});\n"
-        tags = "{" + ", ".join([f"{tag}" for tag in f.tags]) + "}"
+        tags = "{" + ", ".join([f"at::Tag::{tag}" for tag in f.tags]) + "}"
         return f"m.def({cpp_string(str(f.func))}, {tags});\n"
 
 
@@ -1838,13 +1836,13 @@ def gen_headers(
     def gen_tags_enum() -> Dict[str, str]:
         return {
             "enum_of_valid_tags": (
-                "enum Tags\n{\n"
+                "enum class Tag\n{\n"
                 + ",\n".join([f"{tag}" for tag in valid_tags])
                 + "\n};\n"
             )
         }
 
-    core_fm.write("enum_tags.h", gen_tags_enum)
+    core_fm.write("enum_tag.h", gen_tags_enum)
 
 
 def gen_source_files(

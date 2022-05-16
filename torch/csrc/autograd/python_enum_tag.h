@@ -4,5 +4,5 @@
 
 namespace torch {
     namespace autograd {
-    void initEnumTags(PyObject* module);
+    void initEnumTag(PyObject* module);
 }} // namespace torch::autograd
