@@ -100,7 +100,7 @@ def functional_call(
         please set the key as ``{submodule_name}.parametrizations.{parameter_name}.original``.
 
     .. note:: If the module performs in-place operations on parameters/buffers, these will be reflected
-    in the `parameters_and_buffers` input.
+        in the `parameters_and_buffers` input.
 
         Example::
 
