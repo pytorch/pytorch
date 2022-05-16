@@ -2089,6 +2089,28 @@ class TestGraph(TestCase):
         self.assertEqual(expected, graph)
 
 
+def unbatch(x):
+    return x[0]
+
+
+class TestSerialization(TestCase):
+    @skipIfNoDill
+    def test_spawn_lambdas_iter(self):
+        idp = dp.iter.IterableWrapper(range(3)).map(lambda x: x + 1)
+        dl = DataLoader(idp, num_workers=2, shuffle=True,
+                        multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
+        result = list(dl)
+        self.assertEquals([1, 1, 2, 2, 3, 3], sorted(result))
+
+    @skipIfNoDill
+    def test_spawn_lambdas_map(self):
+        mdp = dp.map.SequenceWrapper(range(6)).map(lambda x: x + 1)
+        dl = DataLoader(mdp, num_workers=2, shuffle=True,
+                        multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
+        result = list(dl)
+        self.assertEquals([1, 2, 3, 4, 5, 6], sorted(result))
+
+
 class TestCircularSerialization(TestCase):
     class CustomIterDataPipe(IterDataPipe):
 
@@ -2316,43 +2338,51 @@ class TestIterDataPipeSingletonConstraint(TestCase):
         r"""
         Testing for the case where IterDataPipe's `__iter__` returns `self` and there is a `__next__` method
         Note that the following DataPipe by is singleton by default (because `__iter__` returns `self`).
-        Therefore the test will merely make sure the calls return the same object.
         """
         class _CustomIterDP_Self(IterDataPipe):
             def __init__(self, iterable):
+                self.source = iterable
                 self.iterable = iter(iterable)
 
             def __iter__(self):
+                self.reset()
                 return self
 
             def __next__(self):
                 return next(self.iterable)
 
+            def reset(self):
+                self.iterable = iter(self.source)
+
         # Functional Test: Check that every `__iter__` call returns the same object
+        source_dp = _CustomIterDP_Self(range(10))
+        res = list(source_dp)
+        it = iter(source_dp)
+        self.assertEqual(res, list(it))
+
+        # Functional Test: Check if invalidation logic is correct
         source_dp = _CustomIterDP_Self(range(10))
         it1 = iter(source_dp)
         self.assertEqual(0, next(it1))
         self.assertEqual(1, next(source_dp))
+        # Only invalidates `it1`, and not `source_dp`. Since methods of `it2` depends on `source_dp` remaining valid
         it2 = iter(source_dp)
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(it1)
-        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
-            next(it2)
-        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
-            next(source_dp)
+        self.assertEqual(0, next(it2))
+        self.assertEqual(1, next(source_dp))
 
         # Functional Test: extend the test to a pipeline
         source_dp = _CustomIterDP_Self(dp.iter.IterableWrapper(range(10)).map(_fake_fn).filter(_fake_filter_fn))
         it1 = iter(source_dp)
         self.assertEqual(0, next(it1))
         self.assertEqual(1, next(source_dp))
+        # Only invalidates `it1`, and not `source_dp`. Since methods of `it2` depends on `source_dp` remaining valid
         it2 = iter(source_dp)
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(it1)
-        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
-            next(it2)
-        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
-            next(source_dp)
+        self.assertEqual(0, next(it2))
+        self.assertEqual(1, next(source_dp))
 
         # Functional Test: multiple simultaneous references to the same DataPipe fails
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
@@ -2416,11 +2446,10 @@ class TestIterDataPipeSingletonConstraint(TestCase):
         it1 = iter(source_dp)
         self.assertEqual(0, next(it1))
         self.assertEqual(1, next(source_dp))
-        it2 = iter(source_dp)  # invalidates both `dp` and `it1`
+        it2 = iter(source_dp)  # invalidates both `it1`
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(it1)
-        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
-            next(source_dp)
+        self.assertEqual(2, next(source_dp))  # not impacted by the creation of `it2`
         self.assertEqual(list(range(10)), list(it2))  # `it2` still works because it is a new object
 
 
