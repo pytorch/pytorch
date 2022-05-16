@@ -34,11 +34,14 @@ namespace {
     } else {
       switch (var.layout()) {
         case c10::kSparseCsr:
+        case c10::kSparseCsc:
+        case c10::kSparseBsr:
+        case c10::kSparseBsc:
           {
             auto* impl = at::sparse_csr::get_sparse_csr_impl(var);
             guard.recordDataPtrOnStream(impl->values().storage().data_ptr(), stream);
-            guard.recordDataPtrOnStream(impl->crow_indices().storage().data_ptr(), stream);
-            guard.recordDataPtrOnStream(impl->col_indices().storage().data_ptr(), stream);
+            guard.recordDataPtrOnStream(impl->compressed_indices().storage().data_ptr(), stream);
+            guard.recordDataPtrOnStream(impl->plain_indices().storage().data_ptr(), stream);
             break;
           }
         case c10::kSparse:
