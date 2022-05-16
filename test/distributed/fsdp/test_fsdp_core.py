@@ -46,7 +46,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 params = "cpu_offload,backward_prefetch,sharding_strategy"
 cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
 backward_prefetch_config = [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
-sharding_strategy_config = [ShardingStrategy.SHARD_GRAD_OP, None]
+sharding_strategy_config = [ShardingStrategy.SHARD_GRAD_OP, None, ShardingStrategy.NO_SHARD]
 configs = list(itertools.product(cpu_offload_config,
                                  backward_prefetch_config,
                                  sharding_strategy_config))
@@ -56,6 +56,7 @@ test_name_mapping = {
     str(BackwardPrefetch.BACKWARD_PRE): "prefetch_pre",
     str(BackwardPrefetch.BACKWARD_POST): "prefetch_post",
     str(ShardingStrategy.SHARD_GRAD_OP): "shard_grad_op",
+    str(ShardingStrategy.NO_SHARD): "no_shard",
 }
 
 subtest_name = functools.partial(subtest_name, test_name_mapping)

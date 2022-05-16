@@ -13,6 +13,7 @@ import torchgen.api.dispatcher as dispatcher
 from torchgen.api.lazy import (
     LazyIrSchema,
     LazyArgument,
+    getValueT,
     isValueType,
     tensorListValueT,
 )
@@ -33,7 +34,11 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
             elif arg.lazy_type.type is tensorListValueT:
                 return f"lazy_{arg.name}_tensorlist"
             elif arg.is_symint_or_list:
-                return f"Value(std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>({arg.name}.toSymbolicIntNode())->node_, 0)"
+                cpp_type = arg.lazy_type.cpp_type()
+                return (
+                    f"{cpp_type}(std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>"
+                    f"({arg.name}.toSymbolicIntNode())->node_, 0)"
+                )
             return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.lazy_type, OptionalCType):
             if arg.is_wrapped_scalar:
@@ -202,7 +207,12 @@ class GenLazyIR(ABC):
             f"""\
 class {schema.node_name} : public {self.node_base} {{
  public:
-  {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
+  static torch::lazy::OpKind ClassOpKind() {{
+    return torch::lazy::OpKind({aten_symbol(schema)});
+  }}
+
+  {schema.node_name}({node_ctor_args}, std::vector<torch::lazy::Shape>&& shapes)
+
       : {self.node_base_ctor_call(schema)}{comma_if_scalar_initializers}
         {scalar_initializers}
 
@@ -252,8 +262,8 @@ class GenLazyNativeFuncDefinition:
     create_from_first_tensor: bool
     create_aten_from_ltc_tensor: str
     tuple_aten_from_ltc_tensors: str
-    lazy_value_class: str
     lazy_tensor_ptr: str
+    get_device_fn: str
 
     def lazy_tensor_decls(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
@@ -303,7 +313,7 @@ class GenLazyNativeFuncDefinition:
         assert (
             len(value_types_names) > 0
         ), "Code below assumes there is at least one tensor arg"
-        return f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
+        return f"""auto common_device = {self.get_device_fn}({', '.join(value_types_names)});
         TORCH_INTERNAL_ASSERT(common_device);
         """
 
@@ -314,14 +324,15 @@ class GenLazyNativeFuncDefinition:
         returns_length = len(schema.returns)
         # call the meta kernel if it exists, to compute output shape/dtype for our IR
         if func.structured or func.structured_delegate is not None:
-            meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
+            meta_out = """std::vector<torch::lazy::Shape> shapes{
+        torch::lazy::Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
 
                 def this_shape(i: int) -> str:
-                    return f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
+                    return f"torch::lazy::Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
 
                 shapes_str = ",".join([this_shape(i) for i in range(returns_length)])
-                meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
+                meta_out = "std::vector<torch::lazy::Shape> shapes{" + shapes_str + "};"
 
             shape_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(a.name) for a in all_args)});
         {meta_out}"""
@@ -336,8 +347,8 @@ class GenLazyNativeFuncDefinition:
         # Calculating which dimensions are symbolic
         func_schema_str = "aten::" + str(func.func)
         shape_str += f"""
-        if(symbolicShapeEnabled()){{
-            std::vector<jit::IValue> inputs = {{ {', '.join(str(a.name) for a in all_args)} }};
+        if(torch::lazy::symbolicShapeEnabled()){{
+            std::vector<torch::jit::IValue> inputs = {{ {', '.join(str(a.name) for a in all_args)} }};
             char* schema_str = "{func_schema_str}";
             applySymbolicShapesOnLT(schema_str, inputs, shapes);
         }}
@@ -370,7 +381,7 @@ class GenLazyNativeFuncDefinition:
         if returns_length > 1:
             bridge_str = f"""std::vector<{self.lazy_tensor_ptr}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
-            lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({self.lazy_value_class}(node, i), *common_device));
+            lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({getValueT()}(node, i), *common_device));
         }}
         auto result = {self.tuple_aten_from_ltc_tensors}<{returns_length}>(lazy_tensors);"""
 
@@ -430,7 +441,7 @@ class ComputeShapeSignature:
 
     @property
     def shape_decl(self) -> str:
-        return f"TORCH_API std::vector<Shape> compute_shape_{self.__decl_suffix()}"
+        return f"TORCH_API std::vector<torch::lazy::Shape> compute_shape_{self.__decl_suffix()}"
 
     @property
     def shape_call(self) -> str:

@@ -41,8 +41,10 @@ void initONNXBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& graph,
              const std::vector<at::Tensor>& tensors,
              const python::IODescriptor& desc,
-             bool onnx_shape_inference = false) {
-            ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
+             bool onnx_shape_inference,
+             bool is_script) {
+            ONNXAssignOutputShape(
+                graph, tensors, desc, onnx_shape_inference, is_script);
           })
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(
@@ -194,7 +196,9 @@ void initONNXBindings(PyObject* module) {
 
   m.def(
       "_check_onnx_proto",
-      [](const std::string& proto_string, bool full_check) { check_onnx_proto(proto_string, full_check); },
+      [](const std::string& proto_string, bool full_check) {
+        check_onnx_proto(proto_string, full_check);
+      },
       py::arg("proto_string"),
       py::arg("full_check") = false);
 
