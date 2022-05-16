@@ -1,5 +1,4 @@
 import torch
-import torch.nn.quantized.functional
 
 class Dropout(torch.nn.Dropout):
     r"""This is the quantized equivalent of :class:`~torch.nn.Dropout`.

@@ -1,15 +1,15 @@
 import torch
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 import torch.nn.intrinsic as nni
 
 class LinearReLU(nnq.Linear):
     r"""
     A LinearReLU module fused from Linear and ReLU modules
 
-    We adopt the same interface as :class:`torch.nn.quantized.Linear`.
+    We adopt the same interface as :class:`torch.ao.nn.quantized.Linear`.
 
     Attributes:
-        Same as torch.nn.quantized.Linear
+        Same as torch.ao.nn.quantized.Linear
 
     Examples::
 

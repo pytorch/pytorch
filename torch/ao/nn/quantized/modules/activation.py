@@ -1,5 +1,4 @@
 import torch
-import torch.nn.quantized.functional
 
 class ReLU6(torch.nn.ReLU):
     r"""Applies the element-wise function:
@@ -51,7 +50,7 @@ class Hardswish(torch.nn.Hardswish):
         self.zero_point = zero_point
 
     def forward(self, input):
-        return torch.nn.quantized.functional.hardswish(
+        return torch.ao.nn.quantized.functional.hardswish(
             input, scale=self.scale, zero_point=self.zero_point)
 
     def _get_name(self):
@@ -80,7 +79,7 @@ class ELU(torch.nn.ELU):
         self.zero_point = zero_point
 
     def forward(self, input):
-        return torch.nn.quantized.functional.elu(
+        return torch.ao.nn.quantized.functional.elu(
             input, self.scale, self.zero_point, self.alpha)
 
     def _get_name(self):

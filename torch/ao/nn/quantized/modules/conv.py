@@ -660,7 +660,7 @@ class ConvTranspose1d(_ConvTransposeNd):
     .. note:: Currently only the QNNPACK engine is implemented.
         Please, set the `torch.backends.quantized.engine = 'qnnpack'`
 
-    For special notes, please, see :class:`~torch.nn.quantized.Conv1d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.Conv1d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -747,7 +747,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose2d`.
 
-    For special notes, please, see :class:`~torch.nn.quantized.Conv2d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.Conv2d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -837,7 +837,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     .. note:: Currently only the FBGEMM engine is implemented.
         Please, set the `torch.backends.quantized.engine = 'fbgemm'`
 
-    For special notes, please, see :class:`~torch.nn.quantized.Conv3d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.Conv3d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight

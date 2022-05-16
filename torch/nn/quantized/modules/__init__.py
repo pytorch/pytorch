@@ -7,38 +7,34 @@ Note::
 
 from torch.nn.modules.pooling import MaxPool2d
 
-from torch.ao.nn.quantized.modules import activation
 from torch.ao.nn.quantized.modules.activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax
-from torch.ao.nn.quantized.modules import batchnorm
 from torch.ao.nn.quantized.modules.batchnorm import BatchNorm2d, BatchNorm3d
-from torch.ao.nn.quantized.modules import conv
 from torch.ao.nn.quantized.modules.conv import Conv1d, Conv2d, Conv3d
 from torch.ao.nn.quantized.modules.conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
-from torch.ao.nn.quantized.modules import dropout
 from torch.ao.nn.quantized.modules.dropout import Dropout
-from torch.ao.nn.quantized.modules import embedding_ops
 from torch.ao.nn.quantized.modules.embedding_ops import Embedding, EmbeddingBag
-from torch.ao.nn.quantized.modules import functional_modules
 from torch.ao.nn.quantized.modules.functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
-from torch.ao.nn.quantized.modules import linear
 from torch.ao.nn.quantized.modules.linear import Linear
-from torch.ao.nn.quantized.modules import normalization
 from torch.ao.nn.quantized.modules.normalization import LayerNorm, GroupNorm, InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
 
 from torch.ao.nn.quantized.modules import Quantize, DeQuantize
 
+# The following imports are needed in case the user decides
+# to import the files directly,
+# s.a. `from torch.nn.quantized.modules.conv import ...`.
+# No need to add them to the `__all__`.
+from . import activation
+from . import batchnorm
+from . import conv
+from . import dropout
+from . import embedding_ops
+from . import functional_modules
+from . import linear
+from . import normalization
 
 __all__ = [
     # Subpackages, in case the users import files directly
     # s.a. `from torch.nn.quantized.modules import conv`
-    'activation',
-    'batchnorm',
-    'conv',
-    'dropout',
-    'embedding_ops',
-    'functional_modules',
-    'linear',
-    'normalization',
     # Modules
     'BatchNorm2d',
     'BatchNorm3d',

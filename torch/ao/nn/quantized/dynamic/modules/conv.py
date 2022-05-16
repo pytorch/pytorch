@@ -18,7 +18,7 @@ class Conv1d(nnq.Conv1d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
     For details on input arguments, parameters, and implementation see
-    :class:`~torch.nn.Conv1d` and :class:`~torch.nn.quantized.dynamic.Conv1d` and
+    :class:`~torch.nn.Conv1d` and :class:`~torch.ao.nn.quantized.dynamic.Conv1d` and
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -88,7 +88,7 @@ class Conv2d(nnq.Conv2d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
     For details on input arguments, parameters, and implementation see
-    :class:`~torch.nn.Conv2d` and :class:`~torch.nn.quantized.dynamic.Conv2d` and
+    :class:`~torch.nn.Conv2d` and :class:`~torch.ao.nn.quantized.dynamic.Conv2d` and
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -152,7 +152,7 @@ class Conv3d(nnq.Conv3d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
     For details on input arguments, parameters, and implementation see
-    :class:`~torch.nn.Conv3d` and :class:`~torch.nn.quantized.dynamic.Conv3d` and
+    :class:`~torch.nn.Conv3d` and :class:`~torch.ao.nn.quantized.dynamic.Conv3d` and
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -218,7 +218,7 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose1d`.
 
-    For special notes, please, see :class:`~torch.nn.quantized.dynamic.Conv1d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.dynamic.Conv1d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -278,7 +278,7 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose2d`.
 
-    For special notes, please, see :class:`~torch.nn.quantized.dynamic.Conv2d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.dynamic.Conv2d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -338,7 +338,7 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose3d`.
 
-    For special notes, please, see :class:`~torch.nn.quantized.dynamic.Conv3d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.dynamic.Conv3d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight

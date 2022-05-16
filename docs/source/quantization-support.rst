@@ -350,15 +350,15 @@ quantization and will be dynamically quantized during inference.
 
     Linear
 
-torch.nn.quantized
+torch.ao.nn.quantized
 ~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.quantized
-.. automodule:: torch.nn.quantized.modules
+.. automodule:: torch.ao.nn.quantized
+.. automodule:: torch.ao.nn.quantized.modules
 
 This module implements the quantized versions of the nn layers such as
 ~`torch.nn.Conv2d` and `torch.nn.ReLU`.
 
-.. currentmodule:: torch.nn.quantized
+.. currentmodule:: torch.ao.nn.quantized
 
 .. autosummary::
     :toctree: generated
@@ -428,16 +428,16 @@ This module implements the quantized versions of the functional layers such as
     upsample_bilinear
     upsample_nearest
 
-torch.nn.quantized.dynamic
+torch.ao.nn.quantized.dynamic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.quantized.dynamic
-.. automodule:: torch.nn.quantized.dynamic.modules
+.. automodule:: torch.ao.nn.quantized.dynamic
+.. automodule:: torch.ao.nn.quantized.dynamic.modules
 
 Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
 :class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and
 :class:`~torch.nn.RNNCell`.
 
-.. currentmodule:: torch.nn.quantized.dynamic
+.. currentmodule:: torch.ao.nn.quantized.dynamic
 
 .. autosummary::
     :toctree: generated

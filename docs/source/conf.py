@@ -315,7 +315,7 @@ coverage_ignore_classes = [
     "DDPCommHookType",
     # torch.jit.mobile
     "LiteScriptModule",
-    # torch.nn.quantized.modules
+    # torch.ao.nn.quantized.modules
     "DeQuantize",
     "Quantize",
     # torch.utils.backcompat
