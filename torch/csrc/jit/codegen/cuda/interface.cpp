@@ -91,6 +91,10 @@ class NVFuserEnabler {
   }
 
   bool isEnabledImpl() {
+    // 0. opportunity to force disable NVFuser
+    if (getCachedNNCNotNVFuser()) {
+      return false;
+    }
     std::call_once(enabled_check_flag_, [&]() {
       // if environment variable is setting the value, we must
       if (!runtime_assigned_fuser_enabled_.has_value() &&
@@ -98,10 +102,6 @@ class NVFuserEnabler {
         assertFuserCanBeEnabled(*getCachedFuserEnabledEnvVar());
       }
     });
-    // 0. opportunity to force disable NVFuser
-    if (getCachedNNCNotNVFuser()) {
-      return false;
-    }
     // 1. if user has explicitly assigned fuser value, that value takes
     // precedence.
     if (runtime_assigned_fuser_enabled_.has_value()) {
@@ -111,9 +111,12 @@ class NVFuserEnabler {
     if (getCachedFuserEnabledEnvVar().has_value()) {
       return *getCachedFuserEnabledEnvVar();
     }
-    // 3. default value (if you switch this to true, make sure
-    //    to check nvfuserCanBeEnabled())
+    // 3. default value
+#ifdef FBCODE_CAFFE2
     return false;
+#else
+    return nvfuserCanBeEnabled();
+#endif
   }
 
  public:
