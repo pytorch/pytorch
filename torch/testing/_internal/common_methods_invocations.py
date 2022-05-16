@@ -14816,7 +14816,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(
                            toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
                            'TestUnaryUfuncs', 'test_reference_numerics_large'),
-                    ),
+                   ),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/47358
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
