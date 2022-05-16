@@ -32,19 +32,12 @@ def _basic_validation(op, args=(), kwargs=None):
             f"kwargs: {kwargs} are called without any distributed tensor!"
         )
 
-    # Validate all DistributedTensors use the same PG.
+    # Validate all distributed tensors use the same PG.
     cur_pg = None
 
     def validate_pg(e):
         nonlocal cur_pg
-        if isinstance(e, ReplicatedTensor) or isinstance(e, _PartialTensor):
-            if cur_pg is not None and e.process_group is not cur_pg:
-                raise RuntimeError(
-                    'All distributed tensors should use the '
-                    'same ProcessGroup if used together in an op.'
-                )
-            cur_pg = e.process_group
-        elif isinstance(e, ShardedTensor):
+        if isinstance(e, ReplicatedTensor) or isinstance(e, _PartialTensor) or isinstance(e, ShardedTensor):
             if cur_pg is not None and e._process_group is not cur_pg:
                 raise RuntimeError(
                     'All distributed tensors should use the '

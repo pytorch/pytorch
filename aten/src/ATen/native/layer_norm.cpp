@@ -6,6 +6,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
@@ -221,8 +222,10 @@ Tensor& layer_norm_out(
   TORCH_CHECK(!gamma->defined() || input.device() == gamma->device());
   TORCH_CHECK(!beta->defined() || input.device() == beta->device());
 
-  Tensor mean = at::empty({M}, X->options());
-  Tensor rstd = at::empty({M}, X->options());
+  auto op_math_type = at::toOpMathType(input.scalar_type());
+
+  Tensor mean = at::empty({M}, X->options().dtype(op_math_type));
+  Tensor rstd = at::empty({M}, X->options().dtype(op_math_type));
 
   TORCH_CHECK(canCast(
       typeMetaToScalarType(input.dtype()),
