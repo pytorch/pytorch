@@ -529,7 +529,7 @@ Tensor coo_to_sparse_csc(const Tensor& self) {
   bool out_int32 = (col_indices.scalar_type() == at::kInt);
   auto ccol_indices = at::_convert_indices_from_coo_to_csr(
       col_indices, self.size(1), out_int32);
-  return at::native::_sparse_csr_tensor_unsafe(
+  return at::native::_sparse_csc_tensor_unsafe(
       ccol_indices,
       coalesced_self.indices()[0].contiguous(),
       coalesced_self.values(),
