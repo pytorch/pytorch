@@ -20,3 +20,6 @@ DEFAULT_NUM_WORKER_THREADS: int = _DEFAULT_NUM_WORKER_THREADS
 DEFAULT_PROCESS_GROUP_TIMEOUT: timedelta = timedelta(milliseconds=2 ** 31 - 1)
 # Value indicating that timeout is not set for RPC call, and the default should be used.
 UNSET_RPC_TIMEOUT: float = _UNSET_RPC_TIMEOUT
+
+# Used in dynamic RPC to get a unique id (rank) for the tensorpipe agent
+STORE_GET_RANK_KEY: str = "GET_RANK_KEY"

@@ -70,6 +70,7 @@ if is_available():
     import torch.distributed.autograd as dist_autograd
 
     from .backend_registry import BackendType
+    from .constants import STORE_GET_RANK_KEY
     from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .server_process_global_profiler import (
         _server_process_global_profile,
@@ -165,6 +166,9 @@ if is_available():
             # If world_size is not set in construction and also not set in environment variables
             # The store will be created for the dynamic group setting
             store = dist._create_store_from_options(rpc_backend_options, rank)
+            val = store.add(STORE_GET_RANK_KEY, 1)
+            rank = val - 1
+            print(f"rank is {rank}")
         else:
             # This rendezvous state sometimes is destroyed before all processes
             # finishing handshaking. To avoid that issue, we make it global to
