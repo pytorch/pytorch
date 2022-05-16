@@ -823,32 +823,11 @@ def elementwise_dtypes(
             torch.get_default_dtype() if result_dtype is None else result_dtype
         )
     elif highest_type is complex:
-        # NOTE: complex x float type promotion is incorrectly implemented in PyTorch today
-        # it will treat zero dim and non-zero-dim float and complex tensors equally
-        # unless there's a non-zero-dim complex tensor
-        # the following captures this oddity
-        has_one_plus_dim_complex_tensor = False
-        for x in args:
-            if isinstance(x, TensorLike) and x.ndim > 0 and is_complex_dtype(x.dtype):
-                has_one_plus_dim_complex_tensor = True
-                break
-
-        if has_one_plus_dim_complex_tensor:
-            result_dtype = _find_highest_dtype_filtered(
-                args,
-                lambda x: is_float_dtype(x) or is_complex_dtype(x),
-                float_as_complex=True,
-            )
-        else:
-            # no complex tensors of rank 1+
-            # NOTE: bugged case where all tensors are equal
-            result_dtype = _find_highest_dtype_filtered(
-                args,
-                lambda x: is_float_dtype(x) or is_complex_dtype(x),
-                float_as_complex=True,
-                all_tensors_equal=True,
-            )
-
+        result_dtype = _find_highest_dtype_filtered(
+            args,
+            lambda x: is_complex_dtype(x),
+            float_as_complex=True,
+        )
         if result_dtype is None:
             result_dtype = corresponding_complex_dtype(torch.get_default_dtype())
     elif highest_type is int:
