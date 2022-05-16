@@ -9,7 +9,7 @@ def register_quantized_ops(domain: str, version: int):
     # Register all the non-quantized ops
     symbolic_registry.register_version("", version)
     # Register all quantized ops
-    module = importlib.import_module("torch.onnx._symbolic_opsets.symbolic_caffe2")
+    module = importlib.import_module("torch.onnx.symbolic_caffe2")
     symbolic_registry._symbolic_versions["caffe2"] = module
     quant_version_ops = getmembers(symbolic_registry._symbolic_versions["caffe2"])
     for op in quant_version_ops:
