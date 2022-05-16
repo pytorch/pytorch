@@ -857,8 +857,7 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
 def normalize(input, norm_dims, eps):
     computation_dtype = utils.get_computation_dtype(input.dtype)
     input_acc = input.to(dtype=computation_dtype)
-    biased_var = torch.var(input_acc, dim=norm_dims, unbiased=False, keepdim=True)
-    mean = torch.mean(input_acc, dim=norm_dims, keepdim=True)
+    biased_var, mean = torch.var_mean(input_acc, dim=norm_dims, unbiased=False, keepdim=True)
     rstd = torch.rsqrt(biased_var + eps)
 
     out = ((input - mean) * rstd)
