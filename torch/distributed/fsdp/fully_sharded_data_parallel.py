@@ -584,14 +584,8 @@ class FullyShardedDataParallel(nn.Module):
             before starting training, but adds communication overhead to ``__init__``, as atleast
             one broadcast is triggered per individually wrapped FSDP unit.
             This can also help load checkpoints taken by ``state_dict`` and to be loaded by
-            ``load_state_dict`` in a memory efficient way. See example below for details.
-            (Default: ``False)
-
-            Example::
-
-                >>> module = FSDP(module, auto_wrap_policy=...)
-                >>> # Take checkpoint on rank 0 only and CPU to avoid OOM
-                >>>
+            ``load_state_dict`` in a memory efficient way. See documentation for
+            :class:`FullStateDictConfig` for an example of this. (Default: ``False``)
 
     """
 
