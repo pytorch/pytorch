@@ -32,7 +32,7 @@ from .quantization_patterns import (
     QuantizeHandler,
 )
 
-from .quantization_types import (
+from torch.ao.quantization.quantization_types import (
     Pattern,
     NodePattern
 )
@@ -80,15 +80,17 @@ from ..utils import (
     activation_is_int8_quantized,
 )
 
-from .backend_config.utils import (
-    get_pattern_to_quantize_handlers,
+from ..backend_config.utils import (
     get_pattern_to_dtype_configs,
     get_pattern_to_input_type_to_index,
     get_module_to_qat_module,
     get_fusion_pattern_to_root_node_getter,
 )
-from .backend_config import (
+from ..backend_config import (
     get_native_backend_config_dict,
+)
+from .backend_config_utils import (
+    get_pattern_to_quantize_handlers,
 )
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set

@@ -4,6 +4,12 @@
 #include <torch/library.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/to_native.h>
+#endif
+
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
@@ -34,6 +40,15 @@ namespace {
           auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(tensors));
           (*stack)[arguments_begin + idx] = t_new;
         }
+      } else if (ivalue.isOptionalTensorList()) {
+        any_tensor_inputs = true;
+        auto opt_tensors = ivalue.toOptionalTensorList();
+        if (at::functionalization::impl::isFunctionalTensor(opt_tensors)) {
+          any_functional_inputs = true;
+          at::functionalization::impl::sync(opt_tensors);
+          auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
+          (*stack)[arguments_begin + idx] = t_new;
+        }
       }
     }
     // we should wrap the output if any inputs were wrapped,
@@ -57,11 +72,24 @@ namespace {
         auto tensors = ivalue.toTensorList();
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(tensors));
         (*stack)[returns_begin + idx] = t_new;
+      } else if (ivalue.isOptionalTensorList() && should_wrap_outputs) {
+        auto opt_tensors = ivalue.toOptionalTensorList();
+        auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(opt_tensors));
+        (*stack)[returns_begin + idx] = t_new;
       }
     }
   }
 }
 
+at::Tensor lift_functionalize(const at::Tensor & self) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  return at::functionalization::impl::to_functional_tensor(self);
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
+}
+
+TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
+  m.impl("lift", TORCH_FN(lift_functionalize));
 }

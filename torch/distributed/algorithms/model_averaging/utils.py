@@ -4,16 +4,20 @@ from typing import Union, Iterable, Dict, Iterator
 
 import torch
 import torch.distributed as dist
+# The two imports below are not always available depending on the
+# USE_DISTRIBUTED compile flag. Make sure they raise import error
+# if we're trying to use them.
+from torch.distributed import ProcessGroup, group
 
 def average_parameters(
-    params: Iterator[torch.nn.Parameter], process_group: dist.ProcessGroup
+    params: Iterator[torch.nn.Parameter], process_group: ProcessGroup
 ):
     """
     Averages all the given parameters.
     For allreduce efficiency, all the parameters are flattened into a contiguous buffer.
     Thus, it requires extra memory of the same size as the given parameters.
     """
-    group_to_use = process_group if process_group is not None else dist.group.WORLD
+    group_to_use = process_group if process_group is not None else group.WORLD
     # Do not update any parameter if not in the process group.
     if dist._rank_not_in_group(group_to_use):
         return
@@ -58,7 +62,7 @@ def get_params_to_average(params: Union[Iterable[torch.nn.Parameter], Iterable[D
     return filtered_params
 
 
-def average_parameters_or_parameter_groups(params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]], process_group: dist.ProcessGroup):
+def average_parameters_or_parameter_groups(params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]], process_group: ProcessGroup):
     """
     Averages parameters of a model or parameter groups of an optimizer.
     """

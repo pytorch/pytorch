@@ -1,9 +1,27 @@
 import functools
+import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta
-from torch.utils.data._utils.serialization import serialize_fn, SerializationType, deserialize_fn, DILL_AVAILABLE
 from torch.utils.data.dataset import Dataset, IterableDataset
+
+try:
+    import dill
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
+    HAS_DILL = True
+except ImportError:
+    HAS_DILL = False
+
+__all__ = [
+    "DataChunk",
+    "DFIterDataPipe",
+    "IterDataPipe",
+    "MapDataPipe",
+]
 
 T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
@@ -59,8 +77,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         [2, 4, 6, 8, 10]
     """
     functions: Dict[str, Callable] = {}
-    reduce_ex_hook : Optional[Callable] = None
+    reduce_ex_hook: Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
+    str_hook: Optional[Callable] = None
+    repr_hook: Optional[Callable] = None
 
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
@@ -91,26 +111,14 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         cls.functions[function_name] = function
 
     def __getstate__(self):
+        """
+        This contains special logic to serialize `lambda` functions when `dill` is available.
+        If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
+        `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
+        """
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
-        # TODO: Fix `dill` circular dependency - https://github.com/pytorch/data/issues/237
-        if DILL_AVAILABLE:
-            state_dict = {}
-            for k, v in self.__dict__.items():
-                if callable(v):
-                    state_dict[k] = serialize_fn(v)
-                else:
-                    state_dict[k] = v
-            return state_dict
-        else:
-            return self.__dict__
-
-    def __setstate__(self, state_dict):
-        for k, v in state_dict.items():
-            if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
-                self.__dict__[k] = deserialize_fn(v)
-            else:
-                self.__dict__[k] = v
+        return self.__dict__
 
     def __reduce_ex__(self, *args, **kwargs):
         if IterDataPipe.reduce_ex_hook is not None:
@@ -131,6 +139,18 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         if IterDataPipe.reduce_ex_hook is not None and hook_fn is not None:
             raise Exception("Attempt to override existing reduce_ex_hook")
         IterDataPipe.reduce_ex_hook = hook_fn
+
+    def __repr__(self):
+        if self.repr_hook is not None:
+            return self.repr_hook(self)
+        # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
+
+    def __str__(self):
+        if self.str_hook is not None:
+            return self.str_hook(self)
+        # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
 
 
 class DFIterDataPipe(IterDataPipe):
@@ -171,6 +191,10 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
     """
     functions: Dict[str, Callable] = {}
+    reduce_ex_hook: Optional[Callable] = None
+    getstate_hook: Optional[Callable] = None
+    str_hook: Optional[Callable] = None
+    repr_hook: Optional[Callable] = None
 
     def __getattr__(self, attribute_name):
         if attribute_name in MapDataPipe.functions:
@@ -196,24 +220,88 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         cls.functions[function_name] = function
 
     def __getstate__(self):
-        # TODO: Fix `dill` circular dependency - https://github.com/pytorch/data/issues/237
-        if DILL_AVAILABLE:
-            state_dict = {}
-            for k, v in self.__dict__.items():
-                if callable(v):
-                    state_dict[k] = serialize_fn(v)
-                else:
-                    state_dict[k] = v
-            return state_dict
-        else:
-            return self.__dict__
+        """
+        This contains special logic to serialize `lambda` functions when `dill` is available.
+        If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
+        `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
+        """
+        if MapDataPipe.getstate_hook is not None:
+            return MapDataPipe.getstate_hook(self)
+        return self.__dict__
 
-    def __setstate__(self, state_dict):
-        for k, v in state_dict.items():
-            if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
-                self.__dict__[k] = deserialize_fn(v)
+    def __reduce_ex__(self, *args, **kwargs):
+        if MapDataPipe.reduce_ex_hook is not None:
+            try:
+                return MapDataPipe.reduce_ex_hook(self)
+            except NotImplementedError:
+                pass
+        return super().__reduce_ex__(*args, **kwargs)
+
+    @classmethod
+    def set_getstate_hook(cls, hook_fn):
+        if MapDataPipe.getstate_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing getstate_hook")
+        MapDataPipe.getstate_hook = hook_fn
+
+    @classmethod
+    def set_reduce_ex_hook(cls, hook_fn):
+        if MapDataPipe.reduce_ex_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing reduce_ex_hook")
+        MapDataPipe.reduce_ex_hook = hook_fn
+
+    def __repr__(self):
+        if self.repr_hook is not None:
+            return self.repr_hook(self)
+        # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
+
+    def __str__(self):
+        if self.str_hook is not None:
+            return self.str_hook(self)
+        # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
+
+
+class _DataPipeSerializationWrapper:
+    def __init__(self, datapipe):
+        self._datapipe = datapipe
+
+    def __getstate__(self):
+        use_dill = False
+        try:
+            value = pickle.dumps(self._datapipe)
+        except Exception:
+            if HAS_DILL:
+                value = dill.dumps(self._datapipe)
+                use_dill = True
             else:
-                self.__dict__[k] = v
+                raise
+        return (value, use_dill)
+
+    def __setstate__(self, state):
+        value, use_dill = state
+        if use_dill:
+            self._datapipe = dill.loads(value)
+        else:
+            self._datapipe = pickle.loads(value)
+
+    def __len__(self):
+        try:
+            return len(self._datapipe)
+        except Exception:
+            raise TypeError(
+                "{} instance doesn't have valid length".format(type(self).__name__)
+            )
+
+
+class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
+    def __iter__(self):
+        yield from self._datapipe
+
+
+class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):
+    def __getitem__(self, idx):
+        return self._datapipe[idx]
 
 
 class DataChunk(list, Generic[T]):

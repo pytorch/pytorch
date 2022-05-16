@@ -8,7 +8,7 @@ from torch.fx.graph import Node
 
 from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSNodeTargetType
-from torch.ao.quantization.fx.backend_config.utils import get_native_quant_patterns
+from torch.ao.quantization.fx.backend_config_utils import get_native_quant_patterns
 from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,

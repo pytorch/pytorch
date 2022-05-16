@@ -43,6 +43,9 @@ Fusion pass fuses producer to consumer, horizontal mode allows sibling nodes tha
 3. Turn off guard for fusion `torch._C._jit_set_nvfuser_guard_mode(False)`
 This disables the runtime check on fusion group pre-assumptions (tensor meta information / constant inputs / profiled constants), this really is only used for testing as we want to ensure generated kernels are indeed tested and you should avoid using this in training scripts.
 
+4. Turn off fusion for certain node kinds `torch._C._jit_set_nvfuser_skip_node_kind("aten::add", True)`
+This disables fusion for certain nodes, but allows other nodes to continue being fused. The first parameter is the node kind, and the second parameter is whether to toggle the node on or off in fusion.
+
 ## Fusion Debugging
 
 Given the following script as an example

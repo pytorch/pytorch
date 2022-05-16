@@ -215,8 +215,6 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
   }
 
   void handle(kir::ForLoop* fl) final {
-    const auto gpu_lower = GpuLower::current();
-
     kir::ForLoop* cloned_loop = fl == double_buffer_loop_
         ? cloned_top_level_loop_
         : IrBuilder::create<kir::ForLoop>(fl);

@@ -13,6 +13,8 @@ namespace utils {
 inline bool obeys_layout_contract(const at::Tensor& grad, const at::Tensor& variable) {
   TORCH_INTERNAL_ASSERT(!grad.is_sparse());
   TORCH_INTERNAL_ASSERT(!variable.is_sparse());
+  TORCH_INTERNAL_ASSERT(!grad.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(!variable.is_sparse_csr());
   if (variable.is_non_overlapping_and_dense()) {
     // Only look at stride for dimensions that are not of size 1.
     const auto& grad_sizes = grad.sizes();

@@ -6,6 +6,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
 #include <c10/util/variant.h>
+#include <c10/util/C++17.h>
 
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
@@ -131,6 +132,22 @@ struct MemoryEventData {
 };
 static_assert(std::is_pod<MemoryEventData>::value, "Non-POD member of MemoryEventData.");
 
+auto getAnnotations(const MemoryEventData& event) {
+  torch::profiler::impl::kineto::annotation_t out{
+      {"Device Type", std::to_string((int8_t)event.device_type)},
+      {"Device Id", std::to_string(event.device_index)},
+      {"Addr", std::to_string(reinterpret_cast<intptr_t>(event.ptr))},
+      {"Bytes", std::to_string(event.alloc_size)}};
+
+  if (event.total_allocated >= 0) {
+    out.emplace_back("Total Allocated", std::to_string(event.total_allocated));
+  }
+  if (event.total_reserved >= 0) {
+    out.emplace_back("Total Reserved", std::to_string(event.total_reserved));
+  }
+  return out;
+}
+
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
 static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
@@ -210,10 +227,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       cpu_trace_.transferCpuTrace(end_time);
     }
 
-    auto trace = torch::profiler::impl::kineto::stopTrace();
-    TORCH_CHECK(trace || !torch::profiler::kKinetoAvailable);
-    addTraceEvents(trace);
-    return trace;
+    if (config().state != ProfilerState::KINETO_ONDEMAND) {
+      auto trace = torch::profiler::impl::kineto::stopTrace();
+      TORCH_CHECK(trace || !torch::profiler::kKinetoAvailable);
+      addTraceEvents(trace);
+      return trace;
+    } else {
+      return torch::profiler::impl::kineto::ActivityTraceWrapper();
+    }
   }
 
   void materializeOpEvents() {
@@ -222,15 +243,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
     for (const auto& e : memory_events_) {
       auto start_time_us = converter(e.start_time) / 1000;
-      cpu_trace_.addMemoryUsageActivity(
+      cpu_trace_.addCPUActivity(
           kMemoryEventName,
+          torch::profiler::impl::kineto::KinetoActivityType::CPU_INSTANT_EVENT,
           e.kineto_info,
+          /*correlation_id=*/0,
           start_time_us,
-          c10::Device(e.device_type, e.device_index),
-          e.ptr,
-          e.alloc_size,
-          e.total_allocated,
-          e.total_reserved);
+          start_time_us,
+          getAnnotations(e));
 
       kineto_events_.emplace_back();
       auto& evt = kineto_events_.back();
@@ -256,10 +276,12 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
       cpu_trace_.addCPUActivity(
           e.name(),
+          e.kinetoType(),
           e.kineto_info_,
           e.correlation_id(),
           start_us,
-          end_us);
+          end_us,
+          /*annotations=*/{});
 
       kineto_events_.emplace_back();
       kineto_events_.back()
@@ -328,7 +350,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     // one uint64_t variable as key.
     std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
         tidSeq2activity;
-    uint64_t fwd_bwd_link_id = 1;
 
     for (const auto idx : c10::irange(cpu_trace->activities.size())) {
       auto& kineto_event = kineto_events_[idx];
@@ -592,48 +613,90 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
   std::function<void(std::vector<KinetoEvent>&)> event_post_process_cb_;
 };
 
-void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
-  auto registration_state_ptr = KinetoThreadLocalState::getTLS();
-  TORCH_INTERNAL_ASSERT(registration_state_ptr, "Expected profiler state set");
-  auto handle = at::addThreadLocalCallback(
-      at::RecordFunctionCallback(
-          [](const at::RecordFunction& fn)
-              -> std::unique_ptr<at::ObserverContext> {
-            auto state_ptr = KinetoThreadLocalState::getTLS();
-            if (!state_ptr) {
-              return nullptr;
-            }
-            const auto& config = state_ptr->config();
-            auto corr_id = next_correlation_id();
-            torch::profiler::impl::kineto::pushCorrelationId(corr_id);
-            return state_ptr->record_queue_.getSubqueue()->begin_op(fn, corr_id);
-          },
-          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
-            auto state_ptr = KinetoThreadLocalState::getTLS();
-            if (!state_ptr) {
-              return;
-            }
-            const auto& config = state_ptr->config();
-            auto* kineto_ctx_ptr =
-                static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
-            TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
-            kineto_ctx_ptr->event_->end_time_ = torch::profiler::impl::getApproximateTime();
-            kineto_ctx_ptr->event_->end_thread_id_ = at::RecordFunction::currentThreadId();
-            if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
-              try {
-                auto fallback = kineto_ctx_ptr->fallback_;
-                TORCH_INTERNAL_ASSERT(fallback != nullptr);
-                torch::profiler::impl::cudaStubs()->record(
-                    nullptr, &fallback->cuda_event_end_, nullptr);
-              } catch (const std::exception& e) {
-                LOG(WARNING) << "Failed to record CUDA event. " << e.what();
-              }
-            }
+static std::unique_ptr<KinetoThreadLocalState> globalStatePtr;
 
-            torch::profiler::impl::kineto::popCorrelationId();
-          })
+template<typename... Args>
+static void initGlobalState(Args... args) {
+  if (globalStatePtr) {
+    LOG(WARNING) << "GlobalStatePtr already exists!";
+  } else {
+    globalStatePtr = std::make_unique<KinetoThreadLocalState>(std::forward<Args>(args)...);
+  }
+}
+
+static void resetGlobalState() {
+  TORCH_INTERNAL_ASSERT(globalStatePtr != nullptr, "Global state ptr cannot be null before resetting");
+  globalStatePtr.reset();
+}
+
+template<bool use_global>
+static KinetoThreadLocalState* getStatePtr() {
+  return c10::guts::if_constexpr<use_global>(
+      [] { return globalStatePtr.get(); },
+      [] { return KinetoThreadLocalState::getTLS(); });
+}
+
+template<bool use_global_state_ptr = false>
+std::unique_ptr<at::ObserverContext> onFunctionEnter(const at::RecordFunction& fn) {
+  auto state_ptr = getStatePtr<use_global_state_ptr>();
+  if (!state_ptr) {
+    return nullptr;
+  }
+  auto corr_id = next_correlation_id();
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
+  } else {
+    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+  }
+  return state_ptr->record_queue_.getSubqueue()->begin_op(fn, corr_id);
+}
+
+// @lint-ignore CLANGTIDY clang-diagnostic-unused-parameter
+template<bool use_global_state_ptr = false>
+void onFunctionExit(const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+  auto state_ptr = getStatePtr<use_global_state_ptr>();
+  if (!state_ptr) {
+    return;
+  }
+  const auto& config = state_ptr->config();
+  auto* kineto_ctx_ptr =
+    static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
+  TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
+  kineto_ctx_ptr->event_->end_time_ = torch::profiler::impl::getApproximateTime();
+  kineto_ctx_ptr->event_->end_thread_id_ = at::RecordFunction::currentThreadId();
+  if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
+    try {
+      auto fallback = kineto_ctx_ptr->fallback_;
+      TORCH_INTERNAL_ASSERT(fallback != nullptr);
+      torch::profiler::impl::cudaStubs()->record(
+          nullptr, &fallback->cuda_event_end_, nullptr);
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Failed to record CUDA event. " << e.what();
+    }
+  }
+
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::popUserCorrelationId();
+  } else {
+    torch::profiler::impl::kineto::popCorrelationId();
+  }
+}
+
+template <bool use_global_callback = false>
+void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
+  auto registration_state_ptr = getStatePtr<use_global_callback>();
+  TORCH_INTERNAL_ASSERT(registration_state_ptr, "Expected profiler state set");
+  auto recordFunctionCallback =
+      at::RecordFunctionCallback(
+          onFunctionEnter<use_global_callback>,
+          onFunctionExit<use_global_callback>)
           .needsInputs(registration_state_ptr->config().report_input_shapes)
-          .scopes(scopes));
+          .scopes(scopes);
+
+  auto handle = c10::guts::if_constexpr<use_global_callback>(
+      [&] { return at::addGlobalCallback(recordFunctionCallback); },
+      [&] { return at::addThreadLocalCallback(recordFunctionCallback);
+      });
   registration_state_ptr->setCallbackHandle(handle);
 }
 
@@ -646,6 +709,8 @@ void reportBackendEventToActiveKinetoProfiler(
     const at::RecordScope scope,
     const std::string& event_name,
     const std::string& backend_name) {
+  TORCH_INTERNAL_ASSERT(globalStatePtr == nullptr, "On-demand profiling does not support post processing callback");
+
   auto state_ptr = KinetoThreadLocalState::getTLS();
   if (!state_ptr) {
     return;
@@ -679,7 +744,7 @@ void prepareProfiler(
           config.state == ProfilerState::KINETO_GPU_FALLBACK,
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!at::hasCUDA(), activities);
+      /*cpuOnly=*/!at::hasCUDA(), activities, config.experimental_config);
 }
 
 void enableProfilerWithEventPostProcess(
@@ -690,6 +755,8 @@ void enableProfilerWithEventPostProcess(
   TORCH_CHECK(
       config.state != ProfilerState::NVTX,
       "NVTX does not support post processing callback.");
+  TORCH_INTERNAL_ASSERT(globalStatePtr == nullptr, "On-demand profiling does not support post processing callback");
+
   enableProfiler(config, activities, scopes);
   auto state_ptr = KinetoThreadLocalState::getTLS();
   state_ptr->setEventPostProcessingCallback(std::move(cb));
@@ -707,36 +774,44 @@ void enableProfiler(
 
   TORCH_CHECK(
       config.state == ProfilerState::KINETO ||
-      config.state == ProfilerState::KINETO_GPU_FALLBACK);
+      config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+      config.state == ProfilerState::KINETO_ONDEMAND);
   TORCH_CHECK(
       !activities.empty(), "No activities specified for Kineto profiler");
 
-  auto state = std::make_shared<KinetoThreadLocalState>(config, activities);
-  c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
+  if (config.state == ProfilerState::KINETO ||
+      config.state == ProfilerState::KINETO_GPU_FALLBACK) {
+    auto state = std::make_shared<KinetoThreadLocalState>(config, activities);
+    c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
-  if (state->tracePython()) {
-    python_tracer::call(python_tracer::Command::kStartOne);
+    if (state->tracePython()) {
+      python_tracer::call(python_tracer::Command::kStartOne);
+    }
+
+    if (activities.count(ActivityType::CPU)) {
+      pushProfilingCallbacks<false>(scopes);
+    }
+    torch::profiler::impl::kineto::startTrace();
   }
 
-  if (activities.count(ActivityType::CPU)) {
-    pushProfilingCallbacks(scopes);
-  }
+  if (config.state == ProfilerState::KINETO_ONDEMAND) {
+    initGlobalState(config, activities);
 
-  torch::profiler::impl::kineto::startTrace();
+    TORCH_INTERNAL_ASSERT(activities.count(ActivityType::CPU), "Ondemand profiling must enable CPU tracing");
+    pushProfilingCallbacks<true>(scopes);
+  }
 }
 
 std::unique_ptr<ProfilerResult> disableProfiler() {
-  // all the DebugInfoBase objects are scope based and supposed to use
-  // DebugInfoGuard
-  auto state =
-      c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
+  auto state_ptr = static_cast<ProfilerThreadLocalStateBase*>(
+      (globalStatePtr == nullptr) ? getStatePtr<false>() : getStatePtr<true>());
 
-  auto state_ptr = static_cast<ProfilerThreadLocalStateBase*>(state.get());
   const auto& config = state_ptr->config();
   TORCH_CHECK(
       state_ptr &&
           (config.state == ProfilerState::KINETO ||
            config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+           config.state == ProfilerState::KINETO_ONDEMAND ||
            config.state == ProfilerState::NVTX),
       "Can't disable Kineto profiler when it's not running");
 
@@ -744,24 +819,42 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     at::removeCallback(state_ptr->callbackHandle());
   }
 
-  if (state_ptr->config().state == ProfilerState::NVTX) {
+  // Traces are converged via libkineto automatically for ondemand flow
+  if (state_ptr->config().state == ProfilerState::KINETO_ONDEMAND) {
+    auto kineto_state_ptr = static_cast<KinetoThreadLocalState*>(state_ptr);
+    auto trace = kineto_state_ptr->finalizeTrace();
+    resetGlobalState();
     return std::make_unique<ProfilerResult>();
   }
 
-  auto kineto_state_ptr = static_cast<KinetoThreadLocalState*>(state_ptr);
-  if (kineto_state_ptr->tracePython()) {
-    python_tracer::call(python_tracer::Command::kStop);
+  // Shared among NVTX, KINETO, KINETO_GPU_FALLBACK
+  std::unique_ptr<ProfilerResult> result;
+  if (state_ptr->config().state == ProfilerState::NVTX) {
+    result = std::make_unique<ProfilerResult>();
   }
 
-  auto trace = kineto_state_ptr->finalizeTrace();
-  if (kineto_state_ptr->tracePython()) {
-    python_tracer::call(python_tracer::Command::kClear);
+  if (config.state == ProfilerState::KINETO ||
+      config.state == ProfilerState::KINETO_GPU_FALLBACK) {
+    auto kineto_state_ptr = static_cast<KinetoThreadLocalState*>(state_ptr);
+    if (kineto_state_ptr->tracePython()) {
+      python_tracer::call(python_tracer::Command::kStop);
+    }
+
+    auto trace = kineto_state_ptr->finalizeTrace();
+    if (kineto_state_ptr->tracePython()) {
+      python_tracer::call(python_tracer::Command::kClear);
+    }
+
+    result = std::make_unique<ProfilerResult>(
+        kineto_state_ptr->start_time_,
+        std::move(kineto_state_ptr->kineto_events_),
+        std::move(trace));
   }
 
-  return std::make_unique<ProfilerResult>(
-      kineto_state_ptr->start_time_,
-      std::move(kineto_state_ptr->kineto_events_),
-      std::move(trace));
+  // Disable thread-local profiler. We can't pop until the very end as it would invalidate
+  // the `state_ptr` reference which we need to process the traces.
+  (void)c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
+  return result;
 }
 
 int64_t KinetoEvent::cudaElapsedUs() const {

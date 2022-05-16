@@ -229,8 +229,8 @@ void ROIAlignForward(
       for (const auto pw : c10::irange(pooled_width)) {
         vector<int32_t> acc_buffer(channels, 0);
 
-        for (const auto iy : c10::irange(roi_bin_grid_h)) {
-          for (const auto ix : c10::irange(roi_bin_grid_w)) {
+        for (C10_UNUSED const auto iy : c10::irange(roi_bin_grid_h)) {
+          for (C10_UNUSED const auto ix : c10::irange(roi_bin_grid_w)) {
             PreCalc pc = pre_calc[pre_calc_index];
 
             const uint8_t* data_1 = offset_bottom_data + channels * pc.pos1;

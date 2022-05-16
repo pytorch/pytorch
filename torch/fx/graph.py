@@ -151,7 +151,7 @@ class _Namespace:
             num += 1
             candidate = f'{base}_{num}'
 
-        self._used_names.setdefault(candidate)
+        self._used_names.setdefault(candidate, 0)
         if obj is None:
             self._unassociated_names.add(candidate)
         else:
@@ -598,7 +598,8 @@ class Graph:
     """
 
     @compatibility(is_backward_compatible=True)
-    def __init__(self, owning_module: Optional["GraphModule"] = None, tracer_cls: Optional[Type["Tracer"]] = None):
+    def __init__(self, owning_module: Optional["GraphModule"] = None, tracer_cls: Optional[Type["Tracer"]] = None,
+                 tracer_extras: Optional[Dict[str, Any]] = None):
         """
         Construct an empty Graph.
         """
@@ -610,6 +611,7 @@ class Graph:
         self._owners = 0
         self._owning_module = owning_module
         self._tracer_cls = tracer_cls
+        self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
 
     @property
@@ -680,6 +682,7 @@ class Graph:
         memo = memo if memo else {}
         g = Graph(tracer_cls=self._tracer_cls)
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
+        g._codegen = copy.deepcopy(self._codegen)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
         g.output(output_val, type_expr=getattr(old_output_val, 'type', None))
