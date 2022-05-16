@@ -27,16 +27,20 @@ namespace api {
 
 class Context final {
  public:
-  explicit Context(const Adapter& adapter);
+  explicit Context(const VkInstance instance, size_t adapter_i);
+
   Context(const Context&) = delete;
-  Context(Context&&) = default;
   Context& operator=(const Context&) = delete;
+
+  Context(Context&&) = default;
   Context& operator=(Context&&) = default;
+
   ~Context();
 
   GPU gpu();
   Command& command();
   Shader& shader();
+  QueryPool& querypool();
   Pipeline& pipeline();
   Descriptor& descriptor();
   Resource& resource();
@@ -67,15 +71,19 @@ class Context final {
 
  private:
   // Construction and destruction order matters.  Do not move members around.
-  Adapter adapter_;
-  Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
-  VkQueue queue_;
+  VkInstance instance_;
+  size_t adapter_i_;
+  VkDevice device_;
+  Adapter::Queue queue_;
   Shader shader_;
   Pipeline pipeline_;
   ThreadContext threadcontext_;
 };
 
 bool available();
+
+// The global runtime is retrieved using this function, where it is declared as
+// a static local variable.
 Context* context();
 
 //
@@ -84,10 +92,13 @@ Context* context();
 
 inline GPU Context::gpu() {
   // A GPU is simply a (physical device, logical device, device queue) trio.
+  const Adapter* p_adapter = runtime()->get_adapter_p(adapter_i_);
   return {
-    &adapter_,
-    device(),
-    queue(),
+    instance_,
+    p_adapter,
+    device_,
+    queue_.family_index,
+    queue_.handle,
   };
 }
 
@@ -111,14 +122,16 @@ inline Resource& Context::resource() {
   return threadcontext_.resource();
 }
 
+inline QueryPool& Context::querypool() {
+  return threadcontext_.querypool();
+}
+
 inline VkDevice Context::device() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);
-  return device_.get();
+  return device_;
 }
 
 inline VkQueue Context::queue() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(queue_);
-  return queue_;
+  return queue_.handle;
 }
 
 namespace detail {

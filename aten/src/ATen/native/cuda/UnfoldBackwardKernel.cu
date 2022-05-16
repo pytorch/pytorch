@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UnfoldBackward.h>
 
 #include <ATen/native/cuda/Loops.cuh>

@@ -405,7 +405,7 @@ at::Tensor& embedding_bag_byte_impl(
 
   if (!pruned_weights || fallback_to_no_sparse) {
     auto kernel_i8 =
-        fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType>(
+        fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType, /*OutType=*/float, /*TRHEAD_LOCAL=*/true>(
             /*block_size=*/D,
             /*has_weight=*/per_sample_weights_.has_value(),
             /*normalize_by_lengths=*/false,

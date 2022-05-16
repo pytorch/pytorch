@@ -10,20 +10,6 @@ namespace at {
 namespace cuda {
 namespace solver {
 
-C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status) {
-  switch (status) {
-    case CUSOLVER_STATUS_SUCCESS:                     return "CUSOLVER_STATUS_SUCCES";
-    case CUSOLVER_STATUS_NOT_INITIALIZED:             return "CUSOLVER_STATUS_NOT_INITIALIZED";
-    case CUSOLVER_STATUS_ALLOC_FAILED:                return "CUSOLVER_STATUS_ALLOC_FAILED";
-    case CUSOLVER_STATUS_INVALID_VALUE:               return "CUSOLVER_STATUS_INVALID_VALUE";
-    case CUSOLVER_STATUS_ARCH_MISMATCH:               return "CUSOLVER_STATUS_ARCH_MISMATCH";
-    case CUSOLVER_STATUS_EXECUTION_FAILED:            return "CUSOLVER_STATUS_EXECUTION_FAILED";
-    case CUSOLVER_STATUS_INTERNAL_ERROR:              return "CUSOLVER_STATUS_INTERNAL_ERROR";
-    case CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED:   return "CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
-    default:                                          return "Unknown cusolver error number";
-  }
-}
-
 template <>
 void getrf<double>(
     cusolverDnHandle_t handle, int m, int n, double* dA, int ldda, int* ipiv, int* info) {
@@ -162,6 +148,71 @@ void getrs<c10::complex<float>>(
       info));
 }
 
+template <>
+void sytrf_bufferSize<double>(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDsytrf_bufferSize(handle, n, A, lda, lwork));
+}
+
+template <>
+void sytrf_bufferSize<float>(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSsytrf_bufferSize(handle, n, A, lda, lwork));
+}
+
+template <>
+void sytrf_bufferSize<c10::complex<double>>(
+    CUDASOLVER_SYTRF_BUFFER_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZsytrf_bufferSize(
+      handle, n, reinterpret_cast<cuDoubleComplex*>(A), lda, lwork));
+}
+
+template <>
+void sytrf_bufferSize<c10::complex<float>>(
+    CUDASOLVER_SYTRF_BUFFER_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCsytrf_bufferSize(
+      handle, n, reinterpret_cast<cuComplex*>(A), lda, lwork));
+}
+
+template <>
+void sytrf<double>(CUDASOLVER_SYTRF_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnDsytrf(handle, uplo, n, A, lda, ipiv, work, lwork, devInfo));
+}
+
+template <>
+void sytrf<float>(CUDASOLVER_SYTRF_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnSsytrf(handle, uplo, n, A, lda, ipiv, work, lwork, devInfo));
+}
+
+template <>
+void sytrf<c10::complex<double>>(
+    CUDASOLVER_SYTRF_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZsytrf(
+      handle,
+      uplo,
+      n,
+      reinterpret_cast<cuDoubleComplex*>(A),
+      lda,
+      ipiv,
+      reinterpret_cast<cuDoubleComplex*>(work),
+      lwork,
+      devInfo));
+}
+
+template <>
+void sytrf<c10::complex<float>>(
+    CUDASOLVER_SYTRF_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCsytrf(
+      handle,
+      uplo,
+      n,
+      reinterpret_cast<cuComplex*>(A),
+      lda,
+      ipiv,
+      reinterpret_cast<cuComplex*>(work),
+      lwork,
+      devInfo));
+}
 
 template<>
 void gesvd_buffersize<float>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {

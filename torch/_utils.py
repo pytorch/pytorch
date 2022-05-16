@@ -202,11 +202,16 @@ def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
 
 # Should not be used, only here to be able to load Tensors serialized with older versions of pytorch
 _rebuild_xla_tensor = _rebuild_device_tensor_from_numpy
-_rebuild_mlc_tensor = _rebuild_device_tensor_from_numpy
 
 
 def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
     return torch.empty_strided(size, stride, dtype=dtype, device='meta', requires_grad=requires_grad)
+
+
+def _rebuild_wrapper_subclass(cls, dtype, size, stride, storage_offset, layout, device, requires_grad):
+    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        cls, size, strides=stride, storage_offset=storage_offset, layout=layout,
+        device=device, requires_grad=requires_grad)
 
 
 # TODO: Once we decide to break serialization FC, `storage` no longer needs to

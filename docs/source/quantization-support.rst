@@ -217,6 +217,8 @@ to configure quantization settings for individual ops.
 
 torch.nn.intrinsic
 ~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.intrinsic
+.. automodule:: torch.nn.intrinsic.modules
 
 This module implements the combined (fused) modules conv + relu which can
 then be quantized.
@@ -243,6 +245,9 @@ then be quantized.
 
 torch.nn.intrinsic.qat
 ~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.intrinsic.qat
+.. automodule:: torch.nn.intrinsic.qat.modules
+
 
 This module implements the versions of those fused operations needed for
 quantization aware training.
@@ -268,6 +273,9 @@ quantization aware training.
 
 torch.nn.intrinsic.quantized
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.intrinsic.quantized
+.. automodule:: torch.nn.intrinsic.quantized.modules
+
 
 This module implements the quantized implementations of fused operations
 like conv + relu. No BatchNorm variants as it's usually folded into convolution
@@ -289,6 +297,8 @@ for inference.
 
 torch.nn.intrinsic.quantized.dynamic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.intrinsic.quantized.dynamic
+.. automodule:: torch.nn.intrinsic.quantized.dynamic.modules
 
 This module implements the quantized dynamic implementations of fused operations
 like linear + relu.
@@ -304,6 +314,8 @@ like linear + relu.
 
 torch.nn.qat
 ~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.qat
+.. automodule:: torch.nn.qat.modules
 
 This module implements versions of the key nn modules **Conv2d()** and
 **Linear()** which run in FP32 but with rounding applied to simulate the
@@ -322,6 +334,8 @@ effect of INT8 quantization.
 
 torch.nn.qat.dynamic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.qat.dynamic
+.. automodule:: torch.nn.qat.dynamic.modules
 
 This module implements versions of the key nn modules such as **Linear()**
 which run in FP32 but with rounding applied to simulate the effect of INT8
@@ -338,6 +352,8 @@ quantization and will be dynamically quantized during inference.
 
 torch.nn.quantized
 ~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.quantized
+.. automodule:: torch.nn.quantized.modules
 
 This module implements the quantized versions of the nn layers such as
 ~`torch.nn.Conv2d` and `torch.nn.ReLU`.
@@ -376,6 +392,7 @@ This module implements the quantized versions of the nn layers such as
 
 torch.nn.quantized.functional
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.quantized.functional
 
 This module implements the quantized versions of the functional layers such as
 ~`torch.nn.functional.conv2d` and `torch.nn.functional.relu`. Note:
@@ -413,6 +430,8 @@ This module implements the quantized versions of the functional layers such as
 
 torch.nn.quantized.dynamic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.quantized.dynamic
+.. automodule:: torch.nn.quantized.dynamic.modules
 
 Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
 :class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and
@@ -492,3 +511,8 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
   * :attr:`torch.quint8` — 8-bit unsigned integer
   * :attr:`torch.qint8` — 8-bit signed integer
   * :attr:`torch.qint32` — 32-bit signed integer
+
+
+.. These modules are missing docs. Adding them here only for tracking
+.. automodule:: torch.nn.quantizable
+.. automodule:: torch.nn.quantizable.modules
