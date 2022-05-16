@@ -43,15 +43,41 @@ void atan_kernel_cuda(TensorIteratorBase& iter) {
       });
 }
 
+const char sin_name[] = "sin_kernel";
 void sin_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-      ScalarType::Half, ScalarType::BFloat16,
-      iter.common_dtype(), "sin_cuda",
+  auto common_dtype = iter.common_dtype();
+  if(at::isComplexType(common_dtype)) {
+#if AT_USE_JITERATOR
+  static const auto sin_string = jiterator_stringify(
+    template <typename T>
+    T sin_kernel(T a) {
+        return std::sin(a);
+    }
+  );
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sin_name", [&]() {
+    jitted_gpu_kernel<
+        /*name=*/ sin_name,
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 1>(iter, sin_string);
+  });
+#else
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sin_name", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_T {
+        return ::sin(a);
+    });
+  });
+#endif
+  } else {
+  AT_DISPATCH_FLOATING_AND2(
+    ScalarType::Half, ScalarType::BFloat16,
+    common_dtype, "sin_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return ::sin(a);
         });
       });
+  }
 }
 
 void cos_kernel_cuda(TensorIteratorBase& iter) {
