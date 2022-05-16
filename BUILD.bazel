@@ -8,7 +8,7 @@ load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources"
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops", "generate_aten", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
-load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_PYTHON")
+load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON")
 
 define_targets(rules = rules)
 
@@ -102,37 +102,10 @@ generate_aten(
     generator = "//torchgen:gen",
 )
 
-libtorch_cpp_generated_sources = [
-        "torch/csrc/autograd/generated/VariableType.h",
-        "torch/csrc/autograd/generated/VariableType_0.cpp",
-        "torch/csrc/autograd/generated/VariableType_1.cpp",
-        "torch/csrc/autograd/generated/VariableType_2.cpp",
-        "torch/csrc/autograd/generated/VariableType_3.cpp",
-        "torch/csrc/autograd/generated/VariableType_4.cpp",
-        # "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
-        "torch/csrc/autograd/generated/TraceType_0.cpp",
-        "torch/csrc/autograd/generated/TraceType_1.cpp",
-        "torch/csrc/autograd/generated/TraceType_2.cpp",
-        "torch/csrc/autograd/generated/TraceType_3.cpp",
-        "torch/csrc/autograd/generated/TraceType_4.cpp",
-        # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
-        "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
-        "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
-        # "torch/csrc/autograd/generated/ADInplaceOrViewTypeEverything.cpp",
-        "torch/csrc/autograd/generated/Functions.h",
-        "torch/csrc/autograd/generated/Functions.cpp",
-        "torch/csrc/autograd/generated/variable_factories.h",
-        "torch/csrc/lazy/generated/LazyIr.h",
-        "torch/csrc/lazy/generated/LazyNativeFunctions.h",
-        "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
-        "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
-        "torch/csrc/lazy/generated/RegisterLazy.cpp",
-]
-
 filegroup(
     name = "cpp_generated_code",
     data = [":generate-code"],
-    srcs = libtorch_cpp_generated_sources,
+    srcs = GENERATED_AUTOGRAD_CPP,
 )
 
 exports_files(
@@ -1622,7 +1595,7 @@ cc_library(
             "torch/csrc/autograd/generated/variable_factories.h",
             "torch/csrc/autograd/generated/Functions.h",
         ] + torch_cuda_headers,
-    ) + [":cpp_generated_code", ":version_h"],
+    ) + GENERATED_AUTOGRAD_CPP + [":version_h"],
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",
@@ -1667,8 +1640,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
-    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources +[
-        ":cpp_generated_code",
+    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources + GENERATED_AUTOGRAD_CPP + [
         "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
         "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
     ],
@@ -1701,7 +1673,10 @@ cc_library(
         "**/*.h",
         "**/*.cuh",
     ]) + [
-        ":cpp_generated_code",
+        # We need the filegroup here because the raw list causes Bazel
+        # to see duplicate files. It knows how to deduplicate with the
+        # filegroup.
+        ":cpp_generated_code"
     ],
     includes = [
         "torch/csrc/api/include",
