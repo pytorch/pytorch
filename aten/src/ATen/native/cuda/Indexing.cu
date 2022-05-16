@@ -1314,7 +1314,7 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
         .build();
 
       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_select_sparse_cuda", [&]() {
-          gpu_kernel(iter, [size, dim] GPU_LAMBDA (index_t idx) -> index_t {
+          gpu_kernel(iter, [size] GPU_LAMBDA (index_t idx) -> index_t {
               CUDA_KERNEL_ASSERT(idx >= -size && idx < size
                   && "index_select(): index out of bounds");
               return idx < 0 ? idx + size : idx;
@@ -1352,7 +1352,7 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
           index_t* ptr_intrsc_counts_nneg_index = intrsc_counts_nneg_index.data_ptr<index_t>();
           gpu_kernel(
               iter,
-              [ptr_intrsc_counts_nneg_index, nnz, index_len] GPU_LAMBDA (
+              [ptr_intrsc_counts_nneg_index, index_len] GPU_LAMBDA (
                 index_t dim_val, index_t idx_val, // dim_indices[j], j
                 index_t idx_idx // i
               ) -> index_t {
@@ -1417,7 +1417,7 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
           index_t* ptr_selected_dim_indices_offsets = selected_dim_indices_offsets.data_ptr<index_t>();
           gpu_kernel(
               iter,
-              [ptr_selected_dim_indices, ptr_selected_dim_indices_offsets, nnz, index_len] GPU_LAMBDA (
+              [ptr_selected_dim_indices, ptr_selected_dim_indices_offsets] GPU_LAMBDA (
                 index_t dim_val, index_t idx_dim, // dim_indices[j], j
                 index_t idx_val, index_t idx_idx // index[i], i
               ) -> index_t {
