@@ -455,6 +455,10 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // e.g. updates to (workerIdToInfo_, workerNameToInfo_, workerNameToURL_)
   mutable std::mutex groupMembershipMutex_;
 
+  // CV to watch for changes after groupMembership is updated
+  mutable std::mutex unknownWorkerMutex_;
+  mutable std::condition_variable unknownWorkerCV_;
+
   // Map to Track Network Data
   NetworkDataDict networkData_;
   // Mutex to guard networkData_

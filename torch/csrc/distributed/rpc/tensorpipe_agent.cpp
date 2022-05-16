@@ -1175,6 +1175,20 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(
     GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
     it = workerNameToInfo_.find(workerName);
   }
+  if (!isStaticGroup_ && it == workerNameToInfo_.end()) {
+    std::unique_lock<std::mutex> lock(unknownWorkerMutex_);
+    auto pred = [&]() {
+      bool res = workerNameToInfo_.find(workerName) != workerNameToInfo_.end();
+      LOG(INFO) << "in pred " << res;
+      return res;
+    };
+    // Perform blocking wait for worker to join
+    // unknownWorkerCV_.wait_for(lock, getRpcTimeout(), pred);
+    LOG(INFO) << "before wait for";
+    unknownWorkerCV_.wait_for(lock, std::chrono::milliseconds(100000), pred);
+    LOG(INFO) << "after wait for";
+    it = workerNameToInfo_.find(workerName);
+  }
   TORCH_CHECK(
       it != workerNameToInfo_.end(),
       fmt::format(
@@ -1231,11 +1245,11 @@ void TensorPipeAgent::updateGroupMembership(
     const std::vector<c10::Device> devices,
     const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     bool isJoin) {
+  GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
   std::string name = workerInfo.name_;
   worker_id_t id = workerInfo.id_;
   // Rank with workerInfo is joining the group, update internal mappings
   if (isJoin) {
-    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
     workerIdToInfo_.emplace(id, workerInfo);
     workerNameToInfo_.emplace(name, workerInfo);
 
@@ -1278,6 +1292,7 @@ void TensorPipeAgent::updateGroupMembership(
       }
     }
   }
+  unknownWorkerCV_.notify_all();
 }
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;

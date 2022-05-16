@@ -4573,6 +4573,43 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             )
 
     @dist_init(setup_rpc=False)
+    def test_dynamic_rpc_block_on_unknown_worker_with_timeout(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        print("hello")
+        if self.rank == 0:
+            print(f"initializing {self.rank}", flush=True)
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+            futures = []
+            for rank in range(self.world_size):
+                # print(f"rpc_async for {self.rank} to {rank}", flush=True)
+                # fut = rpc.rpc_async(worker_name(rank), torch.add, args=(torch.tensor(1), 1))
+                # futures.append(fut)
+                print(f"rpc_sync for {self.rank} to {rank}", flush=True)
+                rpc.rpc_sync(worker_name(rank), torch.add, args=(torch.tensor(1), 1))
+
+            # This will succeed as the future will wait on the worker to initialize before executing the RPC call
+            result = 0
+            # print("waiting", flush=True)
+            # for fut in futures:
+            #     result += fut.wait()
+
+            self.assertEqual(torch.tensor(8), result)
+
+        # initialize rest of the workers
+        if self.rank != 0:
+            print(f"initializing {self.rank}", flush=True)
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+    @dist_init(setup_rpc=False)
     def test_init_dynamic_and_static_rpc_group(self):
         # Initialize a static rpc group with size = self.world_size - 1
         dist.init_process_group(
