@@ -1503,6 +1503,14 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "name",
           [](const StrongFunctionPtr& self) { return self.function_->name(); })
+      .def(
+          "_set_ignore_amp",
+          [](StrongFunctionPtr& self, bool ignore) {
+            auto fn = self.function_;
+            TORCH_INTERNAL_ASSERT(fn->isGraphFunction());
+            GraphFunction& g_fn = toGraphFunction(*fn);
+            g_fn._set_ignore_amp(ignore);
+          })
       .def_property_readonly(
           "qualified_name",
           [](const StrongFunctionPtr& self) {
