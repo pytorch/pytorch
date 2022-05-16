@@ -62,27 +62,9 @@ inline int64_t getTimeUs() {
 } // namespace
 
 namespace python_tracer {
-namespace {
-CallFn call_fn;
-TraceEventsFn get_events_fn;
-} // namespace
-
-void registerFunctions(CallFn call, TraceEventsFn get_events) {
-  call_fn = call;
-  get_events_fn = get_events;
-}
-
-void call(Command c) {
-  if (call_fn != nullptr) {
-    call_fn(c);
-  }
-}
-
-std::vector<std::unique_ptr<PyTraceEvent>> get_events() {
-  return get_events_fn != nullptr
-      ? get_events_fn()
-      : std::vector<std::unique_ptr<PyTraceEvent>>();
-}
+using torch::profiler::impl::python_tracer::CallType;
+using torch::profiler::impl::python_tracer::PyTraceEvent;
+using torch::profiler::impl::python_tracer::PythonTracerBase;
 
 // We do not want `getTimeUs` to be directly visible, but we need a way for
 // the python tracer to use the same timing convention as the profiler.
@@ -394,7 +376,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       return;
     }
 
-    auto py_events = python_tracer::get_events();
+    auto py_events = python_tracer::PythonTracerBase::get().getEvents();
     for (const auto& e : py_events) {
       TORCH_INTERNAL_ASSERT(
           !e->thread_id_,
@@ -508,7 +490,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       // associated with it that we need to respect.
       if (!kineto_events_[idx].hasStack()) {
         std::vector<std::string> py_names;
-        _push_reverse_order(python_caller, py_names);
+        python_tracer::_push_reverse_order(python_caller, py_names);
         kineto_events_[idx].stack(py_names);
         activity.addMetadata("Call stack", torch::profiler::impl::stacksToStr(py_names, ";"));
       }
@@ -776,7 +758,7 @@ void enableProfiler(
     c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
     if (state->tracePython()) {
-      python_tracer::call(python_tracer::Command::kStartOne);
+      python_tracer::PythonTracerBase::get().start();
     }
 
     if (activities.count(ActivityType::CPU)) {
@@ -828,12 +810,12 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     auto kineto_state_ptr = static_cast<KinetoThreadLocalState*>(state_ptr);
     if (kineto_state_ptr->tracePython()) {
-      python_tracer::call(python_tracer::Command::kStop);
+      python_tracer::PythonTracerBase::get().stop();
     }
 
     auto trace = kineto_state_ptr->finalizeTrace();
     if (kineto_state_ptr->tracePython()) {
-      python_tracer::call(python_tracer::Command::kClear);
+      python_tracer::PythonTracerBase::get().clear();
     }
 
     result = std::make_unique<ProfilerResult>(
