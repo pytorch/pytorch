@@ -128,8 +128,8 @@ class TestTypePromotion(TestCase):
 
         def scalar_1d_tensor_test(s, t):
             # As per type promotion rules,
-            # scalar/0-D tensor of higher kind with 1-D or greater dimensional of
-            # lower kind than should result in result with dtype of scalar.
+            # scalar/0-D tensor of higher kind with 1-D or greater dimensional tensor
+            # of lower kind should result in output with dtype of scalar tensor.
             self.assertEqual((s * t).dtype, s.dtype)
             self.assertEqual((t * s).dtype, s.dtype)
             self.assertEqual(torch.result_type(s, t), s.dtype)
