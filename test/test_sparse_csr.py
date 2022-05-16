@@ -2057,10 +2057,40 @@ class TestSparseCSR(TestCase):
         dense = torch.randn(4, 5).relu()
         sp_matrix = _construct_sp_matrix(dense, layout)
         pt_matrix = self._convert_to_layout(dense, layout)
+
+        compressed_indices_mth = {
+            torch.sparse_csr: torch.Tensor.crow_indices,
+            torch.sparse_csc: torch.Tensor.ccol_indices,
+            torch.sparse_bsr: torch.Tensor.crow_indices,
+            torch.sparse_bsc: torch.Tensor.ccol_indices,
+        }[layout]
+
+        plain_indices_mth = {
+            torch.sparse_csr: torch.Tensor.col_indices,
+            torch.sparse_csc: torch.Tensor.row_indices,
+            torch.sparse_bsr: torch.Tensor.col_indices,
+            torch.sparse_bsc: torch.Tensor.row_indices,
+        }[layout]
+
+        print("dense")
+        print(dense)
         print("sp_matrix")
         print(sp_matrix)
-        print("pt_matrix")
-        print(pt_matrix)
+        print("sp_matrix.indptr")
+        print(sp_matrix.indptr)
+        print("sp_matrix.indices")
+        print(sp_matrix.indices)
+        print("pt_matrix.ccol_indices()")
+        print(pt_matrix.ccol_indices())
+        print("pt_matrix.row_indices()")
+        print(pt_matrix.row_indices())
+        print("pt_matrix.values()")
+        print(pt_matrix.values())
+        self.assertEqual(layout, pt_matrix.layout)
+        self.assertEqual(sp_matrix.shape, pt_matrix.shape)
+        self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
+        self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
+        self.assertEqual(torch.tensor(sp_matrix.values), pt_matrix.values())
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
