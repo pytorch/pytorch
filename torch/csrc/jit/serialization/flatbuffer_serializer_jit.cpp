@@ -64,7 +64,7 @@ flatbuffers::DetachedBuffer save_jit_module_to_bytes(
   ExtraFilesMap jitfiles;
   std::vector<IValue> constants;
   jitModuleToPythonCodeAndConstants(module, &jitfiles, &constants);
-  CompilationOptions options;
+  CompilationOptions options = getOptionsFromGlobal();
   mobile::Module mobilem = jitModuleToMobile(module, options);
   return save_mobile_module_to_bytes(mobilem, extra_files, jitfiles, constants);
 }
