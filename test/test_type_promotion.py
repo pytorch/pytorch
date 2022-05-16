@@ -6,7 +6,7 @@ import unittest
 
 import torch
 
-from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
+from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
@@ -119,6 +119,35 @@ class TestTypePromotion(TestCase):
         # not a "wrapped number"
         other = torch.tensor(5.5, dtype=torch.double, device=device)
         self.assertEqual((a + other).dtype, torch.complex64)
+
+        def make_scalar(dtype):
+            return make_tensor((), dtype=dtype, device=device)
+
+        def make_1d_tensor(dtype):
+            return make_tensor((3,), dtype=dtype, device=device)
+
+        def scalar_1d_tensor_test(s, t):
+            # As per type promotion rules,
+            # scalar/0-D tensor of higher kind with 1-D or greater dimensional of
+            # lower kind than should result in result with dtype of scalar.
+            self.assertEqual((s * t).dtype, s.dtype)
+            self.assertEqual((t * s).dtype, s.dtype)
+            self.assertEqual(torch.result_type(s, t), s.dtype)
+            self.assertEqual(torch.result_type(t, s), s.dtype)
+
+        if torch.device(device).type != 'xla':
+            # chalf is not supported on XLA
+            s = make_scalar(dtype=torch.chalf)
+            t = make_1d_tensor(dtype=torch.double)
+            scalar_1d_tensor_test(s, t)
+
+            s = make_scalar(dtype=torch.chalf)
+            t = make_1d_tensor(dtype=torch.float)
+            scalar_1d_tensor_test(s, t)
+
+        s = make_scalar(dtype=torch.cfloat)
+        t = make_1d_tensor(dtype=torch.double)
+        scalar_1d_tensor_test(s, t)
 
     @float_double_default_dtype
     def test_complex_scalar_mult_tensor_promotion(self, device):
