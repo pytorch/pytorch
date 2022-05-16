@@ -18,6 +18,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -95,3 +96,7 @@ class TestReshard(ShardedTensorTestBase):
             NotImplementedError, "Only single local shard supported for reshard."
         ):
             st.reshard(reshard_spec)
+
+
+if __name__ == "__main__":
+    run_tests()

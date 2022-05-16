@@ -257,7 +257,7 @@ void initMonitorBindings(PyObject* module) {
       m,
       "data_value_t",
       R"DOC(
-        data_value_t is one of of ``str``, ``float``, ``int``, ``bool``.
+        data_value_t is one of ``str``, ``float``, ``int``, ``bool``.
       )DOC");
 
   py::implicitly_convertible<std::string, data_value_t>();

@@ -22,8 +22,7 @@ std::string operator_str(
  */
 std::unordered_set<std::string> load_and_find_unsupported_operator_names(
     c10::ivalue::TupleElements&& ops_list,
-    mobile::Function* function,
-    int64_t model_version) {
+    mobile::Function* function) {
   std::unordered_set<std::string> unsupported_op_names;
   // ops_list is the list of operator names that were read in from
   // bytecode.plk for the method that is currently being processed.
@@ -41,8 +40,7 @@ std::unordered_set<std::string> load_and_find_unsupported_operator_names(
     auto op_found = function->append_operator(
         op_item[0].toString()->string(),
         op_item[1].toString()->string(),
-        num_args,
-        model_version);
+        num_args);
     if (!op_found) {
       unsupported_op_names.emplace(operator_str(
           op_item[0].toString()->string(), op_item[1].toString()->string()));
@@ -66,12 +64,10 @@ void print_unsupported_ops_and_throw(
 
 void parseOperators(
     c10::ivalue::TupleElements&& ops_list,
-    const int64_t& model_version,
     const uint64_t& module_load_options,
     mobile::Function* function) {
   std::unordered_set<std::string> unsupported_op_names =
-      load_and_find_unsupported_operator_names(
-          std::move(ops_list), function, model_version);
+      load_and_find_unsupported_operator_names(std::move(ops_list), function);
   if ((module_load_options & MobileModuleLoadOptions::OPERATOR_CHECK) &&
       !unsupported_op_names.empty()) {
     print_unsupported_ops_and_throw(unsupported_op_names);

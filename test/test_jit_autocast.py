@@ -15,14 +15,15 @@ TEST_BFLOAT16 = TEST_CUDA and torch.cuda.is_bf16_supported()
 class TestAutocast(JitTestCase):
     def setUp(self):
         # common input tensors
-        self.a_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
-        self.b_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
-        self.c_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
-        self.d_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
-        self.a_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
-        self.b_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
-        self.c_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
-        self.d_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
+        if TEST_CUDA:
+            self.a_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
+            self.b_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
+            self.c_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
+            self.d_fp16 = torch.rand((2, 2), dtype=torch.float16, device='cuda')
+            self.a_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
+            self.b_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
+            self.c_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
+            self.d_fp32 = torch.rand((2, 2), dtype=torch.float32, device='cuda')
         self.old_value = torch._C._jit_set_autocast_mode(True)
         super().setUp()
 
@@ -659,6 +660,81 @@ class TestAutocast(JitTestCase):
         # isn't enabled
         self.assertRaises(RuntimeError, lambda: scripted_thing1.forward(x, y))
 
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_jit_freeze_autocast_basic(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, x, y):
+                with torch.cuda.amp.autocast():
+                    return torch.mm(x, y)
+
+        x = torch.rand((3, 4), dtype=torch.float).cuda()
+        y = torch.rand((4, 5), dtype=torch.float).cuda()
+
+        mod = TestModule().eval()
+
+        # sanity check
+        self._test_autocast(mod, "aten::_autocast_to_reduced_precision", x, y)
+
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod).eval())
+        FileCheck().check_count("aten::_autocast_to_reduced_precision", 2, True).run(frozen_mod.graph)
+
+        # make sure that the runtime pass doesn't duplicate autocast nodes
+        frozen_mod(x, y)
+        optimized_graph = frozen_mod.graph_for(x, y)
+        FileCheck().check_count("aten::_autocast_to_reduced_precision", 2, True).run(optimized_graph)
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_jit_freeze_autocast_constants(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.x = torch.rand((3, 4), dtype=torch.float).cuda()
+
+            def forward(self, y):
+                with torch.cuda.amp.autocast():
+                    return torch.mm(self.x, y)
+
+        y = torch.rand((4, 5), dtype=torch.float).cuda()
+        mod = TestModule().eval()
+
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod).eval())
+        # freezing should pre-cast the constant self.x to remove one autocast call
+        FileCheck().check_count("aten::_autocast_to_reduced_precision", 1, True).run(frozen_mod.graph)
+
+        # the runtime autocasting pass will re-insert the second autocast call,
+        # but constant propagation will merge it with the constant that it's casting.
+        frozen_mod(y)
+        optimized_graph = frozen_mod.graph_for(y)
+        FileCheck().check_count("aten::_autocast_to_reduced_precision", 1, True).run(optimized_graph)
+
+    @unittest.skipIf(TEST_CUDA, "CPU-only test")
+    def test_jit_autocast_softmax_cpu(self):
+        def fn(x):
+            with torch.cpu.amp.autocast():
+                return torch.nn.functional.softmax(x, dim=0)
+
+        fn_s = torch.jit.script(fn)
+        x = torch.rand((2, 2), dtype=torch.bfloat16)
+        fn_s(x)
+        y = fn_s(x)
+
+        self.assertTrue(y.dtype == torch.bfloat16)
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_jit_autocast_softmax_gpu(self):
+        def fn(x):
+            with torch.cuda.amp.autocast():
+                return torch.nn.functional.softmax(x, dim=0)
+
+        fn_s = torch.jit.script(fn)
+        x = torch.rand((2, 2), dtype=torch.half).cuda()
+        fn_s(x)
+        y = fn_s(x)
+
+        self.assertTrue(y.dtype == torch.float)
 
 if __name__ == "__main__":
     run_tests()

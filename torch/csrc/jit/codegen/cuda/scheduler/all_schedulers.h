@@ -9,6 +9,7 @@ namespace fuser {
 namespace cuda {
 
 enum class TORCH_CUDA_CU_API ScheduleHeuristic {
+  None,
   PointWise,
   Reduction,
   Persistent

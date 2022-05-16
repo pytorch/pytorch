@@ -33,6 +33,9 @@ Val* newScalar(ValType vtype, DataType dtype) {
         case DataType::Int32:
         case DataType::Int:
           return IrBuilder::create<Int>();
+        case DataType::ComplexFloat:
+        case DataType::ComplexDouble:
+          return IrBuilder::create<ComplexDouble>();
         default:
           break;
       }
@@ -183,11 +186,68 @@ Val* newValLike(Val* val, DataType dtype) {
   return newScalar(vtype, dtype);
 }
 
+// returns the minimum init value for reduction:
+//   -inf for floating type;
+//   lowest value for integer type;
+//   false for bool.
+Val* getMinimumValue(DataType v) {
+  switch (v) {
+    case (DataType::Double):
+      return IrBuilder::create<Double>(
+          -std::numeric_limits<double>::infinity());
+      break;
+    case (DataType::Float):
+      return IrBuilder::create<Double>(-std::numeric_limits<float>::infinity());
+      break;
+    case (DataType::Int):
+      return IrBuilder::create<Int>(std::numeric_limits<int64_t>::lowest());
+      break;
+    case (DataType::Int32):
+      return IrBuilder::create<Int>(std::numeric_limits<int32_t>::lowest());
+      break;
+    case (DataType::Bool):
+      return IrBuilder::create<Bool>(false);
+      break;
+    default:
+      TORCH_CHECK(
+          false, "Could not generate a max op for tensor with type: ", v);
+  }
+  return nullptr;
+}
+
+// returns the maximum init value for reduction:
+//   inf for floating type;
+//   highest value for integer type;
+//   true for bool.
+Val* getMaximumValue(DataType v) {
+  switch (v) {
+    case (DataType::Double):
+      return IrBuilder::create<Double>(std::numeric_limits<double>::infinity());
+      break;
+    case (DataType::Float):
+      return IrBuilder::create<Double>(std::numeric_limits<float>::infinity());
+      break;
+    case (DataType::Int):
+      return IrBuilder::create<Int>(std::numeric_limits<int64_t>::max());
+      break;
+    case (DataType::Int32):
+      return IrBuilder::create<Int>(std::numeric_limits<int32_t>::max());
+      break;
+    case (DataType::Bool):
+      return IrBuilder::create<Bool>(true);
+      break;
+    default:
+      TORCH_CHECK(
+          false, "Could not generate a min op for tensor with type: ", v);
+  }
+  return nullptr;
+}
+
 } // namespace
 
 Val* castOp(DataType dtype, Val* v1) {
   if (v1->getDataType().value() == dtype) {
-    return v1;
+    return set(v1);
   }
 
   if (cast_func_str(std::make_pair(v1->getDataType().value(), dtype)) ==
@@ -233,17 +293,27 @@ TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
   return unaryOp(type, v1->as<Val>())->as<TensorView>();
 }
 
+Val* unaryIsOp(UnaryOpType type, Val* v) {
+  Val* out = newValLike(v, DataType::Bool);
+  IrBuilder::create<UnaryOp>(type, out, v);
+  return out;
+}
+
+TensorView* unaryIsOp(UnaryOpType type, TensorView* v) {
+  return unaryOp(type, v->asVal())->as<TensorView>();
+}
+
 Val* unaryOp(UnaryOpType type, Val* v1, const TypePromotionConfig& config) {
-  auto casted_v1 = promoteValues(config, {v1}).front();
-  return unaryOp(type, casted_v1);
+  auto cast_v1 = promoteValues(config, {v1}).front();
+  return unaryOp(type, cast_v1);
 }
 
 TensorView* unaryOp(
     UnaryOpType type,
     TensorView* v1,
     const TypePromotionConfig& config) {
-  auto casted_v1 = promoteValues(config, {v1}).front();
-  return unaryOp(type, casted_v1)->as<TensorView>();
+  auto cast_v1 = promoteValues(config, {v1}).front();
+  return unaryOp(type, cast_v1)->as<TensorView>();
 }
 
 // UNARY OPERATIONS
@@ -258,18 +328,35 @@ TensorView* unaryOp(
 
 NVFUSER_DEFINE_UNARY_OP(set, Set)
 NVFUSER_DEFINE_UNARY_OP(randlike, RandLike)
-NVFUSER_DEFINE_UNARY_OP(abs, Abs)
 NVFUSER_DEFINE_UNARY_OP(notOp, Not)
 NVFUSER_DEFINE_UNARY_OP(ceil, Ceil)
 NVFUSER_DEFINE_UNARY_OP(floor, Floor)
 NVFUSER_DEFINE_UNARY_OP(frac, Frac)
-NVFUSER_DEFINE_UNARY_OP(gelu, Gelu)
 NVFUSER_DEFINE_UNARY_OP(neg, Neg)
 NVFUSER_DEFINE_UNARY_OP(relu, Relu)
 NVFUSER_DEFINE_UNARY_OP(round, Round)
 NVFUSER_DEFINE_UNARY_OP(silu, Silu)
 NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
 #undef NVFUSER_DEFINE_UNARY_OP
+
+// The output of abs(complex_tensor) are real numbers
+Val* abs(Val* v) {
+  if (v->getDataType() == DataType::ComplexDouble) {
+    Val* out = newValLike(v, DataType::Double);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Abs, out, v);
+    return out;
+  }
+  if (v->getDataType() == DataType::ComplexFloat) {
+    Val* out = newValLike(v, DataType::Float);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Abs, out, v);
+    return out;
+  }
+  return unaryOp(UnaryOpType::Abs, v);
+}
+
+TensorView* abs(TensorView* tv) {
+  return abs(tv->as<Val>())->as<TensorView>();
+}
 
 // UNARY FLOAT CAST OPERATIONS
 
@@ -305,6 +392,22 @@ NVFUSER_DEFINE_UNARY_FLOAT_OP(sqrt, Sqrt)
 NVFUSER_DEFINE_UNARY_FLOAT_OP(tan, Tan)
 NVFUSER_DEFINE_UNARY_FLOAT_OP(tanh, Tanh)
 #undef NVFUSER_DEFINE_UNARY_FLOAT_OP
+
+#define NVFUSER_DEFINE_UNARY_IS_OP(op_name, op_type) \
+  Val* op_name(Val* v) {                             \
+    return unaryIsOp(UnaryOpType::op_type, v);       \
+  }                                                  \
+  TensorView* op_name(TensorView* tv) {              \
+    return unaryIsOp(UnaryOpType::op_type, tv);      \
+  }
+
+NVFUSER_DEFINE_UNARY_IS_OP(isfinite, IsFinite)
+NVFUSER_DEFINE_UNARY_IS_OP(isinf, IsInf)
+NVFUSER_DEFINE_UNARY_IS_OP(isnan, IsNan)
+NVFUSER_DEFINE_UNARY_IS_OP(isneginf, IsNegInf)
+NVFUSER_DEFINE_UNARY_IS_OP(isposinf, IsPosInf)
+NVFUSER_DEFINE_UNARY_IS_OP(isreal, IsReal)
+#undef NVFUSER_DEFINE_UNARY_IS_OP
 
 // BINARY OPERATIONS
 
@@ -420,9 +523,8 @@ Val* binaryOp(
     const TypePromotionConfig& config) {
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(config, operands);
-  auto casted_values = promoteValues(operands, common_dtype);
-  return binaryOp(
-      type, casted_values.front(), casted_values.back(), common_dtype);
+  auto cast_values = promoteValues(operands, common_dtype);
+  return binaryOp(type, cast_values.front(), cast_values.back(), common_dtype);
 }
 
 TensorView* binaryOp(
@@ -432,11 +534,11 @@ TensorView* binaryOp(
     const TypePromotionConfig& config) {
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(config, operands);
-  auto casted_values = promoteValues(operands, common_dtype);
+  auto cast_values = promoteValues(operands, common_dtype);
   return binaryOp(
       type,
-      casted_values.front()->as<TensorView>(),
-      casted_values.back(),
+      cast_values.front()->as<TensorView>(),
+      cast_values.back(),
       common_dtype);
 }
 
@@ -447,11 +549,11 @@ TensorView* binaryOp(
     const TypePromotionConfig& config) {
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(config, operands);
-  auto casted_values = promoteValues(operands, common_dtype);
+  auto cast_values = promoteValues(operands, common_dtype);
   return binaryOp(
       type,
-      casted_values.front(),
-      casted_values.back()->as<TensorView>(),
+      cast_values.front(),
+      cast_values.back()->as<TensorView>(),
       common_dtype);
 }
 
@@ -462,11 +564,11 @@ TensorView* binaryOp(
     const TypePromotionConfig& config) {
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(config, operands);
-  auto casted_values = promoteValues(operands, common_dtype);
+  auto cast_values = promoteValues(operands, common_dtype);
   return binaryOp(
       type,
-      casted_values.front()->as<TensorView>(),
-      casted_values.back()->as<TensorView>(),
+      cast_values.front()->as<TensorView>(),
+      cast_values.back()->as<TensorView>(),
       common_dtype);
 }
 
@@ -616,7 +718,8 @@ TensorView* reductionOp(
     const std::vector<int>& axes,
     Val* init,
     TensorView* tv,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
   TORCH_CHECK(
       init->isConstScalar(),
       "Cannot create a reduction operation where the initial value is not a const scalar.");
@@ -647,13 +750,14 @@ TensorView* reductionOp(
     uint_axes.push_back((unsigned int)axis);
   }
 
-  TensorView* out = newForReduction(tv, uint_axes);
+  TensorView* out = newForReduction(tv, uint_axes, dtype);
   const auto out_type = out->getDataType().value();
   const auto init_type = init->getDataType().value();
   TORCH_CHECK(
       (isFloatingPointType(out_type) && isFloatingPointType(init_type)) ||
+          (isComplexType(out_type) && isComplexType(init_type)) ||
           (isIntegralType(out_type) && isIntegralType(init_type)) ||
-          (out_type == DataType::Bool && init_type == DataType::Bool),
+          (isBooleanType(out_type) && isBooleanType(init_type)),
       "Types should match for reduction ops but received: ",
       out_type,
       " and ",
@@ -661,7 +765,7 @@ TensorView* reductionOp(
   IrBuilder::create<ReductionOp>(reduction_op_type, init, out, tv);
 
   if (keep_dim) {
-    auto tv_root = TensorDomain::noReductions(tv->getRootDomain());
+    auto tv_root = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
     std::vector<bool> is_broadcast(tv_root.size(), false);
     for (auto axis : uint_axes) {
       is_broadcast.at(axis) = true;
@@ -675,45 +779,44 @@ TensorView* reductionOp(
 TensorView* sum(
     TensorView* v1,
     const std::vector<int>& axes,
-    bool keep_dim /*=false*/) {
-  Val* init = nullptr;
-  auto dtype = v1->getDataType().value();
-  if (isFloatingPointType(dtype)) {
-    init = IrBuilder::create<Double>(0.0);
-  } else if (isIntegralType(dtype)) {
-    init = FusionGuard::getCurFusion()->zeroVal();
-  } else {
-    TORCH_CHECK(
-        false,
-        "Could not generate a sum op for tensor with type: ",
-        v1->getDataType().value());
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  if (dtype == DataType::Null) {
+    auto initial_v1_dtype = v1->getDataType().value();
+    if (isBooleanType(initial_v1_dtype) || isIntegralType(initial_v1_dtype)) {
+      dtype = DataType::Int;
+    }
   }
 
-  return reductionOp(BinaryOpType::Add, axes, init, v1, keep_dim);
+  // Cast input tensor to dtype before the operation is performed
+  if (dtype != DataType::Null) {
+    v1 = optionalCastStrict(dtype, v1)->as<TensorView>();
+  }
+
+  Val* init = nullptr;
+  auto v1_dtype = v1->getDataType().value();
+  if (isFloatingPointType(v1_dtype)) {
+    init = IrBuilder::create<Double>(0.0);
+  } else if (isComplexType(v1_dtype)) {
+    init = IrBuilder::create<ComplexDouble>(c10::complex<double>(0.0, 0.0));
+  } else if (isIntegralType(v1_dtype)) {
+    init = FusionGuard::getCurFusion()->zeroVal();
+  } else if (isBooleanType(v1_dtype)) {
+    init = IrBuilder::create<Bool>(false);
+  } else {
+    TORCH_CHECK(
+        false, "Could not generate a sum op for tensor with type: ", v1_dtype);
+  }
+
+  return reductionOp(BinaryOpType::Add, axes, init, v1, keep_dim, dtype);
 }
 
 TensorView* max(
     TensorView* v1,
     const std::vector<int>& axes,
     bool keep_dim /*=false*/) {
-  Val* init = nullptr;
-  switch (v1->getDataType().value()) {
-    case (DataType::Double):
-      init = IrBuilder::create<Double>(std::numeric_limits<double>::lowest());
-      break;
-    case (DataType::Float):
-      init = IrBuilder::create<Double>(std::numeric_limits<float>::lowest());
-      break;
-    case (DataType::Int):
-      init = IrBuilder::create<Int>(INT_MIN);
-      break;
-    default:
-      TORCH_CHECK(
-          false,
-          "Could not generate a max op for tensor with type: ",
-          v1->getDataType().value());
-  }
-
+  Val* init = getMinimumValue(v1->getDataType().value());
+  TORCH_CHECK(init != nullptr, "Missing initial value");
   return reductionOp(BinaryOpType::Max, axes, init, v1, keep_dim);
 }
 
@@ -721,24 +824,8 @@ TensorView* min(
     TensorView* v1,
     const std::vector<int>& axes,
     bool keep_dim /*=false*/) {
-  Val* init = nullptr;
-  switch (v1->getDataType().value()) {
-    case (DataType::Double):
-      init = IrBuilder::create<Double>(DBL_MAX);
-      break;
-    case (DataType::Float):
-      init = IrBuilder::create<Double>(FLT_MAX);
-      break;
-    case (DataType::Int):
-      init = IrBuilder::create<Int>(INT_MAX);
-      break;
-    default:
-      TORCH_CHECK(
-          false,
-          "Could not generate a min op for tensor with type: ",
-          v1->getDataType().value());
-  }
-
+  Val* init = getMaximumValue(v1->getDataType().value());
+  TORCH_CHECK(init != nullptr, "Missing initial value");
   return reductionOp(BinaryOpType::Min, axes, init, v1, keep_dim);
 }
 
@@ -779,7 +866,12 @@ TensorView* broadcast(
           ParallelType::Serial,
           IterType::BroadcastWithoutStride));
     } else {
-      out_domain.push_back(inp_domain[iinp]->clone());
+      out_domain.push_back(IrBuilder::create<IterDomain>(
+          inp_domain[iinp]->start(),
+          inp_domain[iinp]->extent(),
+          inp_domain[iinp]->stopOffset(),
+          inp_domain[iinp]->getParallelType(),
+          inp_domain[iinp]->getIterType()));
       iinp++;
     }
     ibdim++;
@@ -856,7 +948,7 @@ WelfordResult Welford(
   // Create tensor outputs
   TensorView* out_avg = newForReduction(tv, uint_axes);
   TensorView* out_var = newForReduction(tv, uint_axes);
-  TensorView* out_N = newForReduction(tv, uint_axes, DataType::Int);
+  TensorView* out_N = newForReduction(tv, uint_axes, DataType::Index);
 
   IrBuilder::create<WelfordOp>(
       out_avg,
@@ -889,7 +981,7 @@ WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
 TensorView* transpose(
     TensorView* inp,
     const std::unordered_map<int, int>& old2new) {
-  auto inp_domain = TensorDomain::noReductions(inp->getRootDomain());
+  auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
   std::vector<IterDomain*> out_domain(inp_domain.size());
 
   auto new2old = ir_utils::normalizeOld2New(old2new, inp_domain.size());
@@ -916,7 +1008,10 @@ Val* add_alpha(Val* v1, Val* v2, Val* s) {
       "Alpha value should be a Scalar Valtype and not ",
       s->getValType().value());
 
-  auto vals = maybeBroadcast({v1, v2, s});
+  std::vector<Val*> operands = {v1, v2};
+  auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
+  auto casted_values = promoteValues({v1, v2, s}, common_dtype);
+  auto vals = maybeBroadcast(casted_values);
   Val* intrm = mul(vals[1], vals[2]);
   return add(vals[0], intrm);
 }
@@ -936,7 +1031,10 @@ Val* sub_alpha(Val* v1, Val* v2, Val* s) {
       "Alpha value should be a Scalar Valtype and not ",
       s->getValType().value());
 
-  auto vals = maybeBroadcast({v1, v2, s});
+  std::vector<Val*> operands = {v1, v2};
+  auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
+  auto casted_values = promoteValues({v1, v2, s}, common_dtype);
+  auto vals = maybeBroadcast(casted_values);
   Val* intrm = mul(vals[1], vals[2]);
   return sub(vals[0], intrm);
 }
@@ -951,10 +1049,28 @@ TensorView* sub_alpha(TensorView* v1, TensorView* v2, Val* v3) {
 }
 // lerp
 Val* lerp(Val* start, Val* end, Val* weight) {
+  auto cast_values =
+      promoteValues(TypePromotion::default_op_config, {start, end, weight});
+  start = cast_values[0];
+  end = cast_values[1];
+  weight = cast_values[2];
+
+  auto out_dtype =
+      promote_type(start->getDataType().value(), end->getDataType().value());
+  auto out_vtype =
+      promote_type(start->getValType().value(), end->getValType().value());
+
   auto vals = maybeBroadcast({start, end, weight});
-  Val* intrm1 = sub(vals[1], vals[0]);
-  Val* intrm2 = mul(vals[2], intrm1);
-  return add(vals[0], intrm2);
+  Val* out = nullptr;
+  if (out_vtype == ValType::TensorView) {
+    out = newOutputTV(vals, out_dtype);
+  } else {
+    out = newScalar(out_vtype, out_dtype);
+  }
+
+  IrBuilder::create<TernaryOp>(
+      TernaryOpType::Lerp, out, vals[0], vals[1], vals[2]);
+  return out;
 }
 TensorView* lerp(TensorView* v1, Val* v2, Val* v3) {
   return arithOpOverloads(lerp, v1, v2, v3);
@@ -984,7 +1100,10 @@ Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s) {
       "Alpha value should be a Scalar Valtype and not ",
       s->getValType().value());
 
-  auto vals = maybeBroadcast({v1, v2, v3, s});
+  std::vector<Val*> operands = {v1, v2, v3};
+  auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
+  auto casted_values = promoteValues({v1, v2, v3, s}, common_dtype);
+  auto vals = maybeBroadcast(casted_values);
   Val* intrm1 = mul(vals[2], vals[3]);
   Val* intrm2 = mul(vals[1], intrm1);
   return add(vals[0], intrm2);
@@ -1019,10 +1138,9 @@ Val* where(Val* c, Val* v1, Val* v2) {
       "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
-  auto casted_values =
-      promoteValues(TypePromotion::default_op_config, {v1, v2});
-  v1 = casted_values[0];
-  v2 = casted_values[1];
+  auto cast_values = promoteValues(TypePromotion::default_op_config, {v1, v2});
+  v1 = cast_values[0];
+  v2 = cast_values[1];
 
   TORCH_CHECK(c->getDataType().value() == DataType::Bool);
   auto out_dtype =
@@ -1088,16 +1206,24 @@ TensorView* threshold(TensorView* in, Val* thresh, Val* value) {
 
 Val* clamp(Val* in, Val* min_val, Val* max_val) {
   TORCH_CHECK(
-      (min_val->getValType().value() == ValType::Scalar ||
+      (min_val == nullptr || min_val->getValType().value() == ValType::Scalar ||
        min_val->getValType().value() == ValType::NamedScalar) &&
-          (max_val->getValType().value() == ValType::Scalar ||
+          (max_val == nullptr ||
+           max_val->getValType().value() == ValType::Scalar ||
            max_val->getValType().value() == ValType::NamedScalar),
       "For Clamp operation: Min and Max values should be Scalars.");
 
-  min_val = optionalCast(in->getDataType().value(), min_val);
-  max_val = optionalCast(in->getDataType().value(), max_val);
-  Val* out = newValLike(in, in->getDataType().value());
+  min_val = (min_val == nullptr)
+      ? getMinimumValue(in->getDataType().value())
+      : optionalCast(in->getDataType().value(), min_val);
+  TORCH_CHECK(min_val != nullptr, "Missing minimum value");
 
+  max_val = (max_val == nullptr)
+      ? getMaximumValue(in->getDataType().value())
+      : optionalCast(in->getDataType().value(), max_val);
+  TORCH_CHECK(max_val != nullptr, "Missing maximum value");
+
+  Val* out = newValLike(in, in->getDataType().value());
   IrBuilder::create<TernaryOp>(TernaryOpType::Clamp, out, in, min_val, max_val);
   return out;
 }
@@ -1109,7 +1235,7 @@ TensorView* clamp(TensorView* in, Val* min_val, Val* max_val) {
 // sum_to operator
 
 TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
-  const auto& root = TensorDomain::noReductions(in->getRootDomain());
+  const auto& root = TensorDomain::noReductions(in->getMaybeRFactorDomain());
 
   TORCH_CHECK(
       root.size() >= sum_to_size.size(),
@@ -1155,7 +1281,7 @@ TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
 }
 
 TensorView* sum_to(TensorView* in, const std::vector<int64_t>& sum_to_size) {
-  const auto& root = TensorDomain::noReductions(in->getRootDomain());
+  const auto& root = TensorDomain::noReductions(in->getMaybeRFactorDomain());
 
   TORCH_CHECK(
       root.size() >= sum_to_size.size(),
@@ -1380,7 +1506,7 @@ TensorView* gather(
     const std::vector<std::vector<int>>& pad_width,
     const std::vector<int>& strides,
     bool trim_out_of_bounds) {
-  auto inp_dom = TensorDomain::noReductions(inp->getRootDomain());
+  auto inp_dom = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
   const auto ndims = inp_dom.size();
 
   TORCH_CHECK(
@@ -1448,7 +1574,6 @@ TensorView* gather(
         ". Padding right: ",
         pad_right);
     const auto out_stop_offset = inp_stop_offset.value() + extent_adjustment;
-    Val* out_axis_dim = nullptr;
     out_root_domains.push_back(IrBuilder::create<IterDomain>(
         FusionGuard::getCurFusion()->zeroVal(),
         inp_axis->extent(),
@@ -1482,6 +1607,135 @@ TensorView* gather(
 
   IrBuilder::create<GatherOp>(out_tv, inp, window_shape, pad_width);
   return out_tv;
+}
+
+namespace {
+
+//! Create new output for mma
+static TensorView* newForMma(
+    TensorView* tv_a,
+    TensorView* tv_b,
+    const std::vector<unsigned int>& axes,
+    DataType data_type = DataType::Float) {
+  auto orig_domain_a =
+      TensorDomain::noReductions(tv_a->getMaybeRFactorDomain());
+  auto orig_domain_b =
+      TensorDomain::noReductions(tv_b->getMaybeRFactorDomain());
+
+  TORCH_INTERNAL_ASSERT(
+      orig_domain_a.size() == orig_domain_b.size(),
+      "MMA op: need matching dim input");
+
+  std::set<unsigned int> axes_set(axes.begin(), axes.end());
+  std::vector<IterDomain*> new_domain;
+
+  TORCH_INTERNAL_ASSERT(
+      !axes_set.empty(),
+      "Asked for ouput of reduction, but no reduction axis provided.");
+
+  TORCH_INTERNAL_ASSERT(
+      (*(axes_set.rbegin())) < orig_domain_a.size(),
+      "Error setting up reduction, reduction axis (",
+      *(axes_set.rbegin()),
+      ") is outside nDims (",
+      orig_domain_a.size(),
+      "). Keep in mind reductions are relative to root domains, not modified views.");
+
+  auto axis_iter = axes_set.begin();
+  for (const auto dim : c10::irange(orig_domain_a.size())) {
+    bool isReduction = false;
+    if (axis_iter != axes_set.end() && *axis_iter == dim) {
+      isReduction = true;
+      axis_iter++;
+    }
+
+    const IterDomain* id = orig_domain_a[dim]->isBroadcast()
+        ? orig_domain_b[dim]
+        : orig_domain_a[dim];
+
+    TORCH_CHECK(
+        !(isReduction && id->isBroadcast() && !id->isImplicitBroadcast()),
+        "Cannot reduce an axis that is marked as broadcasted as it has an undetermined size. Tried to reduce ID = ",
+        id,
+        " of tensor ",
+        tv_a,
+        "and",
+        tv_b);
+
+    new_domain.push_back(IrBuilder::create<IterDomain>(
+        id->start(),
+        id->extent(),
+        id->stopOffset(),
+        ParallelType::Serial,
+        isReduction ? IterType::Reduction : id->getIterType()));
+  }
+
+  TensorDomain* td = IrBuilder::create<TensorDomain>(
+      new_domain, std::vector<bool>(new_domain.size(), true));
+
+  return IrBuilder::create<TensorView>(td, data_type);
+}
+
+} // namespace
+
+TensorView* fusedMultiplySum(
+    TensorView* tv_a,
+    TensorView* tv_b,
+    const std::vector<int>& axes,
+    Val* init) {
+  if (init == nullptr) {
+    init = IrBuilder::create<Double>(0);
+  }
+
+  // TODO:
+  //  We will want to support initialize and rfactor with
+  //  mma as well, for maybe fusing bias in prolog.
+  // TODO: check init type if given a tv,
+  //  not supported currently though.
+  TORCH_CHECK(
+      init->isConstScalar(),
+      "Cannot create a reduction operation where the initial value is not a const scalar.");
+
+  // TODO:
+  //  Validate axis relationships between a and b
+  TORCH_CHECK(tv_a->nDims() > 0, "Tried to reduce a 0-dim tensor");
+
+  // TODO:
+  //  Add tf32 and other mma data types
+  //  Add fallback path for non-mma data types.
+  TORCH_CHECK(tv_a->getDataType().value() == DataType::Half);
+  TORCH_CHECK(tv_b->getDataType().value() == DataType::Half);
+
+  TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
+
+  // TODO:
+  //  will lift this in a follow up when we have a
+  //  more generic axes matching.
+  TORCH_CHECK(
+      axes.size() == 1, "Single axis reduction only for mma op instantiation.")
+
+  std::vector<unsigned int> uint_axes;
+  const int ndims = tv_a->domain()->noReductions().size();
+  for (int axis : axes) {
+    if (axis < 0) {
+      axis += ndims;
+    }
+
+    TORCH_CHECK(
+        axis >= 0 && axis < ndims,
+        "Reduction on invalid axis, recieved: ",
+        axis,
+        " however tensor view only has ",
+        ndims,
+        " non-reduction dims.");
+
+    uint_axes.push_back((unsigned int)axis);
+  }
+
+  TensorView* out = newForMma(tv_a, tv_b, uint_axes);
+  IrBuilder::create<MmaOp>(out, tv_a, tv_b, init);
+
+  return out;
 }
 
 } // namespace cuda
