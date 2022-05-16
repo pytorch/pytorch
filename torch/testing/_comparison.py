@@ -602,7 +602,9 @@ class TensorLikePair(Pair):
             raise UnsupportedInputs()
 
     def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
-        if tensor.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
+        supported_layouts = {torch.strided, torch.sparse_coo, torch.sparse_csr, torch.sparse_csc,
+                             torch.sparse_bsr, torch.sparse_bsc}
+        if tensor.layout not in supported_layouts:  # type: ignore[attr-defined]
             raise ErrorMeta(ValueError, f"Unsupported tensor layout {tensor.layout}", id=id)
 
     def compare(self) -> None:
@@ -702,8 +704,8 @@ class TensorLikePair(Pair):
             compare_fn = self._compare_quantized_values
         elif actual.is_sparse:
             compare_fn = self._compare_sparse_coo_values
-        elif actual.is_sparse_csr:
-            compare_fn = self._compare_sparse_csr_values
+        elif actual.layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+            compare_fn = self._compare_sparse_compressed_values
         else:
             compare_fn = self._compare_regular_values_close
 
@@ -771,34 +773,51 @@ class TensorLikePair(Pair):
             identifier="Sparse COO values",
         )
 
-    def _compare_sparse_csr_values(
+    def _compare_sparse_compressed_values(
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
     ) -> None:
-        """Compares sparse CSR tensors by comparing
+        """Compares sparse compressed tensors by comparing
 
         - the number of non-zero elements (nnz) for equality,
-        - the col_indices for equality,
-        - the crow_indices for equality, and
+        - the plain indices for equality,
+        - the compressed indices for equality, and
         - the values for closeness.
         """
+        format_name = {
+            torch.sparse_csr: 'CSR',
+            torch.sparse_csc: 'CSC',
+            torch.sparse_bsr: 'BSR',
+            torch.sparse_bsc: 'BSC'}[actual.layout]
+
         if actual._nnz() != expected._nnz():
             raise self._make_error_meta(
                 AssertionError,
                 (
-                    f"The number of specified values in sparse CSR tensors does not match: "
+                    f"The number of specified values in sparse {format_name} tensors does not match: "
                     f"{actual._nnz()} != {expected._nnz()}"
                 ),
             )
 
+        compressed_indices_mth = {
+            torch.sparse_csr: torch.Tensor.crow_indices,
+            torch.sparse_csc: torch.Tensor.ccol_indices,
+            torch.sparse_bsr: torch.Tensor.crow_indices,
+            torch.sparse_bsc: torch.Tensor.ccol_indices}[actual.layout]
+        plain_indices_mth = {
+            torch.sparse_csr: torch.Tensor.col_indices,
+            torch.sparse_csc: torch.Tensor.row_indices,
+            torch.sparse_bsr: torch.Tensor.col_indices,
+            torch.sparse_bsc: torch.Tensor.row_indices}[actual.layout]
+
         self._compare_regular_values_equal(
-            actual.crow_indices(),
-            expected.crow_indices(),
-            identifier="Sparse CSR crow_indices",
+            compressed_indices_mth(actual),
+            compressed_indices_mth(expected),
+            identifier=f"Sparse {format_name} {compressed_indices_mth.__name__}",
         )
         self._compare_regular_values_equal(
-            actual.col_indices(),
-            expected.col_indices(),
-            identifier="Sparse CSR col_indices",
+            plain_indices_mth(actual),
+            plain_indices_mth(expected),
+            identifier=f"Sparse {format_name} {plain_indices_mth.__name__}",
         )
         self._compare_regular_values_close(
             actual.values(),
@@ -806,7 +825,7 @@ class TensorLikePair(Pair):
             rtol=rtol,
             atol=atol,
             equal_nan=equal_nan,
-            identifier="Sparse CSR values",
+            identifier=f"Sparse {format_name} values",
         )
 
     def _compare_regular_values_equal(
