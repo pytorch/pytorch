@@ -649,24 +649,36 @@ class TestSparseCSR(TestCase):
         self.maxDiff = orig_maxDiff
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_sparse_csr_from_dense(self, device, dtype):
-        dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]], dtype=dtype, device=device)
-        sparse = dense.to_sparse_csr()
-        self.assertEqual(torch.tensor([0, 2, 2, 3], dtype=torch.int64), sparse.crow_indices())
-        self.assertEqual(torch.tensor([0, 1, 0], dtype=torch.int64), sparse.col_indices())
-        self.assertEqual(torch.tensor([4, 5, 1], dtype=dtype), sparse.values())
+    def test_sparse_csr_csc_from_dense(self, device, dtype):
+        print("ASJDKL")
+        def _test(converter, plain_accessor, compressed_accessor, transpose):
 
-        dense = torch.tensor([[0, 0, 0], [0, 0, 1], [1, 0, 0]], dtype=dtype, device=device)
-        sparse = dense.to_sparse_csr()
-        self.assertEqual(torch.tensor([0, 0, 1, 2], dtype=torch.int64), sparse.crow_indices())
-        self.assertEqual(torch.tensor([2, 0], dtype=torch.int64), sparse.col_indices())
-        self.assertEqual(torch.tensor([1, 1], dtype=dtype), sparse.values())
+            dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]], dtype=dtype, device=device)
+            if transpose:
+                dense = dense.transpose(0, 1).contiguous()
+            sparse = converter(dense)
+            self.assertEqual(torch.tensor([0, 2, 2, 3], dtype=torch.int64), plain_accessor(sparse))
+            self.assertEqual(torch.tensor([0, 1, 0], dtype=torch.int64), compressed_accessor(sparse))
+            self.assertEqual(torch.tensor([4, 5, 1], dtype=dtype), sparse.values())
 
-        dense = torch.tensor([[2, 2, 2], [2, 2, 2], [2, 2, 2]], dtype=dtype, device=device)
-        sparse = dense.to_sparse_csr()
-        self.assertEqual(torch.tensor([0, 3, 6, 9], dtype=torch.int64), sparse.crow_indices())
-        self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
-        self.assertEqual(torch.tensor([2] * 9, dtype=dtype), sparse.values())
+            dense = torch.tensor([[0, 0, 0], [0, 0, 1], [1, 0, 0]], dtype=dtype, device=device)
+            if transpose:
+                dense = dense.transpose(0, 1).contiguous()
+            sparse = converter(dense)
+            self.assertEqual(torch.tensor([0, 0, 1, 2], dtype=torch.int64), plain_accessor(sparse))
+            self.assertEqual(torch.tensor([2, 0], dtype=torch.int64), compressed_accessor(sparse))
+            self.assertEqual(torch.tensor([1, 1], dtype=dtype), sparse.values())
+
+            dense = torch.tensor([[2, 2, 2], [2, 2, 2], [2, 2, 2]], dtype=dtype, device=device)
+            if transpose:
+                dense = dense.transpose(0, 1).contiguous()
+            sparse = converter(dense)
+            self.assertEqual(torch.tensor([0, 3, 6, 9], dtype=torch.int64), plain_accessor(sparse))
+            self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), compressed_accessor(sparse))
+            self.assertEqual(torch.tensor([2] * 9, dtype=dtype), sparse.values())
+
+        _test(lambda x: x.to_sparse_csr(), lambda x: x.crow_indices(), lambda x: x.col_indices(), False)
+        _test(lambda x: x.to_sparse_csc(), lambda x: x.ccol_indices(), lambda x: x.row_indices(), True)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_to_dense(self, device, dtype):

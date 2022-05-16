@@ -526,7 +526,7 @@ Tensor coo_to_sparse_csc(const Tensor& self) {
       self.sizes());
   auto coalesced_self = self.coalesce();
   auto col_indices = coalesced_self.indices()[1];
-  bool out_int32 = (row_indices.scalar_type() == at::kInt);
+  bool out_int32 = (col_indices.scalar_type() == at::kInt);
   auto ccol_indices = at::_convert_indices_from_coo_to_csr(
       col_indices, self.size(1), out_int32);
   return at::native::_sparse_csr_tensor_unsafe(
