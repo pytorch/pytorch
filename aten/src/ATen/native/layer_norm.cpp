@@ -6,7 +6,6 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
@@ -222,10 +221,9 @@ Tensor& layer_norm_out(
   TORCH_CHECK(!gamma->defined() || input.device() == gamma->device());
   TORCH_CHECK(!beta->defined() || input.device() == beta->device());
 
-  auto op_math_type = at::toOpMathType(input.scalar_type());
-
-  Tensor mean = at::empty({M}, X->options().dtype(op_math_type));
-  Tensor rstd = at::empty({M}, X->options().dtype(op_math_type));
+  auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
+  Tensor mean = at::empty({M}, X->options().dtype(acc_type));
+  Tensor rstd = at::empty({M}, X->options().dtype(acc_type));
 
   TORCH_CHECK(canCast(
       typeMetaToScalarType(input.dtype()),
@@ -238,7 +236,7 @@ Tensor& layer_norm_out(
         c10::nullopt /* layout */,
         c10::nullopt /* device */,
         c10::nullopt /* pin_memory */,
-        at::MemoryFormat::Contiguous);
+        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     LayerNormKernel(
         input.device().type(),
         *X,
