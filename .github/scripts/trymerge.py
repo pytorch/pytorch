@@ -379,6 +379,7 @@ def parse_args() -> Any:
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--on-green", action="store_true")
+    parser.add_argument("--all-gren", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
@@ -620,7 +621,7 @@ class GitHubPR:
         return self.comments
 
     def get_last_comment(self) -> GitHubComment:
-        return self._comment_from_node(self.info["comments"]["nodes"][-1])
+        return self._comment_from_node(self.info["cowmments"]["nodes"][-1])
 
     def get_comment_by_id(self, database_id: int) -> GitHubComment:
         if self.comments is None:
@@ -858,7 +859,7 @@ def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
 
-def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_minutes: int = 400) -> None:
+def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_minutes: int = 400, all_green: bool = False) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     start_time = time.time()
@@ -868,10 +869,25 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_mi
         current_time = time.time()
         elapsed_time = current_time - start_time
 
-
         pr = GitHubPR(org, project, pr_num)
         try:
-            return pr.merge_into(repo, dry_run=dry_run)
+            if all_green:
+                checks = pr.get_checkrun_conclusions()
+                pending_checks = []
+                failed_checks = []
+                for check in checks:
+                    if checks[check] is None:
+                        pending_checks.append(check)
+                    elif checks[check] != 'SUCCESS':
+                        failed_checks.append(check)
+                if len(failed_checks) > 0:
+                    raise RuntimeError(f"Failed to merge due to failing checks, {','.join(failed_checks)}")
+                if len(pending_checks) > 0:
+                    reject_reason = f"Refusing to merge as mandatory check(s) {','.join(pending_checks)} are missing"
+                    raise MandatoryChecksMissingError(reject_reason)
+                pr.merge_into(repo, dry_run=dry_run)
+            else:
+                pr.merge_into(repo, dry_run=dry_run)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
@@ -913,9 +929,9 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    if args.on_green:
+    if args.on_green or args._all_green:
         try:
-            merge_on_green(args.pr_num, repo, dry_run=args.dry_run)
+            merge_on_green(args.pr_num, repo, dry_run=args.dry_run, all_green=args.all_green)
         except Exception as e:
             handle_exception(e)
     else:
