@@ -6,6 +6,7 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
@@ -1480,6 +1481,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       constexpr auto dense_backends = DispatchKeySet(
           {BackendComponent::CPUBit,
            BackendComponent::CUDABit,
+           BackendComponent::MPSBit,
            BackendComponent::HIPBit,
            BackendComponent::XPUBit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
@@ -2176,6 +2178,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // See NOTE [ Metadata Change for a Detached Tensor ] for details.
   static const char* const err_msg_tensor_metadata_change_not_allowed;
+
+  static void copy_generic_tensor_metadata(
+      const TensorImpl* src_impl,
+      TensorImpl* dest_impl);
 
  public:
   void set_storage_access_should_throw() {
