@@ -101,6 +101,15 @@ def functional_call(
 
     .. note:: If the module performs in-place operations on parameters/buffers, these will be reflected in the `parameters_and_buffers` input.
 
+        Example::
+
+            >>> a = {'foo': torch.zeros(())}
+            >>> mod = Foo()  # does self.foo = self.foo + 1
+            >>> print(mod.foo)  # tensor(0.)
+            >>> functional_call(mod, a, torch.ones(()))
+            >>> print(mod.foo)  # tensor(0.)
+            >>> print(a['foo'])  # tensor(1.)
+
     Args:
         module (torch.nn.Module): the module to call
         parameters_and_buffers (dict of str and Tensor): the parameters that will be used in
