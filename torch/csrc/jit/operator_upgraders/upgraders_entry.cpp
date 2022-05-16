@@ -47,11 +47,19 @@ def div_Tensor_0_3(self: Tensor, other: Tensor) -> Tensor:
     return self.true_divide(other)
   return self.divide(other, rounding_mode='trunc')
 )SCRIPT"},
+    {"div_Tensor_mode_0_3", R"SCRIPT(
+def div_Tensor_mode_0_3(self: Tensor, other: Tensor, *, rounding_mode: Optional[str]=None) -> Tensor:
+  return self.divide(other, rounding_mode=rounding_mode)
+)SCRIPT"},
     {"div_Scalar_0_3", R"SCRIPT(
 def div_Scalar_0_3(self: Tensor, other: number) -> Tensor:
   if (self.is_floating_point() or isinstance(other, float)):
     return self.true_divide(other)
   return self.divide(other, rounding_mode='trunc')
+)SCRIPT"},
+    {"div_Scalar_mode_0_3", R"SCRIPT(
+def div_Scalar_mode_0_3(self: Tensor, other: number, *, rounding_mode: Optional[str]=None) -> Tensor:
+  return self.divide(other, rounding_mode=rounding_mode)
 )SCRIPT"},
     {"div_out_0_3", R"SCRIPT(
 def div_out_0_3(self: Tensor, other: Tensor, *, out: Tensor) -> Tensor:
@@ -59,17 +67,35 @@ def div_out_0_3(self: Tensor, other: Tensor, *, out: Tensor) -> Tensor:
     return self.true_divide(other, out=out)
   return self.divide(other, rounding_mode='trunc', out=out)
 )SCRIPT"},
+    {"div_out_mode_0_3", R"SCRIPT(
+def div_out_mode_0_3(self: Tensor, other: Tensor, *, rounding_mode: Optional[str]=None, out: Tensor) -> Tensor:
+  return self.divide(other, rounding_mode=rounding_mode, out=out)
+)SCRIPT"},
     {"div__Tensor_0_3", R"SCRIPT(
 def div__Tensor_0_3(self: Tensor, other: Tensor) -> Tensor:
   if (self.is_floating_point() or other.is_floating_point()):
     return self.true_divide_(other)
   return self.divide_(other, rounding_mode='trunc')
 )SCRIPT"},
+    {"div__Tensor_mode_0_3", R"SCRIPT(
+def div__Tensor_mode_0_3(self: Tensor, other: Tensor, *, rounding_mode: Optional[str]=None) -> Tensor:
+  return self.divide_(other, rounding_mode=rounding_mode)
+)SCRIPT"},
     {"div__Scalar_0_3", R"SCRIPT(
 def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:
   if (self.is_floating_point() or isinstance(other, float)):
     return self.true_divide_(other)
   return self.divide_(other, rounding_mode='trunc')
+)SCRIPT"},
+    {"div__Scalar_mode_0_3", R"SCRIPT(
+def div__Scalar_mode_0_3(self: Tensor, other: number, *, rounding_mode: Optional[str]=None) -> Tensor:
+  return self.divide_(other, rounding_mode=rounding_mode)
+)SCRIPT"},
+    {"full_names_0_4", R"SCRIPT(
+def full_names_0_4(size:List[int], fill_value:number, *, names:Optional[List[str]]=None,
+                   dtype:Optional[int]=None, layout:Optional[int]=None, device:Optional[Device]=None,
+                   pin_memory:Optional[bool]=None) -> Tensor:
+  return torch.full(size, fill_value, names=names, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
 )SCRIPT"},
     {"full_0_4", R"SCRIPT(
 def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[int]=None,
