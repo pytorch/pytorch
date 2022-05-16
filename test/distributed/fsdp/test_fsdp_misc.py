@@ -52,7 +52,7 @@ class TestFSDPMisc(FSDPTest):
         Test auto wrapping propagates the device id.
         """
         wrapped = FSDP(
-            TransformerWithSharedParams(group=self.process_group),
+            TransformerWithSharedParams(process_group=self.process_group),
             auto_wrap_policy=always_wrap_policy,
             device_id=torch.cuda.current_device()
         )
