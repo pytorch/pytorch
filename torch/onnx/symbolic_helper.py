@@ -583,7 +583,7 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
     else:
         k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
         if _try_get_scalar_type(k) != "Long":
-            k = g.op("Cast", k, to_i=torch.onnx.TensorProtoDataType.INT64)
+            k = g.op("Cast", k, to_i=_C_onnx.TensorProtoDataType.INT64)
     if GLOBALS.export_onnx_opset_version <= 10:
         if not largest:
             _unimplemented("TopK", "Ascending is not supported")
@@ -1214,9 +1214,9 @@ def dequantize_helper(g, qtensor, qdtype=None):
         if input_qdtype is not None:
             qdtype = input_qdtype
         else:
-            qdtype = torch.onnx.TensorProtoDataType.UINT8
+            qdtype = _C_onnx.TensorProtoDataType.UINT8
     value = g.op("Cast", tensor, to_i=qdtype)
-    scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+    scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     zero_point = g.op("Cast", zero_point, to_i=qdtype)
 
     if axis_i is not None and GLOBALS.export_onnx_opset_version < 13:
@@ -1260,11 +1260,11 @@ def quantize_helper(g, tensor, scale, zero_point, axis=None):
 
     assert scale is not None
     if scale.type().scalarType() != "Float":
-        scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+        scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
     if zero_point.type().scalarType() not in ("Byte", "Char"):
-        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
+        zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     output = g.op(
         "QuantizeLinear",
         tensor,
@@ -1290,7 +1290,7 @@ def requantize_bias_helper(g, bias, input_scale, weight_scale, axis=None):
         "ConstantOfShape", bias_scale_shape, value_t=torch.tensor([0], dtype=torch.int)
     )
     q_bias = g.op(
-        "Cast", g.op("Div", bias, bias_scale), to_i=torch.onnx.TensorProtoDataType.INT32
+        "Cast", g.op("Div", bias, bias_scale), to_i=_C_onnx.TensorProtoDataType.INT32
     )
     axis_args = []
     if axis is not None and not _is_none(axis):
