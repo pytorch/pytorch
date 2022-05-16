@@ -3,9 +3,10 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-import torchdynamo
-
 from typing import List
+
+import torchdynamo
+from torchdynamo.optimizations import BACKENDS
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -25,6 +26,12 @@ def broadcast(x):
 def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     print("my_compiler() called with FX graph:")
     gm.graph.print_tabular()
+
+    nvfuser_compiled = BACKENDS["nvfuser"](gm, example_inputs)
+    if nvfuser_compiled is not None:
+        print("nvfuser compiled")
+        return nvfuser_compiled
+
     return gm.forward  # return a python callable
 
 def demo_basic(rank, world_size):
