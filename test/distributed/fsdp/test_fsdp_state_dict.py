@@ -257,21 +257,10 @@ class TestFSDPStateDict(FSDPTest):
                 for key in fsdp_state_dict.keys():
                     fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
 
-<<<<<<< HEAD
-            model_new.load_state_dict(fsdp_state_dict)
-            self._compare_models(model, model_new, self.assertEqual, check_fp16=fp16)
-=======
             with FSDP.state_dict_type(model_new, STATE_DICT_MAPPING[state_dict_type]):
                 model_new.load_state_dict(fsdp_state_dict)
-            with FullyShardedDataParallel.summon_full_params(model_new):
-                with FullyShardedDataParallel.summon_full_params(model):
-                    params = list(model.parameters())
-                    params_new = list(model_new.parameters())
-                    self.assertEqual(params, params_new)
-                    if fp16:
-                        for tensor in model_new.parameters():
-                            self.assertEqual(tensor.dtype, torch.float16)
->>>>>>> origin/master
+
+            self._compare_models(model, model_new, self.assertEqual, check_fp16=fp16)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
