@@ -714,11 +714,9 @@ class _TestONNXRuntime:
         model = torch.jit.trace(TopPredictor(model), input_tensor)
         self.run_test(model, (input_tensor,))
 
-    @skipScriptTest()
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
 
-    @skipScriptTest()
     def test_word_language_model_RNN_RELU(self):
         self.run_word_language_model("RNN_RELU")
 
