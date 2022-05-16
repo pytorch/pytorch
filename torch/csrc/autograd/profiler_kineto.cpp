@@ -126,19 +126,6 @@ using torch::profiler::impl::shapesToStr;
 using torch::profiler::impl::dtypesToStr;
 using torch::profiler::impl::stacksToStr;
 
-struct MemoryEventData {
-  torch::profiler::impl::approx_time_t start_time;
-  void* ptr;
-  int64_t alloc_size;
-  int64_t total_allocated;
-  int64_t total_reserved;
-  uint64_t threadID;
-  torch::profiler::impl::kineto::DeviceAndResource kineto_info;
-  c10::DeviceType device_type;
-  c10::DeviceIndex device_index;
-};
-static_assert(std::is_pod<MemoryEventData>::value, "Non-POD member of MemoryEventData.");
-
 struct EventFieldsVisitor {
   EventFieldsVisitor(
       Result& result,
@@ -204,6 +191,25 @@ struct EventFieldsVisitor {
     }
   }
 
+  void operator()(const ExtraFields<EventType::Allocation>& alloc) {
+    kineto_event_.get()
+        .deviceIndex(alloc.device_index_)
+        .nBytes(alloc.alloc_size_);
+
+    annotations_ = {
+        {"Device Type", std::to_string((int8_t)alloc.device_type_)},
+        {"Device Id", std::to_string(alloc.device_index_)},
+        {"Addr", std::to_string(reinterpret_cast<intptr_t>(alloc.ptr_))},
+        {"Bytes", std::to_string(alloc.alloc_size_)}};
+    if (alloc.total_allocated_ >= 0) {
+      annotations_.emplace_back(
+          "Total Allocated", std::to_string(alloc.total_allocated_));
+    }
+    if (alloc.total_reserved_ >= 0) {
+      annotations_.emplace_back("Total Reserved", std::to_string(alloc.total_reserved_));
+    }
+  }
+
   template <typename T>
   void handleJIT(T& fields) {
     auto& jit_stack = fields.jit_stack_;
@@ -231,22 +237,6 @@ struct EventFieldsVisitor {
   std::reference_wrapper<const post_process_t> post_process_;
   annotation_t annotations_;
 };
-
-auto getAnnotations(const MemoryEventData& event) {
-  torch::profiler::impl::kineto::annotation_t out{
-      {"Device Type", std::to_string((int8_t)event.device_type)},
-      {"Device Id", std::to_string(event.device_index)},
-      {"Addr", std::to_string(reinterpret_cast<intptr_t>(event.ptr))},
-      {"Bytes", std::to_string(event.alloc_size)}};
-
-  if (event.total_allocated >= 0) {
-    out.emplace_back("Total Allocated", std::to_string(event.total_allocated));
-  }
-  if (event.total_reserved >= 0) {
-    out.emplace_back("Total Reserved", std::to_string(event.total_reserved));
-  }
-  return out;
-}
 
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
@@ -287,15 +277,12 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       int64_t total_reserved,
       c10::Device device) override {
     if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
-      std::lock_guard<std::mutex> guard(state_mutex_);
-      memory_events_.emplace_back(
+      record_queue_.getSubqueue()->emplace_allocation_event(
           torch::profiler::impl::getApproximateTime(),
           ptr,
           alloc_size,
           total_allocated,
           total_reserved,
-          at::RecordFunction::currentThreadId(),
-          torch::profiler::impl::kineto::kineto_ids(),
           device.type(),
           device.index());
     }
@@ -333,28 +320,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     std::lock_guard<std::mutex> guard(state_mutex_);
     auto converter = clock_converter_.makeConverter();
 
-    for (const auto& e : memory_events_) {
-      auto start_time_us = converter(e.start_time) / 1000;
-      cpu_trace_.addCPUActivity(
-          kMemoryEventName,
-          torch::profiler::impl::kineto::KinetoActivityType::CPU_INSTANT_EVENT,
-          e.kineto_info,
-          /*correlation_id=*/0,
-          start_time_us,
-          start_time_us,
-          getAnnotations(e));
-
-      kineto_events_.emplace_back();
-      auto& evt = kineto_events_.back();
-      evt.name(kMemoryEventName)
-          .startUs(start_time_us)
-          .deviceIndex(e.device_index)
-          .deviceType(e.device_type)
-          .nBytes(e.alloc_size)
-          .startThreadId(e.threadID);
-    }
-    memory_events_.clear();
-
     for (auto& e : record_queue_.getRecords(converter)) {
       // `take_data` handles time conversion.
       int64_t start_us = e.start_time_us_;
@@ -372,7 +337,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
           .startUs(start_us)
           .durationUs(end_us - start_us)
           .correlationId(e.correlationID())
-          .deviceType(c10::DeviceType::CPU)
+          .deviceType(e.deviceType())
           .startThreadId(e.start_tid_);
 
       // NB: also sets fields on `kineto_events_.back()`.
@@ -635,7 +600,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
   torch::profiler::impl::ApproximateClockToUnixTimeConverter clock_converter_;
   std::set<torch::profiler::impl::ActivityType> activities_;
   torch::profiler::impl::RecordQueue record_queue_;
-  torch::profiler::impl::AppendOnlyList<MemoryEventData, 1024> memory_events_;
   torch::profiler::impl::kineto::TraceWrapper cpu_trace_;
   std::vector<KinetoEvent> kineto_events_;
   // Optional, if event post-processing is enabled.
