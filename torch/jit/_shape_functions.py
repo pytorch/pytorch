@@ -845,11 +845,9 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
     return shape
 
 def nonzero_lower_bound(input: List[int]):
-    assert len(input) >= 1
     return [0, len(input)]
 
 def nonzero_upper_bound(input: List[int]):
-    assert len(input) >= 1
     return [numel(input), len(input)]
 
 def _reduce_along_dim(self: List[int], dim: int, keepdim: bool):
