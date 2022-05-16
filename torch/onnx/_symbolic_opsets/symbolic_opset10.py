@@ -8,8 +8,8 @@ import torch.onnx
 # ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx import symbolic_helper
-from torch.onnx._symbolic_opsets import symbolic_opset9 as opset9
 from torch.onnx._globals import GLOBALS
+from torch.onnx._symbolic_opsets import symbolic_opset9 as opset9
 from torch.onnx.symbolic_helper import parse_args, quantized_args
 
 # EDITING THIS FILE? READ THIS FIRST!
