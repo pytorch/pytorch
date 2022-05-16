@@ -66,12 +66,15 @@ def define_targets(rules):
 # generate-code that use these lists are moved into the shared
 # structure as well.
 
+_GENERATED_AUTOGRAD_PYTHON_H = [
+    "torch/csrc/autograd/generated/python_functions.h",
+]
+
 GENERATED_AUTOGRAD_H = [
     "torch/csrc/autograd/generated/Functions.h",
     "torch/csrc/autograd/generated/VariableType.h",
-    "torch/csrc/autograd/generated/python_functions.h",
     "torch/csrc/autograd/generated/variable_factories.h",
-]
+] + _GENERATED_AUTOGRAD_PYTHON_H
 
 GENERATED_TESTING_PY = [
     "torch/testing/_internal/generated/annotated_fn_args.py",
@@ -82,20 +85,7 @@ GENERATED_LAZY_H = [
     "torch/csrc/lazy/generated/LazyNativeFunctions.h",
 ]
 
-_GENERATED_CPP = [
-    "torch/csrc/autograd/generated/Functions.cpp",
-    "torch/csrc/autograd/generated/VariableType_0.cpp",
-    "torch/csrc/autograd/generated/VariableType_1.cpp",
-    "torch/csrc/autograd/generated/VariableType_2.cpp",
-    "torch/csrc/autograd/generated/VariableType_3.cpp",
-    "torch/csrc/autograd/generated/VariableType_4.cpp",
-    "torch/csrc/autograd/generated/TraceType_0.cpp",
-    "torch/csrc/autograd/generated/TraceType_1.cpp",
-    "torch/csrc/autograd/generated/TraceType_2.cpp",
-    "torch/csrc/autograd/generated/TraceType_3.cpp",
-    "torch/csrc/autograd/generated/TraceType_4.cpp",
-    "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
-    "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
+_GENERATED_AUTOGRAD_PYTHON_CPP = [
     "torch/csrc/autograd/generated/python_functions_0.cpp",
     "torch/csrc/autograd/generated/python_functions_1.cpp",
     "torch/csrc/autograd/generated/python_functions_2.cpp",
@@ -111,7 +101,25 @@ _GENERATED_CPP = [
     "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
     "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
     "torch/csrc/autograd/generated/python_variable_methods.cpp",
+]
+
+GENERATED_AUTOGRAD_PYTHON = _GENERATED_AUTOGRAD_PYTHON_H + _GENERATED_AUTOGRAD_PYTHON_CPP
+
+_GENERATED_CPP = [
+    "torch/csrc/autograd/generated/Functions.cpp",
+    "torch/csrc/autograd/generated/VariableType_0.cpp",
+    "torch/csrc/autograd/generated/VariableType_1.cpp",
+    "torch/csrc/autograd/generated/VariableType_2.cpp",
+    "torch/csrc/autograd/generated/VariableType_3.cpp",
+    "torch/csrc/autograd/generated/VariableType_4.cpp",
+    "torch/csrc/autograd/generated/TraceType_0.cpp",
+    "torch/csrc/autograd/generated/TraceType_1.cpp",
+    "torch/csrc/autograd/generated/TraceType_2.cpp",
+    "torch/csrc/autograd/generated/TraceType_3.cpp",
+    "torch/csrc/autograd/generated/TraceType_4.cpp",
+    "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
+    "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
     "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
     "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
     "torch/csrc/lazy/generated/RegisterLazy.cpp",
-]
+] + _GENERATED_AUTOGRAD_PYTHON_CPP

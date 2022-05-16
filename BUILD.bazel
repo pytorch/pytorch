@@ -8,7 +8,7 @@ load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources"
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops", "generate_aten", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
-load(":build.bzl", "define_targets")
+load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_PYTHON")
 
 define_targets(rules = rules)
 
@@ -129,35 +129,10 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ]
 
-libtorch_python_generated_sources = [
-        "torch/csrc/autograd/generated/python_functions.h",
-        "torch/csrc/autograd/generated/python_functions_0.cpp",
-        "torch/csrc/autograd/generated/python_functions_1.cpp",
-        "torch/csrc/autograd/generated/python_functions_2.cpp",
-        "torch/csrc/autograd/generated/python_functions_3.cpp",
-        "torch/csrc/autograd/generated/python_functions_4.cpp",
-        "torch/csrc/autograd/generated/python_variable_methods.cpp",
-        "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
-        "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
-        "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
-        "torch/csrc/autograd/generated/python_nn_functions.cpp",
-        "torch/csrc/autograd/generated/python_fft_functions.cpp",
-        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
-        "torch/csrc/autograd/generated/python_sparse_functions.cpp",
-        "torch/csrc/autograd/generated/python_special_functions.cpp",
-        "torch/csrc/autograd/generated/python_return_types.cpp",
-]
-
 filegroup(
     name = "cpp_generated_code",
     data = [":generate-code"],
     srcs = libtorch_cpp_generated_sources,
-)
-
-filegroup(
-    name = "python_generated_code",
-    data = [":generate-code"],
-    srcs = libtorch_python_generated_sources,
 )
 
 exports_files(
@@ -1742,7 +1717,7 @@ cc_library(
 
 cc_library(
     name = "torch_python",
-    srcs = libtorch_python_core_sources + [":python_generated_code"],
+    srcs = libtorch_python_core_sources + GENERATED_AUTOGRAD_PYTHON,
     deps = [
         ":torch",
         ":shm",
