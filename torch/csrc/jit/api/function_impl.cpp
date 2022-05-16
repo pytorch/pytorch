@@ -60,7 +60,30 @@ void placeholderCreator(GraphFunction&) {
   throw RecursiveMethodCallError();
 }
 
+namespace {
+int getWarmupRunCount() {
+  const char* env = std::getenv("PYTORCH_JIT_FUNCTION_WARMUP_COUNT");
+  if (!env) {
+    return 0;
+  }
+  return strtol(env, nullptr, 10);
+}
+
+int getCachedWarmupRunCount() {
+  static int warmup_count = getWarmupRunCount();
+  return warmup_count;
+}
+} // namespace
+
 void GraphFunction::run(Stack& stack) {
+  for (auto i : c10::irange(getWarmupRunCount())) {
+    (void)(i); // suppress unused variable warning
+    Stack copy_stack;
+    for (const IValue& val : stack) {
+      copy_stack.push_back(val.deepcopy());
+    }
+    get_executor().run(copy_stack);
+  }
   get_executor().run(stack);
 }
 
