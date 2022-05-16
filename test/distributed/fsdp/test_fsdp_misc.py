@@ -15,6 +15,7 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     FSDPInitMode,
     TransformerWithSharedParams,
+    _validate,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -232,22 +233,11 @@ class TestFSDPMisc(FSDPTest):
                 self.lin = nn.Linear(10, 10, bias=False)
 
         m = MyModel(self.rank).cuda()
-
-        def _validate(model, assert_fn):
-            module_states = [param.detach().cpu() for param in model.parameters()]
-            module_states.extend([buffer.detach().cpu() for buffer in model.buffers()])
-            olist = [None for _ in range(self.world_size)]
-            dist.all_gather_object(olist, module_states, process_group=self.process_group)
-            rank0_states = olist[0]
-            for state in olist[1:]:
-                for p1, p2 in zip(rank0_states, state):
-                    assert_fn(p1, p2)
-
-        _validate(m, equal=False)
-        # FSDP makes the model the same during init
-        fsdp = FSDP(m)
+        _validate(m, assert_fn=self.assertNotEqual)
+        # Passing sync_module_states into FSDP makes model the same during init.
+        fsdp = FSDP(m, sync_module_states=True)
         with fsdp.summon_full_params(fsdp):
-            _validate(fsdp, equal=True)
+            _validate(m, assert_fn=self.assertEqual)
 
 instantiate_parametrized_tests(TestFSDPMisc)
 

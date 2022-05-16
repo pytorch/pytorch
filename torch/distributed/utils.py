@@ -8,6 +8,8 @@ from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
 )
 from typing import List
 
+__all__ = []  # type: ignore[var-annotated]
+
 def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     r"""
     Recursively moves input to the target_gpu.
@@ -32,7 +34,7 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
                     current_stream.wait_stream(stream)
                     # Ensure tensor memory is not reused until work on
                     # main stream is complete
-                    output.record_stream(current_stream)  # type: ignore[arg-type]
+                    output.record_stream(current_stream)  # type: ignore[attr-defined]
                 return (output,)
         if _is_namedtuple(obj):
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]
