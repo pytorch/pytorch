@@ -99,7 +99,8 @@ def functional_call(
         If you want to apply the parametrization function to the value passed
         please set the key as ``{submodule_name}.parametrizations.{parameter_name}.original``.
 
-    .. note:: If the module performs in-place operations on parameters/buffers, these will be reflected in the `parameters_and_buffers` input.
+    .. note:: If the module performs in-place operations on parameters/buffers, these will be reflected
+    in the `parameters_and_buffers` input.
 
         Example::
 
