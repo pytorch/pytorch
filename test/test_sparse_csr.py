@@ -325,18 +325,7 @@ class TestSparseCompressed(TestCase):
             sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
                                                     dtype=dtype, layout=layout, device=device)
             cloned_sparse = sparse.clone()
-            if layout == torch.sparse_csr:
-                self.assertEqual(sparse, cloned_sparse)
-            else:
-                # TODO: implement sparse compressed tensor comparison in torch/testing/_comparison.py
-                self.assertEqual(sparse.layout, cloned_sparse.layout)
-                self.assertEqual(sparse.values(), cloned_sparse.values())
-                if layout in {torch.sparse_csr, torch.sparse_bsr}:
-                    self.assertEqual(sparse.crow_indices(), cloned_sparse.crow_indices())
-                    self.assertEqual(sparse.col_indices(), cloned_sparse.col_indices())
-                else:
-                    self.assertEqual(sparse.ccol_indices(), cloned_sparse.ccol_indices())
-                    self.assertEqual(sparse.row_indices(), cloned_sparse.row_indices())
+            self.assertEqual(sparse, cloned_sparse)
 
 
 class TestSparseCSR(TestCase):
