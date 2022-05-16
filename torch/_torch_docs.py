@@ -1377,7 +1377,7 @@ add_docstr(torch.bitwise_left_shift,
 bitwise_left_shift(input, other, *, out=None) -> Tensor
 
 Computes the left arithmetic shift of :attr:`input` by :attr:`other` bits.
-The input tensor must be of integral types. This operator supports 
+The input tensor must be of integral type. This operator supports 
 :ref:`broadcasting to a common shape <broadcasting-semantics>` and
 :ref:`type promotion <type-promotion-doc>`.
 
