@@ -469,9 +469,7 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
 }
 
 Tensor dense_to_sparse_csc(const Tensor& self) {
-  AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
-  return self;
+  return self.to_sparse().to_sparse_csc();
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
@@ -522,9 +520,23 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
 }
 
 Tensor coo_to_sparse_csc(const Tensor& self) {
-  AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
-  return self;
+  TORCH_CHECK(
+      self.dim() == 2,
+      "Only 2D tensors can be converted to the CSR format but got shape: ",
+      self.sizes());
+  auto coalesced_self = self.coalesce();
+  auto col_indices = coalesced_self.indices()[1];
+  bool out_int32 = (row_indices.scalar_type() == at::kInt);
+  auto ccol_indices = at::_convert_indices_from_coo_to_csr(
+      col_indices, self.size(1), out_int32);
+  return at::native::_sparse_csr_tensor_unsafe(
+      ccol_indices,
+      coalesced_self.indices()[0].contiguous(),
+      coalesced_self.values(),
+      coalesced_self.sizes(),
+      coalesced_self.scalar_type(),
+      c10::kSparseCsc,
+      coalesced_self.device());
 }
 
 Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
