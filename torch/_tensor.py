@@ -533,6 +533,10 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype)
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def solve(self, other):
+        from ._linalg_utils import solve
+        return solve(self, other)
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -645,6 +649,7 @@ class Tensor(torch._C._TensorBase):
     __itruediv__ = _C._TensorBase.__idiv__
 
     __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(_C._TensorBase.pow)
+    __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(_C._TensorBase.pow_)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other):
@@ -656,10 +661,6 @@ class Tensor(torch._C._TensorBase):
         if self.dim() == 0 and not self.is_meta:
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
-
-    @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __ipow__(self, other):  # type: ignore[misc]
-        return NotImplemented
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other):

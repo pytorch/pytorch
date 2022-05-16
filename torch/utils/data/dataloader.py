@@ -18,7 +18,18 @@ import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
 
-from . import IterDataPipe, IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
+from . import (
+    IterDataPipe,
+    MapDataPipe,
+    IterableDataset,
+    Sampler,
+    SequentialSampler,
+    RandomSampler,
+    BatchSampler,
+    Dataset,)
+
+from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
+
 from . import _utils
 
 import torch.utils.data.graph_settings
@@ -208,6 +219,12 @@ class DataLoader(Generic[T_co]):
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
+
+        # _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
+        if isinstance(self.dataset, IterDataPipe):
+            self.dataset = _IterDataPipeSerializationWrapper(self.dataset)
+        elif isinstance(self.dataset, MapDataPipe):
+            self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
 
         # Arg-check dataset related before checking samplers because we want to
         # tell users that iterable-style datasets are incompatible with custom
@@ -554,7 +571,8 @@ class _BaseDataLoaderIter(object):
     def __next__(self) -> Any:
         with torch.autograd.profiler.record_function(self._profile_name):
             if self._sampler_iter is None:
-                self._reset()
+                # TODO(https://github.com/pytorch/pytorch/issues/76750)
+                self._reset()  # type: ignore[call-arg]
             data = self._next_data()
             self._num_yielded += 1
             if self._dataset_kind == _DatasetKind.Iterable and \
