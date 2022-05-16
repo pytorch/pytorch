@@ -254,19 +254,39 @@ def _elementwise_meta(*args, type_promotion):
     strides = utils.compute_elementwise_output_strides(*args)
 
     tensor = None
+    scalar_tensor = None
     number = None
     for arg in args:
         if isinstance(arg, TensorLike):
-            if tensor is None:
+            if utils.is_cpu_scalar_tensor(arg) and scalar_tensor is None:
+                scalar_tensor = arg
+            if not utils.is_cpu_scalar_tensor(arg) and tensor is None:
                 tensor = arg
 
         elif isinstance(arg, Number):
             if number is None:
                 number = arg
 
-    if tensor is not None:
-        return TensorMeta(tensor, strides=strides)
+    # NOTE: type promotion behavior here is mostly hidden from tests because
+    # references will typically handle the type promotion properly even if this doesn't
+    # (but getting it wrong will cause too many casts to be inserted in traces!)
+    if tensor is not None or scalar_tensor is not None:
+        tensor = tensor if tensor is not None else scalar_tensor
+        assert tensor is not None  # appease mypy
+        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT:
+            return TensorMeta(tensor, strides=strides)
+        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
+            return TensorMeta(tensor, strides=strides, dtype=torch.bool)
+        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
+            if utils.is_complex_dtype(tensor.dtype):
+                dtype = utils.corresponding_real_dtype(tensor.dtype)
+            else:
+                dtype = tensor.dtype
+            return TensorMeta(tensor, strides=strides, dtype=dtype)
 
+    # Number case
+    # NOTE: this case is not currently exercised
+    # TODO: fix number type promotion (bool, complex->float)
     return TensorMeta(number)
 
 

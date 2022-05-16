@@ -18486,7 +18486,7 @@ python_ref_db = [
         "_refs.abs",
         torch_opinfo_name="abs",
         skips=(
-            # TODO: FIXME!
+            # https://github.com/pytorch/pytorch/issues/77526
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
                          dtypes=(torch.chalf, torch.cfloat, torch.cdouble), device_type='cuda'),
         )
@@ -18920,16 +18920,13 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_out_warning'),
-            # Test doesn't support non-tensor inputs
-            DecorateInfo(unittest.expectedFailure,
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_conj_view'),
-            # Test doesn't support non-tensor inputs
-            DecorateInfo(unittest.expectedFailure,
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_conj_view'),
-            # Test doesn't support non-tensor inputs
-            DecorateInfo(unittest.expectedFailure,
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
         ),
@@ -18947,16 +18944,13 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_out_warning'),
-            # Test doesn't support non-tensor inputs
-            DecorateInfo(unittest.expectedFailure,
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_conj_view'),
-            # Test doesn't support non-tensor inputs
-            DecorateInfo(unittest.expectedFailure,
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_conj_view'),
-            # Test doesn't support non-tensor inputs
-            DecorateInfo(unittest.expectedFailure,
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
         ),
