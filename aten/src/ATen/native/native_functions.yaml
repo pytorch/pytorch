@@ -5758,6 +5758,20 @@
   device_check: NoCheck
   device_guard: False
 
+- func: ccol_indices(Tensor(a) self) -> Tensor(a)
+  variants: method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: ccol_indices_sparse_csr
+  device_check: NoCheck
+  device_guard: False
+
+- func: row_indices(Tensor(a) self) -> Tensor(a)
+  variants: method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: row_indices_sparse_csr
+  device_check: NoCheck
+  device_guard: False
+
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     SparseCPU: hspmm_out_sparse_cpu
@@ -11961,6 +11975,18 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: col_indices_copy
+  tags: view_copy
+
+- func: ccol_indices_copy(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: ccol_indices_copy
+  tags: view_copy
+
+- func: row_indices_copy(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: row_indices_copy
   tags: view_copy
 
 - func: unbind_copy.int(Tensor self, int dim=0) -> Tensor[]

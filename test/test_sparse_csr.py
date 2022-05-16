@@ -210,6 +210,18 @@ class TestSparseCompressed(TestCase):
             torch.sparse_bsr: torch.sparse_bsr_tensor,
             torch.sparse_bsc: torch.sparse_bsc_tensor,
         }[layout]
+        compressed_indices_mth = {
+            torch.sparse_csr: torch.Tensor.crow_indices,
+            torch.sparse_csc: torch.Tensor.ccol_indices,
+            torch.sparse_bsr: torch.Tensor.crow_indices,
+            torch.sparse_bsc: torch.Tensor.ccol_indices,
+        }[layout]
+        plain_indices_mth = {
+            torch.sparse_csr: torch.Tensor.col_indices,
+            torch.sparse_csc: torch.Tensor.row_indices,
+            torch.sparse_bsr: torch.Tensor.col_indices,
+            torch.sparse_bsc: torch.Tensor.row_indices,
+        }[layout]
         for index_dtype in [torch.int32, torch.int64]:
             for compressed_indices, plain_indices, values, size in self._generate_small_inputs(layout, device, dtype, index_dtype):
                 if input_kind == 'list':
@@ -245,9 +257,8 @@ class TestSparseCompressed(TestCase):
                                                                 dtype=dtype, layout=layout, device=device)
                 self.assertEqual(layout, sparse.layout)
                 self.assertEqual(size, sparse.shape)
-                # TODO: replace crow_indices/col_indices usage per https://github.com/pytorch/pytorch/issues/76638
-                self.assertEqual(compressed_indices, sparse.crow_indices())
-                self.assertEqual(plain_indices, sparse.col_indices())
+                self.assertEqual(compressed_indices, compressed_indices_mth(sparse))
+                self.assertEqual(plain_indices, plain_indices_mth(sparse))
                 self.assertEqual(values, sparse.values())
 
 
