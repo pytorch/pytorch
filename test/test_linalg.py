@@ -5236,6 +5236,17 @@ class TestLinalg(TestCase):
     @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.float)
+    def test_linalg_svd_out_strided(self, device, dtype):
+        def take_out_from_4rank_tensors(ts):
+            U, S, Vh = ts
+            return (U, S[0], Vh)
+
+        A = make_tensor((3, 3, 2, 3), dtype=dtype, device=device)
+        self._test_fn_out_strided(torch.linalg.svd, take_out_from_4rank_tensors, A)
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.float)
     def test_linalg_lu_factor_ex_out_strided(self, device, dtype):
         def take_out_from_4rank_tensors(ts):
             LU, pivots, info = ts
