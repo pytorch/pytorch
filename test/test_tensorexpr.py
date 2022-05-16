@@ -2,7 +2,6 @@
 
 import numpy as np
 import torch
-from torch._C import memory_format
 import torch.nn.functional as F
 from torch import nn
 import unittest
