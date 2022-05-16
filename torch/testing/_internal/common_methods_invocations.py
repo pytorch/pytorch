@@ -18488,10 +18488,10 @@ python_ref_db = [
         "_refs.log",
         torch_opinfo_name="log",
         skips=(
-            # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
+            # RuntimeError: "masked_fill_" not implemented for 'ComplexHalf'
             DecorateInfo(unittest.expectedFailure, "TestCommon", 'test_python_reference_consistency',
                          dtypes=(torch.chalf,)),
-            # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
+            # RuntimeError: "masked_fill_" not implemented for 'ComplexHalf'
             DecorateInfo(unittest.expectedFailure, "TestCommon", 'test_python_reference_meta_functions',
                          dtypes=(torch.chalf,))
         )
