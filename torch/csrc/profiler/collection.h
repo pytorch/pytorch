@@ -59,21 +59,21 @@ template <>
 struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   ExtraFields(
       TorchOpBasicFields&& f,
-      time_t end_time_us,
+      time_t end_time_ns,
       Inputs&& inputs,
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
       FallbackPair&& gpu_fallback)
       : TorchOpBasicFields(std::move(f)),
-        end_time_us_{end_time_us},
+        end_time_ns_{end_time_ns},
         inputs_{std::move(inputs)},
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
         gpu_fallback_{std::move(gpu_fallback)} {}
 
-  time_t end_time_us_;
+  time_t end_time_ns_;
   Inputs inputs_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
@@ -118,11 +118,11 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   std::string name() const;
   torch::profiler::impl::kineto::KinetoActivityType kinetoType() const;
   uint64_t correlationID() const;
-  int64_t endTimeUS() const;
+  int64_t endTimeNS() const;
   uint64_t endTID() const;
   c10::DeviceType deviceType() const;
 
-  int64_t start_time_us_;
+  int64_t start_time_ns_;
   uint64_t start_tid_;
   kineto::DeviceAndResource kineto_info_;
   c10::variant<
@@ -134,11 +134,11 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
  private:
   template <EventType E>
   Result(
-      int64_t start_time_us,
+      int64_t start_time_ns,
       uint64_t start_tid,
       kineto::DeviceAndResource kineto_info,
       ExtraFields<E>&& extra_fields)
-      : start_time_us_{start_time_us},
+      : start_time_ns_{start_time_ns},
         start_tid_{start_tid},
         kineto_info_{kineto_info},
         extra_fields_{std::move(extra_fields)} {}
