@@ -2102,7 +2102,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(sp_matrix.shape, pt_matrix.shape)
         self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
         self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
-        self.assertEqual(torch.tensor(sp_matrix.values), pt_matrix.values())
+        self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
