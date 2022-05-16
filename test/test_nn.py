@@ -17,6 +17,7 @@ from itertools import repeat, product
 from functools import reduce, partial
 from operator import mul
 from collections import OrderedDict
+from tempfile import NamedTemporaryFile
 
 import torch
 
@@ -44,7 +45,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps,\
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
-    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype
+    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -14524,13 +14525,13 @@ class TestNNDeviceType(NNTestCase):
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_groupnorm_nhwc(self, device, dtype):
-        def helper(self, size, groups):
+        def helper(self, size, groups, memory_format):
             channels = size[1]
             input = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
-            input = input.contiguous(memory_format=torch.channels_last)
+            input = input.contiguous(memory_format=memory_format)
             input.retain_grad()
             grad = torch.randn(size, dtype=dtype, device=device)
-            grad = grad.contiguous(memory_format=torch.channels_last)
+            grad = grad.contiguous(memory_format=memory_format)
             gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
             gn.weight.data.uniform_()
             gn.bias.data.uniform_()
@@ -14545,15 +14546,16 @@ class TestNNDeviceType(NNTestCase):
             ref_out = ref_gn(ref_input)
             ref_out.backward(ref_grad)
 
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
             self.assertTrue(ref_out.is_contiguous())
             self.assertEqual(out, ref_out)
             self.assertEqual(gn.weight.grad, ref_gn.weight.grad)
             self.assertEqual(gn.bias.grad, ref_gn.bias.grad)
             self.assertEqual(input.grad, ref_input.grad)
 
-        helper(self, (4, 8, 10, 10), 4)
-        helper(self, (2, 30, 9, 9), 3)
+        helper(self, (4, 8, 10, 10), 4, torch.channels_last)
+        helper(self, (2, 30, 9, 9), 3, torch.channels_last)
+        helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d)
 
     @onlyNativeDeviceTypes
     def test_GroupNorm_numeric(self, device):
@@ -21565,6 +21567,91 @@ class TestStateDictHooks(TestCase):
             )
             m.load_state_dict(state_dict)
             self.assertEqual(2, hook_called)
+
+    def test_load_state_dict_post_hook(self):
+        hook_called = 0
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.foo = torch.nn.Parameter(torch.rand(10))
+
+            def my_post_load_hook(self, module, incompatible_keys):
+                assert module is self
+                nonlocal hook_called
+                incompatible_keys.missing_keys.append("foo")
+                incompatible_keys.unexpected_keys.append("bar")
+                hook_called += 1
+
+        nested = MyModule()
+        wrapped = nn.ModuleList([nested])
+        handle = nested.register_load_state_dict_post_hook(
+            nested.my_post_load_hook,
+        )
+        # Hook must be called even if it is wrapped
+        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
+        self.assertEqual(hook_called, 1)
+        # Ensure that the hook modified missing_keys and unexpected_keys
+        missing = ret.missing_keys
+        unexpected = ret.unexpected_keys
+        self.assertEqual(missing, ["foo"])
+        self.assertEqual(unexpected, ["bar"])
+        # When called with strict=True, the error raised should mention the
+        # missing and unexpected keys the hook added.
+        with self.assertRaisesRegex(RuntimeError, "foo.*\n.*bar"):
+            wrapped.load_state_dict(wrapped.state_dict(), strict=True)
+        self.assertEqual(hook_called, 2)
+        # Removing the hook via handle.remove() should cause it not to
+        # fire anymore.
+        handle.remove()
+        # Hook did not run so it should not have added any keys
+        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
+        self.assertEqual(ret.missing_keys, [])
+        self.assertEqual(ret.unexpected_keys, [])
+        # hook_called should not have been incremented
+        self.assertEqual(hook_called, 2)
+
+        def load_hook_clear_incompatible(module, incompatible_keys):
+            incompatible_keys.missing_keys.clear()
+            incompatible_keys.unexpected_keys.clear()
+
+        nested.register_load_state_dict_post_hook(load_hook_clear_incompatible)
+        state_dict = wrapped.state_dict()
+        state_dict["extra"] = torch.ones(1)
+        # load state_dict with strict=True should not throw.
+        ret = wrapped.load_state_dict(state_dict, strict=True)
+        # explicitly ensure that the post hook clearned out incompatible_keys
+        self.assertEqual([], ret.missing_keys)
+        self.assertEqual([], ret.unexpected_keys)
+
+    @unittest.skipIf(IS_WINDOWS, "Tempfile permission issue on windows")
+    def test_load_state_dict_post_hook_backward_compatibility(self):
+        def my_post_load_hook(mod, _):
+            nonlocal called
+            called = True
+
+        for m in [nn.Softmin(10), nn.Softmax(10), nn.LogSoftmax(10)]:
+            called = False
+            sd = deepcopy(m.state_dict())
+            self.assertTrue(hasattr(m, '_load_state_dict_post_hooks'))
+            # Simulate an older model that did not have this attr
+            delattr(m, '_load_state_dict_post_hooks')
+            # Save and load, and ensure that load_state_dict works (without proper
+            # BC we would run into errors because this attribute would be expected).
+            # In particular, Softmax runs into the issue described here:
+            # https://github.com/pytorch/pytorch/issues/77280
+            with NamedTemporaryFile() as f:
+                # Note that torch.save / torch.load is not recommended to save/load
+                # modules.
+                torch.save(m, f.name)
+                m = torch.load(f.name)
+                m.load_state_dict(sd)
+                self.assertFalse(called)
+
+            # Ensure hooks can be registered and called.
+            m.register_load_state_dict_post_hook(my_post_load_hook)
+            m.load_state_dict(sd)
+            self.assertTrue(called)
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
