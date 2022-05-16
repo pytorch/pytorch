@@ -99,6 +99,8 @@ def functional_call(
         If you want to apply the parametrization function to the value passed
         please set the key as ``{submodule_name}.parametrizations.{parameter_name}.original``.
 
+    .. note:: If the module performs in-place operations on parameters/buffers, these will be reflected in the `parameters_and_buffers` input.
+
     Args:
         module (torch.nn.Module): the module to call
         parameters_and_buffers (dict of str and Tensor): the parameters that will be used in
