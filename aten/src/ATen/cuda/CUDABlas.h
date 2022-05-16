@@ -70,6 +70,33 @@ template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
 
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+enum GEMMAndBiasActivationEpilogue {
+  None,
+  RELU,
+  GELU,
+};
+
+// NOTE: GELU activation is not supported prior to CUDA 11.4 and will
+// do nothing if passed in that case.
+template <typename Dtype>
+void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<Dtype> alpha_val,
+    const Dtype* mat1_ptr,
+    int64_t mat1_ld,
+    const Dtype* mat2_ptr,
+    int64_t mat2_ld,
+    const Dtype* bias,
+    Dtype* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+#endif
+
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
   char transa, char transb, int64_t m, int64_t n, int64_t k, at::opmath_type<Dtype> alpha,    \
       const Dtype *a, int64_t lda, int64_t stridea,                                           \

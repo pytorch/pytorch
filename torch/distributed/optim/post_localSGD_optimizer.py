@@ -75,14 +75,10 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         Performs a single optimization step (parameter update).
         """
         self.optim.step()
-        for param_group in self.param_groups:
-            for params in param_group["params"]:
-                if params.grad is None:
-                    continue
-                self.averager.average_parameters(iter(params))
+        self.averager.average_parameters(params=self.param_groups)
 
-    def zero_grad(self):
-        self.optim.zero_grad()
+    def zero_grad(self, set_to_none: bool = False):  # type: ignore[override]
+        self.optim.zero_grad(set_to_none=set_to_none)
 
     def add_param_group(self, param_group):
         self.optim.add_param_group(param_group)

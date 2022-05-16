@@ -51,6 +51,54 @@ Tensor _to_copy(
   // memory_format is handled separately due to MemoryFormat::Preserve logic
   options = self.options().merge_in(options).memory_format(c10::nullopt);
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
+  // TODO: Use the dispatcher for this.
+  // Currently there are unenumerated extensibility issues preventing this.
+  if (self.is_sparse_csr()) {
+    TORCH_CHECK(
+        memory_format == MemoryFormat::Preserve,
+        "sparse_csr only supports memory format Preserve, but got ",
+        memory_format,
+        " instead.");
+
+    auto new_values = at::native::to(
+        self.values(),
+        dtype,
+        c10::kStrided, // values are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    auto new_crow_indices = at::native::to(
+        self.crow_indices(),
+        self.crow_indices().scalar_type(), // indices are integral
+        c10::kStrided, // indices are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    auto new_col_indices = at::native::to(
+        self.col_indices(),
+        self.col_indices().scalar_type(), // indices are integral
+        c10::kStrided, // indices are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    return at::native::_sparse_csr_tensor_unsafe(
+        new_crow_indices,
+        new_col_indices,
+        new_values,
+        self.sizes(),
+        new_values.scalar_type(),
+        self.layout(),
+        new_values.device());
+  }
 
   bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
                   (options.layout() == c10::kStrided));
@@ -76,9 +124,13 @@ Tensor _to_copy(
     }
   }
   // See Note [Explicit nullopt MemoryFormat argument]
-  auto r = at::empty(self.sizes(),
-                     options.memory_format(memory_format).pinned_memory(pin_out),
-                     c10::nullopt);
+  // TODO: empty_quantized does not work here. It raises an exception in CheckMemoryFormat.h prior to
+  // empty_affine_quantizd/_empty_per_channel_affine_quantized calls
+  // at::empty also does not work here because there is no proper at::empty support for quantized tensors
+  // as it would return a quantized tensor with an UnknownQuantizer
+  auto r = self.is_quantized() ? at::empty_like(self, memory_format)
+                               : at::empty(self.sizes(),
+                                 options.memory_format(memory_format).pinned_memory(pin_out), c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
 }
@@ -240,16 +292,54 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
-  } else if (input_.layout() == c10::kMkldnn) {
-    return grad.to_mkldnn(input_.scalar_type());
-  } else {
-    AT_ERROR("Unsupported input layout: ", input_.layout());
   }
+  if (input_.layout() == c10::kMkldnn) {
+    return grad.to_mkldnn(input_.scalar_type());
+  }
+  if (input_.layout() == c10::kStrided) {
+    return grad.to_dense();
+  }
+  AT_ERROR("to_dense_backward: Unsupported input layout: ", input_.layout());
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() == c10::kStrided);
   return grad.to_dense(input_.scalar_type());
+}
+
+Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
+  if (tensor.layout() == c10::kSparse) {
+    return tensor._to_dense(dtype);
+  }
+  if (tensor.layout() == c10::kSparseCsr) {
+    return tensor._to_dense(dtype);
+  }
+  if (tensor.layout() == c10::kMkldnn) {
+    return tensor._to_dense(dtype);
+  }
+  TORCH_CHECK(tensor.layout() == c10::kStrided, "to_dense does not support layout ", tensor.layout());
+  if (dtype) {
+    return tensor.to(*dtype);
+  }
+  return tensor;
+}
+
+Tensor sparse_to_dense(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(
+      !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
+  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
+  return dst.add_(self);
+}
+
+Tensor sparse_csr_to_dense(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(
+      !dtype.has_value(), "dtype argument is not supported by sparse_csr_to_dense");
+  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
+  return dst.add_(self);
 }
 
 // Computes the strides for view_dtype output when the view dtype is
@@ -369,6 +459,44 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   }
 
   return new_tensor;
+}
+
+Tensor dense_to_sparse_csr(const Tensor& self) {
+  return self.to_sparse().to_sparse_csr();
+}
+
+Tensor csr_to_sparse_csr(const Tensor& self) {
+  // Just returning self doesn't work
+  // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152,
+  // please report a bug to PyTorch. aten::to_sparse_csr
+  return at::native::_sparse_csr_tensor_unsafe(
+      self.crow_indices(),
+      self.col_indices(),
+      self.values(),
+      self.sizes(),
+      self.scalar_type(),
+      c10::kSparseCsr,
+      self.device());
+}
+
+Tensor coo_to_sparse_csr(const Tensor& self) {
+  TORCH_CHECK(
+      self.dim() == 2,
+      "Only 2D tensors can be converted to the CSR format but got shape: ",
+      self.sizes());
+  auto coalesced_self = self.coalesce();
+  auto row_indices = coalesced_self.indices()[0];
+  bool out_int32 = (row_indices.scalar_type() == at::kInt);
+  auto crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices, self.size(0), out_int32);
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      coalesced_self.indices()[1].contiguous(),
+      coalesced_self.values(),
+      coalesced_self.sizes(),
+      coalesced_self.scalar_type(),
+      c10::kSparseCsr,
+      coalesced_self.device());
 }
 
 }} // namespace at::native

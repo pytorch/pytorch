@@ -1,5 +1,6 @@
 torch.utils.tensorboard
 ===================================
+.. automodule:: torch.utils.tensorboard
 
 Before going further, more details on TensorBoard can be found at
 https://www.tensorflow.org/tensorboard/

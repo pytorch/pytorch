@@ -116,6 +116,10 @@ class TORCH_CUDA_CU_API SimplifyingIrBuilder : public IrBuilder {
   static Val* addExpr(Int* lhs, Int* rhs);
   static Val* addExpr(Val* lhs, Val* rhs);
   static Val* subExpr(Val* lhs, Val* rhs);
+  static Val* mulExpr(Int* lhs, Int::ScalarType rhs);
+  static Val* mulExpr(Val* lhs, Int::ScalarType rhs);
+  static Val* mulExpr(Int* lhs, Int* rhs);
+  static Val* mulExpr(Val* lhs, Val* rhs);
   static Val* andExpr(Val* lhs, Val* rhs);
   static Val* maxExpr(Val* lhs, Val* rhs);
   static Val* minExpr(Val* lhs, Val* rhs);
