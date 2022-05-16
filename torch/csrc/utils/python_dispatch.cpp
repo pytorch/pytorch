@@ -64,6 +64,7 @@ public:
     py::gil_scoped_acquire g;
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto obj = py::reinterpret_steal<py::object>(PyObject_Call(func_.ptr(getPyInterpreter()), args_kwargs.first.ptr(), args_kwargs.second.ptr()));
+    if (obj == nullptr) { throw python_error(); }
     pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
   }
 };
@@ -165,7 +166,7 @@ void initDispatchBindings(PyObject* module) {
       parseKind(kind),
       std::move(name),
       std::string(dispatch) == "" ? c10::nullopt : c10::make_optional(c10::parseDispatchKey(dispatch)),
-      file,
+      "/dev/null", // temporary workaround
       linenum);
     END_HANDLE_TH_ERRORS_PYBIND
   }, "", py::arg("kind"), py::arg("name"), py::arg("dispatch"), py::arg("file")="/dev/null", py::arg("linenum")=0)

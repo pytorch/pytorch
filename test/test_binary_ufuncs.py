@@ -1259,6 +1259,7 @@ class TestBinaryUfuncs(TestCase):
         t -= 1
         t *= 1
         t /= 1
+        t **= 1
         with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
             t //= 1
         t %= 1
@@ -3375,30 +3376,6 @@ class TestBinaryUfuncs(TestCase):
                 torch_op(a, 2), torch.tensor(numpy_op(a_np, 2), device=device)
             )
 
-    def test_bitwise_shift_float(self, device):
-        ops = [
-            (torch.bitwise_left_shift, lambda x, y: x * 2.0**y),
-            (operator.lshift, lambda x, y: x * 2.0**y),
-            (torch.bitwise_right_shift, lambda x, y: x / 2.0**y),
-            (operator.rshift, lambda x, y: x / 2.0**y),
-        ]
-        for torch_op, expected_op in ops:
-            # int tensor x float
-            a = torch.tensor([19, -20, -21, 22], dtype=torch.int64, device=device)
-            self.assertEqual(
-                torch_op(a, 1.8), torch.floor(expected_op(a, 1)).to(a.dtype)
-            )
-            # float tensor x int scalar
-            a = torch.tensor(
-                [19.1, -20.2, -21.3, 22.4], dtype=torch.float32, device=device
-            )
-            self.assertEqual(torch_op(a, 2), expected_op(a, 2))
-            # float tensor x float scalar
-            a = torch.tensor(
-                [19.1, -20.2, -21.3, 22.4], dtype=torch.float32, device=device
-            )
-            self.assertEqual(torch_op(a, 2.2), expected_op(a, 2.2))
-
     @onlyNativeDeviceTypes
     @dtypes(
         *list(
@@ -4011,6 +3988,13 @@ class TestBinaryUfuncs(TestCase):
                 dtype=torch.double,
             )
             self.assertEqual(expected, actual.view(-1), rtol=0, atol=0.02)
+
+            # bfloat16
+            a_bf16 = a.bfloat16()
+            b_bf16 = b.bfloat16()
+            actual_bf16 = a_bf16.atan2(b_bf16)
+            self.assertEqual(actual_bf16, actual.bfloat16())
+            self.assertEqual(expected, actual_bf16.view(-1), exact_dtype=False, rtol=0, atol=0.02)
 
         _test_atan2_with_size((2, 2), device)
         _test_atan2_with_size((3, 3), device)
