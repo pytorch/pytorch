@@ -19,7 +19,7 @@ from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
-from functools import reduce
+from functools import reduce, partial
 import torch
 
 from torch import nn
@@ -6576,6 +6576,18 @@ class TestAutogradForwardMode(TestCase):
 
             # as_strided runs without error
             dual.as_strided((5,), (1,), 0)
+
+    def test_metadata_check_checks_ignores_size_zero(self):
+        a = torch.ones(0).as_strided((0, 1,), (1, 1,), 0)
+        b = torch.ones(0).as_strided((0, 1,), (1, 0,), 0)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(a, b)
+            torch.diagonal(dual, offset=0)
+
+        input = torch.rand([0, 1], dtype=torch.complex128, requires_grad=True)
+        func = partial(torch.diagonal, offset=0)
+        torch.autograd.gradcheck(func, (input,), check_forward_ad=True)
 
     def test_metadata_check_when_primal_has_conj_bit(self):
         # Make sure the _has_same_storage_numel is a fallthrough, so that
