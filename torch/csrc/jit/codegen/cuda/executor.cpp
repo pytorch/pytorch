@@ -186,7 +186,12 @@ void FusionExecutor::compileFusion(
       options_.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
   auto properties = at::cuda::getDeviceProperties(options_.device.index());
   configured_device_smem_ = properties->sharedMemPerBlock;
+#ifndef __HIP_PLATFORM_HCC__
   device_smem_limit_ = properties->sharedMemPerBlockOptin;
+#else
+  // don't know if rocm supports opt-in shared memroy reconfiguration
+  device_smem_limit_ = properties->sharedMemPerBlock;
+#endif
   warp_size_ = properties->warpSize;
 
   lowered_ = std::make_unique<GpuLower>(
