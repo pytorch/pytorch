@@ -851,7 +851,7 @@ def index_fill(g, self, dim, index, value):
     )
     value = symbolic_helper._maybe_get_scalar(value)
     value = symbolic_helper._if_scalar_type_as(g, value, self)
-    expanded_value = expand(g, value, expanded_index_shape, None)
+    expanded_value = opset9.expand(g, value, expanded_index_shape, None)
     return scatter(g, self, dim, expanded_index, expanded_value)
 
 
@@ -1225,7 +1225,7 @@ def chunk(g, self, chunks, dim):
     chunk_size = g.op("Div", g.op("Add", dim_size, chunk_size_s), chunks)
     # Create splits vector
     chunk_vec = [
-        expand(g, chunk_size, chunk_size_s, None),
+        opset9.expand(g, chunk_size, chunk_size_s, None),
         g.op("Sub", dim_size, g.op("Mul", chunk_size, chunk_size_s)),
     ]
     chunk_vec = g.op("Concat", *chunk_vec, axis_i=0)

@@ -20,7 +20,7 @@ from torch import _C
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx import symbolic_helper
 from torch.onnx._globals import GLOBALS
-from torch.onnx.symbolic_helper import parse_args, quantized_args
+from torch.onnx.symbolic_helper import _parse_arg, parse_args, quantized_args
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -1163,7 +1163,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         # (input is not a complete tensor or output size not factor of input size)
         # then we call GlobalAveragePool and return None for the indices
         try:
-            output_size = symbolic_helper._parse_arg(output_size, "is")
+            output_size = _parse_arg(output_size, "is")
         except Exception:
             return symbolic_helper._onnx_unsupported(
                 "adaptive pooling, since output_size is not constant."
@@ -1333,7 +1333,7 @@ replication_pad3d = replication_pad
 
 
 def pad(g, input, pad, mode, value):
-    mode = symbolic_helper._parse_arg(mode, "s")
+    mode = _parse_arg(mode, "s")
     if mode == "replicate":
         return replication_pad(g, input, pad)
     elif mode == "reflect":
@@ -2067,7 +2067,7 @@ def index_put(g, self, indices_list_value, values, accumulate):
         args = [self] + indices_list + [values, accumulate]
         return g.at("index_put", *args)
 
-    accumulate = symbolic_helper._parse_arg(accumulate, "b")
+    accumulate = _parse_arg(accumulate, "b")
 
     if len(indices_list) == 0:
         if accumulate:
@@ -2079,7 +2079,7 @@ def index_put(g, self, indices_list_value, values, accumulate):
 
 
 def index_fill(g, self, dim, index, value):
-    dim_value = symbolic_helper._parse_arg(dim, "i")
+    dim_value = _parse_arg(dim, "i")
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "index_fill",
@@ -2101,7 +2101,7 @@ def index_fill(g, self, dim, index, value):
 
 
 def index_copy(g, self, dim, index, source):
-    dim_value = symbolic_helper._parse_arg(dim, "i")
+    dim_value = _parse_arg(dim, "i")
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("index_copy", self, index, source, dim_i=dim_value)
     expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
@@ -4253,14 +4253,14 @@ def linalg_norm(g, self, ord, dim, keepdim, dtype):
                 "dim", "Input rank must be known at export time."
             )
         if self_dim == 1:
-            ord_value = symbolic_helper._parse_arg(ord, "f")
+            ord_value = _parse_arg(ord, "f")
         else:
             dim = [0, 1]
     else:
         if len(dim) == 1:
             if symbolic_helper._is_none(ord):
                 ord = g.op("Constant", value_t=torch.LongTensor([2]))
-            ord_value = symbolic_helper._parse_arg(ord, "f")
+            ord_value = _parse_arg(ord, "f")
     if ord_value:
         return linalg_vector_norm(g, self, ord_value, dim, keepdim, dtype)
     return linalg_matrix_norm(g, self, ord, dim, keepdim, dtype)
@@ -4297,13 +4297,13 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
 @parse_args("v", "v", "is", "i", "v")
 def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.matrix_norm.html
-    ord_value = symbolic_helper._parse_arg(ord, "s")
+    ord_value = _parse_arg(ord, "s")
     if ord_value == "fro":
         return frobenius_norm(g, self, dim, keepdim)
     elif ord_value == "nuc":
         return symbolic_helper._unimplemented("linalg.matrix_norm", "ord==nuc")
     else:
-        ord_value = symbolic_helper._parse_arg(ord, "f")
+        ord_value = _parse_arg(ord, "f")
         if ord_value is None:
             return frobenius_norm(g, self, dim, keepdim)
         if ord_value == 2 or ord_value == -2:
