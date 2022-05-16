@@ -295,6 +295,9 @@ class TORCH_API TensorExprKernel {
   std::vector<torch::jit::StrideInput>& getSymbolicStrideDesc(
       const torch::jit::Value* value);
 
+  // Abstract graph optimizations as a single function.
+  void optimizeOwningGraph();
+
   int64_t nInputs_ = 0;
   int64_t nOutputs_ = 0;
   std::vector<CodeGen::BufferArg> bufferArgs_;
@@ -342,9 +345,6 @@ class TORCH_API TensorExprKernel {
   // map from <input index, tensor dimension> to stride as arg VarHandle
   std::unordered_map<std::pair<size_t, size_t>, VarHandle, SmallSizeTPairHash>
       strideArgToVar_;
-  std::unordered_map<size_t, std::vector<torch::jit::StrideInput>>
-      sym_stride_inputs_;
-  std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs_;
   std::unordered_map<
       const torch::jit::Value*,
       std::vector<torch::jit::StrideInput>>

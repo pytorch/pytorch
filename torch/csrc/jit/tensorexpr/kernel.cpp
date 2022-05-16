@@ -1553,11 +1553,42 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
       : MemoryLayoutPolicy::kContiguous;
 }
 
+void TensorExprKernel::optimizeOwningGraph() {
+  GRAPH_DUMP("TensorExprKernel graph (Before graph optimization):", graph_);
+
+  // We may manipulate output pointers in graph manipulation. So we store the
+  // orignal outputs for symbolic strides information synchronization
+  std::vector<jit::Value*> _orignal_graph_outputs;
+  auto graph_outputs = graph_->outputs();
+  std::copy(
+      graph_outputs.begin(),
+      graph_outputs.end(),
+      std::back_inserter(_orignal_graph_outputs));
+
+  // Get the graph device information first. The graph optimization
+  // might be device specific.
+  device_ = *pickDeviceType(graph_);
+
+  // Optimize the NNC owning graph
+  OptimizeCat(graph_);
+
+  // Synchronize the symbolic strides information
+  graph_outputs = graph_->outputs();
+  TORCH_INTERNAL_ASSERT(graph_outputs.size() == _orignal_graph_outputs.size());
+  for (int i : c10::irange(graph_outputs.size())) {
+    auto el_orig = _orignal_graph_outputs.at(i);
+    auto el_new = graph_outputs.at(i);
+    if (symbolic_strides_.count(el_orig) && (el_orig != el_new)) {
+      symbolic_strides_[el_new] = symbolic_strides_[el_orig];
+      symbolic_strides_.erase(el_orig);
+    }
+  }
+
+  GRAPH_DUMP("TensorExprKernel graph (After graph optimization):", graph_);
+}
+
 void TensorExprKernel::compile() {
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
-
-  device_ = *pickDeviceType(graph_);
-  OptimizeCat(graph_);
 
   has_symbolic_shapes_ = !symbolic_shape_inputs_.empty();
   nInputs_ = graph_->inputs().size();
@@ -1649,8 +1680,10 @@ void TensorExprKernel::compile() {
     if (has_symbolic_shapes_) {
       auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
       tensorOutputSymbolicSizes_.push_back(sizes);
-      TORCH_INTERNAL_ASSERT(sym_stride_outputs_.count(i));
-      auto stride_desc = sym_stride_outputs_[i];
+      TORCH_INTERNAL_ASSERT(symbolic_strides_.count(output));
+      auto stride_desc_vec = symbolic_strides_[output];
+      TORCH_INTERNAL_ASSERT(stride_desc_vec.size() == 1);
+      auto stride_desc = stride_desc_vec[0];
       tensorOutputStrideDesc_.push_back(stride_desc);
       Tensor properly_strided_output =
           convertSymbolicOutputToCorrectStrides(output);
@@ -1732,20 +1765,7 @@ TensorExprKernel::TensorExprKernel(
       pre_alloc_(pre_alloc),
       kernel_func_name_(kernel_func_name),
       symbolic_strides_(std::move(symbolic_strides)) {
-  // convert symbolic_stride to map by output and input index,
-  // since we may manipulate output pointers in graph manipulation
-  for (size_t i : c10::irange(graph_->inputs().size())) {
-    if (symbolic_strides_.count(graph_->inputs().at(i))) {
-      sym_stride_inputs_[i] = symbolic_strides_[graph_->inputs().at(i)];
-    }
-  }
-  for (size_t i : c10::irange(graph_->outputs().size())) {
-    if (symbolic_strides_.count(graph_->outputs().at(i))) {
-      auto& desc = symbolic_strides_[graph_->outputs().at(i)];
-      TORCH_INTERNAL_ASSERT(desc.size() == 1);
-      sym_stride_outputs_[i] = desc[0];
-    }
-  }
+  optimizeOwningGraph();
 
   allow_fallback_ = fallbackAllowed();
 
