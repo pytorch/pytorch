@@ -16,6 +16,7 @@ import collections.abc
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, Iterable
 from dataclasses import dataclass, asdict
+from torchgen.utils import dataclass_repr
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -927,6 +928,9 @@ class OpInfo(object):
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
         return self.op(*args, **kwargs)
+
+    def __str__(self):
+        return dataclass_repr(self)
 
     def get_op(self):
         """Returns the function variant of the operator, torch.<op_name>."""
