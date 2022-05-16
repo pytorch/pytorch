@@ -383,6 +383,29 @@ namespace at {
 namespace native {
 namespace {
 
+template <bool kReluFused>
+class QConv1dInt8 final {
+ public:
+  static Tensor run(
+      Tensor act,
+      const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_weight,
+      double output_scale,
+      int64_t output_zero_point) {
+    at::Tensor output;
+    // we currently use conv2d kernel for conv1d by making the input and weight tensors
+    // 4D rather than 3D. we add a dummy width dimension of size 1
+    // N, C, L -> N, C, 1, L
+    act = act.unsqueeze(-2);
+    if (kReluFused) {
+      output = packed_weight->apply_relu(act, output_scale, output_zero_point);
+    } else {
+      output = packed_weight->apply(act, output_scale, output_zero_point);
+    }
+    // N, C, 1, L -> N, C, L
+    return output.squeeze_(-2);
+  }
+};
+
 template <int kSpatialDim, bool kReluFused>
 class QConvInt8 final {
  public:
@@ -403,6 +426,13 @@ class QConvInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
+  // the cpu conv1d doesn't use the quantized::conv1d*.new variant for packed weights. instead it just uses
+  // quantized::conv1d for packed weights (see quantized/library.cpp).
+  // this is inconsistent with what has been done for conv2d where new variants use packed weights, and
+  // old variant does not. we adopt this inconsistency for now to be consistent with QuantizedCPU's conv1d
+  // and will eventually deprecate the old variants
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d"), QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_relu"), QConv1dInt8<true>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d.new"), QConvInt8<2, false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu.new"), QConvInt8<2, true>::run);
 }

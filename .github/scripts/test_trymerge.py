@@ -178,6 +178,16 @@ class TestGitHubPR(TestCase):
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         self.assertRaisesRegex(MandatoryChecksMissingError, ".*are not yet run.*", lambda: find_matching_merge_rule(pr, repo))
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_author_many_reviews(self, mocked_gql: Any) -> None:
+        """ Tests that all reviews can be fetched
+        """
+        pr = GitHubPR("pytorch", "pytorch", 76123)
+        approved_by = pr.get_approved_by()
+        self.assertGreater(len(approved_by), 0)
+        assert pr._reviews is not None  # to pacify mypy
+        self.assertGreater(len(pr._reviews), 100)
+
 
 if __name__ == "__main__":
     main()
