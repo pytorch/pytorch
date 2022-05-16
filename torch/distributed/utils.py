@@ -7,6 +7,8 @@ from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
     is_namedtuple as _is_namedtuple
 )
 
+__all__ = [] # type: ignore[var-annotated]
+
 def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     r"""
     Recursively moves input to the target_gpu.
