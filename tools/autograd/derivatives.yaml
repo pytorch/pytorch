@@ -2713,3 +2713,6 @@
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
+
+- name: special_dawson(Tensor self) -> Tensor
+  self: non_differentiable

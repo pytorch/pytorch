@@ -13,10 +13,6 @@ Functions
 -----------------------
 
 .. autofunction:: entr
-.. autofunction:: erf
-.. autofunction:: erfc
-.. autofunction:: erfcx
-.. autofunction:: erfinv
 .. autofunction:: expit
 .. autofunction:: expm1
 .. autofunction:: exp2
@@ -44,3 +40,15 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+
+Error Functions and Exponential Integrals
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Error Functions
+"""""""""""""""
+
+.. autofunction:: dawson
+.. autofunction:: erf
+.. autofunction:: erfc
+.. autofunction:: erfcx
+.. autofunction:: erfinv

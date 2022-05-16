@@ -18228,12 +18228,25 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
-    OpInfo(
-        'scatter_reduce',
-        variant_test_name='amax',
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        sample_inputs_func=sample_inputs_scatter_reduce,
+    UnaryUfuncInfo(
+        'special.dawson',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.int16: 1e-2,
+                    torch.int32: 1e-2,
+                    torch.int64: 1e-2,
+                    torch.float16: 1e-2,
+                    torch.float32: 1e-2,
+                    torch.float64: 1e-2,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        dtypesIfCUDA=all_types_and(torch.bool),
+        ref=scipy.special.dawsn if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+        supports_forward_ad=False,
     ),
 ]
 

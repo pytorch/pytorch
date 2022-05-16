@@ -374,6 +374,22 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
+const char dawson_name[] = "dawson";
+
+void dawson_kernel_cuda(TensorIteratorBase& iterator) {
+#ifdef USE_JITERATOR
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "dawson_cuda", [&]() {
+        jitted_gpu_kernel<dawson_name, scalar_t, scalar_t, 1>(iterator, dawson_string);
+    });
+#else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "dawson_cuda", [&]() {
+        gpu_kernel(iterator, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+            return dawson(x);
+        });
+    });
+#endif
+} // dawson_kernel_cuda
+
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
 REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_cuda);
@@ -390,6 +406,7 @@ REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
 REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
 REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_cuda);
 REGISTER_DISPATCH(special_erfcx_stub, &erfcx_kernel_cuda);
+REGISTER_DISPATCH(special_dawson_stub, &dawson_kernel_cuda);
 
 } // namespace native
 } // namespace at

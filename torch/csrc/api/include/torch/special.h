@@ -565,4 +565,20 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Dawson integral D(x).
+/// See https://pytorch.org/docs/master/special.html#torch.special.dawson.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::dawson(t);
+/// ```
+inline Tensor dawson(const Tensor& self) {
+  return torch::special_dawson(self);
+}
+
+inline Tensor& dawson_out(Tensor& result, const Tensor& self) {
+  return torch::special_dawson_out(result, self);
+}
+
 }} // torch::special

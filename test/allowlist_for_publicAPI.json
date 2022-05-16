@@ -3090,6 +3090,7 @@
     "softmax"
   ],
   "torch.special": [
+    "dawson",
     "digamma",
     "entr",
     "erf",

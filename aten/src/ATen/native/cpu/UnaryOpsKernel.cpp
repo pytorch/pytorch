@@ -559,6 +559,14 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
       });
 }
 
+static void dawson_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "dawson_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) -> scalar_t {
+            return dawson(x);
+        });
+    });
+} // dawson_kernel
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -649,6 +657,7 @@ REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
+REGISTER_DISPATCH(special_dawson_stub, &CPU_CAPABILITY::dawson_kernel);
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
