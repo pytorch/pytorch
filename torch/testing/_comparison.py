@@ -283,13 +283,11 @@ class Pair(abc.ABC):
         expected: Any,
         *,
         id: Tuple[Any, ...] = (),
-        msg: Optional[str] = None,
         **unknown_parameters: Any,
     ) -> None:
         self.actual = actual
         self.expected = expected
         self.id = id
-        self.msg = msg
         self._unknown_parameters = unknown_parameters
 
     @staticmethod
@@ -298,18 +296,15 @@ class Pair(abc.ABC):
         if not all(isinstance(input, cls) for input in inputs):
             raise UnsupportedInputs()
 
-    def _make_error_meta(self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()) -> ErrorMeta:
+    def _make_error_meta(self, type: Type[Exception], msg: str) -> ErrorMeta:
         """Makes an :class:`ErrorMeta` from a given exception type and message and the stored id.
-
-        If ``type`` is an :class:`AssertionError` and a ``msg`` was supplied during instantiation, this will override
-        the passed ``msg``.
 
         .. warning::
 
             Since this method uses instance attributes of :class:`Pair`, it should not be used before the
             ``super().__init__(...)`` call in the constructor.
         """
-        return ErrorMeta(type, self.msg if self.msg and type is AssertionError else msg, id=self.id or id)
+        return ErrorMeta(type, msg, id=self.id)
 
     @abc.abstractmethod
     def compare(self) -> None:
@@ -1016,6 +1011,7 @@ def assert_equal(
     pair_types: Sequence[Type[Pair]] = (ObjectPair,),
     sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
     mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
+    msg: Optional[Union[str, Callable[[str], str]]] = None,
     **options: Any,
 ) -> None:
     """Asserts that inputs are equal.
@@ -1070,6 +1066,10 @@ def assert_equal(
     if not error_metas:
         return
 
+    if msg is not None:
+        for error_meta in error_metas:
+            error_meta.msg = msg(error_meta.msg) if callable(msg) else msg
+
     # TODO: compose all metas into one AssertionError
     raise error_metas[0].to_error()
 
@@ -1086,7 +1086,7 @@ def assert_close(
     check_dtype: bool = True,
     check_layout: bool = True,
     check_stride: bool = False,
-    msg: Optional[str] = None,
+    msg: Optional[Union[str, Callable[[str], str]]] = None,
 ):
     r"""Asserts that ``actual`` and ``expected`` are close.
 
@@ -1146,7 +1146,9 @@ def assert_close(
             check is disabled, tensors with different ``layout``'s are converted to strided tensors before being
             compared.
         check_stride (bool): If ``True`` and corresponding tensors are strided, asserts that they have the same stride.
-        msg (Optional[str]): Optional error message to use in case a failure occurs during the comparison.
+        msg (Optional[Union[str, Callable[[str], str]]]): Optional error message to use in case a failure occurs during
+            the comparison. Can also passed as callable in which case it will be called with the generated message and
+            should return the new message.
 
     Raises:
         ValueError: If no :class:`torch.Tensor` can be constructed from an input.
@@ -1297,6 +1299,20 @@ def assert_close(
         Traceback (most recent call last):
         ...
         AssertionError: Argh, the tensors are not close!
+        >>> # If msg is a callable, it can be used to augment the generated message with
+        >>> # extra information
+        >>> torch.testing.assert_close(actual, expected, msg=lambda msg: f"Header\n\n{msg}\n\nFooter")
+        Traceback (most recent call last):
+        ...
+        AssertionError: Header
+        <BLANKLINE>
+        Tensor-likes are not close!
+        <BLANKLINE>
+        Mismatched elements: 2 / 3 (66.7%)
+        Greatest absolute difference: 2.0 at index (1,) (up to 1e-05 allowed)
+        Greatest relative difference: 1.0 at index (1,) (up to 1.3e-06 allowed)
+        <BLANKLINE>
+        Footer
     """
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
