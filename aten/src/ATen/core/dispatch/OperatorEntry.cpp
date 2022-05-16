@@ -58,7 +58,7 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
   return kernel;
 }
 
-void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug, const c10::optional<std::unordered_set<Tags>>& tags) {
+void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug, const std::vector<Tags>& tags) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   for (const auto& kernel : kernels_) {
     for (const auto &j : kernel.second) {
@@ -208,6 +208,10 @@ const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispat
     return &kern_it->second.front();
   }
   return nullptr;
+}
+
+const std::vector<Tags>& OperatorEntry::getTags() const {
+  return tags_;
 }
 
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {

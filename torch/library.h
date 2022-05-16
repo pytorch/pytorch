@@ -596,7 +596,7 @@ class TORCH_API Library final {
   /// ```
 
   template <typename Schema>
-  Library& def(Schema&& raw_schema, std::unordered_set<Tags> tags = {}) & {
+  Library& def(Schema&& raw_schema, const std::vector<Tags>& tags = {}) & {
     c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
     return _def(std::move(s), nullptr, std::move(tags));
   }
@@ -814,7 +814,7 @@ class TORCH_API Library final {
   Library& _def(
       c10::FunctionSchema&& schema,
       c10::OperatorName* out_name = nullptr,
-      const c10::optional<std::unordered_set<Tags>>& tags = c10::nullopt) &;
+      const std::vector<Tags>& tags = {}) &;
   Library& _def(
       c10::either<c10::OperatorName, c10::FunctionSchema>&&,
       CppFunction&& f) &;

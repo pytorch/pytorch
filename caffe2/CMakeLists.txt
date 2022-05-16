@@ -400,6 +400,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_sparse_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/enum_tags.cpp"
     )
 
   set(GENERATED_H_PYTHON
@@ -461,6 +462,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_sparse_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_return_types.cpp"
+    "${TOOLS_PATH}/autograd/templates/enum_tags.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py.in"
     "${TOOLS_PATH}/autograd/deprecated.yaml"

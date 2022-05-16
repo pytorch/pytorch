@@ -182,7 +182,7 @@ public:
    * If a schema with the same operator name and overload name already exists,
    * this function will check that both schemas are exactly identical.
    */
-  RegistrationHandleRAII registerDef(FunctionSchema schema, std::string debug, const c10::optional<std::unordered_set<Tags>>& tags = c10::nullopt);
+  RegistrationHandleRAII registerDef(FunctionSchema schema, std::string debug, const std::vector<Tags>& tags = {});
 
   /**
    * Register a kernel to the dispatch table for an operator.
@@ -342,6 +342,19 @@ public:
 
   void checkInvariants() const {
     return operatorDef_->op.checkInvariants();
+  }
+
+  const std::vector<Tags>& getTags() const {
+    return operatorDef_->op.getTags();
+  }
+
+  bool hasTag(const Tags& tag) const {
+    for(const auto& tag_: getTags()) {
+      if (tag == tag_) {
+        return true;
+      }
+    }
+    return false;
   }
 
   template<class FuncType>

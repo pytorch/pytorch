@@ -99,7 +99,7 @@ public:
   // attempt to register a schema when one is already present or vice
   // versa that is an error.  (Refcounting for the registrations is
   // handled in the OperatorHandle in Dispatcher)
-  void registerSchema(FunctionSchema&&, std::string&& debug, const c10::optional<std::unordered_set<Tags>>& tags = c10::nullopt);
+  void registerSchema(FunctionSchema&&, std::string&& debug, const std::vector<Tags>& tags = {});
   void deregisterSchema();
 
   const OperatorName& operator_name() const {
@@ -206,12 +206,14 @@ public:
   bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
   // Returns true if kernel_ has entry for a particular key.
   bool hasKernelForDispatchKey(DispatchKey k) const;
+  // Returns all the operator tags added at the time of registration
+  const std::vector<Tags>& getTags() const;
 
 private:
 
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
-  c10::optional<std::unordered_set<Tags>> tags_;
+  std::vector<Tags> tags_;
   std::array<KernelFunction, c10::num_runtime_entries> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 

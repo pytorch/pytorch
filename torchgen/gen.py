@@ -147,6 +147,7 @@ class LineLoader(YamlLoader):
 
 
 _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
+_GLOBAL_PARSE_TAGS_YAML_CACHE = {}
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
@@ -212,21 +213,21 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
 
 @functools.lru_cache(maxsize=None)
 def parse_tags_yaml(path: str) -> Set[str]:
-    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
-    with open(path, "r") as f:
-        es = yaml.load(f, Loader=LineLoader)
-        valid_tags = parse_tags_yaml_struct(es, path=path)
-    return valid_tags
+    global _GLOBAL_PARSE_TAGS_YAML_CACHE
+    if path not in _GLOBAL_PARSE_TAGS_YAML_CACHE:
+        with open(path, "r") as f:
+            es = yaml.load(f, Loader=LineLoader)
+            _GLOBAL_PARSE_TAGS_YAML_CACHE[path] = parse_tags_yaml_struct(es, path=path)
+
+    return _GLOBAL_PARSE_TAGS_YAML_CACHE[path]
 
 
 def parse_native_yaml(
     path: str, tags_yaml_path: str, ignore_keys: Optional[Set[DispatchKey]] = None
 ) -> ParsedYaml:
-    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         valid_tags = parse_tags_yaml(tags_yaml_path)
-        _GLOBAL_PARSE_NATIVE_YAML_CACHE[tags_yaml_path] = valid_tags
         with open(path, "r") as f:
             es = yaml.load(f, Loader=LineLoader)
         _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(
@@ -484,11 +485,7 @@ class RegisterSchema:
             return None
         if len(f.tags) == 0:
             return f"m.def({cpp_string(str(f.func))});\n"
-        tags = (
-            "std::unordered_set<Tags>({"
-            + ", ".join([f"{tag}" for tag in f.tags])
-            + "})"
-        )
+        tags = "{" + ", ".join([f"{tag}" for tag in f.tags]) + "}"
         return f"m.def({cpp_string(str(f.func))}, {tags});\n"
 
 
@@ -2391,7 +2388,7 @@ def main() -> None:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
-    valid_tags = _GLOBAL_PARSE_NATIVE_YAML_CACHE[tags_yaml_path]
+    valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
