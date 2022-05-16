@@ -344,7 +344,7 @@ $5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
             log_input("x", x)
             x.to(dtype=torch.double)  # non-optional dtype
             torch.cumprod(x, 0, dtype=torch.double)  # optional dtype
-            x[:,1].contiguous(memory_format=torch.contiguous_format)  # optional memory format
+            x[:, 1].contiguous(memory_format=torch.contiguous_format)  # optional memory format
             # There doesn't appear to be any layout signatures which are
             # triggerable using tensor subclasses (need to use a mode)
 

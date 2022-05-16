@@ -57,7 +57,7 @@ def _register_sharded_op_on_local_tensor(
     """
     @sharded_op_impl(op)
     @_sharded_op_common(op, early_stop_func, extra_check)
-    def sharded_tensor_op_on_local_shards(types, args=(), kwargs=None, pg=None):
+    def sharded_tensor_op_on_local_tensor(types, args=(), kwargs=None, pg=None):
         st = args[0]
         sharding_spec = st.sharding_spec()
         _chunk_sharding_spec_check(sharding_spec, op)
