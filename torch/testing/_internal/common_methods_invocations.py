@@ -14811,7 +14811,12 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    supports_sparse_csr=True,
                    supports_fwgrad_bwgrad=True,
-                   decorators=(precisionOverride({torch.bfloat16: 7e-2}),),
+                   decorators=(
+                       precisionOverride({torch.bfloat16: 7e-2}),
+                       DecorateInfo(
+                           toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
+                           'TestUnaryUfuncs', 'test_reference_numerics_large'),
+                    ),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/47358
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
@@ -14840,9 +14845,6 @@ op_db: List[OpInfo] = [
                        # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
                                     dtypes=(torch.chalf,),),
-                       # AssertionError: Tensor-likes are not close!
-                       DecorateInfo(unitted.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda', dtypes=(torch.chalf,),),
                    )),
     UnaryUfuncInfo('square',
                    ref=np.square,
