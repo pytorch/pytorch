@@ -22764,6 +22764,84 @@ TEST_F(NVFuserTest, FusionRedundantPredSync_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionUnsqueeze1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> shape({10, 11});
+
+  auto tv0 = makeConcreteTensor(shape);
+  fusion.addInput(tv0);
+
+  // [I, R]
+  auto tv1 = sum(tv0, {1});
+  // [I, B]
+  auto tv2 = unsqueeze(tv1, -1);
+  fusion.addOutput(tv2);
+
+  TORCH_CHECK(
+      tv2->nDims() == 2, "Unpected unsqueeze result: ", tv2->toString());
+  TORCH_CHECK(
+      tv2->axis(1)->isBroadcast(),
+      "Unexpected unsqueeze result: ",
+      tv2->toString());
+
+  // tv1 has only one non-reduction axis. An exception should be
+  // thrown.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(unsqueeze(tv1, 2));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({10, 11}, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto ref = t0.sum(1).unsqueeze(-1);
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionSqueeze1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> shape({10, 11});
+
+  auto tv0 = makeConcreteTensor(shape);
+  fusion.addInput(tv0);
+
+  // [I, B]
+  auto tv1 = sum(tv0, {1}, true);
+  // [I]
+  auto tv2 = squeeze(tv1, {shape[0], 1});
+  fusion.addOutput(tv2);
+
+  TORCH_CHECK(
+      tv2->nDims() == 2, "Unexpected squeeze result: ", tv2->toString());
+
+  // [I, R]
+  auto tv3 = sum(tv0, {1});
+  // tv3 has only one non-reduction axis. The extent of the first axis
+  // is not one, so squeeze should fail.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(squeeze(tv3, {shape[0], 1}));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({10, 11}, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto ref = t0.sum(1, true).squeeze(-1);
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

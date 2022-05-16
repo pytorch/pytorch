@@ -845,9 +845,12 @@ TensorView* broadcast(
   auto nBCastDims = is_broadcast_dim.size();
   // Validate is_broadcast_dim
   unsigned int n_broadcasts = 0;
-  for (auto ent : is_broadcast_dim)
-    if (ent)
+  for (auto ent : is_broadcast_dim) {
+    if (ent) {
       n_broadcasts++;
+    }
+  }
+
   TORCH_CHECK(
       nBCastDims - n_broadcasts ==
           TensorDomain::noReductions(inp->getMaybeRFactorDomain()).size(),
