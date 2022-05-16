@@ -2830,8 +2830,6 @@ class TestFunctionalize(TestCase):
         self.assertEqual(inpt1, inpt2)
         self.assertEqual(inpt1, inpt3)
 
-    # BUG: RuntimeError: Tensors of type FunctionalTensorWrapper do not have strides
-    @unittest.expectedFailure
     def test_simple_view(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -2841,8 +2839,6 @@ class TestFunctionalize(TestCase):
             return x
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
 
-    # BUG: RuntimeError: Tensors of type FunctionalTensorWrapper do not have strides
-    @unittest.expectedFailure
     def test_multioutput_view(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -2854,8 +2850,6 @@ class TestFunctionalize(TestCase):
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
 
 
-    # BUG: RuntimeError: Tensors of type FunctionalTensorWrapper do not have strides
-    @unittest.expectedFailure
     def test_inplace_view(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -2881,8 +2875,6 @@ class TestFunctionalize(TestCase):
         out_actual = functionalize(f)(x, y, z)
         self.assertEqual(out_expected, out_actual)
 
-    # BUG: RuntimeError: Tensors of type FunctionalTensorWrapper do not have strides
-    @unittest.expectedFailure
     def test_multioutput_inplace_slice_view(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
