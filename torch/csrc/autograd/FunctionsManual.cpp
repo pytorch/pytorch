@@ -624,7 +624,7 @@ Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, in
 
   // Reference: https://github.com/tensorflow/tensorflow/blob/
   // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
-  return AT_DISPATCH_FLOATING_TYPES(
+  return AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
       [grad, self, result, dim]() {
@@ -918,11 +918,20 @@ Tensor mm_mat2_backward(const Tensor& grad, const Tensor& mat1, IntArrayRef mat2
   return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
 }
 
-Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {
-  AT_ASSERT(sparse_.is_sparse());
-  auto sparse = sparse_.coalesce();
-  Tensor grad_sparse = maybe_multiply(grad.mm(dense.conj().t()), alpha);
-  return grad_sparse.sparse_mask(sparse);
+Tensor mm_mat1_sparse_backward(const Tensor& grad, const Tensor& mat1, const Tensor& mat2, const Scalar& alpha) {
+  if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided && mat1.is_sparse()) {
+    auto sparse = mat1.coalesce();
+    Tensor grad_sparse = maybe_multiply(grad.mm(mat2.conj().t()), alpha);
+    return grad_sparse.sparse_mask(sparse);
+  } else if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided && mat1.is_sparse_csr()) {
+    return at::sparse_sampled_addmm(at::zeros_like(mat1, mat1.options()), grad, mat2.mH(), 1.0, alpha);
+  } else if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided && mat1.layout() == c10::kStrided) {
+    return maybe_multiply(grad.mm(mat2.mH()), alpha);
+  }
+  TORCH_CHECK(false, "sparse_addmm_sparse_backward: unsupported combination of layouts",
+    ", grad: ", grad.layout(),
+    ", mat1: ", mat1.layout(),
+    ", mat2: ", mat2.layout());
 }
 
 // This function return a new SparseTensor with values from Tensor `input` filtered by indices of `mask`
@@ -5516,7 +5525,7 @@ Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_opt
   return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
 }
 
-std::tuple<Tensor, Tensor> _index_reduce_backward(
+std::tuple<Tensor, Tensor> index_reduce_backward(
   const Tensor& grad,
   const Tensor& self,
   int dim,
