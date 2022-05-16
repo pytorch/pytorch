@@ -49,6 +49,30 @@
     }                                                                   \
   } ()
 
+#define AT_DISPATCH_SPARSE_ROW_COMPRESSED_LAYOUTS(LAYOUT, NAME, ROW_DIM_ACTION) \
+  [&]() {                                                               \
+    const auto& the_layout = LAYOUT;                                    \
+    switch (the_layout) {                                               \
+    case kSparseCsr:                                                    \
+    case kSparseBsr:                                                    \
+      return (ROW_DIM_ACTION)();                                        \
+    default:                                                            \
+      AT_ERROR(#NAME, " expected sparse row compressed tensor layout but got ", the_layout); \
+    }                                                                   \
+  } ()
+
+#define AT_DISPATCH_SPARSE_COL_COMPRESSED_LAYOUTS(LAYOUT, NAME, COL_DIM_ACTION) \
+  [&]() {                                                               \
+    const auto& the_layout = LAYOUT;                                    \
+    switch (the_layout) {                                               \
+    case kSparseCsc:                                                    \
+    case kSparseBsc:                                                    \
+      return (COL_DIM_ACTION)();                                        \
+    default:                                                            \
+      AT_ERROR(#NAME, " expected sparse column compressed tensor layout but got ", the_layout); \
+    }                                                                   \
+  } ()
+
 namespace at {
 namespace sparse_csr {
 
