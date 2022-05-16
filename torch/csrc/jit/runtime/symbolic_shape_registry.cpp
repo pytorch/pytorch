@@ -384,6 +384,22 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
   return c10::nullopt;
 }
 
+TORCH_API c10::optional<std::pair<std::shared_ptr<Graph>, std::shared_ptr<Graph>>> boundedGraphsForSchema(
+    const FunctionSchema& schema){
+  std::lock_guard<std::mutex> guard(lock);
+  if (cached_bounded_schema_to_graph.size() == 0) {
+    loadFunctions();
+  }
+  GRAPH_DEBUG("Trying to find schema in bounded graphs: ", schema);
+  auto cache_it = cached_bounded_schema_to_graph.find(&schema);
+  if (cache_it != cached_bounded_schema_to_graph.end()) {
+    return cache_it->second;
+  }
+
+  return c10::nullopt;
+
+}
+
 void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
     std::shared_ptr<Graph> g) {

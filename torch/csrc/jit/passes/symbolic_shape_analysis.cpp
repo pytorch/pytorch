@@ -568,6 +568,10 @@ struct SymbolicShapeOpAnalyzer {
     shape_compute_graph_ = (*maybe_graph)->copy();
   }
 
+  SymbolicShapeOpAnalyzer(const FunctionSchema* schema, std::shared_ptr<Graph> graph) : schema_(schema) {
+    shape_compute_graph_ = graph->copy();
+  }
+
   c10::optional<std::vector<c10::SymbolicShape>> run(
       std::vector<SSArgument>& inputs) {
     if (!shape_compute_graph_) {
@@ -1095,6 +1099,13 @@ calculateSymbolicShapesOnOp(
       ssa_args.emplace_back(ShapeArguments(*ss));
     }
   }
+  // Handle bounded shape option
+  /*
+  auto bounded_graphs = get_bounded_shape_compute_graphs(schema);
+  if(bounded_graphs){
+
+  }
+  */
 
   auto op_analyzer = SymbolicShapeOpAnalyzer(schema);
   auto res = op_analyzer.run(ssa_args);
