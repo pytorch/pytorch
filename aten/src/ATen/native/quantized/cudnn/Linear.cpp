@@ -94,7 +94,6 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   if (quantized_output.numel() == 0) {
     return;
   }
-  at::Tensor linear_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   auto act_scale = input.q_scale();
   auto weight_scale = orig_weight.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
@@ -127,7 +126,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   setLinearParams(&key.params, input, orig_weight, deterministic, allow_tf32);
 
   key.input_alignment = cudnn_utils::getAlignment(input);
-  key.output_alignment = cudnn_utils::getAlignment(linear_output);
+  key.output_alignment = cudnn_utils::getAlignment(quantized_output);
   key.weight_alignment = cudnn_utils::getAlignment(orig_weight);
   if (bias_.has_value()) {
     key.bias_alignment = cudnn_utils::getAlignment(broadcasted_bias.value());
@@ -147,17 +146,15 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
     auto workspace = at::empty({workspace_size}, input.options().dtype(at::kByte));
-    std::vector<void *> data_ptrs;
-    std::vector<int64_t> uids;
-    data_ptrs.reserve(9);
-    uids.reserve(9);
+    at::SmallVector<void *, 8> data_ptrs;
+    at::SmallVector<int64_t, 8> uids;
     data_ptrs = {input.data_ptr<int8_t>(), weight_transposed.data_ptr<int8_t>(),
                  requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr<int8_t>()};
     uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
-                                         broadcasted_bias.value().data_ptr(), broadcasted_bias.value().data_ptr(), linear_output.data_ptr()});
-      uids.insert(uids.end(), {'b', 'c', 'd', 'n', 'e'});
+                                         broadcasted_bias.value().data_ptr(), broadcasted_bias.value().data_ptr()});
+      uids.insert(uids.end(), {'b', 'c', 'd', 'n'});
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setWorkspacePointer(workspace.data_ptr())
@@ -181,7 +178,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   auto linear_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)
       .setaMatDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_INT8, 'x', key.input_alignment))
       .setbMatDesc(cudnn_utils::getTensorDescriptor(weight_transposed.sizes(), weight_transposed.strides(), CUDNN_DATA_INT8, 'w', key.weight_alignment))
-      .setcMatDesc(cudnn_utils::getTensorDescriptor(linear_output, 'y', key.output_alignment, true))
+      // for virtual tensors, the alignment is not used, so we can just put an arbitrary value here, e.g., key.output_alignment
+      .setcMatDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_FLOAT, 'y', key.output_alignment, true))
       .setmatmulDesc(getLinearDescriptor(key.params.dataType))
       .build();
   // std::cout << "operator:" << linear_op.describe() << std::endl;
@@ -207,7 +205,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
       .build());
 
     // computes (act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)])
-    // where the 1st and 2nd summands is linear_output and broadcasted_bias, resp.
+    // where the 1st and 2nd summands is output of linear op and broadcasted_bias, resp.
     // output is a fp32 tensor
     // we use inplace operation here where the output is assigned to the input
     sum_linear_bias_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
@@ -217,7 +215,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
       // test cases are failing. NVIDIA is currently investigating this issue.
       // When this issue is fixed, we can change 'n' back to 'd' and remove the additional entry in uid and data_ptrs in variant pack above
       .setbDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'n', cudnn_utils::getAlignment(broadcasted_bias.value())))
-      .setyDesc(cudnn_utils::getTensorDescriptor(linear_output, 'e', key.output_alignment))
+      .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_FLOAT, 'e', key.output_alignment, true))
       .setpwDesc(cudnn_utils::getPointWiseAddDescriptor(at::native::getCudnnDataType(broadcasted_bias.value())))
       .build());
   }
@@ -231,8 +229,9 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     // we use inplace operation here where the output is assigned to the input
     relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(tensor2requant_ptr)
-      .setyDesc(cudnn_utils::getTensorDescriptor(linear_output, 'f', key.output_alignment, true))
-      .setpwDesc(cudnn_utils::getPointWiseReluDescriptor(at::native::getCudnnDataType(linear_output)))
+      // for virtual tensors, the alignment is not used, so we can just put an arbitrary value here, e.g., key.output_alignment
+      .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_FLOAT, 'f', key.output_alignment, true))
+      .setpwDesc(cudnn_utils::getPointWiseReluDescriptor(CUDNN_DATA_FLOAT))
       .build());
   }
 
@@ -242,7 +241,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(kReluFused ? relu_op.value().getOutputTensor() : tensor2requant_ptr)
     .setbDesc(cudnn_utils::getTensorDescriptor(requantize_multiplier_tensor, 's', cudnn_utils::getAlignment(requantize_multiplier_tensor)))
-    .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', cudnn_utils::getAlignment(quantized_output)))
+    .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', key.output_alignment))
     .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(requantize_multiplier_tensor)))
     .build();
   // // std::cout << "operator:" << requant_op.describe() << std::endl;
