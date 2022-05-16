@@ -152,6 +152,36 @@ bool Int::sameAs(const Statement* other) const {
   return false;
 }
 
+ComplexDouble::ComplexDouble(IrBuilderPasskey passkey)
+    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
+      maybe_value_{c10::nullopt} {}
+
+ComplexDouble::ComplexDouble(IrBuilderPasskey passkey, ScalarType value)
+    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
+      maybe_value_{value} {}
+
+ComplexDouble::ComplexDouble(
+    IrBuilderPasskey passkey,
+    c10::optional<ScalarType> value)
+    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
+      maybe_value_{value} {}
+
+ComplexDouble::ComplexDouble(const ComplexDouble* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
+
+bool ComplexDouble::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<ComplexDouble>()) {
+    return false;
+  }
+  const auto other_complex = other->as<ComplexDouble>();
+  if (isConst() && other_complex->isConst())
+    return *value() == *(other_complex->value());
+  return false;
+}
+
 UnaryOp::UnaryOp(IrBuilderPasskey passkey, UnaryOpType type, Val* out, Val* in)
     : Expr(passkey, ExprType::UnaryOp),
       unary_op_type_{type},
@@ -351,12 +381,14 @@ ReductionOp::ReductionOp(
     BinaryOpType reduction_op_type,
     Val* init,
     Val* out,
-    Val* in)
+    Val* in,
+    bool is_fused)
     : Expr(passkey, ExprType::ReductionOp),
       reduction_op_type_(reduction_op_type),
       init_(init),
       out_(out),
-      in_(in) {
+      in_(in),
+      is_fused_(is_fused) {
   TORCH_CHECK(
       out->getValType().value() == ValType::TensorView ||
       out->getValType().value() == ValType::TensorIndex);
@@ -393,7 +425,8 @@ WelfordOp::WelfordOp(
     Val* init_N,
     Val* in_avg,
     Val* in_var,
-    Val* in_N)
+    Val* in_N,
+    bool is_fused)
     : Expr(passkey, ExprType::WelfordOp),
       out_avg_(out_avg),
       out_var_(out_var),
@@ -403,7 +436,8 @@ WelfordOp::WelfordOp(
       init_N_(init_N),
       in_avg_(in_avg),
       in_var_(in_var),
-      in_N_(in_N) {
+      in_N_(in_N),
+      is_fused_(is_fused) {
   // Check output type
   TORCH_INTERNAL_ASSERT(
       out_avg->getValType().value() == ValType::TensorView ||
@@ -472,7 +506,8 @@ WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
       init_N_(ir_cloner->clone(src->init_N_)),
       in_avg_(ir_cloner->clone(src->in_avg_)),
       in_var_(src->in_var_ ? ir_cloner->clone(src->in_var_) : nullptr),
-      in_N_(ir_cloner->clone(src->in_N_)) {}
+      in_N_(ir_cloner->clone(src->in_N_)),
+      is_fused_(src->is_fused_) {}
 
 namespace {
 inline bool sameOptionalVal(Val* a, Val* b) {
@@ -495,12 +530,75 @@ bool WelfordOp::sameAs(const Statement* other) const {
   return false;
 }
 
+MmaOp::MmaOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in_a,
+    Val* in_b,
+    Val* init)
+    : Expr(passkey, ExprType::MmaOp),
+      out_(out),
+      in_a_(in_a),
+      in_b_(in_b),
+      init_(init) {
+  // Check output type
+  TORCH_INTERNAL_ASSERT(
+      out->getValType().value() == ValType::TensorView ||
+      out->getValType().value() == ValType::TensorIndex);
+
+  TORCH_INTERNAL_ASSERT(
+      in_a->getValType().value() == ValType::TensorView ||
+          in_a->getValType().value() == ValType::TensorIndex,
+      in_a->getValType().value());
+
+  TORCH_INTERNAL_ASSERT(
+      in_b->getValType().value() == ValType::TensorView ||
+          in_b->getValType().value() == ValType::TensorIndex,
+      in_b->getValType().value());
+
+  addOutput(out);
+  addInput(in_a);
+  addInput(in_b);
+}
+
+MmaOp::MmaOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in_a,
+    Val* in_b,
+    Val* init,
+    MmaOptions options)
+    : MmaOp(passkey, out, in_a, in_b, init) {
+  options_ = options;
+}
+
+MmaOp::MmaOp(const MmaOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_a_(ir_cloner->clone(src->in_a_)),
+      in_b_(ir_cloner->clone(src->in_b_)),
+      init_(ir_cloner->clone(src->init_)),
+      options_(src->options_) {}
+
+bool MmaOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (auto other_mma = dynamic_cast<const MmaOp*>(other)) {
+    return out_->sameAs(other_mma->out_) && in_a_->sameAs(other_mma->in_a_) &&
+        in_b_->sameAs(other_mma->in_b_) && init_->sameAs(other_mma->init_) &&
+        options_ == other_mma->options_;
+  }
+  return false;
+}
+
 ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       reduction_op_type_(src->reduction_op_type_),
       init_(ir_cloner->clone(src->init_)),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {}
+      in_(ir_cloner->clone(src->in_)),
+      is_fused_(src->is_fused_) {}
 
 bool ReductionOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -697,6 +795,22 @@ int GatherOp::gatherAxis(int axis) const {
   return int(windowShape().size()) + axis;
 }
 
+ViewDtypeOp::ViewDtypeOp(
+    IrBuilderPasskey passkey,
+    TensorView* out,
+    TensorView* in,
+    DataType dtype)
+    : Expr(passkey, ExprType::ViewDtypeOp), out_(out), in_(in), dtype_(dtype) {
+  addOutput(out);
+  addInput(in);
+}
+
+ViewDtypeOp::ViewDtypeOp(const ViewDtypeOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)),
+      dtype_(src->dtype()) {}
+
 ViewOp::ViewOp(IrBuilderPasskey passkey, TensorView* out, TensorView* in)
     : Expr(passkey, ExprType::ViewOp), out_(out), in_(in) {
   addOutput(out);
@@ -767,7 +881,8 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
       iter_type_(src->iter_type_),
       is_rfactor_domain_(src->is_rfactor_domain_),
       is_padded_dimension_(src->is_padded_dimension_),
-      padded_to_size_(src->padded_to_size_) {}
+      padded_to_size_(src->padded_to_size_),
+      is_mma_swizzled_(src->is_mma_swizzled_) {}
 
 bool IterDomain::sameAs(const Statement* other) const {
   if (other == this) {
@@ -977,6 +1092,12 @@ void IterDomain::parallelize(ParallelType t) {
         " and extent ",
         extent(),
         " .");
+  }
+
+  if (isMmaSwizzled()) {
+    TORCH_CHECK(
+        t == ParallelType::Vectorize,
+        "Parallel type other than vectorize not allowed for warp mapped ids");
   }
 }
 
@@ -1314,6 +1435,10 @@ void TensorDomain::split(
         "Partial split is only allowed with root domains");
   }
 
+  TORCH_INTERNAL_ASSERT(
+      !id->isMmaSwizzled(),
+      "Further transformation on warp mapped id's not allowed.");
+
   auto split_ids =
       IterDomain::split(id, factor, inner_split, trim_out_of_bounds);
   domain_.erase(domain_.begin() + axis_);
@@ -1348,6 +1473,10 @@ void TensorDomain::merge(int axis_o, int axis_i) {
 
   IterDomain* first = axis(axis_o);
   IterDomain* second = axis(axis_i);
+
+  TORCH_INTERNAL_ASSERT(
+      !first->isMmaSwizzled() && !second->isMmaSwizzled(),
+      "Further transformation on warp mapped id's not allowed.");
 
   IterDomain* merged_id = IterDomain::merge(first, second);
 

@@ -1982,7 +1982,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
 
     for (const auto epoch_index : c10::irange(epoch_count)) {
       (void)epoch_index; // Suppress unused variable warning
-      int iteration_count = 0;
+      unsigned iteration_count = 0;
       for (auto iterator = data_loader->begin(); iterator != data_loader->end();
            ++iterator, ++iteration_count) {
         if ((iteration_count + 1) % save_interval == 0) {
@@ -2316,7 +2316,7 @@ TEST(DataLoaderTest, CustomPreprocessPolicy) {
            ++iterator) {
         auto batch_result = *iterator;
         if (batch_result.size() > chunk_size * cross_chunk_shuffle_count) {
-          for (int i = 0; i < batch_result.size(); i += chunk_size) {
+          for (unsigned i = 0; i < batch_result.size(); i += chunk_size) {
             ASSERT_TRUE(std::is_sorted(
                 batch_result.begin() + i,
                 batch_result.begin() + i + chunk_size));

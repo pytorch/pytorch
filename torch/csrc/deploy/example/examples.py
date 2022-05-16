@@ -146,8 +146,7 @@ class MultiReturn(torch.nn.Module):
     def __init__(self):
         super(MultiReturn, self).__init__()
 
-    def forward(self, t):
-        # type: (Tuple[Tensor, Tensor]) -> Tuple[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor]]
+    def forward(self, t: Tuple[Tensor, Tensor]) -> Tuple[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor]]:
         a, b = t
         result = ((a.masked_fill_(b, 0.1), b), (torch.ones_like(a), b))
         return result

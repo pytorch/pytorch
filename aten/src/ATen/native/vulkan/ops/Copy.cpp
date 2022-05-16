@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 
 namespace at {
@@ -9,7 +10,6 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
   api::Context* const context = api::context();
 
   api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
   {
     // X -> Vulkan
     if (at::kVulkan == self.device().type()) {
@@ -17,28 +17,33 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
 
       // Vulkan -> Vulkan
       if (at::kVulkan == src.device().type()) {
-        command_buffer.copy(
-            // - Read-only access is implied on const tensors.  Memory barriers
-            //   are automatically inserted if a RAW hazard is detected.
-            // - Recording any potential pending sync operations into the same
-            //   command buffer prevents an expensive queue submission.
-            convert(src).buffer(
-                command_buffer,
-                vTensor::Stage::Transfer),
-            // - Write-only access never triggers a sync as the contents will be
-            //   overwritten regardless.  Having said that, appropriate barriers
-            //   are inserted automatically if WAR or WAW hazards are detected.
-            // - Recording pending sync operations into the same command buffer
-            //   prevents an expensive queue submission.
-            v_self.buffer(
-                command_buffer,
-                vTensor::Stage::Transfer,
-                vTensor::Access::Write));
+       api::Command::Buffer& command_buffer = command_pool.stream();
+       {
+          api::OpProfiler profiler(command_buffer, context->querypool(), "copy_");
 
+          command_buffer.copy(
+              // - Read-only access is implied on const tensors.  Memory barriers
+              //   are automatically inserted if a RAW hazard is detected.
+              // - Recording any potential pending sync operations into the same
+              //   command buffer prevents an expensive queue submission.
+              convert(src).buffer(
+                  command_buffer,
+                  vTensor::Stage::Transfer),
+              // - Write-only access never triggers a sync as the contents will be
+              //   overwritten regardless.  Having said that, appropriate barriers
+              //   are inserted automatically if WAR or WAW hazards are detected.
+              // - Recording pending sync operations into the same command buffer
+              //   prevents an expensive queue submission.
+              v_self.buffer(
+                  command_buffer,
+                  vTensor::Stage::Transfer,
+                  vTensor::Access::Write));
+        }
         command_pool.submit(context->gpu().queue, command_buffer);
       }
       // CPU -> Vulkan
       else {
+        api::Command::Buffer& command_buffer = command_pool.stream(); // Don't collect the timestamp since the command buffer doesn't record anything
         const Tensor cpu_src = src.device().is_cpu() ? src : src.cpu();
 
         // Requesting write-only host access to the tensor never triggers a sync
@@ -75,6 +80,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     }
     // Vulkan -> X
     else if (at::kVulkan == src.device().type()) {
+      api::Command::Buffer& command_buffer = command_pool.stream(); // Don't collect the timestamp since the command buffer doesn't record anything
       const vTensor& v_src = convert(src);
 
       // Vulkan -> CPU
