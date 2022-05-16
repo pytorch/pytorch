@@ -301,7 +301,7 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
     re.MULTILINE
 )
 RE_REVERT_CMD = re.compile(r"@pytorch(merge|)bot\s+revert\s+this")
-RE_REVERT_CMD_CLI = re.compile(r"@pytorch(merge|)bot\s+revert\s+(-m.*|-c.*)(-m.*|-c.*)")
+RE_REVERT_CMD_CLI = re.compile(r"@pytorch(merge|)bot\s+revert\s+(-m.*-c.*|-c.*-m.*)")
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 
 
@@ -858,7 +858,8 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
-    while elapsed_time < 400 * 60:
+    timeout_minutes = 400
+    while elapsed_time < timeout_minutes * 60:
         current_time = time.time()
         elapsed_time = current_time - start_time
 
@@ -871,7 +872,7 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
             print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
             time.sleep(60)
     # Finally report timeout back
-    msg = "Merged timed out after 400 minutes. Please contact the pytorch_dev_infra team."
+    msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
     if not dry_run:
         gh_add_labels(org, project, pr_num, ["land-failed"])
