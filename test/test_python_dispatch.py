@@ -338,6 +338,24 @@ $3 = torch._ops.aten.kl_div.default($0, $1, 2)
 $4 = torch._ops.aten.kl_div.default($0, $1, log_target=True)
 $5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
 
+    def test_produce_real_type(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(2, 2))
+            log_input("x", x)
+            x.to(dtype=torch.double)  # non-optional dtype
+            torch.cumprod(x, 0, dtype=torch.double)  # optional dtype
+            x[:, 1].contiguous(memory_format=torch.contiguous_format)  # optional memory format
+            # There doesn't appear to be any layout signatures which are
+            # triggerable using tensor subclasses (need to use a mode)
+
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
+$2 = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
+$3 = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
+$4 = torch._ops.aten.select.int($3, 1, 1)
+$5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)''')
+
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):

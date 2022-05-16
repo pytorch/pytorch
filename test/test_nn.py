@@ -418,6 +418,13 @@ class TestNN(NNTestCase):
 
         return l, n, s
 
+    def test_parse_to(self):
+        # Test for buggy use of THPMemoryFormat_New
+        self.assertEqual(
+            repr(torch._C._nn._parse_to(memory_format=torch.contiguous_format)[3]),
+            "torch.contiguous_format"
+        )
+
     def test_requires_grad_(self):
         m = self._create_basic_net()[-1]
         assert len(list(m.buffers())) > 0, 'invalid test'
