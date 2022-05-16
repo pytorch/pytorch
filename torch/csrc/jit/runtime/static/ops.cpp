@@ -698,7 +698,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       auto in1_t = p_node->Input(1).toOptional<at::Tensor>();
       auto in2_t = p_node->Input(2).toOptional<at::Tensor>();
-      at::native::clamp_out(in0_t, in1_t, in2_t, out_t);
+      at::cpu::clamp_out(out_t, in0_t, in1_t, in2_t);
     };
   }
   LogAndDumpSchema(n);

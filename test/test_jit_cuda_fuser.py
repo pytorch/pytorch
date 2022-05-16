@@ -165,14 +165,6 @@ class TestCudaFuser(JitTestCase):
         if TEST_BF16:
             self.support_tensor_dtypes.append(torch.bfloat16)
 
-        self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
-        self.old_guard = torch._C._jit_set_nvfuser_guard_mode(False)
-        torch._C._debug_set_autodiff_subgraph_inlining(False)
-        self.old_value = torch._C._jit_set_autocast_mode(True)
-
         if(RUN_NVFUSER):
             self.cuda_fuser_options = CudaFuserTestOptions()
 
@@ -2681,6 +2673,24 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_conv2d_symbolic_shapes(self):
+        def fn(x: int):
+            responses = []
+            for i in range(2):
+                inp = torch.rand((3, 3, 32, 32)).cuda()
+                weight = torch.rand((x + i, 3, 7, 7)).cuda()
+                bias = torch.rand((x + i)).cuda()
+                res = torch.nn.functional.conv2d(inp, weight, bias, padding=3)
+                responses.append(res)
+            return responses
+
+        fn_s = torch.jit.script(fn)
+        fn_s(5)
+        fn_s(5)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_backward_type(self):
         # not super useful to check gradient of integer/bool, so skipping here
         type_pairs = [
@@ -4694,6 +4704,8 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
         super(TestCudaFuserOpInfoParent, self).setUp()
         if RUN_NVFUSER:
             self.cuda_fuser_options = CudaFuserTestOptions()
+            # enables guard mode since tracing could change graph to violate guard.
+            torch._C._jit_set_nvfuser_guard_mode(True)
         self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
 
     def tearDown(self):

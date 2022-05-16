@@ -499,4 +499,8 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
       coalesced_self.device());
 }
 
+Tensor csr_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
+  return at::native::_csr_to_block_csr(self, blocksize);
+}
+
 }} // namespace at::native
