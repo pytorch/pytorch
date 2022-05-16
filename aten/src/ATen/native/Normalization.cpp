@@ -723,6 +723,33 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cpu(
       });
 }
 
+Tensor batch_norm_elemt_cpu(
+    const Tensor& self,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& bias_opt,
+    const Tensor& mean,
+    const Tensor& invstd,
+    double epsilon) {
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
+  return AT_DISPATCH_FLOATING_TYPES(
+      self.scalar_type(), "batch_norm_elemt_cpu", [&] {
+        auto result = batch_norm_cpu_transform_input_template<scalar_t>(
+            self,
+            weight,
+            bias,
+            mean,
+            invstd,
+            at::Tensor(),
+            at::Tensor(),
+            true,
+            epsilon);
+        return std::get<0>(result);
+      });
+}
+
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps) {
   // See [Note: hacky wrapper removal for optional tensor]

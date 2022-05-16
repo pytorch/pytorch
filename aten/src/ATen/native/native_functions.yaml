@@ -3299,6 +3299,7 @@
 
 - func: batch_norm_elemt(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps) -> Tensor
   dispatch:
+    CPU: batch_norm_elemt_cpu
     CUDA: batch_norm_elemt_cuda
 
 - func: batch_norm_elemt.out(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps, *, Tensor(a!) out) -> Tensor(a!)
