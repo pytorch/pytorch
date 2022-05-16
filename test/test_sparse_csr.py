@@ -2049,8 +2049,25 @@ class TestSparseCSR(TestCase):
         _to_from_layout(from_layout, to_layout)
 
     @skipMeta
+    def test_compressed_layout_to_dense_coverage(self, device):
+        """
+        This test performs a smoke test for conversion from sparse
+        to dense. Most importantly it confirms an exception is
+        thrown.
+        """
+        dense = make_tensor((6, 10), dtype=torch.float, device=device)
+        dense = dense.relu() # Introduce some sparsity
+        pt_matrix = self._convert_to_layout(dense, torch.sparse_csc)
+        with self.assertRaises(RuntimeError):
+            pt_matrix.to_dense()
+
+    @skipMeta
     @all_sparse_compressed_layouts()
     def test_dense_to_sparse_compressed(self, device, layout):
+        """
+        This test tests conversion from dense to CSR and CSC
+        by comparing to SciPy's implementation.
+        """
         if layout is torch.sparse_bsc:
             # TODO: Remove this once support has been enabled
             return
@@ -2085,6 +2102,10 @@ class TestSparseCSR(TestCase):
     @coalescedonoff
     @dtypes(torch.double)
     def test_sparse_to_sparse_compressed(self, device, dtype, coalesced, layout):
+        """
+        This test tests conversion from COO to CSR and CSC
+        by comparing to SciPy's implementation.
+        """
         if layout is torch.sparse_bsc:
             # TODO: Remove this once support has been enabled
             return
