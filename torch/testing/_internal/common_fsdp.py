@@ -40,7 +40,7 @@ def _validate(model, process_group, assert_fn):
     module_states.extend([buffer.detach().cpu() for buffer in model.buffers()])
     world_size = dist.get_world_size(process_group)
     olist = [None for _ in range(world_size)]
-    dist.all_gather_object(olist, module_states, process_group=process_group)
+    dist.all_gather_object(olist, module_states, group=process_group)
     rank0_states = olist[0]
     for state in olist[1:]:
         for p1, p2 in zip(rank0_states, state):
