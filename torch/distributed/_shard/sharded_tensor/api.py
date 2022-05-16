@@ -19,6 +19,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import distributed_c10d
+from torch.distributed._shard.metadata import ShardMetadata
 import torch.distributed._shard.sharding_spec as shard_spec
 from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
@@ -289,27 +290,23 @@ class ShardedTensor(object):
                 Default: ``None``
         """
         def shard_size(shard_md):
-            return math.prod(shard_md.shard_sizes)
+            return math.prod(shard_md.shard_sizes)  # type: ignore[attr-defined]
 
         rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size
         _validate_output_tensor_for_gather(rank, dst, full_size, out)
 
         local_shards = self.local_shards()
-
         world_size = dist.get_world_size(self._process_group)
         rank_sizes = [0 for _ in range(world_size)]
         max_rank_size = 0
-        shard_placement: Dict[int, Tuple[int, int]] = dict()
-        local_shards_offset = []
+        shard_placement: Dict[ShardMetadata, Tuple[int, int]] = dict()
         # collect sizes
-        for shard_idx, shard_md in enumerate(self.metadata().shards_metadata):
+        for shard_md in self.metadata().shards_metadata:
             shard_rank = cast(_remote_device, shard_md.placement).rank()
             assert shard_rank is not None
-            shard_placement[shard_idx] = (shard_rank, rank_sizes[shard_rank])
-            if shard_rank == rank:
-                local_shards_offset.append((shard_md, rank_sizes[shard_rank],))
 
+            shard_placement[shard_md] = (shard_rank, rank_sizes[shard_rank])
             rank_sizes[shard_rank] += shard_size(shard_md)
             max_rank_size = max(max_rank_size, rank_sizes[shard_rank])
 
@@ -322,12 +319,11 @@ class ShardedTensor(object):
 
         with torch.no_grad():
             data = torch.empty(max_rank_size, device=self._get_preferred_device())
+
             for shard in local_shards:
-                for placement in local_shards_offset:
-                    if placement[0] == shard.metadata:
-                        src = shard.tensor.flatten()
-                        data[placement[1]: placement[1] + src.numel()].copy_(src)
-                        break
+                src = shard.tensor.flatten()
+                shard_offset = shard_placement[shard.metadata][1]
+                data[shard_offset: shard_offset + src.numel()].copy_(src)
 
         dist.gather(
             tensor=data,
@@ -343,8 +339,8 @@ class ShardedTensor(object):
 
         full_size = self.metadata().size
         dims = len(full_size)
-        for shard_idx, shard_md in enumerate(self.metadata().shards_metadata):
-            rank, rank_offset = shard_placement[shard_idx]
+        for shard_md in self.metadata().shards_metadata:
+            rank, rank_offset = shard_placement[shard_md]
             tensor = gather_list[rank]
             tensor = tensor[rank_offset : rank_offset + shard_size(shard_md)]
             tensor = tensor.view(shard_md.shard_sizes)
