@@ -14363,6 +14363,10 @@ op_db: List[OpInfo] = [
                    ref=np.sin,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   # TODO: Add torch.chalf backward dtype support. Currently, we get:
+                   # AssertionError: The supported dtypes for sin on device type cuda are incorrect!
+                   # The following dtypes did not work in backward but are listed by the OpInfo: {torch.complex32}. 
+                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    handles_large_floats=False,
                    supports_sparse=True,
@@ -14379,6 +14383,12 @@ op_db: List[OpInfo] = [
                                     dtypes=(torch.cfloat, torch.cdouble,), device_type='cpu', active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                       # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                                    dtypes=(torch.chalf,)),
+                       # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                                    dtypes=(torch.chalf,)),
                    ),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
     UnaryUfuncInfo('sinc',

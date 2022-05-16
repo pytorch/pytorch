@@ -63,13 +63,14 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
   });
 #else
   AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sin_name", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_T {
-        return ::sin(a);
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        using opmath_t = at::opmath_type<scalar_t>;
+        return ::sin(static_cast<opmath_t>(a));
     });
   });
 #endif
   } else {
-  AT_DISPATCH_FLOATING_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
     ScalarType::Half, ScalarType::BFloat16,
     common_dtype, "sin_cuda",
       [&]() {
