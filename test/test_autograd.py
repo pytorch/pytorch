@@ -6584,7 +6584,7 @@ class TestAutogradForwardMode(TestCase):
             dual = fwAD.make_dual(a, b)
             torch.diagonal(dual, offset=0)
 
-        input= torch.rand([0, 1], dtype=torch.complex128, requires_grad=True)
+        input = torch.rand([0, 1], dtype=torch.complex128, requires_grad=True)
         func = partial(torch.diagonal, offset=0)
         torch.autograd.gradcheck(func, (input,), check_forward_ad=True)
 
