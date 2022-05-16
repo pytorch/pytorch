@@ -1979,6 +1979,24 @@ def generate_elementwise_binary_tensors(op, *, device, dtype, requires_grad=Fals
         rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
         yield SampleInput(lhs, args=(rhs,))
 
+def generate_elementwise_binary_arbitrarily_strided_tensors(op, *, device, dtype, requires_grad=False):
+    # shape, strides, offset
+    strided_cases = (
+        ((5, 6, 2), (1, 1, 7), 2),
+        ((5, 5, 4), (1, 1, 7), 2),
+        ((5, 5, 2), (4, 5, 7), 3),
+        ((5, 5, 2), (5, 5, 7), 3),
+        ((5, 5, 2), (5, 5, 5), 3),
+        ((9, 5, 2), (0, 1, 7), 3),
+    )
+
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    for shape, strides, offset in strided_cases:
+        a = make_arg(500,).as_strided(shape, strides, offset)
+        b = make_arg(shape)
+        yield SampleInput(a, args=(b,))
 
 # Returns a generator of pairs of contiguous tensors on the requested device and with
 #   the requested dtype.
@@ -2348,6 +2366,10 @@ def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwar
         op, device=device, dtype=dtype, requires_grad=requires_grad
     )
 
+    yield from generate_elementwise_binary_arbitrarily_strided_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
 
 # A functional that extends an elementwise binary operator's bespoke error inputs
 #   with generic error inputs for the class of elementwise binary operations
@@ -2647,6 +2669,23 @@ def generate_elementwise_unary_noncontiguous_tensors(
             t_non_contig, kwargs=op.sample_kwargs(device, dtype, t_non_contig)[0]
         )
 
+def generate_elementwise_unary_arbitrarily_strided_tensors(op, *, device, dtype, requires_grad=False):
+    # shape, strides, offset
+    strided_cases = (
+        ((5, 6, 2), (1, 1, 7), 2),
+        ((5, 5, 4), (1, 1, 7), 2),
+        ((5, 5, 2), (4, 5, 7), 3),
+        ((5, 5, 2), (5, 5, 7), 3),
+        ((5, 5, 2), (5, 5, 5), 3),
+        ((9, 5, 2), (0, 1, 7), 3),
+    )
+
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    for shape, strides, offset in strided_cases:
+        a = make_arg(500,).as_strided(shape, strides, offset)
+        yield SampleInput(a)
 
 # Reuses the elementwise binary generators for consistency
 # TODO: in the future generalize the reference generators to handle n-ary elementwise operations
@@ -2673,7 +2712,6 @@ def _reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwar
             op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
         )
 
-
 def reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwargs):
     gen = partial(
         _reference_inputs_elementwise_unary, op, device, dtype, requires_grad, **kwargs
@@ -2687,6 +2725,10 @@ def reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwarg
         yield sample.noncontiguous()
 
     yield from generate_elementwise_unary_noncontiguous_tensors(
+        op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
+    )
+
+    yield from generate_elementwise_unary_arbitrarily_strided_tensors(
         op, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
     )
 
@@ -3167,6 +3209,21 @@ def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
 
     return tuple(samples)
 
+def reference_inputs_like_fns(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_like_fns(op, device, dtype, requires_grad, **kwargs)
+
+    # shape
+    cases = (
+        (), (0,), (1, 0), (1, 1, 4, 5), (5, 3, 0, 1), (1, 4, 3, 1, 1)
+    )
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    for shape in cases:
+        yield SampleInput(make_arg(shape))
+        yield SampleInput(make_arg(shape).transpose(0, -1))
+        yield SampleInput(make_arg(shape, noncontiguous=True))
+        yield SampleInput(make_arg(shape, noncontiguous=True).transpose(0, -1))
+
 # TODO: add reduction kwargs
 def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3243,6 +3300,16 @@ def sample_inputs_new_fns(self, device, dtype, requires_grad, **kwargs):
         samples.append(SampleInput(t, args=(output_shape,), kwargs=kwargs))
 
     return tuple(samples)
+
+def sample_inputs_empty(op, device, dtype, requires_grad, **kwargs):
+    # shape
+    cases = (
+        (), (0,), (1,), (1, 3, 5), (5, 3, 1), (1, 0, 5, 1),
+    )
+
+    for case in cases:
+        _kwargs = {'device': device, 'dtype': dtype, 'requires_grad': requires_grad}
+        yield SampleInput(case, args=(), kwargs=_kwargs)
 
 def sample_inputs_new_full(self, device, dtype, requires_grad, **kwargs):
     def get_val(dtype):
@@ -7720,6 +7787,38 @@ def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, M, S)))
     yield SampleInput(make_arg(()))
 
+def reference_inputs_clone(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_clone(op, device, dtype, requires_grad, **kwargs)
+
+    shapes = (
+        (3, 5, 6),
+        (1, 1, 3, 5, 6),
+        (1, 1, 3, 5, 6, 1, 1),
+        (1, 0, 3, 5, 0, 2),
+        (1, 0, 3, 5, 0, 0, 1, 1, 2),
+        (),
+    )
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    for shape in shapes:
+        yield SampleInput(make_arg(shape))
+        yield SampleInput(make_arg(shape).transpose(0, -1))
+        yield SampleInput(make_arg(shape, noncontiguous=True))
+        yield SampleInput(make_arg(shape, noncontiguous=True).transpose(0, -1))
+
+    # shape, strides, offset
+    strided_cases = (
+        ((5, 6, 2), (1, 1, 7), 2),
+        ((5, 5, 4), (1, 1, 7), 2),
+        ((5, 5, 2), (4, 5, 7), 3),
+        ((5, 5, 2), (5, 5, 7), 3),
+        ((5, 5, 2), (5, 5, 5), 3),
+        ((9, 5, 2), (0, 1, 7), 3),
+    )
+
+    for shape, strides, offset in strided_cases:
+        yield SampleInput(make_arg(500,).as_strided(shape, strides, offset))
+
 
 def sample_inputs_contiguous(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -10156,8 +10255,10 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=False),
     OpInfo('clone',
+           ref=np.copy,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            sample_inputs_func=sample_inputs_clone,
+           reference_inputs_func=reference_inputs_clone,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -15745,6 +15846,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
+           reference_inputs_func=reference_inputs_like_fns,
            supports_autograd=False,
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
@@ -15885,6 +15987,37 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
            supports_autograd=False),
+    OpInfo('empty',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_empty,
+           supports_autograd=False,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
+               # Can't find schemas for this operator for some reason
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                            'TestCommon',
+                            'test_out'),
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                            'TestCommon',
+                            'test_out_warning'),
+           )),
     OpInfo('new_full',
            op=lambda x, *args, **kwargs: x.new_full(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -18284,6 +18417,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
         torch_opinfo_name="abs",
+        skips=(
+            # TODO: FIXME!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                         dtypes=(torch.chalf, torch.cfloat, torch.cdouble), device_type='cuda'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
@@ -18406,6 +18544,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.square",
         torch_opinfo_name="square",
+        skips=(
+            # Strides are incorrect -- maybe fix by modeling square as ref
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.bool,), device_type='cuda'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.tan",
@@ -18463,11 +18606,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/76944
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
-        )
-
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
@@ -18499,6 +18637,9 @@ python_ref_db = [
         skips=(
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            # TODO: FIXME
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_reference_meta_functions',
+                         device_type='cuda'),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -18548,7 +18689,7 @@ python_ref_db = [
         # supports_one_python_scalar=True
         skips=(
             # https://github.com/pytorch/pytorch/issues/76555
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_errors'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -18558,7 +18699,7 @@ python_ref_db = [
         # supports_one_python_scalar=True
         skips=(
             # https://github.com/pytorch/pytorch/issues/76555
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_errors'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -18568,8 +18709,6 @@ python_ref_db = [
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
         skips=(
-            # https://github.com/pytorch/pytorch/issues/76944
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
                          dtypes=(torch.chalf,), device_type='cuda', active_if=(not TEST_WITH_ROCM)),
         ),
@@ -18606,10 +18745,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/76944
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.true_divide",
@@ -18617,10 +18752,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/76944
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
-        ),
     ),
     #
     # Data Conversion & Data Movement Opinfos
@@ -18628,6 +18759,13 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.clone",
         torch_opinfo_name="clone",
+        skips=(
+            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,), device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                         dtypes=(torch.chalf,), device_type='cuda'),
+        ),
     ),
     #
     # View & Shape OpInfos
@@ -18714,24 +18852,79 @@ python_ref_db = [
         ),
     ),
     #
-    # Reduction OpInfos
+    # Reduction Reference OpInfos
     #
     ReductionPythonRefInfo(
         "_refs.sum",
         torch_opinfo_name="sum",
         supports_out=True,
     ),
-
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
     ),
-
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
-    )
-
+    ),
+    #
+    # Tensor Creation Reference OpInfos
+    #
+    PythonRefInfo(
+        "_refs.empty",
+        torch_opinfo_name="empty",
+        skips=(
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_python_reference_consistency'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_out'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_out_warning'),
+            # Test doesn't support non-tensor inputs
+            DecorateInfo(unittest.expectedFailure,
+                         'TestMathBits',
+                         'test_conj_view'),
+            # Test doesn't support non-tensor inputs
+            DecorateInfo(unittest.expectedFailure,
+                         'TestMathBits',
+                         'test_neg_conj_view'),
+            # Test doesn't support non-tensor inputs
+            DecorateInfo(unittest.expectedFailure,
+                         'TestMathBits',
+                         'test_neg_view'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.empty_like",
+        torch_opinfo_name="empty_like",
+        skips=(
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_python_reference_consistency'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_out'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_out_warning'),
+            # Test doesn't support non-tensor inputs
+            DecorateInfo(unittest.expectedFailure,
+                         'TestMathBits',
+                         'test_conj_view'),
+            # Test doesn't support non-tensor inputs
+            DecorateInfo(unittest.expectedFailure,
+                         'TestMathBits',
+                         'test_neg_conj_view'),
+            # Test doesn't support non-tensor inputs
+            DecorateInfo(unittest.expectedFailure,
+                         'TestMathBits',
+                         'test_neg_view'),
+        ),
+    ),
+    # TODO: add full and full_like OpInfos
 ]
 
 # Common operator groupings

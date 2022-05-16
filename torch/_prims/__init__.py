@@ -87,8 +87,8 @@ __all__ = [
     "igammac",
     "le",
     "lt",
-    "max",
-    "min",
+    "maximum",
+    "minimum",
     "mul",
     "ne",
     "nextafter",
@@ -142,6 +142,13 @@ __all__ = [
     "any",
     "prod",
     "sum",
+    #
+    # Tensor Creation
+    #
+    "empty",
+    "empty_like",
+    "full",
+    "full_like",
 ]
 
 #
@@ -243,33 +250,21 @@ def _elementwise_meta(*args, type_promotion):
     utils.check_same_shape(*args, allow_cpu_scalar_tensors=True)
     utils.check_same_dtype(*args)
 
-    strides = None
+    strides = utils.compute_elementwise_output_strides(*args)
+
     tensor = None
     number = None
     for arg in args:
         if isinstance(arg, TensorLike):
-            if strides is None:
-                strides = arg.stride()
-
             if tensor is None:
                 tensor = arg
 
-            if arg.stride() != strides:
-                return TensorMeta(
-                    arg, strides=utils.make_contiguous_strides_for(arg.shape)
-                )
         elif isinstance(arg, Number):
             if number is None:
                 number = arg
 
-    # TODO: fix strides
     if tensor is not None:
-        if 0 in tensor.stride() and tensor.numel() > 0:
-            return TensorMeta(
-                tensor, strides=utils.make_contiguous_strides_for(tensor.shape)
-            )
-        else:
-            return TensorMeta(tensor)
+        return TensorMeta(tensor, strides=strides)
 
     return TensorMeta(number)
 
@@ -697,7 +692,7 @@ def _wrap_scalar(a: NumberType, *, dtype: torch.dtype = None) -> torch.Tensor:
 
 
 # Note: the following impls are because torch.maximum and torch.mininum do not support scalar inputs
-def _max_aten(
+def _maximum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
@@ -708,15 +703,15 @@ def _max_aten(
     return torch.maximum(a, b)  # type: ignore[arg-type]
 
 
-max = _make_elementwise_binary_prim(
-    "max",
-    impl_aten=_max_aten,
+maximum = _make_elementwise_binary_prim(
+    "maximum",
+    impl_aten=_maximum_aten,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 
-def _min_aten(
+def _minimum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
@@ -727,9 +722,9 @@ def _min_aten(
     return torch.minimum(a, b)  # type: ignore[arg-type]
 
 
-min = _make_elementwise_binary_prim(
-    "min",
-    impl_aten=_min_aten,
+minimum = _make_elementwise_binary_prim(
+    "minimum",
+    impl_aten=_minimum_aten,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -965,6 +960,7 @@ def _collapse_view_helper(
             continue
 
         length = length * shape[idx]
+        stride = min(stride, strides[idx])
 
         if (
             a.numel() > 0
@@ -1580,10 +1576,12 @@ select = _make_prim(
 # Type conversions
 #
 # TODO: model memory format on TensorMeta
+# TODO: make clone a reference following its implementation in TensorFactories.cpp
 def _clone_meta(
     a: TensorLikeType, *, memory_format: torch.memory_format
 ) -> TensorLikeType:
-    return TensorMeta(a)
+    strides = utils.compute_elementwise_output_strides(a)
+    return TensorMeta(a, strides=strides)
 
 
 def _clone_aten(a: Tensor, *, memory_format: torch.memory_format) -> Tensor:
@@ -1608,7 +1606,9 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
     assert isinstance(a, TensorLike)
     assert isinstance(dtype, torch.dtype)
 
-    return TensorMeta(a, dtype=dtype)
+    return TensorMeta(
+        a, strides=utils.make_contiguous_strides_for(a.shape), dtype=dtype
+    )
 
 
 def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
@@ -1632,6 +1632,23 @@ convert_element_type = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_convert_element_type_doc,
 )
+
+# NOTE: _to_dtype
+# This private op casts the input to the desired type while preserving its stride
+# permutation, unlike .to(dtype) which will create a tensor with contiguous strides
+# TODO: review how best to model this behavior
+def _to_dtype(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
+    # FIXME: improve this so it doesn't error on Meta testing
+    try:
+        requires_grad = a.requires_grad
+    except Exception as e:
+        requires_grad = False
+
+    result = empty_like(a, device=a.device, dtype=dtype, requires_grad=requires_grad)
+
+    # TODO: review if the no_grad context is the best way to model this
+    with torch.no_grad():
+        return copy_to(result, a)
 
 
 def _device_put_meta(
@@ -1728,97 +1745,6 @@ resize = _make_prim(
     doc=_resize_doc,
 )
 
-# NOTE: the set prim is currently commented out because it is unused and would
-# require multiple schema strings
-
-# TODO: model storage, storage offset, and layout
-# def _set_meta(
-#     a: TensorLikeType,
-#     source: Optional[Union[TensorLikeType, _TypedStorage]] = None,
-#     storage_offset: Optional[int] = None,
-#     size: Optional[ShapeType] = None,
-#     stride: Optional[StrideType] = None,
-# ) -> TensorLikeType:
-#     # handles a.set_() (refs.set(a) in primTorch)
-#     if source is None:
-#         assert storage_offset is None
-#         assert size is None
-#         assert stride is None
-
-#         return TensorMeta(a, shape=(), strides=(1,))
-
-#     if isinstance(source, TensorLike):
-#         # storage_offset, size, and stride must not be set
-#         assert storage_offset is None
-#         assert size is None
-#         assert stride is None
-
-#         utils.check_same_dtype(a, source)
-#         utils.check_same_device(a, source, allow_cpu_scalar_tensors=False)
-
-#         return TensorMeta(source)
-
-#     # source is a Storage object
-#     assert isinstance(source, _TypedStorage)
-
-#     assert source.device == a.device
-#     assert source.dtype == a.dtype
-
-#     shape = (source.size(),) if size is None else size
-#     strides = (1,) if stride is None else stride
-#     storage_offset = 0 if storage_offset is None else storage_offset
-
-#     assert len(shape) == len(strides)
-#     assert storage_offset >= 0
-#     utils.validate_strides(strides)
-#     utils.validate_shape(shape)
-
-#     utils.check_in_bounds_for_storage(source, shape, strides, storage_offset)
-
-#     return TensorMeta(a, shape=shape, strides=(1,))
-
-
-# def _set_aten(
-#     a: Tensor,
-#     source: Optional[Union[Tensor, _TypedStorage]] = None,
-#     storage_offset: int = 0,
-#     size: Optional[ShapeType] = None,
-#     stride: Optional[StrideType] = None,
-# ) -> Tensor:
-#     if size is not None:
-#         return a.set_(source, storage_offset, size, stride)  # type: ignore[arg-type]
-#     return a.set_(source)  # type: ignore[arg-type]
-
-
-# _set_doc = """
-#     Modifies a tensor's storage offset, shape, and stride metadata.
-
-#     If source is None then the storage_offset, size, and
-#     stride arguments must also be None and then tensor
-#     is modified to be an empty tensor with no dimensions and
-#     strides of (1,).
-
-#     If source is a tensor then the tensor will share its storage
-#     and have the same shape and strides. The storage_offset, size,
-#     and stride arguments must be None.
-
-#     If source is a Storage then by default the tensor will use the storage
-#     as a one dimensional vector with shape (n,), where n is the size of
-#     the storage, and strides (1,). The storage_offset, size, and
-#     stride arguments can be set to control this behavior.
-# """
-
-# # TODO: model storage, storage offset on TensorMetas
-# # TODO: name currently hidden to not interact with the builtin set name
-# _set = _make_prim(
-#     schema="set(Tensor(a!), ) -> Tensor(a!)",
-#     name="resize",
-#     meta=_set_meta,
-#     impl_aten=_set_aten,
-#     return_type=RETURN_TYPE.INPLACE,
-#     doc=_set_doc,
-# )
-
 
 def _reduction_meta(inp, dims, *, output_dtype=None):
     """
@@ -1911,4 +1837,144 @@ any = _make_bool_reduction_prim(
     name="any",
     impl_aten=torch.any,
     doc="",
+)
+
+# TODO: layout, pin_memory, memory_format
+# TODO: model requires_grad on TensorMeta
+def _empty_meta(
+    shape: ShapeType, *, dtype: torch.dtype, device: torch.device, requires_grad: bool
+) -> TensorLikeType:
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _empty_aten(
+    shape: ShapeType, *, dtype: torch.dtype, device: torch.device, requires_grad: bool
+) -> Tensor:
+    return torch.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+
+
+_empty_doc = """
+    Creates a tensor with uninitialized values and the specified shape, dtype, and device.
+"""
+
+empty = _make_prim(
+    schema="empty(int[] shape, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    meta=_empty_meta,
+    impl_aten=_empty_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_empty_doc,
+)
+
+# TODO: memory format
+def _empty_like_meta(
+    a: TensorLikeType, *, dtype: torch.dtype, device: torch.device, requires_grad: bool
+) -> TensorLikeType:
+    strides = strides = utils.compute_elementwise_output_strides(a)
+    if a.numel() == 0:
+        strides = a.stride()
+
+    return TensorMeta(a, strides=strides, dtype=dtype, device=device)
+
+
+def _empty_like_aten(
+    a: Tensor, *, dtype: torch.dtype, device: torch.device, requires_grad: bool
+) -> Tensor:
+    return torch.empty_like(a, dtype=dtype, device=device, requires_grad=requires_grad)
+
+
+_empty_like_doc = """
+    Creates a tensor with uninitialized values, and the same shape, dtype, and device as the
+    given tensor by default. The dtype and device settings can be overridden
+    by specifying them explicitly.
+"""
+
+empty_like = _make_prim(
+    schema="empty_like(Tensor a, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    meta=_empty_like_meta,
+    impl_aten=_empty_like_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_empty_like_doc,
+)
+
+
+def _full_meta(
+    shape: ShapeType,
+    fill_value: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> TensorLikeType:
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _full_aten(
+    shape: ShapeType,
+    fill_value: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> Tensor:
+    return torch.full(
+        shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
+    )
+
+
+_full_doc = """
+    Creates a tensor filled with the given fill value, and with the specified shape, dtype, and device.
+"""
+
+# TODO: add layout
+full = _make_prim(
+    schema="full(int[] shape, Scalar fill_value, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    meta=_full_meta,
+    impl_aten=_full_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_full_doc,
+)
+
+
+def _full_like_meta(
+    a: TensorLikeType,
+    fill_value: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> TensorLikeType:
+    strides = strides = utils.compute_elementwise_output_strides(a)
+    if a.numel() == 0:
+        strides = a.stride()
+
+    return TensorMeta(a, strides=strides, dtype=dtype, device=device)
+
+
+def _full_like_aten(
+    a: Tensor,
+    fill_value: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> Tensor:
+    return torch.full_like(
+        a, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
+    )
+
+
+_full_like_doc = """
+    Creates a tensor filled with the given fill value, and the same shape, dtype, and device as the
+    given tensor by default. The dtype and device settings can be overridden
+    by specifying them explicitly.
+"""
+
+full_like = _make_prim(
+    schema="full_like(Tensor a, Scalar fill_value, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    meta=_full_like_meta,
+    impl_aten=_full_like_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_full_like_doc,
 )

@@ -23,7 +23,11 @@ def _maybe_convert_to_dtype(
 ) -> Union[TensorLikeType, NumberType, Sequence]:
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
-            return prims.convert_element_type(a, dtype)
+            # NOTE: type promotion is implemented by a cast before the
+            # the kernel is invoked on cpu, so it makes strides contiguous
+            if a.device.type == "cpu":
+                return prims.convert_element_type(a, dtype)
+            return prims._to_dtype(a, dtype)
         return a
     if isinstance(a, Number):
         return utils.dtype_to_type(dtype)(a)
@@ -105,7 +109,7 @@ class elementwise_type_promotion_wrapper(object):
             )
 
             promoted_args = {
-                x: _maybe_convert_to_dtype(bound.arguments[x], dtype=compute_dtype)
+                x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
                 if x in bound.arguments.keys()
             }

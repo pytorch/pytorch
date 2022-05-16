@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
 from enum import Enum
-from functools import reduce
+from functools import reduce, cmp_to_key
 import operator
 
 import torch
@@ -93,6 +93,9 @@ class TensorMeta(torch.Tensor):
         dtype = inferred_dtype if dtype is None else dtype
         device = inferred_device if device is None else device
 
+        if isinstance(device, str):
+            device = torch.device(device)
+
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             shape,
@@ -180,8 +183,20 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
         raise AssertionError(msg)
 
     if a.device != b.device:
-        msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
-        raise AssertionError(msg)
+        # Handles special cuda:0 vs cuda case
+        if (str(a.device) == "cuda:0" or str(a.device) == "cuda") and (
+            str(b.device) == "cuda:0" or str(b.device) == "cuda"
+        ):
+            pass
+        else:
+            msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
+            raise AssertionError(msg)
+
+    # NOTE: currently we are only validating strides on CUDA, because
+    # we are using opmath on both CPU and CUDA, which causes
+    # divergance stride behavior vs. the CPU, which does not use opmath
+    if a.device.type == "cuda" or b.device.type == "cuda":
+        compare_significant_strides(a, b)
 
 
 def compare_significant_strides(a: TensorLikeType, b: TensorLikeType):
@@ -191,7 +206,86 @@ def compare_significant_strides(a: TensorLikeType, b: TensorLikeType):
         assert a.shape[idx] == b.shape[idx]
         if a.shape[idx] == 0 or a.shape[idx] == 1:
             continue
-        assert a.stride()[idx] == b.stride()[idx]
+        if a.stride()[idx] != b.stride()[idx]:
+            msg = "Stride mismatch! Strides are {0} and {1}!".format(
+                a.stride(), b.stride()
+            )
+            raise RuntimeError(msg)
+
+
+# NOTE: Based on the implementation in TensorIterator.cpp, but note that
+# the note [Computing output strides] is incorrect, because it
+# says that strides will be preserved even if they are not
+# "non overlapping and dense", but this is incorrect. The
+# output of elementwise operations are always given
+# non overlapping and dense strides.
+def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
+    """
+    Computes the output strides for elementwise operations.
+    """
+
+    if len(tensors) == 0:
+        msg = "Can't compute elementwise output strides for zero tensors!"
+        raise ValueError(msg)
+
+    # Acquires the shape
+    check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
+    tensors = tuple(
+        a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
+    )
+
+    # Short-circuits for CPU scalar case
+    if len(tensors) == 0:
+        return ()
+
+    # Short-circuits for shapes with zero or one dimensions
+    ndim = tensors[0].ndim
+    if ndim == 0:
+        return ()
+    if ndim == 1:
+        return (1,)
+
+    shape = tensors[0].shape
+
+    def _cmp(idx_a, idx_b):
+        for tensor in tensors:
+            stride_a = tensor.stride()[idx_a]
+            stride_b = tensor.stride()[idx_b]
+
+            if stride_a == 0 or stride_b == 0:
+                continue
+
+            if stride_a < stride_b:
+                return -1
+
+            if stride_a > stride_b:
+                return 1
+
+            # stride_a == stride_b
+            if shape[idx_a] > shape[idx_b]:
+                return 1
+
+            # NOTE: this case is missing in the C++ impl
+            if shape[idx_a] < shape[idx_b]:
+                return -1
+
+        # Note: this case is hit if all strides are zero,
+        # or all strides are equal and all dimensions have the same length
+        return 0
+
+    perm = tuple(range(ndim))
+    perm = sorted(perm, key=cmp_to_key(_cmp), reverse=True)
+
+    permuted_shape = [-1] * ndim
+    for idx, x in enumerate(perm):
+        permuted_shape[idx] = shape[x]
+
+    new_strides = make_contiguous_strides_for(permuted_shape)
+    permuted_strides = [-1] * ndim
+    for idx, x in enumerate(perm):
+        permuted_strides[x] = new_strides[idx]
+
+    return permuted_strides
 
 
 #
@@ -772,6 +866,7 @@ def elementwise_dtypes(
     """
 
     args = tuple(x for x in _args if x is not None)
+    device_type = "cpu"
 
     highest_type: type = bool
     for x in args:
@@ -788,6 +883,8 @@ def elementwise_dtypes(
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
+            if x.device.type != "cpu":
+                device_type = x.device.type
 
     result_dtype = None
 
@@ -899,19 +996,46 @@ def wrap_device(d: Union[str, torch.device]) -> torch.device:
     return d
 
 
+# See implementation in TensorImpl.cpp
+# Returns true when a tensor is "dense" -- filling all of its storage
+# and "non-overlapping" -- each element in the tensor has a unique index.
+# This is equivalent to verifying that tensors with more than zero elements
+# have their sorted strides for dimensions of length greater than one
+# "nested" properly.
+def is_non_overlapping_and_dense(a: TensorLikeType) -> bool:
+    relevant_pairs = []
+    for x, y in zip(a.shape, a.stride()):
+        if x == 0:
+            return True
+        if x == 1:
+            pass
+        relevant_pairs.append((x, y))
+
+    expected = 1
+    for x, y in sorted(relevant_pairs, key=lambda p: p[1]):
+        if y != expected:
+            return False
+        expected = expected * x
+
+    return True
+
+
 def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     validate_shape(shape)
     if not shape:
         return ()
 
     multiplier = 1
-    strides = [multiplier]
-    for l in reversed(shape[1:]):
+    strides = []
+    for l in reversed(shape):
         if l != 0:
+            strides.append(multiplier)
             multiplier = l * multiplier
-        strides.append(multiplier)
+        else:
+            strides.append(1)
 
-    return tuple(reversed(strides))
+    result = tuple(reversed(strides))
+    return result
 
 
 def compute_reduction_output_shape(
