@@ -170,7 +170,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
         Tensor compressed_indices_cpu = compressed_indices.to(kCPU);
         auto compressed_indices_data_ptr = compressed_indices_cpu.data_ptr<index_t>();
         auto batch_stride = compressed_indices_cpu.dim() >= 2 ? compressed_indices_cpu.stride(-2) : 0;
-
+        auto compressed_dims = size[compressedDimension(layout, size)];
         for (const auto batch_id : c10::irange(batchCount(compressed_indices_cpu))) {
           TORCH_CHECK(
                       compressed_indices_data_ptr[batch_id*batch_stride] == 0,
@@ -180,7 +180,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
                       compressed_indices_data_ptr[batch_id*batch_stride + compressed_indices.size(-1) - 1] == plain_indices.size(-1),
                       "(Batch element ", batch_id, ") ",
                       "last value of ", compressed_indices_name, " should be equal to the length of ", plain_indices_name, ".");
-          for (int i =  1; i <= size[size.size() - 2]; i++) {
+          for (int i =  1; i <= compressed_dims; i++) {
             TORCH_CHECK(
                         compressed_indices_data_ptr[batch_id*batch_stride + i - 1] <= compressed_indices_data_ptr[batch_id*batch_stride + i],
                         "(Batch element ", batch_id, ") ",
@@ -513,18 +513,29 @@ const Tensor& resize_sparse_csr_(
   return self;
 }
 
-Tensor& copy_sparse_csr_(Tensor& self, const Tensor& src, bool non_blocking) {
+Tensor& copy_sparse_compressed_(Tensor& self, const Tensor& src, bool non_blocking) {
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "copy_sparse_compressed_", [&]{});
   TORCH_CHECK(
-      self.is_sparse_csr() && src.is_sparse_csr(),
-      "copy_sparse_csr_: copy between different layouts is not supported. Found self type = ",
-      self.toString(),
-      " and src type = ",
-      src.toString());
+      self.layout() == src.layout(),
+      "torch.copy_: copy of sparse compressed tensors having different layouts is not supported.",
+      " self layout is ", self.layout(), " and src layout is ", src.layout());
   TORCH_CHECK(
       self._nnz() == src._nnz(),
-      "copy_sparse_csr_: only tensors with the same number of specified elements are supported.");
-  self.crow_indices().copy_(src.crow_indices(), non_blocking);
-  self.col_indices().copy_(src.col_indices(), non_blocking);
+      "torch.copy_: only sparse compressed tensors with the same number of specified elements are supported.");
+  TORCH_CHECK(self.size(compressedDimension(self.layout(), self.sizes())) == src.size(compressedDimension(src.layout(), src.sizes())),
+              "torch.copy_: only sparse compressed tensors with the same number of compressed dimensions are supported.");
+  TORCH_CHECK(self.values().sizes() == src.values().sizes(),
+              "torch.copy_: only sparse compressed tensors with the same values shape are supported.");
+
+  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "copy_sparse_compressed_",
+                                            [&]{
+                                              self.crow_indices().copy_(src.crow_indices(), non_blocking);
+                                              self.col_indices().copy_(src.col_indices(), non_blocking);
+                                            },
+                                            [&]{
+                                              self.ccol_indices().copy_(src.ccol_indices(), non_blocking);
+                                              self.row_indices().copy_(src.row_indices(), non_blocking);
+                                            });
   self.values().copy_(src.values(), non_blocking);
   return self;
 }

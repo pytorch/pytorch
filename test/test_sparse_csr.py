@@ -363,6 +363,64 @@ class TestSparseCompressed(TestCase):
             self.maxDiff = orig_maxDiff
             raise
 
+    @skipMeta
+    @all_sparse_compressed_layouts()
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_copy(self, layout, device, dtype):
+
+        def run_test(shape, nnz, index_type):
+            block_size = (2, 3) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
+            a = self.genSparseCompressedTensor(shape, nnz, dtype=dtype, layout=layout, device=device,
+                                               index_dtype=index_dtype, block_size=block_size)
+            b = self.genSparseCompressedTensor(shape, nnz, dtype=dtype, layout=layout, device=device,
+                                               index_dtype=index_dtype, block_size=block_size)
+
+            a.copy_(b)
+
+            self.assertEqual(a, b)
+
+        ns = [5, 2, 0]
+        batch_shapes = [(), (2,), (2, 3)]
+        for (m, n, b), index_dtype in zip(itertools.product(ns, ns, batch_shapes), [torch.int32, torch.int64]):
+            run_test((*b, m, n), 0, index_dtype)
+            run_test((*b, m, n), m * n, index_dtype)
+
+    @skipMeta
+    @all_sparse_compressed_layouts()
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_copy_errors(self, layout, device, dtype):
+        block_size = (2, 3) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
+        for index_dtype in [torch.int32, torch.int64]:
+            shape1 = (2, 3)
+            a = self.genSparseCompressedTensor(shape1, 0, dtype=dtype, layout=layout, device=device,
+                                               index_dtype=index_dtype, block_size=block_size)
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        "copy of sparse compressed tensors having different layouts is not supported."):
+                a.copy_(torch.empty(a.shape, dtype=dtype, device=device))
+
+            b = self.genSparseCompressedTensor(shape1, 1, dtype=dtype, layout=layout, device=device,
+                                               index_dtype=index_dtype, block_size=block_size)
+            with self.assertRaisesRegex(RuntimeError,
+                                        "only sparse compressed tensors with the same number of specified elements are supported."):
+                a.copy_(b)
+
+            shape2 = tuple(reversed(shape1))
+            c = self.genSparseCompressedTensor(shape2, 1, dtype=dtype, layout=layout, device=device,
+                                               index_dtype=index_dtype, block_size=block_size)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "only sparse compressed tensors with the same number of compressed dimensions are supported."):
+                b.copy_(c)
+
+            if block_size:
+                block_size1 = tuple(reversed(block_size))
+                d = self.genSparseCompressedTensor(shape1, 1, dtype=dtype, layout=layout, device=device,
+                                                   index_dtype=index_dtype, block_size=block_size1)
+                with self.assertRaisesRegex(RuntimeError,
+                                            "only sparse compressed tensors with the same values shape are supported."):
+                    b.copy_(d)
+
 
 class TestSparseCSR(TestCase):
 
@@ -434,38 +492,6 @@ class TestSparseCSR(TestCase):
         # assigning to sparse trhough indexing is disabled
         with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
             sparse[0, 0, 0, 0] = 99.0
-
-    @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_copy(self, device, dtype):
-
-        def run_test(shape, nnz, index_type):
-            a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-            b = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-
-            a.copy_(b)
-
-            self.assertEqual(a, b)
-
-        ns = [5, 2, 0]
-        batch_shapes = [(), (2,), (2, 3)]
-        for (m, n, b), index_dtype in zip(itertools.product(ns, ns, batch_shapes), [torch.int32, torch.int64]):
-            run_test((*b, m, n), 0, index_dtype)
-            run_test((*b, m, n), m * n, index_dtype)
-
-    @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_copy_errors(self, device, dtype):
-        for index_dtype in [torch.int32, torch.int64]:
-            shape1 = (2, 3)
-            a = self.genSparseCSRTensor(shape1, 0, dtype=dtype, device=device, index_dtype=index_dtype)
-
-            with self.assertRaisesRegex(RuntimeError, "copy between different layouts is not supported."):
-                a.copy_(torch.empty(a.shape, dtype=dtype, device=device))
-
-            b = self.genSparseCSRTensor(shape1, 1, dtype=dtype, device=device, index_dtype=index_dtype)
-            with self.assertRaisesRegex(RuntimeError, "only tensors with the same number of specified elements are supported."):
-                a.copy_(b)
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))

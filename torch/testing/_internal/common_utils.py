@@ -2059,7 +2059,8 @@ class TestCase(expecttest.TestCase):
             n_compressed_dims, n_plain_dims = size[-1], size[-2]
         sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, nnz) for _ in range(n_batch)]
         sparse_tensors_it = map(list, zip(*sparse_tensors))
-        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+
+        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, nnz, *block_size)
         compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
         plain_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
 
