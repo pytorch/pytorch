@@ -12687,6 +12687,32 @@ class _TestONNXRuntime:
                 **atol_rtol,
             )
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_device_eq(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                # exercise both Tensor.device (prim::device)
+                # and torch.device (prim::Constant).
+                if a.device != torch.device("cpu"):
+                    return a
+                return torch.zeros_like(a)
+
+        mod = torch.jit.script(M())  # preserve control flow
+
+        self.run_test(
+            mod,
+            # In order for the ONNX model behavior to match the torch model, we
+            # need to construct input that has the same device that is checked for
+            # in forward(). In ONNX there is no such thing as a device, so the if
+            # condition is always false.
+            torch.randn(3, 3, device="cpu"),
+            # Force dynamic axes so that the output shape depends on the input.
+            # Otherwise the entire model will just return a constant and not have
+            # any inputs.
+            input_names=["a"],
+            dynamic_axes={"a": {0: "a0"}},
+        )
+
 
 def make_test(
     name,
