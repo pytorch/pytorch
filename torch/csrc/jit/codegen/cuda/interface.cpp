@@ -111,12 +111,9 @@ class NVFuserEnabler {
     if (getCachedFuserEnabledEnvVar().has_value()) {
       return *getCachedFuserEnabledEnvVar();
     }
-    // 3. default value
-#ifdef FBCODE_CAFFE2
+    // 3. default value (if you switch this to true, make sure
+    //    to check nvfuserCanBeEnabled())
     return false;
-#else
-    return nvfuserCanBeEnabled();
-#endif
   }
 
  public:
