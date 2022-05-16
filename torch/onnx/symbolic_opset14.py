@@ -1,22 +1,24 @@
+"""This file exports ONNX ops for opset 14.
+
+Note [ONNX operators that are added/updated in opset 14]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+New operators:
+    HardSwish, Trilu
+
+Updated operators:
+    Reshape
+    Add, Sub, Mul, Div
+    GRU, LSTM, RNN
+    BatchNorm, Cumsum, Relu
+"""
+
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
-# This file exports ONNX ops for opset 14
 import torch
-import torch.onnx.symbolic_helper as sym_help
+from torch.onnx import symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import parse_args
-
-# Note [ONNX operators that are added/updated in opset 14]
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# New operators:
-#   HardSwish, Trilu
-#
-# Updated operators:
-#   Reshape
-#   Add, Sub, Mul, Div
-#   GRU, LSTM, RNN
-#   BatchNorm, Cumsum, Relu
 
 
 @parse_args("v")
@@ -40,7 +42,7 @@ def triu(g, self, diagonal, out=None):
 def reshape(g, self, shape):
     # NOTE: Due to bug in ORT https://github.com/microsoft/onnxruntime/issues/10664
     #       Reshape export cannot utilize the new allowzero attribute introduced in opset 14.
-    return sym_help._reshape_helper(g, self, shape, allowzero=0)
+    return symbolic_helper._reshape_helper(g, self, shape, allowzero=0)
 
 
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
@@ -59,12 +61,12 @@ def batch_norm(
 
     if (
         torch.is_autocast_enabled()
-        and not sym_help.args_have_same_dtype(
+        and not symbolic_helper.args_have_same_dtype(
             [input, weight, bias, running_mean, running_var]
         )
         and GLOBALS.export_onnx_opset_version < 15
     ):
-        return sym_help._onnx_opset_unsupported_detailed(
+        return symbolic_helper._onnx_opset_unsupported_detailed(
             "BatchNormalization",
             14,
             15,
@@ -72,8 +74,8 @@ def batch_norm(
             " Turn off Autocast or export using opset version 15.",
         )
 
-    sym_help.check_training_mode(training, "batch_norm")
-    weight, bias, running_mean, running_var = sym_help._batchnorm_helper(
+    symbolic_helper.check_training_mode(training, "batch_norm")
+    weight, bias, running_mean, running_var = symbolic_helper._batchnorm_helper(
         g, input, weight, bias, running_mean, running_var
     )
     out = g.op(
@@ -106,8 +108,8 @@ class Quantized:
 
     @staticmethod
     def hardswish(g, x, op_scale, op_zero_point):
-        x, _, _, _ = sym_help.dequantize_helper(g, x)
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
         output = hardswish(g, x)
 
-        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)

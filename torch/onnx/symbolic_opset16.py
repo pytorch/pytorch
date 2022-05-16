@@ -1,29 +1,30 @@
+"""This file exports ONNX ops for opset 16.
+
+Note [ONNX Operators that are added/updated in opset 16]
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-16-of-the-default-onnx-operator-set
+New operators:
+    GridSample https://github.com/onnx/onnx/pull/3557
+
+Updated operators:
+    Identity
+    If
+    LeakyRelu
+    Loop
+    PRelu
+    RoiAlign
+    Scan
+    ScatterElemenets
+    ScatterND
+    Where
+    GreaterOrEqual
+    LessOrEqual
+    SequenceMap
+"""
+
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
-
-# This file exports ONNX ops for opset 16
-
-# Note [ONNX Operators that are added/updated in opset 16]
-#
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-16-of-the-default-onnx-operator-set
-# New operators:
-#   GridSample https://github.com/onnx/onnx/pull/3557
-#
-# Updated operators:
-#    Identity
-#    If
-#    LeakyRelu
-#    Loop
-#    PRelu
-#    RoiAlign
-#    Scan
-#    ScatterElemenets
-#    ScatterND
-#    Where
-#    GreaterOrEqual
-#    LessOrEqual
-#    SequenceMap
 
 from torch.nn.functional import (
     GRID_SAMPLE_INTERPOLATION_MODES,
