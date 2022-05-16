@@ -1995,6 +1995,22 @@ class TestSparseCSR(TestCase):
             detached_inp = inp.detach()
             self.assertEqual(inp, detached_inp)
 
+    def _convert_to_layout(self, a, target_layout):
+        """
+        Helper function to call the correct layout conversion
+        with reasonable defaults for the block size. Clearly there
+        is a need for a to.layout overload.
+        """
+        if target_layout is torch.sparse_csr:
+            return a.to_sparse_csr()
+        if target_layout is torch.sparse_csc:
+            return a.to_sparse_csc()
+        if target_layout is torch.sparse_bsr:
+            return a.to_sparse_bsr((2, 2))
+        if target_layout is torch.sparse_bsc:
+            return a.to_sparse_bsc((2, 2))
+        raise NotImplementedError(repr(a))
+
     @skipMeta
     @all_sparse_compressed_layouts('to_layout')
     @all_sparse_compressed_layouts('from_layout')
@@ -2004,16 +2020,6 @@ class TestSparseCSR(TestCase):
         that an exception is thrown for unsupported conversions.
         """
 
-        def _convert_to_layout(a, target_layout):
-            if target_layout is torch.sparse_csr:
-                return a.to_sparse_csr()
-            if target_layout is torch.sparse_csc:
-                return a.to_sparse_csc()
-            if target_layout is torch.sparse_bsr:
-                return a.to_sparse_bsr((2, 2))
-            if target_layout is torch.sparse_bsc:
-                return a.to_sparse_bsc((2, 2))
-            raise NotImplementedError(repr(a))
 
         def _to_from_layout(layout_a, layout_b):
             a = make_tensor((6, 10), dtype=torch.float, device=device)
@@ -2023,13 +2029,40 @@ class TestSparseCSR(TestCase):
             expect_error = expect_error or (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_csr)
             if expect_error:
                 with self.assertRaises(RuntimeError):
-                    b = _convert_to_layout(a, layout_a)
-                    _convert_to_layout(b, layout_b)
+                    b = self._convert_to_layout(a, layout_a)
+                    self._convert_to_layout(b, layout_b)
             else:
-                b = _convert_to_layout(a, layout_a)
-                _convert_to_layout(b, layout_b)
+                b = self._convert_to_layout(a, layout_a)
+                self._convert_to_layout(b, layout_b)
 
         _to_from_layout(from_layout, to_layout)
+
+    @skipMeta
+    @all_sparse_compressed_layouts()
+    def test_dense_to_sparse(self, device, layout):
+        print("layout: ", layout)
+        if layout is torch.sparse_bsc:
+            return
+        if layout is torch.sparse_bsr:
+            return
+        def _construct_sp_matrix(dense, layout):
+            if layout is torch.sparse_csr:
+                return sp.csr_matrix(dense.cpu().numpy())
+            if layout is torch.sparse_csc:
+                return sp.csc_matrix(dense.cpu().numpy())
+            if layout is torch.sparse_bsr:
+                return sp.bsr_matrix(dense.cpu().numpy())
+            if layout is torch.sparse_bsc:
+                return sp.bsr_matrix(dense.cpu().transpose(0, 1).numpy()).transpose()
+            raise NotImplementedError(repr(dense))
+        dense = torch.randn(4, 5).relu()
+        sp_matrix = _construct_sp_matrix(dense, layout)
+        pt_matrix = self._convert_to_layout(dense, layout)
+        print("sp_matrix")
+        print(sp_matrix)
+        print("pt_matrix")
+        print(pt_matrix)
+
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
