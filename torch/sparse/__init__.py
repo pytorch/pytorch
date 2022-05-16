@@ -22,7 +22,6 @@ __all__ = [
     'sum',
     'softmax',
     'log_softmax',
-    '_csr_to_block_csr',
 ]
 
 
@@ -263,5 +262,3 @@ Args:
         performed. This is useful for preventing data type
         overflows. Default: None
 """)
-
-_csr_to_block_csr = _sparse._csr_to_block_csr
