@@ -27,6 +27,10 @@ class TORCH_API Computation {
   virtual const std::string to_string() const = 0;
 
   virtual ~Computation() = default;
+
+  // Indicates whether this computation is being executed inside a mark step
+  // Assume false unless set otherwise
+  bool in_mark_step = false;
 };
 
 using ComputationPtr = std::shared_ptr<Computation>;
