@@ -746,7 +746,6 @@ struct PythonPrintImpl {
   }
 
   void checkVersion(Node* node) {
-#if ENABLE_UPGRADERS
     if (auto schema = node->maybeSchema()) {
       auto schema_name = getFullSchemaName(*schema);
       auto version_entry = get_operator_version_map().find(schema_name);
@@ -769,10 +768,6 @@ struct PythonPrintImpl {
         }
       }
     }
-#else
-    min_version_ =
-        std::max(min_version_, get_min_version_for_kind(node->kind()));
-#endif
   }
 
   void printNode(Node* node, bool print_const) {
@@ -1627,11 +1622,7 @@ struct PythonPrintImpl {
   bool enforce_importable_;
 
   // The least version that supports all printed ops
-#if ENABLE_UPGRADERS
   uint64_t min_version_ = caffe2::serialize::kMinSupportedFileFormatVersion;
-#else
-  uint64_t min_version_ = 0;
-#endif
 };
 
 PythonPrint::PythonPrint(

@@ -100,7 +100,6 @@ core_sources_common = [
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/mobile/compatibility/runtime_compatibility.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
-    "torch/csrc/jit/operator_upgraders/upgraders_guard.cpp",
     "torch/csrc/jit/operator_upgraders/version_map.cpp",
     "torch/csrc/jit/runtime/instruction.cpp",
     "torch/csrc/jit/runtime/jit_exception.cpp",
