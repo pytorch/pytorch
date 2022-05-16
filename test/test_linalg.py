@@ -5211,6 +5211,39 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.householder_product(reflectors, tau)
 
+    def _test_fn_out_strided(self, fn, from_4rank_tensors_fn, A):
+        out = fn(A)
+
+        def make_4rank_like(t):
+            fill_with = [3] * (4 - len(t.shape))
+            shape = fill_with + list(t.shape)
+            # Create a 4-rank tensor with non-C-nor-F-contiguous strides.
+            return torch.empty(shape, dtype=t.dtype).contiguous(memory_format=torch.channels_last)
+
+        out_ = from_4rank_tensors_fn([make_4rank_like(o) for o in out])
+        strides_ = list(o.stride() for o in out_)
+
+        fn(A, out=out_)
+
+        for i in range(len(out)):
+            # Check whether the results are equal for the 'out' overload.
+            self.assertEqual(out[i], out_[i])
+            # Check whether the strides were preserved after the call.
+            self.assertEqual(strides_[i], out_[i].stride())
+            # Check whether the original strides are different from the generated ones.
+            self.assertNotEqual(out[i].stride(), out_[i].stride())
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.float)
+    def test_linalg_lu_factor_ex_out_strided(self, device, dtype):
+        def take_out_from_4rank_tensors(ts):
+            LU, pivots, info = ts
+            return (LU, pivots[0], info[0, 0])
+
+        A = make_tensor((3, 3, 2, 3), dtype=dtype, device=device)
+        self._test_fn_out_strided(torch.linalg.lu_factor_ex, take_out_from_4rank_tensors, A)
+
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
