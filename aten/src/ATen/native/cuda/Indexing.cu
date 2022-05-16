@@ -330,7 +330,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
       expandedValue.scalar_type(), "indexing_backward", [&] {
         indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
           sorted_indices.data_ptr<int64_t>(),
