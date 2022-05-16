@@ -1347,7 +1347,7 @@ def get_composite_graph(
             assert_never(g)
         return [(f, group) for f in fs]
 
-    graph = {}
+    graph: CompositeGraph = {}
     nativefunction_for = {
         f.func.name: (f, group)
         for g in grouped_native_functions
@@ -1376,12 +1376,11 @@ def get_composite_headers(
     native_functions: Sequence[NativeFunction],
     b: BackendIndex,
 ) -> List[str]:
-    def maybe_get_header(f: NativeFunction):
+    def maybe_get_header(f: NativeFunction) -> Optional[str]:
         if not b.should_gen_dispatchless_composite(f):
             return None
         name = f.func.name.remove_inplace().name
         return f"#include <ATen/native/composite/{name}.h>"
-
     return sorted(set(mapMaybe(maybe_get_header, native_functions)))
 
 
