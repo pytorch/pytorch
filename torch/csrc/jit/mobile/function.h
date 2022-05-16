@@ -63,6 +63,12 @@ class TORCH_API Function : public torch::jit::Function {
       const std::vector<c10::TypePtr>& types,
       const size_t register_size);
 
+  // if not initialize, initialize by loading operators.
+  // return true of all op loaded, return false if some op is not found
+  // in the current runtime. Then, the ops that did not found will be filled
+  // in unsupported_op_names
+  bool initialize_operators(bool should_check_operators);
+
  private:
   c10::QualifiedName name_;
   Code code_;
@@ -72,6 +78,8 @@ class TORCH_API Function : public torch::jit::Function {
 c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
     c10::OperatorName opname,
     c10::optional<int> num_specified_args);
+
+TORCH_API std::string operator_str(const c10::OperatorName& opname);
 
 } // namespace mobile
 } // namespace jit

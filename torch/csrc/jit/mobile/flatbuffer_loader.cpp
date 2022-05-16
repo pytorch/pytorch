@@ -240,8 +240,6 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     function->append_constant(getIValue(i));
   }
 
-  std::unordered_set<std::string> unsupported_op_names;
-
   appendUpgraderFunctions(function.get());
   // 2. Decides if upgrader is needed
   const uint32_t operator_version = module_->operator_version();
@@ -254,19 +252,13 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
       num_args = op->num_args_serialized();
     }
 
-    auto op_found = function->append_operator(
+    function->append_operator(
         op->name()->str(), op->overload_name()->str(), num_args);
-
-    if (!op_found) {
-      unsupported_op_names.emplace(
-          op->name()->str() + "/" + op->overload_name()->str());
-    }
   }
 
-  TORCH_CHECK(
-      unsupported_op_names.empty(),
-      "Unsupported ops: ",
-      c10::Join(", ", unsupported_op_names));
+  if (should_load_operators_) {
+    function->initialize_operators(true);
+  }
 
   for (const auto i : *method->type_annotations()) {
     function->append_type(getOrCreateTypeAnnotations(i));
@@ -723,6 +715,14 @@ uint64_t get_bytecode_version(const std::string& filename) {
       "Format error");
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
   return flatbuffer_module->bytecode_version();
+}
+
+mobile::ModuleInfo get_module_info_from_flatbuffer(char* flatbuffer_content) {
+  auto* ff_module = mobile::serialization::GetMutableModule(flatbuffer_content);
+  FlatbufferLoader loader;
+  loader.setShouldLoadOperators(false);
+  mobile::Module m = loader.parseModule(ff_module);
+  return mobile::get_module_info(m);
 }
 
 } // namespace jit

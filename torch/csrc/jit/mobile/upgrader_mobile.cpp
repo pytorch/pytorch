@@ -535,6 +535,7 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
             op.overload_name,
             op.num_specified_args);
       }
+      upgrader_function.function.initialize_operators(true);
     }
     return upgrader_function_list;
   };
