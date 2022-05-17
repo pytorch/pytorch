@@ -17724,7 +17724,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
