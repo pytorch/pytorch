@@ -1,11 +1,14 @@
 // This file defines `SymIntArrayRef` which serves as the view onto
-// std::vector<SymInt> This class is conceptually and mostly functionally
-// equivalent to ArrayRef<SymInt> However, ArrayRef<SymInt> can't be used
-// directly as it introduces ambiguity in the following cases: a.expand({1, 2,
-// 3}) matches two overloads: `at::Tensor Tensor::expand(c10::SymIntArrayRef
-// size, bool implicit)` `at::Tensor Tensor::expand(at::IntArrayRef size, bool
-// implicit)` Introducing `SymIntArrayRef` allows to have a finer-grained
-// control over which overload will be used
+// std::vector<SymInt>. This class is conceptually and mostly functionally
+// equivalent to ArrayRef<SymInt>.
+//
+// However, ArrayRef<SymInt> can't be used directly as it introduces ambiguity
+// in the following cases:
+//   - a.expand({1, 2, 3}) matches two overloads:
+//       1. `at::Tensor Tensor::expand(c10::SymIntArrayRef size, bool implicit)`
+//       2. `at::Tensor Tensor::expand(at::IntArrayRef size, bool implicit)`
+// Introducing `SymIntArrayRef` allows to have a finer-grained control over
+// which overload will be used.
 
 #pragma once
 
