@@ -437,7 +437,8 @@ class Tracer(TracerBase):
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
         if isinstance(concrete_args, tuple):
-            assert(len(arg_names) == len(concrete_args))
+            if len(arg_names) != len(concrete_args):
+                raise RuntimeError(f"Tracing expected {len(arg_names)} arguments but got {len(concrete_args)} concrete arguments")
             concrete_args = {name: val for name, val in zip(arg_names, concrete_args)}
         args.extend(proxy_placeholder(names) for names in arg_names)
 
@@ -522,7 +523,13 @@ class Tracer(TracerBase):
         """
         if isinstance(root, torch.nn.Module):
             self.root = root
-            fn = type(root).forward
+
+
+            assert hasattr(
+                type(root), self.traced_func_name
+            ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
+
+            fn = getattr(type(root), self.traced_func_name)
             self.submodule_paths = {mod: name for name, mod in root.named_modules()}
         else:
             self.root = torch.nn.Module()
