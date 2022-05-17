@@ -974,7 +974,6 @@ class TestCudaFuser(JitTestCase):
             for jit_func in [jit_and, jit_or, jit_xor, jit_lshift, jit_rshift]:
                 if torch.bool in {dtype1, dtype2, dtype3} and jit_func in {jit_lshift, jit_rshift}:
                     continue
-                print(dtype1, dtype2, dtype3, jit_func)
                 x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(5).to(dtype1)
                 y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(5).to(dtype2)
                 z = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda").mul(2).to(dtype3)
@@ -983,7 +982,6 @@ class TestCudaFuser(JitTestCase):
                 jit_o = jitted(x, y, z)
                 jit_o = jitted(x, y, z)
                 o = jit_func(x, y, z)
-                print(o.dtype, jit_o.dtype)
                 self.assertEqual(o, jit_o)
                 self.assertGraphContains(jitted.graph_for(x, y, z), FUSION_GUARD)
 

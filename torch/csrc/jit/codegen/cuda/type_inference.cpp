@@ -198,20 +198,12 @@ class NaiveTypePropagator {
       case aten::bitwise_or:
       case aten::__or__:
       case aten::bitwise_xor:
-      case aten::__xor__: {
-        binary_type(node);
-        break;
-      }
-      // shift ops
+      case aten::__xor__:
       case aten::bitwise_left_shift:
       case aten::__lshift__:
       case aten::bitwise_right_shift:
       case aten::__rshift__: {
-        binary_broadcast_type(
-            node,
-            getInputTensorType(node, 0, true),
-            getInputTensorType(node, 1, true),
-            node->input(0)->type()->cast<TensorType>()->scalarType());
+        binary_type(node);
         break;
       }
       // binary comparison

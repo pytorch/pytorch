@@ -689,35 +689,48 @@ NVFUSER_DEFINE_BITWISE_OP(bitwise_or, Or)
 NVFUSER_DEFINE_BITWISE_OP(bitwise_xor, Xor)
 #undef NVFUSER_DEFINE_BITWISE_OP
 
-#define NVFUSER_DEFINE_BITWISE_SHIFT_OP(op_name, op_type)        \
-  Val* op_name(Val* v1, Val* v2) {                               \
-    TORCH_CHECK(                                                 \
-        isIntegralType(v1->dtype()),                             \
-        "input must have integral or boolean type, but got ",    \
-        v1->dtype());                                            \
-    return binaryOp(BinaryOpType::op_type, v1, v2, v1->dtype()); \
-  }                                                              \
-  TensorView* op_name(TensorView* v1, Val* v2) {                 \
-    TORCH_CHECK(                                                 \
-        isIntegralType(v1->dtype()),                             \
-        "input must have integral or boolean type, but got ",    \
-        v1->dtype());                                            \
-    return binaryOp(BinaryOpType::op_type, v1, v2, v1->dtype()); \
-  }                                                              \
-  TensorView* op_name(Val* v1, TensorView* v2) {                 \
-    TORCH_CHECK(                                                 \
-        isIntegralType(v1->dtype()),                             \
-        "input must have integral or boolean type, but got ",    \
-        v1->dtype());                                            \
-    return binaryOp(BinaryOpType::op_type, v1, v2, v1->dtype()); \
-  }                                                              \
-  TensorView* op_name(TensorView* v1, TensorView* v2) {          \
-    TORCH_CHECK(                                                 \
-        isIntegralType(v1->dtype()),                             \
-        "input must have integral or boolean type, but got ",    \
-        v1->dtype());                                            \
-    return binaryOp(BinaryOpType::op_type, v1, v2, v1->dtype()); \
+#define NVFUSER_DEFINE_BITWISE_SHIFT_OP(op_name, op_type)                 \
+  Val* op_name(Val* v1, Val* v2) {                                        \
+    TORCH_CHECK(                                                          \
+        isIntegralType(v1->dtype()) && isIntegralType(v2->dtype()),       \
+        "input must have integral type, but got ",                        \
+        v1->dtype(),                                                      \
+        " and ",                                                          \
+        v2->dtype());                                                     \
+    return binaryOp(                                                      \
+        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
+  }                                                                       \
+  TensorView* op_name(TensorView* v1, Val* v2) {                          \
+    TORCH_CHECK(                                                          \
+        isIntegralType(v1->dtype()) && isIntegralType(v2->dtype()),       \
+        "input must have integral type, but got ",                        \
+        v1->dtype(),                                                      \
+        " and ",                                                          \
+        v2->dtype());                                                     \
+    return binaryOp(                                                      \
+        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
+  }                                                                       \
+  TensorView* op_name(Val* v1, TensorView* v2) {                          \
+    TORCH_CHECK(                                                          \
+        isIntegralType(v2->dtype()) && isIntegralType(v2->dtype()),       \
+        "input must have integral type, but got ",                        \
+        v1->dtype(),                                                      \
+        " and ",                                                          \
+        v2->dtype());                                                     \
+    return binaryOp(                                                      \
+        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
+  }                                                                       \
+  TensorView* op_name(TensorView* v1, TensorView* v2) {                   \
+    TORCH_CHECK(                                                          \
+        isIntegralType(v1->dtype()) && isIntegralType(v2->dtype()),       \
+        "input must have integral type, but got ",                        \
+        v1->dtype(),                                                      \
+        " and ",                                                          \
+        v2->dtype());                                                     \
+    return binaryOp(                                                      \
+        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
   }
+
 NVFUSER_DEFINE_BITWISE_SHIFT_OP(bitwise_left_shift, Lshift)
 NVFUSER_DEFINE_BITWISE_SHIFT_OP(bitwise_right_shift, Rshift)
 #undef NVFUSER_DEFINE_BITWISE_SHIFT_OP
