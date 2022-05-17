@@ -14383,12 +14383,6 @@ op_db: List[OpInfo] = [
                                     dtypes=(torch.cfloat, torch.cdouble,), device_type='cpu', active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                       # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                                    dtypes=(torch.chalf,)),
                        # RuntimeError: "nonzero_cuda" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_consistency',
                                     dtypes=(torch.chalf,)),
@@ -18569,6 +18563,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sin",
         torch_opinfo_name="sin",
+        skips=(
+            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,)),
+            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                         dtypes=(torch.chalf,)),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sinh",
