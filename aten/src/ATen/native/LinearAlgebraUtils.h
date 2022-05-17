@@ -8,6 +8,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TransposeType.h>
 #include <limits>
 #include <type_traits>
 #include <sstream>
