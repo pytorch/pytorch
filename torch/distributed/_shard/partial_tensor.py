@@ -11,7 +11,7 @@ from torch.distributed.nn.functional import (
 )
 from torch.overrides import handle_torch_function
 
-# Custom sharded ops
+# Custom PartialTensor ops
 _PARTIAL_TENSOR_OPS: Dict[Callable, Callable] = {}
 def _register_partial_tensor_op(op, func):
     from inspect import signature
@@ -296,4 +296,5 @@ def partial_cat(types, args=(), kwargs=None):
 def partial_size(types, args=(), kwargs=None):
     if kwargs is None:
         kwargs = {}
-    return args[0]._local_shard.size(*args[1:], **kwargs)
+    with torch._C.DisableTorchFunction():
+        return torch.Tensor.size(*args, **kwargs)
