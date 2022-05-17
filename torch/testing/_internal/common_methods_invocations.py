@@ -18317,21 +18317,22 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         'special.fresnel_integral_s',
         decorators=(
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.int16: tol(atol=1e-2, rtol=0),
-                        torch.int32: tol(atol=1e-2, rtol=0),
-                        torch.int64: tol(atol=1e-2, rtol=0),
-                        torch.float32: tol(atol=1e-2, rtol=0),
-                        torch.float64: tol(atol=1e-2, rtol=0),
-                    },
-                ),
+            precisionOverride(
+                {
+                    torch.int16: 1e-2,
+                    torch.int32: 1e-2,
+                    torch.int64: 1e-2,
+                    torch.float16: 1e-2,
+                    torch.float32: 1e-2,
+                    torch.float64: 1e-2,
+                },
             ),
         ),
         dtypes=all_types_and(torch.bool),
+        dtypesIfCUDA=all_types_and(torch.bool),
         ref=lambda x: scipy.special.fresnel(x)[0] if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
+        supports_forward_ad=False,
     ),
 ]
 
