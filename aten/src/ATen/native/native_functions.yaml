@@ -5440,7 +5440,7 @@
   dispatch:
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
-    SparseCsrCPU, SparseCsrCUDA: addmm_sparse_csr_dense
+    SparseCsrCPU, SparseCsrCUDA: addmm_sparse_compressed_dense
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   structured_delegate: addmm.out
