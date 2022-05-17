@@ -18300,23 +18300,46 @@ op_db: List[OpInfo] = [
     ),
     UnaryUfuncInfo(
         'special.elliptic_integral_e',
-        ref=scipy.special.ellipk if TEST_SCIPY else _NOTHING,
-        domain=(None, 1),
-        supports_inplace_autograd=False,
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
+        decorators=(
+            precisionOverride(
+                {
+                    torch.int16: 1e-2,
+                    torch.int32: 1e-2,
+                    torch.int64: 1e-2,
+                    torch.float16: 1e-2,
+                    torch.float32: 1e-2,
+                    torch.float64: 1e-2,
+                },
+            ),
+        ),
+                domain=(None, 1),
+
         dtypes=all_types_and(torch.bool),
         dtypesIfCUDA=all_types_and(torch.bool),
+        ref=scipy.special.ellipe if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+        supports_forward_ad=False,
     ),
     UnaryUfuncInfo(
         'special.elliptic_integral_k',
-        ref=scipy.special.ellipe if TEST_SCIPY else _NOTHING,
+        decorators=(
+            precisionOverride(
+                {
+                    torch.int16: 1e-2,
+                    torch.int32: 1e-2,
+                    torch.int64: 1e-2,
+                    torch.float16: 1e-2,
+                    torch.float32: 1e-2,
+                    torch.float64: 1e-2,
+                },
+            ),
+        ),
         domain=(None, 1),
-        supports_inplace_autograd=False,
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
         dtypes=all_types_and(torch.bool),
         dtypesIfCUDA=all_types_and(torch.bool),
+        ref=scipy.special.ellipk if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+        supports_forward_ad=False,
     ),
 ]
 
