@@ -3065,7 +3065,7 @@ struct to_ir {
         // Tensor here, then the quantized_lstm.legacy overload can kick in in
         // forward_impl(), and the module will still run correctly.
         if (method.qualname() ==
-            "__torch__.torch.ao.nn.quantized.dynamic.modules.rnn.PackedParameter.__setstate__") {
+            "__torch__.torch.nn.quantized.dynamic.modules.rnn.PackedParameter.__setstate__") {
           if (auto sv =
                   std::dynamic_pointer_cast<SimpleValue>(rhs_sugared_val)) {
             Node* rhs_node = sv->getValue()->node();
