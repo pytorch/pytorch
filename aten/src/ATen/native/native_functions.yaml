@@ -1944,7 +1944,7 @@
     Meta: empty_meta
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA: empty_sparse
-    SparseCsrCPU, SparseCsrCUDA: empty_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
@@ -5061,15 +5061,17 @@
 - func: _weight_norm(Tensor v, Tensor g, int dim=0) -> Tensor
   variants: function
 
-- func: _weight_norm_cuda_interface(Tensor v, Tensor g, int dim=0) -> (Tensor, Tensor)
+- func: _weight_norm_interface(Tensor v, Tensor g, int dim=0) -> (Tensor, Tensor)
   variants: function
   dispatch:
+    CPU: weight_norm_cpu
     CUDA: weight_norm_cuda
 
-- func: _weight_norm_cuda_interface_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
+- func: _weight_norm_interface_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
   variants: function
   dispatch:
-    CUDA: weight_norm_cuda_backward
+    CPU: weight_norm_backward_cpu
+    CUDA: weight_norm_backward_cuda
 
 - func: _weight_norm_differentiable_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
   variants: function
@@ -5288,7 +5290,7 @@
   dispatch:
     CompositeExplicitAutograd: clone
     SparseCPU, SparseCUDA: clone_sparse
-    SparseCsrCPU, SparseCsrCUDA: clone_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: clone_sparse_compressed
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
@@ -5814,12 +5816,28 @@
   dispatch:
     CPU, CUDA: dense_to_sparse_csr
     SparseCPU, SparseCUDA: coo_to_sparse_csr
-    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_csr
+
+- func: to_sparse_csc(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    CPU, CUDA: dense_to_sparse_csc
+    SparseCPU, SparseCUDA: coo_to_sparse_csc
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_csc
 
 - func: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
   variants: method
   dispatch:
-    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_bsr
+    CPU, CUDA: dense_to_sparse_bsr
+    SparseCPU, SparseCUDA: coo_to_sparse_bsr
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_bsr
+
+- func: to_sparse_bsc(Tensor self, int[2] blocksize) -> Tensor
+  variants: method
+  dispatch:
+    CPU, CUDA: dense_to_sparse_bsc
+    SparseCPU, SparseCUDA: coo_to_sparse_bsc
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_bsc
 
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
@@ -9026,9 +9044,6 @@
   dispatch:
     CPU: _convert_indices_from_csr_to_coo_structured_cpu
     CUDA: _convert_indices_from_csr_to_coo_structured_cuda
-
-- func: _csr_to_block_csr(Tensor self, int[2] block_size) -> Tensor
-  python_module: sparse
 
 ## NN wrappers
 
