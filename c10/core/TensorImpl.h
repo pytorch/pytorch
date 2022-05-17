@@ -686,7 +686,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_and_strides_.sizes_arrayref();
   }
   inline c10::SymIntArrayRef sym_sizes_default() const {
-    return c10::SymIntArrayRef(reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.sizes_data()), sizes_and_strides_.size());
+    return c10::SymIntArrayRef(
+        reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.sizes_data()),
+        sizes_and_strides_.size());
   }
   inline int64_t dim_default() const {
     return sizes_and_strides_.size();
