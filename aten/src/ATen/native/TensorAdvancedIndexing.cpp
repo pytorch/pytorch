@@ -312,7 +312,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
-TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
+TORCH_PRECOMPUTE_META_FUNC(index_reduce)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -321,10 +321,10 @@ TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
  bool include_self) {
   (void)include_self;
   TORCH_CHECK(reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce == "amin",
-              "_index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
+              "index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
   dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "_index_reduce");
-  return TORCH_PRECOMPUTE_STRUCT(_index_reduce)().set_dim(dim);
+  index_func_meta_impl(*this, self, dim, index, source, "index_reduce");
+  return TORCH_PRECOMPUTE_STRUCT(index_reduce)().set_dim(dim);
 }
 
 } // namespace meta
@@ -1026,7 +1026,7 @@ void index_reduce_func_impl(
   }
 }
 
-TORCH_IMPL_FUNC(_index_reduce_cpu_out)
+TORCH_IMPL_FUNC(index_reduce_cpu_out)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
