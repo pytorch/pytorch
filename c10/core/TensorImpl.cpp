@@ -371,6 +371,22 @@ IntArrayRef TensorImpl::sizes_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
 }
+
+c10::Device TensorImpl::device_custom() const {
+  if (is_python_dispatch()) {
+    auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+    if (interpreter) {
+      return interpreter->device(this);
+    }
+    TORCH_CHECK(
+        false,
+        "cannot access PyObject for Tensor on interpreter ",
+        pyobj_interpreter_.load()->name());
+  }
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have device");
+}
+
 IntArrayRef TensorImpl::strides_custom() const {
   TORCH_CHECK(
       false,
