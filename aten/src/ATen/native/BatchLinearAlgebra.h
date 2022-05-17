@@ -1,13 +1,17 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/TransposeType.h>
 
 // Forward declare TI
 namespace at {
+class Tensor;
 struct TensorIterator;
+
+namespace native {
+enum class TransposeType;
+}
+
 }
 
 namespace at { namespace native {
