@@ -85,6 +85,8 @@ When training using FP16 precision, some models may fail to converge with FP16 d
 |               | forward   | backward  |
 +===============+===========+===========+
 | Env unset     | original  | alternate |
++---------------+-----------+-----------+
 | Env set to 1  | alternate | alternate |
++---------------+-----------+-----------+
 | Env set to 0  | original  | original  |
 +---------------+-----------+-----------+
