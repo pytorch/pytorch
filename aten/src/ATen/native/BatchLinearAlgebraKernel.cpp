@@ -982,7 +982,7 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
-      "Calling torch.lu on a CPU tensor requires compiling ",
+      "Calling torch.linalg.lu_factor on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on the CPU");
@@ -1163,6 +1163,32 @@ void svd_kernel(const Tensor& A,
   });
 }
 
+void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size) {
+  auto loop = [&](char* const* const  data, const int64_t* const strides, const int64_t nelems) {
+    auto* perm_ptr = data[0];
+    const auto* pivots_ptr = data[1];
+
+    for (const auto elem : c10::irange(nelems)) {
+      (void)elem; //Suppress unused variable warning
+      // WARNING: linalg.lu_factor returns int32 pivots,
+      // this behavior could change in the future.
+      const auto perm_data = reinterpret_cast<int64_t*>(perm_ptr);
+      const auto pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr);
+
+      for (const auto i : c10::irange(dim_size)) {
+        std::swap(
+          perm_data[i],
+          perm_data[pivots_data[i] - 1]
+        );
+      }
+
+      perm_ptr += strides[0];
+      pivots_ptr += strides[1];
+    }
+  };
+
+  iter.for_each(loop);
+}
 } // anonymous namespace
 
 REGISTER_ARCH_DISPATCH(cholesky_stub, DEFAULT, &cholesky_kernel);
@@ -1260,4 +1286,10 @@ REGISTER_AVX512_DISPATCH(svd_stub, &svd_kernel);
 REGISTER_AVX2_DISPATCH(svd_stub, &svd_kernel);
 REGISTER_VSX_DISPATCH(svd_stub, &svd_kernel);
 REGISTER_ZVECTOR_DISPATCH(svd_stub, &svd_kernel);
+
+REGISTER_ARCH_DISPATCH(unpack_pivots_stub, DEFAULT, &unpack_pivots_cpu_kernel);
+REGISTER_AVX512_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
+REGISTER_AVX2_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
+REGISTER_VSX_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
+REGISTER_ZVECTOR_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
 }} // namespace at::native

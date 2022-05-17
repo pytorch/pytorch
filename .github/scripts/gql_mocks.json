@@ -1,5 +1,5 @@
 {
-  "query_sha=2736c3522193f0300c62943fdfdfd51b3c9ceea5eedc9b3e4608af86570e9228 name=pytorch number=73811 owner=pytorch": {
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=73811 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -302,7 +302,10 @@
                 "state": "APPROVED"
               }
             ],
-            "totalCount": 2
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMy0wNFQxNzoyNDo0OC0wNTowMLkyMDIyLTAzLTA0VDE3OjI0OjQ4LTA1OjAwzjWwwqA=",
+              "hasPreviousPage": false
+            }
           },
           "comments": {
             "nodes": [
@@ -1711,7 +1714,7 @@
       }
     }
   },
-  "query_sha=2736c3522193f0300c62943fdfdfd51b3c9ceea5eedc9b3e4608af86570e9228 name=pytorch number=31093 owner=pytorch": {
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=31093 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -2128,7 +2131,10 @@
                 "state": "APPROVED"
               }
             ],
-            "totalCount": 34
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAxOS0xMi0zMFQxMzoxOToxMS0wNTowMLkyMDE5LTEyLTMwVDEzOjE5OjExLTA1OjAwzhQZLuY=",
+              "hasPreviousPage": false
+            }
           },
           "comments": {
             "nodes": [
@@ -2665,7 +2671,7 @@
       }
     }
   },
-  "query_sha=2736c3522193f0300c62943fdfdfd51b3c9ceea5eedc9b3e4608af86570e9228 name=pytorch number=76118 owner=pytorch": {
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=76118 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -4595,7 +4601,10 @@
           },
           "reviews": {
             "nodes": [],
-            "totalCount": 0
+            "pageInfo": {
+              "startCursor": null,
+              "hasPreviousPage": false
+            }
           },
           "comments": {
             "nodes": [
@@ -5034,7 +5043,1474 @@
       }
     }
   },
-  "query_sha=2736c3522193f0300c62943fdfdfd51b3c9ceea5eedc9b3e4608af86570e9228 name=pytorch number=71759 owner=pytorch": {
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=76123 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": true,
+          "isCrossRepository": true,
+          "author": {
+            "login": "kumpera"
+          },
+          "title": "Introduce distributed checkpoint with ShardedTensor.",
+          "body": "Co-authored-by: Wen Zhang <zhangwen@fb.com>\r\nCo-authored-by: Yifu Wang <yifu@fb.com>\r\n\r\n",
+          "headRefName": "st_checkpoint",
+          "headRepository": {
+            "nameWithOwner": "kumpera/pytorch"
+          },
+          "baseRefName": "master",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "kumpera"
+                    },
+                    "email": "kumpera@fb.com",
+                    "name": "Rodrigo Kumpera"
+                  },
+                  "oid": "6bf248bc20a71f248064b795f38276326fe43aae"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "kumpera"
+                    },
+                    "email": "kumpera@fb.com",
+                    "name": "Rodrigo Kumpera"
+                  },
+                  "oid": "10f84fb90bf02d7062e565ebf2c1da6352b64db7"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "kumpera"
+                    },
+                    "email": "kumpera@fb.com",
+                    "name": "Rodrigo Kumpera"
+                  },
+                  "oid": "96c5299740ec791f3cf0975c03a40a7b219b6747"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "Mw",
+              "hasNextPage": false
+            },
+            "totalCount": 3
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "checkSuites": {
+                    "nodes": [
+                      {
+                        "app": {
+                          "name": "Facebook GitHub Tools",
+                          "databaseId": 12274
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "Facebook CLA Check",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXgS2l4=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "TorchBench CI (pytorch-linux-py3.7-cu102)"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "run-torchbench",
+                              "conclusion": "NEUTRAL"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXd2r3Q=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SKIPPED"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "Lint"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "quick-checks",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "toc",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "lintrunner",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (with_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (without_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test tools",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "workflow-checks",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXd2shU=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "pull"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-cuda11.3-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-custom-build-static / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7-no-ops / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cuda11.3-py3 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.1-py3.7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-docs / build-docs (cpp)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-docs / build-docs (python)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (crossref, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (crossref, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / test (default, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 1, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 2, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 3, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 4, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8 / test (xla, 1, 1, linux.2xlarge)",
+                              "conclusion": "FAILURE"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.1-py3.7 / test (default, 1, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.1-py3.7 / test (default, 2, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (deploy, 1, 1, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 1, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 2, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (distributed, 1, 2, linux.8xlarge.nvidia.gpu)",
+                              "conclusion": "FAILURE"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (distributed, 2, 2, linux.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / test (default, 1, 2, windows.4xlarge)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXd5yuY=",
+                            "hasNextPage": true
+                          }
+                        },
+                        "conclusion": "FAILURE"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "Lint"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "lintrunner",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "quick-checks",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (with_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (without_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test tools",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "workflow-checks",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "toc",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXgS3SE=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "TorchBench CI (pytorch-linux-py3.7-cu102)"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "run-torchbench",
+                              "conclusion": "NEUTRAL"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXgS1-o=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SKIPPED"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "pull"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "linux-bionic-rocm5.1-py3.7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7-no-ops / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-custom-build-static / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-cuda11.3-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cuda11.3-py3 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / test (default, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
+                              "conclusion": "FAILURE"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-docs / build-docs (cpp)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-docs / build-docs (python)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (crossref, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (crossref, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 1, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 2, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 3, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 4, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8 / test (xla, 1, 1, linux.2xlarge)",
+                              "conclusion": "FAILURE"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.1-py3.7 / test (default, 1, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.1-py3.7 / test (default, 2, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 1, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 2, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (distributed, 1, 2, linux.8xlarge.nvidia.gpu)",
+                              "conclusion": "FAILURE"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (distributed, 2, 2, linux.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (deploy, 1, 1, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / test (default, 1, 2, windows.4xlarge)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXgaCXo=",
+                            "hasNextPage": true
+                          }
+                        },
+                        "conclusion": "FAILURE"
+                      }
+                    ],
+                    "pageInfo": {
+                      "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXzlNKQ=",
+                      "hasNextPage": false
+                    }
+                  },
+                  "oid": "96c5299740ec791f3cf0975c03a40a7b219b6747"
+                }
+              }
+            ]
+          },
+          "changedFiles": 11,
+          "files": {
+            "nodes": [
+              {
+                "path": "test/distributed/_shard/checkpoint/test_checkpoint.py"
+              },
+              {
+                "path": "test/distributed/_shard/checkpoint/test_file_system_checkpoint.py"
+              },
+              {
+                "path": "test/distributed/_shard/sharded_tensor/test_sharded_tensor.py"
+              },
+              {
+                "path": "torch/distributed/_shard/checkpoint/__init__.py"
+              },
+              {
+                "path": "torch/distributed/_shard/checkpoint/filesystem.py"
+              },
+              {
+                "path": "torch/distributed/_shard/checkpoint/metadata.py"
+              },
+              {
+                "path": "torch/distributed/_shard/checkpoint/resharding.py"
+              },
+              {
+                "path": "torch/distributed/_shard/checkpoint/state_dict_loader.py"
+              },
+              {
+                "path": "torch/distributed/_shard/checkpoint/state_dict_saver.py"
+              },
+              {
+                "path": "torch/distributed/_shard/checkpoint/storage.py"
+              },
+              {
+                "path": "torch/testing/_internal/distributed/_shard/sharded_tensor/_test_st_common.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MTE",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "zzzwen"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "zzzwen"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "wanchaol"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "zzzwen"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "zzzwen"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "simpkins"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "zzzwen"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "zzzwen"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "simpkins"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "simpkins"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "pritamdamania87"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "pritamdamania87"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "pritamdamania87"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "wilson100hong"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "wilson100hong"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "wilson100hong"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "xunnanxu"
+                },
+                "state": "DISMISSED"
+              },
+              {
+                "author": {
+                  "login": "xunnanxu"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "xunnanxu"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "xunnanxu"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "xunnanxu"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "xunnanxu"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "pritamdamania87"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "pritamdamania87"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "pritamdamania87"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "pritamdamania87"
+                },
+                "state": "APPROVED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNC0yNVQxNDozNTowMS0wNDowMLkyMDIyLTA0LTI1VDE0OjM1OjAwLTA0OjAwzjjC2d0=",
+              "hasPreviousPage": true
+            }
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "Merge failed due to Can't fetch all PR reviews\nRaised by https://github.com/pytorch/pytorch/actions/runs/2275691136",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1118495479
+              },
+              {
+                "bodyText": "Merge failed due to Can't fetch all PR reviews\nRaised by https://github.com/pytorch/pytorch/actions/runs/2275691136",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1118511287
+              },
+              {
+                "bodyText": "Merge failed due to Can't fetch all PR reviews\nRaised by https://github.com/pytorch/pytorch/actions/runs/2275691136",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1118662274
+              },
+              {
+                "bodyText": "Merge failed due to Can't fetch all PR reviews Raised by https://github.com/pytorch/pytorch/actions/runs/2275691136\n\n@osalpekar @malfet This is failing because there are 109 review comments on this PR but we only fetch the first 100. This could be solved with a similar concept as how we fetch more comments/check_runs.",
+                "author": {
+                  "login": "janeyx99"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1118689010
+              },
+              {
+                "bodyText": "On a side note, has the test_fsdp_clip_grad_norm_norm_type_2_0_nested_fsdp_False_cpu_offload_CPUOffload failure on the distributed test first shard of this PR been addressed?",
+                "author": {
+                  "login": "janeyx99"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1118693497
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOQqri9w==",
+              "hasPreviousPage": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=cc0db92500f836c7fc4f9a0235a75b77562e6e4ab939b5cbe5584078df1c22d2 cursor=Y3Vyc29yOnYyOpO5MjAyMi0wNC0yNVQxNDozNTowMS0wNDowMLkyMDIyLTA0LTI1VDE0OjM1OjAwLTA0OjAwzjjC2d0= name=pytorch number=76123 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "pritamdamania87"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kumpera"
+                },
+                "state": "COMMENTED"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNC0yMlQyMzozNzo1NC0wNDowMLkyMDIyLTA0LTIyVDE5OjAyOjA5LTA0OjAwzjip7G8=",
+              "hasPreviousPage": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=71759 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -5723,7 +7199,10 @@
                 "state": "APPROVED"
               }
             ],
-            "totalCount": 17
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMS0yNVQxMToyODoxMC0wNTowMLkyMDIyLTAxLTI1VDEwOjU0OjA1LTA1OjAwzjNooqI=",
+              "hasPreviousPage": false
+            }
           },
           "comments": {
             "nodes": [
@@ -5782,7 +7261,1325 @@
       }
     }
   },
-  "query_sha=2736c3522193f0300c62943fdfdfd51b3c9ceea5eedc9b3e4608af86570e9228 name=pytorch number=68111 owner=pytorch": {
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=75095 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": true,
+          "isCrossRepository": false,
+          "author": {
+            "login": "mruberry"
+          },
+          "title": "Initial prims, references, and test architecture for them",
+          "body": "This PR adds an initial set of experimental primitive operations and Python references that reimplement existing PyTorch operations using them. See https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-0/577 for additional context.\r\n\r\nThe following experimental primitives are added:\r\n\r\n- Elementwise unary prims -- abs, acos, acosh, asin, atan, cos, cosh, bessel_i0e, bessel_i1e, cbrt, ceil, digamma, erf, erf_inv, erfc, exp, expm1, floor, igamma, igammac, is_finite, lgamma, log, log1p, neg, reciprocal, round, sign, sinh, sqrt, square, tan. \r\n- Elementwise binary prims -- add, atan2, bitwise_and, bitwise_not, bitwise_or, bitwise_xor, div, eq, ge, gt, le, lt, max, min, mul, ne, nextafter, pow, rsqrt, shift_left, shift_right_arithmetic\r\n- View prims -- brodcast_in_dim, collapse_view, split_dim, squeeze\r\n- Shape prims -- collapse, concatenate, reshape\r\n- Conditional prims -- select\r\n- Data conversion & movement prims -- convert_element_type, device_put\r\n- Inplace prims -- copy_to, resize\r\n\r\nThese primitives do not add any new functionality to PyTorch, but are intended to be the semantic building blocks for reference operators. We have tried to make them consistent with the operations in [jax.lax](https://jax.readthedocs.io/en/latest/jax.lax.html) where possible (because PyTorch prefers being consistent with other frameworks), although there are key differences between these prims and operations in jax.lax. Most notably is that these prims model view semantics and inplace operations.\r\n\r\nIn addition to these primitives the following elementwise binary Python references are added:\r\n\r\n- Elementwise binary Python references -- add, atan2, bitwise_and, bitwise_left_shift, bitwise_or, bitwise_right_shift, bitwise_xor, eq, float_power, ge, gt, le, lt, maximum, minimum, mul, ne, nextafter, pow, sub, true_divide\r\n- Conditional Python references - where\r\n- Data conversion & movement references - copy_to\r\n\r\nA Python reference implements the same behavior as its corresponding PyTorch operator (excepting slight numerical differences, bug fixes, and in some cases additional features). \r\n\r\nThe start of an OpInfo-based test architecture for these references is also included in this PR. A new list, `python_ref_db`, is added to `common_methods_invocations.py`. This list introduces the new `ElementwiseBinaryPythonRefInfo`, which inherits input arguments from the original operators' OpInfo, allows them to be overridden, and then constructs the OpInfo for the Python reference using the (potentially modified) arguments. OpInfo-based tests can opt-into testing references by including this new list in the Sequence passed to the `@ops` decorator. \r\n\r\ncc @ngimel @csarofeen @kevinstephano @Lezcano ",
+          "headRefName": "prims_and_references",
+          "headRepository": {
+            "nameWithOwner": "pytorch/pytorch"
+          },
+          "baseRefName": "master",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "a790467c650be92775103cde5e866c90b56f5376"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "bd6fcf50692e208ebecdc2eaa517a2bfcdcd35cf"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "4a119c8f21529fe1375e7e8789b91f41a3df80c5"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "ea6750dc34d66be759fdfe84b09fb0e23ee59c79"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "2eef8a55fe0227e1921b51bf1f56f9d0a29b49ac"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "b886ed6c20dd1785fd31ed6fa6a8c5b6d0d0b16c"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "9ad9b63d09aa4f7a8549bcf1d88ea4ff0674299c"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "63fdd580118477416ae160e0670ae722ea248090"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "0ccf7dc292af1d40d0a094eb2b2fb0c7ab4ccc70"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "e8a8a4d1fbe35f20eb88e1a43cf5a653883638e5"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "186634dfdd25645c05b58a212f9e8d77c4125fc0"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "f5b4741312b5c42a79f6c8a1d3930b79db38ed8f"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "23d50391bb0fd12111fd3171591c4235ffb2fc1a"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "bac9d45422d58f513b60b4b854441cfdc253d4c5"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "13240ae0b4a0332c3167b65ac026a3172da90cb7"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "1ee34468cb1db3dc6cbae204669f4fec20e2a466"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@fb.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "561d132bc686d00e8911f7feb3da5901b2bdc574"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ngimel"
+                    },
+                    "email": "ngimel@fb.com",
+                    "name": "Natalia Gimelshein"
+                  },
+                  "oid": "ac42bedc84b7c96256376ad09917263bb020b2c3"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ngimel"
+                    },
+                    "email": "ngimel@fb.com",
+                    "name": "Natalia Gimelshein"
+                  },
+                  "oid": "7f7d5ba40a0b5e10526d90b018b30b54673d12d8"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "37a6b4a8b1adb712d5777c7c3479866c27fb3c4e"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ngimel"
+                    },
+                    "email": "ngimel@fb.com",
+                    "name": "Natalia Gimelshein"
+                  },
+                  "oid": "65b613868c44e519c1777af79b9fd3498c5a7e58"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ngimel"
+                    },
+                    "email": "ngimel@fb.com",
+                    "name": "Natalia Gimelshein"
+                  },
+                  "oid": "442c405e9da0d66744ef03e379224c41eedf5b57"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "031ac49ae9c192989385986b6707fa781e3229e0"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "9a6c3b00039c0c985c1c9cb59490012d1c0b38ba"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "d5c30e408af1889b90012d2e09f6ec3cda333bcb"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": null,
+                    "email": "mruberry@devfair044.h1.fair",
+                    "name": "Mike Ruberry"
+                  },
+                  "oid": "db355d55655bb252a699cd532441bb98e52b98d5"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MjY",
+              "hasNextPage": false
+            },
+            "totalCount": 26
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "checkSuites": {
+                    "nodes": [
+                      {
+                        "app": {
+                          "name": "Facebook GitHub Tools",
+                          "databaseId": 12274
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "Facebook CLA Check",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Meta Internal-Only Changes Check",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAW6ux14=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "Netlify",
+                          "databaseId": 13473
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Azure Pipelines",
+                          "databaseId": 9426
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Dependabot",
+                          "databaseId": 29110
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Codecov",
+                          "databaseId": 254
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "PyTorch Bot",
+                          "databaseId": 40112
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "TorchBench CI (pytorch-linux-py3.7-cu102)"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "run-torchbench",
+                              "conclusion": "NEUTRAL"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAW6e-c8=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SKIPPED"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "Lint"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "quick-checks",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "lintrunner",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test tools",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (with_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (without_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "toc",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "workflow-checks",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAW6e-zM=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "pull"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.0-py3.7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cuda11.3-py3 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-custom-build-static / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7-no-ops / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-cuda11.3-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-docs / build-docs (cpp)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-docs / build-docs (python)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (crossref, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / test (default, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 1, 3, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 2, 3, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 3, 3, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8",
+                              "conclusion": "NEUTRAL"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.0-py3.7 / test (default, 1, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.0-py3.7 / test (default, 2, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (deploy, 1, 1, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 1, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 2, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (distributed, 1, 1, linux.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / test (default, 1, 2, windows.4xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / test (default, 2, 2, windows.4xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cuda11.3-py3 / test (default, 1, 2, windows.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cuda11.3-py3 / test (default, 2, 2, windows.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAW6jVK8=",
+                            "hasNextPage": true
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      }
+                    ],
+                    "pageInfo": {
+                      "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXQFDQA=",
+                      "hasNextPage": false
+                    }
+                  },
+                  "oid": "db355d55655bb252a699cd532441bb98e52b98d5"
+                }
+              }
+            ]
+          },
+          "changedFiles": 5,
+          "files": {
+            "nodes": [
+              {
+                "path": "test/test_ops.py"
+              },
+              {
+                "path": "torch/_prims/__init__.py"
+              },
+              {
+                "path": "torch/_prims/utils.py"
+              },
+              {
+                "path": "torch/_refs/__init__.py"
+              },
+              {
+                "path": "torch/testing/_internal/common_methods_invocations.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NQ",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ngimel"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ngimel"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "zou3519"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "peterbell10"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ngimel"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ngimel"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "Lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ngimel"
+                },
+                "state": "APPROVED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mruberry"
+                },
+                "state": "COMMENTED"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNC0wNlQxNTo1NjoyNC0wNDowMLkyMDIyLTA0LTA2VDExOjQwOjM4LTA0OjAwzjenO6Y=",
+              "hasPreviousPage": false
+            }
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "Ref implementations by themselves can handle any shapes (and broadcast ops by themselves don't bake in any shapes). The question is can we decide if a particular trace is applicable for a different input, but that depends on the tracing technology and what we are caching on, so out of scope for initial PR.",
+                "author": {
+                  "login": "ngimel"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1105643418
+              },
+              {
+                "bodyText": "@pytorchbot merge this please",
+                "author": {
+                  "login": "mruberry"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1108072887
+              },
+              {
+                "bodyText": "Merge failed due to 'mruberry'\nRaised by https://github.com/pytorch/pytorch/actions/runs/2218044244",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1108073536
+              },
+              {
+                "bodyText": "@mruberry has imported this pull request. If you are a Meta employee, you can view this diff on Phabricator.",
+                "author": {
+                  "login": "facebook-github-bot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1108075965
+              },
+              {
+                "bodyText": "Hey @mruberry.\nYou've committed this PR, but it does not have both a 'release notes: ...' and 'topics: ...' label. Please add one of each to the PR. The 'release notes: ...' label should represent the part of PyTorch that this PR changes (fx, autograd, distributed, etc) and the 'topics: ...' label should represent the kind of PR it is (not user facing, new feature, bug fix, perf improvement, etc). The list of valid labels can be found here for the 'release notes: ...' and here for the 'topics: ...'.\nFor changes that are 'topic: not user facing' there is no need for a release notes label.",
+                "author": {
+                  "login": "github-actions"
+                },
+                "authorAssociation": "NONE",
+                "editor": null,
+                "databaseId": 1108351107
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOQebHmg==",
+              "hasPreviousPage": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=68111 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -7329,7 +10126,10 @@
                 "state": "COMMENTED"
               }
             ],
-            "totalCount": 49
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMS0xMi0xMFQxMjoyNDoxOS0wNTowMLkyMDIxLTEyLTEwVDEyOjI0OjE5LTA1OjAwzjFryLE=",
+              "hasPreviousPage": false
+            }
           },
           "comments": {
             "nodes": [
@@ -7356,7 +10156,7 @@
                 "author": {
                   "login": "sanchitintel"
                 },
-                "authorAssociation": "NONE",
+                "authorAssociation": "CONTRIBUTOR",
                 "editor": null,
                 "databaseId": 1074499668
               },
@@ -7430,7 +10230,7 @@
                 "author": {
                   "login": "sanchitintel"
                 },
-                "authorAssociation": "NONE",
+                "authorAssociation": "CONTRIBUTOR",
                 "editor": null,
                 "databaseId": 990641309
               },
@@ -7439,7 +10239,7 @@
                 "author": {
                   "login": "sanchitintel"
                 },
-                "authorAssociation": "NONE",
+                "authorAssociation": "CONTRIBUTOR",
                 "editor": null,
                 "databaseId": 991281407
               },
@@ -7448,7 +10248,7 @@
                 "author": {
                   "login": "sanchitintel"
                 },
-                "authorAssociation": "NONE",
+                "authorAssociation": "CONTRIBUTOR",
                 "editor": null,
                 "databaseId": 995389295
               },
@@ -7466,7 +10266,7 @@
                 "author": {
                   "login": "sanchitintel"
                 },
-                "authorAssociation": "NONE",
+                "authorAssociation": "CONTRIBUTOR",
                 "editor": {
                   "login": "sanchitintel"
                 },
@@ -7477,7 +10277,7 @@
                 "author": {
                   "login": "sanchitintel"
                 },
-                "authorAssociation": "NONE",
+                "authorAssociation": "CONTRIBUTOR",
                 "editor": {
                   "login": "sanchitintel"
                 },
@@ -7488,7 +10288,7 @@
                 "author": {
                   "login": "sanchitintel"
                 },
-                "authorAssociation": "NONE",
+                "authorAssociation": "CONTRIBUTOR",
                 "editor": null,
                 "databaseId": 1026330085
               },
@@ -7515,7 +10315,7 @@
                 "author": {
                   "login": "sanchitintel"
                 },
-                "authorAssociation": "NONE",
+                "authorAssociation": "CONTRIBUTOR",
                 "editor": {
                   "login": "sanchitintel"
                 },
@@ -7562,7 +10362,7 @@
                 "author": {
                   "login": "sanchitintel"
                 },
-                "authorAssociation": "NONE",
+                "authorAssociation": "CONTRIBUTOR",
                 "editor": {
                   "login": "sanchitintel"
                 },
@@ -7578,7 +10378,7 @@
       }
     }
   },
-  "query_sha=2736c3522193f0300c62943fdfdfd51b3c9ceea5eedc9b3e4608af86570e9228 name=pytorch number=73969 owner=pytorch": {
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=73969 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -7974,7 +10774,10 @@
           },
           "reviews": {
             "nodes": [],
-            "totalCount": 0
+            "pageInfo": {
+              "startCursor": null,
+              "hasPreviousPage": false
+            }
           },
           "comments": {
             "nodes": [
@@ -8459,7 +11262,7 @@
       }
     }
   },
-  "query_sha=2736c3522193f0300c62943fdfdfd51b3c9ceea5eedc9b3e4608af86570e9228 name=pytorch number=73099 owner=pytorch": {
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=73099 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -9127,7 +11930,10 @@
                 "state": "APPROVED"
               }
             ],
-            "totalCount": 1
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMi0xOFQyMDoxODo0NC0wNTowMLkyMDIyLTAyLTE4VDIwOjE4OjQ0LTA1OjAwzjTr0H0=",
+              "hasPreviousPage": false
+            }
           },
           "comments": {
             "nodes": [
@@ -9388,7 +12194,7 @@
       }
     }
   },
-  "query_sha=2736c3522193f0300c62943fdfdfd51b3c9ceea5eedc9b3e4608af86570e9228 name=pytorch number=74649 owner=pytorch": {
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=74649 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -9890,7 +12696,10 @@
                 "state": "APPROVED"
               }
             ],
-            "totalCount": 1
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wMy0yM1QxODo1MDo0NS0wNDowMLkyMDIyLTAzLTIzVDE4OjUwOjQ1LTA0OjAwzjbPEDg=",
+              "hasPreviousPage": false
+            }
           },
           "comments": {
             "nodes": [
@@ -9965,6 +12774,9 @@
               },
               {
                 "login": "kostmo"
+              },
+              {
+                "login": "0x00b1"
               },
               {
                 "login": "bhosmer"
@@ -10117,6 +12929,9 @@
                 "login": "javier-m"
               },
               {
+                "login": "jmdetloff"
+              },
+              {
                 "login": "mostafaelhoushi"
               },
               {
@@ -10214,29 +13029,29 @@
               },
               {
                 "login": "zanqi"
-              },
-              {
-                "login": "bujar"
-              },
-              {
-                "login": "supriyar"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOACiM0Q=="
+              "endCursor": "Y3Vyc29yOnYyOpHOACa60A=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOACiM0Q== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOACa60A== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
+              {
+                "login": "bujar"
+              },
+              {
+                "login": "supriyar"
+              },
               {
                 "login": "kausv"
               },
@@ -10508,6 +13323,9 @@
                 "login": "fduwjj"
               },
               {
+                "login": "frank-wei"
+              },
+              {
                 "login": "esqu1"
               },
               {
@@ -10527,7 +13345,23 @@
               },
               {
                 "login": "dracifer"
-              },
+              }
+            ],
+            "pageInfo": {
+              "hasNextPage": true,
+              "endCursor": "Y3Vyc29yOnYyOpHOAHSKuw=="
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAHSKuw== name=metamates org=pytorch": {
+    "data": {
+      "organization": {
+        "team": {
+          "members": {
+            "nodes": [
               {
                 "login": "SS-JIA"
               },
@@ -10536,23 +13370,7 @@
               },
               {
                 "login": "xw285cornell"
-              }
-            ],
-            "pageInfo": {
-              "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOAHb0AA=="
-            }
-          }
-        }
-      }
-    }
-  },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAHb0AA== name=metamates org=pytorch": {
-    "data": {
-      "organization": {
-        "team": {
-          "members": {
-            "nodes": [
+              },
               {
                 "login": "hhbyyh"
               },
@@ -10588,6 +13406,9 @@
               },
               {
                 "login": "nateanl"
+              },
+              {
+                "login": "fuqianz"
               },
               {
                 "login": "boyuantan"
@@ -10636,9 +13457,6 @@
               },
               {
                 "login": "SherlockNoMad"
-              },
-              {
-                "login": "venkatacrc"
               },
               {
                 "login": "pritamdamania87"
@@ -10719,6 +13537,9 @@
                 "login": "robieta"
               },
               {
+                "login": "amirhmk"
+              },
+              {
                 "login": "davidxili"
               },
               {
@@ -10782,6 +13603,9 @@
                 "login": "dongreenberg"
               },
               {
+                "login": "sijiac"
+              },
+              {
                 "login": "markkm"
               },
               {
@@ -10837,7 +13661,23 @@
               },
               {
                 "login": "dzhulgakov"
-              },
+              }
+            ],
+            "pageInfo": {
+              "hasNextPage": true,
+              "endCursor": "Y3Vyc29yOnYyOpHOARD9PA=="
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOARD9PA== name=metamates org=pytorch": {
+    "data": {
+      "organization": {
+        "team": {
+          "members": {
+            "nodes": [
               {
                 "login": "great-way"
               },
@@ -10852,23 +13692,7 @@
               },
               {
                 "login": "jbitton"
-              }
-            ],
-            "pageInfo": {
-              "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOASYQlQ=="
-            }
-          }
-        }
-      }
-    }
-  },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOASYQlQ== name=metamates org=pytorch": {
-    "data": {
-      "organization": {
-        "team": {
-          "members": {
-            "nodes": [
+              },
               {
                 "login": "jdsgomes"
               },
@@ -10883,6 +13707,9 @@
               },
               {
                 "login": "anjali411"
+              },
+              {
+                "login": "kryanchun"
               },
               {
                 "login": "842974287"
@@ -10940,6 +13767,9 @@
               },
               {
                 "login": "vmoens"
+              },
+              {
+                "login": "printfoo"
               },
               {
                 "login": "xinyang0"
@@ -11009,6 +13839,9 @@
               },
               {
                 "login": "drisspg"
+              },
+              {
+                "login": "RdoubleA"
               },
               {
                 "login": "jramseyer"
@@ -11144,7 +13977,23 @@
               },
               {
                 "login": "hongxiayang"
-              },
+              }
+            ],
+            "pageInfo": {
+              "hasNextPage": true,
+              "endCursor": "Y3Vyc29yOnYyOpHOA7Myag=="
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOA7Myag== name=metamates org=pytorch": {
+    "data": {
+      "organization": {
+        "team": {
+          "members": {
+            "nodes": [
               {
                 "login": "kyulee-com"
               },
@@ -11168,23 +14017,7 @@
               },
               {
                 "login": "nimaelyasi"
-              }
-            ],
-            "pageInfo": {
-              "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOBC3inw=="
-            }
-          }
-        }
-      }
-    }
-  },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOBC3inw== name=metamates org=pytorch": {
-    "data": {
-      "organization": {
-        "team": {
-          "members": {
-            "nodes": [
+              },
               {
                 "login": "nikithamalgifb"
               },
@@ -11205,6 +14038,9 @@
               },
               {
                 "login": "jnkwok1"
+              },
+              {
+                "login": "kurman"
               },
               {
                 "login": "jbschlosser"
@@ -11255,6 +14091,9 @@
                 "login": "KZFB"
               },
               {
+                "login": "sisilmehta2000"
+              },
+              {
                 "login": "henryliu-bluehills"
               },
               {
@@ -11262,180 +14101,71 @@
               },
               {
                 "login": "muchulee8"
+              },
+              {
+                "login": "anirbanr-fb-r2p"
               }
             ],
             "pageInfo": {
               "hasNextPage": false,
-              "endCursor": "Y3Vyc29yOnYyOpHOBjjUZQ=="
+              "endCursor": "Y3Vyc29yOnYyOpHOBkbBhA=="
             }
           }
         }
       }
     }
   },
-  "query_sha=616bcccd3f174c76d22913485c05461536e8012a2bae13ac6d12bba9a80386f4 cursor=Y3Vyc29yOnYyOpHPAAAAAUK_Uc0= name=pytorch number=71759 owner=pytorch": {
+  "query_sha=1cd57a8e63e615a31c9b0a412e487bb875f11ae7a4561c30b3c37439722e5ef7 name=pytorch number=77078 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
+          "closed": true,
+          "isCrossRepository": true,
+          "author": {
+            "login": "janeyx99"
+          },
+          "title": "[disable bot] Handle empty bodies",
+          "body": "Fixes problem where the disable bot just breaks when the issue body is empty. Disable bot started failing when #77020 was introduced as it had no issue description. \r\n\r\nThis PR simply adds a condition.",
+          "headRefName": "fix-disable-bot",
+          "headRepository": {
+            "nameWithOwner": "janeyx99/pytorch"
+          },
+          "baseRefName": "master",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "janeyx99"
+                    },
+                    "email": "janeyx@fb.com",
+                    "name": "Jane Xu"
+                  },
+                  "oid": "52c95a600de0735eedb095da552f72edd7d9f52a"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MQ",
+              "hasNextPage": false
+            },
+            "totalCount": 1
+          },
           "commits": {
             "nodes": [
               {
                 "commit": {
-                  "oid": "346e0c547953d98eb84d23c1391a95badb9c4a22",
                   "checkSuites": {
                     "nodes": [
-                      {
-                        "app": {
-                          "name": "GitHub Actions",
-                          "databaseId": 15368
-                        },
-                        "workflowRun": {
-                          "workflow": {
-                            "name": "linux-xenial-cuda11.3-py3.7-gcc7"
-                          }
-                        },
-                        "checkRuns": {
-                          "nodes": [
-                            {
-                              "name": "build",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "test (default, 1, 2, linux.4xlarge.nvidia.gpu)",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "test (distributed, 1, 1, linux.8xlarge.nvidia.gpu)",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "test (default, 2, 2, linux.4xlarge.nvidia.gpu)",
-                              "conclusion": "SUCCESS"
-                            }
-                          ],
-                          "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwOTJ0=",
-                            "hasNextPage": false
-                          }
-                        },
-                        "conclusion": "SUCCESS"
-                      },
-                      {
-                        "app": {
-                          "name": "GitHub Actions",
-                          "databaseId": 15368
-                        },
-                        "workflowRun": {
-                          "workflow": {
-                            "name": "Test tools"
-                          }
-                        },
-                        "checkRuns": {
-                          "nodes": [
-                            {
-                              "name": "test",
-                              "conclusion": "SUCCESS"
-                            }
-                          ],
-                          "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwGZ80=",
-                            "hasNextPage": false
-                          }
-                        },
-                        "conclusion": "SUCCESS"
-                      },
-                      {
-                        "app": {
-                          "name": "GitHub Actions",
-                          "databaseId": 15368
-                        },
-                        "workflowRun": {
-                          "workflow": {
-                            "name": "linux-bionic-py3.7-clang9"
-                          }
-                        },
-                        "checkRuns": {
-                          "nodes": [
-                            {
-                              "name": "build",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "test (default, 1, 2, linux.2xlarge)",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "test (noarch, 1, 1, linux.2xlarge)",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "test (default, 2, 2, linux.2xlarge)",
-                              "conclusion": "SUCCESS"
-                            }
-                          ],
-                          "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwIUUk=",
-                            "hasNextPage": false
-                          }
-                        },
-                        "conclusion": "SUCCESS"
-                      },
-                      {
-                        "app": {
-                          "name": "GitHub Actions",
-                          "databaseId": 15368
-                        },
-                        "workflowRun": {
-                          "workflow": {
-                            "name": "linux-docs"
-                          }
-                        },
-                        "checkRuns": {
-                          "nodes": [
-                            {
-                              "name": "build",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "build-docs (cpp)",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "build-docs (python)",
-                              "conclusion": "SUCCESS"
-                            }
-                          ],
-                          "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwIXQk=",
-                            "hasNextPage": false
-                          }
-                        },
-                        "conclusion": "SUCCESS"
-                      },
-                      {
-                        "app": {
-                          "name": "GitHub Actions",
-                          "databaseId": 15368
-                        },
-                        "workflowRun": {
-                          "workflow": {
-                            "name": "linux-xenial-py3-clang5-mobile-custom-build-static"
-                          }
-                        },
-                        "checkRuns": {
-                          "nodes": [
-                            {
-                              "name": "build",
-                              "conclusion": "SUCCESS"
-                            }
-                          ],
-                          "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwGZ9k=",
-                            "hasNextPage": false
-                          }
-                        },
-                        "conclusion": "SUCCESS"
-                      },
                       {
                         "app": {
                           "name": "GitHub Actions",
@@ -11454,7 +14184,7 @@
                             }
                           ],
                           "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwGZ08=",
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXqy6KQ=",
                             "hasNextPage": false
                           }
                         },
@@ -11467,30 +14197,42 @@
                         },
                         "workflowRun": {
                           "workflow": {
-                            "name": "linux-xenial-py3.7-gcc7"
+                            "name": "Lint"
                           }
                         },
                         "checkRuns": {
                           "nodes": [
                             {
-                              "name": "build",
+                              "name": "lintrunner",
                               "conclusion": "SUCCESS"
                             },
                             {
-                              "name": "test (default, 2, 2, linux.2xlarge)",
+                              "name": "toc",
                               "conclusion": "SUCCESS"
                             },
                             {
-                              "name": "test (default, 1, 2, linux.2xlarge)",
+                              "name": "Test collect_env (with_torch)",
                               "conclusion": "SUCCESS"
                             },
                             {
-                              "name": "test (distributed, 1, 1, linux.2xlarge)",
+                              "name": "Test collect_env (without_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "quick-checks",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test tools",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "workflow-checks",
                               "conclusion": "SUCCESS"
                             }
                           ],
                           "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwIaFM=",
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXqy8MQ=",
                             "hasNextPage": false
                           }
                         },
@@ -11503,78 +14245,234 @@
                         },
                         "workflowRun": {
                           "workflow": {
-                            "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single"
+                            "name": "pull"
                           }
                         },
                         "checkRuns": {
                           "nodes": [
                             {
-                              "name": "build-and-test",
+                              "name": "linux-xenial-py3.7-gcc5.4 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-cuda11.3-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7-no-ops / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.1-py3.7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-custom-build-static / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cuda11.3-py3 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-docs / build-docs (cpp)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-docs / build-docs (python)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / test (default, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (crossref, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / test (crossref, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8 / test (xla, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 1, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 2, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 3, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / test (default, 4, 4, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.1-py3.7 / test (default, 1, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm5.1-py3.7 / test (default, 2, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (deploy, 1, 1, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 1, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 2, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (distributed, 1, 2, linux.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / test (distributed, 2, 2, linux.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "win-vs2019-cpu-py3 / test (default, 1, 2, windows.4xlarge)",
                               "conclusion": "SUCCESS"
                             }
                           ],
                           "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwGZ9Y=",
-                            "hasNextPage": false
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXq6qGM=",
+                            "hasNextPage": true
                           }
                         },
                         "conclusion": "SUCCESS"
                       },
                       {
                         "app": {
-                          "name": "GitHub Actions",
-                          "databaseId": 15368
+                          "name": "Facebook GitHub Tools",
+                          "databaseId": 12274
                         },
-                        "workflowRun": {
-                          "workflow": {
-                            "name": "win-vs2019-cpu-py3"
-                          }
-                        },
+                        "workflowRun": null,
                         "checkRuns": {
                           "nodes": [
                             {
-                              "name": "build",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "test (default, 1, 2, windows.4xlarge)",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "test (default, 2, 2, windows.4xlarge)",
-                              "conclusion": "FAILURE"
-                            }
-                          ],
-                          "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwXcvs=",
-                            "hasNextPage": false
-                          }
-                        },
-                        "conclusion": "FAILURE"
-                      },
-                      {
-                        "app": {
-                          "name": "GitHub Actions",
-                          "databaseId": 15368
-                        },
-                        "workflowRun": {
-                          "workflow": {
-                            "name": "linux-vulkan-bionic-py3.7-clang9"
-                          }
-                        },
-                        "checkRuns": {
-                          "nodes": [
-                            {
-                              "name": "build",
-                              "conclusion": "SUCCESS"
-                            },
-                            {
-                              "name": "test (default, 1, 1, linux.2xlarge)",
+                              "name": "Facebook CLA Check",
                               "conclusion": "SUCCESS"
                             }
                           ],
                           "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwIjzs=",
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXqy5OQ=",
                             "hasNextPage": false
                           }
                         },
@@ -11582,62 +14480,126 @@
                       }
                     ],
                     "pageInfo": {
-                      "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUK_Uec=",
-                      "hasNextPage": true
+                      "endCursor": "Y3Vyc29yOnYyOpHPAAAAAX9Sd7A=",
+                      "hasNextPage": false
                     }
-                  }
+                  },
+                  "oid": "52c95a600de0735eedb095da552f72edd7d9f52a"
                 }
               }
             ]
+          },
+          "changedFiles": 1,
+          "files": {
+            "nodes": [
+              {
+                "path": "tools/stats/import_test_stats.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MQ",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "APPROVED"
+              },
+              {
+                "author": {
+                  "login": "malfet"
+                },
+                "state": "APPROVED"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0wNS0wOVQxMDoxNzoyNy0wNDowMLkyMDIyLTA1LTA5VDEwOjE3OjI3LTA0OjAwzjmXL3U=",
+              "hasPreviousPage": false
+            }
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "\ud83d\udd17 Helpful links\n\n\ud83e\uddea \u00a0See artifacts and rendered test results at hud.pytorch.org/pr/77078\n\ud83d\udcc4 \u00a0Preview Python docs built from this PR\n\ud83d\udcc4 \u00a0Preview C++ docs built from this PR\n\u2753Need help or want to give feedback on the CI? Visit our office hours\n\n\u2705 No Failures (0 Pending)\nAs of commit 52c95a6 (more details on the Dr. CI page):\nExpand to see more\n\n\ud83d\udc9a \ud83d\udc9a Looks good so far! There are no failures yet. \ud83d\udc9a \ud83d\udc9a\n\nThis comment was automatically generated by Dr. CI (expand for details).\nPlease report bugs/suggestions to the (internal) Dr. CI Users group.\nClick here  to manually regenerate this comment.",
+                "author": {
+                  "login": "facebook-github-bot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": {
+                  "login": "facebook-github-bot"
+                },
+                "databaseId": 1121162099
+              },
+              {
+                "bodyText": "@pytorchbot merge this on green",
+                "author": {
+                  "login": "malfet"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1121165629
+              },
+              {
+                "bodyText": "Hey @janeyx99.\nYou've committed this PR, but it does not have both a 'release notes: ...' and 'topics: ...' label. Please add one of each to the PR. The 'release notes: ...' label should represent the part of PyTorch that this PR changes (fx, autograd, distributed, etc) and the 'topics: ...' label should represent the kind of PR it is (not user facing, new feature, bug fix, perf improvement, etc). The list of valid labels can be found here for the 'release notes: ...' and here for the 'topics: ...'.\nFor changes that are 'topic: not user facing' there is no need for a release notes label.",
+                "author": {
+                  "login": "github-actions"
+                },
+                "authorAssociation": "NONE",
+                "editor": null,
+                "databaseId": 1121169988
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOQtOTcw==",
+              "hasPreviousPage": false
+            }
           }
         }
       }
     }
   },
-  "query_sha=616bcccd3f174c76d22913485c05461536e8012a2bae13ac6d12bba9a80386f4 cursor=Y3Vyc29yOnYyOpHPAAAAAUK_Uec= name=pytorch number=71759 owner=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=None name=pytorch-dev-infra org=pytorch": {
     "data": {
-      "repository": {
-        "pullRequest": {
-          "commits": {
+      "organization": {
+        "team": {
+          "members": {
             "nodes": [
               {
-                "commit": {
-                  "oid": "346e0c547953d98eb84d23c1391a95badb9c4a22",
-                  "checkSuites": {
-                    "nodes": [
-                      {
-                        "app": {
-                          "name": "GitHub Actions",
-                          "databaseId": 15368
-                        },
-                        "workflowRun": {
-                          "workflow": {
-                            "name": "linux-xenial-py3.7-gcc7-no-ops"
-                          }
-                        },
-                        "checkRuns": {
-                          "nodes": [
-                            {
-                              "name": "build",
-                              "conclusion": "SUCCESS"
-                            }
-                          ],
-                          "pageInfo": {
-                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwGZ9Q=",
-                            "hasNextPage": false
-                          }
-                        },
-                        "conclusion": "SUCCESS"
-                      }
-                    ],
-                    "pageInfo": {
-                      "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUK_Ueg=",
-                      "hasNextPage": false
-                    }
-                  }
-                }
+                "login": "kit1980"
+              },
+              {
+                "login": "b0noI"
+              },
+              {
+                "login": "seemethere"
+              },
+              {
+                "login": "malfet"
+              },
+              {
+                "login": "tenpercent"
+              },
+              {
+                "login": "atalman"
+              },
+              {
+                "login": "osalpekar"
+              },
+              {
+                "login": "janeyx99"
+              },
+              {
+                "login": "clee2000"
               }
-            ]
+            ],
+            "pageInfo": {
+              "hasNextPage": false,
+              "endCursor": "Y3Vyc29yOnYyOpHOAqnOlw=="
+            }
           }
         }
       }
@@ -12429,49 +15391,6 @@
             "pageInfo": {
               "endCursor": "MzQ4",
               "hasNextPage": false
-            }
-          }
-        }
-      }
-    }
-  },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=None name=pytorch-dev-infra org=pytorch": {
-    "data": {
-      "organization": {
-        "team": {
-          "members": {
-            "nodes": [
-              {
-                "login": "kit1980"
-              },
-              {
-                "login": "b0noI"
-              },
-              {
-                "login": "seemethere"
-              },
-              {
-                "login": "malfet"
-              },
-              {
-                "login": "tenpercent"
-              },
-              {
-                "login": "atalman"
-              },
-              {
-                "login": "osalpekar"
-              },
-              {
-                "login": "janeyx99"
-              },
-              {
-                "login": "clee2000"
-              }
-            ],
-            "pageInfo": {
-              "hasNextPage": false,
-              "endCursor": "Y3Vyc29yOnYyOpHOAqnOlw=="
             }
           }
         }
