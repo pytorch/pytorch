@@ -23,8 +23,8 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
 , kernels_()
 , cpp_signature_()
-, is_observed_(ObservedOperators::isObserved(name_))
 , tags_()
+, is_observed_(ObservedOperators::isObserved(name_))
 {
   // Pick up any backend fallbacks that were registered prior to this
   // OperatorEntry being created
