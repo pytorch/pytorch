@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.common_device_type import (
-    onlyNativeDeviceTypes,
     ops,
     instantiate_device_type_tests,
 )
@@ -950,9 +949,13 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
         )
 
 
+# NB: we're running these tests only on CUDA because there are some
+# inconsistencies between CUDA and CPU, and running on CUDA makes it easier
+# to ignore the CPU case when inconsistencies arise.  Ideally we deal
+# with the inconsistencies but this takes time.
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
+    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
@@ -971,7 +974,7 @@ class TestMeta(TestCase):
                     func(*args, **kwargs, out=expected)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
+    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)

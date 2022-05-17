@@ -1011,11 +1011,13 @@ def native_batch_norm(
         assert running_mean is not None and running_var is not None
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
-        save_mean = running_mean
-        save_invstd = invstd
-        mean = _unsqueeze_to_dim(mean, input.dim() - 1)
-        invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
-        output = ((input - mean) * invstd)
+        # Very annoying inconsistency where CPU and CUDA give different shapes
+        if input.device.type == "cuda":
+            save_mean = running_mean
+            save_invstd = invstd
+        else:
+            save_mean = input.new_zeros((0,))
+            save_invstd = input.new_zeros((0,))
 
     if weight is None:
         weight = input.new_ones(())

@@ -84,7 +84,7 @@ def meta_dot(self, tensor):
 def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
     dim = utils.reduction_dims(self.shape, dim)
     if keepdim:
-        output_shape = [self.shape[i] if i not in dim else 1 for i in range(self.ndim)]
+        output_shape = tuple(self.shape[i] if i not in dim else 1 for i in range(self.ndim))
     else:
         output_shape = utils.compute_reduction_output_shape(self.shape, dim)
     result1 = self.new_empty(output_shape, dtype=toRealValueType(self.dtype))
@@ -99,4 +99,3 @@ def meta_inverse(self):
     r = self.new_empty(self.shape)
     r.transpose_(-2, -1)
     return r
-
