@@ -378,6 +378,11 @@ void initPythonIRBindings(PyObject* module_) {
       .GS(eraseOutput)
       .GS(registerOutput)
       .def(
+          "permuteInputs",
+          [](Graph& g, const std::vector<size_t>& new_inputs) {
+            g.block()->permuteInputs(new_inputs);
+          })
+      .def(
           "create",
           [](Graph& g, const char* str) {
             return g.create(Symbol::fromQualString(str));
@@ -638,6 +643,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "getModuleHierarchy",
           [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
+      .def(
+          "namedInput",
+          [](Node& n, const std::string& unqualName) {
+            return n.namedInput(unqualName);
+          })
       .NS(addInput)
       .NS(copyMetadata)
       .NS(replaceInput)
@@ -742,6 +752,16 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "z",
           [](Node& n, const char* name) { return n.t(Symbol::attr(name)); })
+      .def(
+          "ty_",
+          [](Node& n, const char* name, const TypePtr& type) {
+            return n.ty_(Symbol::attr(name), type);
+          })
+      .def(
+          "tys_",
+          [](Node& n, const char* name, const std::vector<TypePtr>& types) {
+            return n.tys_(Symbol::attr(name), types);
+          })
       .def(
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
