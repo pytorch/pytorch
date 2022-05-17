@@ -195,14 +195,19 @@ Tensor& bmm_out_sparse_csr_cuda(
   return at::native::baddbmm_out_sparse_csr_cuda(result, mat1, mat2, beta, alpha, result);
 }
 
-Tensor& addmv_out_sparse_csr_cuda(
+Tensor& addmv_out_sparse_compressed_cuda(
     const Tensor& self,
     const Tensor& mat,
     const Tensor& vec,
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat.layout() == kSparseCsr || mat.layout() == kSparseBsr);
+
+  if (mat.layout() == kSparseCsc) {
+    return addmv_out_sparse_compressed_cuda(self, mat.to_sparse_csr(), vec,
+        beta, alpha, result);
+  }
+  TORCH_CHECK(mat.layout() != kSparseBsc, "addmm_out_sparse_csr_cuda currently does not support kSparseBsc for input mat.");
 
   TORCH_CHECK(mat.dim() == 2, "addmv: Expected mat to be 2-D");
   TORCH_CHECK(vec.dim() == 1, "addmv: Expected vec to be 1-D");
