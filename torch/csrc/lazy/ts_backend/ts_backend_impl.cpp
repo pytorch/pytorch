@@ -182,9 +182,13 @@ torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
 
 std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
     std::vector<torch::lazy::ComputationPtr> instances) const {
+
   for (const auto& instance : instances) {
-    C10_UNUSED auto ts_computation =
+    auto ts_computation =
         static_cast<torch::lazy::TSComputation*>(instance.get());
+    if (!ts_computation->in_mark_step) {
+      LOG(WARNING) << "Compile outside of mark step";
+    }
   }
   return instances;
 }
