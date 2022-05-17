@@ -901,7 +901,7 @@ Tensor __lshift__(const Tensor& self, const Tensor& other) {
 
 Tensor __lshift__(const Tensor& self, const Scalar& other) {
   Tensor result;
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(result, self, wrapper);
   lshift_stub(iter.device_type(), iter);
   return iter.output();
@@ -914,7 +914,7 @@ Tensor& __ilshift__(Tensor& self, const Tensor& other) {
 }
 
 Tensor& __ilshift__(Tensor& self, const Scalar& other) {
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(self, self, wrapper);
   lshift_stub(iter.device_type(), iter);
   return self;
@@ -925,19 +925,19 @@ TORCH_IMPL_FUNC(bitwise_left_shift_out) (const Tensor& self, const Tensor& other
 }
 
 Tensor& bitwise_left_shift_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return at::bitwise_left_shift_out(result, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_left_shift_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_left_shift(const Tensor& self, const Scalar& other) {
-  return at::bitwise_left_shift(self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_left_shift(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& bitwise_left_shift_(Tensor& self, const Scalar& other) {
-  return at::bitwise_left_shift_out(self, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_left_shift_out(self, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_left_shift(const Scalar& self, const Tensor& other) {
-  return at::bitwise_left_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
+  return at::bitwise_left_shift(wrapped_scalar_tensor(self), other);
 }
 
 Tensor __rshift__(const Tensor& self, const Tensor& other) {
@@ -949,7 +949,7 @@ Tensor __rshift__(const Tensor& self, const Tensor& other) {
 
 Tensor __rshift__(const Tensor& self, const Scalar& other) {
   Tensor result;
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(result, self, wrapper);
   rshift_stub(iter.device_type(), iter);
   return iter.output();
@@ -962,7 +962,7 @@ Tensor& __irshift__(Tensor& self, const Tensor& other) {
 }
 
 Tensor& __irshift__(Tensor& self, const Scalar& other) {
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(self, self, wrapper);
   rshift_stub(iter.device_type(), iter);
   return self;
@@ -973,19 +973,19 @@ TORCH_IMPL_FUNC(bitwise_right_shift_out) (const Tensor& self, const Tensor& othe
 }
 
 Tensor& bitwise_right_shift_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return at::bitwise_right_shift_out(result, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_right_shift_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_right_shift(const Tensor& self, const Scalar& other) {
-  return at::bitwise_right_shift(self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_right_shift(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& bitwise_right_shift_(Tensor& self, const Scalar& other) {
-  return at::bitwise_right_shift_out(self, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_right_shift_out(self, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
-  return at::bitwise_right_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
+  return at::bitwise_right_shift(wrapped_scalar_tensor(self), other);
 }
 
 template <typename Stub>

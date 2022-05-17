@@ -3353,7 +3353,7 @@ class TestBinaryUfuncs(TestCase):
             ),
         )
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float)
     def test_bitwise_shift(self, device, dtype):
         ops = [
             (torch.bitwise_left_shift, np.left_shift),
@@ -3367,14 +3367,23 @@ class TestBinaryUfuncs(TestCase):
             a_np = a.cpu().numpy()
             b_np = b.cpu().numpy()
 
-            # Tensor x Tensor
-            self.assertEqual(
-                torch_op(a, b), torch.tensor(numpy_op(a_np, b_np), device=device)
-            )
-            # Tensor x int scalar
-            self.assertEqual(
-                torch_op(a, 2), torch.tensor(numpy_op(a_np, 2), device=device)
-            )
+            with self.assertRaises(RuntimeError):
+                torch_op(a, 2.0)
+            with self.assertRaises(RuntimeError):
+                torch_op(2.0, a)
+
+            if dtype is not torch.float:
+                # Tensor x Tensor
+                self.assertEqual(
+                    torch_op(a, b), torch.tensor(numpy_op(a_np, b_np), device=device)
+                )
+                # Tensor x int scalar
+                self.assertEqual(
+                    torch_op(a, 2), torch.tensor(numpy_op(a_np, 2), device=device)
+                )
+            else:
+                with self.assertRaises(RuntimeError):
+                    torch_op(a, b)
 
     @onlyNativeDeviceTypes
     @dtypes(
