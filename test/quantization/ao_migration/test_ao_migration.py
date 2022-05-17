@@ -409,7 +409,7 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
         self._test_package_import('modules.conv', base='nn.qat')
         self._test_package_import('modules.embedding_ops', base='nn.qat')
         self._test_package_import('modules.linear', base='nn.qat')
-    
+
     def test_package_import_nn_qat_dynamic(self):
         r"""Tests the migration of the torch.nn.qat.modules"""
         self._test_package_import('dynamic', base='nn.qat')

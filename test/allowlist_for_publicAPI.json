@@ -2478,18 +2478,18 @@
   "torch.nn.parameter": [
     "OrderedDict"
   ],
-  "torch.nn.qat.dynamic.modules.linear": [
+  "torch.ao.nn.qat.dynamic.modules.linear": [
     "activation_is_memoryless"
   ],
-  "torch.nn.qat.modules.conv": [
+  "torch.ao.nn.qat.modules.conv": [
     "Tuple",
     "TypeVar",
     "Union"
   ],
-  "torch.nn.qat.modules.embedding_ops": [
+  "torch.ao.nn.qat.modules.embedding_ops": [
     "Tensor"
   ],
-  "torch.nn.qat.modules.linear": [
+  "torch.ao.nn.qat.modules.linear": [
     "LinearReLU",
     "is_parametrized",
     "transfer_parametrizations_and_params",

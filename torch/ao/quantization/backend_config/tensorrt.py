@@ -1,6 +1,6 @@
 import torch
 from .observation_type import ObservationType
-import torch.nn.qat as nnqat
+import torch.ao.nn.qat as nnqat
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 # TODO: maybe refactor this to a separate util function

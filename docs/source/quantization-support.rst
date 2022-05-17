@@ -312,16 +312,16 @@ like linear + relu.
 
     LinearReLU
 
-torch.nn.qat
+torch.ao.nn.qat
 ~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.qat
-.. automodule:: torch.nn.qat.modules
+.. automodule:: torch.ao.nn.qat
+.. automodule:: torch.ao.nn.qat.modules
 
 This module implements versions of the key nn modules **Conv2d()** and
 **Linear()** which run in FP32 but with rounding applied to simulate the
 effect of INT8 quantization.
 
-.. currentmodule:: torch.nn.qat
+.. currentmodule:: torch.ao.nn.qat
 
 .. autosummary::
     :toctree: generated
@@ -332,16 +332,16 @@ effect of INT8 quantization.
     Conv3d
     Linear
 
-torch.nn.qat.dynamic
+torch.ao.nn.qat.dynamic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.qat.dynamic
-.. automodule:: torch.nn.qat.dynamic.modules
+.. automodule:: torch.ao.nn.qat.dynamic
+.. automodule:: torch.ao.nn.qat.dynamic.modules
 
 This module implements versions of the key nn modules such as **Linear()**
 which run in FP32 but with rounding applied to simulate the effect of INT8
 quantization and will be dynamically quantized during inference.
 
-.. currentmodule:: torch.nn.qat.dynamic
+.. currentmodule:: torch.ao.nn.qat.dynamic
 
 .. autosummary::
     :toctree: generated
