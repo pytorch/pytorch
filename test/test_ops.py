@@ -1104,7 +1104,9 @@ class TestCommon(TestCase):
                 *transformed_sample.args,
                 **transformed_sample.kwargs,
             )
-            self.assertEqual(actual, expected, exact_dtype=False)
+            # Since range of chalf is much less compared to cfloat,
+            # we get `inf`s easily, so we cast `cfloat` back to `chalf`.
+            self.assertEqual(actual, expected.to(torch.chalf))
 
 
 class TestCompositeCompliance(TestCase):
