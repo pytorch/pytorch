@@ -111,6 +111,9 @@ tf32_notes = {
     "tf32_note": """This operator supports :ref:`TensorFloat32<tf32_on_ampere>`."""
 }
 
+rocm_fp16_notes = {
+    "rocm_fp16_note": """On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward."""
+}
 
 reproducibility_notes = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
@@ -304,6 +307,8 @@ must be real numbers, otherwise they should be integers.
 
 {tf32_note}
 
+{rocm_fp16_note}
+
 Args:
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
@@ -323,7 +328,7 @@ Example::
     tensor([[  6.6311,   0.0503,   6.9768, -12.0362,  -2.1653],
             [ -4.8185,  -1.4255,  -6.6760,   8.9453,   2.5743],
             [ -3.8202,   4.3691,   1.0943,  -1.1109,   5.4730]])
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **rocm_fp16_notes))
 
 add_docstr(torch.addcdiv, r"""
 addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
@@ -433,6 +438,8 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 
 {tf32_note}
 
+{rocm_fp16_note}
+
 Args:
     input (Tensor): matrix to be added
     mat1 (Tensor): the first matrix to be matrix multiplied
@@ -451,7 +458,7 @@ Example::
     >>> torch.addmm(M, mat1, mat2)
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **rocm_fp16_notes))
 
 add_docstr(torch.adjoint,
            r"""
@@ -1133,6 +1140,8 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 
 {tf32_note}
 
+{rocm_fp16_note}
+
 Args:
     input (Tensor): the tensor to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
@@ -1150,7 +1159,7 @@ Example::
     >>> batch2 = torch.randn(10, 4, 5)
     >>> torch.baddbmm(M, batch1, batch2).size()
     torch.Size([10, 3, 5])
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **rocm_fp16_notes))
 
 add_docstr(torch.bernoulli,
            r"""
@@ -1287,6 +1296,8 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 """ + r"""
 {tf32_note}
 
+{rocm_fp16_note}
+
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
           For broadcasting matrix products, see :func:`torch.matmul`.
 
@@ -1304,7 +1315,7 @@ Example::
     >>> res = torch.bmm(input, mat2)
     >>> res.size()
     torch.Size([10, 3, 5])
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **rocm_fp16_notes))
 
 add_docstr(torch.bitwise_and,
            r"""
@@ -6712,6 +6723,8 @@ respect to strided inputs.
 
 {tf32_note}
 
+{rocm_fp16_note}
+
 Args:
     input (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
@@ -6726,7 +6739,7 @@ Example::
     >>> torch.mm(mat1, mat2)
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **rocm_fp16_notes))
 
 add_docstr(torch.hspmm,
            r"""
@@ -6778,6 +6791,8 @@ The behavior depends on the dimensionality of the tensors as follows:
 
 {tf32_note}
 
+{rocm_fp16_note}
+
 .. note::
 
     The 1-dimensional dot product version of this function does not support an :attr:`out` parameter.
@@ -6817,7 +6832,7 @@ Example::
     >>> torch.matmul(tensor1, tensor2).size()
     torch.Size([10, 3, 5])
 
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **rocm_fp16_notes))
 
 add_docstr(torch.mode,
            r"""

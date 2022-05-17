@@ -95,6 +95,7 @@ When training using FP16 precision, some models may fail to converge with FP16 d
 
 The following is the list of operations where rocBLAS may be used:
 
+* `torch.addbmm`
 * `torch.addmm`
 * `torch.baddbmm`
 * `torch.bmm`
