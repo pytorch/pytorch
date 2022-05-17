@@ -283,7 +283,7 @@ You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob
 ```cmd
 cmd
 
-:: Set the environment variables after you have downloaded and upzipped the mkl package,
+:: Set the environment variables after you have downloaded and unzipped the mkl package,
 :: else CMake would throw an error as `Could NOT find OpenMP`.
 set CMAKE_INCLUDE_PATH={Your directory}\mkl\include
 set LIB={Your directory}\mkl\lib;%LIB%
