@@ -13,6 +13,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/complex.h>
@@ -114,7 +115,6 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
       AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "rsqrt_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           using opmath_t = at::opmath_type<scalar_t>;
-          // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
           return rsqrt_wrapper(static_cast<opmath_t>(a));
         });
       });
@@ -125,7 +125,6 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
       iter.common_dtype(), "rsqrt_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
           return rsqrt_wrapper(a);
         });
       });
