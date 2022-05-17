@@ -170,7 +170,7 @@ class TestLazyDynamicOps(TestCase):
         return super().tearDownClass()
 
     def test_nonzero_dynamic(self):
-        # Test that nonzero gives upper bounds when symbolic shape mode is enabled
+        # Test that nonzero gives upper bounds sizes when symbolic shape mode is enabled
         test_device = get_test_device()
         x1 = torch.tensor([[0, 1.0, 2.0], [3.0, 0, 0]], device=test_device, requires_grad=True)
         x1_lazy = clone_move(x1)
