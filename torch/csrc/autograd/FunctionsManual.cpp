@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
 
 
 #include <ATen/ATen.h>
@@ -591,7 +592,7 @@ Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, in
 
   // Reference: https://github.com/tensorflow/tensorflow/blob/
   // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
-  return AT_DISPATCH_FLOATING_TYPES(
+  return AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
       [grad, self, result, dim]() {
@@ -885,11 +886,20 @@ Tensor mm_mat2_backward(const Tensor& grad, const Tensor& mat1, IntArrayRef mat2
   return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
 }
 
-Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {
-  AT_ASSERT(sparse_.is_sparse());
-  auto sparse = sparse_.coalesce();
-  Tensor grad_sparse = maybe_multiply(grad.mm(dense.conj().t()), alpha);
-  return grad_sparse.sparse_mask(sparse);
+Tensor mm_mat1_sparse_backward(const Tensor& grad, const Tensor& mat1, const Tensor& mat2, const Scalar& alpha) {
+  if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided && mat1.is_sparse()) {
+    auto sparse = mat1.coalesce();
+    Tensor grad_sparse = maybe_multiply(grad.mm(mat2.conj().t()), alpha);
+    return grad_sparse.sparse_mask(sparse);
+  } else if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided && mat1.is_sparse_csr()) {
+    return at::sparse_sampled_addmm(at::zeros_like(mat1, mat1.options()), grad, mat2.mH(), 1.0, alpha);
+  } else if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided && mat1.layout() == c10::kStrided) {
+    return maybe_multiply(grad.mm(mat2.mH()), alpha);
+  }
+  TORCH_CHECK(false, "sparse_addmm_sparse_backward: unsupported combination of layouts",
+    ", grad: ", grad.layout(),
+    ", mat1: ", mat1.layout(),
+    ", mat2: ", mat2.layout());
 }
 
 // This function return a new SparseTensor with values from Tensor `input` filtered by indices of `mask`
@@ -4841,24 +4851,6 @@ Tensor solve_jvp(
   );
 }
 
-Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
-  return at::linalg_solve(A.mH(), grad);
-}
-
-Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
-  at::NoTF32Guard disable_tf32;
-  Tensor grad_self = solve_backward_self(grad, self, A);
-  if (self.ndimension() == 2 && A.ndimension() == 2) {
-    return -at::mm(grad_self, solution.mH());
-  }
-  // if self was unsqueezed from (..., M) to (..., M, 1)
-  bool vector_case = at::native::linalg_solve_is_vector_rhs(A, self);
-  if (vector_case) {
-    return -at::matmul(grad_self.unsqueeze(-1), solution.unsqueeze(-1).mH());
-  }
-  return -at::matmul(grad_self, solution.mH());
-}
-
 Tensor lu_unpack_backward(
   const Tensor& L_grad,
   const Tensor& U_grad,
@@ -5533,10 +5525,29 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_self = grad;
     grad_src = grad.gather(dim, index);
   } else if (reduce == "prod") {
-    grad_self = (grad * result) / self;
-    grad_self.masked_fill_(self == 0, 0);
-    grad_src = (grad * result).gather(dim, index) / src;
-    grad_src.masked_fill_(src == 0, 0);
+    // Explicitly compute exclusive prod for elements in self/src that are 0
+    Tensor masked_self = self.masked_fill(self == 0, 1);
+    Tensor masked_self_result = masked_self.scatter_reduce(dim, index, src, reduce, include_self);
+    grad_self = grad * masked_self_result / masked_self;
+    Tensor src_zero = src == 0;
+    Tensor src_num_zeros = zeros_like(self).scatter_add(dim, index, src_zero.to(self.dtype())).gather(dim, index);
+    Tensor src_single_zero = bitwise_and(src_zero, src_num_zeros == 1);
+    // For src positions with src_single_zero, grad * result.gather(dim,index) / src.masked_fill(src_zero, 1)
+    // would incorrectly propagate zeros as the gradient
+    Tensor masked_src = src.masked_fill(src_single_zero, 1);
+    Tensor masked_src_result = self.scatter_reduce(dim, index, masked_src, reduce, include_self);
+    Tensor grad_src1 = where(src_single_zero,
+                             (grad * masked_src_result).gather(dim, index),
+                             (grad * result).gather(dim, index) / src.masked_fill(src_zero, 1));
+    if ((src_num_zeros > 1).any().item<bool>()) {
+      auto node = std::make_shared<DelayedError>(
+        "scatter_reduce(): Double backward is unsupported for src when >1 zeros in src are scattered to the same position in self",
+        /* num inputs */ 1);
+      auto result = node->apply({ grad_src1 });
+      grad_src = result[0];
+    } else {
+      grad_src = grad_src1;
+    }
   } else if (reduce == "mean") {
     Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N = N.scatter_add(dim, index, ones_like(src));
@@ -5545,9 +5556,14 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     Tensor N_src = N.gather(dim, index);
     grad_src = grad.gather(dim, index) / N_src;
   } else if (reduce == "amax" || reduce == "amin") {
-    grad_self = (self == result) * grad;
+    // Evenly distribute gradient when there are multiple max/mins
     Tensor value = result.gather(dim, index);
-    grad_src = (src == value) * grad.gather(dim, index);
+    Tensor self_is_result = (self == result).to(self.scalar_type());
+    Tensor src_is_result = (src == value).to(self.scalar_type());
+    Tensor N_to_distribute = self_is_result.scatter_add(dim, index, src_is_result);
+    Tensor grad_distributed = grad / N_to_distribute;
+    grad_self = (self == result) * grad_distributed;
+    grad_src = (src == value) * grad_distributed.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
   }
@@ -5571,7 +5587,7 @@ Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_opt
   return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
 }
 
-std::tuple<Tensor, Tensor> _index_reduce_backward(
+std::tuple<Tensor, Tensor> index_reduce_backward(
   const Tensor& grad,
   const Tensor& self,
   int dim,
@@ -5591,10 +5607,28 @@ std::tuple<Tensor, Tensor> _index_reduce_backward(
   }
 
   if (reduce == "prod") {
-    grad_self = (grad * result) / self;
-    grad_self.masked_fill_(self == 0, 0);
-    grad_src = (grad * result).index_select(dim, index) / source;
-    grad_src.masked_fill_(source == 0, 0);
+    Tensor masked_self = self.masked_fill(self == 0, 1);
+    Tensor masked_self_result = masked_self.index_reduce(dim, index, source, reduce, include_self);
+    grad_self = grad * masked_self_result / masked_self;
+    Tensor src_zero = source == 0;
+    Tensor src_num_zeros = zeros_like(self).index_add(dim, index, src_zero.to(self.dtype())).index_select(dim, index);
+    Tensor src_single_zero = bitwise_and(src_zero, src_num_zeros == 1);
+    // For src positions with src_single_zero, (grad * result).index_select(dim,index) / source.masked_fill(src_zero, 1)
+    // would incorrectly propagate zeros as the gradient
+    Tensor masked_src = source.masked_fill(src_single_zero, 1);
+    Tensor masked_src_result = self.index_reduce(dim, index, masked_src, reduce, include_self);
+    Tensor grad_src1 = where(src_single_zero,
+                             (grad * masked_src_result).index_select(dim, index),
+                             (grad * result).index_select(dim, index) / source.masked_fill(src_zero, 1));
+    if ((src_num_zeros > 1).any().item<bool>()) {
+      auto node = std::make_shared<DelayedError>(
+        "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
+        /* num inputs */ 1);
+      auto result = node->apply({ grad_src1 });
+      grad_src = result[0];
+    } else {
+      grad_src = grad_src1;
+    }
   } else if (reduce == "mean") {
     Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N = N.index_add(dim, index, ones_like(source));
