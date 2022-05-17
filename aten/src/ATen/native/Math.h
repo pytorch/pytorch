@@ -2178,7 +2178,7 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 }
 
 template<typename T>
-static inline C10_HOST_DEVICE T elliptic_integral_e(T x) {
+static inline T elliptic_integral_e(T x) {
     static const T P[] = {
             +1.53552577301013293365e-4,
             +2.50888492163602060990e-3,
@@ -2277,7 +2277,7 @@ static inline T elliptic_integral_k_recurrence(T x) {
 } // elliptic_integral_k_recurrence
 
 template<typename T>
-static inline C10_HOST_DEVICE T elliptic_integral_k(T x) {
+static inline T elliptic_integral_k(T x) {
     return elliptic_integral_k_recurrence(T(1.0) - x);
 } // elliptic_integral_k
 
