@@ -10052,6 +10052,27 @@ class TestNN(NNTestCase):
                 torch.zeros_like(a)
             )
 
+    def test_kl_div_grad(self):
+        for device in device_():
+            input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
+            target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device)
+            input.requires_grad_()
+            expected = torch.nn.functional.kl_div(input, target)
+            expected.backward()
+            expected_grad = input.grad
+            for dtype in [torch.float64, torch.float32, torch.float16, torch.bfloat16]:
+                if (torch.device(device).type == 'cpu' and (dtype == torch.float16 or dtype == torch.bfloat16)):
+                    continue
+                new_input = input.clone().detach()
+                new_input = new_input.to(dtype)
+                new_input.requires_grad_()
+                target = target.to(dtype)
+                result = torch.nn.functional.kl_div(new_input, target)
+                result.backward()
+                result_grad = new_input.grad
+                self.assertEqual(result.item(), expected.item(), atol=0.01, rtol=0.01)
+                self.assertEqual(result_grad, expected_grad.to(dtype), atol=0.01, rtol=0.01)
+
     def test_cosine_embedding_loss_no_reduce(self):
         input1 = torch.randn(15, 10, requires_grad=True)
         input2 = torch.randn(15, 10, requires_grad=True)
