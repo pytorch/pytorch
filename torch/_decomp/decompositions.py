@@ -891,7 +891,7 @@ def native_layer_norm(
 
         out = out.to(dtype=input.dtype)
 
-    if not input.is_cuda:
+    if input.device.type == 'cpu':
         mean = mean.to(dtype=input.dtype)
         rstd = rstd.to(dtype=input.dtype)
     return (out, mean, rstd)
@@ -1030,7 +1030,7 @@ def native_batch_norm(
     weight = _unsqueeze_to_dim(weight, input.dim() - 1)
     bias = _unsqueeze_to_dim(bias, input.dim() - 1)
     output = output * weight + bias
-    if not input.is_cuda:
+    if input.device.type == 'cpu':
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
     return output.to(dtype=input.dtype), save_mean, save_rstd
