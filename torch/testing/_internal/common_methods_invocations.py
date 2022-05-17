@@ -17703,7 +17703,8 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         '_masked.cumsum',
-        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.bfloat16),
+        backward_dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
         method_variant=None,
         supports_out=False,
         supports_forward_ad=True,
