@@ -29,8 +29,8 @@ struct TORCH_API RegisterCudaFuseGraph
 };
 
 struct CudaFuserComparisonCallback {
-  using callback_type =
-      std::function<void(const Stack&, const Stack&, const std::shared_ptr<Graph>&)>;
+  using callback_type = std::function<
+      void(const Stack&, const Stack&, const std::shared_ptr<Graph>&)>;
   bool run_fallback;
   callback_type callback;
 };
