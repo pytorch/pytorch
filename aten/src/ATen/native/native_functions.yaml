@@ -6208,6 +6208,10 @@
 
 - func: lift(Tensor self) -> Tensor
   variants: method
+  dispatch:
+    # Not making it CompositeImplicitAutograd because lift
+    # should be a primitive w.r.t. functorch
+    CompositeExplicitAutograd: lift
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
