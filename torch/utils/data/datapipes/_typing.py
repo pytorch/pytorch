@@ -249,15 +249,15 @@ class _DataPipeMeta(GenericMeta):
     r"""
     Metaclass for `DataPipe`. Add `type` attribute and `__init_subclass__` based
     on the type, and validate the return hint of `__iter__`.
+
+    Note that there is subclass `_IterDataPipeMeta` specifically for `IterDataPipe`.
     """
     type: _DataPipeType
 
     def __new__(cls, name, bases, namespace, **kwargs):
-        if '__iter__' in namespace:
-            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
-
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
+        # TODO: the statements below are not reachable by design as there is a bug and typing is low priority for now.
         cls.__origin__ = None
         if 'type' in namespace:
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
@@ -335,6 +335,17 @@ class _DataPipeMeta(GenericMeta):
     # TODO: Fix isinstance bug
     def _hash_(self):
         return hash((self.__name__, self.type))
+
+
+class _IterDataPipeMeta(_DataPipeMeta):
+    r"""
+    Metaclass for `IterDataPipe` and inherits from `_DataPipeMeta`. Aad a hook function to `__iter__`.
+    """
+
+    def __new__(cls, name, bases, namespace, **kwargs):
+        if '__iter__' in namespace:
+            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
+        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
 
 def _simplify_obj_name(obj) -> str:
