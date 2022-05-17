@@ -22700,6 +22700,41 @@ TEST_F(NVFuserMultithreadedTest, MultipleFunctions_CUDA) {
   }
 }
 
+// Repro of issue #1655
+TEST_F(NVFuserTest, FusionIncompleteConcreteID_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  auto tv2 = makeSymbolicTensor(2);
+  fusion.addInput(tv2);
+
+  auto tv3 = broadcast(tv0, {true, true, false});
+  auto tv4 = broadcast(tv1, {false, true, false});
+  auto tv5 = broadcast(tv2, {true, false, false});
+
+  auto tv6 = add(tv3, tv4);
+  auto tv7 = add(tv3, tv5);
+
+  fusion.addOutput(tv6);
+  fusion.addOutput(tv7);
+
+  tv6->merge(0);
+  tv6->merge(0);
+
+  TransformPropagator::from(tv6);
+
+  tv0->computeAt(tv6, -1, ComputeAtMode::MostInlined);
+  tv1->computeAt(tv6, -1, ComputeAtMode::MostInlined);
+  tv2->computeAt(tv7, -1, ComputeAtMode::MostInlined);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(fusion.printKernel());
+}
+
 TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
