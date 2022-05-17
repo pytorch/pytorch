@@ -519,10 +519,6 @@ Tensor addmm_sparse_compressed_dense(
     const Tensor& dense,
     const Scalar& beta,
     const Scalar& alpha) {
-  if (sparse.layout() == kSparseCsc) {
-    return addmm_sparse_compressed_dense(self, sparse.to_sparse_csr(), dense, beta, alpha);
-  }
-  TORCH_CHECK(sparse.layout() != kSparseBsc, "Given argument sparse has layout SparseBsc, which is currently not supported.");
   Tensor r = at::empty({0, 0}, self.options());
   at::addmm_out(r, self, sparse, dense, beta, alpha);
   return r;
