@@ -157,29 +157,30 @@ def _all_gather_sharded_tensor(
     dim_0_size = sharded_tensor.size()[0]  # type: ignore[index]
     tensor_numel = sharded_tensor.size().numel()  # type: ignore[union-attr]
     chunk_size = math.ceil(dim_0_size / world_size) * tensor_numel // dim_0_size
+    cuda_device = torch.device("cuda", torch.cuda.current_device())
     if shards:
         local_tensor = shards[0].tensor.flatten()
         if not local_tensor.is_cuda:
-            move_to_cpu = torch.ones(1, device=torch.cuda.current_device())
+            move_to_cpu = torch.ones(1, device=cuda_device)
             local_tensor = local_tensor.cuda()
         else:
-            move_to_cpu = torch.zeros(1, device=torch.cuda.current_device())
+            move_to_cpu = torch.zeros(1, device=cuda_device)
         num_padding = chunk_size - local_tensor.numel()
         if num_padding > 0:
             local_tensor = F.pad(local_tensor, [0, num_padding])
     else:
         local_tensor = torch.zeros(
-            chunk_size, dtype=sharded_tensor.dtype, device=torch.cuda.current_device()
+            chunk_size, dtype=sharded_tensor.dtype, device=cuda_device
         )
-        move_to_cpu = torch.zeros(1, device=torch.cuda.current_device())
+        move_to_cpu = torch.zeros(1, device=cuda_device)
 
     tensor = torch.empty(
         chunk_size * world_size,
         dtype=local_tensor.dtype,
-        device=torch.cuda.current_device(),
+        device=cuda_device,
     )
     dist._all_gather_base(tensor, local_tensor, group=pg)
-    all_move_to_cpu = torch.empty(world_size, device=torch.cuda.current_device())
+    all_move_to_cpu = torch.empty(world_size, device=cuda_device)
     dist._all_gather_base(all_move_to_cpu, move_to_cpu, group=pg)
 
     tensor = tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())

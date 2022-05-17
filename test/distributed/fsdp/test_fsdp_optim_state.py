@@ -354,12 +354,9 @@ class TestFSDPOptimState(FSDPTest):
         assert "state" in ref_osd
         self.assertTrue("state" in fsdp_osd)
         ref_osd_state = ref_osd["state"]
-        fsdp_osd_state = fsdp_osd["state"]
-
-        for param_id in fsdp_osd_state.keys():
-            param_state = fsdp_osd_state[param_id]
-            param_state = _gather_state_dict(param_state)
-            fsdp_osd_state[param_id] = param_state
+        fsdp_osd_state = {
+            k: _gather_state_dict(v) for k, v in fsdp_osd["state"].items()
+        }
 
         if check_same_param_keys:
             # Check parameter keys are the same
@@ -683,7 +680,6 @@ class TestFSDPOptimState(FSDPTest):
         # As a sanity check, check that we can load and run a few iterations
         optim2.load_state_dict(sharded_osd1)
         self._step_model(model2, optim2, num_iters=NUM_ITERS)
-
 
     @skip_if_lt_x_gpu(2)
     @parametrize("add_to_fsdp_module", [False, True])

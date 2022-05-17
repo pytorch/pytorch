@@ -648,9 +648,7 @@ class FSDPTest(MultiProcessTestCase):
         return model
 
     @staticmethod
-    def _get_nonwrapped_model(
-        group, **model_kwargs,
-    ) -> torch.nn.Module:
+    def _get_nonwrapped_model(group, **model_kwargs) -> torch.nn.Module:
         """Returns the non-wrapped model that is wrapped in
         :meth:`_get_wrapped_model`. The model used in these two methods should
         be kept in sync for tests that use both for parity comparisons."""
