@@ -185,6 +185,16 @@ void initLazyBindings(PyObject* module){
         FLAGS_torch_lazy_reuse_ir = val;
     }
   );
+  lazy.def(
+    "_set_symbolic_shape_mode", [](bool val) {
+        FLAGS_ltc_enable_symbolic_shapes = val;
+    }
+  );
+  lazy.def(
+    "_get_symbolic_shape_mode", []() {
+        return FLAGS_ltc_enable_symbolic_shapes;
+    }
+  );
 
   lazy_ts_backend.def(
     "_init",
