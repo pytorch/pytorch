@@ -278,6 +278,7 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
         ]
         self._test_function_import('utils', function_list,
                                    base='nn.quantized.modules')
+
     def test_package_import_nn_quantized_dynamic(self):
         self._test_package_import('dynamic', base='nn.quantized')
 
@@ -287,7 +288,7 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
         self._test_package_import('modules.conv', base='nn.quantized.dynamic')
         self._test_package_import('modules.linear', base='nn.quantized.dynamic')
         self._test_package_import('modules.rnn', base='nn.quantized.dynamic')
-        
+
     def test_import_nn_quantized_dynamic_import(self):
         module_list = [
             # Modules
