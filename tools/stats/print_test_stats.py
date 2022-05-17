@@ -892,6 +892,7 @@ def write_flaky_test_stats_to_rockset(
                     )
     if len(flaky_tests) > 0:
         import uuid
+
         for flaky_test in flaky_tests:
             flaky_test["job_id"] = os.environ["GHA_WORKFLOW_JOB_ID"]
             flaky_test["workflow_id"] = workflow_id
