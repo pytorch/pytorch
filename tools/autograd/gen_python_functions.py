@@ -91,6 +91,7 @@ _SKIP_PYTHON_BINDINGS = [
     ".*_backward_(out|input|weight|bias)",
     ".*_forward",
     ".*_forward_out",
+    ".*_jvp",
     "_unsafe_view",
     "tensor",
     "_?sparse_(coo|compressed|csr|csc|bsr|bsc)_tensor.*",
