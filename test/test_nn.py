@@ -10,8 +10,6 @@ import unittest.mock as mock
 import itertools
 import warnings
 import pickle
-import gc
-import weakref
 from copy import deepcopy
 from itertools import repeat, product
 from functools import reduce, partial
@@ -21520,23 +21518,6 @@ class TestStateDictHooks(TestCase):
         m_load._register_load_state_dict_pre_hook(hook_with_module, True)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
-
-    def test_no_extra_ref_to_module(self):
-        try:
-            gc.disable()
-            m = nn.Linear(10, 10)
-
-            def hook_with_module(*args, **kwargs):
-                pass
-
-            m._register_load_state_dict_pre_hook(hook_with_module, True)
-            weak_m = weakref.ref(m)
-            del m
-
-            self.assertEqual(weak_m(), None)
-        finally:
-            gc.enable()
-
 
     def test_load_state_dict_module_pre_hook(self):
         hook_called = 0
