@@ -18312,8 +18312,7 @@ op_db: List[OpInfo] = [
                 },
             ),
         ),
-                domain=(None, 1),
-
+        domain=(None, 1),
         dtypes=all_types_and(torch.bool),
         dtypesIfCUDA=all_types_and(torch.bool),
         ref=scipy.special.ellipe if TEST_SCIPY else _NOTHING,
