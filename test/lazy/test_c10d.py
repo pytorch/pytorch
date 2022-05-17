@@ -83,9 +83,28 @@ class TestDistributedLazy(MultiProcessTestCase):
         source = torch.randn(2, 3)
         device_lazy = torch.device("lazy", self.rank)
         result_lazy = self._broadcast(torch.zeros(2, 3).to(device_lazy), source)
+        torch._lazy.mark_step(str(device_lazy))
 
         device_cuda = torch.device("cuda", self.rank)
         result_cuda = self._broadcast(torch.zeros(2, 3).to(device_cuda), source)
+
+        self._all_close(result_lazy, result_cuda)
+
+    def _all_reduce(self, tensor):
+        dist.all_reduce(tensor)
+        return tensor
+
+    def test_AllReduceLazy(self):
+        # disable all JIT optimizations and fusions.
+        torch._C._jit_set_bailout_depth(0)
+
+        source = torch.full((2, 3), self.rank + 1)
+        device_lazy = torch.device("lazy", self.rank)
+        result_lazy = self._all_reduce(source.to(device_lazy))
+        torch._lazy.mark_step(str(device_lazy))
+
+        device_cuda = torch.device("cuda", self.rank)
+        result_cuda = self._all_reduce(source.to(device_cuda))
 
         self._all_close(result_lazy, result_cuda)
 

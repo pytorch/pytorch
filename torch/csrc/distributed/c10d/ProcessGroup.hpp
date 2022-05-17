@@ -214,14 +214,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = {});
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ", getBackendName(), "does not support allreduce"));
-  }
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = {});
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& /* tensors */,
@@ -435,6 +430,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         false,
         c10::str(
             "ProcessGroup ", getBackendName(), "does not support broadcast"));
+  }
+
+    virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_impl(
+      std::vector<at::Tensor>& /* tensors */,
+      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ", getBackendName(), "does not support allreduce"));
   }
 
  protected:

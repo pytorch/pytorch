@@ -23,7 +23,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::broadcast_impl(
   return next()->broadcast(tensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::allreduce(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::allreduce_impl(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   return next()->allreduce(tensors, opts);

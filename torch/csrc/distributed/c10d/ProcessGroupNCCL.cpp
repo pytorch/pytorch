@@ -1659,7 +1659,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
       profilingTitle);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_impl(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_intern(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   return collective(
@@ -1682,7 +1682,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_impl(
       "nccl:all_reduce");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_impl(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   check_gpu_tensors_different_devices(tensors);
@@ -1698,7 +1698,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>()); // outSplitSizes
 
-  return allreduce_impl(tensors, opts);
+  return allreduce_intern(tensors, opts);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
@@ -1717,7 +1717,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>()); // outSplitSizes
 
-  return allreduce_impl(tensors, opts);
+  return allreduce_intern(tensors, opts);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast_impl(

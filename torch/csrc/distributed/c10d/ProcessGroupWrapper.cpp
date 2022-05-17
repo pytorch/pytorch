@@ -192,7 +192,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::broadcast_impl(
   return pg_->broadcast(data, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allreduce(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allreduce_impl(
     std::vector<at::Tensor>& data,
     const AllreduceOptions& opts) {
   runCollectiveChecks(OpType::ALLREDUCE, data);

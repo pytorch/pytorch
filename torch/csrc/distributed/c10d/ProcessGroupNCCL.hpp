@@ -273,7 +273,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_impl(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
@@ -436,7 +436,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       PostProcess post,
       const char* profilingTitle);
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce_impl(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_intern(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions());
 

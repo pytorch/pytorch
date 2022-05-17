@@ -399,7 +399,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast_impl(
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce_impl(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   checkSingleTensor(tensors);

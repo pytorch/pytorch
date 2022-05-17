@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor.h>
+#include <torch/csrc/lazy/ts_backend/ops/allreduce.h>
 #include <torch/csrc/lazy/ts_backend/ops/broadcast.h>
 #include <torch/library.h>
 
@@ -45,8 +46,18 @@ at::Tensor broadcast(const at::Tensor& tensor,
   return tensor;
 }
 
+at::Tensor allreduce(const at::Tensor& tensor,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group, int64_t reduce_op, int64_t timeout) {
+  TORCH_LAZY_FN_COUNTER("lazy::");
+  auto input = GetLtcTensor(tensor);
+  input->SetIrValue(MakeNode<Allreduce>(input->GetIrValue(), process_group, reduce_op, timeout,
+      std::vector<Shape>{Shape(tensor.scalar_type(), tensor.sizes().vec())}));
+  return tensor;
+}
+
 TORCH_LIBRARY_IMPL(c10d, Lazy, m) {
     m.impl("broadcast_", broadcast);
+    m.impl("allreduce_", allreduce);
 }
 
 }  // namespace lazy

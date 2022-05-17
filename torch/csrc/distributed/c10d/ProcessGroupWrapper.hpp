@@ -21,7 +21,7 @@ class TORCH_API ProcessGroupWrapper : public ProcessGroup {
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_impl(
       std::vector<at::Tensor>& data,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 

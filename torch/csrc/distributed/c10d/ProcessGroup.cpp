@@ -14,12 +14,21 @@ c10::intrusive_ptr<ProcessGroup::Work> broadcast(at::TensorList tensors,
       BroadcastOptions {root_rank, root_tensor, std::chrono::milliseconds(timeout)});
 }
 
-// Added specifically for LazyTensor.
+// Added specifically for AOT and LazyTensor.
 at::Tensor broadcast_(const at::Tensor& tensor,
     const c10::intrusive_ptr<ProcessGroup>& process_group, int64_t root_rank, int64_t root_tensor, int64_t timeout) {
   std::vector<at::Tensor> tensors{tensor};
   auto work = process_group->broadcast_impl(tensors,
       BroadcastOptions {root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+  work->wait();
+  return tensor;
+}
+
+at::Tensor allreduce_(const at::Tensor& tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group, int64_t reduce_op, int64_t timeout) {
+  std::vector<at::Tensor> tensors{tensor};
+  auto work = process_group->allreduce_impl(tensors,
+      AllreduceOptions {static_cast<ReduceOp>(reduce_op), std::chrono::milliseconds(timeout)});
   work->wait();
   return tensor;
 }
@@ -35,6 +44,7 @@ TORCH_LIBRARY(c10d, m) {
   // __torch_dispatch__.
   m.def("broadcast", dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast));
   m.def("broadcast_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast_));
+  m.def("allreduce_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
 }
 
 }  // namespace
@@ -229,6 +239,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::broadcast(
   // AoTAutograd has a similar problem as LazyTensor where it expects the return type to be tensor|(tensor)|[tensor].
   // Then it wraps the returns with the fx.Proxy which can then trace the op.
   // So here we use directly broadcast_ above instead.
+  TORCH_CHECK(tensors.size() == 1lu, "Only one tensor input is supported for c10d::broadcast.")
   auto& tensor = tensors[0];
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast_", "")
       .typed<at::Tensor(const at::Tensor&,
@@ -239,6 +250,27 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::broadcast(
       std::vector<c10::Device>{tensor.device()});
   future->markCompleted(tensor);
   auto work = c10::make_intrusive<c10d::ProcessGroup::Work>(getRank(), c10d::OpType::BROADCAST,
+      /*profilingTitle=*/nullptr, tensors);
+  work->setFuture(std::move(future));
+  work->finish();
+  return work;
+}
+
+
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::allreduce(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceOptions& opts) {
+  TORCH_CHECK(tensors.size() == 1lu, "Only one tensor input is supported for c10d::allreduce.")
+  auto& tensor = tensors[0];
+  static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::allreduce_", "")
+      .typed<at::Tensor(const at::Tensor&,
+          const c10::intrusive_ptr<::c10d::ProcessGroup>&, int64_t, int64_t)>();
+  op.call(tensor, c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this), static_cast<uint64_t>(opts.reduceOp),
+      opts.timeout.count());
+  auto future = c10::make_intrusive<at::ivalue::Future>(c10::TensorType::get(),
+      std::vector<c10::Device>{tensor.device()});
+  future->markCompleted(tensor);
+  auto work = c10::make_intrusive<c10d::ProcessGroup::Work>(getRank(), c10d::OpType::ALLREDUCE,
       /*profilingTitle=*/nullptr, tensors);
   work->setFuture(std::move(future));
   work->finish();

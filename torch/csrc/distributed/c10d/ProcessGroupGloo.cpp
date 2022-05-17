@@ -1414,7 +1414,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_impl(
     std::vector<at::Tensor>& inputs,
     const AllreduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
