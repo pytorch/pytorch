@@ -312,7 +312,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
-TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
+TORCH_PRECOMPUTE_META_FUNC(index_reduce)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -321,10 +321,10 @@ TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
  bool include_self) {
   (void)include_self;
   TORCH_CHECK(reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce == "amin",
-              "_index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
+              "index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
   dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "_index_reduce");
-  return TORCH_PRECOMPUTE_STRUCT(_index_reduce)().set_dim(dim);
+  index_func_meta_impl(*this, self, dim, index, source, "index_reduce");
+  return TORCH_PRECOMPUTE_STRUCT(index_reduce)().set_dim(dim);
 }
 
 } // namespace meta
@@ -888,7 +888,7 @@ void index_reduce_func_impl(
   const Tensor& source,
   bool include_self,
   const Tensor& result,
-  const INDEX_OP& op) {
+  const SCATTER_GATHER_OP& op) {
   if (!result.is_same(self)) result.copy_(self);
   if (!include_self) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -896,14 +896,14 @@ void index_reduce_func_impl(
       self.scalar_type(), "index_reduce_func_exclude_input_init", [&] {
       scalar_t init_val;
       switch (op) {
-        case INDEX_OP::PROD:
+        case SCATTER_GATHER_OP::REDUCE_MULTIPLY:
           init_val = (scalar_t)1;
           break;
-        case INDEX_OP::MAXIMUM:
+        case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::lowest();
           break;
-        case INDEX_OP::MINIMUM:
+        case SCATTER_GATHER_OP::REDUCE_MINIMUM:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::max();
           break;
@@ -950,13 +950,13 @@ void index_reduce_func_impl(
         iter.unsafe_replace_operand(2, source_data);
 
         switch (op) {
-          case INDEX_OP::PROD :
+          case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
             mul_stub(iter.device_type(), iter);
             break;
-          case INDEX_OP::MINIMUM :
+          case SCATTER_GATHER_OP::REDUCE_MINIMUM :
             minimum_stub(iter.device_type(), iter);
             break;
-          case INDEX_OP::MAXIMUM :
+          case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
             maximum_stub(iter.device_type(), iter);
             break;
           default :
@@ -966,7 +966,7 @@ void index_reduce_func_impl(
       }
     });
 
-    if (op == INDEX_OP::MEAN) {
+    if (op == SCATTER_GATHER_OP::REDUCE_MEAN) {
       auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
       counts.index_add_(dim, index, at::ones_like(source));
       counts.masked_fill_(counts == 0, 1);
@@ -997,19 +997,19 @@ void index_reduce_func_impl(
             scalar_t *count_ip;
             scalar_t val;
             switch (op) {
-              case INDEX_OP::MEAN :
+              case SCATTER_GATHER_OP::REDUCE_MEAN :
                 *self_ip += *(source_ptr + i * source_stride);
                 count_ip = counts_ptr + self_i * counts_stride;
                 *count_ip += 1;
                 break;
-              case INDEX_OP::PROD :
+              case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
                 *self_ip *= *(source_ptr + i * source_stride);
                 break;
-              case INDEX_OP::MINIMUM :
+              case SCATTER_GATHER_OP::REDUCE_MINIMUM :
                 val = *(source_ptr + i * source_stride);
                 *self_ip = at::_isnan<scalar_t>(val) ? val : std::min(*self_ip, val);
                 break;
-              case INDEX_OP::MAXIMUM :
+              case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
                 val = *(source_ptr + i * source_stride);
                 *self_ip = at::_isnan<scalar_t>(val) ? val : std::max(*self_ip, val);
                 break;
@@ -1019,14 +1019,14 @@ void index_reduce_func_impl(
         }
       });
     });
-    if (op == INDEX_OP::MEAN) {
+    if (op == SCATTER_GATHER_OP::REDUCE_MEAN) {
       counts.masked_fill_(counts == 0, 1);
       result.div_(counts);
     }
   }
 }
 
-TORCH_IMPL_FUNC(_index_reduce_cpu_out)
+TORCH_IMPL_FUNC(index_reduce_cpu_out)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
@@ -1035,19 +1035,7 @@ TORCH_IMPL_FUNC(_index_reduce_cpu_out)
  bool include_input,
  const Tensor& result) {
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
-
-  INDEX_OP op;
-  if (reduce == "prod") {
-    op = INDEX_OP::PROD;
-  } else if (reduce == "mean") {
-    op = INDEX_OP::MEAN;
-  } else if (reduce == "amax") {
-    op = INDEX_OP::MAXIMUM;
-  } else if (reduce == "amin") {
-    op = INDEX_OP::MINIMUM;
-  } else {
-    TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
-  }
+  auto op = meta::get_operator_enum(reduce, true);
   index_reduce_func_impl(self, dim, index, source, include_input, result, op);
 }
 

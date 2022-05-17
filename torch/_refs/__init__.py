@@ -5,6 +5,7 @@ import torch._prims.utils as utils
 from torch._prims.utils import (
     DimsType,
     ShapeType,
+    StrideType,
     TensorLike,
     TensorLikeType,
     DimsSequenceType,
@@ -134,18 +135,21 @@ __all__ = [
     #
     # View & Shape Ops
     #
+    "as_strided",
     "cat",
     "chunk",
     "flatten",
     "flip",
     "narrow",
     "permute",
+    "reshape",
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
     "tensor_split",
     "transpose",
     "unsqueeze",
+    "view",
 ]
 
 Tensor = torch.Tensor
@@ -232,7 +236,7 @@ infer_aten_op = object()
 
 # TODO: add type promotion support
 def _make_elementwise_unary_reference(
-    prim: Callable, *, type_promotion_kind, aten_op=infer_aten_op
+    prim: Callable, *, type_promotion_kind, aten_op=infer_aten_op, register_meta=False
 ) -> Callable:
     @out_wrapper
     @elementwise_type_promotion_wrapper(
@@ -242,9 +246,9 @@ def _make_elementwise_unary_reference(
         return prim(a)
 
     if aten_op is infer_aten_op:
-        aten_op = getattr(torch.ops.aten, prim.__name__)
+        aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
-        register_decomposition(aten_op)(_ref)
+        register_decomposition(aten_op, register_meta=register_meta)(_ref)
 
     return _ref
 
@@ -326,6 +330,7 @@ isnan = _make_elementwise_unary_reference(
     _isnan,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
+    register_meta=True,
 )
 
 lgamma = _make_elementwise_unary_reference(
@@ -388,6 +393,7 @@ def _make_elementwise_binary_reference(
     type_promotion_kind,
     aten_op=infer_aten_op,
     has_out=True,
+    register_meta=False,
 ) -> Callable:
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"), type_promotion_kind=type_promotion_kind
@@ -403,9 +409,9 @@ def _make_elementwise_binary_reference(
         _ref = out_wrapper(_ref)
 
     if aten_op is infer_aten_op:
-        aten_op = getattr(torch.ops.aten, prim.__name__)
+        aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
-        register_decomposition(aten_op)(_ref)
+        register_decomposition(aten_op, register_meta=register_meta)(_ref)
 
     return _ref
 
@@ -515,7 +521,8 @@ ge = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 gt = _make_elementwise_binary_reference(
-    prims.gt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.gt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 igamma = _make_elementwise_binary_reference(
@@ -596,6 +603,7 @@ logical_and = _make_elementwise_binary_reference(
     _logical_and,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_and,
+    register_meta=True,
 )
 
 
@@ -611,11 +619,13 @@ logical_or = _make_elementwise_binary_reference(
     _logical_or,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_or,
+    register_meta=True,
 )
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
-    prims.lt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.lt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 # TODO: add docstring
@@ -701,7 +711,7 @@ true_divide = _make_elementwise_binary_reference(
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
-@register_decomposition(torch.ops.aten.where)
+@register_decomposition(torch.ops.aten.where, register_meta=True)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
@@ -803,7 +813,9 @@ def _reduction(
 
     if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
         result_dtype = dtype if dtype else a.dtype
-        result = prims.convert_element_type(result, result_dtype)
+        if result.dtype != result_dtype:
+            result = prims.convert_element_type(result, result_dtype)
+
     return result
 
 
@@ -879,6 +891,12 @@ def amax(
     )
 
 
+def as_strided(
+    a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int = 0
+) -> TensorLikeType:
+    return prims.as_strided(a, size, stride, storage_offset)
+
+
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
@@ -911,23 +929,32 @@ def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType,
 
 
 # Note: flatten, unlike prim.collapse and prim.collapse_view has an inclusive end_dim
+# Note: flatten, unlike other shape operators, returns the input tensor on a no-op (unless
+# a 0D tensor is flattened, in which case it's returned in 1D)
 def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorLikeType:
     start_dim = utils.canonicalize_dim(a.ndim, start_dim)
-    end_dim = utils.canonicalize_dim(a.ndim, end_dim) + 1
+    end_dim = utils.canonicalize_dim(a.ndim, end_dim)
+
+    # Short-circuits on no-op
+    if start_dim == end_dim and a.ndim != 0:
+        return a
 
     # Tries to take a view
-    # TODO: we could look at directing collapse_view to skip its meta function here
-    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
+    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim + 1)
     if new_shape is not None:
-        return prims.collapse_view(a, start_dim, end_dim)
+        return prims.collapse_view(a, start_dim, end_dim + 1)
 
     # Makes a copy if it can't make a view
-    result = prims.collapse(a, start_dim, end_dim)
-    return result
+    return prims.collapse(a, start_dim, end_dim + 1)
 
 
+@register_decomposition(torch.ops.aten.flip, register_meta=True)
 def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    if not isinstance(dims, tuple) and not isinstance(dims, list):
+        raise ValueError("dims has to be a sequence of ints")
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
+    utils.validate_no_repeating_dims(dims)
     return prims.rev(a, dims)
 
 
@@ -939,6 +966,147 @@ def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeTy
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
+
+
+def _reshape_view_helper(
+    a: TensorLikeType, shape: ShapeType, *, allow_copy: bool
+) -> TensorLikeType:
+    # NOTE: Reshape may be given a shape with a -1 length
+    # This indicates that the dimension's length should be inferred
+    # Creates a valid shape
+
+    for idx in range(len(shape)):
+        if shape[idx] == -1:
+            # Verifies there's only one dimension of length -1 in the shape
+            if shape.count(-1) > 1:
+                msg = "Can only infer the length of one dimension, but got shape {0}!".format(
+                    str(shape)
+                )
+                raise ValueError(msg)
+
+            # TODO: improve error message
+            if a.numel() > 0:
+                length = reduce(
+                    operator.floordiv, (x for x in shape if x != -1), a.numel()
+                )
+            else:
+                msg = "Cannot reshape a tensor of zero elements into shape {0} because the unspecified length is ambiguous!".format(
+                    str(shape)
+                )
+                raise ValueError(msg)
+
+            shape = list(shape)
+            shape[idx] = length
+            break
+
+    # Short-circuits if shape is the same
+    utils.validate_shape(shape)
+    if tuple(a.shape) == tuple(shape):
+        return prims.view_of(a)
+
+    numel = reduce(operator.mul, shape) if len(shape) > 0 else 1
+    if a.numel() != numel:
+        msg = "Attempting to reshape a tensor with shape {0} and {1} elements to a shape {2} with {3} elements!".format(
+            str(a.shape), a.numel(), str(shape), numel
+        )
+        raise ValueError(msg)
+
+    # Special-cases tensors with no elements
+    if a.numel() == 0:
+        return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
+
+    # Special-cases reshaping zero dim tensors
+    if a.ndim == 0:
+        _a = a
+        for length in shape:
+            assert length == 1
+            _a = unsqueeze(_a, -1)
+        return _a
+
+    # Special-cases reshaping to zero dim tensors
+    if len(shape) == 0:
+        _a = a
+        for length in a.shape:
+            assert length == 1
+            _a = squeeze(_a, -1)
+        return _a
+
+    # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
+
+    # NOTE [Reshape Algorithm]
+    # This algorithm works by attempting to greedily construct the desired dimensions in
+    # the output shape, left to right. It does this by, conceptually, accumulating
+    # dimensions of the original tensor, also left to right, until the dimension
+    # can be constructed using prims.split_dim.
+    # The algorithm also has special handling for tail squeezes/unsqueezes, like
+    # if a reshape from (5, 5) to (5, 5, 1) or vice versa.
+    #
+    # This algorithm does not flatten the original tensor and then split dims as appropriate
+    # because that would create copies more often than this algorithm. flatten is the only
+    # operation below which can create a view or a copy, and while it prefers creating
+    # views it may sometimes create a copy if the tensor's strides do not permit a view.
+    # As a result, this algorithm tries to minimize flattening.
+    #
+    # Note that a better version of this algorithm may exist. Regions which could be
+    # flattened without creating a copy can be identified in advance, and that might
+    # allow fewer flatten calls or faster short-circuiting to make a copy.
+    idx = 0
+    a_ = a
+    for length in shape:
+        # Handles tail unsqueezes
+        if idx >= a_.ndim:
+            assert length == 1
+            a_ = unsqueeze(a_, -1)
+            idx = idx + 1
+            continue
+
+        # Skips dimensions that are already the correct length
+        if length == a_.shape[idx]:
+            idx = idx + 1
+            continue
+
+        # Gathers enough original dimensions such that this new dimension can be created
+        # Note that this accumulation will terminate because we've verified a and the shape
+        # specify the same number of elements above
+        accum = a_.shape[idx]
+        end = idx
+        while accum % length != 0:
+            end = end + 1
+            accum = accum * a_.shape[end]
+        if end != idx:
+            # NOTE: in this case multiple dimensions must be flatten to create the desired dimension
+            # This flattening is why reshape sometimes creates a copy -- because flattening
+            # may return a view of a copy
+
+            # Checks if collapse can be a view and short-circuits to copying reshape if it can't
+            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end + 1)
+            if new_shape is None:
+                if allow_copy:
+                    return prims.reshape(a, shape)
+
+                msg = "Cannot view a tensor with shape {0} and strides {1} as a tensor with shape {2}!".format(
+                    a.shape, a.stride(), shape
+                )
+                raise ValueError(msg)
+
+            a_ = flatten(a_, idx, end)
+
+        # Splits the (possibly flattened) dimension to create the desired dim length
+        if accum != length:
+            a_ = prims.split_dim(a_, idx, length)
+
+        idx = idx + 1
+
+    # Squeezes tail
+    while idx < a_.ndim:
+        assert a_.shape[idx] == 1
+        a_ = squeeze(a_, idx)
+
+    return a_
+
+
+def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
+    return _reshape_view_helper(a, shape, allow_copy=True)
 
 
 # update to cat then view instead of unsqueezing each tensor
@@ -1047,12 +1215,16 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
     if a.ndim <= 1:
-        return a
+        return prims.view_of(a)
 
     _permutation = list(range(0, a.ndim))
     _permutation[_dim0] = _dim1
     _permutation[_dim1] = _dim0
     return prims.transpose(a, _permutation)
+
+
+# Aliases for transpose
+swap_axes = transpose
 
 
 def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
@@ -1062,5 +1234,5 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     return prims.expand_dims(a, (dim,))
 
 
-# Aliases for transpose
-swap_axes = transpose
+def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
+    return _reshape_view_helper(a, shape, allow_copy=False)
