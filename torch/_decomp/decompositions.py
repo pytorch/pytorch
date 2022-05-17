@@ -1030,6 +1030,9 @@ def native_batch_norm(
     weight = _unsqueeze_to_dim(weight, input.dim() - 1)
     bias = _unsqueeze_to_dim(bias, input.dim() - 1)
     output = output * weight + bias
+    if not input.is_cuda:
+        save_mean = save_mean.to(dtype=input.dtype)
+        save_rstd = save_rstd.to(dtype=input.dtype)
     return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
