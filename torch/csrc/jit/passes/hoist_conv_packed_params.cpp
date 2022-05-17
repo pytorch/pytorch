@@ -113,7 +113,14 @@ void HoistConvPackedParams(script::Module& m) {
              moduleName.value() ==
                  "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d" ||
              moduleName.value() ==
-                 "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d");
+                 "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d" ||
+             // BC Stuff
+             moduleName.value() ==
+                 "__torch__.torch.nn.quantized.modules.conv.Conv1d" ||
+             moduleName.value() ==
+                 "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
+             moduleName.value() ==
+                 "__torch__.torch.nn.quantized.modules.conv.Conv3d");
 
         if (moduleNameIsQuantizedConv) {
           GRAPH_UPDATE("Hoisting ", *n, " to root module.");
