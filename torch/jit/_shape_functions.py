@@ -866,6 +866,68 @@ def argmax(self: List[int], dim: Optional[int] = None, keepdim: bool = False) ->
         return []
     return _reduce_along_dim(self, dim, keepdim)
 
+def bmm(self: List[int], mat2: List[int]) -> List[int]:
+    assert len(self) == 3, "bmm only supports 3D tensors"
+    assert len(mat2) == 3, "bmm only supports 3D tensors"
+    assert self[0] == mat2[0], "mismatching batch dimension"
+    assert self[2] == mat2[1], "mismatching contracting dimension"
+    return [self[0], self[1], mat2[2]]
+
+def _shape_as_tensor(self: List[int]) -> List[int]:
+    return [len(self)]
+
+def topk(self: List[int], k: int, dim: int = -1) -> Tuple[List[int], List[int]]:
+    if len(self) == 0:
+        result: List[int] = []
+    else:
+        assert k <= self[dim], f"k ({k}) is too big for dimension {dim} of size {self[dim]}"
+        result = _copy(self)
+        result[dim] = k
+    return result, result
+
+def nll_loss_forward(self: List[int], target: List[int], weight: Optional[List[int]], reduction: int) -> Tuple[List[int], List[int]]:
+    # This is taken shamelessly from the meta function in LossNLL.cpp
+    self_dim = len(self)
+    target_dim = len(target)
+    assert 0 < self_dim <= 2
+    assert target_dim <= 1
+    no_batch_dim = self_dim == 1 and target_dim == 0
+    assert no_batch_dim or (self[0] == target[0])
+    n_classes = self[-1]
+    scalar_shape: List[int] = []
+    assert weight is None or (len(weight) == 1 and weight[0] == n_classes)
+    if reduction == 0 and self_dim == 2:
+        reduction_shape = [self[0]]
+    else:
+        reduction_shape = scalar_shape
+    return reduction_shape, scalar_shape
+
+def native_layer_norm(input: List[int], normalized_shape: List[int]) -> Tuple[List[int], List[int], List[int]]:
+    reduction_shape: List[int] = []
+    num_unreduced_dimensions = len(input) - len(normalized_shape)
+    assert num_unreduced_dimensions >= 0
+    for i in range(num_unreduced_dimensions):
+        reduction_shape.append(input[i])
+    for i in range(num_unreduced_dimensions, len(input)):
+        reduction_shape.append(1)
+    return _copy(input), reduction_shape, reduction_shape
+
+def native_batch_norm(input: List[int], weight: Optional[List[int]], bias: Optional[List[int]], running_mean: Optional[List[int]], running_var: Optional[List[int]], training: bool) -> Tuple[List[int], List[int], List[int]]:
+    if training:
+        _size = [input[1]]
+    else:
+        _size = [0]
+    return _copy(input), _size, _size
+
+# TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
+# def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
+#     assert len(indices) <= len(self), "More indices than dimensions to index"
+#     broadcasted_shape: List[int] = []
+#     for index_tensor_shape in indices:
+#         if index_tensor_shape is not None:
+#             broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
+#     return broadcasted_shape
+
 ScriptFn = torch._C.ScriptFunction
 shape_compute_graph_mapping : Dict[str, ScriptFn ] = {}
 bounded_compute_graph_mapping : Dict[str, Tuple[ScriptFn, ScriptFn]] = {}
@@ -949,6 +1011,14 @@ add_shape_compute_mapping("aten::quantize_per_tensor.tensor_qparams(Tensor self,
 add_shape_compute_mapping("aten::dequantize(Tensor self) -> Tensor", unary)
 add_shape_compute_mapping("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc", broadcast)
 add_shape_compute_mapping("aten::argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor", argmax)
+add_shape_compute_mapping("aten::bmm(Tensor self, Tensor mat2) -> Tensor", bmm)
+add_shape_compute_mapping("aten::_shape_as_tensor(Tensor self) -> Tensor", _shape_as_tensor)
+add_shape_compute_mapping("aten::topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)", topk)
+add_shape_compute_mapping("aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", nll_loss_forward)
+add_shape_compute_mapping("aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", native_layer_norm)
+add_shape_compute_mapping("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
+# TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
+#add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp
 # These are duplicated here so that the functions will be serialiazed
