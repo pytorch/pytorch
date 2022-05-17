@@ -2049,23 +2049,10 @@ class TestSparseCSR(TestCase):
         _to_from_layout(from_layout, to_layout)
 
     @skipMeta
-    def test_compressed_layout_to_dense_coverage(self, device):
-        """
-        This test performs a smoke test for conversion from sparse
-        to dense. Most importantly it confirms an exception is
-        thrown.
-        """
-        dense = make_tensor((6, 10), dtype=torch.float, device=device)
-        dense = dense.relu()  # Introduce some sparsity
-        pt_matrix = self._convert_to_layout(dense, torch.sparse_csc)
-        with self.assertRaises(RuntimeError):
-            pt_matrix.to_dense()
-
-    @skipMeta
     @all_sparse_compressed_layouts()
-    def test_dense_to_sparse_compressed(self, device, layout):
+    def test_dense_to_from_sparse_compressed(self, device, layout):
         """
-        This test tests conversion from dense to CSR and CSC
+        This test tests conversion from dense to/from CSR and CSC
         by comparing to SciPy's implementation.
         """
         if layout is torch.sparse_bsc:
@@ -2096,6 +2083,8 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
+
+            self.assertEqual(dense, pt_matrix.to_dense())
 
     @skipMeta
     @all_sparse_compressed_layouts()
