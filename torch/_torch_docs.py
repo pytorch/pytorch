@@ -112,7 +112,8 @@ tf32_notes = {
 }
 
 rocm_fp16_notes = {
-    "rocm_fp16_note": """On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward."""
+    "rocm_fp16_note": """On certain ROCm devices, when using float16 inputs this module will use \
+:ref:`different precision<fp16_on_mi200>` for backward."""
 }
 
 reproducibility_notes = {
