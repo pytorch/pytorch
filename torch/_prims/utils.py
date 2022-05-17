@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
 from enum import Enum
+from functools import reduce
+import operator
 
 import torch
 
@@ -207,7 +209,7 @@ def validate_dim_length(length: int):
     assert length >= 0
 
 
-def validate_shape(shape: Sequence):
+def validate_shape(shape: ShapeType):
     """
     Validates that a sequence represents a valid shape.
     """
@@ -215,6 +217,16 @@ def validate_shape(shape: Sequence):
     assert isinstance(shape, Sequence)
     for l in shape:
         validate_dim_length(l)
+
+
+def validate_strides(strides: StrideType):
+    """
+    Verifies the object specifies valid strides.
+    """
+
+    assert isinstance(strides, Sequence)
+    for stride in strides:
+        assert stride >= 0
 
 
 def validate_idx(rank: int, idx: int):
@@ -887,7 +899,7 @@ def wrap_device(d: Union[str, torch.device]) -> torch.device:
     return d
 
 
-def make_contiguous_strides_for(shape: Sequence) -> Tuple[int, ...]:
+def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     validate_shape(shape)
     if not shape:
         return ()
@@ -895,7 +907,8 @@ def make_contiguous_strides_for(shape: Sequence) -> Tuple[int, ...]:
     multiplier = 1
     strides = [multiplier]
     for l in reversed(shape[1:]):
-        multiplier = l * multiplier
+        if l != 0:
+            multiplier = l * multiplier
         strides.append(multiplier)
 
     return tuple(reversed(strides))
@@ -917,10 +930,41 @@ def compute_reduction_output_shape(
     return tuple(new_shape)
 
 
+def validate_no_repeating_dims(dims: Sequence):
+    if len(dims) != len(set(dims)):
+        raise RuntimeError("duplicate value in the list of dims")
+
+
 def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...]:
     if dims is None:
         return tuple(range(len(shape)))
     dims = tuple(canonicalize_dim(len(shape), idx) for idx in dims)
-    if len(dims) != len(set(dims)):
-        raise RuntimeError("duplicate value in the list of dims")
+    validate_no_repeating_dims(dims)
     return dims
+
+
+def check_in_bounds_for_storage(
+    a: torch._TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
+):
+    """
+    Determines if the given shape, strides, and offset are valid for the given storage.
+    """
+
+    # Short-circuits if the shape has no elements
+    if reduce(operator.mul, shape) == 0:
+        return
+
+    length = a.size() - storage_offset
+    max_offset = 0
+    for x, y in zip(shape, strides):
+        max_offset = max_offset + (x - 1) * y
+
+    if max_offset >= length:
+        required_length = max_offset + storage_offset
+        msg = (
+            "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
+            "which requires a storage of size {4}".format(
+                a.size(), storage_offset, str(shape), str(strides), required_length
+            )
+        )
+        raise ValueError(msg)
