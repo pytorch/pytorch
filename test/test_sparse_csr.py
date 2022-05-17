@@ -2038,6 +2038,9 @@ class TestSparseCSR(TestCase):
                             or layout_b in [torch.sparse_csc, torch.sparse_bsc])
             expect_error = expect_error or (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_bsr)
             expect_error = expect_error or (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_csr)
+            # CSC to CSR conversion is supported
+            if layout_a is torch.sparse_csc and layout_b is torch.sparse_csr:
+                expect_error = False
             if expect_error:
                 with self.assertRaises(RuntimeError):
                     b = self._convert_to_layout(a, layout_a)
