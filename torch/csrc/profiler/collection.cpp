@@ -1,9 +1,11 @@
 #include <torch/csrc/profiler/collection.h>
 
 #include <algorithm>
+#include <queue>
 
 #include <ATen/record_function.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
@@ -296,13 +298,108 @@ void set_autograd_evaluate(std::vector<std::shared_ptr<Result>>& results) {
     }
   }
 }
+
+using result_ptr_t = std::shared_ptr<Result>;
+struct ResultGreater {
+  bool operator()(const result_ptr_t& a, const result_ptr_t& b) const {
+    return a->endTimeNS() > b->endTimeNS();
+  }
+};
+
+void build_tree(std::vector<std::shared_ptr<Result>>& events) {
+  set_autograd_evaluate(events);
+  std::stable_sort(
+      events.begin(), events.end(), [](const auto& a, const auto& b) {
+        return a->start_time_ns_ < b->start_time_ns_;
+      });
+
+  using op_fields = ExtraFields<EventType::TorchOp>;
+  ska::flat_hash_map<uint64_t, std::shared_ptr<Result>> stacks;
+  std::priority_queue<result_ptr_t, std::vector<result_ptr_t>, ResultGreater>
+      end_events_;
+
+  auto push_event = [&stacks, &end_events_](std::shared_ptr<Result>& event) {
+    TORCH_INTERNAL_ASSERT(event->parent_.expired());
+    TORCH_INTERNAL_ASSERT(event->children_.empty());
+    TORCH_INTERNAL_ASSERT(!event->finished_);
+
+    auto parent_it = stacks.find(event->start_tid_);
+    if (parent_it == stacks.end()) {
+      auto fwd_tid = c10::visit(
+          c10::overloaded(
+              [](const op_fields& i) { return i.forward_tid_; },
+              [](const auto&) -> uint64_t { return 0; }),
+          event->extra_fields_);
+      if (fwd_tid) {
+        parent_it = stacks.find(fwd_tid);
+      }
+    }
+
+    if (parent_it != stacks.end()) {
+      event->parent_ = parent_it->second;
+      parent_it->second->children_.push_back(event);
+    }
+
+    if (event->endTimeNS() > event->start_time_ns_) {
+      stacks[event->start_tid_] = event;
+      end_events_.push(event);
+    } else if (event->endTimeNS() == std::numeric_limits<time_t>::min()) {
+      // We use min time to indicate the lack of a termination event, so if we
+      // encounter such a case we don't push to `end_events_`.
+      stacks[event->start_tid_] = event;
+    } else {
+      event->finished_ = true;
+    }
+  };
+
+  auto pop_event = [&stacks](const std::shared_ptr<Result>& event) {
+    if (event->finished_) {
+      // This event was marked finished by a previous `pop_event` call.
+      return;
+    }
+
+    auto start_tid = event->start_tid_;
+    auto frame = stacks.at(start_tid);
+
+    // Handle any events which are allowed to end without an explicit end call.
+    // (E.g. a user scope.)
+    while (frame.get() != event.get()) {
+      TORCH_INTERNAL_ASSERT(frame != nullptr);
+      TORCH_INTERNAL_ASSERT(c10::visit(
+          c10::overloaded(
+              [](const op_fields& i) {
+                return i.scope_ == at::RecordScope::USER_SCOPE;
+              },
+              [](const auto&) { return false; }),
+          frame->extra_fields_))
+      frame->finished_ = true;
+      TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
+      frame = frame->parent_.lock();
+    }
+
+    stacks.erase(start_tid);
+    auto new_frame = event->parent_.lock();
+    if (new_frame != nullptr) {
+      stacks[start_tid] = new_frame;
+    }
+  };
+
+  for (auto& event : events) {
+    while (!end_events_.empty() &&
+           end_events_.top()->endTimeNS() < event->start_time_ns_) {
+      pop_event(end_events_.top());
+      end_events_.pop();
+    }
+    push_event(event);
+  }
+}
 } // namespace
 
 std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     std::function<time_t(approx_time_t)> time_converter) {
   auto converter = [&](approx_time_t t) {
     return t == std::numeric_limits<approx_time_t>::min()
-        ? std::numeric_limits<int64_t>::min()
+        ? std::numeric_limits<time_t>::min()
         : time_converter(t);
   };
   std::vector<std::shared_ptr<Result>> out;
@@ -357,10 +454,7 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     queue.allocations_.clear();
   }
 
-  set_autograd_evaluate(out);
-  std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-    return a->start_time_ns_ < b->start_time_ns_;
-  });
+  build_tree(out);
   return out;
 }
 
