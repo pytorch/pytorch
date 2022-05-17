@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
+    skipCUDAIfRocm,
     dtypes,
 )
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
@@ -17,6 +18,7 @@ from torch._prims.executor import make_traced
 
 class TestPrims(TestCase):
     @onlyCUDA
+    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
         # nvfuser is not currently capable of realizing a broadcasted tensor
