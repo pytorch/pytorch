@@ -3,12 +3,17 @@
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 #include <vector>
+#include <lazy/core/internal_ops/ltc_ops.h>
 
 namespace torch {
 namespace lazy {
 
 class TORCH_API AsStridedViewUpdate : public TsNode {
  public:
+  static OpKind ClassOpKind() {
+    return ltc_as_strided_view_update;
+  }
+
   AsStridedViewUpdate(
       const Value& target,
       const Value& input,

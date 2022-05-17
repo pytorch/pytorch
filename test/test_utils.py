@@ -259,6 +259,19 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self):
+        inp = torch.randn(2, device='cuda').requires_grad_()
+        layer = torch.nn.Dropout()
+
+        def run_fn(input):
+            return layer(input)
+
+        out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
+        out.sum().backward()
+        # This should run without error
+
+
     def test_checkpoint_non_tensor(self):
 
         def run_fn(tensor1, tensor2):
