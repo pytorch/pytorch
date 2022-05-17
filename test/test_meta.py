@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.logging_tensor import no_dispatch
 from torch.testing._internal.common_methods_invocations import op_db
 
+import atexit
 import re
 from collections import defaultdict
 import unittest
@@ -192,12 +193,27 @@ def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
         test_assert(meta_r.is_neg() == r.is_neg(), f"but real is_neg was {r.is_neg()}")
 
 
+# This environment variable controls whether or not we print expected failure
+# lists at the end of a test suite run.  The intended usage looks like this:
+#
+# 1. Run `PYTORCH_COLLECT_EXPECT=1 python test/test_meta.py` on a CUDA build
+#    of PyTorch that has LAPACK/MAGMA installed.  You can filter `-k test_meta`
+#    or `-k test_dispatch_meta` to only focus on one or another list
+# 2. Given the printed skip/xfail list, add them to the corresponding lists;
+#    torch.* entries go in meta_function and aten.* entries go in meta_dispatch.
+#    If there are preexisting entries, you need to merge in the entries.
+#
+# This is somewhat manual but typically you shouldn't need to do this, unless
+# you've made a major change (e.g., added a new dtype to PyTorch) and need to
+# refresh the lists.  If you want to do it from scratch, just clear out the
+# preexisting lists before running.
+#
+# WARNING: Python dict literals will silently ignore duplicate keys
 COLLECT_EXPECT = os.getenv('PYTORCH_COLLECT_EXPECT', '0') == '1'
 
 seen_succeeded = {}
 seen_failed = {}
 failed_reasons = defaultdict(set)
-import atexit
 def print_seen():
     expected_failures = []
     skips = []
@@ -234,7 +250,7 @@ if COLLECT_EXPECT:
     atexit.register(print_seen)
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
-TestExpect = Enum("TestExpect", ("SUCCESS", "FAILURE", "SKIP"))
+TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
 
 # unlike print produce strides
 def verbose_print(e):
@@ -284,13 +300,15 @@ def run_meta_crossref(
     # this isn't well supported)
     if do_meta and to_meta.successful():
         try:
-            # Suppress warnings, this matters because some tests are
-            # checking warnings!
+            # Suppress warnings, this doesn't matter for test_meta.py
+            # but it does matter if you want to use this decorator
+            # for cross-ref testing, as some tests may be looking at
+            # errors
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 meta_rs = func(*meta_args, **meta_kwargs)
         except Exception as e:
-            if test_expect is TestExpect.FAILURE:
+            if test_expect is TestExpect.XFAILURE:
                 return rs
             seen_failed.setdefault(func, set()).add(dtype)
             if isinstance(e, NotImplementedError):
@@ -318,7 +336,7 @@ meta disagrees with real impl:
 {msg}
 """)
             except Exception:
-                if test_expect is TestExpect.FAILURE:
+                if test_expect is TestExpect.XFAILURE:
                     return rs
                 seen_failed.setdefault(func, set()).add(dtype)
                 if COLLECT_EXPECT:
@@ -326,7 +344,7 @@ meta disagrees with real impl:
                 raise
             else:
                 seen_succeeded.setdefault(func, set()).add(dtype)
-                if test_expect is TestExpect.FAILURE and not COLLECT_EXPECT:
+                if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
                     raise RuntimeError(f"unexpected success {resolve_name(func)}")
 
     return rs
@@ -637,9 +655,9 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
         elif self.dtype in meta_function_device_skips[self.device_type].get(func, set()):
             test_expect = TestExpect.SKIP
         elif self.dtype in meta_function_expected_failures.get(func, set()):
-            test_expect = TestExpect.FAILURE
+            test_expect = TestExpect.XFAILURE
         elif self.dtype in meta_function_device_expected_failures[self.device_type].get(func, set()):
-            test_expect = TestExpect.FAILURE
+            test_expect = TestExpect.XFAILURE
         else:
             test_expect = TestExpect.SUCCESS
 
@@ -923,9 +941,9 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
         elif self.dtype in meta_dispatch_device_skips[self.device_type].get(func, set()):
             test_expect = TestExpect.SKIP
         elif self.dtype in meta_dispatch_expected_failures.get(func, set()):
-            test_expect = TestExpect.FAILURE
+            test_expect = TestExpect.XFAILURE
         elif self.dtype in meta_dispatch_device_expected_failures[self.device_type].get(func, set()):
-            test_expect = TestExpect.FAILURE
+            test_expect = TestExpect.XFAILURE
         else:
             test_expect = TestExpect.SUCCESS
 

@@ -123,7 +123,7 @@ class TestFXExperimental(JitTestCase):
         assert len(serialized_graph1["weights"]) == 4
         assert len(serialized_graph1["modules"]) == 0
         assert len(serialized_graph2["nodes"]) == 6
-        assert len(serialized_graph2["weights"]) == 4
+        assert len(serialized_graph2["weights"]) == 1
         assert len(serialized_graph2["modules"]) == 1
         assert serialized_graph1["weights"]["linear.weight"]["shape"] == "[4, 4]"
         assert serialized_graph1["weights"]["linear.weight"]["dtype"] == "torch.float32"
