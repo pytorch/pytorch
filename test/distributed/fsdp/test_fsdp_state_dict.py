@@ -8,6 +8,7 @@ from typing import Any, Dict
 
 import torch
 import torch.nn as nn
+from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 from torch import distributed as dist
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
@@ -19,7 +20,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
 from torch.distributed.fsdp.shard_utils import _gather_state_dict
-from torch.distributed.fsdp.wrap import enable_wrap, wrap, size_based_auto_wrap_policy
+from torch.distributed.fsdp.wrap import enable_wrap, wrap, transformer_auto_wrap_policy
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
@@ -143,34 +144,53 @@ class TestFSDPStateDict(FSDPTest):
                 self.assertEqual(fsdp_state_dict, {})
 
     @skip_if_lt_x_gpu(2)
-    def state_dict_rank0_offload_save_load_flow(self):
+    def test_state_dict_rank0_offload_save_load_flow(self):
         # Test taking checkpoint on rank 0 only, and reload
         # without redundant CPU memories.
+        model = TransformerWithSharedParams(group=dist.distributed_c10d._get_default_group())
+        my_auto_wrap_policy = partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer}
+        )
+        model = FSDP(model, auto_wrap_policy=my_auto_wrap_policy)
         ctx = self._get_state_dict_mgr(
             model, "state_dict", True
         )
-        model = TransformerWithSharedParams(group=dist.distributed_c10d._get_default_group())
-        model = FSDP(model, auto_wrap_policy=size_based_auto_wrap_policy)
         with ctx:
             state_dict = deepcopy(_get_state_dict(model))
 
         # All ranks initialize non-FSDP model
-        model_new = TransformerWithSharedParams(group=dist.distributed_c10d._get_default_group())
+        grp = dist.distributed_c10d._get_default_group()
+        model_new = TransformerWithSharedParams(group=grp)
+        for p in model_new.parameters():
+            with torch.no_grad():
+                p.zero_()
         # Only rank 0 loads the checkpoint
         if self.rank == 0:
             model_new.load_state_dict(state_dict)
 
-        _validate(model_new, process_group=self.process_group, assert_fn=self.assertNotEqual)
+        # TransformerWithSharedParams has a buffer of zeros, so can't pass in
+        # self.assertNotEqual since the buffers would be equal. So just checking that
+        # there is some difference in the model across ranks before state_dict is
+        # broadcasted.
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
+            _validate(model_new, process_group=grp, assert_fn=self.assertEqual)
         # FSDP with sync_module_states=True broadcasts the checkpointed states.
-        model_new = FSDP(model_new, auto_wrap_policy=size_based_auto_wrap_policy, sync_module_states=True)
+        model_new = FSDP(
+            model_new,
+            device_id=torch.cuda.current_device(),
+            auto_wrap_policy=my_auto_wrap_policy,
+            sync_module_states=True
+        )
         # After wrapping with FSDP models are equal across ranks, and have loaded the checkpoint
-        _validate(model_new, process_group=self.process_group, assert_fn=self.assertEqual)
+        with FSDP.summon_full_params(model_new):
+            _validate(model_new, process_group=grp, assert_fn=self.assertEqual)
 
         with FullyShardedDataParallel.summon_full_params(model):
             with FullyShardedDataParallel.summon_full_params(model_new):
                 params = list(model.parameters())
                 params_new = list(model_new.parameters())
-                self.assertNotEqual(params, params_new)
+                self.assertEqual(params, params_new)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)

@@ -2,10 +2,12 @@
 
 import sys
 from contextlib import suppress
+import functools
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
@@ -24,7 +26,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
-from torch.distributed.fsdp.wrap import always_wrap_policy
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -52,9 +54,14 @@ class TestFSDPMisc(FSDPTest):
         """
         Test auto wrapping propagates the device id.
         """
+        model = TransformerWithSharedParams(group=self.process_group)
+        my_auto_wrap_policy = functools.partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer}
+        )
         wrapped = FSDP(
-            TransformerWithSharedParams(group=self.process_group),
-            auto_wrap_policy=always_wrap_policy,
+            model,
+            auto_wrap_policy=my_auto_wrap_policy,
             device_id=torch.cuda.current_device()
         )
         # All FSDP instances should have device_id set
@@ -231,13 +238,14 @@ class TestFSDPMisc(FSDPTest):
                 torch.manual_seed(rank)
                 torch.cuda.manual_seed(rank)
                 self.lin = nn.Linear(10, 10, bias=False)
+                self.register_buffer("buffer", torch.ones(1) * rank)
 
         m = MyModel(self.rank).cuda()
         _validate(m, process_group=self.process_group, assert_fn=self.assertNotEqual)
         # Passing sync_module_states into FSDP makes model the same during init.
         fsdp = FSDP(m, sync_module_states=True)
         with fsdp.summon_full_params(fsdp):
-            _validate(m, process_group=self.process_group, assert_fn=self.assertEqual)
+            _validate(fsdp, process_group=self.process_group, assert_fn=self.assertEqual)
 
 instantiate_parametrized_tests(TestFSDPMisc)
 

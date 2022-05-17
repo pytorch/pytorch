@@ -28,7 +28,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-from torch.distributed.utils import _to_kwargs
+from torch.distributed.utils import _to_kwargs, _sync_params_and_buffers
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -296,7 +296,7 @@ class FullStateDictConfig(StateDictConfig):
         >>>     model.load_state_dict(state_dict)
         >>> # All ranks initialize FSDP module as usual. ``sync_module_states`` argument
         >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
-        >>> fsdp = FSDP(Model, auto_wrap_policy=..., sync_module_states=True)
+        >>> fsdp = FSDP(Model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
         >>> # After this point, all ranks have FSDP model with loaded checkpoint.
     """
     offload_to_cpu: bool = False
@@ -782,10 +782,11 @@ class FullyShardedDataParallel(nn.Module):
                     buf._fsdp_has_been_sync = True
                     bufs_to_sync.append(buf.detach())
 
+            states_to_sync = [param.detach() for param in params]
+            states_to_sync.extend(bufs_to_sync)
             _sync_params_and_buffers(
                 process_group=self.process_group,
-                # TODO: FSDP should sync buffers as well
-                module_states=[param.detach() for param in params].extend(bufs_to_sync),
+                module_states=states_to_sync,
                 # Same bucket size as DDP
                 broadcast_bucket_size=int(250 * 1024 * 1024),
                 src=0,

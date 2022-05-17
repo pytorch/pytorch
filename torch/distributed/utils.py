@@ -34,7 +34,7 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
                     current_stream.wait_stream(stream)
                     # Ensure tensor memory is not reused until work on
                     # main stream is complete
-                    output.record_stream(current_stream)  # type: ignore[attr-defined]
+                    output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
         if _is_namedtuple(obj):
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]
