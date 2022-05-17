@@ -379,7 +379,7 @@ def parse_args() -> Any:
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--on-green", action="store_true")
-    parser.add_argument("--all-gren", action="store_true")
+    parser.add_argument("--all-green", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
@@ -621,7 +621,7 @@ class GitHubPR:
         return self.comments
 
     def get_last_comment(self) -> GitHubComment:
-        return self._comment_from_node(self.info["cowmments"]["nodes"][-1])
+        return self._comment_from_node(self.info["comments"]["nodes"][-1])
 
     def get_comment_by_id(self, database_id: int) -> GitHubComment:
         if self.comments is None:
