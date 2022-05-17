@@ -313,7 +313,7 @@ meta disagrees with real impl:
   {delim.join(map(verbose_print, meta_args))},
   {delim.join(k + ": " + verbose_print(v) for k, v in meta_kwargs.items())}
 ) = (
-  {delim.join(map(verbose_print, meta_rs))}
+  {verbose_print(meta_rs)}
 )
 {msg}
 """)
