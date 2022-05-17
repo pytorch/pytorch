@@ -3940,14 +3940,6 @@ class _TestONNXRuntime:
         input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), input)
 
-    def test_bitshift_other_fp(self):
-        class BitshiftModel(torch.nn.Module):
-            def forward(self, input):
-                return input << 2.4
-
-        input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
-        self.run_test(BitshiftModel(), input)
-
     # uint8 not implemented in ORT for Mul used in
     # exporting bitshift for opset_version < 10
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -3956,9 +3948,9 @@ class _TestONNXRuntime:
             def forward(self, input, input2):
                 return (
                     input >> 1,
-                    input << 3.0,
+                    input << 3,
                     input2 >> torch.tensor([1, 2], dtype=torch.uint8),
-                    input2 << 4.0,
+                    input2 << 4,
                 )
 
         input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
