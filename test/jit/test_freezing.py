@@ -1678,6 +1678,7 @@ class TestFrozenOptimizations(JitTestCase):
         scripted_mod = torch.jit.freeze(scripted_mod, preserved_attrs=["make_prediction", "amt"])
         FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.make_prediction.graph)
 
+    @unittest.skipIf(True, "Caching allocator leak sometimes causes failures")
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_conv_bn_folding_autocast_scenario_cuda(self):
         # CUDA conv takes input tensors which must all be the same dtype,
