@@ -524,7 +524,6 @@ meta_function_expected_failures = {
     torch.histc: {bf16, f32, f64},  # aten::histc, aten::histc.out
     torch.histogram: {f32, f64},  # aten::histogram.bin_ct, aten::histogram.bins_tensor
     torch.histogramdd: {f32, f64},  # aten::_histogramdd_bin_edges, aten::_histogramdd_from_bin_tensors
-    torch.imag: {c32},  # aten::view_as_real
     torch.kthvalue: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::kthvalue.values
     torch.linalg.qr: {f32, f64},  # aten::_linalg_qr_helper
     torch.linalg.vector_norm: {bf16, f16, f32, f64},  # aten::linalg_vector_norm
@@ -568,7 +567,6 @@ meta_function_expected_failures = {
     torch.nn.functional.unfold: {bf16, f16, f32, f64},  # aten::im2col
     torch.nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero, aten::nonzero.out
     torch.polar: {f32, f64},  # aten::polar.out
-    torch.real: {c32},  # aten::view_as_real
     torch.repeat_interleave: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::repeat_interleave.Tensor
     torch.roll: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
     torch.searchsorted: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::searchsorted.Tensor, aten::searchsorted.Tensor_out
@@ -578,7 +576,6 @@ meta_function_expected_failures = {
     torch.trace: {f32, f64, i16, i32, i64, i8, u8},  # aten::trace
     torch.var_mean: {bf16, f16, f32, f64},  # aten::var_mean.correction
     torch.vdot: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::vdot
-    torch.view_as_complex: {f16, f32, f64},  # aten::view_as_complex
     torch.qr: {f32, f64},
     torch.ormqr: {f32, f64},
     torch.lu_solve: {f32, f64},
@@ -915,8 +912,6 @@ meta_dispatch_expected_failures = {
     aten.var_mean.correction: {bf16, f16, f64, f32},
     aten.vdot.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.vdot.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.view_as_complex.default: {c64, f64, c128, f16, f32},
-    aten.view_as_real.default: {c32},
     aten._det_lu_based_helper.default: {f32, f64},  # aten::_det_lu_based_helper
     aten._linalg_check_errors.default: {c128, c64, f32, f64},  # aten::_local_scalar_dense
     aten.cholesky.default: {f32, f64},  # aten::cholesky
