@@ -155,7 +155,7 @@ if(INTERN_BUILD_ATEN_OPS)
 
   set(GEN_COMMAND
       "${PYTHON_EXECUTABLE}" -m torchgen.gen
-      --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
+      --source-path ${CMAKE_CURRENT_LIST_DIR}/../torchgen/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
