@@ -1813,19 +1813,23 @@ class TestQuantizedOps(TestCase):
                 error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
 
                 for name, op in ops_under_test.items():
-                    qX_hat = op(qX, output_size=output_size)
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(
-                        X_ref, qX_hat.int_repr(), atol=1.0,
-                        rtol=0, msg=error_message.format(name, X_ref, qX_hat))
-                    self.assertEqual(
-                        scale, qX_hat.q_scale(),
-                        msg=error_message.format(name + '.scale', scale,
-                                                 qX_hat.q_scale()))
-                    self.assertEqual(
-                        zero_point, qX_hat.q_zero_point(),
-                        msg=error_message.format(name + '.zero_point', scale,
-                                                 qX_hat.q_zero_point()))
+                    # TODO: torch.cuda.is_available() should be swapped for a flag that checks if cudnn
+                    # is enabled in the build when cudnn supports adaptive average pooling
+                    devices = ["cpu", "cuda"] if (dim == 2 and torch.cuda.is_available()) else ["cpu"]
+                    for device in devices:
+                        qX_hat = op(qX.to(device=device), output_size=output_size)
+                        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                        self.assertEqualIgnoreType(
+                            X_ref, qX_hat.int_repr(), atol=1.0,
+                            rtol=0, msg=error_message.format(name, X_ref, qX_hat))
+                        self.assertEqual(
+                            scale, qX_hat.q_scale(),
+                            msg=error_message.format(name + '.scale', scale,
+                                                     qX_hat.q_scale()))
+                        self.assertEqual(
+                            zero_point, qX_hat.q_zero_point(),
+                            msg=error_message.format(name + '.zero_point', scale,
+                                                     qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool3d_ndhwc(self):
@@ -4461,19 +4465,16 @@ class TestQuantizedConv(TestCase):
                 dilations, X_scale, X_zero_point, W_scale, W_zero_point,
                 Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False, input_dtype=X_qdtype, output_dtype=X_qdtype)
 
+    # TODO: merge this test with test_qconv2d when CUDNN runtime flags becomes available
+    """Tests the correctness of quantized 2D convolution cudnn op."""
     @given(batch_size=st.integers(1, 3),
-           # only multiples of 16 are supported right now, might be fixed in
-           # next release of cudnn
-           # input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           input_channels_per_group=st.sampled_from([16, 32]),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           input_channels_per_group=st.integers(1, 32),
            height=st.integers(10, 16),
            width=st.integers(7, 14),
-           # only multiples of 16 are supported right now, might be fixed in
-           # next release of cudnn
-           # output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           output_channels_per_group=st.sampled_from([16, 32]),
-           # groups=st.integers(1, 3),
-           groups=st.integers(1, 1),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           output_channels_per_group=st.integers(1, 32),
+           groups=st.integers(1, 1),  # currently padding only supports groups=1
            kernel_h=st.integers(1, 7),
            kernel_w=st.integers(1, 7),
            stride_h=st.integers(1, 2),
@@ -4482,6 +4483,8 @@ class TestQuantizedConv(TestCase):
            pad_w=st.integers(0, 2),
            # result for dilation == 2 is not correct
            # dilation=st.integers(1, 2),
+           # currently cudnn has only been verified to work for dilation = 1
+           # TODO: check backend works for dilation > 1
            dilation=st.integers(1, 1),
            X_scale=st.floats(1.2, 1.6),
            X_zero_point=st.sampled_from([0]),
@@ -5110,7 +5113,6 @@ class TestQuantizedConv(TestCase):
         use_relu,
         use_channelwise,
     ):
-
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         if torch.backends.quantized.engine == 'qnnpack':
@@ -5145,6 +5147,87 @@ class TestQuantizedConv(TestCase):
                 [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
                 Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False,
                 input_dtype=X_qdtype, output_dtype=X_qdtype)
+
+    # TODO: merge this test with test_qconv1d when CUDNN runtime flags becomes available
+    """Tests the correctness of quantized 1D convolution cudnn op."""
+    @given(batch_size=st.integers(1, 6),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           input_channels_per_group=st.integers(1, 32),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           output_channels_per_group=st.integers(1, 32),
+           groups=st.integers(1, 1),  # currently padding only supports groups=1
+           length=st.integers(4, 16),
+           kernel=st.integers(1, 7),
+           stride=st.integers(1, 2),
+           pad=st.integers(0, 2),
+           # currently cudnn has only been verified to work for dilation = 1
+           # TODO: check backend works for dilation > 1
+           dilation=st.integers(1, 1),
+           X_scale=st.floats(1.2, 1.6),
+           # currently conv cudnn backend is only implemented for int8 symmetric
+           X_zero_point=st.sampled_from([0]),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           # currently conv cudnn backend is only implemented for int8 symmetric
+           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           # currently conv cudnn backend is only implemented for int8 symmetric
+           Y_zero_point=st.sampled_from([0]),
+           use_bias=st.booleans(),
+           use_relu=st.booleans(),
+           # TODO: enable channelwise
+           use_channelwise=st.sampled_from([False]))
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skip("Local only - currently the qconv1d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
+    def test_qconv1d_cudnn(
+        self,
+        batch_size,
+        input_channels_per_group,
+        output_channels_per_group,
+        groups,
+        length,
+        kernel,
+        stride,
+        pad,
+        dilation,
+        X_scale,
+        X_zero_point,
+        W_scale,
+        W_zero_point,
+        Y_scale,
+        Y_zero_point,
+        use_bias,
+        use_relu,
+        use_channelwise,
+    ):
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+
+        conv1d = torch.nn.Conv1d(
+            input_channels,
+            output_channels,
+            kernel,
+            stride,
+            pad,
+            dilation,
+            groups,
+        ).to(torch.device("cuda"))
+        qconv_prepack = torch.ops.quantized.conv1d_prepack
+        if use_relu:
+            qconv = torch.ops.quantized.conv1d_relu
+        else:
+            qconv = torch.ops.quantized.conv1d
+
+        self._test_qconv_impl(
+            qconv, qconv_prepack, conv1d, batch_size,
+            input_channels_per_group, (length, ),
+            output_channels_per_group, groups, kernel, [stride], [pad], None,
+            [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False,
+            device=torch.device("cuda"),
+            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
 
     @given(batch_size=st.integers(1, 4),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
