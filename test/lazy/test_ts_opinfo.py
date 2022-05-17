@@ -32,13 +32,18 @@ def init_lists():
     with open(TS_NATIVE_FUNCTIONS_PATH) as f:
         yaml_ts = yaml.load(f, yaml.Loader)
     LAZY_OPS_LIST = set(remove_suffixes(itertools.chain(yaml_ts["full_codegen"], yaml_ts["supported"], yaml_ts["autograd"])))
-    FALLBACK_LIST = set(["clamp", "nonzero"])
+    FALLBACK_LIST = set(["clamp"])
     SKIP_RUNTIME_ERROR_LIST = set([
         'index_select',  # Empty output_sizes is not supported
         'clone',  # is clone decomposed?
-        'all',  # ASAN failure https://github.com/pytorch/pytorch/issues/74519
-        'any',  # ASAN failure https://github.com/pytorch/pytorch/issues/74519
-        'logdet',  # ASAN failure https://github.com/pytorch/pytorch/issues/74519
+
+        # General ASAN Failure due to related to generating bool values.
+        # https://github.com/pytorch/pytorch/issues/74519
+        # https://github.com/pytorch/pytorch/issues/63034
+        'nonzero',  # ASAN failure (paste: P501906539)
+        'all',  # ASAN failure
+        'any',  # ASAN failure
+        'logdet',  # ASAN failure
     ])
     SKIP_INCORRECT_RESULTS_LIST = set([
         'squeeze',  # Value out of range
