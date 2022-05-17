@@ -132,6 +132,22 @@ struct MemoryEventData {
 };
 static_assert(std::is_pod<MemoryEventData>::value, "Non-POD member of MemoryEventData.");
 
+auto getAnnotations(const MemoryEventData& event) {
+  torch::profiler::impl::kineto::annotation_t out{
+      {"Device Type", std::to_string((int8_t)event.device_type)},
+      {"Device Id", std::to_string(event.device_index)},
+      {"Addr", std::to_string(reinterpret_cast<intptr_t>(event.ptr))},
+      {"Bytes", std::to_string(event.alloc_size)}};
+
+  if (event.total_allocated >= 0) {
+    out.emplace_back("Total Allocated", std::to_string(event.total_allocated));
+  }
+  if (event.total_reserved >= 0) {
+    out.emplace_back("Total Reserved", std::to_string(event.total_reserved));
+  }
+  return out;
+}
+
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
 static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
@@ -227,15 +243,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
     for (const auto& e : memory_events_) {
       auto start_time_us = converter(e.start_time) / 1000;
-      cpu_trace_.addMemoryUsageActivity(
+      cpu_trace_.addCPUActivity(
           kMemoryEventName,
+          torch::profiler::impl::kineto::KinetoActivityType::CPU_INSTANT_EVENT,
           e.kineto_info,
+          /*correlation_id=*/0,
           start_time_us,
-          c10::Device(e.device_type, e.device_index),
-          e.ptr,
-          e.alloc_size,
-          e.total_allocated,
-          e.total_reserved);
+          start_time_us,
+          getAnnotations(e));
 
       kineto_events_.emplace_back();
       auto& evt = kineto_events_.back();
@@ -261,11 +276,12 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
       cpu_trace_.addCPUActivity(
           e.name(),
-          e.record_function_scope(),
+          e.kinetoType(),
           e.kineto_info_,
           e.correlation_id(),
           start_us,
-          end_us);
+          end_us,
+          /*annotations=*/{});
 
       kineto_events_.emplace_back();
       kineto_events_.back()
