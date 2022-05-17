@@ -2255,9 +2255,11 @@ static inline C10_HOST_DEVICE T fresnel_integral_c(T x) {
     constexpr T PI = 3.141592653589793238462643383279502884;
 
     if (std::isinf(x)) {
-        T c = 0.5;
+        T c = T(0.5);
 
-        if (x < 0.0) c = -c;
+        if (x < T(0.0)) {
+            c = -c;
+        }
 
         return c;
     }
@@ -2277,7 +2279,9 @@ static inline C10_HOST_DEVICE T fresnel_integral_c(T x) {
 
         T c = abs_x * cn / cd;
 
-        if (x < 0.0) c = -c;
+        if (x < T(0.0)) {
+            c = -c;
+        }
 
         return c;
     }
@@ -2285,7 +2289,9 @@ static inline C10_HOST_DEVICE T fresnel_integral_c(T x) {
     if (abs_x > T(36974.0)) {
         T c = T(0.5) + T(1.0) / (PI * abs_x) * std::sin(PI * abs_x * abs_x / T(2.0));
 
-        if (x < 0.0) c = -c;
+        if (x < T(0.0)) {
+            return -c;
+        }
 
         return c;
     }
@@ -2294,21 +2300,23 @@ static inline C10_HOST_DEVICE T fresnel_integral_c(T x) {
 
     T u = T(1.0) / (t * t);
 
-    T fn = 0;
-    T fd = 0;
+    T fn = 0.0;
+    T fd = 0.0;
 
-    for (size_t index = 0; index <= 9; index++) fn = fn * u + FN[index];
-    for (size_t index = 0; index <= 9; index++) fd = fd * u + FD[index];
+    for (int index = 0; index <= 9; index++) fn = fn * u + FN[index];
+    for (int index = 0; index <= 9; index++) fd = fd * u + FD[index];
 
-    T gn = 0;
-    T gd = 0;
+    T gn = 0.0;
+    T gd = 0.0;
 
-    for (size_t index = 0; index <= 10; index++) gn = gn * u + GN[index];
-    for (size_t index = 0; index <= 10; index++) gd = gd * u + GD[index];
+    for (int index = 0; index <= 10; index++) gn = gn * u + GN[index];
+    for (int index = 0; index <= 10; index++) gd = gd * u + GD[index];
 
     T c = T(0.5) + ((T(1.0) - u * fn / fd) * std::sin(PI * abs_x) - T(1.0) / t * gn / gd * std::cos(PI * abs_x)) / (PI * abs_x);
 
-    if (x < 0.0) c = -c;
+    if (x < T(0.0)) {
+        c = -c;
+    }
 
     return c;
 }
@@ -2388,12 +2396,14 @@ static inline C10_HOST_DEVICE T fresnel_integral_s(T x) {
     };
 
     constexpr T FRAC_PI_2 = 1.570796326794896619231321691639751440;
-    constexpr T PI        = 3.141592653589793238462643383279502884;
+    constexpr T PI = 3.141592653589793238462643383279502884;
 
     if (std::isinf(x)) {
-        T s = 0.5;
+        T s = T(0.5);
 
-        if (x < T(0.0)) s = -s;
+        if (x < T(0.0)) {
+            s = -s;
+        }
 
         return s;
     }
@@ -2408,20 +2418,24 @@ static inline C10_HOST_DEVICE T fresnel_integral_s(T x) {
         T sn = 0.0;
         T sd = 0.0;
 
-        for (size_t index = 0; index <= 5; index++) sn = sn * t + SN[index];
-        for (size_t index = 0; index <= 5; index++) sd = sd * t + SD[index];
+        for (int index = 0; index <= 5; index++) sn = sn * t + SN[index];
+        for (int index = 0; index <= 5; index++) sd = sd * t + SD[index];
 
         T s = abs_x * abs_x_squared * sn / sd;
 
-        if (x < T(0.0)) s = -s;
+        if (x < T(0.0)) {
+            s = -s;
+        }
 
         return s;
     }
 
     if (abs_x > T(36974.0)) {
-        T s = 0.5 - 1 / (PI * abs_x) * std::cos(PI * abs_x * abs_x / 2);
+        T s = T(0.5) - T(1.0) / (PI * abs_x) * std::cos(PI * abs_x * abs_x / T(2.0));
 
-        if (x < T(0.0)) s = -s;
+        if (x < T(0.0)) {
+            s = -s;
+        }
 
         return s;
     }
@@ -2433,18 +2447,20 @@ static inline C10_HOST_DEVICE T fresnel_integral_s(T x) {
     T fn = 0.0;
     T fd = 0.0;
 
-    for (size_t index = 0; index <= 9; index++) fn = fn * u + FN[index];
-    for (size_t index = 0; index <= 9; index++) fd = fd * u + FD[index];
+    for (int index = 0; index <= 9; index++) fn = fn * u + FN[index];
+    for (int index = 0; index <= 9; index++) fd = fd * u + FD[index];
 
     T gn = 0.0;
     T gd = 0.0;
 
-    for (size_t index = 0; index <= 10; index++) gn = gn * u + GN[index];
-    for (size_t index = 0; index <= 10; index++) gd = gd * u + GD[index];
+    for (int index = 0; index <= 10; index++) gn = gn * u + GN[index];
+    for (int index = 0; index <= 10; index++) gd = gd * u + GD[index];
 
     T s = T(0.5) - ((T(1.0) - u * fn / fd) * std::cos(FRAC_PI_2 * abs_x_squared) + T(1.0) / t * gn / gd * std::sin(FRAC_PI_2 * abs_x_squared)) / (PI * abs_x);
 
-    if (x < T(0.0)) s = -s;
+    if (x < T(0.0)) {
+        s = -s;
+    }
 
     return s;
 }
