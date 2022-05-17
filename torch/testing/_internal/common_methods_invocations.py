@@ -17848,6 +17848,30 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
+        '_masked.median',
+        ref=reference_reduction_numpy(np.median) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
+        dtypes=floating_types_and(torch.bfloat16),  # row may be masked out so need floating type for nan's
+        method_variant=None,
+        nan_policy='propagate',
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        promotes_int_to_float=True,
+        supports_multiple_dims=False,
+        skips=(
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        decorators=[
+            # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-03, rtol=1e-03)}),
+            #              'TestGradients', 'test_forward_mode_AD', device_type='cpu'),
+            # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-03, rtol=1e-03)}),
+            #              'TestGradients', 'test_fn_gradgrad', device_type='cpu'),
+        ],
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
         '_masked.norm',
         identity=0,
         method_variant=None,
