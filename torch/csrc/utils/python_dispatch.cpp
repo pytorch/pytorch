@@ -204,11 +204,8 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_dispatch_has_kernel_for_dispatch_key", [](const char* name, const char* dispatch) -> bool {
     auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
-    if (!op) {
-      return false;  // TODO: or raise an error?
-    } else {
-      return op->hasKernelForDispatchKey(c10::parseDispatchKey(dispatch));
-    }
+    TORCH_CHECK(op, "operator ", name, " does not exist");
+    return op->hasKernelForDispatchKey(c10::parseDispatchKey(dispatch));
   });
 
   m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {
