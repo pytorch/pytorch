@@ -114,3 +114,32 @@ def meta_adaptive_avg_pool2d(self, output_size):
 def meta_adaptive_avg_pool3d(self, output_size):
     check(self.ndim == 4 or self.ndim == 5, f"Expected 4D or 5D tensor, but got {self.shape}")
     return self.new_empty(self.shape[:-3] + tuple(output_size))
+
+@torch.library.impl(meta_lib, "reflection_pad2d")
+def meta_reflection_pad2d(self, padding):
+    valid_dims = self.size(1) != 0 and self.size(2) != 0
+    check(
+        (self.ndim == 3 and valid_dims)
+        or (self.ndim == 4 and valid_dims and self.size(3) != 0),
+        f"3D or 4D (batch mode) tensor expected for input, but got: {self}"
+    )
+    if self.ndim == 4:
+        nbatch, nplane, input_h, input_w = self.shape
+    else:
+        nbatch = 1
+        nplane, input_h, input_w = self.shape
+
+    pad_l, pad_r, pad_t, pad_b = padding
+
+    output_h = input_h + pad_t + pad_b
+    output_w = input_w + pad_l + pad_r
+
+    if self.ndim == 3:
+        return self.new_empty((nplane, output_h, output_w))
+    else:
+        return self.new_empty((nbatch, nplane, output_h, output_w))
+
+
+    return self.new_empty(self.shape[:-3] + tuple(output_size))
+
+
