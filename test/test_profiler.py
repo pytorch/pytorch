@@ -167,12 +167,9 @@ class TestRecordFunction(TestCase):
                 return iter(self.datapipe)
 
         dp2 = IDPDelegator(dp1)
-        it_dp2 = iter(dp2)  # This creates a 2nd iterator, hence invalidating `it_dp1` and `dp1`
-        self.assertEqual(5, it_dp2.get_value(5))  # type: ignore[attr-defined]
-        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
-            next(it_dp2)
-        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
-            self.assertEqual(list(range(10)), list(it_dp2))
+        it_dp2 = iter(dp2)
+        self.assertEqual(5, it_dp2.get_value(5))
+        self.assertEqual(list(range(10)), list(it_dp2))
 
     def test_datapipe_with_record_function_fork(self):
         with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
