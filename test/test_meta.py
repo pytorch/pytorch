@@ -17,6 +17,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 
+import torch._prims as prims
+
 import functools
 import re
 from functools import partial
@@ -782,7 +784,10 @@ meta disagrees with real impl:
                         test_assert(isinstance(meta_r, torch.Tensor), f"but real {i}th result is Tensor")
                         test_assert(meta_r.dtype == r.dtype, f"but real dtype was {r.dtype}")
                         test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
-                        test_assert(meta_r.stride() == r.stride(), f"but real stride was {r.stride()}")
+                        # See https://github.com/pytorch/pytorch/issues/77553 for why strides are CUDA only
+                        if self.test_case.device_type == 'cuda':
+                            stride_result, idx = prims.utils.compare_significant_strides(meta_r, r)
+                            test_assert(stride_result, f", meta stride was {meta_r.stride()}, but real stride was {r.stride()}")
                         test_assert(
                             meta_r.storage_offset() == r.storage_offset(),
                             f"but real storage_offset was {r.storage_offset()}")
@@ -810,6 +815,10 @@ class TestMeta(TestCase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 with push_torch_function_mode(partial(MetaCrossRefMode, self, run_excludes_anyway=run_excludes_anyway)):
+                    # print(args)
+                    # print(args[0].stride())
+                    # print(args[1].stride())
+                    # print(kwargs)
                     expected = func(*args, **kwargs)
                     if isinstance(expected, torch.Tensor) and op.supports_out:
                         func(*args, **kwargs, out=expected)

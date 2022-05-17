@@ -195,10 +195,19 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
     if a.device.type == "cuda" or b.device.type == "cuda":
-        compare_significant_strides(a, b)
+        stride_result, idx = compare_significant_strides(a, b)
+        if not stride_result:
+            msg = (
+                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+                    a.stride(), b.stride(), idx
+                )
+            )
+            raise RuntimeError(msg)
 
 
-def compare_significant_strides(a: TensorLikeType, b: TensorLikeType):
+def compare_significant_strides(
+    a: TensorLikeType, b: TensorLikeType
+) -> Tuple[bool, int]:
     assert a.ndim == b.ndim
 
     for idx in range(a.ndim):
@@ -206,12 +215,9 @@ def compare_significant_strides(a: TensorLikeType, b: TensorLikeType):
         if a.shape[idx] == 0 or a.shape[idx] == 1:
             continue
         if a.stride()[idx] != b.stride()[idx]:
-            msg = (
-                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-                    a.stride(), b.stride(), idx
-                )
-            )
-            raise RuntimeError(msg)
+            return False, idx
+
+    return True, -1
 
 
 # NOTE: Based on the implementation in TensorIterator.cpp, but note that
