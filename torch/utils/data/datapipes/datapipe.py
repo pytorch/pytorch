@@ -39,18 +39,29 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
     All DataPipes that represent an iterable of data samples should subclass this.
     This style of DataPipes is particularly useful when data come from a stream, or
-    when the number of samples is too large to fit them all in memory.
+    when the number of samples is too large to fit them all in memory. ``IterDataPipe`` is lazily initialized and its
+    elements are computed only when ``next()`` is called on the iterator of an ``IterDataPipe``.
 
     All subclasses should overwrite :meth:`__iter__`, which would return an
-    iterator of samples in this DataPipe.
+    iterator of samples in this DataPipe. Calling ``__iter__`` of an ``IterDataPipe`` automatically invokes its
+    method ``reset()``, which by default performs no operation. When writing a custom ``IterDataPipe``, users should
+    override ``reset()`` if necesssary. The common usages include resetting buffers, pointers,
+    and various state variables within the custom ``IterDataPipe``.
 
-    `IterDataPipe` is lazily initialized and its elements are computed only when ``next()`` is called
-    on its iterator.
+    Note:
+        Only `one` iterator can be valid for each ``IterDataPipe`` at a time,
+        and the creation a second iterator will invalidate the first one. This constraint is necessary because
+        some ``IterDataPipe`` have internal buffers, whose states can become invalid if there are multiple iterators.
+        The code example below presents details on how this constraint looks in practice.
+        If you have any feedback related to this constraint, please see `Github IterDataPipe Singler Iterator Issue`_.
 
     These DataPipes can be invoked in two ways, using the class constructor or applying their
-    functional form onto an existing `IterDataPipe` (recommended, available to most but not all DataPipes).
+    functional form onto an existing ``IterDataPipe`` (recommended, available to most but not all DataPipes).
     You can chain multiple `IterDataPipe` together to form a pipeline that will perform multiple
     operations in succession.
+
+    .. _Github IterDataPipe Singler Iterator Issue:
+        https://github.com/pytorch/data/issues/45
 
     Note:
         When a subclass is used with :class:`~torch.utils.data.DataLoader`, each
@@ -63,18 +74,30 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         dataset's :meth:`__iter__` method or the :class:`~torch.utils.data.DataLoader` 's
         :attr:`worker_init_fn` option to modify each copy's behavior.
 
-    Example:
-        >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
-        >>> dp = IterableWrapper(range(10))
-        >>> map_dp_1 = Mapper(dp, lambda x: x + 1)  # Using class constructor
-        >>> map_dp_2 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
-        >>> list(map_dp_1)
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        >>> list(map_dp_2)
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        >>> filter_dp = map_dp_1.filter(lambda x: x % 2 == 0)
-        >>> list(filter_dp)
-        [2, 4, 6, 8, 10]
+    Examples:
+        General Usage:
+            >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
+            >>> dp = IterableWrapper(range(10))
+            >>> map_dp_1 = Mapper(dp, lambda x: x + 1)  # Using class constructor
+            >>> map_dp_2 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
+            >>> list(map_dp_1)
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            >>> list(map_dp_2)
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            >>> filter_dp = map_dp_1.filter(lambda x: x % 2 == 0)
+            >>> list(filter_dp)
+            [2, 4, 6, 8, 10]
+        Single Iterator Constraint Example:
+            >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
+            >>> dp = IterableWrapper(range(10))
+            >>> it1 = iter(source_dp)
+            >>> list(it1)
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+            >>> it1 = iter(source_dp)
+            >>> it2 = iter(source_dp)  # The creation of a new iterator invalidates `it1`
+            >>> next(it2)
+            0
+            >>> next(it1)  # Further usage of `it1` will raise a `RunTimeError`
     """
     functions: Dict[str, Callable] = {}
     reduce_ex_hook: Optional[Callable] = None
