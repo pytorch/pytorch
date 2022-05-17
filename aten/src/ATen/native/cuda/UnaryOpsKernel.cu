@@ -559,38 +559,6 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
       });
 }
 
-static void airy_ai_kernel(TensorIteratorBase& iterator){
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
-            return airy_ai(a);
-        });
-    });
-} // airy_ai_kernel
-
-static void airy_bi_kernel(TensorIteratorBase& iterator){
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_bi_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
-            return airy_bi(a);
-        });
-    });
-} // airy_bi_kernel
-
-static void airy_derivative_ai_kernel(TensorIteratorBase& iterator){
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_derivative_ai_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
-            return airy_derivative_ai(a);
-        });
-    });
-} // airy_derivative_ai_kernel
-
-static void airy_derivative_bi_kernel(TensorIteratorBase& iterator){
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_derivative_bi_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
-            return airy_derivative_bi(a);
-        });
-    });
-} // airy_derivative_bi_kernel
-
 static void bessel_j0_kernel(TensorIteratorBase& iterator){
     AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j0_cpu", [&]() {
         cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
@@ -623,6 +591,37 @@ static void bessel_y1_kernel(TensorIteratorBase& iterator){
     });
 } // bessel_y1_kernel
 
+static void airy_ai_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return airy_ai(a);
+        });
+    });
+} // airy_ai_kernel
+
+static void airy_bi_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_bi_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return airy_bi(a);
+        });
+    });
+} // airy_bi_kernel
+
+static void airy_derivative_ai_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_derivative_ai_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return airy_derivative_ai(a);
+        });
+    });
+} // airy_derivative_ai_kernel
+
+static void airy_derivative_bi_kernel(TensorIteratorBase& iterator){
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_derivative_bi_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t a) -> scalar_t {
+            return airy_derivative_bi(a);
+        });
+    });
+} // airy_derivative_bi_kernel
 
 static void modified_bessel_i0_kernel(TensorIteratorBase& iterator){
     AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i0_cpu", [&]() {
