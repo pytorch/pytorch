@@ -435,7 +435,7 @@ TORCH_META_FUNC(_linalg_solve)(const Tensor& A,
   TORCH_CHECK(left || !vector_case, "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. In this case linalg.solve is equivalent to B / A.squeeze(-1)");
   auto result_shape = vector_case ? IntArrayRef(B_broad_shape.data(), B_broad_shape.size() - 1)
                                   : B_broad_shape;
-  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/left);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(result_shape, /*column_major=*/left);
 
   set_output(0, result_shape, result_strides, B.options(), {});
 
