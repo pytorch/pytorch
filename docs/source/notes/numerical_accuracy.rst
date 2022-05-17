@@ -90,3 +90,27 @@ When training using FP16 precision, some models may fail to converge with FP16 d
 +---------------+-----------+-----------+
 | Env set to 0  | original  | original  |
 +---------------+-----------+-----------+
+
+The following is the list of operations where rocBLAS may be used:
+
+* torch.addmm
+* torch.baddbmm
+* torch.bmm
+* torch.mm
+* torch.nn.GRUCell
+* torch.nn.LSTMCell
+* torch.nn.Linear
+* torch.sparse.addmm
+* the following torch._C._ConvBackend implementations:
+  * slowNd
+  * slowNd_transposed
+  * slowNd_dilated
+  * slowNd_dilated_transposed
+
+The following is the list of operations where MIOpen may be used:
+
+* torch.nn.Conv[Transpose]Nd
+* the following torch._C._ConvBackend implementations:
+  * ConvBackend::Miopen
+  * ConvBackend::MiopenDepthwise
+  * ConvBackend::MiopenTranspose
