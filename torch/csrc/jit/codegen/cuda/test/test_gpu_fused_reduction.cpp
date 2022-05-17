@@ -1226,7 +1226,7 @@ TEST_F(NVFuserTest, FusionPersistentBNBackwardAllreduce_CUDA) {
       reduction_axes.end(),
       std::back_inserter(at_reduction_axes));
 
-  auto at_bcast = [](const auto& tensor) {
+  auto at_bcast = [=](const auto& tensor) {
     if (channels_last) {
       tensor.unsqueeze(0).unsqueeze(0).unsqueeze(0);
     } else {
