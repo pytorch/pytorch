@@ -1481,6 +1481,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       constexpr auto dense_backends = DispatchKeySet(
           {BackendComponent::CPUBit,
            BackendComponent::CUDABit,
+           BackendComponent::MPSBit,
            BackendComponent::HIPBit,
            BackendComponent::XPUBit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
@@ -1942,6 +1943,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // Cleaning warning messages, no need to break as TORCH_CHECK(false)
         // terminates flow.
         // break;
+      case MemoryFormat::NumOptions:
+        TORCH_INTERNAL_ASSERT(false, "invalid memory format ", memory_format);
     }
     // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
     // exclusive see #24090
@@ -2177,6 +2180,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // See NOTE [ Metadata Change for a Detached Tensor ] for details.
   static const char* const err_msg_tensor_metadata_change_not_allowed;
+
+  static void copy_generic_tensor_metadata(
+      const TensorImpl* src_impl,
+      TensorImpl* dest_impl);
 
  public:
   void set_storage_access_should_throw() {
