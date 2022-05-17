@@ -1937,22 +1937,33 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   auto out_N = welford->outN()->as<TensorView>();
 
   fusion->removeExpr(welford);
+  // Not safe to use welford anymore
+  welford = nullptr;
 
   // Create normalization based welford graph
   //  largely taken from batchnorm cpp benchmark
-  auto& in_root = in_val->getRootDomain();
-  auto& out_root = out_avg->getRootDomain();
+  const auto& in_root =
+      TensorDomain::noReductions(in_val->getMaybeRFactorDomain());
+  const auto& out_root = out_avg->getRootDomain();
   std::vector<int> red_axes;
+
+  TORCH_INTERNAL_ASSERT(
+      in_root.size() == out_root.size(),
+      "Invalid root domains of Welford input and output.",
+      " Input: ",
+      ir_utils::toString(in_root),
+      ". Output: ",
+      ir_utils::toString(out_root));
 
   // Create scalar version of the feature element
   //  counting.
   Val* num_features = IrBuilder::create<Double>(1);
   std::vector<bool> broadcast_mask(in_root.size(), false);
   for (const auto i : c10::irange(in_root.size())) {
-    if (out_root[i]->isReduction()) {
+    if (out_root.at(i)->isReduction()) {
       red_axes.push_back(i);
       broadcast_mask[i] = true;
-      num_features = mul(num_features, out_root[i]->extent());
+      num_features = mul(num_features, out_root.at(i)->extent());
     }
   }
 
