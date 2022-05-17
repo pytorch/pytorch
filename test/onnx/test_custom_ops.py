@@ -1,20 +1,19 @@
 # Owner(s): ["module: onnx"]
 
 import unittest
-import torch
-import torch.utils.cpp_extension
-
-import onnx
-import caffe2.python.onnx.backend as c2
 
 import numpy as np
-
+import onnx
 from test_pytorch_onnx_caffe2 import do_export
 from test_pytorch_onnx_onnxruntime import run_model_test
+
+import caffe2.python.onnx.backend as c2
+import torch
+import torch.utils.cpp_extension
 from torch.onnx.symbolic_helper import _unimplemented
 
-class TestCustomOps(unittest.TestCase):
 
+class TestCustomOps(unittest.TestCase):
     def test_custom_add(self):
         op_source = """
         #include <torch/script.h>
@@ -42,7 +41,10 @@ class TestCustomOps(unittest.TestCase):
             return g.op("Add", self, other)
 
         from torch.onnx import register_custom_op_symbolic
-        register_custom_op_symbolic("custom_namespace::custom_add", symbolic_custom_add, 9)
+
+        register_custom_op_symbolic(
+            "custom_namespace::custom_add", symbolic_custom_add, 9
+        )
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         y = torch.randn(2, 3, 4, requires_grad=False)
@@ -62,7 +64,6 @@ class TestCustomAutogradFunction(unittest.TestCase):
 
     def test_symbolic(self):
         class MyClip(torch.autograd.Function):
-
             @staticmethod
             def forward(ctx, input, scalar):
                 ctx.save_for_backward(input)
@@ -83,18 +84,16 @@ class TestCustomAutogradFunction(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()
-        run_model_test(self, model, input=(x, ))
+        run_model_test(self, model, input=(x,))
 
     def test_register_custom_op(self):
         class MyClip(torch.autograd.Function):
-
             @staticmethod
             def forward(ctx, input, scalar):
                 ctx.save_for_backward(input)
                 return input.clamp(min=scalar)
 
         class MyRelu(torch.autograd.Function):
-
             @staticmethod
             def forward(ctx, input):
                 ctx.save_for_backward(input)
@@ -122,11 +121,13 @@ class TestCustomAutogradFunction(unittest.TestCase):
                 return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
 
         from torch.onnx import register_custom_op_symbolic
+
         register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()
-        run_model_test(self, model, input=(x, ))
+        run_model_test(self, model, input=(x,))
+
 
 class TestExportAsContribOps(unittest.TestCase):
     opset_version = 14
@@ -137,7 +138,7 @@ class TestExportAsContribOps(unittest.TestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.gelu = torch.nn.GELU(approximate='none')
+                self.gelu = torch.nn.GELU(approximate="none")
 
             def forward(self, x):
                 res = []
@@ -154,11 +155,13 @@ class TestExportAsContribOps(unittest.TestCase):
             return g.op("com.microsoft::Gelu", input).setType(input.type())
 
         from torch.onnx import register_custom_op_symbolic
+
         register_custom_op_symbolic("::gelu", symbolic_custom_gelu, 1)
 
         x = torch.randn(3, 3, 4, requires_grad=True)
         model = torch.jit.script(M())
         run_model_test(self, model, input=(x,))
+
 
 if __name__ == "__main__":
     unittest.main()

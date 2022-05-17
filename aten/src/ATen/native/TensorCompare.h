@@ -32,10 +32,8 @@ DECLARE_DISPATCH(is_infinity_op_fn, isneginf_stub);
 using mode_fn = void (*)(Tensor&, Tensor&, const Tensor&, int64_t, bool);
 DECLARE_DISPATCH(mode_fn, mode_stub);
 
-using clamp_fn = void (*)(TensorIterator &);
-DECLARE_DISPATCH(clamp_fn, clamp_stub);
-DECLARE_DISPATCH(clamp_fn, clamp_min_stub);
-DECLARE_DISPATCH(clamp_fn, clamp_max_stub);
+using clamp_tensor_fn = void (*)(TensorIteratorBase &);
+DECLARE_DISPATCH(clamp_tensor_fn, clamp_stub);
 
 namespace detail {
     enum class ClampLimits {Min, Max, MinMax};

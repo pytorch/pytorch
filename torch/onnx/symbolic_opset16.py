@@ -25,9 +25,11 @@
 #    LessOrEqual
 #    SequenceMap
 
+from torch.nn.functional import (
+    GRID_SAMPLE_INTERPOLATION_MODES,
+    GRID_SAMPLE_PADDING_MODES,
+)
 from torch.onnx.symbolic_helper import parse_args
-
-from torch.nn.functional import GRID_SAMPLE_INTERPOLATION_MODES, GRID_SAMPLE_PADDING_MODES
 
 
 # note (mkozuki): Why `grid_sampler` instead of `grid_sample`?

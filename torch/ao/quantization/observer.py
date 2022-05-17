@@ -1495,10 +1495,14 @@ Default observer for a floating point zero-point and 4 bit activations.
 
 # TODO(future PR): remove these defaults and enforce activation functions
 # to explicitly specify their output range
-default_symmetric_fixed_qparams_observer = FixedQParamsObserver.with_args(
+default_fixed_qparams_range_neg1to1_observer = FixedQParamsObserver.with_args(
     scale=2.0 / 256.0, zero_point=128, dtype=torch.quint8, quant_min=0, quant_max=255)
-default_affine_fixed_qparams_observer = FixedQParamsObserver.with_args(
+default_fixed_qparams_range_0to1_observer = FixedQParamsObserver.with_args(
     scale=1.0 / 256.0, zero_point=0, dtype=torch.quint8, quant_min=0, quant_max=255)
+# TODO: the following 2 variables are kept for backwards compatibility; remove after a few releases
+default_symmetric_fixed_qparams_observer = default_fixed_qparams_range_neg1to1_observer
+default_affine_fixed_qparams_observer = default_fixed_qparams_range_0to1_observer
+
 """
 Default observers for fixed qparams operations.
 """

@@ -25,29 +25,23 @@ def define_targets(rules):
     rules.genrule(
         name = "generate-code",
         srcs = [
-            "aten/src/ATen/native/ts_native_functions.yaml",
-            "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
-            "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
-            "aten/src/ATen/templates/LazyIr.h",
-            "aten/src/ATen/templates/RegisterDispatchKey.cpp",
-            "torch/csrc/lazy/core/shape_inference.h",
-            "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
+            ":DispatchKeyNativeFunctions.cpp",
+            ":DispatchKeyNativeFunctions.h",
+            ":LazyIr.h",
+            ":RegisterDispatchKey.cpp",
             ":native_functions.yaml",
+            ":shape_inference.h",
             ":tags.yaml",
+            ":ts_native_functions.cpp",
+            ":ts_native_functions.yaml",
         ],
         tools = ["//tools/setup_helpers:generate_code"],
-        outs = _GENERATED_CPP + GENERATED_AUTOGRAD_H + GENERATED_LAZY_H + GENERATED_TESTING_PY,
+        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
         cmd = "$(location //tools/setup_helpers:generate_code) " +
-              "--install_dir $(RULEDIR) " +
+              "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
               "--gen_lazy_ts_backend",
-        tags = [
-            # Filter this target out for Bazel until we are ready to
-            # use it. When we refactor this for fbcode it will start
-            # to conflict with the Bazel code generator.
-            "-bazel",
-        ],
     )
 
     rules.genrule(
@@ -72,55 +66,62 @@ def define_targets(rules):
 # generate-code that use these lists are moved into the shared
 # structure as well.
 
-# In the open-source build, these are generated into
-# torch/csrc/autograd/generated
-GENERATED_AUTOGRAD_H = [
-    "autograd/generated/Functions.h",
-    "autograd/generated/VariableType.h",
-    "autograd/generated/python_functions.h",
-    "autograd/generated/variable_factories.h",
+_GENERATED_AUTOGRAD_PYTHON_HEADERS = [
+    "torch/csrc/autograd/generated/python_functions.h",
 ]
 
-# In the open-source build, these are generated into
-# torch/testing/_internal/generated
+_GENERATED_AUTOGRAD_CPP_HEADERS = [
+    "torch/csrc/autograd/generated/Functions.h",
+    "torch/csrc/autograd/generated/VariableType.h",
+    "torch/csrc/autograd/generated/variable_factories.h",
+]
+
+GENERATED_AUTOGRAD_H = _GENERATED_AUTOGRAD_CPP_HEADERS + _GENERATED_AUTOGRAD_PYTHON_HEADERS
+
 GENERATED_TESTING_PY = [
-    "annotated_fn_args.py",
+    "torch/testing/_internal/generated/annotated_fn_args.py",
 ]
 
 GENERATED_LAZY_H = [
-    "lazy/generated/LazyIr.h",
-    "lazy/generated/LazyNativeFunctions.h",
+    "torch/csrc/lazy/generated/LazyIr.h",
+    "torch/csrc/lazy/generated/LazyNativeFunctions.h",
 ]
 
-# In both open-source and fbcode builds, these are generated into
-# torch/csrc/{autograd,jit}/generated.i
-_GENERATED_CPP = [
-    "autograd/generated/Functions.cpp",
-    "autograd/generated/VariableType_0.cpp",
-    "autograd/generated/VariableType_1.cpp",
-    "autograd/generated/VariableType_2.cpp",
-    "autograd/generated/VariableType_3.cpp",
-    "autograd/generated/VariableType_4.cpp",
-    "autograd/generated/TraceType_0.cpp",
-    "autograd/generated/TraceType_1.cpp",
-    "autograd/generated/TraceType_2.cpp",
-    "autograd/generated/TraceType_3.cpp",
-    "autograd/generated/TraceType_4.cpp",
-    "autograd/generated/ADInplaceOrViewType_0.cpp",
-    "autograd/generated/ADInplaceOrViewType_1.cpp",
-    "autograd/generated/python_functions_0.cpp",
-    "autograd/generated/python_functions_1.cpp",
-    "autograd/generated/python_functions_2.cpp",
-    "autograd/generated/python_functions_3.cpp",
-    "autograd/generated/python_functions_4.cpp",
-    "autograd/generated/python_nn_functions.cpp",
-    "autograd/generated/python_fft_functions.cpp",
-    "autograd/generated/python_linalg_functions.cpp",
-    "autograd/generated/python_return_types.cpp",
-    "autograd/generated/python_sparse_functions.cpp",
-    "autograd/generated/python_special_functions.cpp",
-    "autograd/generated/python_torch_functions_0.cpp",
-    "autograd/generated/python_torch_functions_1.cpp",
-    "autograd/generated/python_torch_functions_2.cpp",
-    "autograd/generated/python_variable_methods.cpp",
+_GENERATED_AUTOGRAD_PYTHON_CPP = [
+    "torch/csrc/autograd/generated/python_functions_0.cpp",
+    "torch/csrc/autograd/generated/python_functions_1.cpp",
+    "torch/csrc/autograd/generated/python_functions_2.cpp",
+    "torch/csrc/autograd/generated/python_functions_3.cpp",
+    "torch/csrc/autograd/generated/python_functions_4.cpp",
+    "torch/csrc/autograd/generated/python_nn_functions.cpp",
+    "torch/csrc/autograd/generated/python_fft_functions.cpp",
+    "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+    "torch/csrc/autograd/generated/python_return_types.cpp",
+    "torch/csrc/autograd/generated/python_sparse_functions.cpp",
+    "torch/csrc/autograd/generated/python_special_functions.cpp",
+    "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
+    "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
+    "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
+    "torch/csrc/autograd/generated/python_variable_methods.cpp",
 ]
+
+GENERATED_AUTOGRAD_PYTHON = _GENERATED_AUTOGRAD_PYTHON_HEADERS + _GENERATED_AUTOGRAD_PYTHON_CPP
+
+GENERATED_AUTOGRAD_CPP = [
+    "torch/csrc/autograd/generated/Functions.cpp",
+    "torch/csrc/autograd/generated/VariableType_0.cpp",
+    "torch/csrc/autograd/generated/VariableType_1.cpp",
+    "torch/csrc/autograd/generated/VariableType_2.cpp",
+    "torch/csrc/autograd/generated/VariableType_3.cpp",
+    "torch/csrc/autograd/generated/VariableType_4.cpp",
+    "torch/csrc/autograd/generated/TraceType_0.cpp",
+    "torch/csrc/autograd/generated/TraceType_1.cpp",
+    "torch/csrc/autograd/generated/TraceType_2.cpp",
+    "torch/csrc/autograd/generated/TraceType_3.cpp",
+    "torch/csrc/autograd/generated/TraceType_4.cpp",
+    "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
+    "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
+    "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
+    "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
+    "torch/csrc/lazy/generated/RegisterLazy.cpp",
+] + _GENERATED_AUTOGRAD_CPP_HEADERS + GENERATED_LAZY_H
