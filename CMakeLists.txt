@@ -97,25 +97,34 @@ if(APPLE)
     # Determine if we can link against MPSGraph
     set(MPS_FOUND OFF)
     execute_process(
-      COMMAND bash -c "xcrun --sdk macosx --show-sdk-path"
-      OUTPUT_VARIABLE _macosx_sdk_path
+      COMMAND bash -c "xcodebuild -sdk macosx -version SDKVersion"
+      RESULT_VARIABLE _exit_code
+      OUTPUT_VARIABLE _macosx_sdk_version
       OUTPUT_STRIP_TRAILING_WHITESPACE)
-    set(_MPS_supported_os_version OFF)
-    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin"
-        AND DARWIN_MAJOR_VERSION VERSION_GREATER_EQUAL 21
-        AND DARWIN_MINOR_VERSION VERSION_GREATER_EQUAL 3)
-      set(_MPS_supported_os_version ON)
-    endif()
-    set(_SDK_SEARCH_PATH "${_macosx_sdk_path}/System/Library/Frameworks/")
-    set(_FRAMEWORK_SEARCH_PATH "/System/Library/Frameworks/")
+    if(_exit_code EQUAL 0)
+        set(_MPS_supported_os_version OFF)
+        if(_macosx_sdk_version VERSION_GREATER_EQUAL 12.3)
+            set(_MPS_supported_os_version ON)
+        endif()
+        message(STATUS "sdk version: ${_macosx_sdk_version}, mps supported: ${_MPS_supported_os_version}")
+        execute_process(
+          COMMAND bash -c "xcrun --sdk macosx --show-sdk-path"
+          OUTPUT_VARIABLE _macosx_sdk_path
+          OUTPUT_STRIP_TRAILING_WHITESPACE)
+        set(_SDK_SEARCH_PATH "${_macosx_sdk_path}/System/Library/Frameworks/")
+        set(_FRAMEWORK_SEARCH_PATH "/System/Library/Frameworks/")
 
-    find_library(_MPS_fwrk_path_ NAMES MetalPerformanceShadersGraph MetalPerformanceShaders PATHS ${_FRAMEWORK_SEARCH_PATH} NO_DEFAULT_PATH)
-    find_library(_MPS_sdk_path_ NAMES MetalPerformanceShadersGraph MetalPerformanceShaders PATHS ${_SDK_SEARCH_PATH} NO_DEFAULT_PATH)
+        find_library(_MPS_fwrk_path_ NAMES MetalPerformanceShadersGraph MetalPerformanceShaders PATHS ${_FRAMEWORK_SEARCH_PATH} NO_DEFAULT_PATH)
+        find_library(_MPS_sdk_path_ NAMES MetalPerformanceShadersGraph MetalPerformanceShaders PATHS ${_SDK_SEARCH_PATH} NO_DEFAULT_PATH)
 
-    if(_MPS_supported_os_version AND _MPS_fwrk_path_ AND _MPS_sdk_path_)
-      set(MPS_FOUND ON)
-      message(STATUS "MPSGraph framework found")
+        if(_MPS_supported_os_version AND _MPS_fwrk_path_ AND _MPS_sdk_path_)
+          set(MPS_FOUND ON)
+          message(STATUS "MPSGraph framework found")
+        else()
+          message(STATUS "MPSGraph framework not found")
+        endif()
     else()
+      message(STATUS "MPS: unable to get MacOS sdk version")
       message(STATUS "MPSGraph framework not found")
     endif()
   endif()
@@ -681,6 +690,8 @@ include(ExternalProject)
 if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR CMAKE_SYSTEM_PROCESSOR STREQUAL "x86"))
   set(USE_FBGEMM OFF)
 endif()
+
+set(BUILD_ONEDNN_GRAPH OFF)
 
 include(cmake/Dependencies.cmake)
 
