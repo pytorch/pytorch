@@ -2,6 +2,7 @@ import copy
 import functools
 from typing import (
     Any,
+    cast,
     Dict,
     Iterable,
     Iterator,
@@ -228,7 +229,7 @@ def _unflatten_communicated_optim_state(
             optim_state: Union[torch.Tensor, ShardedTensor] = next(param_views)
             if shard_state:
                 optim_state = _distributed_chunk_tensor(
-                    optim_state,
+                    cast(torch.Tensor, optim_state),
                     fsdp_module.rank,
                     fsdp_module.world_size,
                     fsdp_module.process_group
