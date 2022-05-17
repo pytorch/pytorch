@@ -368,8 +368,8 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
           stack_copy->end() - output_count,
           stack_copy->end());
     }
-    auto graph_str = fusion_node->g(attr::Subgraph)->toString();
-    compare_callback.callback(fused_outputs, fallback_outputs, graph_str);
+    auto& graph = fusion_node->g(attr::Subgraph);
+    compare_callback.callback(fused_outputs, fallback_outputs, graph);
   }
 }
 

@@ -720,9 +720,9 @@ void initJITBindings(PyObject* module) {
             auto callback_lambda = [fn_ptr](
                                        const Stack& fused_outputs,
                                        const Stack& unfused_outputs,
-                                       const std::string& graph_ir) {
+                                       const std::shared_ptr<Graph>& graph) {
               py::gil_scoped_acquire acquire{};
-              (*fn_ptr)(fused_outputs, unfused_outputs, graph_ir);
+              (*fn_ptr)(fused_outputs, unfused_outputs, graph);
             };
             setCudaFuserComparisonCallback({run_fallback, callback_lambda});
           })
