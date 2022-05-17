@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <ATen/SparseTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -524,6 +525,11 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
       self.layout(),
       " instead.");
   if (self.layout() == kSparseCsc) {
+    TORCH_CHECK(
+        self.dim() == 2,
+        "Expected self to be of dimension 2, but got ",
+        self.dim(),
+        ".");
     auto sizes = self.sizes();
     auto ccol_indices = self.ccol_indices();
     auto row_indices = self.row_indices();
@@ -532,7 +538,7 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
         ccol_indices,
         row_indices,
         values,
-        sizes,
+        {sizes[1], sizes[0]},
         values.scalar_type(),
         kSparseCsr,
         values.device());
@@ -931,11 +937,11 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
   TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
   TORCH_CHECK(sparse_dim <= 2,
               "sparse_dim must be less than or equal to 2");
-  TORCH_CHECK(self.layout() == kSparseCsr,
-      "Expected input to have layout SparseCsr, but got ", self.layout(), " instead.");
   if (self.layout() == kSparseCsc) {
     return self.to_sparse_csr().to_sparse();
   }
+  TORCH_CHECK(self.layout() == kSparseCsr,
+      "Expected input to have layout SparseCsr, but got ", self.layout(), " instead.");
   if (sparse_dim == 2) {
     auto sizes = self.sizes();
     Tensor crow_indices = self.crow_indices();

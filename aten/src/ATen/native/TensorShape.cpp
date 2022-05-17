@@ -2484,9 +2484,10 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
           self.crow_indices(),
           self.col_indices(),
           self.values(),
-          {sizes[1], sizes[0]} self.values().scalar_type(),
+          {sizes[1], sizes[0]},
+          self.values().scalar_type(),
           kSparseCsc,
-          self.values.device());
+          self.values().device());
     } else { // sparse COO
       Tensor self_clone = self.clone();
       return sparse_transpose_(self_clone, dim0, dim1);
