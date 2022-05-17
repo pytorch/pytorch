@@ -60,6 +60,7 @@ from .flatten_params_wrapper import (
     FlatParameter,
     FlattenParamsWrapper,
 )
+from .shard_utils import _distributed_chunk_tensor
 from .wrap import _recursive_wrap, _wrap_batchnorm_individually, _or_policy
 
 if TYPE_CHECKING:
@@ -3419,10 +3420,21 @@ class FullyShardedDataParallel(nn.Module):
         ] = None,
     ) -> Dict[str, Any]:
         """
-        The API performs the functionaility as ``full_optim_state_dict`` but
-        shards all non-zero-dimension states to save the memory. This API should
-        only be used when the state_dict is returned by ``sharded_state_dict``.
+        The API is similar to :meth:``full_optim_state_dict`` but chunks all
+        non-zero-dimension states to ShardedTensor to save memory. This API
+        should only be used when the state_dict is sharded_state_dict.
+
+        For the args and returns detail, refer to the :meth:``full_optim_state_dict`
+        doc.
         """
+
+        # TODO: The ultimate goal of the optimizer state APIs should be the same
+        # as state_dict/load_state_dict -- using one API to get optimizer states
+        # and one API to load optimizer states. ``state_dict_type`` will be used
+        # to decide which optimizer states should be returned.
+        # There are currently two APIs to load a full optimizer state. So the
+        # first step of the unification is to merge the two full optimizer state
+        # loading APIs.
         return _optim_state_dict(
             model=model,
             optim=optim,
@@ -3499,7 +3511,7 @@ class FullyShardedDataParallel(nn.Module):
 
     @staticmethod
     def flatten_sharded_optim_state_dict(
-        full_optim_state_dict: Dict[str, Any],
+        sharded_optim_state_dict: Dict[str, Any],
         model: torch.nn.Module,
         optim_input: Optional[
             Union[
@@ -3507,8 +3519,30 @@ class FullyShardedDataParallel(nn.Module):
             ]
         ] = None,
     ) -> Dict[str, Any]:
+        """
+        The API is similar to :meth:``shard_full_optim_state_dict``. The only
+        difference is that the input ``full_optim_state_dict`` should be returned
+        from :meth:`full_optim_state_dict`. Therefore, there will be allgather
+        on each rank to gather ShardedTensor.
+
+        Args:
+            sharded_optim_state_dict (Dict[str, Any]): Optimizer state dict
+                corresponding to the unflattened parameters and holding the
+                sharded optimizer state.
+            model (torch.nn.Module):
+                Refer to :meth:``shard_full_optim_state_dict``.
+            optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
+                Refer to :meth:``shard_full_optim_state_dict``.
+
+        Returns:
+            Refer to :meth:``shard_full_optim_state_dict``.
+        """
+
+        # TODO: The implementation is the same as ``shard_full_optim_state_dict``.
+        # See the TODO in ``shard_full_optim_state_dict`` for the future
+        # unification plan.
         return _flatten_optim_state_dict(
-            full_optim_state_dict,
+            sharded_optim_state_dict,
             model=model,
             shard_state=True,
             optim_input=optim_input,

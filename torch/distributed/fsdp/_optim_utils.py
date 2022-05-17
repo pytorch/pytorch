@@ -1037,6 +1037,54 @@ def _optim_state_dict(
     rank0_only: bool = True,
     shard_state: bool = False,
 ) -> Dict[str, Any]:
+    """
+    Consolidates the optimizer state and returns it as a :class:`dict`
+    following the convention of :meth:`torch.optim.Optimizer.state_dict`,
+    i.e. with keys ``"state"`` and ``"param_groups"``.
+    The flattened parameters in ``FSDP`` modules contained in ``model``
+    are mapped back to their unflattened parameters.
+
+    .. warning:: This needs to be called on all ranks since synchronization
+        primitives are used. However, if ``rank0_only=True``, then the
+        state dict is only populated on rank 0, and all other ranks return
+        an empty :class:`dict`.
+
+    .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
+        uses full parameter names as keys instead of parameter IDs.
+
+    .. warning:: If you do not pass ``model.parameters()`` as the first
+        argument to the optimizer, then you should pass that same value to
+        this method as ``optim_input``.
+
+    .. note:: Like in :meth:`torch.optim.Optimizer.state_dict`, the tensors
+        contained in the optimizer state dict are not cloned, so there may
+        be aliasing surprises. For best practices, consider saving the
+        returned optimizer state dict immediately, e.g. using
+        ``torch.save()``.
+
+    Args:
+        model (torch.nn.Module): Root module (which may or may not be a
+            :class:`FullyShardedDataParallel` instance) whose parameters
+            were passed into the optimizer ``optim``.
+        optim (torch.optim.Optimizer): Optimizer for ``model`` 's
+            parameters.
+        optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
+            Input passed into the optimizer ``optim`` representing either a
+            :class:`list` of parameter groups or an iterable of parameters;
+            if ``None``, then this method assumes the input was
+            ``model.parameters()``. (Default: ``None``)
+        rank0_only (bool): If ``True``, saves the populated :class:`dict`
+            only on rank 0; if ``False``, saves it on all ranks. (Default:
+            ``True``)
+        shard_state (bool): If ``True``, shard all non-zero-dimension states.
+
+    Returns:
+        Dict[str, Any]: A :class:`dict` containing the optimizer state for
+        ``model`` 's original unflattened parameters and including keys
+        "state" and "param_groups" following the convention of
+        :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
+        then nonzero ranks return an empty :class:`dict`.
+    """
     osd = optim.state_dict()
     osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
 
