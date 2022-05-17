@@ -1013,7 +1013,7 @@ class PackageExporter:
                     )
 
                 if attrs.get("is_pickle") is True:
-                    # This node came from save_source_pickle, we don't need to write any source for it.
+                    # This node came from save_pickle, we don't need to write any source for it.
                     continue
 
                 is_package = attrs["is_package"]
