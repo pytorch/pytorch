@@ -918,23 +918,27 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
   TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
   TORCH_CHECK(sparse_dim <= 2,
               "sparse_dim must be less than or equal to 2");
+  // TODO: implement coo.to_sparse(sparse_dim) and then use
+  // return self.to_sparse().to_sparse(sparse_dim);
+  TORCH_CHECK(
+      sparse_dim == 2, "sparse dim 1 is not supported by sparse_csr_to_dense");
   if (self.layout() == kSparseCsc) {
-    return self.to_sparse_csr().to_sparse();
+    Tensor indices = at::_convert_indices_from_csr_to_coo(
+        self.ccol_indices(), self.row_indices(), false, true);
+    return at::native::_sparse_coo_tensor_unsafe(
+               indices, self.values(), self.sizes())
+        ._coalesced_(true);
   }
-  TORCH_CHECK(self.layout() == kSparseCsr,
-      "Expected input to have layout SparseCsr, but got ", self.layout(), " instead.");
-  if (sparse_dim == 2) {
-    auto sizes = self.sizes();
-    Tensor crow_indices = self.crow_indices();
-    Tensor col_indices = self.col_indices();
-    Tensor values = self.values();
-    Tensor indices = at::_convert_indices_from_csr_to_coo(crow_indices, col_indices, false, false);
-    return at::native::_sparse_coo_tensor_unsafe(indices, values, sizes)._coalesced_(true);
-  } else {
-    TORCH_CHECK(false, "sparse dim 1 is not supported by sparse_csr_to_dense");
-    // TODO: implement coo.to_sparse(sparse_dim) and then use
-    // return self.to_sparse().to_sparse(sparse_dim);
+  if (self.layout() == kSparseCsr) {
+    Tensor indices = at::_convert_indices_from_csr_to_coo(
+        self.crow_indices(), self.col_indices(), false, false);
+    return at::native::_sparse_coo_tensor_unsafe(
+               indices, self.values(), self.sizes())
+        ._coalesced_(true);
   }
+  AT_ERROR(
+      "sparse_compressed_to_sparse expected SparseCsr or SparseCsc layout but got ",
+      self.layout());
 }
 
 Tensor sparse_compressed_to_sparse(const Tensor& self) {
