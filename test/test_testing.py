@@ -1091,7 +1091,10 @@ class TestAssertCloseSparseCSR(TestCase):
         col_indices = (1, 0)
         values = (1, 2)
         actual = torch.sparse_csr_tensor(crow_indices, col_indices, values, size=(2, 2))
-        expected = actual.clone()
+        # TODO: replace this by actual.clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
+        expected = torch.sparse_csr_tensor(
+            actual.crow_indices(), actual.col_indices(), actual.values(), size=actual.size(), device=actual.device
+        )
 
         for fn in assert_close_with_inputs(actual, expected):
             fn()
@@ -1149,7 +1152,10 @@ class TestAssertCloseSparseCSC(TestCase):
         row_indices = (1, 0)
         values = (1, 2)
         actual = torch.sparse_csc_tensor(ccol_indices, row_indices, values, size=(2, 2))
-        expected = actual.clone()
+        # TODO: replace this by actual.clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
+        expected = torch.sparse_csc_tensor(
+            actual.ccol_indices(), actual.row_indices(), actual.values(), size=actual.size(), device=actual.device
+        )
 
         for fn in assert_close_with_inputs(actual, expected):
             fn()
@@ -1207,7 +1213,10 @@ class TestAssertCloseSparseBSR(TestCase):
         col_indices = (1, 0)
         values = ([[1]], [[2]])
         actual = torch.sparse_bsr_tensor(crow_indices, col_indices, values, size=(2, 2))
-        expected = actual.clone()
+        # TODO: replace this by actual.clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
+        expected = torch.sparse_bsr_tensor(
+            actual.crow_indices(), actual.col_indices(), actual.values(), size=actual.size(), device=actual.device
+        )
 
         for fn in assert_close_with_inputs(actual, expected):
             fn()
@@ -1265,7 +1274,10 @@ class TestAssertCloseSparseBSC(TestCase):
         row_indices = (1, 0)
         values = ([[1]], [[2]])
         actual = torch.sparse_bsc_tensor(ccol_indices, row_indices, values, size=(2, 2))
-        expected = actual.clone()
+        # TODO: replace this by actual.clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
+        expected = torch.sparse_bsc_tensor(
+            actual.ccol_indices(), actual.row_indices(), actual.values(), size=actual.size(), device=actual.device
+        )
 
         for fn in assert_close_with_inputs(actual, expected):
             fn()

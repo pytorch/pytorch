@@ -584,31 +584,23 @@ const SparseCsrTensor& resize_as_sparse_csr_(
   return self;
 }
 
-SparseCsrTensor clone_sparse_compressed(
-                                        const SparseCsrTensor& self,
-                                        c10::optional<c10::MemoryFormat> optional_memory_format) {
+SparseCsrTensor clone_sparse_csr(
+    const SparseCsrTensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !optional_memory_format.has_value(),
       "unsupported memory format option ",
       optional_memory_format.value());
   TensorOptions options = self.options();
-  auto compressed_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(),
-                                                                      "clone_sparse_compressed",
-                                                                      [&]{ return self.crow_indices(); },
-                                                                      [&]{ return self.ccol_indices(); });
-  auto plain_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(),
-                                                                 "clone_sparse_compressed",
-                                                                 [&]{ return self.col_indices(); },
-                                                                 [&]{ return self.row_indices(); });
-  return at::native::_sparse_compressed_tensor_unsafe(
-                                                      compressed_indices.clone(),
-                                                      plain_indices.clone(),
-                                                      self.values().clone(),
-                                                      self.sizes(),
-                                                      optTypeMetaToScalarType(options.dtype_opt()),
-                                                      options.layout_opt(),
-                                                      options.device_opt(),
-                                                      options.pinned_memory_opt());
+  return at::native::_sparse_csr_tensor_unsafe(
+                                               self.crow_indices().clone(),
+                                               self.col_indices().clone(),
+                                               self.values().clone(),
+                                               self.sizes(),
+                                               optTypeMetaToScalarType(options.dtype_opt()),
+                                               options.layout_opt(),
+                                               options.device_opt(),
+                                               options.pinned_memory_opt());
 }
 
 Tensor empty_like_sparse_csr(
