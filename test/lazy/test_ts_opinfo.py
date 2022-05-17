@@ -30,7 +30,7 @@ def init_lists():
     with open(TS_NATIVE_FUNCTIONS_PATH) as f:
         yaml_ts = yaml.load(f, yaml.Loader)
     LAZY_OPS_LIST = set(remove_suffixes(itertools.chain(yaml_ts["full_codegen"], yaml_ts["supported"], yaml_ts["autograd"])))
-    FALLBACK_LIST = set(["clamp"])
+    FALLBACK_LIST = set(["clamp", "nonzero"])
     SKIP_RUNTIME_ERROR_LIST = set([
         'index_select',  # Empty output_sizes is not supported
         'clone',  # is clone decomposed?
@@ -53,13 +53,13 @@ def init_lists():
 
 torch.manual_seed(42)
 
+def clone_move(t):
+    dev = 'lazy'
+    copy_t = t.detach().clone().requires_grad_(True).to(device=dev)
+    return copy_t
+
 class TestLazyTensor(JitTestCase):
     def testConvolutionBackward(self):
-        def clone_move(t):
-            dev = 'lazy'
-            copy_t = t.detach().clone().requires_grad_(True).to(device=dev)
-            return copy_t
-
         test_device = get_test_device()
         inp = torch.rand(1, 3, 128, 128, device=test_device, requires_grad=True)
         inp_copy = clone_move(inp)
@@ -154,6 +154,33 @@ class TestLazyOpInfo(TestCase):
 # TODO: after we move to master, add Lazy as a new Device here:
 # https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_device_type.py#L532
 instantiate_device_type_tests(TestLazyOpInfo, globals(), only_for="cpu")
+
+
+class TestLazyDynamicOps(TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        # Setup the dynamic shape mode
+        cls.old_ssa_mode = torch._C._lazy._get_symbolic_shape_mode()
+        torch._C._lazy._set_symbolic_shape_mode(True)
+        return super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        torch._C._lazy._set_symbolic_shape_mode(cls.old_ssa_mode)
+        return super().tearDownClass()
+
+    def test_nonzero_dynamic(self):
+        # Test that nonzero gives upper bounds when symbolic shape mode is enabled
+        test_device = get_test_device()
+        x1 = torch.tensor([[0, 1.0, 2.0], [3.0, 0, 0]], device=test_device, requires_grad=True)
+        x1_lazy = clone_move(x1)
+        x2_lazy = torch.nonzero(x1_lazy)
+        print(x2_lazy.size())
+        self.assertEqual(tuple(x2_lazy.size()), (6, 2))
+
+        # We should still be able to instantiate it and get the actual result
+        x2_eager = x2_lazy.cpu()
+        self.assertEqual(tuple(x2_eager.size()), (3, 2))
 
 
 if __name__ == '__main__':
