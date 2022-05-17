@@ -1312,7 +1312,7 @@ class Softmin(Module):
         self.dim = dim
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
+        super().__setstate__(state)
         if not hasattr(self, 'dim'):
             self.dim = None
 
@@ -1368,7 +1368,7 @@ class Softmax(Module):
         self.dim = dim
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
+        super().__setstate__(state)
         if not hasattr(self, 'dim'):
             self.dim = None
 
@@ -1439,7 +1439,7 @@ class LogSoftmax(Module):
         self.dim = dim
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
+        super().__setstate__(state)
         if not hasattr(self, 'dim'):
             self.dim = None
 
