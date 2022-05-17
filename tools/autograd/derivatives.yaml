@@ -1254,6 +1254,7 @@
   self: "accumulate ? grad : grad.put(index, zeros_like(source), false)"
   index: non_differentiable
   source: grad.take(index).reshape_as(source)
+  result: auto_linear  # It is affine, but sure
 
 - name: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
   A: linalg_qr_backward(grad_Q, grad_R, Q, R, mode)
@@ -1726,6 +1727,9 @@
 # NN
 - name: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   i1, i2, i3: _trilinear_backward(grad, i1, i2, i3, expand1, expand2, expand3, sumdim, grad_input_mask)
+  result: "_trilinear(i1_t, i2_p, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
+           _trilinear(i1_p, i2_t, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
+           _trilinear(i1_p, i2_p, i3_t, expand1, expand2, expand3, sumdim, unroll_dim)"
 
 - name: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   self: constant_pad_nd_backward(grad, pad)
@@ -1748,6 +1752,7 @@
 - name: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   indices: non_differentiable
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
+  result: auto_linear
 
 - name: embedding_dense_backward(Tensor grad_output, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
   grad_output: embedding_dense_double_backward(grad, indices, padding_idx)
@@ -1880,6 +1885,7 @@
 
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   self: log_sigmoid_backward(grad, self, buffer)
+  output: auto_element_wise
 
 - name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _log_softmax_backward_data(grad, result, dim, self.scalar_type())
@@ -1894,12 +1900,15 @@
 
 - name: prelu(Tensor self, Tensor weight) -> Tensor
   self, weight: "grad.defined() ? prelu_backward(grad, self, weight) : std::tuple<Tensor, Tensor>()"
+  result: prelu_jvp(self_p, self_t, weight_p, weight_t)
 
 - name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
 
 - name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
+  result: auto_element_wise
+
 
 - name: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   self: rrelu_with_noise_backward(grad, result, noise, lower, upper, training, true)

@@ -299,6 +299,7 @@ infinitely_differentiable_native_group_norm_backward(
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask);
+Tensor prelu_jvp(const Tensor& x, const Tensor& dx, const Tensor& w, const Tensor& dw);
 std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
     const Tensor & grad_grad_input,
     const Tensor & grad_grad_weight,
