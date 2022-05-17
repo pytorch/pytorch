@@ -10,7 +10,6 @@ from torch.ao.quantization.backend_config.utils import (
     remove_boolean_dispatch_from_name,
 )
 import os.path
-import sys
 
 
 # Create a directory for the images, if it doesn't exist
@@ -25,9 +24,6 @@ if not os.path.exists(QUANTIZATION_BACKEND_CONFIG_IMAGE_PATH):
 output_path = os.path.join(QUANTIZATION_BACKEND_CONFIG_IMAGE_PATH, "default_backend_config.txt")
 
 with open(output_path, "w") as f:
-    old_stdout = sys.stdout
-    sys.stdout = f
-
     native_backend_config_dict = get_native_backend_config_dict()
 
     configs = native_backend_config_dict['configs']
@@ -63,6 +59,4 @@ with open(output_path, "w") as f:
     for entry in configs:
         entries.append(entry_to_pretty_str(entry))
     entries = ",\n".join(entries)
-    print(entries)
-
-    sys.stdout = old_stdout
+    f.write(entries)
