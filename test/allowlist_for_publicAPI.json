@@ -537,13 +537,6 @@
     "set_grad_enabled",
     "variable"
   ],
-  "torch.autograd.anomaly_mode": [
-    "Any"
-  ],
-  "torch.autograd.forward_ad": [
-    "Any",
-    "namedtuple"
-  ],
   "torch.autograd.function": [
     "Any",
     "List",
@@ -554,18 +547,6 @@
   "torch.autograd.functional": [
     "List",
     "Tuple"
-  ],
-  "torch.autograd.gradcheck": [
-    "Callable",
-    "Dict",
-    "Iterable",
-    "List",
-    "Optional",
-    "Tuple",
-    "Union",
-    "is_tensor_like",
-    "product",
-    "vmap"
   ],
   "torch.autograd.graph": [
     "Any",
@@ -2114,6 +2095,7 @@
     "svdvals",
     "tensorinv",
     "tensorsolve",
+    "vander",
     "vector_norm"
   ],
   "torch.multiprocessing": [
@@ -3102,7 +3084,6 @@
     "IntTensor",
     "LongTensor",
     "ShortTensor",
-    "_csr_to_block_csr",
     "addmm",
     "log_softmax",
     "mm",
@@ -3567,7 +3548,7 @@
     "_validate_sparse_csr_tensor_args",
     "_values_copy",
     "_weight_norm",
-    "_weight_norm_cuda_interface",
+    "_weight_norm_interface",
     "autocast",
     "broadcast_shapes",
     "candidate",

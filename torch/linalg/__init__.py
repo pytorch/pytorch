@@ -266,7 +266,7 @@ Examples::
 
     >>> A = torch.randn(2, 3, 4, 4)  # Batch of matrices
     >>> Ainv = torch.linalg.inv(A)
-    >>> torch.dist(A @ Ainv, torch.eye(4)))
+    >>> torch.dist(A @ Ainv, torch.eye(4))
     tensor(1.9073e-06)
 
     >>> A = torch.randn(4, 4, dtype=torch.complex128)  # Complex matrix
@@ -2692,4 +2692,55 @@ Examples::
     tensor(1.6099e-06)
     >>> torch.dist(Q.mT @ Q, torch.eye(4))
     tensor(6.2158e-07)
+""")
+
+vander = _add_docstr(_linalg.linalg_vander, r"""
+vander(x, N=None) -> Tensor
+
+Generates a Vandermonde matrix.
+
+Returns the Vandermonde matrix :math:`V`
+
+.. math::
+
+    V = \begin{pmatrix}
+            1 & x_1 & x_1^2 & \dots & x_1^{N-1}\\
+            1 & x_2 & x_2^2 & \dots & x_2^{N-1}\\
+            1 & x_3 & x_3^2 & \dots & x_3^{N-1}\\
+            \vdots & \vdots & \vdots & \ddots &\vdots \\
+            1 & x_n & x_n^2 & \dots & x_n^{N-1}
+        \end{pmatrix}.
+
+for `N > 1`.
+If :attr:`N`\ `= None`, then `N = x.size(-1)` so that the output is a square matrix.
+
+Supports inputs of float, double, cfloat, cdouble, and integral dtypes.
+Also supports batches of vectors, and if :attr:`x` is a batch of vectors then
+the output has the same batch dimensions.
+
+Differences with `numpy.vander`:
+
+- Unlike `numpy.vander`, this function returns the powers of :attr:`x` in ascending order.
+  To get them in the reverse order call ``linalg.vander(x, N).flip(-1)``.
+
+Args:
+    x (Tensor): tensor of shape `(*, n)` where `*` is zero or more batch dimensions
+                consisting of vectors.
+
+Keyword args:
+    N (int, optional): Number of columns in the output. Default: `x.size(-1)`
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3, 5])
+    >>> linalg.vander(x)
+    tensor([[  1,   1,   1,   1],
+            [  1,   2,   4,   8],
+            [  1,   3,   9,  27],
+            [  1,   5,  25, 125]])
+    >>> linalg.vander(x, N=3)
+    tensor([[ 1,  1,  1],
+            [ 1,  2,  4],
+            [ 1,  3,  9],
+            [ 1,  5, 25]])
 """)
