@@ -28,10 +28,14 @@ class ErrorMeta(Exception):
         self.msg = msg
         self.id = id
 
-    def to_error(self) -> Exception:
-        msg = self.msg
-        if self.id:
-            msg += f"\n\nThe failure occurred for item {''.join(str([item]) for item in self.id)}"
+    def to_error(self, msg: Optional[Union[str, Callable[[str], str]]] = None) -> Exception:
+        if not isinstance(msg, str):
+            generated_msg = self.msg
+            if self.id:
+                generated_msg += f"\n\nThe failure occurred for item {''.join(str([item]) for item in self.id)}"
+
+            msg = msg(generated_msg) if callable(msg) else generated_msg
+
         return self.type(msg)
 
 
@@ -1066,12 +1070,8 @@ def assert_equal(
     if not error_metas:
         return
 
-    if msg is not None:
-        for error_meta in error_metas:  # type: ignore[misc]
-            error_meta.msg = msg(error_meta.msg) if callable(msg) else msg  # type: ignore[misc]
-
     # TODO: compose all metas into one AssertionError
-    raise error_metas[0].to_error()
+    raise error_metas[0].to_error(msg)
 
 
 def assert_close(
