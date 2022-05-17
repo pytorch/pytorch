@@ -391,7 +391,7 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss)
+@register_decomposition(aten.huber_loss, register_meta=True)
 @pw_cast_for_opmath
 def huber_loss(
     self: Tensor,
@@ -1268,3 +1268,21 @@ def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
     maxes_squeezed = torch.masked_fill(maxes_squeezed, maxes_squeezed.abs() == float('inf'), 0)
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
+
+
+@register_decomposition(aten.trace.default)
+def trace(self: Tensor) -> Tensor:
+    return torch.sum(torch.diag(self))
+
+
+# nb: Should use acc_t, not op_math
+@register_decomposition(aten.log_sigmoid_forward.default)
+@pw_cast_for_opmath
+def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
+    min = torch.minimum(self.new_zeros(()), self)
+    z = torch.exp(-torch.abs(self))
+    if self.is_cuda:
+        buffer = self.new_zeros((0,))
+    else:
+        buffer = z
+    return min - torch.log1p(z), buffer
