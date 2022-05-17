@@ -17709,8 +17709,11 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
-            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
         ),
         # Can reuse the same inputs; dim is required in both
         sample_inputs_func=sample_inputs_masked_cumops,
@@ -17724,8 +17727,11 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
-            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
         ),
         # Can reuse the same inputs; dim is required in both
         sample_inputs_func=sample_inputs_masked_cumops,
