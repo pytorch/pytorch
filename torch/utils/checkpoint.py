@@ -343,10 +343,13 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
         return counter - 1
 
     def unpack(x):
+        nonlocal storage
+        unpack_counter = 0
         if len(storage) == 0:
-
             def inner_pack(inner):
-                storage.append(inner)
+                nonlocal unpack_counter
+                storage[unpack_counter] = inner
+                unpack_counter += 1
                 return None
 
             def inner_unpack(packed):
@@ -365,9 +368,9 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
                         set_device_states(fwd_gpu_devices, fwd_gpu_states)
                 with torch.enable_grad(), torch.cuda.amp.autocast(had_autocast_in_fwd):
                     with torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
-                        _unused = function(*args)
+                        _unused = function(*args, **kwargs)
 
-        return storage[x]
+        return storage.pop(x)
 
     with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
         output = function(*args)
