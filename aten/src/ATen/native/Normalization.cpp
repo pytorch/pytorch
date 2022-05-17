@@ -230,6 +230,126 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   return std::make_tuple(save_mean, save_var_transform);
 }
 
+template <typename scalar_t>
+std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cpu_impl(
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& mean_,
+    const Tensor& invstd_,
+    const Tensor& weight,
+    bool input_g,
+    bool weight_g,
+    bool bias_g) {
+  using accscalar_t = at::acc_type<scalar_t, false>;
+
+  Tensor grad_weight;
+  Tensor grad_bias;
+  Tensor sum_dy_xmu;
+  if (input_g) {
+    sum_dy_xmu = at::empty_like(mean_, input.suggest_memory_format());
+  }
+  if (weight_g) {
+    grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
+  }
+  if (bias_g) {
+    grad_bias = at::empty({input.size(1)}, input.options());
+  }
+
+  auto weight_a = conditional_accessor_1d<scalar_t>(weight);
+  auto grad_weight_a = conditional_accessor_1d<scalar_t>(grad_weight);
+  auto grad_bias_a = conditional_accessor_1d<scalar_t>(grad_bias);
+  auto mean_a = conditional_accessor_1d<scalar_t>(mean_);
+  auto invstd_a = conditional_accessor_1d<scalar_t>(invstd_);
+  auto sum_dy_xmu_a = conditional_accessor_1d<scalar_t>(sum_dy_xmu);
+
+  int64_t n_input = input.size(1);
+  const int64_t ndim = input.dim();
+
+  // Reduce all dimensions except dim=1
+  DimVector reduce_dims(ndim - 1);
+  reduce_dims[0] = 0;
+  for (const auto i : c10::irange(2, ndim)) {
+    reduce_dims[i - 1] = i;
+  }
+
+  auto sum = at::sum(grad_output, /*dims=*/reduce_dims);
+  auto sum_a = sum.accessor<scalar_t, 1>();
+
+  auto reduce_iter = TensorIteratorConfig()
+                         .add_input(input)
+                         .add_input(grad_output)
+                         .resize_outputs(false)
+                         .declare_static_shape(input.sizes(), /*squash_dims=*/1)
+                         .build();
+
+  auto in_channel_stride = input.strides()[1];
+  auto in_data = input.data_ptr<scalar_t>();
+  auto grad_out_channel_stride = grad_output.strides()[1];
+  auto grad_out_data = grad_output.data_ptr<scalar_t>();
+
+  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
+    TensorIterator reduce_iter_local(reduce_iter);
+    for (const auto f : c10::irange(b_begin, b_end)) {
+      scalar_t w = weight.defined() ? weight_a[f] : 1;
+
+      scalar_t mean, invstd;
+      mean = mean_a[f];
+      invstd = invstd_a[f];
+
+      // dot product of the Q(X) and gradOuput
+      accscalar_t dotp = 0;
+      reduce_iter_local.unsafe_replace_operand(
+          0, in_data + f * in_channel_stride);
+      reduce_iter_local.unsafe_replace_operand(
+          1, grad_out_data + f * grad_out_channel_stride);
+
+      cpu_serial_kernel(
+          reduce_iter_local, [&](const scalar_t i, const scalar_t go) -> void {
+            dotp += (i - mean) * go;
+          });
+
+      if (input_g) {
+        sum_dy_xmu_a[f] = dotp;
+      }
+
+      if (weight_g) {
+        grad_weight_a[f] = dotp * invstd;
+      }
+
+      if (bias_g) {
+        grad_bias_a[f] = sum_a[f];
+      }
+    }
+  });
+  return std::make_tuple(sum, sum_dy_xmu, grad_weight, grad_bias);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cpu(
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& mean_,
+    const Tensor& invstd_,
+    const c10::optional<Tensor>& weight_opt,
+    bool input_g,
+    bool weight_g,
+    bool bias_g) {
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  return AT_DISPATCH_FLOATING_TYPES(
+      input.scalar_type(), "batch_norm_backward_reduce_cpu", [&] {
+        return batch_norm_backward_reduce_cpu_impl<scalar_t>(
+            grad_output,
+            input,
+            mean_,
+            invstd_,
+            weight,
+            input_g,
+            weight_g,
+            bias_g);
+      });
+}
+
 template<typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     const Tensor& grad_out_, const Tensor& input, const Tensor& weight,

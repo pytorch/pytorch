@@ -132,6 +132,10 @@ class SyncBatchNorm(Function):
                 self.needs_input_grad[1],
                 self.needs_input_grad[2]
             )
+            print("sum_dy: ", sum_dy)
+            print("sum_dy_xmu: ", sum_dy_xmu)
+            print("grad_weight: ", grad_weight)
+            print("grad_bias: ", grad_bias)
 
             if self.needs_input_grad[0]:
                 # synchronizing stats used to calculate input gradient.
