@@ -275,6 +275,7 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
         ]
         self._test_function_import('utils', function_list,
                                    base='nn.quantized.modules')
+
     def test_package_import_nn_quantized_dynamic(self):
         self._test_package_import('dynamic', base='nn.quantized')
 
@@ -284,7 +285,7 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
         self._test_package_import('modules.conv', base='nn.quantized.dynamic')
         self._test_package_import('modules.linear', base='nn.quantized.dynamic')
         self._test_package_import('modules.rnn', base='nn.quantized.dynamic')
-        
+
     def test_import_nn_quantized_dynamic_import(self):
         module_list = [
             # Modules
@@ -313,23 +314,23 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
         self._test_package_import('modules.linear', base='nn.quantized._reference')
         self._test_package_import('modules.rnn', base='nn.quantized._reference')
         self._test_package_import('modules.sparse', base='nn.quantized._reference')
-        
+
     def test_import_nn_quantized_reference_import(self):
         module_list = [
             # Modules
-                'Linear',
-                'Conv1d',
-                'Conv2d',
-                'Conv3d',
-                'ConvTranspose1d',
-                'ConvTranspose2d',
-                'ConvTranspose3d',
-                'RNNCell',
-                'LSTMCell',
-                'GRUCell',
-                'LSTM',
-                'Embedding',
-                'EmbeddingBag',
+            'Linear',
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+            'ConvTranspose1d',
+            'ConvTranspose2d',
+            'ConvTranspose3d',
+            'RNNCell',
+            'LSTMCell',
+            'GRUCell',
+            'LSTM',
+            'Embedding',
+            'EmbeddingBag',
         ]
         self._test_function_import('_reference', module_list, base='nn.quantized')
 
@@ -346,14 +347,14 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
         ]
         self._test_function_import('conv', function_list,
                                    base='nn.quantized._reference.modules')
-    
+
     def test_reference_modules_linear(self):
         function_list = [
             'Linear',
         ]
         self._test_function_import('linear', function_list,
                                    base='nn.quantized._reference.modules')
-    
+
     def test_reference_modules_rnn(self):
         function_list = [
             'RNNCellBase',
