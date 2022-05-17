@@ -202,6 +202,11 @@ void initDispatchBindings(PyObject* module) {
     c10::Dispatcher::singleton().checkInvariants();
   });
 
+  m.def("_dispatch_has_kernel", [](const char* name) -> bool {
+    auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+    return static_cast<bool>(op);
+  });
+
   m.def("_dispatch_has_kernel_for_dispatch_key", [](const char* name, const char* dispatch) -> bool {
     auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
     TORCH_CHECK(op, "operator ", name, " does not exist");
