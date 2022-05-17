@@ -2197,7 +2197,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
   }
 
- protected:
+ public:
   enum class SizesStridesPolicy : uint8_t {
     // Default behavior, e.g., dense tensor.
     //
