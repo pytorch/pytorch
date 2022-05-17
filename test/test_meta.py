@@ -311,7 +311,6 @@ meta_exclude_set = {
     torch.logical_xor,  # MISSING aten::logical_xor.out
     torch.logit,  # MISSING aten::logit
     torch.lstsq,  # MISSING aten::lstsq
-    torch.lu_solve,  # MISSING aten::lu_solve
     torch.masked_select,  # MISSING aten::masked_select
     torch.matmul,  # MISSING aten::dot
     torch.matrix_exp,  # MISSING aten::linalg_matrix_exp
