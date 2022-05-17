@@ -2287,7 +2287,7 @@ static inline T jacobi_elliptic(T u, T k, T *pcn, T *pdn) __ubsan_ignore_float_d
 } // jacobi_elliptic
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_cd(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_cd(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     T cn;
     T dn;
 
@@ -2297,7 +2297,7 @@ static inline C10_HOST_DEVICE T jacobi_elliptic_k_cd(T u, T k) __ubsan_ignore_fl
 } // jacobi_elliptic_k_cd
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_cn(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_cn(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     T cn;
 
     jacobi_elliptic(u, k, &cn, static_cast<T *>(0));
@@ -2306,7 +2306,7 @@ static inline C10_HOST_DEVICE T jacobi_elliptic_k_cn(T u, T k) __ubsan_ignore_fl
 } // jacobi_elliptic_k_cn
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_cs(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_cs(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     T cn;
 
     T sn = jacobi_elliptic(u, k, &cn, static_cast<T *>(0));
@@ -2315,7 +2315,7 @@ static inline C10_HOST_DEVICE T jacobi_elliptic_k_cs(T u, T k) __ubsan_ignore_fl
 } // jacobi_elliptic_k_cs
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_dc(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_dc(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     T cn;
     T dn;
 
@@ -2325,7 +2325,7 @@ static inline C10_HOST_DEVICE T jacobi_elliptic_k_dc(T u, T k) __ubsan_ignore_fl
 } // jacobi_elliptic_k_dc
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_dn(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_dn(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     T dn;
 
     jacobi_elliptic(u, k, static_cast<T *>(0), &dn);
@@ -2334,7 +2334,7 @@ static inline C10_HOST_DEVICE T jacobi_elliptic_k_dn(T u, T k) __ubsan_ignore_fl
 } // jacobi_elliptic_k_dn
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_ds(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_ds(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     T dn;
 
     T sn = jacobi_elliptic(u, k, static_cast<T *>(0), &dn);
@@ -2343,24 +2343,24 @@ static inline C10_HOST_DEVICE T jacobi_elliptic_k_ds(T u, T k) __ubsan_ignore_fl
 } // jacobi_elliptic_k_ds
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_nc(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_nc(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     return 1 / jacobi_elliptic_k_cn(u, k);
 } // jacobi_elliptic_k_nc
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_nd(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_nd(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     return 1 / jacobi_elliptic_k_dn(u, k);
 } // jacobi_elliptic_k_nd
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_ns(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_ns(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     T sn = jacobi_elliptic(u, k, static_cast<T *>(0), static_cast<T *>(0));
 
     return 1 / sn;
 } // jacobi_elliptic_k_ns
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_sc(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_sc(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     T cn;
 
     T sn = jacobi_elliptic(u, k, &cn, static_cast<T *>(0));
@@ -2369,7 +2369,7 @@ static inline C10_HOST_DEVICE T jacobi_elliptic_k_sc(T u, T k) __ubsan_ignore_fl
 } // jacobi_elliptic_k_sc
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_sd(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_sd(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     T dn;
 
     T sn = jacobi_elliptic(u, k, static_cast<T *>(0), &dn);
@@ -2378,7 +2378,7 @@ static inline C10_HOST_DEVICE T jacobi_elliptic_k_sd(T u, T k) __ubsan_ignore_fl
 } // jacobi_elliptic_k_sd
 
 template<typename T>
-static inline C10_HOST_DEVICE T jacobi_elliptic_k_sn(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
+static inline T jacobi_elliptic_k_sn(T u, T k) __ubsan_ignore_float_divide_by_zero__ {
     return jacobi_elliptic(u, k, static_cast<T *>(0), static_cast<T *>(0));
 } // jacobi_elliptic_k_sn
 
