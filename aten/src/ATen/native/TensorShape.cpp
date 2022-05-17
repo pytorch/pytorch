@@ -2416,6 +2416,13 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_transpose_(self, dim0, dim1);
   }
 
+  TORCH_CHECK(
+      self.layout() == kSparseCsr || self.layout() == kSparseCsc ||
+          self.layout() == kSparseBsr || self.layout() == kSparseBsc,
+      "Got layout ",
+      self.layout(),
+      ", but SparseCsr, SparseCsc, SparseBsr, SparseBsc do not support in-place transposition.");
+
   if (self.is_mkldnn()) {
     return at::_mkldnn_transpose_(self, dim0, dim1);
   }
