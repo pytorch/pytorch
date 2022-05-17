@@ -1388,18 +1388,39 @@ if(USE_CUDA)
   endif()
 endif()
 
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
+  if(MSVC)
+    message(WARNING "Tensorpipe cannot be used on Windows.")
+  else()
+    if(USE_CUDA)
+      set(TP_USE_CUDA ON CACHE BOOL "" FORCE)
+      set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
+    endif()
+    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
+    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
+
+    # Tensorpipe uses cuda_add_library
+    torch_update_find_cuda_flags()
+    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+    if(USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
+    elseif(USE_ROCM)
+      message(WARNING "TensorPipe doesn't yet support ROCm")
+      # Not yet...
+      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
+    endif()
+  endif()
+endif()
+
 if(USE_GLOO)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    if(MSVC)
-      # Don't install gloo on Windows
-      # It is already handled in builder scripts
-      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
-    else()
-      set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
-    endif()
+    # Don't install gloo
+    set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Temporarily override variables to avoid building Gloo tests/benchmarks
@@ -1411,6 +1432,10 @@ if(USE_GLOO)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
     if(NOT USE_SYSTEM_GLOO)
+      if(USE_DISTRIBUED AND USE_TENSORPIPE)
+        get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
+        set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
+      endif()
       # gloo uses cuda_add_library
       torch_update_find_cuda_flags()
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
@@ -1445,32 +1470,6 @@ if(USE_GLOO)
       list(APPEND Caffe2_HIP_DEPENDENCY_LIBS gloo_hip)
     endif()
     add_compile_options(-DCAFFE2_USE_GLOO)
-  endif()
-endif()
-
-if(USE_DISTRIBUTED AND USE_TENSORPIPE)
-  if(MSVC)
-    message(WARNING "Tensorpipe cannot be used on Windows.")
-  else()
-    if(USE_CUDA)
-      set(TP_USE_CUDA ON CACHE BOOL "" FORCE)
-      set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
-    endif()
-    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
-
-    # Tensorpipe uses cuda_add_library
-    torch_update_find_cuda_flags()
-    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-
-    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
-    if(USE_CUDA)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
-    elseif(USE_ROCM)
-      message(WARNING "TensorPipe doesn't yet support ROCm")
-      # Not yet...
-      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
-    endif()
   endif()
 endif()
 

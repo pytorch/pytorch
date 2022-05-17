@@ -11,7 +11,7 @@ from torch.distributed.nn.functional import (
 )
 from torch.overrides import handle_torch_function
 
-# Custom sharded ops
+# Custom PartialTensor ops
 _PARTIAL_TENSOR_OPS: Dict[Callable, Callable] = {}
 def _register_partial_tensor_op(op, func):
     from inspect import signature
@@ -120,7 +120,7 @@ class _PartialTensor(object):
         self, local_shard, process_group=None, reduce_op=distributed_c10d.ReduceOp.SUM
     ):
         self.local_shard = local_shard
-        self.process_group = (
+        self._process_group = (
             process_group
             if process_group
             else dist.distributed_c10d._get_default_group()
@@ -157,22 +157,22 @@ class _PartialTensor(object):
         if self.local_shard.is_complex():
             raise NotImplementedError("Only real partial tensor supported for reshard.")
         sharding_dim = int(resharding_spec.dim)  # type: ignore[attr-defined]
-        chunk_mode_res = self.local_shard.size(sharding_dim) % self.process_group.size()
+        chunk_mode_res = self.local_shard.size(sharding_dim) % self._process_group.size()
         local_shard = self.local_shard
         # Add padding when the size is not divisible by the world size.
         if chunk_mode_res != 0:
             padding = [0] * (self.local_shard.dim() * 2)
-            padding[-1] = self.process_group.size() - chunk_mode_res
+            padding[-1] = self._process_group.size() - chunk_mode_res
             local_shard = torch.nn.functional.pad(
                 self.local_shard,
                 tuple(padding),
                 "constant",
                 0,
             )
-        current_rank = dist.get_rank(self.process_group)  # type: ignore[attr-defined]
+        current_rank = dist.get_rank(self._process_group)  # type: ignore[attr-defined]
         rank_idx = None
         rearrange_local_shards = False
-        indices = [0] * self.process_group.size()
+        indices = [0] * self._process_group.size()
         for idx, placement in enumerate(resharding_spec.placements):  # type: ignore[attr-defined]
             if placement.rank() == current_rank:  # type: ignore[index, union-attr]
                 rank_idx = idx  # type: ignore[attr-defined]
@@ -180,7 +180,7 @@ class _PartialTensor(object):
                 rearrange_local_shards = True
             indices[placement.rank()] = idx  # type: ignore[index, union-attr]
 
-        local_shards = local_shard.chunk(self.process_group.size(), dim=sharding_dim)
+        local_shards = local_shard.chunk(self._process_group.size(), dim=sharding_dim)
         if rearrange_local_shards:
             # Need to re-arrange original shard_dim of output_tensor_list.
             local_shards = [local_shards[idx] for idx in indices]  # type: ignore[call-overload]
@@ -192,7 +192,7 @@ class _PartialTensor(object):
         # Remove padding when the size is not divisible by the world size.
         if chunk_mode_res != 0:
             uneven_local_shards = self.local_shard.chunk(
-                self.process_group.size(), dim=sharding_dim
+                self._process_group.size(), dim=sharding_dim
             )
             expected_size = uneven_local_shards[rank_idx].size()
             if local_result.size() != expected_size:
@@ -205,7 +205,7 @@ class _PartialTensor(object):
             local_result,
             resharding_spec,
             sharded_tensor_size,
-            process_group=self.process_group,
+            process_group=self._process_group,
         )
 
     def size(self):
@@ -229,7 +229,7 @@ def _transpose_impl(types, args=(), kwargs=None):
     dim1 = args[2]
     return _PartialTensor(
         torch.transpose(input.local_shard, dim0, dim1),
-        input.process_group,
+        input._process_group,
         input.reduce_op
     )
 
@@ -264,4 +264,4 @@ def partial_cat(types, args=(), kwargs=None):
         if 'out' in kwargs:
             raise RuntimeError('"out" kwarg is not supported!')
         dim = kwargs['dim'] if 'dim' in kwargs else 0
-    return _PartialTensor(torch.cat(local_shards, dim), input.process_group, input.reduce_op)
+    return _PartialTensor(torch.cat(local_shards, dim), input._process_group, input.reduce_op)
