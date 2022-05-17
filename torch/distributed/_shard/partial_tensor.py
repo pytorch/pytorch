@@ -11,7 +11,7 @@ from torch.distributed.nn.functional import (
 )
 from torch.overrides import handle_torch_function
 
-# Custom sharded ops
+# Custom PartialTensor ops
 _PARTIAL_TENSOR_OPS: Dict[Callable, Callable] = {}
 def _register_partial_tensor_op(op, func):
     from inspect import signature
@@ -229,7 +229,7 @@ def _transpose_impl(types, args=(), kwargs=None):
     dim1 = args[2]
     return _PartialTensor(
         torch.transpose(input.local_shard, dim0, dim1),
-        input.process_group,
+        input._process_group,
         input.reduce_op
     )
 
@@ -264,4 +264,4 @@ def partial_cat(types, args=(), kwargs=None):
         if 'out' in kwargs:
             raise RuntimeError('"out" kwarg is not supported!')
         dim = kwargs['dim'] if 'dim' in kwargs else 0
-    return _PartialTensor(torch.cat(local_shards, dim), input.process_group, input.reduce_op)
+    return _PartialTensor(torch.cat(local_shards, dim), input._process_group, input.reduce_op)

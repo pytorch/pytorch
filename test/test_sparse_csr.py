@@ -138,11 +138,18 @@ class TestSparseCSRSampler(TestCase):
                     self.assertLessEqual(counts.max(), n_cols)
 
 
-all_sparse_compressed_layouts = parametrize('layout', [
-    subtest(torch.sparse_csr, name='SparseCSR'),
-    subtest(torch.sparse_csc, name='SparseCSC'),
-    subtest(torch.sparse_bsr, name='SparseBSR'),
-    subtest(torch.sparse_bsc, name='SparseBSC')])
+def all_sparse_compressed_layouts(test_name='layout'):
+    return parametrize(test_name, [
+        subtest(torch.sparse_csr, name='SparseCSR'),
+        subtest(torch.sparse_csc, name='SparseCSC'),
+        subtest(torch.sparse_bsr, name='SparseBSR'),
+        subtest(torch.sparse_bsc, name='SparseBSC')])
+
+
+def sparse_compressed_nonblock_layouts(test_name='layout'):
+    return parametrize(test_name, [
+        subtest(torch.sparse_csr, name='SparseCSR'),
+        subtest(torch.sparse_csc, name='SparseCSC')])
 
 
 class TestSparseCompressed(TestCase):
@@ -160,7 +167,8 @@ class TestSparseCompressed(TestCase):
         The input is defined as a 4-tuple:
           compressed_indices, plain_indices, values, expected_size_from_shape_inference
         """
-        batch_shape = (2, 3)
+        from operator import mul
+        from functools import reduce
         if layout in {torch.sparse_csr, torch.sparse_csc}:
             yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype),
                    torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype),
@@ -170,10 +178,12 @@ class TestSparseCompressed(TestCase):
                    torch.tensor([], device=device, dtype=index_dtype),
                    torch.tensor([], device=device, dtype=dtype),
                    (0, 0))
-            yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype).repeat(6, 1).reshape(*batch_shape, -1),
-                   torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype).repeat(6, 1).reshape(*batch_shape, -1),
-                   torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(6, 1).reshape(*batch_shape, -1),
-                   (*batch_shape, 2, 2))
+            for batch_shape in {(2, 3), (2,)}:
+                prod = reduce(mul, batch_shape, 1)
+                yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
+                       torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
+                       torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(prod, 1).reshape(*batch_shape, -1),
+                       (*batch_shape, 2, 2))
         else:
             assert layout in {torch.sparse_bsr, torch.sparse_bsc}
             yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype),
@@ -184,13 +194,15 @@ class TestSparseCompressed(TestCase):
                    torch.tensor([], device=device, dtype=index_dtype),
                    torch.tensor([], device=device, dtype=dtype).reshape(1, 0, 0),
                    (0, 0))
-            yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype).repeat(6, 1).reshape(*batch_shape, -1),
-                   torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype).repeat(6, 1).reshape(*batch_shape, -1),
-                   torch.tensor([[[1, 11]], [[2, 22]], [[3, 33]], [[4, 44]]],
-                                device=device, dtype=dtype).repeat(6, 1, 1).reshape(*batch_shape, 4, 1, 2),
-                   (*batch_shape, 2, 2))
+            for batch_shape in {(2, 3), (2,)}:
+                prod = reduce(mul, batch_shape, 1)
+                yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
+                       torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
+                       torch.tensor([[[1, 11]], [[2, 22]], [[3, 33]], [[4, 44]]],
+                                    device=device, dtype=dtype).repeat(prod, 1, 1).reshape(*batch_shape, 4, 1, 2),
+                       (*batch_shape, 2, 2))
 
-    @all_sparse_compressed_layouts
+    @all_sparse_compressed_layouts()
     @onlyCPU
     def test_layout(self, layout):
         self.assertIn(str(layout), {'torch.sparse_csr', 'torch.sparse_csc', 'torch.sparse_bsr', 'torch.sparse_bsc'})
@@ -199,7 +211,7 @@ class TestSparseCompressed(TestCase):
     @parametrize('shape_and_device_inference', [subtest(False, name='_'), subtest(False, name='shape_and_device_inference')])
     @parametrize('use_factory_function', [subtest(False, name='_'), subtest(True, name='factory')])
     @parametrize('input_kind', [subtest('tensor', name='from_tensor'), subtest('list', name='from_list')])
-    @all_sparse_compressed_layouts
+    @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_compressed_constructor(self, layout, device, dtype,
                                            use_factory_function, shape_and_device_inference, input_kind):
@@ -208,6 +220,18 @@ class TestSparseCompressed(TestCase):
             torch.sparse_csc: torch.sparse_csc_tensor,
             torch.sparse_bsr: torch.sparse_bsr_tensor,
             torch.sparse_bsc: torch.sparse_bsc_tensor,
+        }[layout]
+        compressed_indices_mth = {
+            torch.sparse_csr: torch.Tensor.crow_indices,
+            torch.sparse_csc: torch.Tensor.ccol_indices,
+            torch.sparse_bsr: torch.Tensor.crow_indices,
+            torch.sparse_bsc: torch.Tensor.ccol_indices,
+        }[layout]
+        plain_indices_mth = {
+            torch.sparse_csr: torch.Tensor.col_indices,
+            torch.sparse_csc: torch.Tensor.row_indices,
+            torch.sparse_bsr: torch.Tensor.col_indices,
+            torch.sparse_bsc: torch.Tensor.row_indices,
         }[layout]
         for index_dtype in [torch.int32, torch.int64]:
             for compressed_indices, plain_indices, values, size in self._generate_small_inputs(layout, device, dtype, index_dtype):
@@ -244,10 +268,65 @@ class TestSparseCompressed(TestCase):
                                                                 dtype=dtype, layout=layout, device=device)
                 self.assertEqual(layout, sparse.layout)
                 self.assertEqual(size, sparse.shape)
-                # TODO: replace crow_indices/col_indices usage per https://github.com/pytorch/pytorch/issues/76638
-                self.assertEqual(compressed_indices, sparse.crow_indices())
-                self.assertEqual(plain_indices, sparse.col_indices())
+                self.assertEqual(compressed_indices, compressed_indices_mth(sparse))
+                self.assertEqual(plain_indices, plain_indices_mth(sparse))
                 self.assertEqual(values, sparse.values())
+
+    @skipMeta
+    @sparse_compressed_nonblock_layouts()
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
+    def test_empty(self, layout, device, dtype):
+        ns = [5, 2, 0]
+        batch_shapes = [(), (2,), (2, 3)]
+        compressed_indices_mth = {
+            torch.sparse_csr: torch.Tensor.crow_indices,
+            torch.sparse_csc: torch.Tensor.ccol_indices,
+        }[layout]
+        plain_indices_mth = {
+            torch.sparse_csr: torch.Tensor.col_indices,
+            torch.sparse_csc: torch.Tensor.row_indices,
+        }[layout]
+        compressed_dim = {
+            torch.sparse_csr: -2,
+            torch.sparse_csc: -1,
+        }[layout]
+        for m, n, b in itertools.product(ns, ns, batch_shapes):
+            shape = (*b, m, n)
+            result = torch.empty(shape, dtype=dtype, device=device, layout=layout)
+            self.assertEqual(result.shape, shape)
+            self.assertEqual(result.dtype, dtype)
+            self.assertEqual(result.device, torch.device(device))
+            self.assertEqual(result.layout, layout)
+            self.assertEqual(compressed_indices_mth(result).shape, (*b, shape[compressed_dim] + 1,))
+            self.assertEqual(plain_indices_mth(result).shape, (*b, 0,))
+            self.assertEqual(result.values().shape, (*b, 0,))
+            self.assertEqual(result._nnz(), 0)
+            self.assertEqual(compressed_indices_mth(result).device, torch.device(device))
+            self.assertEqual(plain_indices_mth(result).device, torch.device(device))
+            self.assertEqual(result.values().device, torch.device(device))
+            self.assertEqual(compressed_indices_mth(result).dtype, torch.int64)
+            self.assertEqual(plain_indices_mth(result).dtype, torch.int64)
+            self.assertEqual(result.values().dtype, dtype)
+
+    @skipMeta
+    @sparse_compressed_nonblock_layouts()
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    def test_empty_errors(self, layout, device, dtype):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "torch.empty: Only batched sparse compressed \\(non-block\\) tensors are supported"
+                                    ", but got size"):
+            torch.empty((5,), dtype=dtype, device=device, layout=layout)
+
+    @skipMeta
+    @all_sparse_compressed_layouts()
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    def test_clone(self, layout, device, dtype):
+        for compressed_indices, plain_indices, values, size in self._generate_small_inputs(
+                layout, device, dtype, index_dtype=torch.int32):
+            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
+                                                    dtype=dtype, layout=layout, device=device)
+            cloned_sparse = sparse.clone()
+            self.assertEqual(sparse, cloned_sparse)
 
 
 class TestSparseCSR(TestCase):
@@ -320,49 +399,6 @@ class TestSparseCSR(TestCase):
         # assigning to sparse trhough indexing is disabled
         with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
             sparse[0, 0, 0, 0] = 99.0
-
-    @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
-    def test_empty(self, device, dtype):
-        ns = [5, 2, 0]
-        batch_shapes = [(), (2,), (2, 3)]
-        for m, n, b in itertools.product(ns, ns, batch_shapes):
-            shape = (*b, m, n)
-            result = torch.empty(shape, dtype=dtype, device=device, layout=torch.sparse_csr)
-            self.assertEqual(result.shape, shape)
-            self.assertEqual(result.dtype, dtype)
-            self.assertEqual(result.device, torch.device(device))
-            self.assertEqual(result.layout, torch.sparse_csr)
-            self.assertEqual(result.crow_indices().shape, (*b, shape[-2] + 1,))
-            self.assertEqual(result.col_indices().shape, (*b, 0,))
-            self.assertEqual(result.values().shape, (*b, 0,))
-            self.assertEqual(result._nnz(), 0)
-            self.assertEqual(result.crow_indices().device, torch.device(device))
-            self.assertEqual(result.col_indices().device, torch.device(device))
-            self.assertEqual(result.values().device, torch.device(device))
-            self.assertEqual(result.crow_indices().dtype, torch.int64)
-            self.assertEqual(result.col_indices().dtype, torch.int64)
-            self.assertEqual(result.values().dtype, dtype)
-
-    @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
-    def test_empty_errors(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only batched sparse CSR matrices are supported, but got size"):
-            torch.empty((5,), dtype=dtype, device=device, layout=torch.sparse_csr)
-
-    @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
-    def test_clone(self, device, dtype):
-        from operator import mul
-        from functools import reduce
-        for batch_shape in ((), (2,), (2, 3)):
-            prod = reduce(mul, batch_shape, 1)
-            crow_indices = torch.tensor([0, 2, 4], device=device).repeat(prod, 1).reshape(*batch_shape, -1)
-            col_indices = torch.tensor([0, 1, 0, 1], device=device).repeat(prod, 1).reshape(*batch_shape, -1)
-            values = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(prod, 1).reshape(*batch_shape, -1)
-            sparse = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=dtype, device=device)
-            cloned_sparse = sparse.clone()
-            self.assertEqual(sparse, cloned_sparse)
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -718,24 +754,24 @@ class TestSparseCSR(TestCase):
         self.assertEqual(csr.values(), values)
 
     @parametrize("blocksize", [2, 4])
-    @parametrize("shape", [(24, 24), (12, 24)])
     @dtypes((torch.double, torch.int32), (torch.double, torch.int64))
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @skipMeta
-    def test_csr_to_block_csr(self, device, dtypes, shape, blocksize):
-        dtype, index_dtype = dtypes
-        m, k = shape
-        nnz = random.randint(0, m * k)
-        t = self.genSparseCSRTensor((m * blocksize, k * blocksize), nnz, dtype=dtype,
-                                    device=device, index_dtype=index_dtype)
-        st = sp.csr_matrix((t.values().cpu(), t.col_indices().cpu(), t.crow_indices().cpu()), shape=tuple(t.size()))
-        block_t = t.to_sparse_bsr((blocksize, blocksize))
-        self.assertEqual(block_t.values().dim(), 3)
-        self.assertTrue(block_t.layout == torch.sparse_bsr)
-        block_st = st.tobsr(blocksize=(blocksize, blocksize))
-        self.assertEqual(block_t.values().cpu(), block_st.data)
-        self.assertEqual(block_t.col_indices().cpu(), torch.tensor(block_st.indices).to(index_dtype))
-        self.assertEqual(block_t.crow_indices().cpu(), torch.tensor(block_st.indptr).to(index_dtype))
+    def test_csr_to_block_csr(self, device, dtypes, blocksize):
+        for shape in [(24, 24), (12, 24)]:
+            dtype, index_dtype = dtypes
+            m, k = shape
+            nnz = random.randint(0, m * k)
+            t = self.genSparseCSRTensor((m * blocksize, k * blocksize), nnz, dtype=dtype,
+                                        device=device, index_dtype=index_dtype)
+            st = sp.csr_matrix((t.values().cpu(), t.col_indices().cpu(), t.crow_indices().cpu()), shape=tuple(t.size()))
+            block_t = t.to_sparse_bsr((blocksize, blocksize))
+            self.assertEqual(block_t.values().dim(), 3)
+            self.assertTrue(block_t.layout == torch.sparse_bsr)
+            block_st = st.tobsr(blocksize=(blocksize, blocksize))
+            self.assertEqual(block_t.values().cpu(), block_st.data)
+            self.assertEqual(block_t.col_indices().cpu(), torch.tensor(block_st.indices).to(index_dtype))
+            self.assertEqual(block_t.crow_indices().cpu(), torch.tensor(block_st.indptr).to(index_dtype))
 
     @dtypes(torch.double)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
@@ -1983,6 +2019,41 @@ class TestSparseCSR(TestCase):
             detached_inp = inp.detach()
             self.assertEqual(inp, detached_inp)
 
+    @skipMeta
+    @all_sparse_compressed_layouts('to_layout')
+    @all_sparse_compressed_layouts('from_layout')
+    def test_compressed_layout_conversions_coverage(self, device, from_layout, to_layout):
+        """
+        This test performs a smoke test for covered conversion and verifies
+        that an exception is thrown for unsupported conversions.
+        """
+
+        def _convert_to_layout(a, target_layout):
+            if target_layout is torch.sparse_csr:
+                return a.to_sparse_csr()
+            if target_layout is torch.sparse_csc:
+                return a.to_sparse_csc()
+            if target_layout is torch.sparse_bsr:
+                return a.to_sparse_bsr((2, 2))
+            if target_layout is torch.sparse_bsc:
+                return a.to_sparse_bsc((2, 2))
+            raise NotImplementedError(repr(a))
+
+        def _to_from_layout(layout_a, layout_b):
+            a = make_tensor((6, 10), dtype=torch.float, device=device)
+            expect_error = (layout_a in [torch.sparse_csc, torch.sparse_bsc]
+                            or layout_b in [torch.sparse_csc, torch.sparse_bsc])
+            expect_error = expect_error or (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_bsr)
+            expect_error = expect_error or (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_csr)
+            if expect_error:
+                with self.assertRaises(RuntimeError):
+                    b = _convert_to_layout(a, layout_a)
+                    _convert_to_layout(b, layout_b)
+            else:
+                b = _convert_to_layout(a, layout_a)
+                _convert_to_layout(b, layout_b)
+
+        _to_from_layout(from_layout, to_layout)
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
