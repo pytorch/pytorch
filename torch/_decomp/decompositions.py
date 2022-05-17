@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import functools
 from torch.utils._pytree import tree_map, tree_flatten
 import torch._prims.utils as utils
+from torch._prims.wrappers import out_wrapper
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -665,18 +666,7 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
 
 
-@register_decomposition(aten.logit)
-@pw_cast_for_int_to_real
-def logit(self: Tensor, eps: Optional[float] = None) -> Tensor:
-    if eps is None:
-        eps = -1.0
-    lo = eps
-    hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
-    return (self / (1 - self)).log()
-
-
-@register_decomposition(aten.logit_backward)
+@register_decomposition(aten.logit_backward.default)
 @pw_cast_for_opmath
 def logit_backward(
     grad_output: Tensor, self: Tensor, eps: Optional[float] = None

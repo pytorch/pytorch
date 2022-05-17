@@ -104,3 +104,13 @@ def meta_inverse(self):
 def meta_bernoulli(self, *, generator=None, out):
     torch._resize_output_(out, self.size(), self.device)
     return out
+
+@torch.library.impl(meta_lib, "_adaptive_avg_pool2d")
+def meta_adaptive_avg_pool2d(self, output_size):
+    check(self.ndim == 3 or self.ndim == 4, f"Expected 3D or 4D tensor, but got {self.shape}")
+    return self.new_empty(self.shape[:-2] + tuple(output_size))
+
+@torch.library.impl(meta_lib, "_adaptive_avg_pool3d")
+def meta_adaptive_avg_pool3d(self, output_size):
+    check(self.ndim == 4 or self.ndim == 5, f"Expected 4D or 5D tensor, but got {self.shape}")
+    return self.new_empty(self.shape[:-3] + tuple(output_size))
