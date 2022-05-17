@@ -646,7 +646,8 @@ class TestTorchDeviceType(TestCase):
             warning = w[0]
 
             # Checks for cpp context in the warning message
-            self.assertTrue(re.search(s, str(warning.message)) is not None)
+            escaped_warning_message = str(warning.message).encode('unicode_escape')
+            self.assertTrue(re.search(s, str(escaped_warning_message), re.IGNORECASE) is not None)
 
             # Checks the Python features of the warning
             # Note: the eager mode warning refers to the line in the function
@@ -661,7 +662,8 @@ class TestTorchDeviceType(TestCase):
             warning = w[0]
 
             # Checks for cpp context in the warning message
-            self.assertTrue(re.search(s, str(warning.message)) is not None)
+            escaped_warning_message = str(warning.message).encode('unicode_escape')
+            self.assertTrue(re.search(s, str(escaped_warning_message), re.IGNORECASE) is not None)
 
             # Checks the Python features of the warning
             # Note: the jitted warning's lineno refers to the call to the jitted
@@ -7659,7 +7661,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_to(self):
         self._test_to_with_layout(torch.strided)
-        self._test_to_with_layout(torch.sparse_csr)
+        is_cuda10_2_or_higher = (
+            (torch.version.cuda is not None)
+            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+        if is_cuda10_2_or_higher:  # in cuda10_1 sparse_csr is beta
+            self._test_to_with_layout(torch.sparse_csr)
 
     # FIXME: describe this test
     def test_as_subclass(self):
