@@ -57,7 +57,14 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                 name = op_overload._schema.name
                 if op_overload._schema.overload_name:
                     name += "." + op_overload._schema.overload_name
-                if not disable_meta and not torch._C._dispatch_has_kernel_for_dispatch_key(name, 'Meta'):
+                if (
+                    not disable_meta
+                    # TorchScript dumps a bunch of extra nonsense overloads
+                    # which don't have corresponding dispatcher entries, we need
+                    # to filter those out
+                    and torch._C._dispatch_has_kernel(name)
+                    and not torch._C._dispatch_has_kernel_for_dispatch_key(name, 'Meta')
+                ):
                     meta_lib.impl(op_overload, f)
 
         # To handle allowing multiple aten_ops at once
