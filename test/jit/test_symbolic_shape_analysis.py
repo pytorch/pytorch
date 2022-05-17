@@ -351,14 +351,16 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         @torch.jit.script
         def conv_bwd(input, weight, grad):
             bias_sizes = [8, ]
-            return torch.ops.aten.convolution_backward(grad, input, weight, bias_sizes, [1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
+            args = ([1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
+            return torch.ops.aten.convolution_backward(grad, input, weight, bias_sizes, *args)
 
         self.assert_shape_equal_scripted(conv_bwd, (input, weight, out_grad))
 
         @torch.jit.script
         def conv_bwd_2(input, weight, grad):
             bias_sizes = None
-            return torch.ops.aten.convolution_backward(grad, input, weight, bias_sizes, [1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
+            args = ([1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
+            return torch.ops.aten.convolution_backward(grad, input, weight, bias_sizes, *args)
         self.assert_shape_equal_scripted(conv_bwd_2, (input, weight, out_grad))
 
 
