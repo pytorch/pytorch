@@ -190,3 +190,91 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
             'QFunctional',
         ]
         self._test_function_import('modules', module_list, base='nn.quantized')
+
+    def test_modules_activation(self):
+        function_list = [
+            'ReLU6',
+            'Hardswish',
+            'ELU',
+            'LeakyReLU',
+            'Sigmoid',
+            'Softmax',
+        ]
+        self._test_function_import('activation', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_batchnorm(self):
+        function_list = [
+            'BatchNorm2d',
+            'BatchNorm3d',
+        ]
+        self._test_function_import('batchnorm', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_conv(self):
+        function_list = [
+            '_reverse_repeat_padding',
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+            'ConvTranspose1d',
+            'ConvTranspose2d',
+            'ConvTranspose3d',
+        ]
+        self._test_function_import('conv', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_dropout(self):
+        function_list = [
+            'Dropout',
+        ]
+        self._test_function_import('dropout', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_embedding_ops(self):
+        function_list = [
+            'EmbeddingPackedParams',
+            'Embedding',
+            'EmbeddingBag',
+        ]
+        self._test_function_import('embedding_ops', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_functional_modules(self):
+        function_list = [
+            'FloatFunctional',
+            'FXFloatFunctional',
+            'QFunctional',
+        ]
+        self._test_function_import('functional_modules', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_linear(self):
+        function_list = [
+            'Linear',
+            'LinearPackedParams',
+        ]
+        self._test_function_import('linear', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_normalization(self):
+        function_list = [
+            'LayerNorm',
+            'GroupNorm',
+            'InstanceNorm1d',
+            'InstanceNorm2d',
+            'InstanceNorm3d',
+        ]
+        self._test_function_import('normalization', function_list,
+                                   base='nn.quantized.modules')
+
+    def test_modules_utils(self):
+        function_list = [
+            '_ntuple_from_first',
+            '_pair_from_first',
+            '_quantize_weight',
+            'hide_packed_params_repr',
+            'WeightedQuantizedModule',
+        ]
+        self._test_function_import('utils', function_list,
+                                   base='nn.quantized.modules')
