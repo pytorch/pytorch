@@ -7,7 +7,7 @@
 namespace torch {
 namespace lazy {
 
-c10::intrusive_ptr<c10d::ProcessGroup::Work> broadcast(at::TensorList tensors,
+at::Tensor broadcast(const at::Tensor& tensor,
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group, int64_t root_rank, int64_t root_tensor,
     int64_t timeout) {
   TORCH_LAZY_FN_COUNTER("lazy::");
@@ -20,27 +20,33 @@ c10::intrusive_ptr<c10d::ProcessGroup::Work> broadcast(at::TensorList tensors,
   // So here, we restrict the input to be one tensor and overload another broadcast FunctionSchema, i.e.,
   // at::Tensor broadcast_(const at::Tensor& tensor, const c10::intrusive_ptr<ProcessGroup>& process_group, int64_t root_rank, int64_t root_tensor, int64_t timeout)
   // In the new schema, it basically makes the broadcast as an inplace op.
-  TORCH_CHECK(tensors.size() == 1lu, "Only one tensor input is supported for c10d::broadcast.")
-  auto& tensor = tensors[0];
+//   TORCH_CHECK(tensors.size() == 1lu, "Only one tensor input is supported for c10d::broadcast.")
+//   auto& tensor = tensors[0];
+//   auto input = GetLtcTensor(tensor);
+//   input->SetIrValue(MakeNode<Broadcast>(input->GetIrValue(), process_group, root_rank, root_tensor, timeout,
+//       std::vector<Shape>{Shape(tensor.scalar_type(), tensor.sizes().vec())}));
+
+//   auto future = c10::make_intrusive<at::ivalue::Future>(c10::TensorType::get(),
+//       std::vector<c10::Device>{tensor.device()});
+//   future->markCompleted(tensor);
+//   // For profilingTitle, there is no programatic way to query such value. They are hard-coded for each
+//   // backend. Since c10d::ProcessGroup::Work will eventually go away, let's leave it as it is now.
+//   auto work = c10::make_intrusive<c10d::ProcessGroup::Work>(process_group->getRank(), c10d::OpType::BROADCAST,
+//       /*profilingTitle=*/nullptr, tensors.vec());
+//   work->setFuture(std::move(future));
+//   // We might want to extend Work instead of making .finish() public.
+//   work->finish();
+//   return work;
+
+  // Adopts the new broadcast_ schema as AOT.
   auto input = GetLtcTensor(tensor);
   input->SetIrValue(MakeNode<Broadcast>(input->GetIrValue(), process_group, root_rank, root_tensor, timeout,
       std::vector<Shape>{Shape(tensor.scalar_type(), tensor.sizes().vec())}));
-
-  auto future = c10::make_intrusive<at::ivalue::Future>(c10::TensorType::get(),
-      std::vector<c10::Device>{tensor.device()});
-  future->markCompleted(tensor);
-  // For profilingTitle, there is no programatic way to query such value. They are hard-coded for each
-  // backend. Since c10d::ProcessGroup::Work will eventually go away, let's leave it as it is now.
-  auto work = c10::make_intrusive<c10d::ProcessGroup::Work>(process_group->getRank(), c10d::OpType::BROADCAST,
-      /*profilingTitle=*/nullptr, tensors.vec());
-  work->setFuture(std::move(future));
-  // We might want to extend Work instead of making .finish() public.
-  work->finish();
-  return work;
+  return tensor;
 }
 
 TORCH_LIBRARY_IMPL(c10d, Lazy, m) {
-    m.impl("broadcast", broadcast);
+    m.impl("broadcast_", broadcast);
 }
 
 }  // namespace lazy
