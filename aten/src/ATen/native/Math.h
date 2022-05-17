@@ -2178,7 +2178,7 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 }
 
 template<typename T>
-static inline T elliptic_integral_e(T x) {
+static inline C10_HOST_DEVICE T elliptic_integral_e(T x) {
     static const T P[] = {
             +1.53552577301013293365e-4,
             +2.50888492163602060990e-3,
@@ -2208,11 +2208,17 @@ static inline T elliptic_integral_e(T x) {
 
     x = T(1.0) - x;
 
-    if (x == T(0.0)) return T(1.0);
+    if (x == T(0.0)) {
+        return T(1.0);
+    }
 
-    if (x < T(0.0)) return std::numeric_limits<T>::quiet_NaN();
+    if (x < T(0.0)) {
+        return NAN;
+    }
 
-    if (x > T(1.0)) return elliptic_integral_e(T(1.0) - T(1.0) / x) * std::sqrt(x);
+    if (x > T(1.0)) {
+        return elliptic_integral_e(T(1.0) - T(1.0) / x) * std::sqrt(x);
+    }
 
     T p = 0.0;
     T q = 0.0;
@@ -2221,7 +2227,7 @@ static inline T elliptic_integral_e(T x) {
     for (int index = 0; index <= 10 - 1; index++) q = q * x + Q[index];
 
     return p - std::log(x) * (x * q);
-}
+} // elliptic_integral_e
 
 template<typename T>
 static inline T elliptic_integral_k_recurrence(T x) {
@@ -2253,10 +2259,14 @@ static inline T elliptic_integral_k_recurrence(T x) {
             +4.99999999999999999821e-1,
     };
 
-    if (x < T(0.0)) return std::numeric_limits<T>::quiet_NaN();
+    if (x < T(0.0)) {
+        return NAN;
+    }
 
     if (x > T(1.0)) {
-        if (std::isinf(x)) return T(0.0);
+        if (std::isinf(x)) {
+            return T(0.0);
+        }
 
         return elliptic_integral_k_recurrence(T(1.0) / x) / std::sqrt(x);
     }
@@ -2270,14 +2280,16 @@ static inline T elliptic_integral_k_recurrence(T x) {
 
         return p - std::log(x) * q;
     } else {
-        if (x == T(0.0)) return std::numeric_limits<T>::infinity();
+        if (x == T(0.0)) {
+            return INFINITY;
+        }
 
         return T(1.3862943611198906188) - T(0.5) * std::log(x);
     }
 } // elliptic_integral_k_recurrence
 
 template<typename T>
-static inline T elliptic_integral_k(T x) {
+static inline C10_HOST_DEVICE T elliptic_integral_k(T x) {
     return elliptic_integral_k_recurrence(T(1.0) - x);
 } // elliptic_integral_k
 
