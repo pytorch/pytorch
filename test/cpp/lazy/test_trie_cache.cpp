@@ -13,11 +13,15 @@ namespace lazy {
 
 class TrieCacheNode : public Node {
  public:
+  static OpKind ClassOpKind() {
+    return OpKind();
+  }
+
   explicit TrieCacheNode(size_t id)
-      : Node(OpKind(), /* num_outputs */ 1), id_(id), hash_(Hash(id_)) {}
+      : Node(ClassOpKind(), /* num_outputs */ 1), id_(id), hash_(Hash(id_)) {}
   ~TrieCacheNode() override = default;
 
-  bool Equal(size_t id) const {
+  bool CanBeReused(size_t id) const {
     return (id_ == id);
   }
 
@@ -40,14 +44,14 @@ TEST(TrieCacheTest, TestSinglePath) {
   FLAGS_torch_lazy_reuse_ir = true;
   TrieCache::Get()->Clear();
 
-  NodePtr a = MakeNode<TrieCacheNode>(0);
-  NodePtr b = MakeNode<TrieCacheNode>(1);
-  NodePtr c = MakeNode<TrieCacheNode>(2);
+  NodePtr a = ReuseOrMakeNode<TrieCacheNode>(0);
+  NodePtr b = ReuseOrMakeNode<TrieCacheNode>(1);
+  NodePtr c = ReuseOrMakeNode<TrieCacheNode>(2);
   TrieCache::Get()->ResetCurrent(); // MarkStep
 
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 0).get(), a.get());
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 1).get(), b.get());
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 2).get(), c.get());
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(0).get(), a.get());
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(1).get(), b.get());
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(2).get(), c.get());
   TrieCache::Get()->ResetCurrent(); // MarkStep
 }
 
@@ -62,25 +66,25 @@ TEST(TrieCacheTest, TestTwoPaths) {
   FLAGS_torch_lazy_reuse_ir = true;
   TrieCache::Get()->Clear();
 
-  NodePtr a = MakeNode<TrieCacheNode>(0);
-  NodePtr b = MakeNode<TrieCacheNode>(1);
-  NodePtr c = MakeNode<TrieCacheNode>(2);
+  NodePtr a = ReuseOrMakeNode<TrieCacheNode>(0);
+  NodePtr b = ReuseOrMakeNode<TrieCacheNode>(1);
+  NodePtr c = ReuseOrMakeNode<TrieCacheNode>(2);
   TrieCache::Get()->ResetCurrent(); // MarkStep
 
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 0).get(), a.get());
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 1).get(), b.get());
-  NodePtr d = ReuseOrMakeNode<TrieCacheNode>(OpKind(), 3);
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(0).get(), a.get());
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(1).get(), b.get());
+  NodePtr d = ReuseOrMakeNode<TrieCacheNode>(3);
   EXPECT_NE(d.get(), c.get());
   TrieCache::Get()->ResetCurrent(); // MarkStep
 
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 0).get(), a.get());
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 1).get(), b.get());
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 3).get(), d.get());
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(0).get(), a.get());
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(1).get(), b.get());
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(3).get(), d.get());
   TrieCache::Get()->ResetCurrent(); // MarkStep
 
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 0).get(), a.get());
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 1).get(), b.get());
-  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(OpKind(), 2).get(), c.get());
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(0).get(), a.get());
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(1).get(), b.get());
+  EXPECT_EQ(ReuseOrMakeNode<TrieCacheNode>(2).get(), c.get());
   TrieCache::Get()->ResetCurrent(); // MarkStep
 }
 
