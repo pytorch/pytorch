@@ -2224,7 +2224,7 @@ static inline C10_HOST_DEVICE T elliptic_integral_e(T x) {
 }
 
 template<typename T>
-static inline C10_HOST_DEVICE T elliptic_integral_k_recurrence(T x) {
+static inline T elliptic_integral_k_recurrence(T x) {
     static const T P[] = {
             +1.37982864606273237150e-4,
             +2.28025724005875567385e-3,
