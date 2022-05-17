@@ -309,6 +309,10 @@ class AutocastCPUTestLists(object):
             ("addmm", mat1_fp32 + mat2_fp32 + mat3_fp32),
             ("addbmm", mat0_fp32 + (torch.randn((n, n, n), device=dev, dtype=torch.float32),
                                     torch.randn((n, n, n), device=dev, dtype=torch.float32))),
+            ("conv_tbc", (torch.randn((10, 7, 3), device=dev, dtype=torch.float32),
+                          torch.randn((5, 3, 5), device=dev, dtype=torch.float32),
+                          torch.randn(5, device=dev, dtype=torch.float32),
+                          0)),
         ]
         self.torch_fp32 = [
             ("conv_transpose1d", conv_args_bf16[0]),

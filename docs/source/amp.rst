@@ -326,7 +326,6 @@ CPU Ops that can autocast to ``float32``
 ``fft_irfftn``,
 ``fft_hfft``,
 ``fft_ihfft``,
-``conv_tbc``,
 ``linalg_matrix_norm``,
 ``linalg_cond``,
 ``linalg_matrix_rank``,
