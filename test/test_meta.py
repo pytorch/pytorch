@@ -302,7 +302,6 @@ meta_exclude_set = {
     torch.linalg.slogdet,  # MISSING aten::linalg_slogdet
     torch.linalg.solve_triangular,  # MISSING aten::linalg_solve_triangular
     torch.linalg.tensorinv,  # MISSING aten::_local_scalar_dense
-    torch.linalg.tensorsolve,  # MISSING aten::linalg_solve
     torch.linalg.vector_norm,  # MISSING aten::linalg_vector_norm
     torch.logcumsumexp,  # MISSING aten::_logcumsumexp
     torch.logdet,  # MISSING aten::_local_scalar_dense
