@@ -99,3 +99,8 @@ def meta_inverse(self):
     r = self.new_empty(self.shape)
     r.transpose_(-2, -1)
     return r
+
+@torch.library.impl(meta_lib, "bernoulli.out")
+def meta_bernoulli(self, *, generator=None, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out

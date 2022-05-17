@@ -478,7 +478,6 @@ meta_function_skips = {
     torch.Tensor.__getitem__: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32},
     torch.addr: {b8},
     torch.aminmax: {b8, f32, f64, i16, i32, i64, i8, u8},
-    torch.bernoulli: {bf16, f32, f64},  # TODO
     torch.conj_physical: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.cummax: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.cummin: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
@@ -587,7 +586,6 @@ meta_function_device_expected_failures['cuda'] = {
 
 meta_function_device_skips['cuda'] = {
     torch.Tensor.__getitem__: {c32},
-    torch.bernoulli: {f16},
     torch.cummax: {f16},
     torch.cummin: {f16},
     torch.functional.tensordot: {f16},
@@ -674,7 +672,6 @@ meta_dispatch_expected_failures = {
     aten.addbmm.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.angle.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.angle.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.bernoulli.out: {bf16, f64, f32},
     aten.bincount.default: {i8, i64, i16, u8, i32},
     aten.bucketize.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.bucketize.Tensor_out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
@@ -834,7 +831,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
     aten.addbmm.default: {f16},  # aten::addbmm
     aten.addbmm.out: {f16},  # aten::addbmm.out
-    aten.bernoulli.out: {f16},  # aten::bernoulli.out
     aten.convolution.default: {f16},
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.diag.default: {f16},  # aten::diag.out
