@@ -13,6 +13,18 @@ from .qconfig import QConfigAny
 from .qconfig_mapping import QConfigMapping
 
 
+# TODO: revisit this list. Many helper methods shouldn't be public
+__all__ = [
+    "convert_lists_to_ordered_dicts",
+    "get_flattened_qconfig_dict",
+    "get_object_type_qconfig",
+    "get_module_name_qconfig",
+    "get_module_name_regex_qconfig",
+    "maybe_adjust_qconfig_for_module_type_or_name",
+    "update_qconfig_for_qat",
+]
+
+
 def get_object_type_qconfig(
         qconfig_mapping: QConfigMapping,
         object_type: Union[Callable, str],

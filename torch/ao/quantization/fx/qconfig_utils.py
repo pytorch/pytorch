@@ -25,10 +25,26 @@ from ..qconfig_mapping import (
     MODULE_NAME_REGEX_DICT_KEY,
     QConfigMapping,
 )
-from ..qconfig_dict_utils import (
+from ..qconfig_mapping_utils import (
     get_object_type_qconfig,
     maybe_adjust_qconfig_for_module_type_or_name,
 )
+
+
+# TODO: revisit this list. Many helper methods shouldn't be public
+__all__ = [
+    "check_is_valid_config_dict",
+    "check_is_valid_convert_custom_config_dict",
+    "check_is_valid_fuse_custom_config_dict",
+    "check_is_valid_prepare_custom_config_dict",
+    "compare_prepare_convert_qconfig_mappings",
+    "generate_qconfig_map",
+    "get_standalone_module_configs",
+    "is_qconfig_supported_by_dtype_configs",
+    "maybe_adjust_qconfig_for_module_name_object_type_order",
+    "update_qconfig_for_fusion",
+]
+
 
 
 def maybe_adjust_qconfig_for_module_name_object_type_order(

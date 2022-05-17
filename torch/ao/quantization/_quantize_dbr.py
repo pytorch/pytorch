@@ -2,9 +2,9 @@ import torch
 
 from ._dbr.auto_trace import add_auto_observation, add_auto_convert
 from ._dbr.fusion import get_module_fusion_fqns
-from ._dbr.qconfig_dict_utils import normalize_object_types
+from ._dbr.qconfig_mapping_utils import normalize_object_types
 
-from .qconfig_dict_utils import (
+from .qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
     convert_lists_to_ordered_dicts,
 )

@@ -18,7 +18,7 @@ from ..observer import (
 )
 from ..qconfig import QConfigAny, is_reuse_input_qconfig
 from ..qconfig_mapping import QConfigMapping
-from ..qconfig_dict_utils import (
+from ..qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
     convert_lists_to_ordered_dicts,
     update_qconfig_for_qat,
@@ -96,6 +96,42 @@ from .backend_config_utils import (
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
 from collections import defaultdict
+
+
+# TODO: revisit this list. Many helper methods shouldn't be public
+__all__ = [
+    "DO_NOT_OBS_DTYPE_LIST",
+    "add_matched_node_name_to_set",
+    "get_arg_target_compute_dtype_as_input_to_node",
+    "get_arg_target_dtype_as_input_to_node",
+    "get_arg_target_dtype_as_output",
+    "get_target_activation_dtype_for_node",
+    "insert_observer",
+    "insert_observers_for_model",
+    "is_activation_post_process_node",
+    "is_input_arg_dtype_supported_by_backend",
+    "is_observer_in_same_graph",
+    "is_output_dtype_supported_by_backend",
+    "is_pattern_dtype_config_supported_by_backend",
+    "maybe_insert_input_equalization_observers_for_node",
+    "maybe_insert_input_observer_for_arg_or_kwarg",
+    "maybe_insert_input_observers_for_node",
+    "maybe_insert_observers_before_graph_output",
+    "maybe_insert_output_observer_for_node",
+    "maybe_make_input_output_share_observers",
+    "maybe_propagate_dtype_for_node",
+    "node_arg_is_bias",
+    "node_arg_is_weight",
+    "prepare",
+    "prepare_get_standalone_module_configs",
+    "propagate_dtypes_for_known_nodes",
+    "qat_swap_modules",
+    "remove_output_observer",
+    "run_prepare_fx_on_standalone_modules",
+    "save_state",
+    "swap_custom_module_to_observed",
+]
+
 
 # list of dtypes to not add observers to
 DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]

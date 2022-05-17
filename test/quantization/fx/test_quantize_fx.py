@@ -83,7 +83,7 @@ from torch.ao.quantization.qconfig_mapping import (
     QConfigObjectTypeEntry,
 )
 
-from torch.ao.quantization.qconfig_dict_utils import (
+from torch.ao.quantization.qconfig_mapping_utils import (
     get_object_type_qconfig,
     get_module_name_qconfig,
     get_module_name_regex_qconfig,

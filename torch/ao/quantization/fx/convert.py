@@ -22,7 +22,7 @@ from ..qconfig import (
     qconfig_equals
 )
 from ..qconfig_mapping import QConfigMapping
-from ..qconfig_dict_utils import (
+from ..qconfig_mapping_utils import (
     convert_lists_to_ordered_dicts,
     update_qconfig_for_qat,
 )
@@ -59,6 +59,27 @@ from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
 from .lower_to_fbgemm import lower_to_fbgemm
+
+
+# TODO: revisit this list. Many helper methods shouldn't be public
+__all__ = [
+    "convert",
+    "convert_custom_module",
+    "convert_standalone_module",
+    "convert_weighted_module",
+    "duplicate_dequantize_node",
+    "duplicate_quantize_dynamic_node",
+    "get_module_path_and_prefix",
+    "has_none_qconfig",
+    "insert_dequantize_node",
+    "maybe_get_observer_for_node",
+    "maybe_recursive_remove_dequantize",
+    "remove_extra_dequantize",
+    "remove_quant_dequant_pairs",
+    "restore_state",
+    "run_weight_observers",
+]
+
 
 def restore_state(
         observed: torch.nn.Module

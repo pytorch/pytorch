@@ -25,7 +25,7 @@ from torch.quantization import (
     is_activation_post_process,
 )
 
-from ..qconfig_dict_utils import (
+from ..qconfig_mapping_utils import (
     maybe_adjust_qconfig_for_module_type_or_name,
 )
 
