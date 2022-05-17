@@ -357,6 +357,133 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
       " do not have is_contiguous");
 }
 
+void TensorImpl::empty_tensor_restride_custom(MemoryFormat memory_format) {
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have empty_tensor_restride");
+}
+
+void TensorImpl::empty_tensor_restride_default(MemoryFormat memory_format) {
+#ifdef DEBUG
+  TORCH_INTERNAL_ASSERT(
+      compute_numel() == numel_,
+      "If you are seeing this error, that means empty_tensor_restride was "
+      "called before setting correct numel");
+#endif
+  switch (memory_format) {
+    case MemoryFormat::Contiguous: {
+      // dim_ is a virtual call, don't repeat it
+      const auto dim_ = dim();
+      sizes_and_strides_.resize(dim_);
+      if (dim_ > 0) {
+        const auto last_idx = dim_ - 1;
+        sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
+        for (auto i = last_idx - 1; i >= 0; --i) {
+          sizes_and_strides_.stride_at_unchecked(i) =
+              sizes_and_strides_.stride_at_unchecked(i + 1) *
+              std::max<int64_t>(sizes_and_strides_.size_at_unchecked(i + 1), 1);
+        }
+      }
+      break;
+    }
+    case MemoryFormat::ChannelsLast: {
+      TORCH_CHECK(
+          dim() == 4, "required rank 4 tensor to use channels_last format");
+      set_sizes_and_strides(sizes(), get_channels_last_strides_2d(sizes()));
+      break;
+    }
+    case MemoryFormat::ChannelsLast3d: {
+      TORCH_CHECK(
+          dim() == 5, "required rank 5 tensor to use channels_last_3d format");
+      set_sizes_and_strides(sizes(), get_channels_last_strides_3d(sizes()));
+      break;
+    }
+    case MemoryFormat::Preserve:
+      TORCH_CHECK(false, "unsupported memory format ", memory_format);
+      // Cleaning warning messages, no need to break as TORCH_CHECK(false)
+      // terminates flow.
+      // break;
+    case MemoryFormat::NumOptions:
+      TORCH_INTERNAL_ASSERT(false, "invalid memory format ", memory_format);
+  }
+  // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
+  // exclusive see #24090
+  refresh_contiguous();
+}
+
+void TensorImpl::refresh_contiguous_custom() {
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have refresh_contiguous");
+}
+
+void TensorImpl::set_sizes_and_strides_custom(
+    IntArrayRef new_size,
+    IntArrayRef new_stride) {
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have set_sizes_and_strides");
+}
+
+void TensorImpl::set_sizes_and_strides_default(
+    IntArrayRef new_size,
+    IntArrayRef new_stride) {
+  TORCH_CHECK(
+      allow_tensor_metadata_change(),
+      "set_sizes_and_strides ",
+      err_msg_tensor_metadata_change_not_allowed);
+  TORCH_CHECK(
+      new_size.size() == new_stride.size(),
+      "dimensionality of sizes (",
+      new_size.size(),
+      ") must match dimensionality of strides (",
+      new_stride.size(),
+      ")");
+  const auto new_dim = new_size.size();
+
+  sizes_and_strides_.set_sizes(new_size);
+
+  if (new_dim > 0) {
+    for (size_t dim = new_dim - 1;; dim--) {
+      if (new_stride[dim] >= 0) {
+        sizes_and_strides_.stride_at_unchecked(dim) = new_stride[dim];
+      } else {
+        // XXX: This behavior is surprising and may need to be removed to
+        // support negative strides. Some pytorch functions rely on it:
+        // for example, torch.cat (run TestTorch.test_cat_empty).
+        if (dim == new_dim - 1) {
+          sizes_and_strides_.stride_at_unchecked(dim) = 1;
+        } else {
+          // Keep stride monotonically increasing to match NumPy.
+          sizes_and_strides_.stride_at_unchecked(dim) =
+              std::max<int64_t>(
+                  sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
+              sizes_and_strides_.stride_at_unchecked(dim + 1);
+        }
+      }
+      if (dim == 0)
+        break;
+    }
+  }
+
+  refresh_numel();
+  refresh_contiguous();
+}
+
+void TensorImpl::set_sizes_contiguous_custom(IntArrayRef new_size) {
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have set_sizes_contiguous_custom");
+}
+
 IntArrayRef TensorImpl::sizes_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");

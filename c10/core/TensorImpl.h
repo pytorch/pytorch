@@ -653,10 +653,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // sizes_strides_policy_ >= CustomStrides
   virtual IntArrayRef strides_custom() const;
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
+  virtual void empty_tensor_restride_custom(MemoryFormat memory_format);
+  virtual void refresh_contiguous_custom();
+  virtual void set_sizes_and_strides_custom(
+      IntArrayRef new_size,
+      IntArrayRef new_stride);
+
   // sizes_strides_policy_ >= CustomSizes
   virtual IntArrayRef sizes_custom() const;
   virtual int64_t dim_custom() const;
   virtual int64_t numel_custom() const;
+  virtual void set_sizes_contiguous_custom(IntArrayRef new_size);
 
   // These are factored into separate functions in case subclasses
   // want to use them
@@ -684,6 +691,67 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #endif
     return numel_;
   }
+
+  void refresh_contiguous_default() {
+    is_contiguous_ = compute_contiguous();
+    // Note:
+    // Dim 0, 1, 2 will never be a channels last 2d/3d format
+    // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this
+    // point) Dim 4+ is possibly be a channels last 3d format (Dim 5 only at
+    // this point)
+    switch (dim()) {
+      case 4:
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = false;
+        is_channels_last_ = compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ = false;
+        is_non_overlapping_and_dense_ = is_contiguous_ ||
+            is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
+        break;
+      case 5:
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ &&
+            compute_channels_last_contiguous_3d();
+        is_channels_last_ = !is_channels_last_3d_contiguous_ &&
+            compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ =
+            !is_channels_last_ && compute_strides_like_channels_last_3d();
+        is_non_overlapping_and_dense_ = is_contiguous_ ||
+            is_channels_last_contiguous_ || is_channels_last_3d_contiguous_ ||
+            compute_non_overlapping_and_dense();
+        break;
+      default:
+        is_channels_last_contiguous_ = false;
+        is_channels_last_3d_contiguous_ = false;
+        // is_channels_last_ and is_channels_last_3d_ are suggested
+        // memory_format. Being channels_last_contiguous doesn't necessarily
+        // mean the tensor is strided like channels_last: for strides on channel
+        // dimension could suggest desired memory_layout, but it doesn't affect
+        // memory storage
+        is_channels_last_ = false;
+        is_channels_last_3d_ = false;
+        is_non_overlapping_and_dense_ =
+            is_contiguous_ || compute_non_overlapping_and_dense();
+    }
+  }
+
+  void set_sizes_contiguous_default(IntArrayRef new_size) {
+    TORCH_CHECK(
+        allow_tensor_metadata_change(),
+        "set_sizes_contiguous ",
+        err_msg_tensor_metadata_change_not_allowed);
+
+    sizes_and_strides_.set_sizes(new_size);
+
+    refresh_numel();
+    empty_tensor_restride(MemoryFormat::Contiguous);
+  }
+
+  void empty_tensor_restride_default(MemoryFormat memory_format);
+
+  void set_sizes_and_strides_default(
+      IntArrayRef new_size,
+      IntArrayRef new_stride);
 
  public:
   /**
@@ -1291,15 +1359,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * this is the responsibility of the caller
    */
   void set_sizes_contiguous(IntArrayRef new_size) {
-    TORCH_CHECK(
-        allow_tensor_metadata_change(),
-        "set_sizes_contiguous ",
-        err_msg_tensor_metadata_change_not_allowed);
-
-    sizes_and_strides_.set_sizes(new_size);
-
-    refresh_numel();
-    empty_tensor_restride(MemoryFormat::Contiguous);
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return set_sizes_contiguous_custom(new_size);
+    }
+    return set_sizes_contiguous_default(new_size);
   }
 
   /**
@@ -1310,46 +1375,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * this is the responsibility of the caller
    */
   void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
-    TORCH_CHECK(
-        allow_tensor_metadata_change(),
-        "set_sizes_and_strides ",
-        err_msg_tensor_metadata_change_not_allowed);
-    TORCH_CHECK(
-        new_size.size() == new_stride.size(),
-        "dimensionality of sizes (",
-        new_size.size(),
-        ") must match dimensionality of strides (",
-        new_stride.size(),
-        ")");
-    const auto new_dim = new_size.size();
-
-    sizes_and_strides_.set_sizes(new_size);
-
-    if (new_dim > 0) {
-      for (size_t dim = new_dim - 1;; dim--) {
-        if (new_stride[dim] >= 0) {
-          sizes_and_strides_.stride_at_unchecked(dim) = new_stride[dim];
-        } else {
-          // XXX: This behavior is surprising and may need to be removed to
-          // support negative strides. Some pytorch functions rely on it:
-          // for example, torch.cat (run TestTorch.test_cat_empty).
-          if (dim == new_dim - 1) {
-            sizes_and_strides_.stride_at_unchecked(dim) = 1;
-          } else {
-            // Keep stride monotonically increasing to match NumPy.
-            sizes_and_strides_.stride_at_unchecked(dim) =
-                std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
-                sizes_and_strides_.stride_at_unchecked(dim + 1);
-          }
-        }
-        if (dim == 0)
-          break;
-      }
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+      return set_sizes_and_strides_custom(new_size, new_stride);
     }
-
-    refresh_numel();
-    refresh_contiguous();
+    return set_sizes_and_strides_default(new_size, new_stride);
   }
 
   /**
@@ -1902,53 +1933,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * memory contiguous
    */
   void empty_tensor_restride(MemoryFormat memory_format) {
-#ifdef DEBUG
-    TORCH_INTERNAL_ASSERT(
-        compute_numel() == numel_,
-        "If you are seeing this error, that means empty_tensor_restride was "
-        "called before setting correct numel");
-#endif
-    switch (memory_format) {
-      case MemoryFormat::Contiguous: {
-        // dim_ is a virtual call, don't repeat it
-        const auto dim_ = dim();
-        sizes_and_strides_.resize(dim_);
-        if (dim_ > 0) {
-          const auto last_idx = dim_ - 1;
-          sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
-          for (auto i = last_idx - 1; i >= 0; --i) {
-            sizes_and_strides_.stride_at_unchecked(i) =
-                sizes_and_strides_.stride_at_unchecked(i + 1) *
-                std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1), 1);
-          }
-        }
-        break;
-      }
-      case MemoryFormat::ChannelsLast: {
-        TORCH_CHECK(
-            dim() == 4, "required rank 4 tensor to use channels_last format");
-        set_sizes_and_strides(sizes(), get_channels_last_strides_2d(sizes()));
-        break;
-      }
-      case MemoryFormat::ChannelsLast3d: {
-        TORCH_CHECK(
-            dim() == 5,
-            "required rank 5 tensor to use channels_last_3d format");
-        set_sizes_and_strides(sizes(), get_channels_last_strides_3d(sizes()));
-        break;
-      }
-      case MemoryFormat::Preserve:
-        TORCH_CHECK(false, "unsupported memory format ", memory_format);
-        // Cleaning warning messages, no need to break as TORCH_CHECK(false)
-        // terminates flow.
-        // break;
-      case MemoryFormat::NumOptions:
-        TORCH_INTERNAL_ASSERT(false, "invalid memory format ", memory_format);
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+      return empty_tensor_restride_custom(memory_format);
     }
-    // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
-    // exclusive see #24090
-    refresh_contiguous();
+    return empty_tensor_restride_default(memory_format);
   }
 
   bool is_strides_like_channels_last() const {
@@ -2100,46 +2090,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * or strides.
    */
   void refresh_contiguous() {
-    is_contiguous_ = compute_contiguous();
-    // Note:
-    // Dim 0, 1, 2 will never be a channels last 2d/3d format
-    // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this
-    // point) Dim 4+ is possibly be a channels last 3d format (Dim 5 only at
-    // this point)
-    switch (dim()) {
-      case 4:
-        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
-        is_channels_last_3d_contiguous_ = false;
-        is_channels_last_ = compute_strides_like_channels_last_2d();
-        is_channels_last_3d_ = false;
-        is_non_overlapping_and_dense_ = is_contiguous_ ||
-            is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
-        break;
-      case 5:
-        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
-        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ &&
-            compute_channels_last_contiguous_3d();
-        is_channels_last_ = !is_channels_last_3d_contiguous_ &&
-            compute_strides_like_channels_last_2d();
-        is_channels_last_3d_ =
-            !is_channels_last_ && compute_strides_like_channels_last_3d();
-        is_non_overlapping_and_dense_ = is_contiguous_ ||
-            is_channels_last_contiguous_ || is_channels_last_3d_contiguous_ ||
-            compute_non_overlapping_and_dense();
-        break;
-      default:
-        is_channels_last_contiguous_ = false;
-        is_channels_last_3d_contiguous_ = false;
-        // is_channels_last_ and is_channels_last_3d_ are suggested
-        // memory_format. Being channels_last_contiguous doesn't necessarily
-        // mean the tensor is strided like channels_last: for strides on channel
-        // dimension could suggest desired memory_layout, but it doesn't affect
-        // memory storage
-        is_channels_last_ = false;
-        is_channels_last_3d_ = false;
-        is_non_overlapping_and_dense_ =
-            is_contiguous_ || compute_non_overlapping_and_dense();
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+      return refresh_contiguous_custom();
     }
+    return refresh_contiguous_default();
   }
 
   /**
@@ -2208,11 +2164,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Customizable strides behavior, e.g., sparse tensor,
     // mkldnn tensor.
     //
-    // Can override: strides(), is_contiguous()
+    // Can override:
+    //   - strides()
+    //   - is_contiguous()
+    //   - empty_tensor_restride()
+    //   - refresh_contiguous()
+    //   - set_sizes_and_strides()
     CustomStrides = 1,
     // Customizable sizes behavior, e.g., nested tensor
     //
-    // Can override: strides(), is_contiguous(), sizes(), dim(), numel()
+    // Can override:
+    //   - strides()
+    //   - is_contiguous()
+    //   - empty_tensor_restride()
+    //   - refresh_contiguous()
+    //   - set_sizes_and_strides()
+    //   - sizes()
+    //   - dim()
+    //   - numel()
+    //   - set_sizes_contiguous()
     CustomSizes = 2,
   };
 
