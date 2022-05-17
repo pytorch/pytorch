@@ -813,6 +813,10 @@ Tensor bitwise_and(const Tensor& self, const Scalar& other) {
   return at::bitwise_and(self, wrapped_scalar_tensor(other));
 }
 
+Tensor bitwise_and(const Scalar& self, const Tensor& other) {
+  return at::bitwise_and(wrapped_scalar_tensor(self), other);
+}
+
 Tensor& bitwise_and_(Tensor& self, const Scalar& other) {
   return self.bitwise_and_(wrapped_scalar_tensor(other));
 }
@@ -842,6 +846,10 @@ Tensor bitwise_or(const Tensor& self, const Scalar& other) {
   return at::bitwise_or(self, wrapped_scalar_tensor(other));
 }
 
+Tensor bitwise_or(const Scalar& self, const Tensor& other) {
+  return at::bitwise_or(wrapped_scalar_tensor(self), other);
+}
+
 Tensor& bitwise_or_(Tensor& self, const Scalar& other) {
   return self.bitwise_or_(wrapped_scalar_tensor(other));
 }
@@ -869,6 +877,10 @@ Tensor& bitwise_xor_out(const Tensor& self, const Scalar& other, Tensor& result)
 
 Tensor bitwise_xor(const Tensor& self, const Scalar& other) {
   return at::bitwise_xor(self, wrapped_scalar_tensor(other));
+}
+
+Tensor bitwise_xor(const Scalar& self, const Tensor& other) {
+  return at::bitwise_xor(wrapped_scalar_tensor(self), other);
 }
 
 Tensor& bitwise_xor_(Tensor& self, const Scalar& other) {
