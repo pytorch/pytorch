@@ -26,7 +26,8 @@ def broadcast(x):
 # Here, we just print the code in the compiler_fn. Return of this function is a callable.
 def compiler_fn(fx_module: torch.fx.GraphModule, _):
     print(fx_module.code)
-    return fx_module
+    with torch.jit.fuser("fuser2"):
+        return torch.jit.script(fx_module)
 
 def demo_basic(rank, world_size):
     # without flushing, mp won't print this message if crash.
