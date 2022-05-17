@@ -132,12 +132,13 @@ def default_collate(batch):
     elem_type = type(elem)
     if isinstance(elem, torch.Tensor):
         if elem.device != torch.device('cpu'):
-            warn((f'default_collate: Spotted a non-cpu tensor in default_collate (device={elem.device}). '
-            'In typical usage scenarios this is not recommended as it will significantly limit multiprocessing performance, '
-            'resulting in low GPU utilization. '
-            'The recommended approach is to modify your Dataset instances to return either numpy array or cpu tensors in '
-            'their __getitem__ method implementation.'
-            ))
+            warn(
+                f'default_collate: Spotted a non-cpu tensor in default_collate (device={elem.device}). '
+                'In typical usage scenarios this is not recommended as it will significantly limit multiprocessing performance, '
+                'resulting in low GPU utilization. '
+                'The recommended approach is to modify your Dataset instances to return either numpy array or cpu tensors in '
+                'their __getitem__ method implementation.'
+            )
         out = None
         if torch.utils.data.get_worker_info() is not None:
             # If we're in a background process, concatenate directly into a
