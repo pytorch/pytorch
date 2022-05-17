@@ -69,6 +69,7 @@ jobs:
           auto-update-conda: true
           python-version: 3.8
           activate-environment: build
+          miniconda-version: latest
 
       - name: Install macOS homebrew dependencies
         run: |
