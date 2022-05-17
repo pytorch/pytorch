@@ -437,7 +437,7 @@ class GenLazyNativeFuncDefinition:
             assert (
                 len(value_types_names) > 0
             ), "Code below assumes there is at least one tensor arg"
-            bridge_str = f"""std::vector<{self.tensor_class}Ptr> lazy_tensors;
+            bridge_str = f"""std::vector<{self.lazy_tensor_ptr}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
             lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({getValueT()}(node, i), *common_device));
         }}
