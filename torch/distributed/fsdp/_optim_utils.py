@@ -279,6 +279,10 @@ def _flatten_full_optim_state_dict(
         else:
             assert len(unflat_param_names) == 1
             unflat_param_name = unflat_param_names[0]
+            if unflat_param_name not in full_osd_state:
+                # A non-FSDP module's parameter may be ignored and hence not
+                # have an entry in the optimizer state
+                continue
             # Remap from unflattened to flattened parameter ID -- do not
             # deepcopy to avoid unnecessarily duplicating tensor storage
             flat_osd_state[flat_param_id] = \
@@ -551,8 +555,8 @@ def _flatten_zero_dim_tensor_optim_state(
     """
     non_none_tensors = [t for t in zero_dim_tensors if t is not None]
     # Enforce that all have the same value and dtype
-    values_set = set(t.item() for t in zero_dim_tensors)
-    dtypes = set(t.dtype for t in zero_dim_tensors)
+    values_set = set(t.item() if t is not None else None for t in zero_dim_tensors)
+    dtypes = set(t.dtype if t is not None else None for t in zero_dim_tensors)
     if len(non_none_tensors) != len(zero_dim_tensors) or \
             len(values_set) != 1 or len(dtypes) != 1:
         raise ValueError(

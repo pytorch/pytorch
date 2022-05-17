@@ -5,6 +5,7 @@ test/test_overrides.py.
 
 python -m tools.autograd.gen_annotated_fn_args \
        aten/src/ATen/native/native_functions.yaml \
+       aten/src/ATen/native/tags.yaml \
        $OUTPUT_DIR \
        tools/autograd
 
@@ -36,8 +37,12 @@ from .gen_python_functions import (
 )
 
 
-def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+def gen_annotated(
+    native_yaml_path: str, tags_yaml_path: str, out: str, autograd_dir: str
+) -> None:
+    native_functions = parse_native_yaml(
+        native_yaml_path, tags_yaml_path
+    ).native_functions
     mappings = (
         (is_py_torch_function, "torch._C._VariableFunctions"),
         (is_py_nn_function, "torch._C._nn"),
@@ -90,12 +95,13 @@ def main() -> None:
     parser.add_argument(
         "native_functions", metavar="NATIVE", help="path to native_functions.yaml"
     )
+    parser.add_argument("tags", metavar="TAGS", help="path to tags.yaml")
     parser.add_argument("out", metavar="OUT", help="path to output directory")
     parser.add_argument(
         "autograd", metavar="AUTOGRAD", help="path to template directory"
     )
     args = parser.parse_args()
-    gen_annotated(args.native_functions, args.out, args.autograd)
+    gen_annotated(args.native_functions, args.tags, args.out, args.autograd)
 
 
 if __name__ == "__main__":
