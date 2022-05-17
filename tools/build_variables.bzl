@@ -11,7 +11,6 @@
 
 # This is duplicated in caffe2/CMakeLists.txt for now and not yet used in buck
 GENERATED_LAZY_TS_CPP = [
-    "lazy/generated/LazyIr.cpp",
     "lazy/generated/LazyNativeFunctions.cpp",
     "lazy/generated/RegisterAutogradLazy.cpp",
     "lazy/generated/RegisterLazy.cpp",
@@ -258,6 +257,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/peephole_non_tensor.cpp",
     "torch/csrc/jit/passes/create_functional_graphs.cpp",
+    "torch/csrc/jit/passes/refine_tuple_types.cpp",
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
@@ -426,7 +426,6 @@ lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/ops/expand.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
-    "torch/csrc/lazy/ts_backend/ops/to_copy.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/as_strided.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/as_strided_view_update.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/diagonal.cpp",
@@ -483,6 +482,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/exception.cpp",
     "torch/csrc/distributed/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/logging.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/socket.cpp",
@@ -945,7 +945,6 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
-    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
@@ -1032,7 +1031,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Generator.cpp",
     "aten/src/ATen/core/List.cpp",
     "aten/src/ATen/core/NamedTensor.cpp",
-    "aten/src/ATen/core/SymIntArrayRef.cpp",
     "aten/src/ATen/core/Tensor.cpp",
     "aten/src/ATen/core/VariableFallbackKernel.cpp",
     "aten/src/ATen/core/VariableHooksInterface.cpp",
@@ -1081,6 +1079,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/MkldnnTensorMath.cpp",
     "aten/src/ATen/native/mkldnn/Normalization.cpp",
     "aten/src/ATen/native/mkldnn/Pooling.cpp",
+    "aten/src/ATen/native/mkldnn/Prelu.cpp",
     "aten/src/ATen/native/mkldnn/Relu.cpp",
     "aten/src/ATen/native/mkldnn/SoftMax.cpp",
     "aten/src/ATen/native/mkldnn/TensorFactories.cpp",
@@ -1160,6 +1159,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/WeightNormKernel.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]
 
