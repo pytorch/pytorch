@@ -190,6 +190,18 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1024, 1024 * 512}, {2, 4 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 4 * 1024}, {1024, 1024 * 512}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
@@ -211,6 +223,18 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1024, 1024 * 1024}, {2, 4 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 4 * 1024}, {1024, 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 

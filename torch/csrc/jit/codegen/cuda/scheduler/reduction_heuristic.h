@@ -28,6 +28,10 @@ class ReductionParams {
   // like [reduction, iteration, reduction].
   bool schedule_3D = false;
 
+  // For outer reductions we may want to swap the gdimx and gdimy bindings to
+  // amortize the cost of the final cleanup in grid reductions.
+  bool flip_grid = false;
+
   // Inner Reduction Domain:
 
   // Reduce across the block?
@@ -111,7 +115,7 @@ class ReductionParams {
     bool attr_equal = other.fastest_dim == fastest_dim &&
         other.persistent_kernel == persistent_kernel &&
         other.project_persistent_buffers == project_persistent_buffers &&
-        other.schedule_3D == schedule_3D &&
+        other.schedule_3D == schedule_3D && other.flip_grid == flip_grid &&
         other.cross_block_inner_reduction == cross_block_inner_reduction &&
         other.cross_grid_inner_reduction == cross_grid_inner_reduction &&
         other.unroll_factor_inner_reduction == unroll_factor_inner_reduction &&
@@ -223,24 +227,25 @@ class ReductionParamsHash {
         static_cast<size_t>(rp.persistent_kernel) << (bits - 2) ^
         static_cast<size_t>(rp.project_persistent_buffers) << (bits - 3) ^
         static_cast<size_t>(rp.schedule_3D) << (bits - 4) ^
-        static_cast<size_t>(rp.cross_block_inner_reduction) << (bits - 5) ^
-        static_cast<size_t>(rp.cross_grid_inner_reduction) << (bits - 6) ^
-        static_cast<size_t>(rp.unroll_factor_inner_reduction) << (bits - 7) ^
-        static_cast<size_t>(rp.vectorize_inner_reduction) << (bits - 8) ^
-        static_cast<size_t>(rp.split_grid_dim_inner_reduction) << (bits - 9) ^
-        static_cast<size_t>(rp.pad_inner_reduction_to_warp) << (bits - 10) ^
+        static_cast<size_t>(rp.flip_grid) << (bits - 5) ^
+        static_cast<size_t>(rp.cross_block_inner_reduction) << (bits - 6) ^
+        static_cast<size_t>(rp.cross_grid_inner_reduction) << (bits - 7) ^
+        static_cast<size_t>(rp.unroll_factor_inner_reduction) << (bits - 8) ^
+        static_cast<size_t>(rp.vectorize_inner_reduction) << (bits - 9) ^
+        static_cast<size_t>(rp.split_grid_dim_inner_reduction) << (bits - 10) ^
+        static_cast<size_t>(rp.pad_inner_reduction_to_warp) << (bits - 11) ^
         static_cast<size_t>(rp.batches_per_block_inner_reduction)
-            << (bits - 11) ^
-        static_cast<size_t>(rp.multiple_reds_per_blk) << (bits - 12) ^
-        static_cast<size_t>(rp.unroll_factor_iter_dom) << (bits - 13) ^
-        static_cast<size_t>(rp.vectorize_iter_dom) << (bits - 14) ^
-        static_cast<size_t>(rp.split_grid_dim_iter_dom) << (bits - 15) ^
-        static_cast<size_t>(rp.cross_block_outer_reduction) << (bits - 16) ^
-        static_cast<size_t>(rp.cross_grid_outer_reduction) << (bits - 17) ^
-        static_cast<size_t>(rp.split_grid_dim_outer_reduction) << (bits - 18) ^
+            << (bits - 12) ^
+        static_cast<size_t>(rp.multiple_reds_per_blk) << (bits - 13) ^
+        static_cast<size_t>(rp.unroll_factor_iter_dom) << (bits - 14) ^
+        static_cast<size_t>(rp.vectorize_iter_dom) << (bits - 15) ^
+        static_cast<size_t>(rp.split_grid_dim_iter_dom) << (bits - 16) ^
+        static_cast<size_t>(rp.cross_block_outer_reduction) << (bits - 17) ^
+        static_cast<size_t>(rp.cross_grid_outer_reduction) << (bits - 18) ^
+        static_cast<size_t>(rp.split_grid_dim_outer_reduction) << (bits - 19) ^
         static_cast<size_t>(rp.batches_per_block_outer_reduction)
-            << (bits - 19) ^
-        static_cast<size_t>(rp.unroll_factor_outer_reduction) << (bits - 20);
+            << (bits - 20) ^
+        static_cast<size_t>(rp.unroll_factor_outer_reduction) << (bits - 21);
     return attr_hash;
   }
 };

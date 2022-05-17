@@ -11,7 +11,7 @@
 
 using namespace torch::jit::fuser::cuda;
 
-static void setup_vit_base_patch16_224_kernel17(Fusion* fusion, void* null) {
+static void setup_vit_base_patch16_224_bcast7(Fusion* fusion, void* null) {
   FusionGuard fg(fusion);
 
   auto t2 = makeContigTensor(3, DataType::Float);
@@ -48,7 +48,7 @@ static void setup_vit_base_patch16_224_kernel17(Fusion* fusion, void* null) {
   fusion->addOutput(t39);
 }
 
-static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel17(
+static void NvFuserScheduler_TIMM_vit_base_patch16_224_bcast7(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
     void* null) {
@@ -82,17 +82,18 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel17(
 }
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel17,
-    setup_vit_base_patch16_224_kernel17,
-    NvFuserScheduler_TIMM_vit_base_patch16_224_kernel17,
+    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_bcast7,
+    setup_vit_base_patch16_224_bcast7,
+    NvFuserScheduler_TIMM_vit_base_patch16_224_bcast7,
     nullptr);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel17)
+// pwise case, broadcasting both sides
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_bcast7)
     ->Args({64, 197, 768})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-static void setup_vit_base_patch16_224_kernel5(Fusion* fusion, void* null) {
+static void setup_vit_base_patch16_224_bcast5(Fusion* fusion, void* null) {
   FusionGuard fg(fusion);
 
   auto t2 = makeContigTensor(3, DataType::Float);
@@ -162,7 +163,7 @@ static void setup_vit_base_patch16_224_kernel5(Fusion* fusion, void* null) {
   fusion->addOutput(t34); // full 3d half
 }
 
-static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel5(
+static void NvFuserScheduler_TIMM_vit_base_patch16_224_bcast5(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
     void* null) {
@@ -196,17 +197,20 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel5(
 }
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_TIMM_vit_base_patch16_224_kernel5_NCHW,
-    setup_vit_base_patch16_224_kernel5,
-    NvFuserScheduler_TIMM_vit_base_patch16_224_kernel5,
+    NvFuserScheduler_TIMM_vit_base_patch16_224_bcast5_NCHW,
+    setup_vit_base_patch16_224_bcast5,
+    NvFuserScheduler_TIMM_vit_base_patch16_224_bcast5,
     nullptr);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_vit_base_patch16_224_kernel5_NCHW)
+// Broadcast on both sides
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_vit_base_patch16_224_bcast5_NCHW)
     ->Args({64, 197, 768})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-static void setup_vit_base_patch16_224_kernel2(Fusion* fusion, void* null) {
+static void setup_vit_base_patch16_224_bcast_outer2(
+    Fusion* fusion,
+    void* null) {
   FusionGuard fg(fusion);
 
   auto t0 = makeContigTensor(3, DataType::Half);
@@ -226,7 +230,7 @@ static void setup_vit_base_patch16_224_kernel2(Fusion* fusion, void* null) {
   fusion->addOutput(t7);
 }
 
-static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel2(
+static void NvFuserScheduler_TIMM_vit_base_patch16_224_bcast_outer2(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
     void* null) {
@@ -254,17 +258,18 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel2(
 }
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel2,
-    setup_vit_base_patch16_224_kernel2,
-    NvFuserScheduler_TIMM_vit_base_patch16_224_kernel2,
+    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_bcast_outer2,
+    setup_vit_base_patch16_224_bcast_outer2,
+    NvFuserScheduler_TIMM_vit_base_patch16_224_bcast_outer2,
     nullptr);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel2)
+NVFUSER_BENCHMARK_RUN(
+    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_bcast_outer2)
     ->Args({64, 197, 2304})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-static void setup_vit_base_patch16_224_kernel3(Fusion* fusion, void* null) {
+static void setup_vit_base_patch16_224_norm_inner3(Fusion* fusion, void* null) {
   FusionGuard fg(fusion);
 
   auto t0 = makeContigTensor(4, DataType::Half);
@@ -280,7 +285,7 @@ static void setup_vit_base_patch16_224_kernel3(Fusion* fusion, void* null) {
   auto t6 = broadcast(t5, {false, false, false, true});
   auto t7 = sub(t4, t6);
   auto t8 = exp(t7);
-  auto t9 = sum(t8, {-2});
+  auto t9 = sum(t8, {3});
   auto t10 = broadcast(t9, {false, false, false, true});
   auto t11 = reciprocal(t10);
   auto t12 = mul(t8, t11);
@@ -303,7 +308,7 @@ static void setup_vit_base_patch16_224_kernel3(Fusion* fusion, void* null) {
   fusion->addOutput(t4);
 }
 
-static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel3(
+static void NvFuserScheduler_TIMM_vit_base_patch16_224_norm_inner3(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
     void* null) {
@@ -329,17 +334,21 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel3(
 }
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel3,
-    setup_vit_base_patch16_224_kernel3,
-    NvFuserScheduler_TIMM_vit_base_patch16_224_kernel3,
+    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_norm_inner3,
+    setup_vit_base_patch16_224_norm_inner3,
+    NvFuserScheduler_TIMM_vit_base_patch16_224_norm_inner3,
     nullptr);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel3)
+// Norm inner dim
+NVFUSER_BENCHMARK_RUN(
+    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_norm_inner3)
     ->Args({64, 12, 197})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-static void setup_vit_base_patch16_224_kernel6(Fusion* fusion, void* null) {
+static void setup_vit_base_patch16_224_bcast_outer6(
+    Fusion* fusion,
+    void* null) {
   FusionGuard fg(fusion);
 
   auto t0 = makeContigTensor(3, DataType::Half);
@@ -378,7 +387,7 @@ static void setup_vit_base_patch16_224_kernel6(Fusion* fusion, void* null) {
   fusion->addOutput(t19);
 }
 
-static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel6(
+static void NvFuserScheduler_TIMM_vit_base_patch16_224_bcast_outer6(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
     void* null) {
@@ -405,12 +414,13 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel6(
 }
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel6,
-    setup_vit_base_patch16_224_kernel6,
-    NvFuserScheduler_TIMM_vit_base_patch16_224_kernel6,
+    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_bcast_outer6,
+    setup_vit_base_patch16_224_bcast_outer6,
+    NvFuserScheduler_TIMM_vit_base_patch16_224_bcast_outer6,
     nullptr);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel6)
+NVFUSER_BENCHMARK_RUN(
+    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_bcast_outer6)
     // First size is original, the rest are variations to check perf
     // reliability.
     ->Args({64, 197, 3 * 1024})
@@ -425,7 +435,7 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel6)
     ->UseManualTime();
 
 // Reverse the broadcast dimensions to check for consistency in scheduling.
-static void setup_vit_base_patch16_224_kernel6_reversed(
+static void setup_vit_base_patch16_224_bcast_inner6(
     Fusion* fusion,
     void* null) {
   FusionGuard fg(fusion);
@@ -466,7 +476,7 @@ static void setup_vit_base_patch16_224_kernel6_reversed(
   fusion->addOutput(t19);
 }
 
-static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel6_reversed(
+static void NvFuserScheduler_TIMM_vit_base_patch16_224_bcast_inner6(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
     void* null) {
@@ -494,13 +504,13 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_kernel6_reversed(
 }
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel6_reversed,
-    setup_vit_base_patch16_224_kernel6_reversed,
-    NvFuserScheduler_TIMM_vit_base_patch16_224_kernel6_reversed,
+    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_bcast_inner6,
+    setup_vit_base_patch16_224_bcast_inner6,
+    NvFuserScheduler_TIMM_vit_base_patch16_224_bcast_inner6,
     nullptr);
 
 NVFUSER_BENCHMARK_RUN(
-    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_kernel6_reversed)
+    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_bcast_inner6)
     ->Args({64, 197, 3 * 1024})
     ->Args({64, 197, 2 * 1024})
     ->Args({64, 197, 1024})
@@ -509,5 +519,223 @@ NVFUSER_BENCHMARK_RUN(
     ->Args({2, 1024, 64 * 197})
     ->Args({1, 1024, 64 * 197})
     ->Args({2, 256, 64 * 197})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+static void setup_vit_base_patch16_224_LN_BWD(Fusion* fusion, void* null) {
+  FusionGuard fg(fusion);
+
+  auto t0 = makeContigTensor(3, DataType::Bool);
+  fusion->addInput(t0);
+
+  auto t1 = makeContigTensor(3, DataType::Half);
+  fusion->addInput(t1);
+
+  auto t2 = castOp(DataType::Float, t1);
+
+  auto t3 = makeContigTensor(3, DataType::Half);
+  fusion->addInput(t3);
+
+  auto t4 = castOp(DataType::Float, t3);
+
+  auto d35 = t3->axis(2)->extent();
+
+  auto t5 = TensorViewBuilder()
+                .shape({-1, -1, 1})
+                .dtype(DataType::Float)
+                .contiguity({true, true, false})
+                .build();
+  fusion->addInput(t5);
+
+  auto t6 = TensorViewBuilder()
+                .shape({-1, -1, 1})
+                .dtype(DataType::Float)
+                .contiguity({true, true, false})
+                .build();
+  fusion->addInput(t6);
+
+  auto t7 = makeContigTensor(1, DataType::Half);
+  fusion->addInput(t7);
+
+  auto t8 = castOp(DataType::Float, t7);
+
+  auto t9 = makeContigTensor(1, DataType::Half);
+  fusion->addInput(t9);
+
+  auto t11 = sub(t4, t5);
+  auto t12 = mul(t11, t6);
+
+  auto t13 = broadcast(t8, {true, true, false});
+  auto t14 = mul(t2, t13);
+  auto t15 = mul(d35, t14);
+  auto t16 = sum(t14, {2});
+  auto t17 = broadcast(t16, {false, false, true});
+  auto t18 = mul(t14, t12);
+  auto t19 = sum(t18, {2});
+  auto t20 = broadcast(t19, {false, false, true});
+
+  auto t40 = castOp(DataType::Half, t12);
+  auto t41 = castOp(DataType::Float, t40);
+  auto t42 = castOp(DataType::Half, t20);
+  auto t43 = castOp(DataType::Float, t42);
+  auto t21 = mul(t42, t43);
+
+  auto t38 = castOp(DataType::Half, t15);
+  auto t39 = castOp(DataType::Float, t38);
+  auto t44 = castOp(DataType::Half, t17);
+  auto t45 = castOp(DataType::Float, t44);
+  auto t22 = sub(t39, t45);
+
+  auto t23 = sub(t22, t21);
+
+  auto d87 = reciprocal(d35);
+  auto t24 = mul(d87, t6);
+
+  auto t25 = mul(t24, t23);
+  auto t26 = mul(t2, t41);
+  auto t27 = sum(t26, {0, 1});
+  auto t28 = sum(t2, {0, 1});
+
+  auto t29 = castOp(DataType::Float, t0);
+  auto t30 = mul(t25, t29);
+
+  auto d33 = IrBuilder::create<Double>();
+  fusion->addInput(d33);
+  auto t31 = mul(t30, d33);
+  auto t32 = sum(t31, {0, 1});
+  auto t33 = castOp(DataType::Half, t32);
+  auto t34 = castOp(DataType::Half, t31);
+  auto t35 = castOp(DataType::Half, t25);
+  auto t36 = castOp(DataType::Half, t27);
+  auto t37 = castOp(DataType::Half, t28);
+
+  fusion->addOutput(t33);
+  fusion->addOutput(t34);
+  fusion->addOutput(t35);
+  fusion->addOutput(t36);
+  fusion->addOutput(t37);
+}
+
+static void NvFuserScheduler_TIMM_vit_base_patch16_224_LN_BWD(
+    benchmark::State& benchmark_state,
+    FusionExecutorCache* fusion_executor_cache,
+    void* null) {
+  std::vector<int64_t> input_shape{
+      benchmark_state.range(0),
+      benchmark_state.range(1),
+      benchmark_state.range(2)};
+
+  at::manual_seed(0);
+  // auto bool_options = at::TensorOptions().dtype(at::kBool).device(at::kCUDA,
+  // 0);
+  auto fp16_options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto fp32_options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(input_shape, fp16_options).to(at::kBool);
+  auto t1 = at::randn(input_shape, fp16_options);
+  auto t3 = at::randn(input_shape, fp16_options);
+  auto t5 = at::randn({input_shape[0], input_shape[1], 1}, fp32_options);
+  auto t6 = at::randn({input_shape[0], input_shape[1], 1}, fp32_options);
+  auto t7 = at::randn({input_shape[2]}, fp16_options);
+  auto t9 = at::randn({input_shape[2]}, fp16_options);
+
+  std::vector<c10::IValue> aten_inputs({t0, t1, t3, t5, t6, t7, t9, 1.0});
+  runBenchmarkIterations(benchmark_state, fusion_executor_cache, aten_inputs);
+
+  // Full tensors - bool, halfx4 - t0, t1, t3, t34, t35
+  // Outer two dimensions - floatx2 - t5, t6
+  // Inner dimension - halfx5 - t7, t9, t33, t36, t37
+  benchmark_state.SetBytesProcessed(
+      int64_t(benchmark_state.iterations()) * ((t0.numel() * (4 * 2 + 1))) +
+      (t5.numel() * 4 * 2) + (t7.numel() * 5 * 2));
+}
+
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_LN_BWD,
+    setup_vit_base_patch16_224_LN_BWD,
+    NvFuserScheduler_TIMM_vit_base_patch16_224_LN_BWD,
+    nullptr);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_NCHW_vit_base_patch16_224_LN_BWD)
+    ->Args({128, 197, 768})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+static void nhwc_seresnet152d_transpose65(Fusion* fusion, void* null) {
+  FusionGuard fg(fusion);
+
+  auto t2 = makeContigTensor(4, DataType::Half);
+  auto t5 = makeContigTensor(4, DataType::Half);
+  auto t7 = makeContigTensor(4, DataType::Half);
+  auto t9 = makeContigTensor(4, DataType::Half);
+  auto t4 = makeConcreteTensor({}, DataType::Half);
+
+  fusion->addInput(t2);
+  fusion->addInput(t5);
+  fusion->addInput(t7);
+  fusion->addInput(t9);
+  fusion->addInput(t4);
+
+  auto d86 = IrBuilder::create<Double>(0);
+
+  auto t3 = castOp(DataType::Float, t2);
+  auto t6 = castOp(DataType::Float, t5);
+  auto t8 = castOp(DataType::Float, t7);
+  auto t10 = castOp(DataType::Float, t9);
+  auto t11 = add(t8, t10);
+  auto t12 = set(t11);
+  auto t13 = set(t6);
+  auto t14 = lt(t13, d86);
+  auto t15 = broadcast(t4, {true, true, true, true});
+  auto t16 = where(t14, t15, t12);
+  auto t17 = set(t16);
+  auto t29 = castOp(DataType::Half, t17);
+  auto t18 = mul(t17, t3);
+  auto t19 = transpose(t18, {{0, 0}, {1, 3}, {2, 1}, {3, 2}});
+  auto t30 = castOp(DataType::Half, t19);
+
+  fusion->addOutput(t29);
+  fusion->addOutput(t30);
+}
+
+static void NvFuserScheduler_nhwc_seresnet152d_transpose65(
+    benchmark::State& benchmark_state,
+    FusionExecutorCache* fusion_executor_cache,
+    void* null) {
+  std::vector<int64_t> input_shape{
+      benchmark_state.range(0),
+      benchmark_state.range(2),
+      benchmark_state.range(2),
+      benchmark_state.range(1)};
+
+  at::manual_seed(0);
+  auto fp16_options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+
+  auto t2 = at::randn(input_shape, fp16_options);
+  auto t5 = at::randn(input_shape, fp16_options);
+  auto t7 = at::randn(input_shape, fp16_options);
+  auto t9 = at::randn(input_shape, fp16_options);
+  // Need zero dim tensor don't know how to do that, so just going to reduce a
+  // 1D tensor
+  auto t4 = at::randn({2}, fp16_options).sum();
+
+  std::vector<c10::IValue> aten_inputs({t2, t5, t7, t9, t4});
+  runBenchmarkIterations(benchmark_state, fusion_executor_cache, aten_inputs);
+
+  // Full tensors - halfx6 - t2, t5, t7, t9, t29, t30
+  benchmark_state.SetBytesProcessed(
+      int64_t(benchmark_state.iterations()) * t2.numel() * 6 * 2);
+}
+
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_TIMM_nhwc_seresnet152d_transpose65,
+    nhwc_seresnet152d_transpose65,
+    NvFuserScheduler_nhwc_seresnet152d_transpose65,
+    nullptr);
+
+// Norm inner dim Half version of vit_base_patch16_224_norm_inner3
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_nhwc_seresnet152d_transpose65)
+    ->Args({128, 12, 197})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();

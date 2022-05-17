@@ -124,7 +124,14 @@ TensorView* flatten(TensorView* x, int64_t start_dim, int64_t end_dim) {
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
-  TORCH_INTERNAL_ASSERT(x->nDims() == sizes.size());
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
+
+  TORCH_INTERNAL_ASSERT(
+      ndims == sizes.size(),
+      "Invalid sizes for squeeze: ",
+      sizes,
+      ". Input tensor: ",
+      x->toString());
 
   std::vector<int> trivial_reduction_axes;
   for (const auto idx : c10::irange(sizes.size())) {
@@ -140,11 +147,27 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
-  TORCH_INTERNAL_ASSERT(x->nDims() == sizes.size());
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
+
+  TORCH_INTERNAL_ASSERT(
+      ndims == sizes.size(),
+      "Invalid sizes for squeeze: ",
+      sizes,
+      ". Input tensor: ",
+      x->toString());
+
   if (dim < 0) {
-    dim = (int)(x->nDims()) + dim;
+    dim = ndims + dim;
   }
-  if (dim >= 0 && dim < x->nDims() && sizes[dim] == 1) {
+
+  TORCH_INTERNAL_ASSERT(
+      dim >= 0 && dim < ndims,
+      "Invalid position to squeeze: ",
+      dim,
+      ". Input tensor: ",
+      x->toString());
+
+  if (sizes[dim] == 1) {
     return sum(x, {dim}, false /* keep_dim */, x->getDataType().value());
   } else {
     return set(x);
@@ -152,12 +175,20 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
 }
 
 TensorView* unsqueeze(TensorView* x, int dim) {
-  if (dim < 0) {
-    dim = (int)(x->nDims()) + dim + 1;
-  }
-  TORCH_INTERNAL_ASSERT(dim >= 0 && dim <= x->nDims());
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
 
-  std::vector<bool> broadcast_axes(x->nDims() + 1, false);
+  if (dim < 0) {
+    dim = ndims + dim + 1;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      dim >= 0 && dim <= ndims,
+      "Invalid position to unsqueeze: ",
+      dim,
+      ". Input tensor: ",
+      x->toString());
+
+  std::vector<bool> broadcast_axes(ndims + 1, false);
   broadcast_axes[dim] = true;
   return broadcast(x, broadcast_axes);
 }

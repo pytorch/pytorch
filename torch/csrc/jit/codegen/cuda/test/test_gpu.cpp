@@ -12636,7 +12636,9 @@ __global__ void kernel1(
         (long*)shared_buf_N,
         threadIdx.x<out_var.size[0],
         threadIdx.x<out_var.size[0],
-        0.f);
+        0.f,
+        0,
+        1);
     if(blockIdx.x == gridDim.x - 1 && blockIdx.y == gridDim.y - 1){
         out_avg[threadIdx.x*out_avg.stride[0]]=tmp_avg;
         out_var[threadIdx.x*out_var.stride[0]]=tmp_M2/tmp_N;
@@ -22705,6 +22707,101 @@ TEST_F(NVFuserMultithreadedTest, MultipleFunctions_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int X = 256, Y = 7, Z = 2048;
+
+  // setup fusion
+  auto tv0 = makeContigTensor(4, DataType::Half);
+  fusion.addInput(tv0);
+  auto tv1 = castOp(DataType::Float, tv0);
+
+  auto tvs = Welford(tv1, {0, 1, 2});
+  auto tv_avg = tvs.avg;
+  auto tv_M2 = tvs.var_sum;
+  auto tv_N = tvs.n;
+  fusion.addOutput(tv_avg);
+  fusion.addOutput(tv_M2);
+
+  auto cached_input = tv0->cacheAfter();
+  auto cached_avg = tv_avg->cacheBefore();
+  auto cached_M2 = tv_M2->cacheBefore();
+
+  auto reduction_tv = scheduler_utils::getReductionTvs(&fusion)[0];
+
+  reduction_tv->merge(0);
+  reduction_tv->merge(0);
+
+  int TIDx = 16;
+  int vec = 4;
+
+  int TIDy = 16;
+  int outer_tidy_fact = 16;
+
+  reduction_tv->split(-1, TIDx * vec);
+  reduction_tv->split(-1, vec);
+  reduction_tv->axis(-2)->parallelize(ParallelType::TIDx);
+  reduction_tv->axis(-1)->parallelize(ParallelType::Vectorize);
+  reduction_tv->axis(-3)->parallelize(ParallelType::BIDx);
+
+  reduction_tv->split(0, TIDy);
+  reduction_tv->axis(1)->parallelize(ParallelType::TIDy);
+  reduction_tv->split(0, outer_tidy_fact);
+  reduction_tv->axis(0)->parallelize(ParallelType::BIDy);
+
+  // T2_g[ rblockIdx.y, rS{16}, rthreadIdx.y, iblockIdx.x, ithreadIdx.x24,
+  // iV25{4} ]
+  reduction_tv->reorder({{3, 0}, {4, 1}, {0, 2}, {2, 3}, {1, 4}, {5, 5}});
+  // T2_g[iblockIdx.x, ithreadIdx.x24, rblockIdx.y, rthreadIdx.y, rS{16},
+  // iV25{4}]
+
+  TransformPropagator::from(reduction_tv);
+  auto rfactor_tv = ir_utils::rfactorHelper(reduction_tv, {4});
+  scheduler_utils::parallelizeAllLike(rfactor_tv, ir_utils::allTvs(&fusion));
+
+  tv0->computeAt(tv_avg, 2);
+  tv0->computeAt(cached_input, -2);
+
+  cached_input->computeAt(rfactor_tv, 4, ComputeAtMode::BestEffort);
+
+  for (auto tv : ir_utils::allTvs(&fusion)) {
+    if (tv == cached_input || tv == tv_avg || tv == tv_M2) {
+      continue;
+    }
+    tv->axis(-1)->parallelize(ParallelType::Serial);
+  }
+
+  CompileOptions co;
+  co.index_mode = KernelIndexMode::INT32;
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {}, LaunchParams(), co);
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({X, Y, Y, Z}, options);
+
+  auto cg_outputs = fe.runFusion({t0}, LaunchParams(-1, -1, -1, -1, -1, -1));
+
+  // by default Welford outputs sum of square diff so need to divide to get var
+  cg_outputs[1] = cg_outputs[1].div((float)(X * Y * Y));
+
+  auto at_mu = at::mean(t0.to(at::kDouble), {0, 1, 2});
+  auto at_var = at::var(t0.to(at::kDouble), {0, 1, 2}, false);
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {t0},
+      {at_mu, at_var},
+      __LINE__,
+      __FILE__,
+      "",
+      LaunchParams(-1, -1, -1, -1, -1, -1));
+}
+
 // Test sync insertion with redundant predicates
 TEST_F(NVFuserTest, FusionRedundantPredSync_CUDA) {
   Fusion fusion;
@@ -22769,6 +22866,114 @@ TEST_F(NVFuserTest, FusionRedundantPredSync_CUDA) {
   auto ref = t0 + t1;
 
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionUnsqueeze1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> shape({10, 11});
+
+  auto tv0 = makeConcreteTensor(shape);
+  fusion.addInput(tv0);
+
+  // [I, R]
+  auto tv1 = sum(tv0, {1});
+  // [I, B]
+  auto tv2 = unsqueeze(tv1, -1);
+  fusion.addOutput(tv2);
+
+  TORCH_CHECK(
+      tv2->nDims() == 2, "Unpected unsqueeze result: ", tv2->toString());
+  TORCH_CHECK(
+      tv2->axis(1)->isBroadcast(),
+      "Unexpected unsqueeze result: ",
+      tv2->toString());
+
+  // tv1 has only one non-reduction axis. An exception should be
+  // thrown.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(unsqueeze(tv1, 2));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({10, 11}, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto ref = t0.sum(1).unsqueeze(-1);
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionSqueeze1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> shape({10, 11});
+
+  auto tv0 = makeConcreteTensor(shape);
+  fusion.addInput(tv0);
+
+  // [I, B]
+  auto tv1 = sum(tv0, {1}, true);
+  // [I]
+  auto tv2 = squeeze(tv1, {shape[0], 1});
+  fusion.addOutput(tv2);
+
+  TORCH_CHECK(
+      tv2->nDims() == 2, "Unexpected squeeze result: ", tv2->toString());
+
+  // [I, R]
+  auto tv3 = sum(tv0, {1});
+  // tv3 has only one non-reduction axis. The extent of the first axis
+  // is not one, so squeeze should fail.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(squeeze(tv3, {shape[0], 1}));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({10, 11}, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto ref = t0.sum(1, true).squeeze(-1);
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionContigPredicate_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = broadcast(tv1, {false, true, false});
+  fusion.addOutput(tv2);
+
+  tv2->merge(-2, -1);
+  tv2->merge(-2, -1);
+  tv2->split(-1, 100);
+  tv0->computeAt(tv2, -1);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(PredicatedChecker::isPredicated(tv1, gpulw));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({3, 4}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0.unsqueeze(1);
+
+  testValidate(fe.kernel(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit

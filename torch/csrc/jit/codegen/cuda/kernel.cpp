@@ -115,15 +115,17 @@ class KernelIrScanner : private IrVisitor {
   void handle(GridWelford* grid_welford) final {
     summary_.has_welford = true;
     summary_.has_grid_welford = true;
-    const auto dom =
-        grid_welford->welford_op()->out()->as<TensorIndex>()->view()->domain();
-    updateGridReductionInLoop(dom);
+    summary_.has_grid_reductions = true;
+    if (grid_welford->welford_op()->isAllreduce()) {
+      summary_.has_cooperative_grid_reduction = true;
+    }
   }
 
   void handle(GridReduction* grid_reduction) final {
     summary_.has_grid_reductions = true;
-    const auto dom = ir_utils::getTvOutput(grid_reduction)->domain();
-    updateGridReductionInLoop(dom);
+    if (grid_reduction->isAllreduce()) {
+      summary_.has_cooperative_grid_reduction = true;
+    }
   }
 
   void handle(GroupedGridReduction* grid_reduction) final {
@@ -156,8 +158,6 @@ class KernelIrScanner : private IrVisitor {
 
  private:
   void updateGridReductionInLoop(TensorDomain* dom) {
-    summary_.has_grid_reductions = true;
-
     for (const auto i : c10::irange(dom->nDims())) {
       const auto id = GpuLower::current()->caMap()->getConcreteMappedID(
           dom->domain()[i], IdMappingMode::LOOP);

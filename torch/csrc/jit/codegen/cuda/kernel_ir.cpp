@@ -435,6 +435,8 @@ GridReduction::GridReduction(
     Val* in,
     Allocate* reduction_buffer,
     Allocate* sync_buffer,
+    Val* entrance_index,
+    Val* entrances,
     bool is_allreduce)
     : ReductionOp(
           passkey,
@@ -445,7 +447,9 @@ GridReduction::GridReduction(
           is_allreduce,
           ExprType::GridReduction),
       reduction_buffer_(reduction_buffer),
-      sync_buffer_(sync_buffer) {
+      sync_buffer_(sync_buffer),
+      entrance_index_(entrance_index),
+      entrances_(entrances) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -495,13 +499,17 @@ GridWelford::GridWelford(
     Allocate* var_buffer,
     Allocate* avg_buffer,
     Allocate* n_buffer,
-    Allocate* sync_buffer)
+    Allocate* sync_buffer,
+    Val* entrance_index,
+    Val* entrances)
     : Expr(passkey, ExprType::GridWelford),
       welford_op_(welford_op),
       var_buffer_(var_buffer),
       avg_buffer_(avg_buffer),
       n_buffer_(n_buffer),
-      sync_buffer_(sync_buffer) {
+      sync_buffer_(sync_buffer),
+      entrance_index_(entrance_index),
+      entrances_(entrances) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");

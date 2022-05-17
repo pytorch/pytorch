@@ -513,6 +513,8 @@ class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
       Val* in,
       Allocate* reduction_buffer,
       Allocate* sync_buffer,
+      Val* entrance_index,
+      Val* entrances,
       bool is_fused = false);
 
   Allocate* reduction_buffer() const {
@@ -521,6 +523,16 @@ class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
 
   Allocate* sync_buffer() const {
     return sync_buffer_;
+  }
+
+  // Which instance of entering this grid reduction is this iteration?
+  Val* entrance_index() const {
+    return entrance_index_;
+  }
+
+  // How many times will this grid reduction be entered
+  Val* entrances() const {
+    return entrances_;
   }
 
   const ParallelTypeBitmap& threadPredicate() const {
@@ -538,6 +550,8 @@ class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
   // use them, the thread predicate is held here separately from
   // Expr::predicate_.
   ParallelTypeBitmap thread_predicate_;
+  Val* entrance_index_ = nullptr;
+  Val* entrances_ = nullptr;
 };
 
 class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
@@ -629,7 +643,9 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
       Allocate* var_buffer,
       Allocate* avg_buffer,
       Allocate* n_buffer,
-      Allocate* sync_buffer);
+      Allocate* sync_buffer,
+      Val* entrance_index,
+      Val* entrances);
 
   WelfordOp* welford_op() const {
     return welford_op_;
@@ -651,6 +667,16 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
     return sync_buffer_;
   }
 
+  // Which instance of entering this grid reduction is this iteration?
+  Val* entrance_index() const {
+    return entrance_index_;
+  }
+
+  // How many times will this grid reduction be entered
+  Val* entrances() const {
+    return entrances_;
+  }
+
   const ParallelTypeBitmap& threadPredicate() const {
     return thread_predicate_;
   }
@@ -665,6 +691,8 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
   Allocate* avg_buffer_ = nullptr;
   Allocate* n_buffer_ = nullptr;
   Allocate* sync_buffer_ = nullptr;
+  Val* entrance_index_ = nullptr;
+  Val* entrances_ = nullptr;
   // gridReduce has template flags for thread predicates. In order to
   // use them, the thread predicate is held here separately from
   // Expr::predicate_.
