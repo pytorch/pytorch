@@ -7161,20 +7161,23 @@ def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs)
     """Sample inputs for masked cumsum and cumprod.
     """
     inputs: List[SampleInput] = []
-    for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
-        sample_input_args, sample_input_kwargs = sample_input.args, sample_input.kwargs.copy()
-        if 'keepdim' in sample_input_kwargs:
-            sample_input_kwargs.pop('keepdim')
-        # dimension is required
-        if sample_input_args:
-            dim = sample_input.args[0]
-        else:
-            if 'dim' not in sample_input_kwargs:
+    for sample_input in sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, **kwargs):
+        for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
+            if type(mask) != torch.Tensor:
                 continue
-            dim = sample_input_kwargs.pop('dim')
-            sample_input_args = (dim,)
-        inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
-                                  args=sample_input_args, kwargs=sample_input_kwargs))
+            sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
+            if 'keepdim' in sample_input_kwargs:
+                sample_input_kwargs.pop('keepdim')
+            # dimension is required
+            if sample_input_args:
+                dim = sample_input.args[0]
+            else:
+                if 'dim' not in sample_input_kwargs:
+                    continue
+                dim = sample_input_kwargs.pop('dim')
+                sample_input_args = (dim,)
+            inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
+                                      args=sample_input_args, kwargs=sample_input_kwargs))
 
     return inputs
 
@@ -17698,41 +17701,35 @@ op_db: List[OpInfo] = [
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
         sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
     ),
-    ReductionOpInfo(
+    OpInfo(
         '_masked.cumsum',
-        ref=reference_reduction_numpy(np.cumsum),
         dtypes=all_types_and_complex_and(torch.bfloat16),
         method_variant=None,
-        identity=0,
-        nan_policy='propagate',
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        supports_multiple_dims=False,
         skips=(
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         # Can reuse the same inputs; dim is required in both
-        sample_inputs_func=sample_inputs_masked_cumops
+        sample_inputs_func=sample_inputs_masked_cumops,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
-    ReductionOpInfo(
+    OpInfo(
         '_masked.cumprod',
-        ref=reference_reduction_numpy(np.cumprod),
         dtypes=all_types_and_complex_and(torch.bfloat16),
         method_variant=None,
-        nan_policy='propagate',
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        promotes_int_to_int64=False,
-        supports_multiple_dims=False,
         skips=(
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         # Can reuse the same inputs; dim is required in both
-        sample_inputs_func=sample_inputs_masked_cumops
+        sample_inputs_func=sample_inputs_masked_cumops,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
         '_masked.amax',
