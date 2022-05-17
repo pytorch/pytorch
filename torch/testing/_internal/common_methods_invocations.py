@@ -17852,23 +17852,25 @@ op_db: List[OpInfo] = [
         ref=reference_reduction_numpy(np.median) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
         dtypes=floating_types_and(torch.bfloat16),  # row may be masked out so need floating type for nan's
         method_variant=None,
-        nan_policy='propagate',
+        nan_policy='omit',
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        promotes_int_to_float=True,
         supports_multiple_dims=False,
         skips=(
+            # does not support passing keepdim without dim, and dim must be an int
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
+            # does not support dim = None
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_multi_unsupported'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_ndim_limit'),
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
-        decorators=[
-            # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-03, rtol=1e-03)}),
-            #              'TestGradients', 'test_forward_mode_AD', device_type='cpu'),
-            # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-03, rtol=1e-03)}),
-            #              'TestGradients', 'test_fn_gradgrad', device_type='cpu'),
-        ],
-        sample_inputs_func=sample_inputs_masked_reduction,
+        sample_inputs_func=sample_inputs_masked_softmax,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(

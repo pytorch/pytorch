@@ -1068,7 +1068,7 @@ elements, have ``nan`` values.
 def median(input: Tensor,
            dim: int = -1,
            *,
-           keepdim: Optional[bool] = False,
+           keepdim: bool = False,
            dtype: Optional[DType] = None,
            mask: Optional[Tensor] = None) -> Tensor:
 
@@ -1092,12 +1092,14 @@ elements, have ``nan`` values.
     mask_input = _combine_input_and_mask(median, input, mask)
     if input.layout == torch.strided:
         output = torch.nanmedian(mask_input, dim_, keepdim).values
-        if is_float: 
+        if is_float:
             return output
         elif not is_float and not torch.isnan(output).any():
             return output.to(dtype=dtype)
         else:
-            raise ValueError(f"masked median expects no fully masked out rows if dtype is not floating point")
+            raise ValueError("masked median expects no fully masked out rows if dtype is not floating point")
+    else:
+        raise ValueError(f'masked median expects strided tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
