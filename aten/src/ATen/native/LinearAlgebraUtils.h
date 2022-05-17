@@ -121,6 +121,53 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
 
+static inline void checkIsMatrix(const Tensor& t,
+                                 const char* const f_name,
+                                 const char* const t_name) {
+  TORCH_CHECK(t.dim() >= 2, f_name, ": Expected ", t_name,
+                            " to be a tensor of at least 2 dimensions.");
+}
+
+static inline void checkIsSquareMatrix(const Tensor& t,
+                                       const char* const f_name,
+                                       const char* const t_name) {
+  checkIsMatrix(t, f_name, t_name);
+  TORCH_CHECK(t.size(-1) == t.size(-2),
+              f_name, ": Expected ", t_name,
+              " to be a square matrix or batch of square matrices. "
+              "Got matrices of size (", t.size(-2), ", ", t.size(-1), ").");
+}
+
+static inline void checkInputsSolver(const Tensor& A,
+                                     const Tensor& B,
+                                     const bool left,
+                                     const char* const f_name) {
+  checkIsSquareMatrix(A, f_name, "A");
+  checkIsMatrix(B, f_name, "B");
+  TORCH_CHECK(left ? A.size(-2) == B.size(-2) : A.size(-1) == B.size(-1),
+              f_name, ": Incompatible shapes of A and B for the equation ",
+              left ? "AX = B" : "XA = B",
+              " (", A.size(-2), "x", A.size(-1), " and ", B.size(-2), "x", B.size(-1), ")");
+}
+
+static inline bool is_row_or_column_contiguous(const Tensor& t) {
+  // This could be made more general, similar to how it's checked in matmul, which would allow to
+  // ellide the copy with strides such as (6, 12, 1, 3) or (3, 1, 9), but this is quite tricky.
+  // We choose to be conservative for simplicity
+  return t.is_contiguous() || t.transpose(-2, -1).is_contiguous();
+}
+
+static inline TransposeType to_transpose_type(const bool contig, const bool conj) {
+  if (conj) {
+    if (contig) { TORCH_INTERNAL_ASSERT(false, "Invalid transpose type"); }
+    else {        return TransposeType::ConjTranspose; }
+  } else {
+    if (contig) { return TransposeType::NoTranspose; }
+    else {        return TransposeType::Transpose; }
+  }
+}
+
+
 // This function is designed to be used with linear algebra methods that minimize
 // L(ax - b) = 0, where L is generally the identity map (`solve`, for example)
 // or the L2 norm (`lstsq`).
