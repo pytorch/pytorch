@@ -52,6 +52,7 @@ class DispatchKey(Enum):
     Dense = auto()
     FPGA = auto()
     ORT = auto()
+    MPS = auto()
     Vulkan = auto()
     Metal = auto()
     MKLDNN = auto()
@@ -109,6 +110,7 @@ class DispatchKey(Enum):
     AutogradXLA = auto()
     AutogradLazy = auto()
     AutogradIPU = auto()
+    AutogradMPS = auto()
     AutogradXPU = auto()
     AutogradPrivateUse1 = auto()
     AutogradPrivateUse2 = auto()
@@ -139,7 +141,8 @@ class DispatchKey(Enum):
         raise AssertionError(f"unknown dispatch key {value}")
 
 
-STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
+STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU}
+UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Set of supported dispatch keys
 dispatch_keys = [
@@ -148,6 +151,7 @@ dispatch_keys = [
     DispatchKey.SparseCsrCPU,
     DispatchKey.MkldnnCPU,
     DispatchKey.CUDA,
+    DispatchKey.MPS,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -192,7 +196,7 @@ def is_structured_dispatch_key(dk: DispatchKey) -> bool:
 
 def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
     # For now, ufunc dispatch keys coincide with structured keys
-    return dk in STRUCTURED_DISPATCH_KEYS
+    return dk in UFUNC_DISPATCH_KEYS
 
 
 # This is oddly named ScalarType and not DType for symmetry with C++
@@ -290,21 +294,6 @@ class UfuncKey(Enum):
 class DeviceCheckType(Enum):
     NoCheck = 0
     ExactSame = 1
-
-
-class Tag(Enum):
-    inplace_view = 0
-    view_copy = 1
-
-    def __str__(self) -> str:
-        return self.name
-
-    @staticmethod
-    def parse(value: str) -> "Tag":
-        for k, v in Tag.__members__.items():
-            if k == value:
-                return v
-        raise AssertionError(f"unknown tag {value}")
 
 
 ViewSchemaKind = Enum("ViewSchemaKind", ("aliasing", "inplace", "out", "non_aliasing"))
@@ -416,8 +405,7 @@ class NativeFunction:
 
     # Tags are used to describe semantic information about (groups of) operators,
     # That aren't easily inferrable directly from the operator's schema.
-    # For now operators have at most one tag.
-    tag: Optional["Tag"]
+    tags: Set[str]
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -426,7 +414,10 @@ class NativeFunction:
     # We parse both the NativeFunction + backend-specific information about it, which it stored in a corresponding BackendIndex.
     @staticmethod
     def from_yaml(
-        ei: Dict[str, object], loc: "Location"
+        ei: Dict[str, object],
+        loc: "Location",
+        valid_tags: Set[str],
+        ignore_keys: Optional[Set[DispatchKey]] = None,
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
@@ -514,9 +505,18 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tag_str = e.pop("tags", None)
-        assert tag_str is None or isinstance(tag_str, str), f"not a str: {tag_str}"
-        tag = Tag.parse(tag_str) if tag_str else None
+        tags_s = e.pop("tags", "")
+        assert isinstance(tags_s, str)
+        tags: Set[str] = set()
+        if len(tags_s) > 0:
+            assert len(valid_tags) > 0
+            for t in tags_s.split(", "):
+                # TODO: verify that the tag is valid and has an entry in tags.yaml
+                if t in valid_tags:
+                    tags.add(t)
+                else:
+                    raise AssertionError(f"illegal tag {t}")
+        assert isinstance(tags, set)
 
         from torchgen.api import cpp
 
@@ -535,6 +535,8 @@ class NativeFunction:
                 assert isinstance(ks, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
+                    if ignore_keys and dispatch_key in ignore_keys:
+                        continue
                     assert dispatch_key in dispatch_keys, (
                         f"Dispatch key {dispatch_key} of kernel {v} "
                         "is not a supported dispatch key."
@@ -601,7 +603,7 @@ class NativeFunction:
         # Program the BackendIndex for the implicit dispatch entry from ufunc
         if ufunc_inner_loop:
             assert structured, "ufunc must be structured"
-            for dispatch_key in STRUCTURED_DISPATCH_KEYS:
+            for dispatch_key in UFUNC_DISPATCH_KEYS:
                 assert (
                     dispatch_key not in dispatch
                 ), f"ufunc should not have explicit dispatch entry for {dispatch_key}"
@@ -662,7 +664,7 @@ class NativeFunction:
                 is_abstract=is_abstract,
                 has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
                 has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
-                tag=tag,
+                tags=tags,
             ),
             backend_metadata,
         )
@@ -743,7 +745,7 @@ class NativeFunction:
         is_non_mutating_view = len(rets) > 0 and any(
             r.annotation is not None and not r.annotation.is_write for r in rets
         )
-        is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
+        is_inplace_view = "inplace_view" in self.tags
         is_wildcard_view = any(
             inp.annotation is not None and inp.annotation.alias_set_after != ""
             for inp in self.func.schema_order_arguments()
@@ -1959,7 +1961,7 @@ class NativeFunctionsViewGroup:
             assert not gets_generated_view_copy(self.view), (
                 f"{str(self.view.func.name)} appears to be a new operator that aliases its inputs."
                 " The codegen expects you to add a corresponding operator to native_functions.yaml:"
-                " {str(get_view_copy_name(self.view)}."
+                f" {get_view_copy_name(self.view):!s}."
                 " See Note [view_copy NativeFunctions] for details."
             )
         else:
@@ -1967,8 +1969,8 @@ class NativeFunctionsViewGroup:
             assert self.view.func.signature() == self.view_copy.func.signature(
                 strip_view_copy_name=True
             )
-            assert self.view_copy.tag == Tag.view_copy, (
-                f"{str(self.view_copy.func.name)} appears to be a view_copy operator. The codegen expects"
+            assert "view_copy" in self.view_copy.tags, (
+                f"{str(self.view_copy.func.name), str(self.view.tags)} appears to be a view_copy operator. The codegen expects"
                 " view_copy operators to be annotated with the 'view_copy' tag in native_functions.yaml."
                 " See Note [view_copy NativeFunction] for details."
             )
@@ -2009,7 +2011,7 @@ def gets_generated_view_copy(f: NativeFunction) -> bool:
     if f.has_composite_implicit_autograd_kernel:
         return False
     # We also don't need to generate copy variants for inplace views.
-    if f.tag == Tag.inplace_view:
+    if "inplace_view" in f.tags:
         return False
     return True
 

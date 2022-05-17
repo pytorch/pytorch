@@ -342,7 +342,7 @@ class CMake:
         cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH", None)
         if cmake_prefix_path:
             build_options["CMAKE_PREFIX_PATH"] = (
-                cast(str, py_lib_path) + ";" + cast(str, cmake_prefix_path)
+                py_lib_path + ";" + cast(str, cmake_prefix_path)
             )
         else:
             build_options["CMAKE_PREFIX_PATH"] = py_lib_path
