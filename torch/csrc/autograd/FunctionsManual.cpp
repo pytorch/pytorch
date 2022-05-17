@@ -5584,10 +5584,28 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
   }
 
   if (reduce == "prod") {
-    grad_self = (grad * result) / self;
-    grad_self.masked_fill_(self == 0, 0);
-    grad_src = (grad * result).index_select(dim, index) / source;
-    grad_src.masked_fill_(source == 0, 0);
+    Tensor masked_self = self.masked_fill(self == 0, 1);
+    Tensor masked_self_result = masked_self.index_reduce(dim, index, source, reduce, include_self);
+    grad_self = grad * masked_self_result / masked_self;
+    Tensor src_zero = source == 0;
+    Tensor src_num_zeros = zeros_like(self).index_add(dim, index, src_zero.to(self.dtype())).index_select(dim, index);
+    Tensor src_single_zero = bitwise_and(src_zero, src_num_zeros == 1);
+    // For src positions with src_single_zero, (grad * result).index_select(dim,index) / source.masked_fill(src_zero, 1)
+    // would incorrectly propagate zeros as the gradient
+    Tensor masked_src = source.masked_fill(src_single_zero, 1);
+    Tensor masked_src_result = self.index_reduce(dim, index, masked_src, reduce, include_self);
+    Tensor grad_src1 = where(src_single_zero,
+                             (grad * masked_src_result).index_select(dim, index),
+                             (grad * result).index_select(dim, index) / source.masked_fill(src_zero, 1));
+    if ((src_num_zeros > 1).any().item<bool>()) {
+      auto node = std::make_shared<DelayedError>(
+        "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
+        /* num inputs */ 1);
+      auto result = node->apply({ grad_src1 });
+      grad_src = result[0];
+    } else {
+      grad_src = grad_src1;
+    }
   } else if (reduce == "mean") {
     Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N = N.index_add(dim, index, ones_like(source));
