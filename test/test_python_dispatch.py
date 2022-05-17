@@ -1194,18 +1194,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
                         return not_contiguous_data.is_contiguous()
                     return NotImplemented
 
-            class ExampleTensor4(torch.Tensor):
-                @staticmethod
-                def __new__(cls, data, wrapper):
-                    return subclass_helper(cls, data, wrapper)
-
-                @classmethod
-                def __torch_dispatch__(cls, func, types, args, kwargs):
-                    if func.overloadpacket == torch.ops.aten.is_contiguous:
-                        return not_contiguous_data.is_contiguous()
-                    elif func.overloadpacket == torch.ops.aten.contiguous:
-                        return "arf"
-                    return NotImplemented
 
             err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
             e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
@@ -1222,12 +1210,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
             e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
             self.assertEqual(e.is_contiguous(), False)
             with self.assertRaisesRegex(TypeError, err_msg):
-                e.contiguous()
-
-            err_msg = "contiguous returned invalid type str"
-            e = ExampleTensor4(torch.randn(3, 3), use_wrapper_subclass)
-            self.assertEqual(e.is_contiguous(), False)
-            with self.assertRaisesRegex(RuntimeError, err_msg):
                 e.contiguous()
 
 
