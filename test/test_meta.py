@@ -6,6 +6,7 @@ from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten
 import torch.utils._python_dispatch
+from torch._prims.utils import is_complex_dtype, corresponding_real_dtype
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
@@ -14,9 +15,9 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.common_device_type import (
-    onlyNativeDeviceTypes,
     ops,
     instantiate_device_type_tests,
+    onlyCUDA,
 )
 from torch.testing._internal.logging_tensor import no_dispatch
 from torch.testing._internal.common_methods_invocations import op_db
@@ -86,36 +87,66 @@ class MetaConverter:
     # NB: doesn't actually return a storage, because meta storage is
     # not supported
     def meta_storage(self, s):
-        if s not in self.storage_memo:
-            self.storage_memo[s] = torch.empty(s.size(), dtype=s.dtype, device='meta')
-        return self.storage_memo[s]
+        # NB: TypedStorage is freshly allocated and cannot be used as hash
+        # key index.
+        if s._cdata not in self.storage_memo:
+            self.storage_memo[s._cdata] = torch.empty(s.size(), dtype=s.dtype, device='meta')
+        return self.storage_memo[s._cdata]
 
     # This function assumes that it's possible to do the conversion
     def meta_tensor(self, t):
         if t not in self.tensor_memo:
             with torch.inference_mode(t.is_inference()):
-                s = self.meta_storage(t.storage())
-                is_leaf = safe_is_leaf(t)
-                if is_leaf or not t._is_view():
-                    r = torch.empty(
-                        (0,), dtype=t.dtype, device='meta'
-                    )
-                    with no_dispatch():
-                        r.set_(s, t.storage_offset(), t.size(), t.stride())
-                    r.requires_grad = t.requires_grad
-                    if not is_leaf and t.requires_grad:
-                        with torch.enable_grad():
-                            r = r.clone()
-                else:
-                    base = torch.empty(
-                        (0,), dtype=t.dtype, device='meta'
-                    )
-                    base.set_(s, 0, s.size(), (1,))
-                    base.requires_grad = t.requires_grad
+                if t._is_view():
+                    # Construct views in two steps: recursively meta-fy their
+                    # base, and then create the view off that.  NB: doing it
+                    # directly from storage is WRONG because this won't cause
+                    # version counters to get shared.
+                    assert t._is_view()
+                    base = self.meta_tensor(t._base)
+
+                    def is_c_of_r(complex_dtype, real_dtype):
+                        return is_complex_dtype(complex_dtype) and \
+                            corresponding_real_dtype(complex_dtype) == real_dtype
+
+                    if base.dtype == t.dtype:
+                        pass
+                    elif is_c_of_r(base.dtype, t.dtype):
+                        base = torch.view_as_real(base)
+                    elif is_c_of_r(t.dtype, base.dtype):
+                        base = torch.view_as_complex(base)
+                    else:
+                        # This is not guaranteed to succeed.  If it fails, it
+                        # means there is another dtype-converting view function
+                        # that hasn't been handled here
+                        base = base.view(t.dtype)
+
                     with torch.enable_grad():
-                        if t._is_view() and not safe_is_leaf(t._base):
-                            base = base.clone()
                         r = base.as_strided(t.size(), t.stride(), t.storage_offset())
+                else:
+                    is_leaf = safe_is_leaf(t)
+                    # Fake up some autograd history.
+                    if t.requires_grad:
+                        r = torch.empty((0,), dtype=t.dtype, device='meta', requires_grad=True)
+                        if not is_leaf:
+                            with torch.enable_grad():
+                                # The backward function here will be wrong, but
+                                # that's OK; our goal is just to get the metadata
+                                # looking as close as possible; we're not going to
+                                # actually try to backward() on these produced
+                                # metas.  TODO: would be safer to install some
+                                # sort of unsupported grad_fn here
+                                r = r.clone()
+                    else:
+                        r = torch.empty((0,), dtype=t.dtype, device='meta')
+                    # As long as meta storage is not supported, need to prevent
+                    # redispatching on set_(Storage, ...) which will choke with
+                    # meta storage
+                    s = self.meta_storage(t.storage())
+                    with no_dispatch():
+                        with torch.no_grad():
+                            r.set_(s, t.storage_offset(), t.size(), t.stride())
+
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
             self.tensor_memo[t] = r
@@ -169,6 +200,98 @@ class MetaConverter:
         else:
             # non-Tensor types don't count as hit or miss
             return t
+
+
+class TestMetaConverter(TestCase):
+    def assertSameVersionCounter(self, m1, m2):
+        # Cannot easily test m1 and m2 have same storage due to
+        # lack of Storage bindings.  Use version counter.
+        vc = m1._version
+        self.assertEqual(m2._version, vc)
+        # Doing it this way ensures that we get VC bump even with leaves
+        with torch.no_grad():
+            m1._base.add_(3)
+        self.assertNotEqual(m1._version, vc)
+        self.assertEqual(m2._version, m1._version)
+
+    def test_view_of_non_leaf(self):
+        x = torch.randn(4, requires_grad=True)
+        y = x.neg()
+        z1 = y[:]
+        z2 = y[:]
+        to_meta = MetaConverter()
+        m1 = to_meta(z1)
+        m2 = to_meta(z2)
+        self.assertEqual(m1.shape, z1.shape)
+        self.assertTrue(m1._is_view())
+        self.assertFalse(m1._base.is_leaf)
+        self.assertSameVersionCounter(m1, m2)
+
+    def test_view_of_leaf(self):
+        x = torch.randn(4, requires_grad=True)
+        z1 = x[:]
+        z2 = x[:]
+        to_meta = MetaConverter()
+        m1 = to_meta(z1)
+        m2 = to_meta(z2)
+        self.assertEqual(m1.shape, z1.shape)
+        self.assertTrue(m1._is_view())
+        self.assertTrue(m1._base.is_leaf)
+        self.assertSameVersionCounter(m1, m2)
+
+    def test_leaf(self):
+        x = torch.randn(4, requires_grad=True)
+        to_meta = MetaConverter()
+        m = to_meta(x)
+        self.assertEqual(m.shape, x.shape)
+        self.assertTrue(m.is_leaf)
+        self.assertTrue(m.requires_grad)
+
+    def test_non_leaf(self):
+        x = torch.randn(4, requires_grad=True)
+        y = x.neg()
+        to_meta = MetaConverter()
+        m = to_meta(y)
+        self.assertEqual(m.shape, y.shape)
+        self.assertFalse(m.is_leaf)
+        self.assertTrue(m.requires_grad)
+
+    def test_requires_grad_false(self):
+        x = torch.randn(4, requires_grad=False)
+        to_meta = MetaConverter()
+        m = to_meta(x)
+        self.assertEqual(m.shape, x.shape)
+        self.assertFalse(m.requires_grad)
+
+    def test_view_as_real(self):
+        x = torch.randn(4, dtype=torch.complex64)
+        y = torch.view_as_real(x)
+        m = MetaConverter()(y)
+        self.assertEqual(m.shape, y.shape)
+        self.assertEqual(m.dtype, y.dtype)
+
+    def test_view_as_complex(self):
+        x = torch.randn((4, 2), dtype=torch.float32)
+        y = torch.view_as_complex(x)
+        m = MetaConverter()(y)
+        self.assertEqual(m.shape, y.shape)
+        self.assertEqual(m.dtype, y.dtype)
+
+    def test_view_dtype(self):
+        x = torch.randn(4, dtype=torch.float32)
+        y = x.view(dtype=torch.int32)
+        m = MetaConverter()(y)
+        self.assertEqual(m.shape, y.shape)
+        self.assertEqual(m.dtype, y.dtype)
+
+    def test_imag(self):
+        x = torch.randn(4, dtype=torch.complex64)
+        y = x.imag
+        m = MetaConverter()(y)
+        self.assertEqual(m.shape, y.shape)
+        self.assertEqual(m.dtype, y.dtype)
+        self.assertEqual(m.stride(), y.stride())
+        self.assertEqual(m.storage_offset(), y.storage_offset())
 
 
 def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
@@ -401,7 +524,6 @@ meta_function_expected_failures = {
     torch.histc: {bf16, f32, f64},  # aten::histc, aten::histc.out
     torch.histogram: {f32, f64},  # aten::histogram.bin_ct, aten::histogram.bins_tensor
     torch.histogramdd: {f32, f64},  # aten::_histogramdd_bin_edges, aten::_histogramdd_from_bin_tensors
-    torch.imag: {c32},  # aten::view_as_real
     torch.kthvalue: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::kthvalue.values
     torch.linalg.qr: {f32, f64},  # aten::_linalg_qr_helper
     torch.linalg.vector_norm: {bf16, f16, f32, f64},  # aten::linalg_vector_norm
@@ -445,7 +567,6 @@ meta_function_expected_failures = {
     torch.nn.functional.unfold: {bf16, f16, f32, f64},  # aten::im2col
     torch.nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero, aten::nonzero.out
     torch.polar: {f32, f64},  # aten::polar.out
-    torch.real: {c32},  # aten::view_as_real
     torch.repeat_interleave: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::repeat_interleave.Tensor
     torch.roll: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
     torch.searchsorted: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::searchsorted.Tensor, aten::searchsorted.Tensor_out
@@ -455,7 +576,6 @@ meta_function_expected_failures = {
     torch.trace: {f32, f64, i16, i32, i64, i8, u8},  # aten::trace
     torch.var_mean: {bf16, f16, f32, f64},  # aten::var_mean.correction
     torch.vdot: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::vdot
-    torch.view_as_complex: {f16, f32, f64},  # aten::view_as_complex
     torch.qr: {f32, f64},
     torch.ormqr: {f32, f64},
     torch.lu_solve: {f32, f64},
@@ -792,8 +912,6 @@ meta_dispatch_expected_failures = {
     aten.var_mean.correction: {bf16, f16, f64, f32},
     aten.vdot.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.vdot.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.view_as_complex.default: {c64, f64, c128, f16, f32},
-    aten.view_as_real.default: {c32},
     aten._det_lu_based_helper.default: {f32, f64},  # aten::_det_lu_based_helper
     aten._linalg_check_errors.default: {c128, c64, f32, f64},  # aten::_local_scalar_dense
     aten.cholesky.default: {f32, f64},  # aten::cholesky
@@ -988,9 +1106,13 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
         )
 
 
+# NB: we're running these tests only on CUDA because there are some
+# inconsistencies between CUDA and CPU, and running on CUDA makes it easier
+# to ignore the CPU case when inconsistencies arise.  Ideally we deal
+# with the inconsistencies but this takes time.
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
+    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
@@ -1009,7 +1131,7 @@ class TestMeta(TestCase):
                     func(*args, **kwargs, out=expected)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
+    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
