@@ -300,7 +300,6 @@ meta_exclude_set = {
     torch.linalg.norm,  # MISSING aten::linalg_vector_norm
     torch.linalg.qr,  # MISSING aten::_linalg_qr_helper
     torch.linalg.slogdet,  # MISSING aten::linalg_slogdet
-    torch.linalg.solve,  # MISSING aten::linalg_solve
     torch.linalg.solve_triangular,  # MISSING aten::linalg_solve_triangular
     torch.linalg.tensorinv,  # MISSING aten::_local_scalar_dense
     torch.linalg.tensorsolve,  # MISSING aten::linalg_solve
@@ -311,7 +310,6 @@ meta_exclude_set = {
     torch.logical_xor,  # MISSING aten::logical_xor.out
     torch.logit,  # MISSING aten::logit
     torch.lstsq,  # MISSING aten::lstsq
-    torch.lu_solve,  # MISSING aten::lu_solve
     torch.masked_select,  # MISSING aten::masked_select
     torch.matmul,  # MISSING aten::dot
     torch.matrix_exp,  # MISSING aten::linalg_matrix_exp
