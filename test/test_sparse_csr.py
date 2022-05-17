@@ -2047,7 +2047,9 @@ class TestSparseCSR(TestCase):
                     self._convert_to_layout(b, layout_b)
             else:
                 b = self._convert_to_layout(a, layout_a)
-                self._convert_to_layout(b, layout_b)
+                c = self._convert_to_layout(b, layout_b)
+                if (layout_a is not torch.sparse_bsr and layout_b is not torch.sparse_bsr):
+                    self.assertEqual(a.to_dense(), c.to_dense())
 
         _to_from_layout(from_layout, to_layout)
 

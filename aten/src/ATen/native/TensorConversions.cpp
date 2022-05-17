@@ -490,7 +490,6 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
 
 
 Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
-  AT_DISPATCH_SPARSE_COMPRESSED_NONBLOCK_LAYOUTS(self.layout(), "sparse_compressed_to_sparse_csr", [&]{});
   if (self.layout() == kSparseCsc) {
     TORCH_CHECK(
         self.dim() == 2,
@@ -523,18 +522,21 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
                                                  c10::kSparseCsr,
                                                  new_values.device());
   }
-  // Just returning self doesn't work
-  // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
-  // "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152, please
-  // report a bug to PyTorch. aten::to_sparse_csr
-  return at::native::_sparse_csr_tensor_unsafe(
-      self.crow_indices(),
-      self.col_indices(),
-      self.values(),
-      self.sizes(),
-      self.scalar_type(),
-      c10::kSparseCsr,
-      self.device());
+  if (self.layout() == kSparseCsr) {
+    // Just returning self doesn't work
+    // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
+    // "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152, please
+    // report a bug to PyTorch. aten::to_sparse_csr
+    return at::native::_sparse_csr_tensor_unsafe(
+        self.crow_indices(),
+        self.col_indices(),
+        self.values(),
+        self.sizes(),
+        self.scalar_type(),
+        c10::kSparseCsr,
+        self.device());
+  }
+  AT_ERROR("sparse_compressed_to_sparse_csr expected SparseCsr or SparseCsc layout but got ", self.layout());
 }
 
 Tensor coo_to_sparse_csr(const Tensor& self) {
