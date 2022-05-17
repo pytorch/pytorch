@@ -37,3 +37,5 @@ jobs:
           else
             python3 .github/scripts/trymerge.py --revert "${PR_NUM}"
           fi
+
+concurrency: try-revert
