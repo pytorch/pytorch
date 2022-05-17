@@ -1,13 +1,17 @@
 import bisect
 import itertools
 import math
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed import distributed_c10d
-from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._shard.sharded_tensor import (
+    init_from_local_shards,
+    Shard,
+    ShardedTensor,
+)
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
     EnumerableShardingSpec,
@@ -151,6 +155,10 @@ def _all_gather_sharded_tensor(
     world_size = dist.get_world_size(pg)
     shards = sharded_tensor.local_shards()
     local_tensor = shards[0].tensor.flatten()
+    move_to_cpu = False
+    if not local_tensor.is_cuda:
+        move_to_cpu = True
+        local_tensor = local_tensor.cuda()
     dim_0_size = sharded_tensor.size()[0]  # type: ignore[index]
     tensor_numel = sharded_tensor.size().numel()  # type: ignore[union-attr]
     chunk_size = math.ceil(dim_0_size / world_size) * tensor_numel // dim_0_size
@@ -159,7 +167,10 @@ def _all_gather_sharded_tensor(
         local_tensor = F.pad(local_tensor, [0, num_padding])
     tensor = torch.empty(chunk_size * world_size, dtype=local_tensor.dtype).cuda()
     dist._all_gather_base(tensor, local_tensor, group=pg)
-    return tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
+    tensor = tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
+    if move_to_cpu:
+        tensor = tensor.cpu()
+    return tensor
 
 
 def _gather_state_dict(
@@ -188,3 +199,15 @@ def _gather_state_dict(
             tensor = output_tensor
         new_state_dict[key] = tensor
     return new_state_dict
+
+
+def _distributed_chunk_tensor(
+    tensor: torch.Tensor, rank: int, world_size: int, process_group: dist.ProcessGroup
+) -> ShardedTensor:
+    local_shard = tensor.chunk(world_size)[rank].clone()
+    offsets = [0 for _ in tensor.size()]
+    offsets[0] = math.ceil(tensor.size()[0] / world_size) * rank
+    local_shards = [Shard.from_tensor_and_offsets(local_shard, offsets, rank)]
+    return init_from_local_shards(
+        local_shards, tensor.size(), process_group=process_group
+    )

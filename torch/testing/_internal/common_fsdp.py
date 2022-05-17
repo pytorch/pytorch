@@ -626,9 +626,9 @@ class FSDPTest(MultiProcessTestCase):
                 msg="FullyShardedDataParallel didn't match PyTorch DDP",
             )
 
+    @staticmethod
     def _get_wrapped_model(
-        self, group, cuda_first=False, ignore_modules=False, config=None,
-        **model_kwargs,
+        group, cuda_first=False, ignore_modules=False, config=None, **model_kwargs,
     ) -> FullyShardedDataParallel:
         if config is None:
             config = {}
@@ -647,8 +647,9 @@ class FSDPTest(MultiProcessTestCase):
             model = model.cuda()
         return model
 
+    @staticmethod
     def _get_nonwrapped_model(
-        self, group, **model_kwargs,
+        group, **model_kwargs,
     ) -> torch.nn.Module:
         """Returns the non-wrapped model that is wrapped in
         :meth:`_get_wrapped_model`. The model used in these two methods should
