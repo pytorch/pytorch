@@ -2474,8 +2474,20 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
       // Sparse CSR transpose is a copy operation as the values of
       // transposed CSR tensor are permuted values of the input CSR
       // tensor.
-      return sparse_csr_transpose(self);
-    } else {  // sparse COO
+      TORCH_CHECK(
+          self.dim() == 2,
+          "Expected self to be of dimension 2, but got ",
+          self.dim(),
+          ".");
+      auto sizes = self.sizes();
+      return _sparse_csc_tensor_unsafe(
+          self.crow_indices(),
+          self.col_indices(),
+          self.values(),
+          {sizes[1], sizes[0]} self.values().scalar_type(),
+          kSparseCsc,
+          self.values.device());
+    } else { // sparse COO
       Tensor self_clone = self.clone();
       return sparse_transpose_(self_clone, dim0, dim1);
     }
