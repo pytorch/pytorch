@@ -468,10 +468,12 @@ meta_function_expected_failures = {
 }
 
 """
+# This is some sample code for how we could dump these dicts into YAML
+# file for easier reading/writing
 import yaml
-print(yaml.dump({"boof":
+print(yaml.dump(
   {resolve_name(k): [dtype_abbrs[d] for d in v]
-   for k, v in meta_function_expected_failures.items()}}, default_flow_style=None))
+   for k, v in meta_function_expected_failures.items()}, default_flow_style=None))
 import sys
 sys.exit()
 """

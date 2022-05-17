@@ -202,10 +202,10 @@ void initDispatchBindings(PyObject* module) {
     c10::Dispatcher::singleton().checkInvariants();
   });
 
-  m.def("_dispatch_has_kernel_for_dispatch_key", [](const char* name, std::string dispatch) -> bool {
+  m.def("_dispatch_has_kernel_for_dispatch_key", [](const char* name, const char* dispatch) -> bool {
     auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
     if (!op) {
-      return "";
+      return false;  // TODO: or raise an error?
     } else {
       return op->hasKernelForDispatchKey(c10::parseDispatchKey(dispatch));
     }
