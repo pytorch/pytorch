@@ -785,7 +785,7 @@ SparseTensor& sparse_mask_out_cpu(
     // TODO: Re-audit this; it used to be an indexSelect directly into r_values
     at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(r_values.scalar_type(), "sparse_mask", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r_values.scalar_type(), "sparse_mask", [&] {
       sparse_mask_out_cpu_kernel<scalar_t>(
           r_values, t, r_nnz, sparse_dim, mask_indices);
     });
