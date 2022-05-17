@@ -3329,6 +3329,7 @@
 
 - func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu, Tensor count) -> Tensor
   dispatch:
+    CPU: batch_norm_backward_elemt_cpu
     CUDA: batch_norm_backward_elemt_cuda
 
 - func: batch_norm_update_stats(Tensor input, Tensor? running_mean, Tensor? running_var, float momentum) -> (Tensor, Tensor)

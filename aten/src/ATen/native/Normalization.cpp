@@ -350,6 +350,136 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cpu(
       });
 }
 
+template <typename scalar_t>
+Tensor batch_norm_backward_elemt_cpu_impl(
+    const Tensor& grad_out_,
+    const Tensor& input,
+    const Tensor& mean_,
+    const Tensor& invstd_,
+    const Tensor& weight,
+    const Tensor& sum_dy,
+    const Tensor& sum_dy_xmu,
+    const Tensor& count) {
+  Tensor grad_input = at::empty_like(input, input.suggest_memory_format());
+  auto weight_a = conditional_accessor_1d<scalar_t>(weight);
+  auto mean_a = conditional_accessor_1d<scalar_t>(mean_);
+  auto invstd_a = conditional_accessor_1d<scalar_t>(invstd_);
+  auto sum_dy_a = conditional_accessor_1d<scalar_t>(sum_dy);
+  auto sum_dy_xmu_a = conditional_accessor_1d<scalar_t>(sum_dy_xmu);
+  auto count_data = count.data_ptr<int>();
+  int64_t n_input = input.size(1);
+  int64_t n = input.numel() / n_input;
+  int64_t n_with_count = 0;
+  for (int i = 0; i < count.numel(); i++) {
+    n_with_count += count_data[i];
+  }
+  TensorIterator unary_iter;
+  TensorIterator binary_iter;
+  bool train = true;
+  unary_iter.build(TensorIteratorConfig()
+                       .add_output(grad_input)
+                       .add_input(train ? input : grad_out_)
+                       .resize_outputs(false)
+                       .declare_static_shape(input.sizes(), /*squash_dims=*/1));
+  binary_iter.build(
+      TensorIteratorConfig()
+          .add_output(grad_input)
+          .add_input(grad_input)
+          .add_input(grad_out_)
+          .resize_outputs(false)
+          .declare_static_shape(input.sizes(), /*squash_dims=*/1));
+
+  auto in_channel_stride = input.strides()[1];
+  auto in_data = input.data_ptr<scalar_t>();
+  // auto grad_in_channel_stride = grad_input_mask[0] ? grad_input.strides()[1]
+  // : 0; auto grad_in_data = grad_input_mask[0] ?
+  // grad_input.data_ptr<scalar_t>() : nullptr;
+  auto grad_in_channel_stride = grad_input.strides()[1];
+  auto grad_in_data = grad_input.data_ptr<scalar_t>();
+  auto grad_out_channel_stride = grad_out_.strides()[1];
+  auto grad_out_data = grad_out_.data_ptr<scalar_t>();
+
+  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
+    TensorIterator unary_iter_local(unary_iter);
+    TensorIterator binary_iter_local(binary_iter);
+
+    for (const auto f : c10::irange(b_begin, b_end)) {
+      scalar_t w = weight.defined() ? weight_a[f] : 1;
+
+      scalar_t mean, invstd;
+      mean = mean_a[f];
+      invstd = invstd_a[f];
+
+      if (train) {
+        // when in training mode
+        // Q(X) = X - E[x] ; i.e. input centered to zero mean
+        // Y = Q(X) / sigma    ; i.e. BN output before weight and bias
+        // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / sigma * w
+
+        // projection of gradOutput on to output scaled by std
+        scalar_t k = (scalar_t)sum_dy_xmu_a[f] * invstd * invstd / n_with_count;
+        {
+          unary_iter_local.unsafe_replace_operand(
+              0, grad_in_data + f * grad_in_channel_stride);
+          unary_iter_local.unsafe_replace_operand(
+              1, in_data + f * in_channel_stride);
+          cpu_serial_kernel(
+              unary_iter_local,
+              [&](const scalar_t i) -> scalar_t { return (i - mean) * k; });
+        }
+
+        scalar_t grad_mean = sum_dy_a[f] / n_with_count;
+        {
+          auto gI_data = grad_in_data + f * grad_in_channel_stride;
+          binary_iter_local.unsafe_replace_operand(0, gI_data);
+          binary_iter_local.unsafe_replace_operand(1, gI_data);
+          binary_iter_local.unsafe_replace_operand(
+              2, grad_out_data + f * grad_out_channel_stride);
+          cpu_serial_kernel(
+              binary_iter_local, [&](scalar_t gi, scalar_t go) -> scalar_t {
+                return (go - grad_mean - gi) * invstd * w;
+              });
+        }
+      } else {
+        // when in evaluation mode
+        // Q(X) = X - running_mean  ; i.e. input centered to zero mean
+        // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
+        // dL/dX = w / running_std
+        {
+          unary_iter_local.unsafe_replace_operand(
+              0, grad_in_data + f * grad_in_channel_stride);
+          unary_iter_local.unsafe_replace_operand(
+              1, grad_out_data + f * grad_out_channel_stride);
+          cpu_serial_kernel(
+              unary_iter_local,
+              [&](const scalar_t i) -> scalar_t { return i * invstd * w; });
+        }
+      }
+    }
+  });
+  return grad_input;
+}
+
+Tensor batch_norm_backward_elemt_cpu(
+    const Tensor& self,
+    const Tensor& input,
+    const Tensor& mean,
+    const Tensor& invstd,
+    const c10::optional<Tensor>& weight_opt,
+    const Tensor& sum_dy,
+    const Tensor& sum_dy_xmu,
+    const Tensor& count) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  return AT_DISPATCH_FLOATING_TYPES(
+      self.scalar_type(), "batch_norm_backward_elemt_cpu", [&] {
+        return batch_norm_backward_elemt_cpu_impl<scalar_t>(
+            self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
+      });
+}
+
 template<typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     const Tensor& grad_out_, const Tensor& input, const Tensor& weight,

@@ -134,8 +134,8 @@ class SyncBatchNorm(Function):
             )
             print("sum_dy: ", sum_dy)
             print("sum_dy_xmu: ", sum_dy_xmu)
-            print("grad_weight: ", grad_weight)
-            print("grad_bias: ", grad_bias)
+            # print("grad_weight: ", grad_weight)
+            # print("grad_bias: ", grad_bias)
 
             if self.needs_input_grad[0]:
                 # synchronizing stats used to calculate input gradient.
@@ -144,6 +144,8 @@ class SyncBatchNorm(Function):
                 torch.distributed.all_reduce(
                     combined, torch.distributed.ReduceOp.SUM, process_group, async_op=False)
                 sum_dy, sum_dy_xmu = torch.split(combined, num_channels)
+                print("sum_dy after combine: ", sum_dy)
+                print("sum_dy_xmu after combine: ", sum_dy_xmu)
 
                 # backward pass for gradient calculation
                 grad_input = torch.batch_norm_backward_elemt(
@@ -183,6 +185,7 @@ class SyncBatchNorm(Function):
             # Leave grad_input, grad_weight and grad_bias as None, which will be
             # interpreted by the autograd engine as Tensors full of zeros.
 
+        print("backward done")
         return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
 
 class CrossMapLRN2d(Function):
