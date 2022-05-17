@@ -9,7 +9,6 @@ from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed.nn.functional import (
     reduce_scatter,
 )
-from torch.overrides import handle_torch_function
 
 # Custom PartialTensor ops
 _PARTIAL_TENSOR_OPS: Dict[Callable, Callable] = {}
@@ -123,7 +122,7 @@ class _PartialTensor(torch.Tensor):
     __slots__ = ["_process_group", "_local_shard", "_reduce_op"]
 
     def __new__(cls, local_shard, process_group=None, reduce_op=distributed_c10d.ReduceOp.SUM):
-        r = torch.Tensor._make_wrapper_subclass(
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             local_shard.size(),
             dtype=local_shard.dtype,
@@ -204,7 +203,7 @@ class _PartialTensor(torch.Tensor):
             uneven_local_shards = self._local_shard.chunk(
                 self._process_group.size(), dim=sharding_dim
             )
-            expected_size = uneven_local_shards[rank_idx].size()
+            expected_size = uneven_local_shards[rank_idx].size()  # type: ignore[index]
             if local_result.size() != expected_size:
                 local_result = local_result.narrow(
                     sharding_dim,
@@ -224,7 +223,7 @@ class _PartialTensor(torch.Tensor):
             return _PARTIAL_TENSOR_OPS[func](types, args, kwargs)
 
         # Need to disable all dispatch to print args and kwargs appropriately.
-        guard = torch._C._DisableTorchDispatch()
+        guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
         try:
             with torch._C.DisableTorchFunction():
                 raise RuntimeError(
