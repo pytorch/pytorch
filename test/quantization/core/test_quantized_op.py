@@ -4228,7 +4228,7 @@ class TestQuantizedConv(TestCase):
         weight_dtype=torch.qint8,
     ):
         assert not (use_channelwise and use_transpose), \
-               "Cannot generate channelwise qconv_transpose_tensors "
+            "Cannot generate channelwise qconv_transpose_tensors "
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         # Padded input size should be at least as big as dilated kernel
