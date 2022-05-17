@@ -754,14 +754,16 @@ std::shared_ptr<Graph> PropagateShapesWithShapeFunction(
   return op_analyzer.getShapeComputeGraph();
 }
 
-c10::SymbolicShape combine_bounds(c10::SymbolicShape& lower_bound, c10::SymbolicShape& upper_bound){
+c10::SymbolicShape combine_bounds(
+    c10::SymbolicShape& lower_bound,
+    c10::SymbolicShape& upper_bound) {
   TORCH_INTERNAL_ASSERT(lower_bound.rank() == upper_bound.rank());
-  if(lower_bound.rank() == c10::nullopt){
+  if (lower_bound.rank() == c10::nullopt) {
     return c10::SymbolicShape();
   }
   std::vector<c10::ShapeSymbol> merged_shapes;
-  for (int i=0; i<lower_bound.rank(); i++){
-    if(lower_bound[i] == upper_bound[i]){
+  for (int i = 0; i < lower_bound.rank(); i++) {
+    if (lower_bound[i] == upper_bound[i]) {
       merged_shapes.push_back(lower_bound[i]);
     } else {
       merged_shapes.push_back(c10::ShapeSymbol::newSymbol());
@@ -1121,17 +1123,18 @@ calculateSymbolicShapesOnOp(
     }
   }
   // Handle bounded shape option
-  if(bounded_graphs){
+  if (bounded_graphs) {
     auto lower_bound = SymbolicShapeOpAnalyzer(schema, bounded_graphs->first);
     auto lower_bound_res = lower_bound.run(ssa_args);
     auto upper_bound = SymbolicShapeOpAnalyzer(schema, bounded_graphs->second);
     auto upper_bound_res = upper_bound.run(ssa_args);
     // Stitch together the values
-    if(lower_bound_res.has_value() && upper_bound_res.has_value()){
+    if (lower_bound_res.has_value() && upper_bound_res.has_value()) {
       TORCH_INTERNAL_ASSERT(lower_bound_res->size() == upper_bound_res->size());
       auto merged_res = std::vector<c10::SymbolicShape>();
-      for(size_t i = 0; i < lower_bound_res->size(); i++){
-        merged_res.push_back(combine_bounds(lower_bound_res->at(i), upper_bound_res->at(i)));
+      for (size_t i = 0; i < lower_bound_res->size(); i++) {
+        merged_res.push_back(
+            combine_bounds(lower_bound_res->at(i), upper_bound_res->at(i)));
       }
       cache_shape_function(schema, inputs, merged_res);
       return merged_res;

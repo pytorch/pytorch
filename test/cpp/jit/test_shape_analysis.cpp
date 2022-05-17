@@ -362,20 +362,19 @@ TEST(ShapeAnalysisTest, SymbolicShapeAPI) {
   assertShapeEqual(res, {sym_dim, 64, sym_dim, sym_dim});
 }
 
-TEST(ShapeAnalysisTest, BoundedSymbolicShapes){
-  auto schema = getSchema(
-      "aten::nonzero(Tensor self) -> (Tensor)");
+TEST(ShapeAnalysisTest, BoundedSymbolicShapes) {
+  auto schema = getSchema("aten::nonzero(Tensor self) -> (Tensor)");
 
   // Test that we generate symbolic shapes for the output of a nonzero op
   c10::IValue const_size_1 = std::vector<int64_t>{5, 10};
-  auto res = calculateSymbolicShapesOnOp(
-      schema, std::vector<SSAInput>{const_size_1});
+  auto res =
+      calculateSymbolicShapesOnOp(schema, std::vector<SSAInput>{const_size_1});
   assertShapeEqual(res, {sym_dim, 2});
 
   // Test that nonzero can also create concrete shapes
   c10::IValue const_size_2 = std::vector<int64_t>({1, 0});
-  res = calculateSymbolicShapesOnOp(
-      schema, std::vector<SSAInput>{const_size_2});
+  res =
+      calculateSymbolicShapesOnOp(schema, std::vector<SSAInput>{const_size_2});
   assertShapeEqual(res, {0, 2});
 }
 
