@@ -36,6 +36,17 @@ def _get_full_detached_param(fsdp_model: FullyShardedDataParallel):
 
     return params
 
+def _validate(model, process_group, assert_fn):
+    module_states = [param.detach().cpu() for param in model.parameters()]
+    module_states.extend([buffer.detach().cpu() for buffer in model.buffers()])
+    world_size = dist.get_world_size(process_group)
+    olist = [None for _ in range(world_size)]
+    dist.all_gather_object(olist, module_states, group=process_group)
+    rank0_states = olist[0]
+    for state in olist[1:]:
+        for p1, p2 in zip(rank0_states, state):
+            assert_fn(p1, p2)
+
 def _zero_model(fsdp_model: FullyShardedDataParallel):
     with FullyShardedDataParallel.summon_full_params(fsdp_model):
         for param in fsdp_model.parameters():

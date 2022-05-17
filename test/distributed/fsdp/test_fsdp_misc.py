@@ -17,6 +17,7 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     FSDPInitMode,
     TransformerWithSharedParams,
+    _validate,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -223,6 +224,28 @@ class TestFSDPMisc(FSDPTest):
         # CUDA device.
         inp = mod.get_input(device=torch.device("cpu"))
         fsdp(inp[0]).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_same_model_across_ranks(self):
+        """
+        FSDP broadcasts model from rank 0 to ensure it starts off with the same
+        values.
+        """
+        class MyModel(nn.Module):
+            def __init__(self, rank):
+                super().__init__()
+                # Seed via rank to make model different across ranks
+                torch.manual_seed(rank)
+                torch.cuda.manual_seed(rank)
+                self.lin = nn.Linear(10, 10, bias=False)
+                self.register_buffer("buffer", torch.ones(1) * rank)
+
+        m = MyModel(self.rank).cuda()
+        _validate(m, process_group=self.process_group, assert_fn=self.assertNotEqual)
+        # Passing sync_module_states into FSDP makes model the same during init.
+        fsdp = FSDP(m, sync_module_states=True)
+        with fsdp.summon_full_params(fsdp):
+            _validate(fsdp, process_group=self.process_group, assert_fn=self.assertEqual)
 
 instantiate_parametrized_tests(TestFSDPMisc)
 
