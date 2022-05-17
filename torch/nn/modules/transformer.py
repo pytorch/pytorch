@@ -170,6 +170,7 @@ class TransformerEncoder(Module):
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
         num_layers: the number of sub-encoder-layers in the encoder (required).
         norm: the layer normalization component (optional).
+        return_all_layers: a bool decide if result of each layers are returned (optional).
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -179,11 +180,12 @@ class TransformerEncoder(Module):
     """
     __constants__ = ['norm']
 
-    def __init__(self, encoder_layer, num_layers, norm=None):
+    def __init__(self, encoder_layer, num_layers, norm=None, return_all_layers=False):
         super(TransformerEncoder, self).__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
+        self.return_all_layers = return_all_layers
 
     def forward(self, src: Tensor, mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
@@ -197,9 +199,31 @@ class TransformerEncoder(Module):
             see the docs in Transformer class.
         """
         output = src
+        convert_to_nested = False
+
+        output_layers = []
+        if self.return_all_layers:
+            output_layers.append(output)
+        if hasattr(self.layers[0], "is_fastpath"):
+            if self.layers[0].is_fastpath() and src.dim() == 3:
+                if src_key_padding_mask is not None and not output.is_nested:
+                    convert_to_nested = True
+                    output = torch._nested_tensor_from_mask(output,
+                            src_key_padding_mask.logical_not())
 
         for mod in self.layers:
             output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
+            if self.return_all_layers:
+                if convert_to_nested:
+                    output_layers.append(output.to_padded_tensor())
+                else:
+                    output_layers.append(output)
+
+        if self.return_all_layers:
+            return torch.cat(output_layers, 0)
+
+        if convert_to_nested:
+            output = output.to_padded_tensor()
 
         if self.norm is not None:
             output = self.norm(output)
@@ -353,6 +377,14 @@ class TransformerEncoderLayer(Module):
             state['activation'] = F.relu
         super(TransformerEncoderLayer, self).__setstate__(state)
 
+    def is_fastpath(self):
+        if (not self.norm_first and not self.training and
+            self.self_attn.batch_first and
+            self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
+            self.norm1.eps == self.norm2.eps):
+            return True
+        return False
+
     def forward(self, src: Tensor, src_mask: Optional[Tensor] = None,
                 src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layer.
@@ -368,9 +400,7 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
-        if (not self.norm_first and not self.training and
-            self.self_attn.batch_first and src.dim() == 3 and self.self_attn._qkv_same_embed_dim and
-            self.activation_relu_or_gelu and self.norm1.eps == self.norm2.eps and
+        if (self.is_fastpath() and src.dim() == 3 and
             ((src_mask is None and src_key_padding_mask is None)
              if src.is_nested
              else (src_mask is None or src_key_padding_mask is None))):
