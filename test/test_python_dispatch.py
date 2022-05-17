@@ -876,8 +876,8 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
                 return func(*args, **kwargs)
 
         x = torch.randn(1)
-        with push_torch_dispatch_mode(partial(Logger, "A")):
-            with push_torch_dispatch_mode(partial(Logger, "B")):
+        with Logger.push("A"):
+            with Logger.push("B"):
                 x + x
         self.assertEqual(logs, ["B", "A"])
 
