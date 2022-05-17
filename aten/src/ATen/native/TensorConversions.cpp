@@ -909,9 +909,19 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
 }
 
 Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
+  if (self.layout() == kSparseCsc) {
+    // Based on to_sparse_csr just returning self doesn't work
+    return _sparse_csc_tensor_unsafe(
+        self.ccol_indices(),
+        self.row_indices(),
+        self.values(),
+        self.sizes(),
+        self.scalar_type(),
+        c10::kSparseCsc,
+        self.device());
+  }
   AT_ERROR(
       "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
-  return self;
 }
 
 Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
