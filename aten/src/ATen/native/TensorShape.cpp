@@ -2417,8 +2417,8 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   }
 
   TORCH_CHECK(
-      self.layout() == kSparseCsr || self.layout() == kSparseCsc ||
-          self.layout() == kSparseBsr || self.layout() == kSparseBsc,
+      !(self.layout() == kSparseCsr || self.layout() == kSparseCsc ||
+          self.layout() == kSparseBsr || self.layout() == kSparseBsc),
       "Got layout ",
       self.layout(),
       ", but SparseCsr, SparseCsc, SparseBsr, SparseBsc do not support in-place transposition.");

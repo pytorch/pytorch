@@ -549,6 +549,11 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
         0.0,
         1.0);
   }
+  if (mat1.layout() == kSparseCsc && mat2.layout() == c10::kStrided) {
+    // TODO: This is a costly conversion. We should have
+    // native support for CSC.
+    return _sparse_csr_mm(mat1.to_sparse_csr(), mat2);
+  }
   if (mat1.is_sparse_csr() && mat2.layout() == c10::kStrided) {
     // Return dense
     return at::addmm(
@@ -567,7 +572,7 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
         0.0,
         1.0);
   }
-  TORCH_INTERNAL_ASSERT(false, "Shouldn't get here. Please open an issue.");
+  AT_ERROR("_sparse_csr_mm does not support matrix multiplication of ", mat1.layout(), " @ ", mat2.layout());
 }
 
 Tensor _sparse_csr_addmm(
