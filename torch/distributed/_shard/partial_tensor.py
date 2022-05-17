@@ -11,7 +11,7 @@ from torch.distributed.nn.functional import (
 )
 from torch.overrides import handle_torch_function
 
-# Custom sharded ops
+# Custom PartialTensor ops
 _PARTIAL_TENSOR_OPS: Dict[Callable, Callable] = {}
 def _register_partial_tensor_op(op, func):
     from inspect import signature
