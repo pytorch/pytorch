@@ -3110,7 +3110,13 @@ class IrParser {
             TORCH_INTERNAL_ASSERT(self_type != nullptr);
             auto self_sizes = getTensorSizes(self_type);
 
-            auto output = squeeze(self, self_sizes);
+            TensorView* output = nullptr;
+            if (self_sizes.empty()) {
+              // squeeze on scalar tensor should just return itself;
+              output = set(self);
+            } else {
+              output = squeeze(self, self_sizes);
+            }
             value_map.emplace(node->output()->unique(), output);
           },
           [](const Node* node) -> bool {
@@ -3156,7 +3162,12 @@ class IrParser {
                 auto self_type = self_value->type()->cast<c10::TensorType>();
                 TORCH_INTERNAL_ASSERT(self_type != nullptr);
                 auto self_sizes = getTensorSizes(self_type);
-                output = squeeze(self, self_sizes, dim_value.value());
+                if (self_sizes.empty()) {
+                  // squeeze on scalar tensor should just return itself;
+                  output = set(self);
+                } else {
+                  output = squeeze(self, self_sizes, dim_value.value());
+                }
               }
               value_map.emplace(node->output()->unique(), output);
             },
