@@ -4327,7 +4327,7 @@ class DistributedTest:
                 weight_decay=sgd_weight_decay,
             )
 
-        def _test_ddp_hook_parity(self, state, hook):
+        def _test_ddp_hook_parity(self, state, hook, num_validated_iters=100):
             rank = self.rank
             m = torch.nn.Linear(1, 5)
             try:
@@ -4369,18 +4369,20 @@ class DistributedTest:
                 loss_hook.backward()
                 grad_hook = net_with_hook.module.weight.grad
                 avg_hook = grad_hook.clone()
-                # Verify hook grad with expected.
-                self.assertEqual(
-                    avg_hook[0, 0].item(),
-                    expected_grad,
-                    msg=f"Expected hook grad of {expected_grad} but got {avg_hook[0, 0]}",
-                )
-                # Verify hook grad with vanilla allreduce
-                self.assertEqual(
-                    avg_hook[0, 0],
-                    avg[0, 0],
-                    msg=f"Expected hook grad to be close to allreduce {avg[0, 0]}, but got {avg_hook[0, 0]}",
-                )
+
+                if i < num_validated_iters:
+                    # Verify hook grad with expected.
+                    self.assertEqual(
+                        avg_hook[0, 0].item(),
+                        expected_grad,
+                        msg=f"Expected hook grad of {expected_grad} but got {avg_hook[0, 0]}",
+                    )
+                    # Verify hook grad with vanilla allreduce
+                    self.assertEqual(
+                        avg_hook[0, 0],
+                        avg[0, 0],
+                        msg=f"Expected hook grad to be close to allreduce {avg[0, 0]}, but got {avg_hook[0, 0]}",
+                    )
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["cuda"],
@@ -4438,6 +4440,20 @@ class DistributedTest:
             )
             self._test_ddp_hook_parity(
                 state=state, hook=post_localSGD.post_localSGD_hook
+            )
+            # Only validate the warmup iterations before local SGD is applied,
+            # because when `post_local_gradient_allreduce` is disabled, the gradients will not be synchronized at all.
+            # Note that in practice a model averager has to be applied to run model averaging,
+            # so local gradient averaging is not necessary.
+            start_localSGD_iter = 10
+            state = post_localSGD.PostLocalSGDState(
+                process_group=None,
+                subgroup=dist.group.WORLD,
+                start_localSGD_iter=start_localSGD_iter,
+                post_local_gradient_allreduce=False,
+            )
+            self._test_ddp_hook_parity(
+                state=state, hook=post_localSGD.post_localSGD_hook, num_validated_iters=start_localSGD_iter
             )
 
             # When `subgroup` is None, it is equivalent to the subgroup on the each node.

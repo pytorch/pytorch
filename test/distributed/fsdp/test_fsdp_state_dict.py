@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 from torch import distributed as dist
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     StateDictType,
@@ -100,19 +101,33 @@ class TestFSDPStateDict(FSDPTest):
         dist.broadcast_object_list(olist)
         return olist[0]
 
-    def _get_simple_nested_model(self, *fsdp_args, **fsdp_kwargs):
-        model = FSDP(
-            nn.Sequential(
-                FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs),
-                nn.Linear(10, 10, bias=False).cuda(),
-            ),
-            *fsdp_args,
-            **fsdp_kwargs,
-        )
+    def _compare_models(self, model, model_new, assert_fn, check_fp16=False):
+        with FullyShardedDataParallel.summon_full_params(model):
+            with FullyShardedDataParallel.summon_full_params(model_new):
+                params = list(model.parameters())
+                params_new = list(model_new.parameters())
+                assert_fn(params, params_new)
+                if check_fp16:
+                    for tensor in model_new.parameters():
+                        self.assertEqual(tensor.dtype, torch.float16)
+
+    def _get_simple_nested_model(self, *fsdp_args, checkpoint_wrap=False, **fsdp_kwargs):
+        lin1 = nn.Linear(10, 10, bias=False).cuda()
+        lin2 = nn.Linear(10, 10, bias=False).cuda()
+        if checkpoint_wrap:
+            lin1 = checkpoint_wrapper(lin1)
+            lin2 = checkpoint_wrapper(lin2)
+        seq = nn.Sequential(FSDP(lin1, *fsdp_args, **fsdp_kwargs), lin2)
+        if checkpoint_wrap:
+            seq = checkpoint_wrapper(seq)
+        model = FSDP(seq, *fsdp_args, **fsdp_kwargs)
         return model
 
-    def _get_simple_model(self, *fsdp_args, **fsdp_kwargs):
-        model = FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs)
+    def _get_simple_model(self, *fsdp_args, checkpoint_wrap=False, **fsdp_kwargs):
+        lin = nn.Linear(10, 10, bias=False).cuda()
+        if checkpoint_wrap:
+            lin = checkpoint_wrapper(lin)
+        model = FSDP(lin, *fsdp_args, **fsdp_kwargs)
         return model
 
     def _get_state_dict_mgr(self, model, state_dict_type, state_dict_rank0_and_offload):
@@ -142,6 +157,50 @@ class TestFSDPStateDict(FSDPTest):
                     )
             else:
                 self.assertEqual(fsdp_state_dict, {})
+
+    @skip_if_lt_x_gpu(2)
+    def test_load_activation_checkpointed_module(self):
+        # TODO: move this tests to checkpoint_wrapper tests once there is a dedicated
+        # test suite for them: https://github.com/pytorch/pytorch/issues/77478.
+        lin = nn.Linear(10, 10, bias=False).cuda()
+        lin = checkpoint_wrapper(lin)
+        state_dict = deepcopy(lin.state_dict())
+        # Load into non-checkpoint wrapped linear module
+        lin_new = nn.Linear(10, 10, bias=False).cuda()
+        lin_new.load_state_dict(state_dict)
+        for p1, p2 in zip(lin.parameters(), lin_new.parameters()):
+            self.assertEqual(p1, p2)
+
+        # Load non-checkpoint wrapped module into checkpoint wrapped one
+        # Make params different
+        for p in lin_new.parameters():
+            with torch.no_grad():
+                p.add_(0.5)
+
+        state_dict = deepcopy(lin_new.state_dict())
+        # Verify checkpoint wrapped linear can load unwrapped linear
+        lin.load_state_dict(state_dict)
+        print(type(lin))
+        for p1, p2 in zip(lin.parameters(), lin_new.parameters()):
+            self.assertEqual(p1, p2)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("checkpoint_wrap", ["first", "second", "both"])
+    def test_fsdp_state_dict_with_activation_checkpoint(self, checkpoint_wrap):
+        for model_call in [
+            partial(self._get_simple_model),
+            partial(self._get_simple_nested_model)
+        ]:
+            model = model_call(checkpoint_wrap=(checkpoint_wrap in ["first", "both"]))
+            state_dict = _get_state_dict(model, False, False)
+            # Possibly wrap new model in activation checkpoint wrapper to test save/
+            # load with this wrapper
+            model_new = model_call(checkpoint_wrap=(checkpoint_wrap in ["second", "both"]))
+            _zero_model(model_new)
+            self._compare_models(model, model_new, self.assertNotEqual)
+            # Would fail if checkpoint_wrapper did not correctly implement state_dict pre/post hooks
+            model_new.load_state_dict(state_dict)
+            self._compare_models(model, model_new, self.assertEqual)
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_rank0_offload_save_load_flow(self):
@@ -240,12 +299,7 @@ class TestFSDPStateDict(FSDPTest):
 
             # zero the model to ensure parameters are different.
             _zero_model(model_new)
-
-            with FullyShardedDataParallel.summon_full_params(model):
-                with FullyShardedDataParallel.summon_full_params(model_new):
-                    params = list(model.parameters())
-                    params_new = list(model_new.parameters())
-                    self.assertNotEqual(params, params_new)
+            self._compare_models(model, model_new, self.assertNotEqual)
 
             # Verify parameters are the same in the new model.
             if state_dict_rank0_and_offload:
@@ -257,14 +311,8 @@ class TestFSDPStateDict(FSDPTest):
 
             with FSDP.state_dict_type(model_new, STATE_DICT_MAPPING[state_dict_type]):
                 model_new.load_state_dict(fsdp_state_dict)
-            with FullyShardedDataParallel.summon_full_params(model_new):
-                with FullyShardedDataParallel.summon_full_params(model):
-                    params = list(model.parameters())
-                    params_new = list(model_new.parameters())
-                    self.assertEqual(params, params_new)
-                    if fp16:
-                        for tensor in model_new.parameters():
-                            self.assertEqual(tensor.dtype, torch.float16)
+
+            self._compare_models(model, model_new, self.assertEqual, check_fp16=fp16)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
