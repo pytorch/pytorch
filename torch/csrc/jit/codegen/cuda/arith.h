@@ -30,7 +30,8 @@ TORCH_CUDA_CU_API TensorView* bitCastOp(DataType dtype, TensorView* v1);
 // Perform unary op type and return the output
 TORCH_CUDA_CU_API Val* unaryOp(UnaryOpType type, Val* v1);
 TORCH_CUDA_CU_API TensorView* unaryOp(UnaryOpType type, TensorView* v1);
-
+TORCH_CUDA_CU_API Val* unaryIsOp(UnaryOpType type, Val* v1);
+TORCH_CUDA_CU_API TensorView* unaryIsOp(UnaryOpType type, TensorView* v1);
 TORCH_CUDA_CU_API Val* unaryOp(
     UnaryOpType type,
     Val* v1,
@@ -228,6 +229,24 @@ TORCH_CUDA_CU_API TensorView* trunc(TensorView*);
 // not
 TORCH_CUDA_CU_API Val* notOp(Val*);
 TORCH_CUDA_CU_API TensorView* notOp(TensorView*);
+// isfinite
+TORCH_CUDA_CU_API Val* isfinite(Val*);
+TORCH_CUDA_CU_API TensorView* isfinite(TensorView*);
+// isinf
+TORCH_CUDA_CU_API Val* isinf(Val*);
+TORCH_CUDA_CU_API TensorView* isinf(TensorView*);
+// isnan
+TORCH_CUDA_CU_API Val* isnan(Val*);
+TORCH_CUDA_CU_API TensorView* isnan(TensorView*);
+// isneginf
+TORCH_CUDA_CU_API Val* isneginf(Val*);
+TORCH_CUDA_CU_API TensorView* isneginf(TensorView*);
+// isposinf
+TORCH_CUDA_CU_API Val* isposinf(Val*);
+TORCH_CUDA_CU_API TensorView* isposinf(TensorView*);
+// isreal
+TORCH_CUDA_CU_API Val* isreal(Val*);
+TORCH_CUDA_CU_API TensorView* isreal(TensorView*);
 
 // Broadcasts v1 based on bool vector. Size of broadcast bool vector should be
 // the number of dims desired in the broadcasted tensor. This vector should be

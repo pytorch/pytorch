@@ -2,10 +2,11 @@ import inspect
 from typing import Dict, List, Union
 
 import torch._C
-from torch.onnx import symbolic_helper, symbolic_registry
+from torch.onnx import _constants, symbolic_registry
 
-for v in symbolic_helper._onnx_stable_opsets + [symbolic_helper._onnx_main_opset]:
+for v in _constants.onnx_stable_opsets:
     symbolic_registry.register_version("", v)
+symbolic_registry.register_version("", _constants.onnx_main_opset)
 
 
 class _TorchSchema:
@@ -70,7 +71,7 @@ def _symbolic_argument_count(func):
             has_var = True
         elif name == "_outputs" or name == "g":
             continue
-        elif p.default != inspect._empty:   # type: ignore[attr-defined]
+        elif p.default != inspect._empty:  # type: ignore[attr-defined]
             optional_params.append(p)
         else:
             params.append(str(p))

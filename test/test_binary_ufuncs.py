@@ -56,6 +56,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
+    binary_ufuncs_and_refs,
     _NOTHING,
     generate_elementwise_binary_tensors,
     generate_elementwise_binary_small_value_tensors,
@@ -474,34 +475,36 @@ class TestBinaryUfuncs(TestCase):
     # NOTE: because the cross-product of all possible type promotion tests is huge, this
     #   just spot checks some handwritten cases.
     # NOTE: It may be possible to refactor this test into something simpler
-    @ops(binary_ufuncs, dtypes=OpDTypes.none)
+    @ops(binary_ufuncs_and_refs, dtypes=OpDTypes.none)
     def test_type_promotion(self, device, op):
         supported_dtypes = op.supported_dtypes(torch.device(device).type)
+
+        make_lhs = partial(
+            make_tensor, (5,), device=device, **op.lhs_make_tensor_kwargs
+        )
+        make_rhs = partial(
+            make_tensor, (5,), device=device, **op.rhs_make_tensor_kwargs
+        )
+
+        make_lhs_scalar_tensor = partial(
+            make_tensor, (), device='cpu', **op.lhs_make_tensor_kwargs
+        )
+        make_rhs_scalar_tensor = partial(
+            make_tensor, (), device='cpu', **op.rhs_make_tensor_kwargs
+        )
 
         def _supported(dtypes):
             return all(map(lambda x: x in supported_dtypes, dtypes))
 
         # int x int type promotion
         if _supported((torch.int16, torch.int32, torch.int64)):
-            lhs_i16 = make_tensor(
-                (5,), device=device, dtype=torch.int16, **op.lhs_make_tensor_kwargs
-            )
-            lhs_i32 = make_tensor(
-                (5,), device=device, dtype=torch.int32, **op.lhs_make_tensor_kwargs
-            )
-            lhs_i64 = make_tensor(
-                (5,), device=device, dtype=torch.int64, **op.lhs_make_tensor_kwargs
-            )
+            lhs_i16 = make_lhs(dtype=torch.int16)
+            lhs_i32 = make_lhs(dtype=torch.int32)
+            lhs_i64 = make_lhs(dtype=torch.int64)
 
-            rhs_i16 = make_tensor(
-                (5,), device=device, dtype=torch.int16, **op.rhs_make_tensor_kwargs
-            )
-            rhs_i32 = make_tensor(
-                (5,), device=device, dtype=torch.int32, **op.rhs_make_tensor_kwargs
-            )
-            rhs_i64 = make_tensor(
-                (5,), device=device, dtype=torch.int64, **op.rhs_make_tensor_kwargs
-            )
+            rhs_i16 = make_rhs(dtype=torch.int16)
+            rhs_i32 = make_rhs(dtype=torch.int32)
+            rhs_i64 = make_rhs(dtype=torch.int64)
 
             if op.promotes_int_to_float:
                 default_dtype = torch.get_default_dtype()
@@ -570,19 +573,11 @@ class TestBinaryUfuncs(TestCase):
 
         # float x float type promotion
         if _supported((torch.float32, torch.float64)):
-            lhs_f32 = make_tensor(
-                (5,), device=device, dtype=torch.float32, **op.lhs_make_tensor_kwargs
-            )
-            lhs_f64 = make_tensor(
-                (5,), device=device, dtype=torch.float64, **op.lhs_make_tensor_kwargs
-            )
+            lhs_f32 = make_lhs(dtype=torch.float32)
+            lhs_f64 = make_lhs(dtype=torch.float64)
 
-            rhs_f32 = make_tensor(
-                (5,), device=device, dtype=torch.float32, **op.rhs_make_tensor_kwargs
-            )
-            rhs_f64 = make_tensor(
-                (5,), device=device, dtype=torch.float64, **op.rhs_make_tensor_kwargs
-            )
+            rhs_f32 = make_rhs(dtype=torch.float32)
+            rhs_f64 = make_rhs(dtype=torch.float64)
 
             if op.always_returns_bool:
                 self.assertEqual(op(lhs_f32, rhs_f64).dtype, torch.bool)
@@ -625,19 +620,11 @@ class TestBinaryUfuncs(TestCase):
 
         # complex x complex type promotion
         if _supported((torch.complex64, torch.complex128)):
-            lhs_c64 = make_tensor(
-                (5,), device=device, dtype=torch.complex64, **op.lhs_make_tensor_kwargs
-            )
-            lhs_c128 = make_tensor(
-                (5,), device=device, dtype=torch.complex128, **op.lhs_make_tensor_kwargs
-            )
+            lhs_c64 = make_lhs(dtype=torch.complex64)
+            lhs_c128 = make_lhs(dtype=torch.complex128)
 
-            rhs_c64 = make_tensor(
-                (5,), device=device, dtype=torch.complex64, **op.rhs_make_tensor_kwargs
-            )
-            rhs_c128 = make_tensor(
-                (5,), device=device, dtype=torch.complex128, **op.rhs_make_tensor_kwargs
-            )
+            rhs_c64 = make_rhs(dtype=torch.complex64)
+            rhs_c128 = make_rhs(dtype=torch.complex128)
 
             if op.always_returns_bool:
                 self.assertEqual(op(lhs_c64, lhs_c128).dtype, torch.bool)
@@ -682,6 +669,124 @@ class TestBinaryUfuncs(TestCase):
                     out = torch.empty_like(lhs_f64, dtype=torch.int64)
                     self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.int64)
                     self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
+
+        # int x float type promotion
+        # Note: float type is the result dtype
+        if _supported((torch.long, torch.float32)):
+            lhs_i64 = make_lhs(dtype=torch.int64)
+            rhs_f32 = make_rhs(dtype=torch.float32)
+
+            result = op(lhs_i64, rhs_f32)
+            expected_dtype = torch.float32 if not op.always_returns_bool else torch.bool
+            self.assertEqual(result.dtype, expected_dtype)
+
+        # float x complex type promotion
+        # Note: complex type with highest "value type" is the result dtype
+        if _supported((torch.float64, torch.complex64)):
+            lhs_f64 = make_lhs(dtype=torch.float64)
+            rhs_c64 = make_rhs(dtype=torch.complex64)
+
+            result = op(lhs_f64, rhs_c64)
+            expected_dtype = (
+                torch.complex128 if not op.always_returns_bool else torch.bool
+            )
+            self.assertEqual(result.dtype, expected_dtype)
+
+        # int x float scalar type promotion
+        # Note: default float dtype is the result dtype
+        if _supported((torch.int64, torch.float32)) and op.supports_rhs_python_scalar:
+            lhs_i64 = make_lhs(dtype=torch.int64)
+            rhs_f_scalar = 1.0
+
+            result = op(lhs_i64, rhs_f_scalar)
+            expected_dtype = (
+                torch.get_default_dtype() if not op.always_returns_bool else torch.bool
+            )
+            self.assertEqual(result.dtype, expected_dtype)
+
+            # repeats with a scalar float tensor, which should set the dtype
+            rhs_f32_scalar_tensor = make_rhs_scalar_tensor(dtype=torch.float32)
+            result = op(lhs_i64, rhs_f32_scalar_tensor)
+            expected_dtype = torch.float32 if not op.always_returns_bool else torch.bool
+            self.assertEqual(result.dtype, expected_dtype)
+
+            # Additional test with double
+            if _supported((torch.float64,)):
+                rhs_f64_scalar_tensor = make_rhs_scalar_tensor(dtype=torch.float64)
+                result = op(lhs_i64, rhs_f64_scalar_tensor)
+                expected_dtype = (
+                    torch.float64 if not op.always_returns_bool else torch.bool
+                )
+                self.assertEqual(result.dtype, expected_dtype)
+
+        # float x complex scalar type promotion
+        # Note: result dtype is complex with highest "value type" among all tensors
+        if (
+            _supported((torch.float32, torch.complex64))
+            and op.supports_rhs_python_scalar
+        ):
+            lhs_f32 = make_lhs(dtype=torch.float32)
+            rhs_c_scalar = complex(1, 1)
+
+            result = op(lhs_f32, rhs_c_scalar)
+            expected_dtype = (
+                torch.complex64 if not op.always_returns_bool else torch.bool
+            )
+            self.assertEqual(result.dtype, expected_dtype)
+
+            # repeats with a scalar complex tensor
+            rhs_c64_scalar_tensor = make_rhs_scalar_tensor(dtype=torch.complex64)
+            result = op(lhs_f32, rhs_c64_scalar_tensor)
+            expected_dtype = (
+                torch.complex64 if not op.always_returns_bool else torch.bool
+            )
+            self.assertEqual(result.dtype, expected_dtype)
+
+            # Additional test with complexdouble
+            if _supported((torch.complex128,)):
+                rhs_c128_scalar_tensor = make_rhs_scalar_tensor(dtype=torch.complex128)
+                result = op(lhs_f32, rhs_c128_scalar_tensor)
+                expected_dtype = (
+                    torch.complex128 if not op.always_returns_bool else torch.bool
+                )
+                self.assertEqual(result.dtype, expected_dtype)
+
+        # float x float scalar tensor
+        # Note: result dtype is the type of the float tensor
+        if _supported((torch.float32, torch.float64)) and op.supports_rhs_python_scalar:
+            lhs_f32 = make_lhs(dtype=torch.float32)
+            rhs_f64_scalar_tensor = make_rhs_scalar_tensor(dtype=torch.float64)
+
+            result = op(lhs_f32, rhs_f64_scalar_tensor)
+            expected_dtype = torch.float32 if not op.always_returns_bool else torch.bool
+            self.assertEqual(result.dtype, expected_dtype)
+
+        # complex x complex scalar tensor
+        # Note: result dtype is the type of the complex tensor
+        if (
+            _supported((torch.complex64, torch.complex128))
+            and op.supports_rhs_python_scalar
+        ):
+            lhs_c64 = make_lhs(dtype=torch.complex64)
+            rhs_c128_scalar_tensor = make_rhs_scalar_tensor(dtype=torch.complex128)
+
+            result = op(lhs_c64, rhs_c128_scalar_tensor)
+            expected_dtype = (
+                torch.complex64 if not op.always_returns_bool else torch.bool
+            )
+            self.assertEqual(result.dtype, expected_dtype)
+
+        # scalar int x scalar float
+        # Note: result dtype is default float type
+        # TODO: FIXME: re-enable this, scalar x scalar type promotion is currently broken
+        # https://github.com/pytorch/pytorch/issues/76801
+        # if op.supports_two_python_scalars and _supported((torch.long, torch.float32)):
+        #     lhs_i_scalar = 1
+        #     rhs_f_scalar = 2.
+
+        #     result = op(lhs_i_scalar, rhs_f_scalar)
+        #     expected_dtype = torch.get_default_dtype() if not op.always_returns_bool else torch.bool
+        #     self.assertEqual(result.dtype, expected_dtype)
 
     # TODO: move to error input test
     @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
@@ -1154,6 +1259,7 @@ class TestBinaryUfuncs(TestCase):
         t -= 1
         t *= 1
         t /= 1
+        t **= 1
         with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
             t //= 1
         t %= 1
@@ -3270,30 +3376,6 @@ class TestBinaryUfuncs(TestCase):
                 torch_op(a, 2), torch.tensor(numpy_op(a_np, 2), device=device)
             )
 
-    def test_bitwise_shift_float(self, device):
-        ops = [
-            (torch.bitwise_left_shift, lambda x, y: x * 2.0**y),
-            (operator.lshift, lambda x, y: x * 2.0**y),
-            (torch.bitwise_right_shift, lambda x, y: x / 2.0**y),
-            (operator.rshift, lambda x, y: x / 2.0**y),
-        ]
-        for torch_op, expected_op in ops:
-            # int tensor x float
-            a = torch.tensor([19, -20, -21, 22], dtype=torch.int64, device=device)
-            self.assertEqual(
-                torch_op(a, 1.8), torch.floor(expected_op(a, 1)).to(a.dtype)
-            )
-            # float tensor x int scalar
-            a = torch.tensor(
-                [19.1, -20.2, -21.3, 22.4], dtype=torch.float32, device=device
-            )
-            self.assertEqual(torch_op(a, 2), expected_op(a, 2))
-            # float tensor x float scalar
-            a = torch.tensor(
-                [19.1, -20.2, -21.3, 22.4], dtype=torch.float32, device=device
-            )
-            self.assertEqual(torch_op(a, 2.2), expected_op(a, 2.2))
-
     @onlyNativeDeviceTypes
     @dtypes(
         *list(
@@ -3907,6 +3989,13 @@ class TestBinaryUfuncs(TestCase):
             )
             self.assertEqual(expected, actual.view(-1), rtol=0, atol=0.02)
 
+            # bfloat16
+            a_bf16 = a.bfloat16()
+            b_bf16 = b.bfloat16()
+            actual_bf16 = a_bf16.atan2(b_bf16)
+            self.assertEqual(actual_bf16, actual.bfloat16())
+            self.assertEqual(expected, actual_bf16.view(-1), exact_dtype=False, rtol=0, atol=0.02)
+
         _test_atan2_with_size((2, 2), device)
         _test_atan2_with_size((3, 3), device)
         _test_atan2_with_size((5, 5), device)
@@ -4430,7 +4519,9 @@ class TestBinaryUfuncs(TestCase):
             test_helper(x, q)
 
     @onlyCUDA
-    @dtypes(torch.chalf,)
+    @dtypes(
+        torch.chalf,
+    )
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.
         # Ideally, this should be covered by `test_complex_half_reference_testing`

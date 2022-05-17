@@ -1,5 +1,6 @@
 import torch
 import torch._ops
+import torch.library
 from typing import Callable, Union, Dict, Sequence
 from torch.utils._pytree import tree_map
 from collections import defaultdict
@@ -11,7 +12,10 @@ __all__ = ["decomposition_table", "register_decomposition", "get_decompositions"
 decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 
 
-def register_decomposition(aten_op, registry=None):
+meta_lib = torch.library.Library("aten", "IMPL", "Meta")
+
+
+def register_decomposition(aten_op, registry=None, *, register_meta: bool = False):
     """
     A decorator to register a function as a decomposition to the Python
     decomposition table.  Use it like this::
@@ -27,6 +31,10 @@ def register_decomposition(aten_op, registry=None):
     the API when we make decompositions eligible for use in transforms (e.g.,
     autograd) and not just backend tracing, where we then need to know if a
     decomposition can be used to simulate a transform.
+
+    If `register_meta` is True, we will also register this function to the
+    Meta key in the dispatcher, so that it will be used to compute meta
+    tensors.
     """
     def decomposition_decorator(f):
         nonlocal registry
@@ -34,13 +42,19 @@ def register_decomposition(aten_op, registry=None):
             registry = decomposition_table
 
         def add_op_to_table(aten_op):
-            # Converts aten.foo to aten.foo.default
-            # Done so I can be lazy and not write default on all of these ops
-            if not isinstance(aten_op, torch._ops.OpOverload):
-                op_overload = aten_op.default
+            overloads = []
+            if isinstance(aten_op, torch._ops.OpOverload):
+                overloads.append(aten_op)
             else:
-                op_overload = aten_op
-            registry[op_overload] = f
+                assert isinstance(aten_op, torch._ops.OpOverloadPacket)
+                for ol in aten_op.overloads():
+                    overloads.append(getattr(aten_op, ol))
+            for op_overload in overloads:
+                if op_overload in registry:
+                    raise RuntimeError(f"duplicate registrations for {op_overload}")
+                registry[op_overload] = f
+                if register_meta:
+                    meta_lib.impl(op_overload, f)
 
         # To handle allowing multiple aten_ops at once
         tree_map(add_op_to_table, aten_op)
@@ -77,3 +91,4 @@ def get_decompositions(
 
 # populate the table
 import torch._decomp.decompositions
+import torch._refs

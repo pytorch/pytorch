@@ -172,7 +172,15 @@ enum class UnaryOpType {
   Trunc,
 
   // Might be a bitwise operator or boolean operator.
-  Not
+  Not,
+
+  // Operators returning boolean values
+  IsFinite,
+  IsInf,
+  IsNan,
+  IsNegInf,
+  IsPosInf,
+  IsReal,
 };
 
 // Primarily for Not, which could be Not a boolean, or a bitwise not.
