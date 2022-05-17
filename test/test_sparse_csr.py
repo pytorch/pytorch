@@ -2012,8 +2012,10 @@ class TestSparseCSR(TestCase):
         raise NotImplementedError(repr(a))
 
     def _construct_sp_matrix(self, tensor, layout):
-        if tensor.layout == torch.sparse_coo:
+        if tensor.layout in [torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.strided]:
             tensor = tensor.to_dense()
+        else:
+            raise NotImplementedError(repr(tensor))
         if layout is torch.sparse_csr:
             return sp.csr_matrix(tensor.cpu().numpy())
         if layout is torch.sparse_csc:
@@ -2047,7 +2049,9 @@ class TestSparseCSR(TestCase):
                     self._convert_to_layout(b, layout_b)
             else:
                 b = self._convert_to_layout(a, layout_a)
-                self._convert_to_layout(b, layout_b)
+                c = self._convert_to_layout(b, layout_b)
+                if (layout_a is not torch.sparse_bsr and layout_b is not torch.sparse_bsr):
+                    self.assertEqual(a.to_dense(), c.to_dense())
 
         _to_from_layout(from_layout, to_layout)
 
@@ -2057,6 +2061,8 @@ class TestSparseCSR(TestCase):
         """
         This test tests conversion from dense to/from CSR and CSC
         by comparing to SciPy's implementation.
+
+        TODO: Eventually this is meant to be merged into test_compressed_layout_conversions_coverage
         """
         if layout is torch.sparse_bsc:
             # TODO: Remove this once support has been enabled
@@ -2095,8 +2101,10 @@ class TestSparseCSR(TestCase):
     @dtypes(torch.double)
     def test_sparse_to_sparse_compressed(self, device, dtype, coalesced, layout):
         """
-        This test tests conversion from COO to CSR and CSC
+        This test tests conversion from COO to CSR and CSC and CSC to CSR and CSC
         by comparing to SciPy's implementation.
+
+        TODO: Eventually this is meant to be merged into test_compressed_layout_conversions_coverage
         """
         if layout is torch.sparse_bsc:
             # TODO: Remove this once support has been enabled
@@ -2121,6 +2129,16 @@ class TestSparseCSR(TestCase):
                 torch.sparse_csr: torch.Tensor.col_indices,
                 torch.sparse_csc: torch.Tensor.row_indices,
             }[layout]
+
+            self.assertEqual(layout, pt_matrix.layout)
+            self.assertEqual(sp_matrix.shape, pt_matrix.shape)
+            self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
+            self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
+            self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
+
+            sparse_csc = sparse.to_sparse_csc()
+            sp_matrix = self._construct_sp_matrix(sparse_csc, layout)
+            pt_matrix = self._convert_to_layout(sparse_csc, layout)
 
             self.assertEqual(layout, pt_matrix.layout)
             self.assertEqual(sp_matrix.shape, pt_matrix.shape)
