@@ -31,7 +31,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
             data = torch.empty(0)
-        if type(data) is torch.Tensor:
+        if type(data) is torch.Tensor or type(data) is Parameter:
             # For ease of BC maintenance, keep this path for standard Tensor.
             # Eventually (tm), we should change the behavior for standard Tensor to match.
             return torch.Tensor._make_subclass(cls, data, requires_grad)
