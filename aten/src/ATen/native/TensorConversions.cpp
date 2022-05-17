@@ -519,11 +519,7 @@ static inline Tensor sparse_csr_transpose(const Tensor & self) {
 }
 
 Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
-  TORCH_CHECK(
-      self.layout() == kSparseCsr || self.layout() == kSparseCsc,
-      "Expected input self to be format SparseCsr or SparseCsc, but got ",
-      self.layout(),
-      " instead.");
+  AT_DISPATCH_SPARSE_COMPRESSED_NONBLOCK_LAYOUTS(self.layout(), "sparse_compressed_to_sparse_csr", [&]{});
   if (self.layout() == kSparseCsc) {
     TORCH_CHECK(
         self.dim() == 2,
