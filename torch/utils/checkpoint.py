@@ -332,7 +332,8 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
             had_cuda_in_fwd = True
             fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
 
-    storage: List[Union[torch.Tensor, None]] = []
+    #storage: List[Union[torch.Tensor, None]] = []
+    storage = {}
     counter = 0
 
     def pack(x):
@@ -368,7 +369,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
                         set_device_states(fwd_gpu_devices, fwd_gpu_states)
                 with torch.enable_grad(), torch.cuda.amp.autocast(had_autocast_in_fwd):
                     with torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
-                        _unused = function(*args, **kwargs)
+                        _unused = function(*args)
 
         return storage.pop(x)
 
