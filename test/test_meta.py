@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
+    onlyCUDA,
 )
 from torch.testing._internal.logging_tensor import no_dispatch
 from torch.testing._internal.common_methods_invocations import op_db
@@ -491,7 +492,6 @@ meta_function_skips = {
     torch.logit: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},  # TODO
     torch.nn.functional.adaptive_avg_pool1d: {bf16, f32, f64},
     torch.nn.functional.adaptive_avg_pool3d: {f16, f32, f64},  # TODO
-    torch.nn.functional.batch_norm: {f32, f64},  # TODO
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
     # BEGIN TODO
@@ -599,7 +599,6 @@ meta_function_device_skips['cuda'] = {
     torch.logit: {f16},
     torch.nn.functional.adaptive_avg_pool1d: {f16},
     torch.nn.functional.adaptive_avg_pool3d: {bf16},
-    torch.nn.functional.batch_norm: {bf16, f16},
     torch.nn.functional.cross_entropy: {f16},
     torch.nn.functional.interpolate: {f16},
     torch.nn.functional.nll_loss: {f16},
