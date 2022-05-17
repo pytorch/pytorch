@@ -10,8 +10,6 @@ import unittest.mock as mock
 import itertools
 import warnings
 import pickle
-import gc
-import weakref
 from copy import deepcopy
 from itertools import repeat, product
 from functools import reduce, partial
@@ -9418,6 +9416,28 @@ class TestNN(NNTestCase):
         test_pixel_shuffle_unshuffle_3D()
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
+
+    def test_pixel_shuffle_nhwc_cpu(self):
+        input = torch.randn(3, 18, 4, 4, device='cpu')
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randn(3, 18, 4, 4, device='cpu')
+        ps = torch.nn.PixelShuffle(3)
+        pus = torch.nn.PixelUnshuffle(3)
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_ps = torch.nn.PixelShuffle(3)
+        ref_pus = torch.nn.PixelUnshuffle(3)
+
+        out = pus(ps(input))
+        out.backward(grad)
+        ref_out = ref_pus(ref_ps(ref_input))
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
 
     # These tests should be OpInfo'd
     def test_elu_inplace_on_view(self):
@@ -21498,23 +21518,6 @@ class TestStateDictHooks(TestCase):
         m_load._register_load_state_dict_pre_hook(hook_with_module, True)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
-
-    def test_no_extra_ref_to_module(self):
-        try:
-            gc.disable()
-            m = nn.Linear(10, 10)
-
-            def hook_with_module(*args, **kwargs):
-                pass
-
-            m._register_load_state_dict_pre_hook(hook_with_module, True)
-            weak_m = weakref.ref(m)
-            del m
-
-            self.assertEqual(weak_m(), None)
-        finally:
-            gc.enable()
-
 
     def test_load_state_dict_module_pre_hook(self):
         hook_called = 0
