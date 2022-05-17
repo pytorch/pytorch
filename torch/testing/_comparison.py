@@ -1067,8 +1067,8 @@ def assert_equal(
         return
 
     if msg is not None:
-        for error_meta in error_metas:
-            error_meta.msg = msg(error_meta.msg) if callable(msg) else msg
+        for error_meta in error_metas:  # type: ignore[misc]
+            error_meta.msg = msg(error_meta.msg) if callable(msg) else msg  # type: ignore[misc]
 
     # TODO: compose all metas into one AssertionError
     raise error_metas[0].to_error()
