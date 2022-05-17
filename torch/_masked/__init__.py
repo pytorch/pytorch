@@ -1091,7 +1091,7 @@ elements, have ``nan`` values.
         input = input.to(dtype=torch.float)
     mask_input = _combine_input_and_mask(median, input, mask)
     if input.layout == torch.strided:
-        output = torch.nanmedian(mask_input, dim_, keepdim=keepdim).values
+        output = torch.nanmedian(mask_input, dim_, keepdim).values
         if is_float: 
             return output
         elif not is_float and not torch.isnan(output).any():
