@@ -76,6 +76,8 @@ except ImportError:
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
 
+_PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
+
 
 def _default_meta_device_init_fn(module):
     """
@@ -581,7 +583,7 @@ class FullyShardedDataParallel(nn.Module):
         sync_module_states (bool): If ``True``, each individually wrapped FSDP unit will broadcast
             module parameters from rank 0 to ensure they are the same across all ranks after
             initialization. This helps ensure model parameters are the same across ranks
-            before starting training, but adds communication overhead to ``__init__``, as atleast
+            before starting training, but adds communication overhead to ``__init__``, as at least
             one broadcast is triggered per individually wrapped FSDP unit.
             This can also help load checkpoints taken by ``state_dict`` and to be loaded by
             ``load_state_dict`` in a memory efficient way. See documentation for
@@ -788,7 +790,7 @@ class FullyShardedDataParallel(nn.Module):
                 process_group=self.process_group,
                 module_states=states_to_sync,
                 # Same bucket size as DDP
-                broadcast_bucket_size=int(250 * 1024 * 1024),
+                broadcast_bucket_size=_PARAM_BROADCAST_BUCKET_SIZE,
                 src=0,
             )
 
