@@ -222,15 +222,15 @@ def _unflatten_communicated_optim_state(
                 flat_param_views[state_name] = param_views
             else:
                 param_views = flat_param_views[state_name]
-            state = next(param_views)
+            optim_state = next(param_views)
             if shard_state:
-                state = _distributed_chunk_tensor(
-                    state,
+                optim_state = _distributed_chunk_tensor(
+                    optiom_state,
                     fsdp_module.rank,
                     fsdp_module.world_size,
                     fsdp_module.process_group
                 )
-            unflat_state_param[state_name] = state
+            unflat_state_param[state_name] = optim_state
 
         # Add zero-dimension tensor state: take the target rank's value
         for state_name, zero_dim_tensor in zero_dim_tensor_state.items():
