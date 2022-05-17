@@ -1,10 +1,12 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <utility>
 
 #include <ATen/Context.h>
+#include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/variant.h>
@@ -16,37 +18,25 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
-struct OpEvent {
-  OpEvent() = default;
-  OpEvent(
-      const uint64_t correlation_id,
-      const uint64_t start_thread_id,
-      const int64_t sequence_number,
-      const uint64_t forward_thread_id,
-      const at::RecordScope scope,
-      const bool is_async,
-      const int64_t debug_handle,
-      const std::string name)
-      : correlation_id_{correlation_id},
-        start_thread_id_{start_thread_id},
-        sequence_number_{sequence_number},
-        forward_thread_id_{forward_thread_id},
-        record_function_scope_{(uint8_t)scope},
-        is_async_{is_async},
-        debug_handle_{debug_handle},
-        name_{name} {}
+enum class EventType : uint8_t {
+  TorchOp = 0,
+  Backend
+};
 
-  approx_time_t start_time_;
-  approx_time_t end_time_{std::numeric_limits<approx_time_t>::min()};
+template <EventType>
+struct ExtraFields;
+
+struct TorchOpBasicFields {
   uint64_t correlation_id_;
-  uint64_t start_thread_id_;
-  uint64_t end_thread_id_;
   int64_t sequence_number_;
-  uint64_t forward_thread_id_;
-  uint8_t record_function_scope_;
+  uint64_t forward_tid_;
+  at::RecordScope scope_;
   bool is_async_;
   int64_t debug_handle_;
   std::string name_;
+
+  // Set in the exit callback.
+  uint64_t end_tid_{0};
 };
 
 struct Inputs {
@@ -54,47 +44,91 @@ struct Inputs {
   std::vector<std::string> dtypes_;
 };
 
+using jit_stack_t = std::vector<std::string>;
+using jit_modules_t = std::vector<std::string>;
+using extra_args_t = std::unordered_map<std::string, c10::IValue>;
+
 struct FallbackPair {
   CUDAEventStub cuda_event_start_ = nullptr;
   CUDAEventStub cuda_event_end_ = nullptr;
 };
 
-struct BackendEvent {
-  int64_t start_time_us_;
-  int64_t end_time_us_;
-  uint8_t record_function_scope_;
-  int64_t debug_handle_;
-  std::string name_;
-  std::string backend_;
-};
+template <>
+struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
+  ExtraFields(
+      TorchOpBasicFields&& f,
+      time_t end_time_us,
+      Inputs&& inputs,
+      jit_stack_t&& jit_stack,
+      jit_modules_t&& jit_modules,
+      extra_args_t&& extra_args,
+      FallbackPair&& gpu_fallback)
+      : TorchOpBasicFields(std::move(f)),
+        end_time_us_{end_time_us},
+        inputs_{std::move(inputs)},
+        jit_stack_{std::move(jit_stack)},
+        jit_modules_{std::move(jit_modules)},
+        extra_args_{std::move(extra_args)},
+        gpu_fallback_{std::move(gpu_fallback)} {}
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct Result {
-  std::string name() const;
-  torch::profiler::impl::kineto::KinetoActivityType kinetoType() const;
-  uint64_t correlation_id() const;
-
-  int64_t start_time_us_;
-  int64_t end_time_us_;
-  uint64_t start_tid_;
-  kineto::DeviceAndResource kineto_info_;
-
-  c10::variant<OpEvent, BackendEvent> event_;
-
-  // OpEvent only.
+  time_t end_time_us_;
   Inputs inputs_;
-  std::vector<std::string> jit_stack_;
-  std::vector<std::string> jit_modules_;
-  std::unordered_map<std::string, c10::IValue> extra_args_;
+  jit_stack_t jit_stack_;
+  jit_modules_t jit_modules_;
+  extra_args_t extra_args_;
   FallbackPair gpu_fallback_;
 };
 
-struct KinetoObserverContext : public at::ObserverContext {
-  explicit KinetoObserverContext(OpEvent* event)
-    : event_{event} {}
+template <>
+struct ExtraFields<EventType::Backend> {
+  int64_t start_time_us_;
+  int64_t end_time_us_;
+  int64_t debug_handle_;
+  at::RecordScope scope_;
+  std::string name_;
+  std::string backend_;
+  jit_stack_t jit_stack_;
+  jit_modules_t jit_modules_;
+};
 
-  OpEvent* event_;
-  FallbackPair* fallback_ {nullptr};
+struct Result {
+  template <EventType E>
+  Result(
+      int64_t start_time_us,
+      uint64_t start_tid,
+      kineto::DeviceAndResource kineto_info,
+      ExtraFields<E>&& extra_fields)
+      : start_time_us_{start_time_us},
+        start_tid_{start_tid},
+        kineto_info_{kineto_info},
+        extra_fields_{std::move(extra_fields)} {}
+
+  std::string name() const;
+  torch::profiler::impl::kineto::KinetoActivityType kinetoType() const;
+  uint64_t correlationID() const;
+  int64_t endTimeUS() const;
+  uint64_t endTID() const;
+
+  int64_t start_time_us_;
+  uint64_t start_tid_;
+  kineto::DeviceAndResource kineto_info_;
+  c10::variant<ExtraFields<EventType::TorchOp>, ExtraFields<EventType::Backend>>
+      extra_fields_;
+};
+
+struct KinetoObserverContext : public at::ObserverContext {
+  struct Event {
+    TorchOpBasicFields basic_fields_;
+    approx_time_t start_time_;
+
+    // Set in the exit callback.
+    approx_time_t end_time_{std::numeric_limits<approx_time_t>::min()};
+  };
+
+  explicit KinetoObserverContext(Event* event) : event_{event} {}
+
+  Event* event_;
+  FallbackPair* fallback_{nullptr};
 };
 
 constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;
@@ -163,25 +197,25 @@ class TORCH_API ThreadLocalSubqueue {
   friend class RecordQueue;
   // See `containers.h` for block size benchmarks.
   static constexpr size_t BlockSize = 512;
-  AppendOnlyList<OpEvent, BlockSize> op_events_;
+  AppendOnlyList<KinetoObserverContext::Event, BlockSize> op_events_;
 
   // report_input_shapes
   InputOutputEncoder inputs_outputs_;
 
   // with_stack
-  AppendOnlyList<std::vector<std::string>, BlockSize> jit_stack_;
+  AppendOnlyList<jit_stack_t, BlockSize> jit_stack_;
 
   // with_modules
-  AppendOnlyList<std::vector<std::string>, BlockSize> jit_modules_;
+  AppendOnlyList<jit_modules_t, BlockSize> jit_modules_;
 
   // with_flops
-  AppendOnlyList<std::unordered_map<std::string, c10::IValue>, BlockSize> extra_args_;
+  AppendOnlyList<extra_args_t, BlockSize> extra_args_;
 
   // ProfilerState::KINETO_GPU_FALLBACK
   AppendOnlyList<FallbackPair, BlockSize> gpu_fallback_;
 
   // reportBackendEventToActiveKinetoProfiler
-  AppendOnlyList<BackendEvent, BlockSize> backend_events_;
+  AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
 };
 
 class TORCH_API RecordQueue {
