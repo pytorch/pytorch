@@ -22939,6 +22939,36 @@ TEST_F(NVFuserTest, FusionSqueeze1_CUDA) {
   testValidate(&fusion, cg_outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionContigPredicate_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = broadcast(tv1, {false, true, false});
+  fusion.addOutput(tv2);
+
+  tv2->merge(-2, -1);
+  tv2->merge(-2, -1);
+  tv2->split(-1, 100);
+  tv0->computeAt(tv2, -1);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(PredicatedChecker::isPredicated(tv1, gpulw));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({3, 4}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0.unsqueeze(1);
+
+  testValidate(fe.kernel(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
