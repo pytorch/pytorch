@@ -1218,7 +1218,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
             self.assertEqual(e.is_contiguous(), True)
             e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
 
-            err_msg = "no implementation found for 'torch.ops.aten.contiguous'"
+            err_msg = "no implementation found for"
             e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
             self.assertEqual(e.is_contiguous(), False)
             with self.assertRaisesRegex(TypeError, err_msg):
