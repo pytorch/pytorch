@@ -4,7 +4,6 @@ import csv
 import json
 import sys
 
-from dataclasses import dataclass
 from typing import List, Dict
 
 class ComparisonResult():
