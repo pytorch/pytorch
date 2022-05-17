@@ -486,9 +486,27 @@ size_t SchedulerRuntimeInfo::getMaxVectorizableWidth(TensorView* tv) {
   // If we don't have an record, either it is a tv with innermost broadcast,
   // or it is an intermediate tensor allocated by fuser. Logic copied to get
   // root according to scheduler_utils::innerMostRootDim.
-  auto tv_root = TensorDomain::noReductions(
-      tv->hasReduction() && tv->hasRFactor() ? tv->getRootDomain()
-                                             : tv->getMaybeRFactorDomain());
+  auto tv_root = tv->hasReduction() && tv->hasRFactor()
+      ? tv->getRootDomain()
+      : tv->getMaybeRFactorDomain();
+
+  auto tv_root_no_reductions = TensorDomain::noReductions(tv_root);
+
+  auto contiguity = tv->domain()->contiguity();
+  // Appears after reductions the reduction domain often has a contiguity entry.
+  // This only matters if the result of the reduction is an output
+  if (contiguity.size() == tv_root.size() &&
+      contiguity.size() != tv_root_no_reductions.size()) {
+    std::vector<bool> new_contiguity;
+    for (auto i : c10::irange(tv_root.size())) {
+      if (!tv_root[i]->isReduction()) {
+        new_contiguity.push_back(contiguity[i]);
+      }
+    }
+    contiguity = new_contiguity;
+  }
+  tv_root = tv_root_no_reductions;
+
   auto tv_root_size = tv_root.size();
 
   // Filter out 0-dim tensors
@@ -497,7 +515,7 @@ size_t SchedulerRuntimeInfo::getMaxVectorizableWidth(TensorView* tv) {
   }
 
   // Filter out mismatched contiguity info
-  if (tv_root_size != tv->domain()->contiguity().size()) {
+  if (tv_root_size != contiguity.size()) {
     return 1;
   }
 
@@ -522,7 +540,7 @@ size_t SchedulerRuntimeInfo::getMaxVectorizableWidth(TensorView* tv) {
     }
 
     // Not contiguous
-    if (!tv->domain()->contiguity()[root_i]) {
+    if (!contiguity[root_i]) {
       break;
     }
 
@@ -564,9 +582,27 @@ size_t SchedulerRuntimeInfo::getInnerDimVectorizableWidth(TensorView* tv) {
   // If we don't have an record, either it is a tv with innermost broadcast,
   // or it is an intermediate tensor allocated by fuser. Logic copied to get
   // root according to scheduler_utils::innerMostRootDim.
-  auto tv_root = TensorDomain::noReductions(
-      tv->hasReduction() && tv->hasRFactor() ? tv->getRootDomain()
-                                             : tv->getMaybeRFactorDomain());
+  auto tv_root = tv->hasReduction() && tv->hasRFactor()
+      ? tv->getRootDomain()
+      : tv->getMaybeRFactorDomain();
+
+  auto tv_root_no_reductions = TensorDomain::noReductions(tv_root);
+
+  auto contiguity = tv->domain()->contiguity();
+  // Appears after reductions the reduction domain often has a contiguity entry.
+  // This only matters if the result of the reduction is an output
+  if (contiguity.size() == tv_root.size() &&
+      contiguity.size() != tv_root_no_reductions.size()) {
+    std::vector<bool> new_contiguity;
+    for (auto i : c10::irange(tv_root.size())) {
+      if (!tv_root[i]->isReduction()) {
+        new_contiguity.push_back(contiguity[i]);
+      }
+    }
+    contiguity = new_contiguity;
+  }
+  tv_root = tv_root_no_reductions;
+
   auto tv_root_size = tv_root.size();
 
   // Filter out 0-dim tensors
@@ -575,7 +611,7 @@ size_t SchedulerRuntimeInfo::getInnerDimVectorizableWidth(TensorView* tv) {
   }
 
   // Filter out mismatched contiguity info
-  if (tv_root_size != tv->domain()->contiguity().size()) {
+  if (tv_root_size != contiguity.size()) {
     return 1;
   }
 
@@ -596,7 +632,7 @@ size_t SchedulerRuntimeInfo::getInnerDimVectorizableWidth(TensorView* tv) {
   }
 
   // If the inner most dimension is not contiguous return 1
-  if (!tv->domain()->contiguity()[id_pos]) {
+  if (!contiguity[id_pos]) {
     return 1;
   }
 

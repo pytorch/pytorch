@@ -143,6 +143,7 @@ namespace {
 // size. For example, FusedReduction should double the work buffer size.
 Val* getGridCommWorkBufferSize(
     const TensorDomain* td,
+    const std::vector<kir::ForLoop*>& for_loops = {},
     int expansion_factor = 1) {
   // The buffer size is the number of thread blocks multiplied by the
   // number of threads not used for reduction domains.
@@ -172,10 +173,27 @@ Val* getGridCommWorkBufferSize(
     }
     buffer_size = SimplifyingIrBuilder::mulExpr(buffer_size, pt_dim);
   }
+
+  // All iteration domains require a separate entry in the buffer for re-entrant
+  // grid reductions.
+  for (auto fl : for_loops) {
+    if (fl->isTrivial()) {
+      continue;
+    }
+    if (fl->iter_domain()->isThread()) {
+      // already accounted for.
+      continue;
+    }
+    buffer_size =
+        SimplifyingIrBuilder::mulExpr(buffer_size, fl->iter_domain()->extent());
+  }
+
   return buffer_size;
 }
 
-Val* getGridSyncBufferSize(const TensorDomain* td) {
+Val* getGridSyncBufferSize(
+    const TensorDomain* td,
+    const std::vector<kir::ForLoop*>& for_loops = {}) {
   // See the comment above for getGridCommWorkBufferSize.
   Val* buffer_size = GpuLower::current()->kernel()->oneVal();
   for (auto pt : kParallelTypeBIDs) {
@@ -191,7 +209,64 @@ Val* getGridSyncBufferSize(const TensorDomain* td) {
     }
     buffer_size = SimplifyingIrBuilder::mulExpr(buffer_size, pt_dim);
   }
+
+  // All iteration domains require a separate semaphore for re-entrant grid
+  // reductions
+  for (auto fl : for_loops) {
+    if (fl->isTrivial()) {
+      continue;
+    }
+    if (fl->iter_domain()->isThread()) {
+      // already accounted for.
+      continue;
+    }
+
+    buffer_size =
+        SimplifyingIrBuilder::mulExpr(buffer_size, fl->iter_domain()->extent());
+  }
+
   return buffer_size;
+}
+
+Val* getEntranceCountGridReduce(std::vector<kir::ForLoop*>& for_loops) {
+  Val* grid_reduction_entrances = GpuLower::current()->kernel()->oneVal();
+
+  for (const auto loop : for_loops) {
+    if (loop->isTrivial()) {
+      continue;
+    }
+    if (loop->iter_domain()->isThread()) {
+      // already accounted for.
+      continue;
+    }
+    // TODO: Does this work for shift/gather?
+    grid_reduction_entrances = SimplifyingIrBuilder::mulExpr(
+        grid_reduction_entrances, loop->iter_domain()->extent());
+  }
+  return grid_reduction_entrances;
+}
+
+// Linear indexing of for loops for multiple entrances into grid reduce
+// TODO: What happens if there's a broadcast that's resolved (not present in the
+// grid reduce) but the global buffer isn't expanded?
+Val* getEntranceLinIndGridReduce(std::vector<kir::ForLoop*>& for_loops) {
+  Val* linear_index = GpuLower::current()->kernel()->zeroVal();
+
+  for (const auto loop : for_loops) {
+    if (loop->isTrivial()) {
+      continue;
+    }
+    if (loop->iter_domain()->isThread()) {
+      // already accounted for.
+      continue;
+    }
+    // TODO: Does this work for shift/gather?
+    linear_index = SimplifyingIrBuilder::addExpr(
+        SimplifyingIrBuilder::mulExpr(
+            linear_index, loop->iter_domain()->extent()),
+        loop->index());
+  }
+  return linear_index;
 }
 
 } // namespace
@@ -269,14 +344,36 @@ void IndexLowering::handleGridReduction(
       out_domain->domain().end(),
       [](IterDomain* id) { return !isTrivialIterDomain(id); });
 
+  // Use a unique buffer for work and sync flag when called within a
+  // loop unless it's persistent. Grid all reduce means persistence is
+  // required. However, not being a grid all reduce does not mean
+  // non-persistence. Currently, if a cooperative grid reduction is
+  // required anywhere in the kernel, all grid reducitons are done in
+  // a persistent manner, so all grid reductions should be consulted.
+  // TODO: fix this
+  const bool privatize_buffer = !rop->isAllreduce();
+
   const auto reduce_buffer = ir_utils::allocGlobalBufferForGridComm(
       getGridCommWorkBufferSize(
-          out_domain, rop->isAllreduce() && is_within_a_loop ? 2 : 1),
+          out_domain,
+          privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>(),
+          rop->isAllreduce() && is_within_a_loop ? 2 : 1),
       out->dtype(),
       false);
 
   const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
-      getGridSyncBufferSize(out_domain), DataType::Int, true);
+      getGridSyncBufferSize(
+          out_domain,
+          privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>()),
+      DataType::Int,
+      true);
+
+  const auto entrance_ind = privatize_buffer
+      ? getEntranceLinIndGridReduce(for_loops_)
+      : GpuLower::current()->kernel()->zeroVal();
+  const auto n_entrances = privatize_buffer
+      ? getEntranceCountGridReduce(for_loops_)
+      : GpuLower::current()->kernel()->oneVal();
 
   // The thread predicate for GridReduction needs to be set
   // separately from the main predicate. Do not combine them like
@@ -291,6 +388,8 @@ void IndexLowering::handleGridReduction(
       in,
       reduce_buffer,
       sync_buffer,
+      entrance_ind,
+      n_entrances,
       rop->isAllreduce());
 
   grid_reduction->setThreadPredicate(thread_pred);
@@ -412,13 +511,14 @@ void IndexLowering::handleGridReduction(
         return ir_utils::allocGlobalBufferForGridComm(
             getGridCommWorkBufferSize(
                 out_domain,
+                for_loops_,
                 (grouped_rop->isAllreduce() && is_within_a_loop ? 2 : 1)),
             output->dtype(),
             false);
       });
 
   const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
-      getGridSyncBufferSize(out_domain), DataType::Int, true);
+      getGridSyncBufferSize(out_domain, for_loops_), DataType::Int, true);
 
   // The thread predicate for GridReduction needs to be set
   // separately from the main predicate. Do not combine them like
@@ -546,8 +646,13 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
       out_domain->domain().end(),
       [](IterDomain* id) { return !isTrivialIterDomain(id); });
 
+  // TODO: See the comment on the same variable in handleGridReduction
+  const bool privatize_buffer = !indexed_wop->isAllreduce();
+
   const auto work_buffer_size = getGridCommWorkBufferSize(
-      out_domain, indexed_wop->isAllreduce() && is_within_a_loop ? 2 : 1);
+      out_domain,
+      privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>(),
+      indexed_wop->isAllreduce() && is_within_a_loop ? 2 : 1);
 
   const auto out_var_buffer = ir_utils::allocGlobalBufferForGridComm(
       work_buffer_size, indexed_wop->outVar()->dtype(), false);
@@ -557,7 +662,18 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
       work_buffer_size, indexed_wop->outN()->dtype(), false);
 
   const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
-      getGridSyncBufferSize(out_domain), DataType::Int, true);
+      getGridSyncBufferSize(
+          out_domain,
+          privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>()),
+      DataType::Int,
+      true);
+
+  const auto entrance_ind = privatize_buffer
+      ? getEntranceLinIndGridReduce(for_loops_)
+      : GpuLower::current()->kernel()->zeroVal();
+  const auto n_entrances = privatize_buffer
+      ? getEntranceCountGridReduce(for_loops_)
+      : GpuLower::current()->kernel()->oneVal();
 
   // The thread predicate for GridReduction needs to be set
   // separately from the main predicate. Do not combine them like
@@ -566,7 +682,13 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
       GpuLower::current()->threadPredMap().getPredicatedParallelTypes(out_tv);
 
   auto grid_welford = IrBuilder::create<kir::GridWelford>(
-      indexed_wop, out_var_buffer, out_avg_buffer, out_N_buffer, sync_buffer);
+      indexed_wop,
+      out_var_buffer,
+      out_avg_buffer,
+      out_N_buffer,
+      sync_buffer,
+      entrance_ind,
+      n_entrances);
 
   grid_welford->setThreadPredicate(thread_pred);
 

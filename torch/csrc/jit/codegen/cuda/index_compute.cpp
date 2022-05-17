@@ -2295,7 +2295,8 @@ struct PredicateDomainInfo {
 // TODO: This seems to have a large overlap with ContigIDs. Consider
 // refactoring.
 std::vector<PredicateDomainInfo> getPredicateContigIds(
-    TensorView* consumer_tv) {
+    TensorView* consumer_tv,
+    const std::unordered_map<IterDomain*, Val*>& consumer_index_map) {
   const auto gpu_lower = GpuLower::current();
 
   const auto& consumer_root_domain = consumer_tv->getRootDomain();
@@ -2365,6 +2366,13 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
 
       if (excluded_ids.count(merge->inner()) > 0 ||
           excluded_ids.count(merge->outer()) > 0) {
+        continue;
+      }
+
+      // Do not try to predicate the merge output domain if the output
+      // domain has not a predicate that is mapped from the reference.
+      // See FusionContigPredicate_CUDA for a concrete example.
+      if (consumer_index_map.find(merge->out()) == consumer_index_map.end()) {
         continue;
       }
 
@@ -3163,7 +3171,8 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
   }
 
   // Get the contiguous ids we need to generate predicates for
-  auto contig_id_infos = getPredicateContigIds(consumer_tv);
+  auto contig_id_infos =
+      getPredicateContigIds(consumer_tv, consumer_stop_index_map);
 
   auto non_divisible_splits =
       getNonDivisibleConsumerDomainsToPredicate(consumer_tv);

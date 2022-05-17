@@ -1342,6 +1342,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
     // Init val
     func_args.arg(genCall(data_type, genInline(grop->init())));
+    func_args.arg(genInline(grop->entrance_index()));
+    func_args.arg(genInline(grop->entrances()));
 
     indent() << "reduction::gridReduce<" << template_args << ">(\n";
     indent() << kTab << func_args << ");\n";
@@ -1658,7 +1660,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       indent() << kTab << read_pred << ",\n";
     }
     // TODO : init value support or remove.
-    indent() << kTab << data_type << "(0));\n";
+    indent() << kTab << data_type << "(0),\n";
+    indent() << kTab << genInline(gwop->entrance_index()) << ",\n";
+    indent() << kTab << genInline(gwop->entrances());
+    code_ << ");\n";
   }
 
   void generateGridAllreduce(const kir::GridWelford* gwop) {

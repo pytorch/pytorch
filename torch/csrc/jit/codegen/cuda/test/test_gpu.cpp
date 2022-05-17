@@ -12629,7 +12629,9 @@ __global__ void kernel1(
         (long*)shared_buf_N,
         threadIdx.x<out_var.size[0],
         threadIdx.x<out_var.size[0],
-        0.f);
+        0.f,
+        0,
+        1);
     if(blockIdx.x == gridDim.x - 1 && blockIdx.y == gridDim.y - 1){
         out_avg[threadIdx.x*out_avg.stride[0]]=tmp_avg;
         out_var[threadIdx.x*out_var.stride[0]]=tmp_M2/tmp_N;
@@ -22696,6 +22698,101 @@ TEST_F(NVFuserMultithreadedTest, MultipleFunctions_CUDA) {
   for (auto& t : threads) {
     t.join();
   }
+}
+
+TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int X = 256, Y = 7, Z = 2048;
+
+  // setup fusion
+  auto tv0 = makeContigTensor(4, DataType::Half);
+  fusion.addInput(tv0);
+  auto tv1 = castOp(DataType::Float, tv0);
+
+  auto tvs = Welford(tv1, {0, 1, 2});
+  auto tv_avg = tvs.avg;
+  auto tv_M2 = tvs.var_sum;
+  auto tv_N = tvs.n;
+  fusion.addOutput(tv_avg);
+  fusion.addOutput(tv_M2);
+
+  auto cached_input = tv0->cacheAfter();
+  auto cached_avg = tv_avg->cacheBefore();
+  auto cached_M2 = tv_M2->cacheBefore();
+
+  auto reduction_tv = scheduler_utils::getReductionTvs(&fusion)[0];
+
+  reduction_tv->merge(0);
+  reduction_tv->merge(0);
+
+  int TIDx = 16;
+  int vec = 4;
+
+  int TIDy = 16;
+  int outer_tidy_fact = 16;
+
+  reduction_tv->split(-1, TIDx * vec);
+  reduction_tv->split(-1, vec);
+  reduction_tv->axis(-2)->parallelize(ParallelType::TIDx);
+  reduction_tv->axis(-1)->parallelize(ParallelType::Vectorize);
+  reduction_tv->axis(-3)->parallelize(ParallelType::BIDx);
+
+  reduction_tv->split(0, TIDy);
+  reduction_tv->axis(1)->parallelize(ParallelType::TIDy);
+  reduction_tv->split(0, outer_tidy_fact);
+  reduction_tv->axis(0)->parallelize(ParallelType::BIDy);
+
+  // T2_g[ rblockIdx.y, rS{16}, rthreadIdx.y, iblockIdx.x, ithreadIdx.x24,
+  // iV25{4} ]
+  reduction_tv->reorder({{3, 0}, {4, 1}, {0, 2}, {2, 3}, {1, 4}, {5, 5}});
+  // T2_g[iblockIdx.x, ithreadIdx.x24, rblockIdx.y, rthreadIdx.y, rS{16},
+  // iV25{4}]
+
+  TransformPropagator::from(reduction_tv);
+  auto rfactor_tv = ir_utils::rfactorHelper(reduction_tv, {4});
+  scheduler_utils::parallelizeAllLike(rfactor_tv, ir_utils::allTvs(&fusion));
+
+  tv0->computeAt(tv_avg, 2);
+  tv0->computeAt(cached_input, -2);
+
+  cached_input->computeAt(rfactor_tv, 4, ComputeAtMode::BestEffort);
+
+  for (auto tv : ir_utils::allTvs(&fusion)) {
+    if (tv == cached_input || tv == tv_avg || tv == tv_M2) {
+      continue;
+    }
+    tv->axis(-1)->parallelize(ParallelType::Serial);
+  }
+
+  CompileOptions co;
+  co.index_mode = KernelIndexMode::INT32;
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {}, LaunchParams(), co);
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({X, Y, Y, Z}, options);
+
+  auto cg_outputs = fe.runFusion({t0}, LaunchParams(-1, -1, -1, -1, -1, -1));
+
+  // by default Welford outputs sum of square diff so need to divide to get var
+  cg_outputs[1] = cg_outputs[1].div((float)(X * Y * Y));
+
+  auto at_mu = at::mean(t0.to(at::kDouble), {0, 1, 2});
+  auto at_var = at::var(t0.to(at::kDouble), {0, 1, 2}, false);
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {t0},
+      {at_mu, at_var},
+      __LINE__,
+      __FILE__,
+      "",
+      LaunchParams(-1, -1, -1, -1, -1, -1));
 }
 
 // Test sync insertion with redundant predicates

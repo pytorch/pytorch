@@ -311,6 +311,29 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_ResNext_BatchNorm_nhwc_fp16)
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
+// Permutation of TIMM sizes
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_TIMM_BatchNorm_nhwc_fp16,
+    setupBatchNorm_nhwc,
+    NvFuserScheduler_BatchNorm_nhwc,
+    DataType::Half);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_BatchNorm_nhwc_fp16)
+    ->ArgsProduct(
+        {{8, 16, 32, 64, 128, 256},
+         {24, 40, 48, 56, 72, 152, 184, 200, 368},
+         {7, 14, 28, 56, 112}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_BatchNorm_nhwc_fp16)
+    ->ArgsProduct(
+        {{128, 256, 512, 1024, 2048},
+         {24, 40, 48, 56, 72, 152},
+         {7, 14, 28, 56}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
 //------------------------------------------------------------------------------
 
 BENCHMARK(Baseline_ResNet_BatchNorm_nhwc_cuDNN_fp16)

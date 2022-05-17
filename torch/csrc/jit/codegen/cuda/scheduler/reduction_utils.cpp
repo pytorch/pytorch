@@ -48,11 +48,6 @@ TensorView* scheduleReductionTV(
       "Multiple reductions requires an iter domain, but one wasn't found.");
 
   TORCH_INTERNAL_ASSERT(
-      !(rparams.cross_grid_inner_reduction &&
-        rparams.unroll_factor_iter_dom > 1),
-      "Unrolling on iter domain not supported with cross grid reductions.");
-
-  TORCH_INTERNAL_ASSERT(
       !(rparams.unroll_factor_iter_dom > 1 && !has_iter_axis),
       "Unrolling on iter domain requires an iter domain.");
 

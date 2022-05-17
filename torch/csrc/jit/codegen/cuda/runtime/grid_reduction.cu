@@ -174,6 +174,11 @@ __device__ void gridReduceLastBlock(
 // gets valid reduction results. There is no guarantee which particular block
 // gets the final results.
 //
+// entrance_ind and n_entrances are allowed when PERSISTENT_REDUCTION = false.
+// If a grid reduction call is only called once per thread, entrance_ind == 0
+// and n_entrances == 1. However, grid reduction can be called in a loop in a
+// thread, in that case entrance_ind is the count of times the function has been
+// called, and n_entrances is the total number of times it will be called.
 template <
     bool X_BLOCK,
     bool Y_BLOCK,
@@ -193,8 +198,14 @@ __device__ void gridReduce(
     T* shared_buf,
     bool read_pred,
     bool write_pred,
-    T init_val) {
+    T init_val,
+    const nvfuser_index_t entrance_ind,
+    const nvfuser_index_t n_entrances) {
   T block_reduction_val = init_val;
+
+  // entrance index only matters for non-persistent re-entrant grid reductions.
+  const nvfuser_index_t entrance_ind_ = PERSISTENT_REDUCTION ? 0 : entrance_ind;
+  const nvfuser_index_t n_entrances_ = PERSISTENT_REDUCTION ? 1 : n_entrances;
 
   // Do block reduction when required
   if (X_THREAD || Y_THREAD || Z_THREAD) {
@@ -227,10 +238,15 @@ __device__ void gridReduce(
   const auto block_reduction_segment_size =
       index_utils::maskedSize<!X_THREAD, !Y_THREAD, !Z_THREAD>(blockDim);
 
+  // Number of reductions in the grid
+  const nvfuser_index_t grid_segment_size = PERSISTENT_REDUCTION
+      ? 1
+      : index_utils::maskedSize<!X_BLOCK, !Y_BLOCK, !Z_BLOCK>(gridDim);
+
   // advance to the offset for this segment
   // index of reduction * size of the reduction * size of threads
-  work_buf += idx_in_grid_segment * grid_reduction_segment_size *
-      block_reduction_segment_size;
+  work_buf += (entrance_ind * grid_segment_size + idx_in_grid_segment) *
+      grid_reduction_segment_size * block_reduction_segment_size;
 
   if ((!X_THREAD || threadIdx.x == 0) && (!Y_THREAD || threadIdx.y == 0) &&
       (!Z_THREAD || threadIdx.z == 0)) {
@@ -243,9 +259,16 @@ __device__ void gridReduce(
         block_offset * block_reduction_segment_size + thread_offset;
     work_buf[work_buf_offset] = block_reduction_val;
   }
+  if (PERSISTENT_REDUCTION) {
+    grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
+        sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
 
-  grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
-      sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
+  } else {
+    // Use a different sync flag for each call
+    grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
+        sync_flags[entrance_ind_ * grid_segment_size + idx_in_grid_segment],
+        grid_reduction_segment_size);
+  }
 
   bool last_block =
       index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
