@@ -2178,7 +2178,7 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 }
 
 template<typename T>
-static inline C10_HOST_DEVICE T fresnel_integral_c(T x) {
+static inline T fresnel_integral_c(T x) {
     static const T CN[] = {
             -4.98843114573573548651e-08,
             +9.50428062829859605134e-06,
@@ -2264,7 +2264,7 @@ static inline C10_HOST_DEVICE T fresnel_integral_c(T x) {
         return c;
     }
 
-    T abs_x = std::fabs(x);
+    T abs_x = std::abs(x);
 
     T abs_x_squared = abs_x * abs_x;
 
@@ -2322,7 +2322,7 @@ static inline C10_HOST_DEVICE T fresnel_integral_c(T x) {
 }
 
 template<typename T>
-static inline C10_HOST_DEVICE T fresnel_integral_s(T x) {
+static inline T fresnel_integral_s(T x) {
     static const T SN[] = {
             -2.99181919401019853726e+03,
             +7.08840045257738576863e+05,
@@ -2408,7 +2408,7 @@ static inline C10_HOST_DEVICE T fresnel_integral_s(T x) {
         return s;
     }
 
-    T abs_x = std::fabs(x);
+    T abs_x = std::abs(x);
 
     T abs_x_squared = abs_x * abs_x;
 
