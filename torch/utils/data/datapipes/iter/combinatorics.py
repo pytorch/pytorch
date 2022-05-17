@@ -85,6 +85,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
     datapipe: IterDataPipe[T_co]
     buffer_size: int
     _shuffle_enabled: bool
+    buffer: List[T_co]
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
@@ -93,6 +94,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
                  unbatch_level: int = 0
                  ) -> None:
         super().__init__()
+        self.buffer: List[T_co] = []
         assert buffer_size > 0, "buffer_size should be larger than 0"
         if unbatch_level == 0:
             self.datapipe = datapipe
@@ -117,17 +119,40 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             for x in self.datapipe:
                 yield x
         else:
-            buffer: List[T_co] = []
             for x in self.datapipe:
-                if len(buffer) == self.buffer_size:
-                    yield ShufflerIterDataPipe.buffer_replace(buffer, x)
+                if len(self.buffer) == self.buffer_size:
+                    yield ShufflerIterDataPipe.buffer_replace(self.buffer, x)
                 else:
-                    buffer.append(x)
-            random.shuffle(buffer)
-            while buffer:
-                yield buffer.pop()
+                    self.buffer.append(x)
+            random.shuffle(self.buffer)
+            while self.buffer:
+                yield self.buffer.pop()
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+
+    def reset(self) -> None:
+        self.buffer = []
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+        state = (
+            self.datapipe,
+            self.buffer_size,
+            self._enabled
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.datapipe,
+            self.buffer_size,
+            self._enabled
+        ) = state
+        self.buffer = []
+
+    def __del__(self):
+        self.buffer.clear()

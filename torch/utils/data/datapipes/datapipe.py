@@ -176,6 +176,15 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
+    def reset(self):
+        r"""
+        Reset the `IterDataPipe` to the initial state. By default, no-op. For subclasses of `IterDataPipe`,
+        depending on their functionalities, they may want to override this method with implementations that
+        may clear the buffers and reset pointers of the DataPipe.
+        The `reset` method is always called when `__iter__` is called as part of `hook_iterator`.
+        """
+        pass
+
 
 class DFIterDataPipe(IterDataPipe):
     def _is_dfpipe(self):
