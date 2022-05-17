@@ -3948,9 +3948,9 @@ class _TestONNXRuntime:
             def forward(self, input, input2):
                 return (
                     input >> 1,
-                    input << 3.0,
+                    input << 3,
                     input2 >> torch.tensor([1, 2], dtype=torch.uint8),
-                    input2 << 4.0,
+                    input2 << 4,
                 )
 
         input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
