@@ -1,7 +1,9 @@
 import importlib
 from inspect import getmembers, isfunction
 
-from torch.onnx import symbolic_helper, symbolic_registry
+from torch.onnx import symbolic_helper
+from torch.onnx import symbolic_opset9 as opset9
+from torch.onnx import symbolic_registry
 from torch.onnx.symbolic_helper import parse_args
 
 
@@ -138,9 +140,7 @@ def add(g, input_a, input_b, scale, zero_point):
 @parse_args("v")
 def relu(g, input):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opset9 import relu
-
-        return relu(g, input)
+        return opset9.relu(g, input)
     kwargs = {
         "Y_scale_f": input.node()["Y_scale"],
         "Y_zero_point_i": input.node()["Y_zero_point"],
@@ -177,11 +177,7 @@ def upsample_nearest2d(
     g, input, output_size, align_corners=None, scales_h=None, scales_w=None
 ):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opset9 import (
-            upsample_nearest2d as upsample_nearest2d_impl,
-        )
-
-        return upsample_nearest2d_impl(g, input, output_size, align_corners)
+        return opset9.upsample_nearest2d(g, input, output_size, align_corners)
 
     output_size = symbolic_helper._parse_arg(output_size, "is")
     kwargs = {
@@ -199,9 +195,7 @@ def upsample_nearest2d(
 @parse_args("v", "is", "is", "is", "is", "i")
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opset9 import max_pool2d
-
-        return max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode)
+        return opset9.max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode)
     kwargs = {
         "strides_i": stride,
         "pads_i": padding + padding,
@@ -229,9 +223,7 @@ def avg_pool2d(
     divisor_override=None,
 ):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opset9 import avg_pool2d
-
-        return avg_pool2d(
+        return opset9.avg_pool2d(
             g,
             input,
             kernel_size,
@@ -258,9 +250,7 @@ def avg_pool2d(
 
 def reshape(g, input, shape):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opset9 import reshape
-
-        return reshape(g, input, shape)
+        return opset9.reshape(g, input, shape)
 
     kwargs = {
         "Y_scale_f": input.node()["Y_scale"],
@@ -274,9 +264,7 @@ def reshape(g, input, shape):
 @parse_args("v", "v", "v", "v", "i")
 def slice(g, input, dim, start, end, step):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opset9 import slice
-
-        return slice(g, input, dim, start, end, step)
+        return opset9.slice(g, input, dim, start, end, step)
 
     if step != 1:
         raise RuntimeError("ONNX quantized slice export only works for step 1.")
@@ -300,9 +288,7 @@ def cat(g, tensor_list, dim, scale=None, zero_point=None):
     tensors = symbolic_helper._unpack_list(tensor_list)
     input = tensors[0]
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opset9 import cat
-
-        return cat(g, tensor_list, dim)
+        return opset9.cat(g, tensor_list, dim)
 
     dim = symbolic_helper._parse_arg(dim, "i")
     kwargs = {
@@ -317,9 +303,7 @@ def cat(g, tensor_list, dim, scale=None, zero_point=None):
 @parse_args("v")
 def sigmoid(g, input):
     if input not in symbolic_helper._quantized_ops:
-        from torch.onnx.symbolic_opset9 import sigmoid
-
-        return sigmoid(g, input)
+        return opset9.sigmoid(g, input)
     # Caffe2 expects the output scale to be 1/2^8
     # and output zero_point to be 0 (quint8 type)
     out_scale = 1.0 / 256

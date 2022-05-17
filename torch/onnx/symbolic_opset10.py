@@ -104,8 +104,6 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                 strides_i=[1 for _ in range(ndims)],
             )
             # convert indices to have non-flattened indices values
-            from torch.onnx.symbolic_opset9 import sub
-
             s = symbolic_helper._slice_helper(
                 g,
                 flattened_indices,
@@ -113,7 +111,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                 starts=tuple_fn(0),
                 ends=tuple_fn(1),
             )
-            indices = sub(g, indices, s)
+            indices = opset9.sub(g, indices, s)
             return r, indices
         else:
             r = g.op("MaxPool", input, outputs=1, **kwargs)
@@ -333,8 +331,6 @@ def embedding_bag(
     if padding_idx is not None and padding_idx >= 0:
         raise RuntimeError("embedding_bag with padding_idx")
 
-    from torch.onnx.symbolic_opset9 import select
-
     warnings.warn(
         "Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
         "Please use opset 11 or higher to export model for dynamic input shape.'"
@@ -354,11 +350,11 @@ def embedding_bag(
         list_ = []
         for i in range(offset_len):
             start_ = symbolic_helper._unsqueeze_helper(
-                g, select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), [0]
+                g, opset9.select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), [0]
             )
             end_ = symbolic_helper._unsqueeze_helper(
                 g,
-                select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)),
+                opset9.select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)),
                 [0],
             )
             axes_ = g.op("Constant", value_t=torch.tensor([0]))
@@ -436,16 +432,14 @@ def fake_quantize_per_tensor_affine(
 
 
 def isinf(g, input):
-    from torch.onnx.symbolic_opset9 import _cast_Double  # type: ignore[attr-defined]
-
-    return g.op("IsInf", _cast_Double(g, input, False))
+    return g.op("IsInf", opset9._cast_Double(g, input, False))  # type: ignore[attr-defined]
 
 
 def isfinite(g, input):
-    from torch.onnx.symbolic_opset9 import __not_, __or_, isnan
+    from torch.onnx.symbolic_opset9 import __not_, __or_
 
     inf_node = isinf(g, input)
-    nan_node = isnan(g, input)
+    nan_node = opset9.isnan(g, input)
     return __not_(g, __or_(g, inf_node, nan_node))
 
 
@@ -464,8 +458,6 @@ def dequantize(g, input):
 
 @parse_args("v", "f", "f", "f")
 def nan_to_num(g, input, nan, posinf, neginf):
-    from torch.onnx.symbolic_opset9 import gt, isnan, logical_and, lt
-
     # Cannot create a int type tensor with inf/nan values, so we simply
     # return the original tensor
     if not symbolic_helper._is_fp(input):
@@ -473,7 +465,7 @@ def nan_to_num(g, input, nan, posinf, neginf):
     input_dtype = symbolic_helper.pytorch_name_to_type[input.type().scalarType()]
     if nan is None:
         nan = 0.0
-    nan_cond = isnan(g, input)
+    nan_cond = opset9.isnan(g, input)
     nan_result = g.op(
         "Where",
         nan_cond,
@@ -486,10 +478,10 @@ def nan_to_num(g, input, nan, posinf, neginf):
     finfo = torch.finfo(input_dtype)
     if posinf is None:
         posinf = finfo.max
-    posinf_cond = logical_and(
+    posinf_cond = opset9.logical_and(
         g,
         isinf(g, nan_result),
-        gt(g, nan_result, g.op("Constant", value_t=torch.LongTensor([0]))),
+        opset9.gt(g, nan_result, g.op("Constant", value_t=torch.LongTensor([0]))),
     )
     nan_posinf_result = g.op(
         "Where",
@@ -500,10 +492,10 @@ def nan_to_num(g, input, nan, posinf, neginf):
 
     if neginf is None:
         neginf = finfo.min
-    neginf_cond = logical_and(
+    neginf_cond = opset9.logical_and(
         g,
         isinf(g, nan_posinf_result),
-        lt(g, nan_posinf_result, g.op("Constant", value_t=torch.LongTensor([0]))),
+        opset9.lt(g, nan_posinf_result, g.op("Constant", value_t=torch.LongTensor([0]))),
     )
     return g.op(
         "Where",
