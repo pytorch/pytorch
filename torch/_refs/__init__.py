@@ -41,8 +41,7 @@ __all__ = [
     "acosh",
     "asin",
     "atan",
-    # "bessel_i0e",  # special.i0e
-    # "bessel_i1e",  # special.i1e
+    "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
     "cos",
@@ -56,6 +55,7 @@ __all__ = [
     "floor",
     "isfinite",
     "isnan",
+    "i0",
     "lgamma",
     "log",
     "log1p",
@@ -112,11 +112,9 @@ __all__ = [
     "pow",
     # 'remainder',
     # 'rsub', # unblocked
-    # # special.xlog1py
-    # # special.zeta
     "sub",
     "true_divide",
-    # 'xlogy', # where?, log, mul
+    "xlogy",
     #
     # Conditional references
     #
@@ -273,6 +271,11 @@ atan = _make_elementwise_unary_reference(
     prims.atan, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
+bitwise_not = _make_elementwise_unary_reference(
+    prims.bitwise_not,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 ceil = _make_elementwise_unary_reference(
     prims.ceil, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
 )
@@ -313,6 +316,12 @@ expm1 = _make_elementwise_unary_reference(
 
 floor = _make_elementwise_unary_reference(
     prims.floor, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+i0 = _make_elementwise_unary_reference(
+    prims.bessel_i0,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.special_i0,
 )
 
 isfinite = _make_elementwise_unary_reference(
@@ -702,6 +711,24 @@ true_divide = _make_elementwise_binary_reference(
     prims.div,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # CompositeImplicitAutograd
+)
+
+
+def _xlogy(a: Union[Tensor, NumberType], b: Union[Tensor, NumberType]):
+    if isinstance(a, Tensor) and isinstance(b, Number):
+        b = prims._wrap_scalar(b, dtype=a.dtype, device=a.device)
+    elif isinstance(b, Tensor) and isinstance(a, Number):
+        a = prims._wrap_scalar(a, dtype=b.dtype, device=b.device)
+
+    rhs = where(eq(a, 0), a, mul(a, log(b)))
+    return where(isnan(b), b, rhs)
+
+
+# TODO: add docstring
+xlogy = _make_elementwise_binary_reference(
+    _xlogy,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=None,  # Defined in torch/_decomp/decompositions.py
 )
 
 #

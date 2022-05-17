@@ -45,8 +45,11 @@ __all__ = [
     "atan",
     "cos",
     "cosh",
+    "bessel_i0",
+    "bessel_i1",
     "bessel_i0e",
     "bessel_i1e",
+    "bitwise_not",
     "cbrt",
     "ceil",
     "digamma",
@@ -75,9 +78,9 @@ __all__ = [
     "add",
     "atan2",
     "bitwise_and",
-    "bitwise_not",
     "bitwise_or",
     "bitwise_xor",
+    "zeta"
     # 'complex',  # needs custom meta
     "div",
     "eq",
@@ -361,6 +364,20 @@ cosh = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+bessel_i0 = _make_elementwise_unary_prim(
+    "bessel_i0",
+    impl_aten=torch.i0,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+bessel_i1 = _make_elementwise_unary_prim(
+    "bessel_i1",
+    impl_aten=torch.special.i1,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 bessel_i0e = _make_elementwise_unary_prim(
     "bessel_i0e",
     impl_aten=torch.special.i0e,
@@ -371,6 +388,13 @@ bessel_i0e = _make_elementwise_unary_prim(
 bessel_i1e = _make_elementwise_unary_prim(
     "bessel_i1e",
     impl_aten=torch.special.i1e,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+bitwise_not = _make_elementwise_unary_prim(
+    "bitwise_not",
+    impl_aten=torch.bitwise_not,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -564,13 +588,6 @@ bitwise_and = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
-bitwise_not = _make_elementwise_binary_prim(
-    "bitwise_not",
-    impl_aten=torch.bitwise_not,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
 bitwise_or = _make_elementwise_binary_prim(
     "bitwise_or",
     impl_aten=torch.bitwise_or,
@@ -581,6 +598,13 @@ bitwise_or = _make_elementwise_binary_prim(
 bitwise_xor = _make_elementwise_binary_prim(
     "bitwise_xor",
     impl_aten=torch.bitwise_xor,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+zeta = _make_elementwise_binary_prim(
+    "zeta",
+    impl_aten=torch.special.zeta,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -685,7 +709,9 @@ lt = _make_elementwise_binary_prim(
 )
 
 
-def _wrap_scalar(a: NumberType, *, dtype: torch.dtype = None) -> torch.Tensor:
+def _wrap_scalar(
+    a: NumberType, *, dtype: torch.dtype = None, device: torch.device = None
+) -> torch.Tensor:
     """
     Wraps a Number into a Tensor of corresponding dtype.
 
@@ -693,7 +719,7 @@ def _wrap_scalar(a: NumberType, *, dtype: torch.dtype = None) -> torch.Tensor:
     accept scalars, so it's necessary for their prims to do so.
     """
     dtype = dtype if dtype is not None else utils.type_to_dtype(type(a))
-    return torch.tensor(a, dtype=dtype)
+    return torch.tensor(a, dtype=dtype, device=device)
 
 
 # Note: the following impls are because torch.maximum and torch.mininum do not support scalar inputs

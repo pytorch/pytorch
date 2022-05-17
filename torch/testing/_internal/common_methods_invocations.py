@@ -18494,6 +18494,10 @@ python_ref_db = [
         torch_opinfo_name="atan",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.bitwise_not",
+        torch_opinfo_name="bitwise_not",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.ceil",
         torch_opinfo_name="ceil",
     ),
@@ -18643,6 +18647,29 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.i0",
+        torch_opinfo_name="i0",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.i1",
+        torch_opinfo_name="special.i1",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.special.zeta",
+        torch_opinfo_name="special.zeta",
+        supports_one_python_scalar=True,
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.special.xlog1py",
+        torch_opinfo_name="special.xlog1py",
+        supports_one_python_scalar=True,
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.xlogy",
+        torch_opinfo_name="xlogy",
+        supports_one_python_scalar=True,
     ),
     #
     # Elementwise Unary nn.functional OpInfos
