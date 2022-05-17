@@ -13,6 +13,11 @@ class TORCH_API Permute : public TsNode {
 
   Permute(const Value& input, std::vector<int64_t> dims);
 
+  bool CanBeReused(const Value& input, c10::ArrayRef<int64_t> dims) const {
+    size_t i = 0;
+    return (operand(i++) == input && dims_ == dims);
+  }
+
   std::string ToString() const override;
 
   const std::vector<int64_t>& dims() const {

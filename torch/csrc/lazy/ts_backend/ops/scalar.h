@@ -19,6 +19,16 @@ class TORCH_API Scalar : public TsNode {
   Scalar(const at::Scalar& value, Shape shape);
   Scalar(const at::Scalar& value, c10::ScalarType type);
 
+  bool CanBeReused(const at::Scalar& value, Shape shape) const {
+    TORCH_INTERNAL_ASSERT(false, "Reusing Scalar nodes is unsupported")
+    return false;
+  }
+
+  bool CanBeReused(const at::Scalar& value, c10::ScalarType type) const {
+    TORCH_INTERNAL_ASSERT(false, "Reusing Scalar nodes is unsupported")
+    return false;
+  }
+
   std::string ToString() const override;
 
   const at::Scalar& value() const {

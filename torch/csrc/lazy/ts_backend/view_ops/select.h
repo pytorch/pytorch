@@ -18,6 +18,18 @@ class TORCH_API Select : public TsNode {
       int64_t end,
       int64_t stride);
 
+  bool CanBeReused(
+      const Value& input,
+      int64_t dim,
+      int64_t start,
+      int64_t end,
+      int64_t stride) const {
+    size_t i = 0;
+    return (
+        operand(i++) == input && dim_ == dim && start_ == start &&
+        end_ == end && stride_ == stride);
+  }
+
   std::string ToString() const override;
 
   int64_t dim() const {

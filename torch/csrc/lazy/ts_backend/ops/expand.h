@@ -15,6 +15,16 @@ class TORCH_API Expand : public TsNode {
 
   Expand(const Value& input, std::vector<int64_t> size, bool is_scalar_expand);
 
+  bool CanBeReused(
+      const Value& input,
+      std::vector<int64_t> size,
+      bool is_scalar_expand) const {
+    size_t i = 0;
+    return (
+        operand(i++) == input && size_ == size &&
+        is_scalar_expand_ == is_scalar_expand);
+  }
+
   std::string ToString() const override;
 
   const std::vector<int64_t>& size() const {

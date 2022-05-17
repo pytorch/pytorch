@@ -13,6 +13,11 @@ class TORCH_API Resize : public TsNode {
 
   Resize(const Value& input, std::vector<int64_t> size);
 
+  bool CanBeReused(const Value& input, c10::ArrayRef<int64_t> size) const {
+    size_t i = 0;
+    return (operand(i++) == input && size_ == size);
+  }
+
   std::string ToString() const override;
 
   const std::vector<int64_t>& size() const {

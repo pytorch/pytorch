@@ -13,6 +13,14 @@ class TORCH_API Diagonal : public TsNode {
 
   Diagonal(const Value& input, int64_t offset, int64_t dim1, int64_t dim2);
 
+  bool CanBeReused(const Value& input, int64_t offset, int64_t dim1, int64_t dim2)
+      const {
+    size_t i = 0;
+    return (
+        operand(i++) == input && offset_ == offset && dim1_ == dim1 &&
+        dim2_ == dim2);
+  }
+
   std::string ToString() const override;
 
   int64_t offset() const {

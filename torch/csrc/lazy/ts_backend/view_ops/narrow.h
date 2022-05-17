@@ -16,6 +16,17 @@ class TORCH_API Narrow : public TsNode {
       c10::ArrayRef<int64_t> base_indices,
       c10::ArrayRef<int64_t> sizes);
 
+  bool CanBeReused(
+      const Value& input,
+      c10::ArrayRef<int64_t> base_indices,
+      c10::ArrayRef<int64_t> sizes) const {
+    size_t i = 0;
+    return (
+        operand(i++) == input &&
+        base_indices_ == base_indices &&
+        sizes_ == sizes);
+  }
+
   std::string ToString() const override;
 
   const std::vector<int64_t>& base_indices() const {

@@ -15,6 +15,11 @@ class TORCH_API View : public TsNode {
 
   View(const Value& input, std::vector<int64_t> output_size);
 
+  bool CanBeReused(const Value& input, std::vector<int64_t> output_size) const {
+    size_t i = 0;
+    return (operand(i++) == input && output_size_ == output_size);
+  }
+
   std::string ToString() const override;
 
   const std::vector<int64_t>& output_size() const {

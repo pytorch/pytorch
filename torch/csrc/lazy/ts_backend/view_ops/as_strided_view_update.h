@@ -21,6 +21,18 @@ class TORCH_API AsStridedViewUpdate : public TsNode {
       std::vector<int64_t> stride,
       int64_t storage_offset);
 
+  bool CanBeReused(
+      const Value& target,
+      const Value& input,
+      std::vector<int64_t> size,
+      std::vector<int64_t> stride,
+      int64_t storage_offset) const {
+    size_t i = 0;
+    return (
+        operand(i++) == target && operand(i++) == input && size_ == size &&
+        stride_ == stride && storage_offset_ == storage_offset);
+  }
+
   std::string ToString() const override;
 
   const std::vector<int64_t>& size() const {

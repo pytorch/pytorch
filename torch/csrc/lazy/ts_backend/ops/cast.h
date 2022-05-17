@@ -19,6 +19,14 @@ class TORCH_API Cast : public TsNode {
       at::ScalarType dtype,
       c10::optional<at::ScalarType> stype = c10::nullopt);
 
+  bool CanBeReused(
+      const Value& input,
+      at::ScalarType dtype,
+      c10::optional<at::ScalarType> stype = c10::nullopt) const {
+    size_t i = 0;
+    return (operand(i++) == input && dtype_ == dtype && stype_ == stype);
+  }
+
   std::string ToString() const override;
 
   at::ScalarType dtype() const {

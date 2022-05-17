@@ -13,6 +13,11 @@ class TORCH_API Unsqueeze : public TsNode {
 
   Unsqueeze(const torch::lazy::Value& input, int dim);
 
+  bool CanBeReused(const torch::lazy::Value& input, int dim) const {
+    size_t i = 0;
+    return (operand(i++) == input && dim_ == dim);
+  }
+
   std::string ToString() const override;
 
   int dim() const {
