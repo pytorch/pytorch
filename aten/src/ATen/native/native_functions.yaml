@@ -5290,7 +5290,7 @@
   dispatch:
     CompositeExplicitAutograd: clone
     SparseCPU, SparseCUDA: clone_sparse
-    SparseCsrCPU, SparseCsrCUDA: clone_sparse_compressed
+    SparseCsrCPU, SparseCsrCUDA: clone_sparse_csr
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
