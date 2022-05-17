@@ -643,6 +643,7 @@ class FullyShardedDataParallel(nn.Module):
                 backward_prefetch=backward_prefetch,
                 mixed_precision=mixed_precision,
                 param_init_fn=param_init_fn,
+                device_id=device_id,
             )
 
         self.process_group = process_group or _get_default_group()
