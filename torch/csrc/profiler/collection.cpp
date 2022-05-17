@@ -257,6 +257,7 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
   return it->second.get();
 }
 
+namespace {
 template <typename T>
 auto steal_or_default(T& it) {
   if (it.exhausted()) {
@@ -267,6 +268,35 @@ auto steal_or_default(T& it) {
     return result;
   }
 }
+
+struct EvaluateFunctionVisitor {
+  void operator()(
+      ExtraFields<EventType::TorchOp>& first,
+      ExtraFields<EventType::TorchOp>& second) {
+    if (first.scope_ == at::RecordScope::FUNCTION &&
+        second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
+        first.name_.rfind("autograd::engine::evaluate_function: ", 0) == 0) {
+      first.sequence_number_ = second.sequence_number_;
+      first.forward_tid_ = second.forward_tid_;
+    }
+  }
+
+  template <typename T0, typename T1>
+  void operator()(T0&, T1&) {}
+};
+
+void set_autograd_evaluate(std::vector<std::shared_ptr<Result>>& results) {
+  auto end = results.size() > 2 ? results.end() - 1 : results.begin();
+  for (auto it = results.begin(); it < end; ++it) {
+    if ((*it)->start_tid_ == (*(it + 1))->start_tid_) {
+      c10::visit(
+          EvaluateFunctionVisitor(),
+          (*it)->extra_fields_,
+          (*(it + 1))->extra_fields_);
+    }
+  }
+}
+} // namespace
 
 std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     std::function<time_t(approx_time_t)> time_converter) {
@@ -327,6 +357,7 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     queue.allocations_.clear();
   }
 
+  set_autograd_evaluate(out);
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
     return a->start_time_us_ < b->start_time_us_;
   });
