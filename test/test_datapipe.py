@@ -378,12 +378,14 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertTrue(inp[1].closed)
 
         cached = list(datapipe2)
-        datapipe3 = dp.iter.RoutedDecoder(cached, _png_decoder)
+        with warnings.catch_warnings(record=True) as wa:
+            datapipe3 = dp.iter.RoutedDecoder(cached, _png_decoder)
         datapipe3.add_handler(decoder_basichandlers)
         _helper(cached, datapipe3)
 
         cached = list(datapipe2)
-        datapipe4 = dp.iter.RoutedDecoder(cached, decoder_basichandlers)
+        with warnings.catch_warnings(record=True) as wa:
+            datapipe4 = dp.iter.RoutedDecoder(cached, decoder_basichandlers)
         datapipe4.add_handler(_png_decoder)
         _helper(cached, datapipe4, channel_first=True)
 
@@ -571,6 +573,9 @@ def _fake_filter_fn(data):
     return True
 
 
+def _simple_filter_fn(data):
+    return data >= 5
+
 def _fake_filter_fn_constant(constant, data):
     return data >= constant
 
@@ -618,17 +623,26 @@ class TestFunctionalIterDataPipe(TestCase):
         # 1. Testing for serialization before any iteration starts
         self._serialization_test_helper(dp1, use_dill)
         self._serialization_test_helper(dp2, use_dill)
+
         # 2. Testing for serialization after DataPipe is partially read
         it1, it2 = iter(dp1), iter(dp2)
         _, _ = next(it1), next(it2)
-        self._serialization_test_helper(dp1, use_dill)
-        self._serialization_test_helper(dp2, use_dill)
+        # Catch `fork`, `demux` "some child DataPipes are not exhausted" warning
+        with warnings.catch_warnings(record=True) as wa:
+            self._serialization_test_helper(dp1, use_dill)
+            self._serialization_test_helper(dp2, use_dill)
+
         # 2.5. Testing for serialization after one child DataPipe is fully read
         #      (Only for DataPipes with children DataPipes)
+        it1 = iter(dp1)
         _ = list(it1)  # fully read one child
-        self._serialization_test_helper(dp1, use_dill)
-        self._serialization_test_helper(dp2, use_dill)
+        # Catch `fork`, `demux` "some child DataPipes are not exhausted" warning
+        with warnings.catch_warnings(record=True) as wa:
+            self._serialization_test_helper(dp1, use_dill)
+            self._serialization_test_helper(dp2, use_dill)
+
         # 3. Testing for serialization after DataPipe is fully read
+        it2 = iter(dp2)
         _ = list(it2)  # fully read the other child
         self._serialization_test_helper(dp1, use_dill)
         self._serialization_test_helper(dp2, use_dill)
@@ -638,12 +652,12 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Batcher, None, (3, True,), {}),
             (dp.iter.Collator, None, (_fake_fn,), {}),
             (dp.iter.Concater, None, (dp.iter.IterableWrapper(range(5)),), {}),
-            # (dp.iter.Demultiplexer, None, (2, _fake_filter_fn), {}),  # Temporarily disabled until next PR
+            (dp.iter.Demultiplexer, None, (2, _simple_filter_fn), {}),
             (dp.iter.FileLister, ".", (), {}),
             (dp.iter.FileOpener, None, (), {}),
             (dp.iter.Filter, None, (_fake_filter_fn,), {}),
             (dp.iter.Filter, None, (partial(_fake_filter_fn_constant, 5),), {}),
-            # (dp.iter.Forker, None, (2,), {}),  # Temporarily disabled until next PR
+            (dp.iter.Forker, None, (2,), {}),
             (dp.iter.Grouper, None, (_fake_filter_fn,), {"group_size": 2}),
             (dp.iter.IterableWrapper, range(10), (), {}),
             (dp.iter.Mapper, None, (_fake_fn,), {}),
@@ -679,7 +693,7 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp = dp.iter.IterableWrapper(range(10))
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
             (dp.iter.Collator, (lambda x: x,), {}),
-            # (dp.iter.Demultiplexer, (2, lambda x: x % 2,), {}),  # Temporarily disabled until next PR
+            (dp.iter.Demultiplexer, (2, lambda x: x % 2,), {}),
             (dp.iter.Filter, (lambda x: x >= 5,), {}),
             (dp.iter.Grouper, (lambda x: x >= 5,), {}),
             (dp.iter.Mapper, (lambda x: x,), {}),
@@ -829,32 +843,38 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(range(5)), output2)
         self.assertEqual(list(range(10)), output3)
 
-        # Reset Test: DataPipe doesn't reset if this pipe hasn't been read
+        # Reset Test: DataPipe resets when a new iterator is created, even if this datapipe hasn't been read
         dp1, dp2 = input_dp.fork(num_instances=2)
-        i1, i2 = iter(dp1), iter(dp2)
+        _ = iter(dp1)
         output2 = []
-        for i, n2 in enumerate(i2):
-            output2.append(n2)
-            if i == 4:
-                i1 = iter(dp1)  # Doesn't reset because i1 hasn't been read
-        self.assertEqual(list(range(10)), output2)
+        with self.assertRaisesRegex(RuntimeError, r"iterator has been invalidated"):
+            for i, n2 in enumerate(dp2):
+                output2.append(n2)
+                if i == 4:
+                    with warnings.catch_warnings(record=True) as wa:
+                        _ = iter(dp1)  # This will reset all child DataPipes
+                        self.assertEqual(len(wa), 1)
+                        self.assertRegex(str(wa[0].message), r"child DataPipes are not exhausted")
+        self.assertEqual(list(range(5)), output2)
 
-        # Reset Test: DataPipe reset when some of it have been read
+        # Reset Test: DataPipe resets when some of it has been read
         dp1, dp2 = input_dp.fork(num_instances=2)
-        i1, i2 = iter(dp1), iter(dp2)
         output1, output2 = [], []
-        for i, (n1, n2) in enumerate(zip(i1, i2)):
+        for i, (n1, n2) in enumerate(zip(dp1, dp2)):
             output1.append(n1)
             output2.append(n2)
             if i == 4:
                 with warnings.catch_warnings(record=True) as wa:
-                    i1 = iter(dp1)  # Reset both all child DataPipe
+                    _ = iter(dp1)  # Reset both all child DataPipe
                     self.assertEqual(len(wa), 1)
                     self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
                 break
-        for i, (n1, n2) in enumerate(zip(i1, i2)):
-            output1.append(n1)
-            output2.append(n2)
+        with warnings.catch_warnings(record=True) as wa:
+            for i, (n1, n2) in enumerate(zip(dp1, dp2)):
+                output1.append(n1)
+                output2.append(n2)
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"child DataPipes are not exhausted")
         self.assertEqual(list(range(5)) + list(range(10)), output1)
         self.assertEqual(list(range(5)) + list(range(10)), output2)
 
@@ -981,18 +1001,21 @@ class TestFunctionalIterDataPipe(TestCase):
             next(it)
             next(it)
 
-        # Reset Test: DataPipe doesn't reset when it has not been read
+        # Reset Test: DataPipe resets when a new iterator is created, even if this datapipe hasn't been read
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
-        i1 = iter(dp1)
+        _ = iter(dp1)
         output2 = []
-        i = 0
-        for i, n2 in enumerate(dp2):
-            output2.append(n2)
-            if i == 4:
-                i1 = iter(dp1)
+        with self.assertRaisesRegex(RuntimeError, r"iterator has been invalidated"):
+            for i, n2 in enumerate(dp2):
+                output2.append(n2)
+                if i == 4:
+                    with warnings.catch_warnings(record=True) as wa:
+                        _ = iter(dp1)  # This will reset all child DataPipes
+                        self.assertEqual(len(wa), 1)
+                        self.assertRegex(str(wa[0].message), r"child DataPipes are not exhausted")
         self.assertEqual(list(range(1, 10, 2)), output2)
 
-        # Reset Test: DataPipe reset when some of it has been read
+        # Reset Test: DataPipe resets when some of it has been read
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
         output1, output2 = [], []
         for n1, n2 in zip(dp1, dp2):
@@ -1004,11 +1027,13 @@ class TestFunctionalIterDataPipe(TestCase):
             i1 = iter(dp1)  # Reset all child DataPipes
             self.assertEqual(len(wa), 1)
             self.assertRegex(str(wa[0].message), r"Some child DataPipes are not exhausted")
-        for n1, n2 in zip(dp1, dp2):
-            output1.append(n1)
-            output2.append(n2)
-        self.assertEqual([0, 2, 4] + list(range(0, 10, 2)), output1)
-        self.assertEqual([1, 3, 5] + list(range(1, 10, 2)), output2)
+            for n1, n2 in zip(dp1, dp2):
+                output1.append(n1)
+                output2.append(n2)
+            self.assertEqual([0, 2, 4] + list(range(0, 10, 2)), output1)
+            self.assertEqual([1, 3, 5] + list(range(1, 10, 2)), output2)
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"child DataPipes are not exhausted")
 
         # Reset Test: DataPipe reset, even when not all child DataPipes are exhausted
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=lambda x: x % 2)
@@ -2451,6 +2476,74 @@ class TestIterDataPipeSingletonConstraint(TestCase):
         self.assertEqual(2, next(source_dp))  # not impacted by the creation of `it2`
         self.assertEqual(list(range(10)), list(it2))  # `it2` still works because it is a new object
 
+    def test_iterdatapipe_singleton_constraint_multiple_outputs(self):
+        r"""
+        Testing for the case where IterDataPipe has multiple child DataPipes as outputs.
+        """
+        # Functional Test: all previous related iterators should be invalidated when a new iterator
+        #                  is created from a ChildDataPipe
+        source_dp: IterDataPipe = dp.iter.IterableWrapper(range(10))
+        cdp1, cdp2 = source_dp.fork(num_instances=2)
+        it1, it2 = iter(cdp1), iter(cdp2)
+        self.assertEqual(list(range(10)), list(it1))
+        self.assertEqual(list(range(10)), list(it2))
+        it1, it2 = iter(cdp1), iter(cdp2)
+        with warnings.catch_warnings(record=True) as wa:
+            it3 = iter(cdp1)  # This should invalidate `it1` and `it2`
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"child DataPipes are not exhausted")
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it1)
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it2)
+        self.assertEqual(0, next(it3))
+        # The next line should not invalidate anything, as there was no new iterator created
+        # for `cdp2` after `it2` was invalidated
+        it4 = iter(cdp2)
+        self.assertEqual(1, next(it3))  # An error shouldn't be raised here
+        self.assertEqual(list(range(10)), list(it4))
+
+        # Functional Test: invalidation when a new iterator is created from `source_dp`
+        source_dp = dp.iter.IterableWrapper(range(10))
+        cdp1, cdp2 = source_dp.fork(num_instances=2)
+        it1, it2 = iter(cdp1), iter(cdp2)
+        self.assertEqual(list(range(10)), list(it1))
+        self.assertEqual(list(range(10)), list(it2))
+        it1, it2 = iter(cdp1), iter(cdp2)
+        self.assertEqual(0, next(it1))
+        self.assertEqual(0, next(it2))
+        it3 = iter(source_dp)  # note that a new iterator is created from `source_dp`
+        self.assertEqual(0, next(it3))  # `it3` should invalidate `it1` and `it2` since they both use `source_dp`
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it1)
+        self.assertEqual(1, next(it3))
+
+        # Function Test: Extending test to pipeline
+        source_dp = dp.iter.IterableWrapper(range(10)).map(_fake_fn).filter(_fake_filter_fn)
+        cdp1, cdp2 = source_dp.fork(num_instances=2)
+        it1, it2 = iter(cdp1), iter(cdp2)
+        self.assertEqual(list(range(10)), list(it1))
+        self.assertEqual(list(range(10)), list(it2))
+        it1, it2 = iter(cdp1), iter(cdp2)
+        with warnings.catch_warnings(record=True) as wa:
+            it3 = iter(cdp1)  # This should invalidate `it1` and `it2`
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"child DataPipes are not exhausted")
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it1)
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it2)
+        with warnings.catch_warnings(record=True) as wa:
+            it1, it2 = iter(cdp1), iter(cdp2)
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"child DataPipes are not exhausted")
+        self.assertEqual(0, next(it1))
+        self.assertEqual(0, next(it2))
+        it3 = iter(source_dp)  # note that a new iterator is created from `source_dp`
+        self.assertEqual(0, next(it3))  # `it3` should invalidate `it1` and `it2` since they both use `source_dp`
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it1)
+        self.assertEqual(1, next(it3))
 
 if __name__ == '__main__':
     run_tests()
