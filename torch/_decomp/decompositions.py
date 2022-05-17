@@ -1012,7 +1012,7 @@ def native_batch_norm(
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         save_mean = running_mean
-        save_rstd = invstd
+        save_invstd = invstd
         mean = _unsqueeze_to_dim(mean, input.dim() - 1)
         invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
         output = ((input - mean) * invstd)
