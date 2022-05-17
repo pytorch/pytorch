@@ -542,7 +542,7 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
 Tensor coo_to_sparse_csr(const Tensor& self) {
   TORCH_CHECK(
       self.dim() == 2,
-      "Only 2D tensors can be converted to the SparseCsr format but got shape: ",
+      "Only 2D tensors can be converted to the SparseCsr layout but got shape: ",
       self.sizes());
   auto coalesced_self = self.coalesce();
   auto row_indices = coalesced_self.indices()[0];
@@ -562,7 +562,7 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
 Tensor coo_to_sparse_csc(const Tensor& self) {
   TORCH_CHECK(
       self.dim() == 2,
-      "Only 2D tensors can be converted to the SparseCsc format but got shape: ",
+      "Only 2D tensors can be converted to the SparseCsc layout but got shape: ",
       self.sizes());
   auto coalesced_self = self.transpose(0, 1).coalesce().to_sparse_csr();
   return at::native::_sparse_csc_tensor_unsafe(
