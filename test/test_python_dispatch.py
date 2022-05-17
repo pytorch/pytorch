@@ -247,6 +247,34 @@ class TestPythonRegistration(TestCase):
         del my_lib2
         del my_lib1
 
+    def test_alias_analysis(self):
+        def test_helper(alias_analysis=""):
+            my_lib1 = Library("foo", "DEF")
+
+            called = [0]
+
+            my_lib1.define("_op() -> None", alias_analysis=alias_analysis)
+
+            @torch.library.impl(my_lib1, "_op")
+            def _op(*args, **kwargs):
+                called[0] += 1
+
+            @torch.jit.script
+            def _test():
+                torch.ops.foo._op()
+
+            assert "foo::_op" in str(_test.graph)
+            assert torch.ops.foo._op() is None
+            assert called[0] == 1
+
+            assert _test() is None
+            assert called[0] == 2
+
+        with self.assertRaises(AssertionError):
+            test_helper("")  # alias_analysis="FROM_SCHEMA"
+
+        test_helper("CONSERVATIVE")
+
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:

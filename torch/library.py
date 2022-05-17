@@ -39,8 +39,6 @@ class Library:
 
     def impl(self, op_name, fn, dispatch_key=''):
         if dispatch_key == '':
-            if self.dispatch_key == '':
-                raise RuntimeError("Please specify the dispatch key that you want to register the kernel for.")
             dispatch_key = self.dispatch_key
 
         if isinstance(op_name, str):
@@ -65,8 +63,17 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
-    def define(self, schema):
-        self.m.define(schema)
+    def define(self, schema, alias_analysis=""):
+        '''
+        Takes a schema to define a new operator.
+        Also, optionally takes `alias_analysis` argument to indicate if the aliasing properties of the arguments
+        can be inferred from the schema (default behavior) or not ("CONSERVATIVE").
+        '''
+        # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
+        # AliasAnalysis type in C++
+        if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
+            raise RuntimeError("Invalid alias_analysis type")
+        self.m.define(schema, alias_analysis)
 
     def __del__(self):
         for key in self._op_impls:
