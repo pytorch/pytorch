@@ -165,7 +165,7 @@ DEFINE_VISITOR(
     scopeToType(e.scope_),
     KinetoActivityType::CPU_INSTANT_EVENT);
 DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0);
-DEFINE_VISITOR(endTimeUS, e.end_time_us_, e.end_time_us_, start_time_us_);
+DEFINE_VISITOR(endTimeNS, e.end_time_ns_, e.end_time_us_ * 1000, start_time_ns_);
 DEFINE_VISITOR(endTID, e.end_tid_, start_tid_, start_tid_);
 DEFINE_VISITOR(
     deviceType,
@@ -303,7 +303,7 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
   auto converter = [&](approx_time_t t) {
     return t == std::numeric_limits<approx_time_t>::min()
         ? std::numeric_limits<int64_t>::min()
-        : time_converter(t) / 1000; // ns to ms
+        : time_converter(t);
   };
   std::vector<std::shared_ptr<Result>> out;
   for (auto& subqueue_it : sub_queues_) {
@@ -311,7 +311,7 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     for (auto& i : queue.backend_events_) {
       auto start_time = i.start_time_us_;
       out.emplace_back(Result::create(
-          start_time,
+          /*start_time_ns_=*/start_time * 1000,
           /*start_tid_=*/queue.tid(),
           /*kineto_info_=*/queue.kineto_info(),
           /*extra_fields_=*/std::move(i)));
@@ -359,7 +359,7 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
 
   set_autograd_evaluate(out);
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-    return a->start_time_us_ < b->start_time_us_;
+    return a->start_time_ns_ < b->start_time_ns_;
   });
   return out;
 }
