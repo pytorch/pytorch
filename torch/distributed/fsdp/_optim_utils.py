@@ -18,6 +18,9 @@ import torch.distributed as dist
 
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
+from torch.distributed._shard.sharded_tensor import (
+    ShardedTensor
+)
 from torch.distributed.fsdp.flatten_params_wrapper import FlatParameter
 from torch.distributed.fsdp.shard_utils import (
     _distributed_chunk_tensor,
@@ -222,7 +225,7 @@ def _unflatten_communicated_optim_state(
                 flat_param_views[state_name] = param_views
             else:
                 param_views = flat_param_views[state_name]
-            optim_state = next(param_views)
+            optim_state: Union[torch.Tensor, ShardedTensor] = next(param_views)
             if shard_state:
                 optim_state = _distributed_chunk_tensor(
                     optiom_state,
