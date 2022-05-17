@@ -9675,21 +9675,25 @@ class TestNN(NNTestCase):
         self.assertEqual(x.grad, x_grad_ref)
 
     def test_batchnorm_nhwc_cpu(self):
-        def helper(self, size):
+        def helper(self, size, dtype, mixed_dtype=False):
             channels = size[1]
-            input = torch.randn(size, dtype=torch.float32, device='cpu', requires_grad=True)
-            input = input.contiguous(memory_format=torch.channels_last)
+            input = torch.randn(size, dtype=dtype, device='cpu', requires_grad=True)
+            input = input.contiguous(memory_format=torch.channels_last).to(dtype)
             input.retain_grad()
-            grad = torch.randn(size, dtype=torch.float32, device='cpu')
+            grad = torch.randn(size, dtype=dtype, device='cpu')
             grad = grad.contiguous(memory_format=torch.channels_last)
-            bn = nn.BatchNorm2d(channels).cpu().float()
+            bn = nn.BatchNorm2d(channels).cpu().to(dtype)
             bn.weight.data.uniform_()
             bn.bias.data.uniform_()
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_bn = nn.BatchNorm2d(channels).cpu().float()
+            ref_bn = nn.BatchNorm2d(channels).cpu().to(dtype)
             ref_bn.load_state_dict(bn.state_dict())
+
+            if mixed_dtype:
+                bn.float()
+                ref_bn.float()
 
             out = bn(input)
             out.backward(grad)
@@ -9703,9 +9707,11 @@ class TestNN(NNTestCase):
             self.assertEqual(bn.bias.grad, ref_bn.bias.grad)
             self.assertEqual(input.grad, ref_input.grad)
 
-        helper(self, (4, 8, 10, 10))
-        helper(self, (4, 1, 9, 9))
-        helper(self, (4, 9, 1, 1))
+        # test NC11 and N1HW; test mixed dtype
+        for shape in [(4, 8, 10, 10), (4, 1, 9, 9), (4, 9, 1, 1)]:
+            helper(self, shape, torch.float, False)
+            helper(self, shape, torch.bfloat16, False)
+            helper(self, shape, torch.bfloat16, True)
 
     def test_batchnorm_non_contig_cpu(self):
         input = torch.arange(6, dtype=torch.float).reshape(1, 3, 2, 1).cpu()
