@@ -631,7 +631,7 @@ PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPModule_isCurrentStreamCapturing_wrap(PyObject *self, PyObject *noargs) {
+static PyObject * THCPModule_isCurrentStreamCapturing_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   // If there's no cuda context, at::cuda::currentStreamCaptureStatus returns

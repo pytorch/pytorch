@@ -3116,7 +3116,7 @@ torch.cuda.synchronize()
         self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
 
     def test_graph_is_current_stream_capturing(self):
-        self.assertFalse(torch.cuda.is_current_stream_capturing)
+        self.assertFalse(torch.cuda.is_current_stream_capturing())
 
         if (TEST_CUDA and (not TEST_WITH_ROCM) and int(torch.version.cuda.split(".")[0]) >= 11):
             g = torch.cuda.CUDAGraph()
