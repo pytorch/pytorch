@@ -1191,7 +1191,10 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
 @register_decomposition(torch.ops.aten.flip, register_meta=True)
 def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    if not isinstance(dims, tuple) and not isinstance(dims, list):
+        raise ValueError("dims has to be a sequence of ints")
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
+    utils.validate_no_repeating_dims(dims)
     return prims.rev(a, dims)
 
 

@@ -3595,8 +3595,14 @@
   variants: function, method
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
+  dispatch:
+    CPU: pixel_shuffle_cpu
+    CompositeExplicitAutograd: math_pixel_shuffle
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
+  dispatch:
+    CPU: pixel_unshuffle_cpu
+    CompositeExplicitAutograd: math_pixel_unshuffle
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:
@@ -5290,7 +5296,7 @@
   dispatch:
     CompositeExplicitAutograd: clone
     SparseCPU, SparseCUDA: clone_sparse
-    SparseCsrCPU, SparseCsrCUDA: clone_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: clone_sparse_compressed
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
@@ -6224,6 +6230,10 @@
 
 - func: lift(Tensor self) -> Tensor
   variants: method
+  dispatch:
+    # Not making it CompositeImplicitAutograd because lift
+    # should be a primitive w.r.t. functorch
+    CompositeExplicitAutograd: lift
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
@@ -9341,6 +9351,11 @@
   python_module: nn
   dispatch:
     CPU, CUDA: glu_jvp
+
+- func: glu_backward_jvp(Tensor grad_x, Tensor grad_glu, Tensor x, Tensor dgrad_glu, Tensor dx, int dim) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU, CUDA: glu_backward_jvp
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
