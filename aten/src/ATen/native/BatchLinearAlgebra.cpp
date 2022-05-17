@@ -460,7 +460,7 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
 
   // This one checks that B can be broadcasted to the shape of A
   auto B_broadcast_size = std::get<0>(at::native::_linalg_broadcast_batch_dims(B, LU));
-  auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/left);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/left);
 
   set_output(0, B_broadcast_size, result_strides, B.options(), {});
 }
@@ -4689,7 +4689,7 @@ Tensor linalg_vander(
               t == ScalarType::Double ||
               t == ScalarType::ComplexFloat ||
               t == ScalarType::ComplexDouble ||
-              isIntegralType(t),
+              c10::isIntegralType(t, false),
               "linalg.vander supports floating point, complex, and integer tensors, but got ", t);
   const auto x_ = x.dim() == 0 ? x.unsqueeze(-1) : x;
 
