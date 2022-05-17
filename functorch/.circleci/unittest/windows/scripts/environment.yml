@@ -7,6 +7,7 @@ dependencies:
   - pytest-cov
   - codecov
   - pip
+  - pyyaml
   - ca-certificates
   - pip:
       - unittest-xml-reporting
