@@ -959,6 +959,9 @@ class ShardedTensor(object):
     def requires_grad(self):
         return self._metadata.tensor_properties.requires_grad
 
+    def requires_grad_(self, requires_grad=True):
+        return handle_torch_function(torch.Tensor.requires_grad_, (self, requires_grad), self, requires_grad)
+
     @property
     def dtype(self):
         return self._metadata.tensor_properties.dtype
@@ -1022,6 +1025,12 @@ class ShardedTensor(object):
 
     def __deepcopy__(self, memo):
         return handle_torch_function(torch.Tensor.__deepcopy__, (self, memo), self, memo)
+
+    def clone(self, *, memory_format=torch.preserve_format):
+        return handle_torch_function(torch.Tensor.clone, (self,), self, memory_format=memory_format)
+
+    def detach(self):
+        return handle_torch_function(torch.Tensor.detach, (self,), self)
 
     @dataclass
     class ProcessGroupState:
