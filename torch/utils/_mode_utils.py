@@ -71,7 +71,7 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
         raise ValueError(f'expected to get {mode_info.mode_class_name()}, Tensor-like class, '
                          f'or None as an argument got {type(mode)} instead')
     old = mode_info.get_mode()
-    if old is mode:
+    if type(old) is type(mode):
         yield
         return
     if old is not None and not ignore_preexisting and old is not replace:
