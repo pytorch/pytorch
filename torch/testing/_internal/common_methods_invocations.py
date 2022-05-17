@@ -18301,13 +18301,15 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         'special.fresnel_integral_c',
         decorators=(
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.float32: tol(atol=1e-4, rtol=0),
-                        torch.float64: tol(atol=1e-4, rtol=0),
-                    },
-                ),
+            precisionOverride(
+                {
+                    torch.int16: 1e-2,
+                    torch.int32: 1e-2,
+                    torch.int64: 1e-2,
+                    torch.float16: 1e-2,
+                    torch.float32: 1e-2,
+                    torch.float64: 1e-2,
+                },
             ),
         ),
         dtypes=all_types_and(torch.bool),
