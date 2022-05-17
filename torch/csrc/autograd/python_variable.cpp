@@ -206,6 +206,7 @@ void concrete_dispatch_fn(
     torch::jit::Stack* stack,
     const std::shared_ptr<SafePyObject>& type);
 bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+c10::intrusive_ptr<TensorImpl> concrete_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -215,7 +216,8 @@ class PyInterpreterHolder {
             &concrete_decref_fn,
             &concrete_detach_fn,
             &concrete_dispatch_fn,
-            &concrete_is_contiguous_fn)) {}
+            &concrete_is_contiguous_fn,
+            &concrete_contiguous_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -1965,19 +1967,6 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
-  // Setup the arguments expected for the detach call
-  std::vector<py::handle> overloaded_args;
-  // TODO: there should be a shorter way to spell this
-  // TODO: fix the constness of target
-  Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-  auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
-  TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
-  append_overloaded_tensor(&overloaded_args, self_p.ptr());
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
-  PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
-
-  py::dict kwargs;
-
   auto out = torchDispatchFromTensorImpl(
       self,
       "detach",
@@ -2013,5 +2002,26 @@ bool concrete_is_contiguous_fn(const c10::impl::PyInterpreter*, const c10::Tenso
 
   return PyObject_IsTrue(out.ptr());
 }
+
+c10::intrusive_ptr<TensorImpl> concrete_contiguous_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "contiguous",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("contiguous")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  TORCH_CHECK(THPVariable_Check(out.ptr()), "contiguous returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected Tensor");
+  const Tensor& res_t = THPVariable_Unpack(out.ptr());
+  return res_t.getIntrusivePtr();
+}
+
 
 } // anonymous namespace

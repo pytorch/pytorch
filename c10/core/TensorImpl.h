@@ -642,6 +642,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_default(memory_format);
   }
 
+  c10::intrusive_ptr<TensorImpl> contiguous(at::MemoryFormat memory_format) const {
+    return contiguous_custom(memory_format);
+  }
+
  protected:
   /**
    * Customization points for the functions above.  sizes_strides_policy_
@@ -653,6 +657,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // sizes_strides_policy_ >= CustomStrides
   virtual IntArrayRef strides_custom() const;
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
+  virtual c10::intrusive_ptr<TensorImpl> contiguous_custom(at::MemoryFormat memory_format) const;
   // sizes_strides_policy_ >= CustomSizes
   virtual IntArrayRef sizes_custom() const;
   virtual int64_t dim_custom() const;
@@ -2216,6 +2221,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void set_sizes_strides_policy(SizesStridesPolicy policy) {
     sizes_strides_policy_ = static_cast<uint8_t>(policy);
+  }
+
+  uint8_t get_sizes_strides_policy() {
+    return sizes_strides_policy_;
   }
 
   Storage storage_;

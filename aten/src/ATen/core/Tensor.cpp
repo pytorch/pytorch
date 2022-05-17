@@ -22,6 +22,11 @@ const TensorBase& get_tensor_base(const Tensor &t) {
 }
 
 TensorBase TensorBase::__dispatch_contiguous(c10::MemoryFormat memory_format) const {
+  if (C10_UNLIKELY(
+          impl_->get_sizes_strides_policy() >=
+          static_cast<uint8_t>(c10::TensorImpl::SizesStridesPolicy::CustomStrides))) {
+    return TensorBase(std::move(impl_->contiguous(memory_format)));
+  }
   OptionalTensorRef self(*this);
   return at::_ops::contiguous::call(*self, memory_format);
 }

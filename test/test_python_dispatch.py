@@ -1145,7 +1145,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
         #    - More steps....
         y.exp()
 
-    def test_is_contiguous_slow_path(self):
+    def test_contiguous_slow_path(self):
         data = torch.randn(3, 3)
         contiguous_data = data.clone()
         not_contiguous_data = torch.as_strided(data.clone(), (2, 2), (1, 2))
@@ -1157,7 +1157,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
                 kwargs["dtype"] = data.dtype
                 kwargs["layout"] = data.layout
                 kwargs["requires_grad"] = True
-                kwargs['dispatch_strides'] = True
+                kwargs["dispatch_strides"] = True
                 return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
             else:
                 return torch.Tensor._make_subclass(cls, data, True, dispatch_strides=True)
@@ -1192,18 +1192,26 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.is_contiguous:
                         return not_contiguous_data.is_contiguous()
+                    elif func.overloadpacket == torch.ops.aten.contiguous:
+                        return "arf"
                     return NotImplemented
 
             err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
+            e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
-                e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
                 e.is_contiguous()
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.contiguous()
 
             e = ExampleTensor2(torch.randn(3, 3), use_wrapper_subclass)
             self.assertEqual(e.is_contiguous(), True)
+            e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
 
+            err_msg = "contiguous returned invalid type str, expected Tensor"
             e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
             self.assertEqual(e.is_contiguous(), False)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                e.contiguous()
 
 
 if __name__ == '__main__':
