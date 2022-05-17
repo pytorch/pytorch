@@ -637,7 +637,9 @@ inline int64_t PythonArgs::toInt64(int i) {
 }
 
 inline c10::SymInt PythonArgs::toSymInt(int i) {
-  if (!args[i]) return signature.params[i].default_int;
+  if (!args[i]) {
+    return c10::SymInt(signature.params[i].default_int);
+  }
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
     auto & var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
