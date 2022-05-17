@@ -488,35 +488,6 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   return self;
 }
 
-static inline Tensor sparse_csr_transpose(const Tensor & self) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-
-  auto sizes = self.sizes();
-  auto crow_indices = self.crow_indices();
-  auto col_indices = self.col_indices();
-  auto values = self.values();
-
-  // convert CSR indices to COO indices and swap its rows
-  const bool out_int32 = crow_indices.scalar_type() == ScalarType::Int;
-  Tensor indices_transposed = _convert_indices_from_csr_to_coo(crow_indices, col_indices, out_int32, true);
-
-  // sort transposed indices
-  auto indices_scalar = at::sparse::flatten_indices(indices_transposed, {sizes[1], sizes[0]});
-  auto indicesPermutation = std::get<1>(indices_scalar.sort(0));
-  auto indices_transposed_sorted = indices_transposed.index_select(1, indicesPermutation);
-
-  // construct a CSR tensor that is transpose of self
-  auto new_row_indices = indices_transposed_sorted.select(0, 0);
-  auto new_col_indices = indices_transposed_sorted.select(0, 1);
-  auto new_values = values.index_select(0, indicesPermutation);
-  Tensor new_crow_indices = _convert_indices_from_coo_to_csr(new_row_indices, sizes[1], out_int32);
-
-  return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
-                                               {sizes[1], sizes[0]},
-                                               new_values.scalar_type(),
-                                               self.layout(),
-                                               new_values.device());
-}
 
 Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
   TORCH_CHECK(
@@ -534,15 +505,27 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
     auto ccol_indices = self.ccol_indices();
     auto row_indices = self.row_indices();
     auto values = self.values();
-    auto tmp = _sparse_csr_tensor_unsafe(
-        ccol_indices,
-        row_indices,
-        values,
-        {sizes[1], sizes[0]},
-        values.scalar_type(),
-        kSparseCsr,
-        values.device());
-    return sparse_csr_transpose(tmp);
+
+    // convert CSR indices to COO indices and swap its rows
+    const bool out_int32 = ccol_indices.scalar_type() == ScalarType::Int;
+    Tensor indices_transposed = _convert_indices_from_csr_to_coo(ccol_indices, row_indices, out_int32, true);
+
+    // sort transposed indices
+    auto indices_scalar = at::sparse::flatten_indices(indices_transposed, {sizes[0], sizes[1]});
+    auto indicesPermutation = std::get<1>(indices_scalar.sort(0));
+    auto indices_transposed_sorted = indices_transposed.index_select(1, indicesPermutation);
+
+    // construct a CSR tensor that is transpose of self
+    auto new_row_indices = indices_transposed_sorted.select(0, 0);
+    auto new_col_indices = indices_transposed_sorted.select(0, 1);
+    auto new_values = values.index_select(0, indicesPermutation);
+    Tensor new_crow_indices = _convert_indices_from_coo_to_csr(new_row_indices, sizes[0], out_int32);
+
+    return _sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
+                                                 {sizes[0], sizes[1]},
+                                                 new_values.scalar_type(),
+                                                 c10::kSparseCsr,
+                                                 new_values.device());
   }
   // Just returning self doesn't work
   // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
