@@ -1571,6 +1571,10 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("owner", &Method::owner);
   m.def("_generate_upgraders_graph", &generate_upgraders_graph);
   m.def(
+      "_calculate_package_version_based_on_upgraders",
+      &calculate_package_version_based_on_upgraders);
+  m.def("_get_version_calculator_flag", &get_version_calculator_flag);
+  m.def(
       "_compile_graph_to_code_table",
       [](const std::string& name, const std::shared_ptr<Graph>& graph) {
         CompilationOptions options;
