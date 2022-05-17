@@ -2,10 +2,12 @@
 
 import sys
 from contextlib import suppress
+import functools
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
@@ -23,7 +25,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
-from torch.distributed.fsdp.wrap import always_wrap_policy
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -51,9 +53,14 @@ class TestFSDPMisc(FSDPTest):
         """
         Test auto wrapping propagates the device id.
         """
+        model = TransformerWithSharedParams(group=self.process_group)
+        my_auto_wrap_policy = functools.partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer}
+        )
         wrapped = FSDP(
-            TransformerWithSharedParams(group=self.process_group),
-            auto_wrap_policy=always_wrap_policy,
+            model,
+            auto_wrap_policy=my_auto_wrap_policy,
             device_id=torch.cuda.current_device()
         )
         # All FSDP instances should have device_id set
