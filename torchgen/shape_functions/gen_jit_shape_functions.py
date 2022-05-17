@@ -55,7 +55,9 @@ SERIALIZED_SHAPE_UTIL_FILE_NAME = "serialized_shape_function_registry.cpp"
 def gen_serialized_decompisitions() -> str:
     already_serialized_names = set()
     unique_funcs = []
-    all_funcs = chain(shape_compute_graph_mapping.values(), *bounded_compute_graph_mapping.values())
+    all_funcs = chain(
+        shape_compute_graph_mapping.values(), *bounded_compute_graph_mapping.values()
+    )
     for scripted_func in all_funcs:
         if scripted_func.name in already_serialized_names:
             continue
