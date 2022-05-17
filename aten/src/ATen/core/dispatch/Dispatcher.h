@@ -263,9 +263,9 @@ private:
   Dispatcher();
 
   static int64_t sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey);
-  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey);
-  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, torch::jit::Stack &&stack);
-  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, const torch::jit::Stack &stack);
+  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey);
+  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, torch::jit::Stack &&stack);
+  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, const torch::jit::Stack &stack);
 
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
   OperatorHandle findOrRegisterName_(const OperatorName& op_name);
@@ -498,12 +498,13 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   // If callbacks need inputs, we box the arguments and pass them to the guard.
   // Note: For perf reasons we wouldn't want to prematurely box the arguments.
   at::RecordFunction guard(std::move(stepCallbacks));
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.operatorDef_->op.isObserved());
   auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
+  auto& schema = op.schema();
+  auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
   guard.needsInputs()
-      ? runRecordFunction(guard, op, dispatchKey, impl::boxArgs(args...))
-      : runRecordFunction(guard, op, dispatchKey);
+      ? runRecordFunction(guard, schema_ref, dispatchKey, impl::boxArgs(args...))
+      : runRecordFunction(guard, schema_ref, dispatchKey);
 
   if (C10_UNLIKELY(guard.needsOutputs())) {
     // Calls the kernel and capture the output temporarily to pass to
@@ -553,10 +554,11 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   auto step_callbacks = at::getStepCallbacks(at::RecordScope::FUNCTION);
   if (C10_UNLIKELY(!step_callbacks.empty() && entry.isObserved())) {
     at::RecordFunction guard(std::move(step_callbacks));
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-    guard.needsInputs() ? runRecordFunction(guard, op, dispatchKey, *stack)
-                        : runRecordFunction(guard, op, dispatchKey);
+    auto& schema = op.schema();
+    auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
+    guard.needsInputs() ? runRecordFunction(guard, schema_ref, dispatchKey, *stack)
+                        : runRecordFunction(guard, schema_ref, dispatchKey);
 
     // keeping the guard alive while executing the kernel
     kernel.callBoxed(op, dispatchKeySet, stack);
