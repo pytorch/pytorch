@@ -2282,7 +2282,7 @@ TEST(StaticRuntime, FmodScalar) {
   testStaticRuntime(fmod_scalar, {a, 3}, {c, 4});
 }
 
-TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
+TEST(StaticRuntime, QEmbeddingBagBytePrepack) {
   const std::string embedding_bag_byte_prepack_script = R"IR(
     graph(%input: Tensor):
         %none : None = prim::Constant()
@@ -2296,6 +2296,23 @@ TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
 
   testStaticRuntime(embedding_bag_byte_prepack_script, {a});
   testStaticRuntime(embedding_bag_byte_prepack_script, {a}, {b});
+}
+
+TEST(StaticRuntime, QEmbeddingBagByteUnpack) {
+  const auto src = R"IR(
+    graph(%input: Tensor):
+        %none : None = prim::Constant()
+        %weight: Tensor = quantized::embedding_bag_byte_prepack(%input)
+        %output: Tensor = quantized::embedding_bag_byte_unpack(%weight)
+        %res: Tensor = aten::clone(%output, %none)
+        return (%res)
+  )IR";
+
+  auto a = torch::randn({8, 16}, at::ScalarType::Float);
+  auto b = torch::randn({8 * 2, 16 * 2}, at::ScalarType::Float);
+
+  testStaticRuntime(src, {a});
+  testStaticRuntime(src, {a}, {b});
 }
 
 TEST(StaticRuntime, LinalgNorm_ScalarOrd) {
