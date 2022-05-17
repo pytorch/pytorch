@@ -100,14 +100,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
-  # Install numba only on python-3.8 or below
-  # For numba issue see https://github.com/pytorch/pytorch/issues/51511
-  if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
-    pip_install numba==0.54.1
-  else
-    pip_install numba==0.49.0
-  fi
-
   # Update scikit-learn to a python-3.8 compatible version
   if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
     pip_install -U scikit-learn
