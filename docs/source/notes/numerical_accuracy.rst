@@ -73,6 +73,8 @@ If reduced-precision reductions are problematic, they can be turned off with
 
 For more information see :ref:`allow_fp16_reduced_precision_reduction<fp16reducedprecision>`
 
+.. _fp16_on_mi200:
+
 Reduced Precision FP16 and BF16 GEMMs and Convolutions on AMD Instinct MI200 devices
 ------------------------------------------------------------------------------------
 On AMD Instinct MI200 GPUs, the FP16 and BF16 V_DOT2 and MFMA matrix instructions flush input and output denormal values to zero. FP32 and FP64 MFMA matrix instructions do not flush input and output denormal values to zero. The affected instructions are only used by rocBLAS (GEMM) and MIOpen (convolution) kernels; all other PyTorch operations will not encounter this behavior. All other supported AMD GPUs will not encounter this behavior.
@@ -93,14 +95,14 @@ When training using FP16 precision, some models may fail to converge with FP16 d
 
 The following is the list of operations where rocBLAS may be used:
 
-* torch.addmm
-* torch.baddbmm
-* torch.bmm
-* torch.mm
-* torch.nn.GRUCell
-* torch.nn.LSTMCell
-* torch.nn.Linear
-* torch.sparse.addmm
+* `torch.addmm`
+* `torch.baddbmm`
+* `torch.bmm`
+* `torch.mm`
+* `torch.nn.GRUCell`
+* `torch.nn.LSTMCell`
+* `torch.nn.Linear`
+* `torch.sparse.addmm`
 * the following torch._C._ConvBackend implementations:
   * slowNd
   * slowNd_transposed
