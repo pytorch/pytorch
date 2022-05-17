@@ -32,9 +32,7 @@ MODULES_TO_SKIP: Set[Type] = {
     torch.nn.Module,  # abstract base class
     torch.nn.Container,  # deprecated
     torch.nn.NLLLoss2d,  # deprecated
-    torch.nn.quantized.modules._ConvNd,  # abstract base class
     torch.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
-    torch.ao.nn.quantized.modules._ConvNd,  # abstract base class
     torch.ao.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
 }
 
