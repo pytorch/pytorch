@@ -17703,12 +17703,13 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         '_masked.cumsum',
-        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         method_variant=None,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
@@ -17724,6 +17725,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
