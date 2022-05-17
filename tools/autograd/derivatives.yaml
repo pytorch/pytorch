@@ -1654,6 +1654,9 @@
   self: grad.reshape(self.sizes())
   result: auto_linear
 
+- name: lift(Tensor self) -> Tensor
+  self: not_implemented("lift")
+
 - name: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
   self: grad.squeeze(dim)
   result: auto_linear
