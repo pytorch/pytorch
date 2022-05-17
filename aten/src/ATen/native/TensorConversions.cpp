@@ -121,7 +121,7 @@ Tensor _to_copy(
       }
       return r;
     } else {
-      if (self.is_quantized()) {
+      if (self.is_quantized() || self.is_xla()) {
       //quantized logic is copied from below, see comments below on why empty_like is used
         memory_format = self.suggest_memory_format();
         r = at::empty_like(self, memory_format);
