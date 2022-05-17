@@ -378,6 +378,11 @@ void initPythonIRBindings(PyObject* module_) {
       .GS(eraseOutput)
       .GS(registerOutput)
       .def(
+          "permuteInputs",
+          [](Graph& g, const std::vector<size_t>& new_inputs) {
+            g.block()->permuteInputs(new_inputs);
+          })
+      .def(
           "create",
           [](Graph& g, const char* str) {
             return g.create(Symbol::fromQualString(str));
