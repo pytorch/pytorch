@@ -298,7 +298,7 @@ class FullStateDictConfig(StateDictConfig):
         >>>     model.load_state_dict(state_dict)
         >>> # All ranks initialize FSDP module as usual. ``sync_module_states`` argument
         >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
-        >>> fsdp = FSDP(Model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
+        >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
         >>> # After this point, all ranks have FSDP model with loaded checkpoint.
     """
     offload_to_cpu: bool = False
