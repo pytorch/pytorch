@@ -9,7 +9,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
-#include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -66,9 +65,9 @@ std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
   const int64_t depth = CeilLog2(m);
 
   const Vec kZeroVec(T(0));
-  c10::SmallVector<int64_t, kMaxDepth> m0_stk(depth, 0);
-  c10::SmallVector<Vec, kMaxDepth> m1_stk(depth, kZeroVec);
-  c10::SmallVector<Vec, kMaxDepth> m2_stk(depth, kZeroVec);
+  std::array<int64_t, kMaxDepth> m0_stk = {};
+  std::array<Vec, kMaxDepth> m1_stk = {{}};
+  std::array<Vec, kMaxDepth> m2_stk = {{}};
 
   for (const auto i : c10::irange(m)) {
     const T* X_ptr = X + i * kChunkSize * kVecSize;
