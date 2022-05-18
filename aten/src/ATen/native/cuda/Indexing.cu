@@ -12,7 +12,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
-#include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAUtils.h>
@@ -52,7 +51,7 @@ __global__ void indexing_backward_kernel(
 //stride_before is the stride of the dimension immediately preceding first indexed dimension
 //if indexing starts from the 0th dimension, stride_before does not matter because blockIdx.z will be 0 in this case
 //outer_dim is number of elements in the first unindexed dimensions
-  using accscalar_t = at::acc_type<scalar_t, true>;
+  using opmath_t = at::opmath_type<scalar_t>;
 
   // Each warp is responsible for an input into the LookupTable.
   // If the preceding input has the same destination index as this input, then the warp
@@ -79,19 +78,19 @@ __global__ void indexing_backward_kernel(
         }
         const int64_t weight_row = ((int64_t) sorted_indices[idx]) * stride + z * stride_before;
         const int64_t grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
-        const accscalar_t scale = (accscalar_t)1.0;
+        const opmath_t scale = (opmath_t)1.0;
 
-        accscalar_t gradient[SZ];
-        accscalar_t weight[SZ];
+        opmath_t gradient[SZ];
+        opmath_t weight[SZ];
 
         while (start_feature < stride) {
           #pragma unroll
           for (int ii = 0; ii < SZ; ii++) {
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
-              gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
+              gradient[ii] = static_cast<opmath_t>(grad_output[grad_row + feature_dim]);
               if (accumulate) {
-                weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
+                weight[ii] = static_cast<opmath_t>(grad_weight[weight_row + feature_dim]);
               }
             }
           }
