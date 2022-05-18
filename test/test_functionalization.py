@@ -86,6 +86,7 @@ class TestFunctionalization(TestCase):
         finally:
             torch._disable_functionalization()
 
+        self.assertEqual(out_ref.size(), out_functional.size())
         # We need to sync the input tensors first, in case there are any queued mutations left.
         torch._sync(input_functional)
         torch._sync(out_functional)
@@ -178,12 +179,12 @@ $2 = torch._ops.aten.add.Tensor($0, tensor([[1., 1.],
     # They also need special handling.
     def test_mutable_op_not_inplace_or_other(self):
         def f(x):
-            return torch._fused_moving_avg_obs_fq_helper(x, x, x, x, x, x, x, 1.0, 1, 1, 0)
+            return torch._fused_moving_avg_obs_fq_helper(x, x, x, x, x, x, x, 1.0, 0, 1, 0)
 
         logs = self.get_logs(f, torch.ones(1))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functional($0, $0, $0, $0, $0, $0, $0, 1.0, 1, 1, 0)""")
+$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functional($0, $0, $0, $0, $0, $0, $0, 1.0, 0, 1, 0)""")
 
     def test_tensor_list_composite(self):
         def f(x):
@@ -272,7 +273,7 @@ $9 = torch._ops.aten.mul.Tensor($8, $8)""")
             x.transpose_(1, 0)
             y = x[0]
             y.add_(tmp)
-            return y
+            return x
         self.assert_functionalization(f, torch.ones(4, 2))
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline('\n'.join(logs), """\
@@ -325,7 +326,7 @@ $4 = torch._ops.aten.div.Tensor($3, 1)""")
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
 $1 = torch._ops.aten.ge.Scalar($0, 0)
-$2 = torch._ops.aten._to_copy.default($1, dtype=6, layout=0)""")
+$2 = torch._ops.aten._to_copy.default($1, dtype=torch.float32, layout=torch.strided)""")
 
     def test_only_one_view(self):
         def f(x):

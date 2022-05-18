@@ -387,14 +387,21 @@ def emit_view_functionalization_body(
           return {reverse_lambda.inner_call()}
         }}
       );
-      at::functionalization::impl::mutate_view_meta({view_tensor_name}, view_meta);
       {return_type} reference_tensor_output;
       {{
         at::AutoDispatchSkipFunctionalize guard;
         {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
+      // This function adds the above view meta to the current tensor and replays them off the base,
+      // mutating the size/stride info of the current FunctionalTensorWrapper.
+      // Because of this, we need to make sure to run the reference shape function above,
+      // BEFORE doing this (otherwise we'll end up runnin the reference function using the wrong sizes/strides)
+      at::functionalization::impl::mutate_view_meta({view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
+      // XLA/LTC don't implement the logic to propagate strides correctly, so we need to rely
+      // on a reference implementation here (instead of relying on the output from the forward lambda
+      // having the correct stride info)
       at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
       return {view_tensor_name};
     }}
