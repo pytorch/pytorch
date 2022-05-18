@@ -1297,8 +1297,7 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=use_forward_ad)
 
     numerical_vJu = _get_numerical_vJu(func, inputs, inp_tensors_idx, func_out, all_u, all_v, eps, is_forward_ad=use_forward_ad)
-    # See note: [numerical vs analytical output length]
-    numerical_vJu = [nj for o, nj in zip(func_out, numerical_vJu) if o.requires_grad]
+    # TODO: replicate https://github.com/pytorch/pytorch/pull/77743 for fast gradcheck as well
     if use_forward_ad:
         assert all_v is None
         analytical_vJu = _get_analytical_jacobian_forward_ad(func, inputs, _as_tuple(func_out),
@@ -1538,7 +1537,7 @@ def gradgradcheck(
     if grad_outputs is None:
         # If grad_outputs is not specified, create random Tensors of the same shape, type, and device as the outputs
 
-        outputs = _as_tuple(func(*tupled_inputs))
+        outputs = _differentiable_outputs(func(*tupled_inputs))
         tupled_grad_outputs = tuple(
             torch.testing.make_tensor(
                 x.shape,
