@@ -28,7 +28,8 @@ def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIN
     @functools.wraps(f)
     def inner(*args, **kwargs):
         flat_args = [x for x in tree_flatten((args, kwargs))[0] if isinstance(x, Tensor)]
-        computation_dtype, result_dtype = utils.elementwise_dtypes(*flat_args, type_promotion_kind=type_promotion)
+        computation_dtype, result_dtype = utils.elementwise_dtypes(*flat_args,
+                                                                   type_promotion_kind=type_promotion)
 
         # TODO: pretty sure this is not quite right
         def increase_prec(x):
@@ -48,7 +49,7 @@ def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIN
 
     return inner
 
-pw_cast_for_opmath = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH)
+pw_cast_for_opmath = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 reduction_complex_to_real = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
 pw_cast_for_int_to_real = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 
@@ -391,7 +392,7 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss)
+@register_decomposition(aten.huber_loss, register_meta=True)
 @pw_cast_for_opmath
 def huber_loss(
     self: Tensor,
@@ -1124,7 +1125,7 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(aten.detach, disable_meta=True)
+@register_decomposition(aten.detach)
 def detach_decomposition(x):
     return x
 
