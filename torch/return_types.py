@@ -15,8 +15,13 @@ def pytree_register_structseq(cls):
 
     torch.utils._pytree._register_pytree_node(cls, structseq_flatten, structseq_unflatten)
 
+DONT_EXPORT = {
+    "_linalg_solve",
+    "_linalg_solve_out",
+}
+
 for name in dir(return_types):
-    if name.startswith('__'):
+    if name.startswith('__') or name in DONT_EXPORT:
         continue
     globals()[name] = getattr(return_types, name)
     __all__.append(name)

@@ -2350,6 +2350,22 @@ std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self
             output_mask[1] ? grad * -self * recip : Tensor() };
 }
 
+Tensor prelu_jvp(const Tensor& x, const Tensor& dx, const Tensor& w, const Tensor& dw) {
+  const auto ndim = x.dim();
+  auto as_nd = [ndim](const Tensor& t) {
+    std::vector<int64_t> sizes(ndim, 1), strides(ndim, 0);
+    if (ndim >= 2) {
+      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+      return t.as_strided(sizes, strides);
+    }
+    return t.as_strided(sizes, strides);
+  };
+  auto w_ = as_nd(w);
+  auto dw_ = as_nd(dw);
+  return at::where(x >= 0, dx, w_ * dx + dw_ * x);
+}
+
 // TODO: Seriously consider writing the derivative formulas for
 // each output separately; there is not all that much sharing
 // of computation going on here.
