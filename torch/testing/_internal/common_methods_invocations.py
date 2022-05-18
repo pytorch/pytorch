@@ -18310,8 +18310,8 @@ op_db: List[OpInfo] = [
             ),
         ),
         domain=(None, 1),
-        dtypes=floating_types_and(torch.bool),
-        dtypesIfCUDA=floating_types_and(torch.bool),
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types(),
         ref=scipy.special.ellipe if TEST_SCIPY else _NOTHING,
         skips=(
             # Results of original model and exported/imported version of model differed
@@ -18336,8 +18336,8 @@ op_db: List[OpInfo] = [
             ),
         ),
         domain=(None, 1),
-        dtypes=floating_types_and(torch.bool),
-        dtypesIfCUDA=floating_types_and(torch.bool),
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types(),
         ref=scipy.special.ellipk if TEST_SCIPY else _NOTHING,
         skips=(
             # Results of original model and exported/imported version of model differed
