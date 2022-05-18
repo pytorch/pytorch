@@ -181,16 +181,11 @@ autograd:
 
 # Ops that don't have a native schema definitions and are dispatched within Lazy Tensor Core
 non_native:
-  - func: device_data(BackendDataPtr data) -> Tensor
-    opkind: ltc_device_data
-    properties:
-      - ShapeCompute
-      - CanBeReusedDeclOnly
-      - CreateFnDeclOnly
-  - func: scalar(ScalarVal value, ScalarType type) -> Tensor
+  - func: scalar(Scalar value, ScalarType type) -> Tensor
     opkind: at::prim::Constant
     properties:
       - ShapeCompute
+      - TreatScalarsAsConstants
   - func: expand(Tensor input, int[] size, bool is_scalar_expand) -> Tensor
   - func: view(Tensor input, int[] output_size) -> Tensor
     properties:

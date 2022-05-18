@@ -8,6 +8,7 @@
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 #include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <torch/csrc/lazy/ts_backend/ops/generic.h>
+#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 
 namespace torch {
 namespace lazy {

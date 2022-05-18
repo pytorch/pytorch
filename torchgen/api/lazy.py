@@ -28,10 +28,8 @@ from torchgen.api.types import (
     stringT,
     scalarT,
     scalarTypeT,
-    scalarValT,
     memoryFormatT,
     SymIntT,
-    backendDataPtrT,
 )
 
 
@@ -59,7 +57,7 @@ tensorListValueT = BaseCppType("torch::lazy", "Value")
 
 
 def process_ir_type(
-    typ: Type,
+    typ: Type, properties: "LazyIrProperties"
 ) -> Union[BaseCType, VectorCType, OptionalCType, ListCType]:
     """
     This function takes a type from NativeFunctions and converts it for use with
@@ -80,6 +78,8 @@ def process_ir_type(
         if typ.name == BaseTy.Tensor:
             return BaseCType(getValueT())
         elif typ.name == BaseTy.Scalar:
+            if properties.TreatScalarsAsConstants:
+                return BaseCType(scalarT)
             # at::scalar has special handling,
             # and is wrapped in an lazy::Value just like at::tensor
             return BaseCType(getValueT())
@@ -101,14 +101,10 @@ def process_ir_type(
             return BaseCType(layoutT)
         elif typ.name == BaseTy.MemoryFormat:
             return BaseCType(memoryFormatT)
-        elif typ.name == BaseTy.ScalarVal:
-            return BaseCType(scalarValT)
-        elif typ.name == BaseTy.BackendDataPtr:
-            return BaseCType(backendDataPtrT)
         else:
             raise AssertionError(f"TODO add support for type {repr(typ)}")
     elif isinstance(typ, OptionalType):
-        return OptionalCType(process_ir_type(typ.elem))
+        return OptionalCType(process_ir_type(typ.elem, properties))
     elif isinstance(typ, ListType):
         if str(typ.elem) == "Tensor?":
             # TODO(whc) is this actually correct? or should it use a Vector like above
@@ -117,12 +113,12 @@ def process_ir_type(
             # this is a TensorList which comes in from GetTensorList as a Value
             return BaseCType(tensorListValueT)
         else:
-            return VectorCType(process_ir_type(typ.elem))
+            return VectorCType(process_ir_type(typ.elem, properties))
     else:
         raise AssertionError(f"unrecognized type {repr(typ)}")
 
 
-def isValueType(typ: CType) -> bool:
+def isValueType(typ: CType, properties: "Optional[LazyIrProperties]" = None) -> bool:
     """
     Given a type, determine if it is a Value-like type.  This is equivalent to
     being Tensor-like, but assumes the type has already been transformed.
@@ -130,9 +126,14 @@ def isValueType(typ: CType) -> bool:
     if isinstance(typ, BaseCType):
         # I am regretting my naming conventions, but now we are wrapping at::scalar in
         # lazy value, while preserving other 'scalar' types as scalars in the IR
-        return typ.type == getValueT() or typ.type == scalarT or typ.type == SymIntT
+        treat_scalars_as_constants = properties and properties.TreatScalarsAsConstants
+        return (
+            typ.type == getValueT()
+            or (typ.type == scalarT and not treat_scalars_as_constants)
+            or typ.type == SymIntT
+        )
     elif isinstance(typ, (OptionalCType, ListCType, VectorCType)):
-        return isValueType(typ.elem)
+        return isValueType(typ.elem, properties)
     return False
 
 
@@ -174,7 +175,7 @@ class LazyArgument:
     # true if this argument is or contains a lazy IR value
     is_lazy_value: bool
 
-    def __init__(self, arg: Argument):
+    def __init__(self, arg: Argument, properties: "LazyIrProperties"):
         self.name = arg.name
         self.orig_type = arg.type
         self.is_optional = isinstance(arg.type, OptionalType)
@@ -188,11 +189,13 @@ class LazyArgument:
             # its null and safe to exclude from lazy IR
             self.lazy_type_ = None
         else:
-            self.lazy_type_ = process_ir_type(arg.type)
+            self.lazy_type_ = process_ir_type(arg.type, properties)
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
         self.is_symint_or_list = isSymIntType(arg.type)
 
-        self.is_lazy_value = not self.is_generator and isValueType(self.lazy_type)
+        self.is_lazy_value = not self.is_generator and isValueType(
+            self.lazy_type, properties
+        )
 
     @property
     def lazy_type(self) -> CType:
@@ -229,6 +232,9 @@ class LazyIrProperties:
             "CreateFn",  # Codegen full create function
             "CreateFnDeclOnly",  # Codegen only create function declaration
         ),
+        (
+            "TreatScalarsAsConstants",  # Treat Scalars as constants instead of handling like values
+        ),
     )
 
     def __init__(self, *default_properties: str):
@@ -252,7 +258,7 @@ class LazyIrProperties:
         for values in LazyIrProperties.Properties:
             if key in values:
                 properties[values] = key if value else None
-                return
+                return value
 
         raise KeyError(f"Invalid property: {key}")
 
@@ -283,20 +289,25 @@ class LazyIrSchema:
     )
     opkind: Optional[str] = None
 
-    def __init__(self, func: FunctionSchema):
+    def __init__(
+        self, func: FunctionSchema, properties: Optional[LazyIrProperties] = None
+    ):
+        if properties:
+            self.properties = properties
 
-        positional_args = []
+        positional_args: List[LazyArgument] = []
         for arg_field in ["pre_self_positional", "self_arg", "post_self_positional"]:
             if arg_field == "self_arg" and func.arguments.self_arg is not None:
                 arg = getattr(func.arguments, "self_arg").argument
-                positional_args.append(LazyArgument(arg))
+                positional_args.append(LazyArgument(arg, self.properties))
             elif getattr(func.arguments, arg_field) is not None:
                 positional_args.extend(
-                    [LazyArgument(arg) for arg in getattr(func.arguments, arg_field)]
+                    LazyArgument(arg, self.properties)
+                    for arg in getattr(func.arguments, arg_field)
                 )
         self.positional_args = tuple(positional_args)
 
-        keyword_args = []
+        keyword_args: List[LazyArgument] = []
         for arg_field in [
             "pre_tensor_options_kwarg_only",
             "tensor_options",
@@ -313,7 +324,9 @@ class LazyIrSchema:
                             self.generator_arg is None
                         ), "We expect there is only one generator arg"
                         self.generator_arg = NamedCType(arg.name, arg.type)
-                keyword_args.extend([LazyArgument(arg) for arg in curr_args])
+                keyword_args.extend(
+                    LazyArgument(arg, self.properties) for arg in curr_args
+                )
         self.keyword_args = tuple(keyword_args)
         self.name = func.name
         self.returns = func.returns

@@ -586,11 +586,12 @@ def generate_non_native_lazy_ir_nodes(
     """Generate the non-native lazy IR node classes"""
     nodes = []
     for op in non_native:
-        schema = LazyIrSchema(FunctionSchema.parse(op["func"]))
         # Set default properties for Non-Native IRs
-        schema.properties = LazyIrProperties("ShapeCache")
+        properties = LazyIrProperties("ShapeCache")
         for p in op.get("properties", []):
-            setattr(schema.properties, p, True)
+            setattr(properties, p, True)
+
+        schema = LazyIrSchema(FunctionSchema.parse(op["func"]), properties)
         schema.opkind = op.get("opkind")
         nodes.append(gen_lazy_ir.gen(schema)[0])
 

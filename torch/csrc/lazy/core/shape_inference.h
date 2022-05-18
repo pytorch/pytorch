@@ -71,7 +71,6 @@ TORCH_API std::vector<torch::lazy::Shape> compute_shape_zero_functional(const at
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t dim, int64_t start, c10::SymInt length);
 
 // Non-Native ops
-TORCH_API std::vector<Shape> compute_shape_device_data(const std::shared_ptr<BackendData>& data);
 TORCH_API std::vector<Shape> compute_shape_scalar(const at::Scalar& value, const at::ScalarType& type);
 TORCH_API std::vector<Shape> compute_shape_expand(const Output& input0, const std::vector<int64_t>& size, const bool& is_scalar_expand);
 TORCH_API std::vector<Shape> compute_shape_view(const Output& input0, const std::vector<int64_t>& output_sizes);

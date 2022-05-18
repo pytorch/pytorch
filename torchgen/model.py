@@ -1512,8 +1512,6 @@ BaseTy = Enum(
         "Stream",
         "SymInt",
         "ConstQuantizerPtr",  # TODO: rename
-        "ScalarVal",  # An actual aten Scalar value, no special handling
-        "BackendDataPtr",
     ),
 )
 

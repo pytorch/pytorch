@@ -633,9 +633,6 @@ std::vector<Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t di
 
 
 // Non-Native Ops
-std::vector<Shape> compute_shape_device_data(const std::shared_ptr<BackendData>& data) {
-  return {data->shape()};
-}
 std::vector<Shape> compute_shape_scalar(const at::Scalar& value, const at::ScalarType& type) {
   return { Shape(type, {}) };
 }
