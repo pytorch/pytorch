@@ -144,7 +144,7 @@ def _getDefaultRtolAndAtol(dtype0, dtype1):
     return rtol, atol
 
 
-def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
+def op_assert_ref(test_case, op, test_dtype, orig, decomp, ref, args, kwargs):
     assert orig.dtype == decomp.dtype, f"Operation:  {op}"
     if orig.numel() == 0 or decomp.numel() == 0:
         assert orig.numel() == decomp.numel()
@@ -153,11 +153,13 @@ def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
     tol_table = {
         (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
+        (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
         decomp_diff = (decomp - ref).abs().max()
-        atol = tol_table.get((orig.dtype, op), 1e-7)
+        atol = tol_table.get((test_dtype, op), 1e-7)
         if decomp_diff > orig_diff + atol:
             raise RuntimeError(
                 f"Difference from float64 is larger with decomposition {op.__name__}"
@@ -172,7 +174,7 @@ def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
         )
 
 
-def op_assert_equal(test_case, op, orig, decomp, args, kwargs):
+def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
     test_case.assertEqual(
         orig.dtype, decomp.dtype, f"Operation: {op}, orig.dtype: {orig.dtype}, decomp.dtype: {decomp.dtype}, {args}, {kwargs}")
     # Before adding an entry to this table, make sure your decomposition is right :)
@@ -184,7 +186,7 @@ def op_assert_equal(test_case, op, orig, decomp, args, kwargs):
             1e-3,
         ),
     }
-    if (decomp.dtype, op) in tol_table:
+    if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
@@ -425,13 +427,13 @@ class TestDecomp(TestCase):
                         if orig is None:
                             assert decomp is None
                             continue
-                        op_assert_ref(self, func, orig, decomp, ref, args, kwargs)
+                        op_assert_ref(self, func, test_dtype, orig, decomp, ref, args, kwargs)
                 else:
                     for orig, decomp in zip(real_out, decomp_out):
                         if orig is None:
                             assert decomp is None
                             continue
-                        op_assert_equal(self, func, orig, decomp, args, kwargs)
+                        op_assert_equal(self, func, test_dtype, orig, decomp, args, kwargs)
 
                 return real_out_unflat
 
