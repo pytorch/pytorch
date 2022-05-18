@@ -1634,7 +1634,7 @@ Differences with `numpy.linalg.svd`:
     The `driver` kwarg may be used in CUDA with a cuSOLVER backend to choose the algorithm used to compute the SVD.
     The choice of a driver is a trade-off between accuracy and speed.
 
-    - If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
+    - If :attr:`A` is well-conditioned (its `condition number` is not too large), or you do not mind some precision loss.
 
       - For a general matrix: `'gesvdj'` (Jacobi method)
       - If :attr:`A` is tall or wide (`m >> n` or `m << n`): `'gesvda'` (Approximate method)
