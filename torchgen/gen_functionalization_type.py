@@ -25,7 +25,6 @@ from torchgen.model import (
     NativeFunctionsGroup,
     BackendIndex,
     FunctionSchema,
-    SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
     BaseType,
@@ -280,9 +279,14 @@ def convert_to_meta_tensors(sig: DispatcherSignature) -> Tuple[str, List[Binding
     for arg in sig.arguments():
         if is_tensor_like(arg.argument):
             # for tensor inputs, we want to unwrap them before passing them into the redispatch calls.
+            # for tensor inputs, we want to unwrap them before passing them into the redispatch calls.
             a_ = arg.name
             unwrapped_name = f"{arg.name}_meta"
-            unwrapped_tensor_args.append(f"auto {unwrapped_name} = to_meta({a_});")
+            unwrapped_tensor_args.append(
+                f"auto {unwrapped_name} = at::native::empty_strided_meta({a_}.sizes(), {a_}.strides(), \
+/*dtype=*/c10::make_optional({a_}.scalar_type()), /*layout=*/c10::make_optional({a_}.layout()), \
+/*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);"
+            )
             context.append(arg.with_name(unwrapped_name))
         else:
             # for non-tensor inputs, we want to pass them directly into the redispatch calls.
@@ -621,18 +625,8 @@ def emit_inplace_functionalization_body(
             ]
         )
 
-    meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
-
     return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-      if ({str(f.func.kind() == SchemaKind.inplace).lower()}) {{
-        // Before converting the mutable op to its functional variant, run meta tensors through the original op.
-        // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
-        // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).
-        {meta_conversion_str}
-        at::AutoDispatchSkipFunctionalize guard;
-        at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
-      }}
       {unwrap_tensor_args_str}
       if (!({check_all_mutated_args_are_functional})) {{
         if (({check_any_non_mutated_args_are_functional})) {{
