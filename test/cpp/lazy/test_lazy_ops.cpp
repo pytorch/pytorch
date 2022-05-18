@@ -94,6 +94,19 @@ TEST(LazyDynamicOpsTest, NarrowCopy) {
   AllClose(z.cpu(), x.cpu().narrow_copy(X_DIM_INDEX, 0, Y_DIM));
 }
 
+TEST(LazyDynamicOpsTest, NarrowCopyViaSymSizes) {
+  auto xc = torch::rand({10});
+  auto x = xc.to(kLazy);
+  const size_t Y_DIM = 3;
+  const size_t X_DIM_INDEX = 0;
+  auto y = torch::rand({Y_DIM}).to(kLazy);
+  auto z = x.narrow_copy(X_DIM_INDEX, 0, y.sym_sizes()[0]);
+  auto zc = xc.narrow_copy(X_DIM_INDEX, 0, Y_DIM);
+  ASSERT_EQ(z.sizes()[0], xc.sizes()[0]); // note, xc not zc
+  // shape inference assumes narrow_copy can copy the whole tensor
+  AllClose(z.cpu(), zc);
+}
+
 TEST_F(LazyOpsTest, TestScalarTensor) {
   torch::Tensor scalar_tensor = torch::scalar_tensor(
       1., torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
