@@ -18,8 +18,7 @@ import threading
 from typing import List, Optional, Tuple, Union, Any
 from ._utils import _get_device_index, _dummy_type
 from .._utils import classproperty
-from .graphs import CUDAGraph, graph_pool_handle, graph, \
-    make_graphed_callables, is_current_stream_capturing
+from .graphs import CUDAGraph, graph_pool_handle, graph, make_graphed_callables
 from .streams import ExternalStream, Stream, Event
 from .. import device as _device
 import torch._C
