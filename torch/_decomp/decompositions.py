@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import functools
 from torch.utils._pytree import tree_map, tree_flatten
 import torch._prims.utils as utils
-from torch._prims.wrappers import out_wrapper
+from torch._prims.wrappers import out_wrapper_multi
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -1266,7 +1266,8 @@ def trace(self: Tensor) -> Tensor:
 
 
 # nb: Should use acc_t, not op_math
-@register_decomposition(aten.log_sigmoid_forward.default)
+@register_decomposition(aten.log_sigmoid_forward)
+@out_wrapper_multi('output', 'buffer')
 @pw_cast_for_opmath
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
