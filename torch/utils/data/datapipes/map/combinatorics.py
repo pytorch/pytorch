@@ -45,7 +45,6 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
         self.datapipe = datapipe
         self.indices = list(range(len(datapipe))) if indices is None else indices
         self.index_map = {index_name: num_index for num_index, index_name in enumerate(self.indices)}
-        self._seed = None
         # We do not lazily shuffle because this way is significantly faster in terms of total time
         random.shuffle(self.indices)
 
