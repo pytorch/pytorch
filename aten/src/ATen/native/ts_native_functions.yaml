@@ -19,15 +19,21 @@ full_codegen:
   - avg_pool2d_backward
   - baddbmm
   - bernoulli
-  - bernoulli_.float
+  - bernoulli.p
   - binary_cross_entropy
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
   - bitwise_or.Tensor
+  - block_diag
   - bmm
   - cat
   - clamp
   - clamp_min
+  # clone() *should* show up in the IR.
+  # For example, tracing through at::reshape() will insert a clone in cases where the output
+  # needs to be cloned first before constructing a view, when the input strides are incompatible.
+  # This clone needs to be there in order to faithfully re-execute the view later.
+  - clone
   - constant_pad_nd
   - convolution
   - convolution_backward
@@ -52,6 +58,7 @@ full_codegen:
   - gelu_backward
   - glu
   - glu_backward
+  - glu_jvp
   - grid_sampler_2d
   - grid_sampler_2d_backward
   - gt.Scalar
@@ -71,8 +78,8 @@ full_codegen:
   - log_sigmoid_forward
   - lt.Scalar
   - lt.Tensor
-  - masked_fill_.Scalar
-  - masked_fill_.Tensor
+  - masked_fill.Scalar
+  - masked_fill.Tensor
   - max
   - max.dim
   - max_pool2d_with_indices
@@ -91,6 +98,7 @@ full_codegen:
   - native_layer_norm_backward
   - ne.Scalar
   - ne.Tensor
+  - new_empty_strided
   - neg
   - nll_loss_backward
   - nll_loss_forward
@@ -99,12 +107,11 @@ full_codegen:
   - norm.ScalarOpt_dim
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
-  - random_
-  - random_.from
-  - random_.to
+  - random.functional
+  - random.from_functional
+  - random.to_functional
   - reciprocal
   - relu
-  - relu_
   - remainder.Tensor
   - repeat
   - rsqrt
@@ -139,7 +146,7 @@ full_codegen:
   - upsample_bilinear2d_backward
   - upsample_nearest2d
   - upsample_nearest2d_backward
-  - zero_
+  - zero.functional
   - narrow_copy.SymInt
   - alias_copy
   - as_strided_copy
@@ -152,27 +159,25 @@ full_codegen:
   - slice_copy.Tensor
   #- split_copy.Tensor
   #- split_with_sizes_copy
+  #- unbind_copy.int
   - squeeze_copy
   - squeeze_copy.dim
   - t_copy
   - transpose_copy.int
   - unsqueeze_copy
-  #- unbind_copy.int
   - view_copy
   - view_copy.dtype
   - unfold_copy
   - select_scatter
   - slice_scatter
   - diagonal_scatter
+  - as_strided_scatter
 supported:
-  - clone
   - _copy_from
   - _copy_from_and_resize
-  - diagonal
   - empty.memory_format
   - empty_strided
   - fill_.Scalar
-  - narrow
   - native_batch_norm
   - native_batch_norm_backward
   - normal_
@@ -180,5 +185,6 @@ supported:
   - max_pool3d_with_indices_backward
   - _to_copy
   - _unsafe_view
+  - lift
 autograd:
   - max_pool3d

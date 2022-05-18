@@ -9,7 +9,9 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, instantiate_device_type_tests
 import torch._lazy
+import torch._lazy.config
 import torch._lazy.metrics
+import torch._lazy.ir_cache
 import torch._lazy.ts_backend
 import itertools
 import yaml
@@ -175,6 +177,44 @@ class TestLazyOpInfo(TestCase):
             r_actual = op(*args, **kwargs)
 
             assert_allclose_rec((r_actual, r_exp))
+
+    @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST], allowed_dtypes=(torch.float,))  # noqa: B950
+    def test_correctness_with_reusing_ir(self, device, dtype, op):
+        torch._lazy.config.set_reuse_ir(True)
+        test_device = get_test_device()
+
+        def clone_to_device(input, dev):
+            if isinstance(input, torch.Tensor):
+                return input.detach().clone().to(device=dev)
+            if isinstance(input, Sequence) and not isinstance(input, str):
+                return tuple(map(functools.partial(clone_to_device, dev=dev), input))
+            return input
+
+        def assert_allclose_rec(t):
+            a, b = t
+            self.assertEqual(type(a), type(b))
+            if isinstance(a, torch.Tensor):
+                self.assertTrue(torch.allclose(clone_to_device(a, test_device), b, atol=1e-4))
+
+            if isinstance(a, Sequence):
+                map(assert_allclose_rec, zip(a, b))
+
+        samples = op.sample_inputs("lazy", dtype, requires_grad=False)
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            copy_args = clone_to_device(args, test_device)
+
+            r_exp = op(*copy_args, **kwargs)
+            r_actual = op(*args, **kwargs)
+
+            torch._lazy.mark_step()
+            assert_allclose_rec((r_actual, r_exp))
+
+        torch._lazy.ir_cache.reset()
+        torch._lazy.config.set_reuse_ir(False)
+
+
 
 # TODO: after we move to master, add Lazy as a new Device here:
 # https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_device_type.py#L532

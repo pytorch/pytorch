@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/Parallel.h>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -51,6 +52,54 @@ Tensor _to_copy(
   // memory_format is handled separately due to MemoryFormat::Preserve logic
   options = self.options().merge_in(options).memory_format(c10::nullopt);
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
+  // TODO: Use the dispatcher for this.
+  // Currently there are unenumerated extensibility issues preventing this.
+  if (self.is_sparse_csr()) {
+    TORCH_CHECK(
+        memory_format == MemoryFormat::Preserve,
+        "sparse_csr only supports memory format Preserve, but got ",
+        memory_format,
+        " instead.");
+
+    auto new_values = at::native::to(
+        self.values(),
+        dtype,
+        c10::kStrided, // values are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    auto new_crow_indices = at::native::to(
+        self.crow_indices(),
+        self.crow_indices().scalar_type(), // indices are integral
+        c10::kStrided, // indices are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    auto new_col_indices = at::native::to(
+        self.col_indices(),
+        self.col_indices().scalar_type(), // indices are integral
+        c10::kStrided, // indices are strided
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we're in _to_copy
+        memory_format);
+
+    return at::native::_sparse_csr_tensor_unsafe(
+        new_crow_indices,
+        new_col_indices,
+        new_values,
+        self.sizes(),
+        new_values.scalar_type(),
+        self.layout(),
+        new_values.device());
+  }
 
   bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
                   (options.layout() == c10::kStrided));
@@ -413,14 +462,35 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   return new_tensor;
 }
 
+// Sparse layout conversions Start
+
 Tensor dense_to_sparse_csr(const Tensor& self) {
   return self.to_sparse().to_sparse_csr();
 }
 
-Tensor csr_to_sparse_csr(const Tensor& self) {
+Tensor dense_to_sparse_csc(const Tensor& self) {
+  AT_ERROR(
+      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
+  return self;
+}
+
+Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
+  AT_ERROR(
+      "Conversion from ", self.layout(), " to SparseBsr is currently not supported.");
+  return self;
+}
+
+Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
+  AT_ERROR(
+      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
+  return self;
+}
+
+Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
   // Just returning self doesn't work
-  // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152,
-  // please report a bug to PyTorch. aten::to_sparse_csr
+  // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
+  // "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152, please
+  // report a bug to PyTorch. aten::to_sparse_csr
   return at::native::_sparse_csr_tensor_unsafe(
       self.crow_indices(),
       self.col_indices(),
@@ -451,6 +521,353 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
       coalesced_self.device());
 }
 
+Tensor coo_to_sparse_csc(const Tensor& self) {
+  AT_ERROR(
+      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
+  return self;
+}
+
+Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
+  AT_ERROR(
+      "Conversion from ", self.layout(), " to SparseBsr is currently not supported.");
+  return self;
+}
+
+Tensor coo_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
+  AT_ERROR(
+      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
+  return self;
+}
+
+namespace {
+template <typename input_t, typename output_t>
+void convert_indices_from_coo_to_csr_cpu(
+    const Tensor& result,
+    const Tensor& input,
+    const int64_t size) {
+  int64_t numel = input.numel();
+  const input_t* data_in = input.data_ptr<input_t>();
+  output_t* data_out = result.data_ptr<output_t>();
+
+  if (numel == 0) {
+    result.zero_();
+    return;
+  }
+
+  for (int64_t i = 0; i <= data_in[0]; i++)
+    data_out[i] = static_cast<output_t>(0);
+
+  at::parallel_for(
+      0, numel - 1, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
+        input_t curr_value = data_in[start], next_value;
+        for (const auto i : c10::irange(start, end)) {
+          next_value = data_in[i + 1];
+          for (; curr_value < next_value; curr_value++)
+            data_out[curr_value + 1] = static_cast<output_t>(i + 1);
+        }
+      });
+  for (int64_t i = data_in[numel - 1] + 1; i < size + 1; i++) {
+    data_out[i] = static_cast<output_t>(numel);
+  }
+}
+
+template <typename input_t, typename output_t>
+void convert_indices_from_csr_to_coo_cpu(
+    const Tensor& indices,
+    const Tensor& crow_indices,
+    const Tensor& col_indices,
+    const bool transpose = false) {
+  int64_t nrows = crow_indices.numel() - 1;
+  if (nrows == 0) {
+    indices.zero_();
+    return;
+  }
+  auto crow_indices_ = crow_indices.expect_contiguous();
+  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
+  TORCH_INTERNAL_ASSERT(indices.is_contiguous());
+  auto row0 = indices.select(0, transpose ? 1 : 0);
+  auto row1 = indices.select(0, transpose ? 0 : 1);
+  output_t* data_out = row0.data_ptr<output_t>();
+  row1.copy_(*col_indices.expect_contiguous());
+  at::parallel_for(
+      0, nrows, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
+        for (const auto i : c10::irange(start, end)) {
+          std::fill(
+              &data_out[crow_indices_data_in[i]],
+              &data_out[crow_indices_data_in[i + 1]],
+              static_cast<output_t>(i));
+        }
+      });
+}
+} // namespace
+
+TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu)
+(const Tensor& input,
+ const int64_t size,
+ const bool out_int32,
+ const Tensor& result) {
+  if (out_int32) {
+    AT_DISPATCH_INTEGRAL_TYPES(
+        input.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
+          convert_indices_from_coo_to_csr_cpu<scalar_t, int32_t>(
+              result, input, size);
+        });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(
+        input.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
+          convert_indices_from_coo_to_csr_cpu<scalar_t, int64_t>(
+              result, input, size);
+        });
+  }
+}
+
+TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu)
+(const Tensor& crow_indices,
+ const Tensor& col_indices,
+ const bool out_int32,
+ const bool transpose,
+ const Tensor& result) {
+  if (out_int32) {
+    AT_DISPATCH_INTEGRAL_TYPES(
+        crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
+          convert_indices_from_csr_to_coo_cpu<scalar_t, int32_t>(
+              result, crow_indices, col_indices, transpose);
+        });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(
+        crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
+          convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(
+              result, crow_indices, col_indices, transpose);
+        });
+  }
+}
+
+/*
+ * Based on
+ * https://github.com/scipy/scipy/blob/8a64c938ddf1ae4c02a08d2c5e38daeb8d061d38/scipy/sparse/sparsetools/csr.h
+ */
+template <class I, class T>
+void _csr_to_block_csr_cpu_kernel(
+    const I n_row,
+    const I n_col,
+    const I R,
+    const I C,
+    const I* input_crow_indices,
+    const I* input_col_indices,
+    const T* input_values,
+    I* result_crow_indices,
+    I* result_col_indices,
+    T* result_values) {
+  // All blocks are possible, that is, may be allocated if a single non-zero
+  // value lives within them. Otherwise they're not.
+
+  // Allocate pointers for all possible column blocks plus 1
+  std::vector<T*> blocks(n_col / C + 1, (T*)0);
+
+  assert(n_row % R == 0);
+  assert(n_col % C == 0);
+
+  // Major assumptions
+  // 1. Blocks must be square
+
+  // Number of blocks along rows
+  I n_brow = n_row / R;
+  // Number of blocks along columns
+  // I n_bcol = n_col / C;
+
+  // Number of elements per block
+  I RC = R * C;
+  // Number of blocks overall
+  I n_blks = 0;
+
+  result_crow_indices[0] = 0;
+
+  // Iterate over blocks along rows
+  for (I block_i = 0; block_i < n_brow; block_i++) {
+    // Iterate over rows within block
+    for (I r = 0; r < R; r++) {
+      I i = R * block_i + r; // row index
+      for (I jj = input_crow_indices[i]; jj < input_crow_indices[i + 1]; jj++) {
+        I j = input_col_indices[jj]; // column index
+
+        // Block corresponding to column index
+        I block_j = j / C;
+        // Column within block
+        I c = j % C;
+
+        if (blocks[block_j] == 0) {
+          blocks[block_j] = result_values + RC * n_blks;
+          result_col_indices[n_blks] = block_j;
+          n_blks++;
+        }
+
+        // Specific blocks entries should not be visited more than once.
+        // Scipy code does an addition here. Why?
+        *(blocks[block_j] + C * r + c) = input_values[jj];
+      }
+    }
+
+    for (I jj = input_crow_indices[R * block_i];
+         jj < input_crow_indices[R * (block_i + 1)];
+         jj++) {
+      blocks[input_col_indices[jj] / C] = 0;
+    }
+
+    result_crow_indices[block_i + 1] = n_blks;
+  }
+}
+
+/*
+ * Based on
+ * https://github.com/scipy/scipy/blob/8a64c938ddf1ae4c02a08d2c5e38daeb8d061d38/scipy/sparse/sparsetools/csr.h
+ */
+template <class I>
+I csr_count_blocks(
+    const I n_row,
+    const I n_col,
+    const I R,
+    const I C,
+    const I Ap[],
+    const I Aj[]) {
+  std::vector<I> mask(n_col / C + 1, -1);
+  I n_blks = 0;
+  for (I i = 0; i < n_row; i++) {
+    I bi = i / R;
+    for (I jj = Ap[i]; jj < Ap[i + 1]; jj++) {
+      I bj = Aj[jj] / C;
+      if (mask[bj] != bi) {
+        mask[bj] = bi;
+        n_blks++;
+      }
+    }
+  }
+  return n_blks;
+}
+
+Tensor _csr_to_block_csr_cpu(const Tensor& self, IntArrayRef blocksize) {
+  TORCH_CHECK(
+      blocksize[0] == blocksize[1],
+      "blocks must be square. ",
+      "Got (",
+      blocksize[0],
+      ", ",
+      blocksize[1],
+      ") instead.");
+  TORCH_CHECK(
+      self.size(0) % blocksize[0] == 0 && self.size(1) % blocksize[1] == 0,
+      "Block sparse CSR Tensors must have a size that is an ",
+      "integral multiple of their block size. ",
+      "Got Tensor of size (",
+      self.size(0),
+      ", ",
+      self.size(1),
+      ") with block size (",
+      blocksize[0],
+      ", ",
+      blocksize[1],
+      ") instead.");
+  Tensor input_values = self.values().contiguous();
+  Tensor input_crow_indices = self.crow_indices().contiguous();
+  Tensor input_col_indices = self.col_indices().contiguous();
+
+  // First we determine the number of blocks needed. For each given block, if it
+  // contains a non-zero element we will allocate values and indices for it.
+  int64_t num_blocks;
+  int64_t n_row = self.size(0);
+  int64_t n_col = self.size(1);
+  AT_DISPATCH_INDEX_TYPES(
+      input_crow_indices.scalar_type(), "_csr_to_block_csr_cpu", [&] {
+        num_blocks = csr_count_blocks<index_t>(
+            n_row,
+            n_col,
+            blocksize[0],
+            blocksize[1],
+            input_crow_indices.data_ptr<index_t>(),
+            input_col_indices.data_ptr<index_t>());
+      });
+
+  Tensor result_values =
+      input_values.new_zeros({num_blocks, blocksize[0], blocksize[1]});
+  Tensor result_crow_indices =
+      input_crow_indices.new_empty({(n_row / blocksize[0]) + 1});
+  Tensor result_col_indices = input_col_indices.new_empty({num_blocks});
+
+  // Next we copy over non-zero elements into the allocated blocks.
+  AT_DISPATCH_INDEX_TYPES(
+      input_crow_indices.scalar_type(), "_csr_to_block_csr_cpu", [&] {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+            input_values.scalar_type(), "_csr_to_block_csr_cpu", [&] {
+              _csr_to_block_csr_cpu_kernel<index_t, scalar_t>(
+                  n_row,
+                  n_col,
+                  blocksize[0],
+                  blocksize[1],
+                  input_crow_indices.data_ptr<index_t>(),
+                  input_col_indices.data_ptr<index_t>(),
+                  input_values.data_ptr<scalar_t>(),
+                  result_crow_indices.data_ptr<index_t>(),
+                  result_col_indices.data_ptr<index_t>(),
+                  result_values.data_ptr<scalar_t>());
+            });
+      });
+  return at::native::_sparse_bsr_tensor_unsafe(
+      result_crow_indices,
+      result_col_indices,
+      result_values,
+      self.sizes(),
+      result_values.scalar_type(),
+      c10::kSparseBsr,
+      result_values.device());
+}
+
+Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
+  TORCH_CHECK(
+      self.is_sparse_csr(),
+      "Can only convert CSR to SparseBsr, but got ",
+      self.layout(),
+      " instead.");
+  Tensor self_values = self.values();
+  Tensor self_crow_indices = self.crow_indices();
+  Tensor self_col_indices = self.col_indices();
+  Tensor cpu_result = _csr_to_block_csr_cpu(
+      _sparse_csr_tensor_unsafe(
+          self_crow_indices.cpu(),
+          self_col_indices.cpu(),
+          self_values.cpu(),
+          self.sizes(),
+          self_values.scalar_type(),
+          self.layout(),
+          self_values.device()),
+      blocksize);
+  Tensor result_values = cpu_result.values().to(self_values.options());
+  Tensor result_crow_indices =
+      cpu_result.crow_indices().to(self_crow_indices.options());
+  Tensor result_col_indices =
+      cpu_result.col_indices().to(self_col_indices.options());
+  return at::native::_sparse_bsr_tensor_unsafe(
+      result_crow_indices,
+      result_col_indices,
+      result_values,
+      self.sizes(),
+      result_values.scalar_type(),
+      c10::kSparseBsr,
+      result_values.device());
+}
+
+Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
+  AT_ERROR(
+      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
+  return self;
+}
+
+Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
+  AT_ERROR(
+      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
+  return self;
+}
+
+// Sparse layout conversions End
+
 Tensor to_meta(const Tensor& tensor) {
   auto out = at::native::empty_strided_meta(tensor.sizes(), tensor.strides(), \
 /*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
@@ -466,6 +883,15 @@ c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor) {
     return to_meta(*tensor);
   }
   return c10::nullopt;
+}
+
+std::vector<Tensor> to_meta(const at::TensorList& t_list) {
+  std::vector<Tensor> outs;
+  outs.reserve(t_list.size());
+  for (const auto& i : c10::irange(t_list.size())) {
+    outs.push_back(to_meta(t_list[i]));
+  }
+  return outs;
 }
 
 }} // namespace at::native

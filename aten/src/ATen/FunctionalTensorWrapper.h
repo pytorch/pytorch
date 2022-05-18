@@ -91,12 +91,31 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // replace_() swaps out the wrapped tensor, value_, with tmp.
   void replace_(const Tensor& other);
 
+  // See Note[resize_() in functionalization pass]
+  void maybe_replace_storage(const Tensor& other);
+
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override;
+
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const override;
+
   ~FunctionalTensorWrapper() override = default;
 
  private:
   const char* tensorimpl_type_name() const override;
   void set_constructor_metadata();
   functionalization::FunctionalStorageImpl* functional_storage_impl() const;
+
+  // This is used to re-implement shallow_copy_and_detach for FunctionalTensorWrapper.
+  // The implementation is identical, but we just need to return a subclass instead of a plain TensorImpl.
+  // TODO: maybe it's possible to arrange for that to happen automatically without an override here?
+  template <typename VariableVersion>
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
+      VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const;
 
   // Note that value is not taken by reference: internally, the wrapper will change the value tensor that it points to over time.
   Tensor value_;

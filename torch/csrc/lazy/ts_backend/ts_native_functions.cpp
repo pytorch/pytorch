@@ -8,7 +8,8 @@
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/shape_inference.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
-#include <torch/csrc/lazy/core/view_ops/as_strided.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
+#include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
@@ -42,11 +43,6 @@ c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const c10::optional<c10::
 }
 
 }  // namespace
-
-at::Tensor LazyNativeFunctions::clone(const at::Tensor & self, c10::optional<at::MemoryFormat> memory_format) {
-  auto self_lt = torch::lazy::TryGetLtcTensor(self);
-  return torch::lazy::CreateAtenFromLtcTensor(self_lt->Create(self_lt->GetIrValue(), self_lt->GetDevice()));
-}
 
 at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
                                            const at::Tensor& dst,
@@ -154,7 +150,11 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
     auto lazy_self = torch::lazy::TryGetLtcTensor(self);
     if (!lazy_self && device && device->type() == c10::kLazy) {
       // Case 1: eager->lazy (we create a new lazy tensor)
-      return torch::lazy::to_lazy_tensor(self, options, *device, /*non_blocking=*/non_blocking, /*functionalize_output=*/true);
+      // See Note [Lazy Tensor Functionalization]
+      // Invariant: if the functionalization key is in the exclude set, then we're expected
+      // to return an ordinary tensor, which will be "lifted" into a functional wrapper later.
+      bool functionalize_output = !c10::impl::tls_local_dispatch_key_set().excluded_.has(c10::DispatchKey::Functionalize);
+      return torch::lazy::to_lazy_tensor(self, options, *device, /*non_blocking=*/non_blocking, /*functionalize_output=*/functionalize_output);
     } else if(device && device->type() != c10::kLazy) {
       // Case 2: lazy->eager (forces a graph break since we are materializing a tensor)
 
@@ -213,19 +213,6 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
     }
 };
 
-at::Tensor LazyNativeFunctions::diagonal(const at::Tensor& self, int64_t offset, int64_t dim1, int64_t dim2) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-
-  auto input = GetLtcTensor(self);
-  auto input_shape = input->shape();
-  dim1 = at::maybe_wrap_dim(dim1, self);
-  dim2 = at::maybe_wrap_dim(dim2, self);
-  auto diagonal_info = DiagonalInfo {offset, dim1, dim2};
-  auto view_info = ViewInfo(ViewInfo::Type::kDiagonal, input_shape, diagonal_info);
-
-  return CreateAtenFromLtcTensor(input->CreateViewTensor(std::move(view_info)));
-}
-
 at::Tensor LazyNativeFunctions::empty(
     at::IntArrayRef size, c10::optional<at::ScalarType> dtype,
     c10::optional<at::Layout> layout, c10::optional<at::Device> device,
@@ -240,8 +227,14 @@ at::Tensor LazyNativeFunctions::empty(
   auto x_result = at::empty(size, options, memory_format);
   auto tensor = CreateLtcTensor(x_result, GetLtcDevice(device));
   // See Note [Lazy Tensor Functionalization]
-  auto wrapped = at::functionalization::impl::to_functional_tensor(tensor);
-  return wrapped;
+  if (c10::impl::tls_local_dispatch_key_set().excluded_.has(c10::DispatchKey::Functionalize)) {
+    // Invariant: if the functionalization key is in the exclude set, then we're expected
+    // to return an ordinary tensor, which will be "lifted" into a functional wrapper later.
+    return tensor;
+  } else {
+    auto wrapped = at::functionalization::impl::to_functional_tensor(tensor);
+    return wrapped;
+  }
 }
 
 at::Tensor LazyNativeFunctions::empty_strided(
@@ -354,13 +347,6 @@ at::Tensor LazyNativeFunctions::max_pool3d_with_indices_backward(
                                                        ceil_mode, indices);
 }
 
-at::Tensor LazyNativeFunctions::narrow(const at::Tensor& self, int64_t dim, int64_t start, int64_t length) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  return torch::lazy::CreateAtenFromLtcTensor(torch::lazy::narrow(
-      self_tensor, dim, start, length));
-}
-
 at::Tensor & LazyNativeFunctions::normal_(at::Tensor & self, double mean, double std, c10::optional<at::Generator> generator) {
     // Unconditionally fall back.
     // implementing normal_ via lazy tensor caused differences in results compared to eager.
@@ -387,6 +373,15 @@ at::Tensor LazyNativeFunctions::_unsafe_view(const at::Tensor& self,
                                      at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   return LazyNativeFunctions::view_copy(self, size);
+}
+
+
+// This is needed by the torch.tensor constructor.
+// LazyTensor always opts into functionalization.
+// "lifting" a tensor for functionalization means wrapping it in a FunctionalTensorWrapper object.
+at::Tensor LazyNativeFunctions::lift(const at::Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(tensor));
+  return at::functionalization::impl::to_functional_tensor(tensor);
 }
 
 void InitializeAtenBindings() {}

@@ -47,7 +47,9 @@
 
 #include <torch/csrc/lazy/core/shape.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/TensorConversions.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Functions.h>
 #include <ATen/CompositeExplicitAutogradFunctions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
@@ -83,10 +85,11 @@ std::vector<int64_t> expand_param_if_needed(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
-std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
+TORCH_API std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
   double size_d = 0;
   // shape inference code copied from RangeFactories.cpp arange_out function
   // Note: AT_DISPATCH_ALL_TYPES_AND is just a macro that defines the correct c++ scalar_t type depending on out tensor
+
   AT_DISPATCH_ALL_TYPES_AND(c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
     // Note: acc_type further defines an accumulataion type depending on the scalar_t and whether its on cuda vs cpu.
     using accscalar_t = at::acc_type<scalar_t, false>;
@@ -131,7 +134,6 @@ std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::
   // If any of start, end, or stop are floating-point, the dtype is inferred to be the default dtype, see get_default_dtype().
   // Otherwise, the dtype is inferred to be torch.int64.
 
-  // Since out tensor is specified, its dtype should always be used?
   return {Shape(out.scalar_type(), {size})};
 }
 
@@ -147,7 +149,7 @@ std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, c10::optiona
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_bernoulli_(at::Tensor & self, double p, c10::optional<at::Generator> generator) {
+std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, double p, c10::optional<at::Generator> generator) {
   return compute_shape_bernoulli(self, generator);
 }
 
@@ -226,11 +228,11 @@ std::vector<Shape> compute_shape_convolution(const at::Tensor & input, const at:
   }
 }
 
-std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
+std::vector<Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
+std::vector<Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -294,6 +296,14 @@ std::vector<Shape> compute_shape_kl_div_backward(const at::Tensor& grad_output, 
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<torch::lazy::Shape> compute_shape_block_diag(at::TensorList tensors) {
+  // block_diag is composite but all of its base ops are structured, so we can
+  // run meta tensors through it.
+  auto meta_tensors = at::native::to_meta(tensors);
+  auto meta_out = at::block_diag(meta_tensors);
+  return {Shape(meta_out.scalar_type(), meta_out.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   // TODO(whc) support cat in codegen and move this to compute_*_cat functions
   std::vector<int64_t> out_shape(tensors[0].sizes().begin(), tensors[0].sizes().end());
@@ -344,6 +354,10 @@ std::vector<Shape> compute_shape_native_layer_norm_backward(const at::Tensor& gr
   return shapes;
 }
 
+TORCH_API std::vector<Shape> compute_shape_new_empty_strided(const at::Tensor & self, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
+  return {Shape(dtype.has_value() ? *dtype : self.scalar_type(), size.vec())};
+}
+
 std::vector<Shape> compute_shape_mean(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
   if (dtype.has_value()) {
     return {Shape(dtype.value(), {})};
@@ -363,24 +377,20 @@ std::vector<Shape> compute_shape_native_dropout_backward(const at::Tensor & grad
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_(at::Tensor & self, c10::optional<at::Generator> generator) {
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, c10::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_(at::Tensor & self, int64_t to, c10::optional<at::Generator> generator) {
-  return compute_shape_random_(self, generator);
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, int64_t to, c10::optional<at::Generator> generator) {
+  return compute_shape_random_functional(self, generator);
 }
 
-std::vector<Shape> compute_shape_random_(at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator) {
-  return compute_shape_random_(self, generator);
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator) {
+  return compute_shape_random_functional(self, generator);
 }
 
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
-std::vector<Shape> compute_shape_relu_(at::Tensor& self) {
-  return compute_shape_relu(self);
 }
 
 std::vector<Shape> compute_shape_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
@@ -400,7 +410,7 @@ std::vector<Shape> compute_shape_sum(
   return {Shape(self.scalar_type(), {})};;
 }
 
-std::vector<Shape> compute_shape_zero_(at::Tensor& self) {
+std::vector<Shape> compute_shape_zero_functional(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -547,12 +557,20 @@ std::vector<Shape> compute_shape_glu_backward(const at::Tensor & grad_output, co
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_glu_jvp(const at::Tensor & glu, const at::Tensor & x, const at::Tensor & dx, int64_t dim) {
+  return {Shape(glu.scalar_type(), glu.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction) {
   TORCH_INTERNAL_ASSERT(grad_output.scalar_type() == self.dtype());
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_clamp_min(const at::Tensor & self, const at::Scalar & min) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+TORCH_API std::vector<Shape> compute_shape_clone(const at::Tensor & self, c10::optional<at::MemoryFormat> memory_format) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -595,6 +613,7 @@ std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef
 
 std::vector<Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t dim, int64_t start, c10::SymInt length) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
 
 std::vector<Shape> compute_shape_select_scatter(const at::Tensor & self, const at::Tensor & src, int64_t dim, int64_t index) {
   auto self_meta = at::native::empty_strided_meta(self.sizes(), self.strides(), /*dtype=*/c10::make_optional(self.scalar_type()), /*layout=*/c10::make_optional(self.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
@@ -614,6 +633,13 @@ std::vector<Shape> compute_shape_slice_scatter(const at::Tensor & self, const at
   auto self_meta = at::native::empty_strided_meta(self.sizes(), self.strides(), /*dtype=*/c10::make_optional(self.scalar_type()), /*layout=*/c10::make_optional(self.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
   auto src_meta = at::native::empty_strided_meta(src.sizes(), src.strides(), /*dtype=*/c10::make_optional(src.scalar_type()), /*layout=*/c10::make_optional(src.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
   auto out_meta = at::compositeexplicitautograd::slice_scatter(self_meta, src_meta, dim, start, end, step);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_as_strided_scatter(const at::Tensor& self, const at::Tensor& src, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
+  auto self_meta = at::native::empty_strided_meta(self.sizes(), self.strides(), /*dtype=*/c10::make_optional(self.scalar_type()), /*layout=*/c10::make_optional(self.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(src.sizes(), src.strides(), /*dtype=*/c10::make_optional(src.scalar_type()), /*layout=*/c10::make_optional(src.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::as_strided_scatter(self_meta, src_meta, size, stride, storage_offset);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 

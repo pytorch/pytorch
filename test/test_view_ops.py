@@ -1,5 +1,4 @@
 # Owner(s): ["module: tests"]
-
 import torch
 import numpy as np
 
@@ -11,7 +10,7 @@ import random
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
-    torch_to_numpy_dtype_dict,
+    numpy_to_torch_dtype_dict,
 )
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipMeta)
@@ -130,7 +129,7 @@ class TestViewOps(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test_view_dtype_new(self, device, dtype):
-        dtypes = torch_to_numpy_dtype_dict.copy()
+        dtypes = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
         del dtypes[torch.bool]
 
         def generate_inputs():
@@ -487,6 +486,8 @@ class TestViewOps(TestCase):
         v[0] = 0
         self.assertEqual(t[2, 0], v[0])
 
+    # Lazy hasn't implemented unbind yet.
+    @onlyNativeDeviceTypes
     def test_unbind_view(self, device) -> None:
         t = torch.zeros((5, 5), device=device)
         tup = torch.unbind(t)
@@ -764,6 +765,9 @@ class TestViewOps(TestCase):
         nv[6] = 0
         self.assertNotEqual(t[1, 1], nv[6])
 
+    # This test use as_strided to construct a tensor with overlapping memory,
+    # which is not handled by the functionalization pass.
+    @onlyNativeDeviceTypes
     def test_flatten_view(self, device):
         def test_writes_propagate(t, v):
             idx_t = (0,) * t.ndim
