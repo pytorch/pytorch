@@ -201,6 +201,6 @@ jobs:
         run: |
           git config --global user.email "csl@fb.com"
           git config --global user.name "Cathierine Lee"
-          git add .
+          git add .github/xla_commit_hash.txt
           git commit -m "Nightly - update XLA commit hash"
-          git push refs/heads/master:refs/heads/clee2000/test
+          git push HEAD:refs/heads/clee2000/test
