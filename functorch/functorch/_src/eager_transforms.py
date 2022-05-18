@@ -14,7 +14,7 @@ from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
 from .vmap import vmap
-from .decompositions import decomposition_table
+from .decompositions import decomposition_table, decomposition_table_for_jvp
 
 
 from functorch._C import (
@@ -1276,8 +1276,13 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
 
 
 def _register_jit_decomposition(decomp, use_python=False):
-    assert decomp in decomposition_table, f"could not find {decomp}"
-    decomp_fn = decomposition_table[decomp]
+    if decomp in decomposition_table_for_jvp:
+        decomposition_table_used = decomposition_table_for_jvp
+    elif decomp in decomposition_table:
+        decomposition_table_used = decomposition_table
+    else:
+        raise RuntimeError(f"could not find decomposition for {decomp}")
+    decomp_fn = decomposition_table_used[decomp]
     if use_python:
         decomp_fn = torch.jit.ignore(decomp_fn)
         sig = inspect.signature(decomp_fn)
@@ -1310,3 +1315,4 @@ _register_jit_decomposition(torch.ops.aten._softmax_backward_data.default)
 _register_jit_decomposition(torch.ops.aten.log_sigmoid_forward.default)
 _register_jit_decomposition(torch.ops.aten.binary_cross_entropy_backward.default)
 _register_jit_decomposition(torch.ops.aten.binary_cross_entropy.default)
+_register_jit_decomposition(torch.ops.aten.native_layer_norm_backward.default)
