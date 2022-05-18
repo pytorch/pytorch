@@ -482,7 +482,7 @@ meta_function_expected_failures = {
     torch.Tensor.to_sparse: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::to_sparse, aten::to_sparse.sparse_dim
     torch.addbmm: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::addbmm, aten::addbmm.out
     torch.allclose: {bf16, f16, f32, f64},  # aten::_local_scalar_dense
-    torch.angle: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::angle, aten::angle.out
+    torch.angle: {b8, bf16, c32, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::angle, aten::angle.out
     torch.argwhere: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero
     torch.bincount: {i16, i32, i64, i8, u8},  # aten::bincount
     torch.bucketize: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::bucketize.Tensor, aten::bucketize.Tensor_out
@@ -632,7 +632,6 @@ meta_function_skips = {
     torch.nn.functional.pad: {f32, f64},
     torch.normal: {bf16, f16, f32, f64},
     torch.prod: {b8, f32, f64, i16, i32, i64, i8, u8},
-    torch.square: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.tensor_split: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.logsigmoid: {bf16, f16, f32, f64},  # logsigmoid.output
     # END TODO
@@ -798,7 +797,7 @@ meta_dispatch_expected_failures = {
     aten._unique2.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.addbmm.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.addbmm.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.angle.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
+    aten.angle.default: {c32, i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.angle.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.bincount.default: {i8, i64, i16, u8, i32},
     aten.bucketize.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
@@ -869,7 +868,6 @@ meta_dispatch_expected_failures = {
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.searchsorted.Tensor_out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
-    aten.square.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.std_mean.correction: {bf16, f16, f64, f32},
     aten.take.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.take.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
