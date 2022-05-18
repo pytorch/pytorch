@@ -99,9 +99,9 @@ def _default_meta_device_init_fn(module):
 class ShardingStrategy(Enum):
     """
     Specify which sharding strategy will be used for the distributed training.
-    FULL_SHARD: if Shard parameters, gradients and optimizer states, this algorithm
-                inserts all_gather before forward and backward computation to gather
-                parameters, also inserts reduce_scatter after backward computation for
+    FULL_SHARD: Shards parameters, gradients and optimizer states. This algorithm
+                inserts ``all_gather`` before forward and backward computation to gather
+                parameters, also inserts ``reduce_scatter`` after backward computation for
                 synchronizing and sharding gradients. Sharded optimizer states are
                 updated locally.
     SHARD_GRAD_OP: Shard optimizer states and gradients, this algorithm inserts all_gather
@@ -110,7 +110,7 @@ class ShardingStrategy(Enum):
                    after backward computation for synchronizing and sharding gradients.
                    Sharded optimizer states are updated locally.
     NO_SHARD: This is similar to PyTorch ``DistributedDataParallel`` API. Parameters, gradients
-              and optimizer states are replicated among ranks, all_reduce is inserted after
+              and optimizer states are replicated among ranks, ``all_reduce`` is inserted after
               backward computation is done for synchronizing gradients. Full optimizer states
               are updated in each rank.
     HYBRID_SHARD(future support): apply FULL_SHARD algorithm in the intra node and
@@ -185,8 +185,6 @@ class CPUOffload:
     """
 
     offload_params: bool = False
-    # TODO: state dict offloading
-    # https://github.com/pytorch/pytorch/issues/67224
 
 
 class BackwardPrefetch(Enum):
@@ -1099,7 +1097,7 @@ class FullyShardedDataParallel(nn.Module):
 
         Compared to ``torch.nn.Module.apply``, this version additionally gathers
         the full parameters before applying ``fn``. It should not be called from
-        within another ``_summon_full_params`` context.
+        within another ``summon_full_params`` context.
 
         Args:
             fn (:class:`Module` -> None): function to be applied to each submodule
@@ -1708,7 +1706,7 @@ class FullyShardedDataParallel(nn.Module):
 
         Args:
             module (torch.nn.Module): Root module.
-            state_dict_type (StateDictType): the desired state_dict_type to set.
+            state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
         """
         prev_state_dict_type = None
         prev_state_dict_config = None
@@ -1887,7 +1885,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def state_dict(self, *args, **kwargs):
         """
-        The entry point of all three FSDP state_dict APIs. By default, calling
+        The entry point of all three FSDP ``state_dict`` APIs. By default, calling
         ``state_dict`` on an FSDP module will result in FSDP attempting to bring
         the entire (nested) model into memory and taking the local model's
         ``state_dict`` on every rank, which could result in OOM if the model
@@ -2141,7 +2139,7 @@ class FullyShardedDataParallel(nn.Module):
         *args,
     ) -> NamedTuple:
         """
-        The entry point of all three FSDP load_state_dict APIs. By default,
+        The entry point of all three FSDP ``load_state_dict`` APIs. By default,
         calling ``load_state_dict`` on an FSDP module will result in FSDP
         attempting to load a "full" state_dict, i.e. a state_dict consisting of
         full, unsharded, unflattened original module parameters. This requires
@@ -2447,8 +2445,8 @@ class FullyShardedDataParallel(nn.Module):
             corresponding to the local param shard will persist after the
             context manager exits (unless ``writeback=False``, in which case
             changes will be discarded). In the case where FSDP does not shard
-            the parameters, currently only when ``world_size == 1``, the
-            modification is persisted regardless of ``writeback``.
+            the parameters, currently only when ``world_size == 1``, or ``NO_SHARD``
+            config, the modification is persisted regardless of ``writeback``.
         .. note:: This method works on modules which are not FSDP themselves but
             may contain multiple independent FSDP units. In that case, the given
             arguments will apply to all contained FSDP units.
@@ -2459,7 +2457,7 @@ class FullyShardedDataParallel(nn.Module):
             across ranks within the context, and writing to them can lead to
             inconsistency across ranks when the context is exited.
 
-        ..warning:: Note that ``offload_to_cpu`` and ``rank0_only=False`` will
+        .. warning:: Note that ``offload_to_cpu`` and ``rank0_only=False`` will
             result in full parameters being redundantly copied to CPU memory for
             GPUs that reside on the same machine, which may incur the risk of
             CPU OOM. It is recommended to use ``offload_to_cpu`` with
@@ -2482,9 +2480,9 @@ class FullyShardedDataParallel(nn.Module):
             offload_to_cpu (bool, optional): If ``True``, full parameters are
                 offloaded to CPU. Note that this offloading currently only
                 occurs if the parameter is sharded (which is only not the case
-                for world_size = 1). It is recommended to use ``offload_to_cpu``
-                with ``rank0_only=True`` to avoid redundant copies of model
-                parameters being offloaded to the same CPU memory.
+                for world_size = 1 or ``NO_SHARD`` config). It is recommended
+                to use ``offload_to_cpu`` with ``rank0_only=True`` to avoid
+                redundant copies of model parameters being offloaded to the same CPU memory.
         """
         # Note that we specify root_only as FSDP roots will handle summoning
         # child FSDP instances based on recurse argument.
@@ -2515,7 +2513,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         Overrides :meth:`named_buffers()` to intercept buffer names and
         remove all occurrences of the FSDP-specific flattened buffer prefix
-        when inside the :meth:`_summon_full_params` context manager.
+        when inside the :meth:`summon_full_params` context manager.
         """
         in_summon_full_params = self.training_state == TrainingState_.SUMMON_FULL_PARAMS
         for buffer_name, buffer in super().named_buffers(*args, **kwargs):
@@ -2533,7 +2531,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         Overrides :meth:`named_parameters()` to intercept parameter names and
         remove all occurrences of the FSDP-specific flattened parameter prefix
-        when inside the :meth:`_summon_full_params` context manager.
+        when inside the :meth:`summon_full_params` context manager.
         """
         # Determine which logic to use based on the context at call time
         in_summon_full_params = self.training_state == TrainingState_.SUMMON_FULL_PARAMS
