@@ -236,7 +236,7 @@ infer_aten_op = object()
 
 # TODO: add type promotion support
 def _make_elementwise_unary_reference(
-    prim: Callable, *, type_promotion_kind, aten_op=infer_aten_op
+    prim: Callable, *, type_promotion_kind, aten_op=infer_aten_op, register_meta=False
 ) -> Callable:
     @out_wrapper
     @elementwise_type_promotion_wrapper(
@@ -248,7 +248,7 @@ def _make_elementwise_unary_reference(
     if aten_op is infer_aten_op:
         aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
-        register_decomposition(aten_op)(_ref)
+        register_decomposition(aten_op, register_meta=register_meta)(_ref)
 
     return _ref
 
@@ -330,6 +330,7 @@ isnan = _make_elementwise_unary_reference(
     _isnan,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
+    register_meta=True,
 )
 
 lgamma = _make_elementwise_unary_reference(
@@ -392,6 +393,7 @@ def _make_elementwise_binary_reference(
     type_promotion_kind,
     aten_op=infer_aten_op,
     has_out=True,
+    register_meta=False,
 ) -> Callable:
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"), type_promotion_kind=type_promotion_kind
@@ -409,7 +411,7 @@ def _make_elementwise_binary_reference(
     if aten_op is infer_aten_op:
         aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
-        register_decomposition(aten_op)(_ref)
+        register_decomposition(aten_op, register_meta=register_meta)(_ref)
 
     return _ref
 
@@ -519,7 +521,8 @@ ge = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 gt = _make_elementwise_binary_reference(
-    prims.gt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.gt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 igamma = _make_elementwise_binary_reference(
@@ -600,6 +603,7 @@ logical_and = _make_elementwise_binary_reference(
     _logical_and,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_and,
+    register_meta=True,
 )
 
 
@@ -615,11 +619,13 @@ logical_or = _make_elementwise_binary_reference(
     _logical_or,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_or,
+    register_meta=True,
 )
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
-    prims.lt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.lt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 # TODO: add docstring
@@ -943,8 +949,12 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
     return prims.collapse(a, start_dim, end_dim + 1)
 
 
+@register_decomposition(torch.ops.aten.flip, register_meta=True)
 def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    if not isinstance(dims, tuple) and not isinstance(dims, list):
+        raise ValueError("dims has to be a sequence of ints")
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
+    utils.validate_no_repeating_dims(dims)
     return prims.rev(a, dims)
 
 
