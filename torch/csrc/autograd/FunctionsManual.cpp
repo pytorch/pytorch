@@ -1578,6 +1578,45 @@ Tensor binary_cross_entropy_target_backward(
   return grad_target;
 }
 
+Tensor binary_cross_entropy_double_backward_target(
+  const Tensor& grad,
+  const Tensor& grad_output,
+  const Tensor& self,
+  const Tensor& target,
+  const c10::optional<Tensor>& weight,
+  int64_t reduction
+) {
+  auto res = -grad * grad_output;
+
+  if (isDefined(weight)) {
+    res = isTensorSubclassLike(weight.value())
+      ? res.mul(weight.value())
+      : res.mul_(weight.value());
+  }
+
+  auto neg_self = 1 - self;
+  auto denom = isTensorSubclassLike(self)
+    ? neg_self.mul(self)
+    : neg_self.mul_(self);
+  {
+    at::NoGradGuard guard;
+    // Default eps in binary_cross_entropy for ALL dtypes
+    // TODO: probably change this to a dtype-dependent value
+    double eps = 1e-12;
+    denom.clamp_min_(eps);
+  }
+
+  res = isTensorSubclassLike(denom)
+    ? res.div(denom)
+    : res.div_(denom);
+
+  if (reduction == at::Reduction::Mean) {
+    res.div_(target.numel());
+  }
+
+  return res;
+}
+
 
 Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const c10::optional<Tensor>& weight, const c10::optional<Tensor>& pos_weight, int64_t reduction) {
   Tensor grad_target;
@@ -2380,6 +2419,22 @@ std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self
   return std::tuple<Tensor,Tensor>{
             output_mask[0] ? grad * other * recip : Tensor(),
             output_mask[1] ? grad * -self * recip : Tensor() };
+}
+
+Tensor prelu_jvp(const Tensor& x, const Tensor& dx, const Tensor& w, const Tensor& dw) {
+  const auto ndim = x.dim();
+  auto as_nd = [ndim](const Tensor& t) {
+    std::vector<int64_t> sizes(ndim, 1), strides(ndim, 0);
+    if (ndim >= 2) {
+      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+      return t.as_strided(sizes, strides);
+    }
+    return t.as_strided(sizes, strides);
+  };
+  auto w_ = as_nd(w);
+  auto dw_ = as_nd(dw);
+  return at::where(x >= 0, dx, w_ * dx + dw_ * x);
 }
 
 // TODO: Seriously consider writing the derivative formulas for
