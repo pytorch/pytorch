@@ -1478,9 +1478,13 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(AssertionError):
             shuffle_dp = input_ds.shuffle(buffer_size=0)
 
-        for bs in (5, 20, 25, 33):
-            shuffle_dp = input_ds.shuffle(buffer_size=bs).sharding_filter()
-            self.assertEqual(len(shuffle_dp), len(input_ds))
+        def _create_dp(buffer_size):
+            input_ds = dp.iter.IterableWrapper(list(range(100)))
+            return input_ds.shuffle(buffer_size=bs).sharding_filter()
+
+        for bs in (5, 20, 33):
+            shuffle_dp = _create_dp(bs)
+            self.assertEqual(len(shuffle_dp), len(exp))
 
             torch.manual_seed(123)
             res = list(shuffle_dp)
@@ -1502,11 +1506,36 @@ class TestFunctionalIterDataPipe(TestCase):
                     dl_res.append(list(dl))
                 self.assertEqual(dl_res[0], dl_res[1])
 
+                # Different seeds
+                torch.manual_seed(321)
+                dl_res.append(list(dl))
+
+                self.assertEqual(len(dl_res[0]), len(dl_res[2]))
+                self.assertNotEqual(dl_res[0], dl_res[2])
+                self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
+
                 if num_workers == 0:
                     continue
 
                 # Persistent workers
                 ps_dl_res = []
+                for _ in range(2):
+                    dl = DataLoader(
+                        shuffle_dp,
+                        num_workers=num_workers,
+                        shuffle=True,
+                        multiprocessing_context="spawn",
+                        worker_init_fn=_worker_init_fn,
+                        persistent_workers=True
+                    )
+                    ps_res = []
+                    torch.manual_seed(123)
+                    for epoch in range(2):
+                        ps_res.extend(list(dl))
+                    ps_dl_res.append(ps_res)
+                self.assertEqual(ps_dl_res[0], ps_dl_res[1])
+
+                # Different Seeds
                 dl = DataLoader(
                     shuffle_dp,
                     num_workers=num_workers,
@@ -1515,10 +1544,16 @@ class TestFunctionalIterDataPipe(TestCase):
                     worker_init_fn=_worker_init_fn,
                     persistent_workers=True
                 )
+                ps_res = []
+                torch.manual_seed(321)
                 for epoch in range(2):
-                    torch.manual_seed(123)
-                    ps_dl_res.append(list(dl))
-                self.assertEqual(dl_res[0], dl_res[1])
+                    ps_res.extend(list(dl))
+                ps_dl_res.append(ps_res)
+
+                self.assertEqual(len(ps_dl_res[0]), len(ps_dl_res[2]))
+                self.assertNotEqual(ps_dl_res[0], ps_dl_res[2])
+                self.assertEqual(sorted(ps_dl_res[0]), sorted(ps_dl_res[2]))
+
 
         shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):

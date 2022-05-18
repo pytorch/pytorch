@@ -124,6 +124,8 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             for x in self.datapipe:
                 yield x
         else:
+            self._rng.seed(self._seed)
+            self._seed = None
             for x in self.datapipe:
                 if len(self._buffer) == self.buffer_size:
                     idx = self._rng.randint(0, len(self._buffer) - 1)
@@ -145,8 +147,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self._buffer = []
             if self._enabled and self._seed is None:
                 self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
-            self._rng.seed(self._seed)
-            self._seed = None
         else:
             self._restored = False
 
