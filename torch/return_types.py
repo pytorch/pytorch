@@ -22,7 +22,7 @@ for name in dir(return_types):
     attr = getattr(return_types, name)
     globals()[name] = attr
 
-    if name.startswith('_'):
+    if not name.startswith('_'):
         __all__.append(name)
 
     # Today everything in torch.return_types is a structseq, aka a "namedtuple"-like
