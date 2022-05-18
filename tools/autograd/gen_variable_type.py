@@ -497,6 +497,8 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # just in case
     "_cudnn_rnn",
     "dequantize_self",
+    # lift() should never actually be called with a requires_grad=True tensor,
+    "lift",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -504,6 +506,8 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     "_slow_conv2d_forward",
     "slow_conv3d_forward",
     "channel_shuffle",
+    # lift() should never actually be called with a requires_grad=True tensor,
+    "lift",
     # If an input is returned as-is in output, we cannot guarantee its storage_impl
     # use count to be 1 either.
     *DONT_ENFORCE_TENSOR_IMPL_USE_COUNT,
