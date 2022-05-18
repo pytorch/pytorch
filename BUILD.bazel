@@ -8,7 +8,17 @@ load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources"
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops")
-load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON")
+load(":build.bzl",
+     "define_targets",
+     "GENERATED_AUTOGRAD_CPP",
+     "GENERATED_AUTOGRAD_PYTHON",
+     "GENERATED_CPP",
+     "GENERATED_CPP_CORE",
+     "GENERATED_CPP_CUDA",
+     "GENERATED_H",
+     "GENERATED_H_CORE",
+     "GENERATED_H_CUDA",
+)
 load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
 
 define_targets(rules = rules)
@@ -29,62 +39,7 @@ COMMON_COPTS = [
     "-DUSE_CUDNN",
 ])
 
-generated_cpu_cpp = [
-    "aten/src/ATen/RegisterBackendSelect.cpp",
-    "aten/src/ATen/RegisterCPU.cpp",
-    "aten/src/ATen/RegisterFunctionalization_0.cpp",
-    "aten/src/ATen/RegisterFunctionalization_1.cpp",
-    "aten/src/ATen/RegisterFunctionalization_2.cpp",
-    "aten/src/ATen/RegisterFunctionalization_3.cpp",
-    # "aten/src/ATen/RegisterFunctionalizationEverything.cpp",
-    "aten/src/ATen/RegisterMkldnnCPU.cpp",
-    "aten/src/ATen/RegisterNestedTensorCPU.cpp",
-    "aten/src/ATen/RegisterQuantizedCPU.cpp",
-    "aten/src/ATen/RegisterSparseCPU.cpp",
-    "aten/src/ATen/RegisterSparseCsrCPU.cpp",
-    "aten/src/ATen/RegisterZeroTensor.cpp",
-    "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
-    "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
-    "aten/src/ATen/RegisterMeta.cpp",
-    "aten/src/ATen/RegisterSchema.cpp",
-    "aten/src/ATen/CPUFunctions.h",
-    "aten/src/ATen/CPUFunctions_inl.h",
-    "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
-    "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
-    "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
-    "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
-    "aten/src/ATen/CompositeViewCopyKernels.cpp",
-    "aten/src/ATen/FunctionalInverses.h",
-    "aten/src/ATen/Functions.h",
-    "aten/src/ATen/Functions.cpp",
-    "aten/src/ATen/RedispatchFunctions.h",
-    "aten/src/ATen/Operators.h",
-    "aten/src/ATen/Operators_0.cpp",
-    "aten/src/ATen/Operators_1.cpp",
-    "aten/src/ATen/Operators_2.cpp",
-    "aten/src/ATen/Operators_3.cpp",
-    "aten/src/ATen/Operators_4.cpp",
-    "aten/src/ATen/NativeFunctions.h",
-    "aten/src/ATen/MetaFunctions.h",
-    "aten/src/ATen/MetaFunctions_inl.h",
-    "aten/src/ATen/MethodOperators.h",
-    "aten/src/ATen/NativeMetaFunctions.h",
-    "aten/src/ATen/RegistrationDeclarations.h",
-    "aten/src/ATen/core/aten_interned_strings.h",
-    "aten/src/ATen/core/TensorBody.h",
-    "aten/src/ATen/core/TensorMethods.cpp",
-    "aten/src/ATen/core/ATenOpList.cpp",
-]
 
-generated_cuda_cpp = [
-    "aten/src/ATen/CUDAFunctions.h",
-    "aten/src/ATen/CUDAFunctions_inl.h",
-    "aten/src/ATen/RegisterCUDA.cpp",
-    "aten/src/ATen/RegisterNestedTensorCUDA.cpp",
-    "aten/src/ATen/RegisterQuantizedCUDA.cpp",
-    "aten/src/ATen/RegisterSparseCUDA.cpp",
-    "aten/src/ATen/RegisterSparseCsrCUDA.cpp",
-]
 
 filegroup(
     name = "cpp_generated_code",
@@ -319,7 +274,7 @@ cc_library(
         ":aten_native_transformers_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
-    ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
+    ] + GENERATED_CPP + GENERATED_H_CORE + GENERATED_H + GENERATED_CPP_CORE + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
     copts = ATEN_COPTS,
     data = if_cuda(
         [":libcaffe2_nvrtc.so"],
@@ -366,7 +321,7 @@ cc_binary(
 
 cc_library(
     name = "aten_cuda_cpp",
-    srcs = [":aten_cuda_cpp_srcs"] + generated_cuda_cpp,
+    srcs = [":aten_cuda_cpp_srcs"] + GENERATED_H_CUDA + GENERATED_CPP_CUDA,
     hdrs = [":aten_src_ATen_cuda_config"],
     copts = ATEN_COPTS,
     visibility = ["//visibility:public"],
