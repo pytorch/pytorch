@@ -1659,34 +1659,19 @@ Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_outpu
   return grad_target;
 }
 
-Tensor binary_cross_entropy_with_logits_jvp(const Tensor& input_t, const Tensor& target_t, const Tensor& input_p, const Tensor& target_p, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
-
-  Tensor grad_input;
-  Tensor grad_target;
-
-  if (pos_weight.defined()) {
-    // pos_weight need to be broadcasted, thus mul(target) is not inplace.
-    auto t = pos_weight.mul(target_p);
-    grad_input = input_t.mul(t.add(1).sub_(target_p).mul_(input_p.sigmoid()).sub_(t));
-  } else {
-    grad_input = input_t.mul(input_p.sigmoid() - target_p);
-  }
-
-  if (pos_weight.defined()) {
-    grad_target = target_t.mul((1. - input_p.sigmoid()).log_().sub_(pos_weight.mul(input_p.sigmoid().log_())));
-  } else {
-    grad_target = -target_t.mul(input_p);
-  }
-
-  if (weight.defined()) {
-    grad_input = grad_input.mul(weight);
-    grad_target = grad_target.mul(weight);
-  }
-  return apply_loss_reduction(grad_target + grad_input, reduction);
+Tensor binary_cross_entropy_with_logits_jvp(
+    const Tensor& dself,
+    const Tensor& dtarget,
+    const Tensor& self,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight,
+    const c10::optional<Tensor>& pos_weight,
+    int64_t reduction
+) {
+  const auto self_contrib = at::binary_cross_entropy_with_logits_backward(dself, self, target, weight, pos_weight, at::Reduction::None);
+  const auto target_contrib = binary_cross_entropy_with_logits_target_backward(dtarget, self, target, weight, pos_weight, at::Reduction::None);
+  const auto dresult = self_contrib + target_contrib;
+  return apply_loss_reduction(dresult, reduction);
 }
 
 Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
