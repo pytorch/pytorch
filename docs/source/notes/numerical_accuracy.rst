@@ -105,6 +105,7 @@ The following is the list of operations where rocBLAS may be used:
 * `torch.nn.Linear`
 * `torch.sparse.addmm`
 * the following torch._C._ConvBackend implementations:
+
   * slowNd
   * slowNd_transposed
   * slowNd_dilated
@@ -114,6 +115,7 @@ The following is the list of operations where MIOpen may be used:
 
 * torch.nn.Conv[Transpose]Nd
 * the following torch._C._ConvBackend implementations:
+
   * ConvBackend::Miopen
   * ConvBackend::MiopenDepthwise
   * ConvBackend::MiopenTranspose
