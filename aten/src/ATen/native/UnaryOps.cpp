@@ -71,8 +71,6 @@ CREATE_UNARY_FLOAT_META_FUNC(special_log_ndtr)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
-CREATE_UNARY_FLOAT_META_FUNC(special_elliptic_integral_e)
-CREATE_UNARY_FLOAT_META_FUNC(special_elliptic_integral_k)
 
 TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
@@ -84,10 +82,13 @@ TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   TORCH_META_FUNC(func) (const Tensor& self) {        \
     build_borrowing_unary_op(maybe_get_output(), self);   \
   }
+
 CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
 CREATE_UNARY_META_FUNC(round)
 CREATE_UNARY_META_FUNC(sgn)
+CREATE_UNARY_META_FUNC(special_elliptic_integral_e)
+CREATE_UNARY_META_FUNC(special_elliptic_integral_k)
 
 TORCH_META_FUNC2(round, decimals)(const Tensor& self, int64_t decimals){
   build_unary_op(maybe_get_output(), self);
