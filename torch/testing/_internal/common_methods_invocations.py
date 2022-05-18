@@ -18303,9 +18303,6 @@ op_db: List[OpInfo] = [
         decorators=(
             precisionOverride(
                 {
-                    torch.int16: 1e-2,
-                    torch.int32: 1e-2,
-                    torch.int64: 1e-2,
                     torch.float16: 1e-2,
                     torch.float32: 1e-2,
                     torch.float64: 1e-2,
@@ -18313,8 +18310,8 @@ op_db: List[OpInfo] = [
             ),
         ),
         domain=(None, 1),
-        dtypes=all_types_and(torch.bool),
-        dtypesIfCUDA=all_types_and(torch.bool),
+        dtypes=floating_types_and(torch.bool),
+        dtypesIfCUDA=floating_types_and(torch.bool),
         ref=scipy.special.ellipe if TEST_SCIPY else _NOTHING,
         skips=(
             # Results of original model and exported/imported version of model differed
@@ -18332,9 +18329,6 @@ op_db: List[OpInfo] = [
         decorators=(
             precisionOverride(
                 {
-                    torch.int16: 1e-2,
-                    torch.int32: 1e-2,
-                    torch.int64: 1e-2,
                     torch.float16: 1e-2,
                     torch.float32: 1e-2,
                     torch.float64: 1e-2,
@@ -18342,8 +18336,8 @@ op_db: List[OpInfo] = [
             ),
         ),
         domain=(None, 1),
-        dtypes=all_types_and(torch.bool),
-        dtypesIfCUDA=all_types_and(torch.bool),
+        dtypes=floating_types_and(torch.bool),
+        dtypesIfCUDA=floating_types_and(torch.bool),
         ref=scipy.special.ellipk if TEST_SCIPY else _NOTHING,
         skips=(
             # Results of original model and exported/imported version of model differed
