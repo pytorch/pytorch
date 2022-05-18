@@ -302,11 +302,13 @@ Tensor norm_jvp(const Tensor& self_p, const Tensor& self_t, const optional<Scala
 }
 
 Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+  // No need to handle the dtype arg as it's handled via broadcasting in the function
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_jvp(self_p, self_t, scalar_ord, norm, dim, keepdim);
 }
 
 Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+  // No need to handle the dtype arg as it's handled via broadcasting in the function
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
 }
@@ -756,9 +758,17 @@ std::vector<Tensor> block_diag_backward(const Tensor & grad, const std::vector<s
       dim1 = shape[1];
     // 1d case
     } else if (shape.size() == 1) {
-      dim0 = shape[0];
+      dim1 = shape[0];
     }
-    grad_inputs[i] = grad_val.slice(0, cur_dim0, cur_dim0 + dim0).slice(1, cur_dim1, cur_dim1 + dim1);
+    auto slice = grad_val.slice(0, cur_dim0, cur_dim0 + dim0).slice(1, cur_dim1, cur_dim1 + dim1);
+    if (shape.size() == 1) {
+      slice = slice.squeeze(-1);
+    } else if (shape.size() == 0) {
+      slice = slice.squeeze(-1).squeeze(-1);
+    }
+    grad_inputs[i] = slice;
+    cur_dim0 += dim0;
+    cur_dim1 += dim1;
   }
   return grad_inputs;
 }
@@ -1056,8 +1066,7 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p
   }
   grad_output = grad_output.sum(
       reduce_dims, /*keepdim=*/true, /*dtype=*/real_acc_type);
-  auto nb = linalg_vector_norm_backward(
-      grad_output, self, p, norm, reduce_dims, /*keepdim=*/true);
+  auto nb = norm_backward(grad_output, self, p, norm, reduce_dims, /*keepdim=*/true);
 
   auto invnorm = (norm + 1e-7).reciprocal();
   auto grad_norm = maxnorm * invnorm * (grad - invnorm * nb);
@@ -1620,6 +1629,45 @@ Tensor binary_cross_entropy_target_backward(
   }
 
   return grad_target;
+}
+
+Tensor binary_cross_entropy_double_backward_target(
+  const Tensor& grad,
+  const Tensor& grad_output,
+  const Tensor& self,
+  const Tensor& target,
+  const c10::optional<Tensor>& weight,
+  int64_t reduction
+) {
+  auto res = -grad * grad_output;
+
+  if (isDefined(weight)) {
+    res = isTensorSubclassLike(weight.value())
+      ? res.mul(weight.value())
+      : res.mul_(weight.value());
+  }
+
+  auto neg_self = 1 - self;
+  auto denom = isTensorSubclassLike(self)
+    ? neg_self.mul(self)
+    : neg_self.mul_(self);
+  {
+    at::NoGradGuard guard;
+    // Default eps in binary_cross_entropy for ALL dtypes
+    // TODO: probably change this to a dtype-dependent value
+    double eps = 1e-12;
+    denom.clamp_min_(eps);
+  }
+
+  res = isTensorSubclassLike(denom)
+    ? res.div(denom)
+    : res.div_(denom);
+
+  if (reduction == at::Reduction::Mean) {
+    res.div_(target.numel());
+  }
+
+  return res;
 }
 
 
