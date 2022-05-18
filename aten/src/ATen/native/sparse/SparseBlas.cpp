@@ -25,7 +25,7 @@
 namespace at {
 namespace native {
 
-Tensor& addmv_out_sparse_csr(
+Tensor& addmv_out_sparse_compressed(
     const Tensor& self,
     const Tensor& mat,
     const Tensor& vec,
@@ -38,7 +38,7 @@ Tensor& addmv_out_sparse_csr(
       mat.layout(),
       ".");
   if (mat.layout() == kSparseCsc) {
-    return addmv_out_sparse_csr(
+    return addmv_out_sparse_compressed(
         self, mat.to_sparse_csr(), vec, beta, alpha, result);
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(

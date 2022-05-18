@@ -424,7 +424,7 @@ void addmm_out_sparse_csr_native_cpu(
 
 // Functions for matrix multiplication.
 // result = beta * self + alpha (mat1 @ mat2)
-Tensor& addmm_out_sparse_csr_cpu(
+Tensor& addmm_out_sparse_compressed_cpu(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
@@ -448,7 +448,7 @@ Tensor& addmm_out_sparse_csr_cpu(
       mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
-    return addmm_out_sparse_csr_cpu(
+    return addmm_out_sparse_compressed_cpu(
         self, mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
   }
 
