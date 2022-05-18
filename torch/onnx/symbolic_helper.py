@@ -293,7 +293,9 @@ def quantized_args(
                 _zero_point = g.op("Constant", value_t=torch.tensor(_zero_point))
 
             # Support variable length arguments by marking unspecified ones as non-quantized
-            arg_q_descriptors_extended = (False,) * (len(args) - len(arg_q_descriptors))
+            arg_q_descriptors_extended = arg_q_descriptors + (False,) * (
+                len(args) - len(arg_q_descriptors)
+            )
             descriptor_args = tuple(zip(arg_q_descriptors_extended, args))
             # Run regular symbolic function if none of the argument is QTensor.
             if not any(
