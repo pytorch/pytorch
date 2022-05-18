@@ -14,8 +14,6 @@ Functions
 
 .. autofunction::  get_overridable_functions
 
-.. autofunction::  resolve_name
-
 .. autofunction::  get_testing_overrides
 
 .. autofunction::  handle_torch_function
