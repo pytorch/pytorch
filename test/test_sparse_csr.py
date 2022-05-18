@@ -410,7 +410,7 @@ class TestSparseCompressed(TestCase):
                                                index_dtype=index_dtype, block_size=block_size)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "only sparse compressed tensors with the same number of compressed dimensions are supported."):
+                    "expected shapes of self and src to match along dimension"):
                 b.copy_(c)
 
             if block_size:
