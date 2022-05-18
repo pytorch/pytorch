@@ -30,7 +30,7 @@ def _basic_validation(op, args=(), kwargs=None):
         )
 
     # Validate all distributed tensors use the same PG.
-    cur_pg = None
+    cur_pg: torch.distributed.ProcessGroup = None
 
     def validate_pg(e):
         nonlocal cur_pg

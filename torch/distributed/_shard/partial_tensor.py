@@ -1,5 +1,5 @@
 import functools
-from typing import Callable, Dict
+from typing import Callable, Dict, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -11,6 +11,11 @@ from torch.distributed.nn.functional import (
 from torch.distributed._shard.common_op_utils import _register_default_op
 from torch.distributed._shard.op_registry_utils import _decorator_func
 from torch.utils._pytree import tree_map
+
+if TYPE_CHECKING:
+    # Only include ShardedTensor when do type checking, exclude it
+    # from run-time to resolve circular dependency.
+    from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 # Custom PartialTensor ops
 _PARTIAL_TENSOR_OPS: Dict[Callable, Callable] = {}
