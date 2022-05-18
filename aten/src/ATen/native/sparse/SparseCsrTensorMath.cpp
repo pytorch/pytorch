@@ -506,7 +506,9 @@ Tensor& addmm_out_sparse_compressed_cpu(
       false,
       "Calling addmm on sparse CPU tensors requires Linux platform. ",
       "Please use PyTorch built with MKL on Linux.");
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
+  TORCH_CHECK(
+      result.layout() == kStrided,
+      "Calling addmm on CPU with sparse output requires MKL.");
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       result.scalar_type(), "addmm_sparse_dense", [&] {
         addmm_out_sparse_csr_native_cpu<scalar_t>(
