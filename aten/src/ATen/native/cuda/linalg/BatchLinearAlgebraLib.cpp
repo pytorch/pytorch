@@ -904,7 +904,7 @@ void svd_cusolver(const Tensor& A,
 
   // The default heuristic is to use gesvdj driver
   const auto driver_v = driver.value_or("gesvdj");
- 
+
   if (driver_v == "gesvd") {
     svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
   } else if (driver_v == "gesvdj") {

@@ -2602,10 +2602,10 @@ class TestLinalg(TestCase):
 
             for batch, m, n, driver in product(batches, ns, ns, drivers):
                 if not (backend == 'cusolver' or driver is None):
-	                # only test cases below and skip otherwise:
-	                # - backend == 'cusolver' (driver can be anything)
-	                # - backend != 'cusolver' (driver should only be None)
-	                continue
+                    # only test cases below and skip otherwise:
+                    # - backend == 'cusolver' (driver can be anything)
+                    # - backend != 'cusolver' (driver should only be None)
+                    continue
 
                 shape = batch + (m, n)
                 k = min(m, n)
