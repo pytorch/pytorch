@@ -28,8 +28,7 @@ void SizesAndStrides::resizeSlowPath(
       // CANNOT USE allocateOutOfLineStorage(newSize) HERE! WOULD
       // OVERWRITE inlineStorage_!
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-      SymInt* tempStorage =
-          static_cast<SymInt*>(malloc(storageBytes(newSize)));
+      SymInt* tempStorage = static_cast<SymInt*>(malloc(storageBytes(newSize)));
       TORCH_CHECK(
           tempStorage,
           "Could not allocate memory to change Tensor SizesAndStrides!");
