@@ -79,7 +79,7 @@ static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t 
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "cumsum_out_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, self.scalar_type(), "cumsum_out_cpu", [&] {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
@@ -98,7 +98,7 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "cumprod_out_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, self.scalar_type(), "cumprod_out_cpu", [&] {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
@@ -224,6 +224,10 @@ static void norm_kernel_tensor_iterator_impl(
   } else {
     AT_ERROR("norm_kernel_tensor_iterator_impl expects norm to be integer or float");
   }
+  if (iter.numel() == 0) {
+    iter.output().fill_((val < 0) ? INFINITY : 0);
+    return;
+  }
 
   bool use_fast_path = is_reduce_lastdim(iter) && iter.dtype(0) == iter.input_dtype()
       && (iter.input_dtype() == kFloat || iter.input_dtype() == kBFloat16);
@@ -303,7 +307,7 @@ static void norm_kernel_tensor_iterator_impl(
       binary_kernel_reduce(
         iter,
         AbsMinOps<scalar_t, acc_t>(),
-        std::numeric_limits<acc_t>::max()
+        std::numeric_limits<acc_t>::infinity()
       );
     });
   } else {

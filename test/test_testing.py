@@ -1091,10 +1091,7 @@ class TestAssertCloseSparseCSR(TestCase):
         col_indices = (1, 0)
         values = (1, 2)
         actual = torch.sparse_csr_tensor(crow_indices, col_indices, values, size=(2, 2))
-        # TODO: replace this by actual.clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
-        expected = torch.sparse_csr_tensor(
-            actual.crow_indices(), actual.col_indices(), actual.values(), size=actual.size(), device=actual.device
-        )
+        expected = actual.clone()
 
         for fn in assert_close_with_inputs(actual, expected):
             fn()
@@ -1142,6 +1139,180 @@ class TestAssertCloseSparseCSR(TestCase):
 
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR values")):
+                fn()
+
+
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSC testing")
+class TestAssertCloseSparseCSC(TestCase):
+    def test_matching(self):
+        ccol_indices = (0, 1, 2)
+        row_indices = (1, 0)
+        values = (1, 2)
+        actual = torch.sparse_csc_tensor(ccol_indices, row_indices, values, size=(2, 2))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_ccol_indices_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = (0, 2, 2)
+        expected_row_indices = actual_row_indices
+        expected_values = actual_values
+        expected = torch.sparse_csc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSC ccol_indices")):
+                fn()
+
+    def test_mismatching_row_indices_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = actual_ccol_indices
+        expected_row_indices = (1, 1)
+        expected_values = actual_values
+        expected = torch.sparse_csc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSC row_indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = actual_ccol_indices
+        expected_row_indices = actual_row_indices
+        expected_values = (1, 3)
+        expected = torch.sparse_csc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSC values")):
+                fn()
+
+
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support BSR testing")
+class TestAssertCloseSparseBSR(TestCase):
+    def test_matching(self):
+        crow_indices = (0, 1, 2)
+        col_indices = (1, 0)
+        values = ([[1]], [[2]])
+        actual = torch.sparse_bsr_tensor(crow_indices, col_indices, values, size=(2, 2))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_crow_indices_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = (0, 2, 2)
+        expected_col_indices = actual_col_indices
+        expected_values = actual_values
+        expected = torch.sparse_bsr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSR crow_indices")):
+                fn()
+
+    def test_mismatching_col_indices_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = actual_crow_indices
+        expected_col_indices = (1, 1)
+        expected_values = actual_values
+        expected = torch.sparse_bsr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSR col_indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = actual_crow_indices
+        expected_col_indices = actual_col_indices
+        expected_values = ([[1]], [[3]])
+        expected = torch.sparse_bsr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSR values")):
+                fn()
+
+
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support BSC testing")
+class TestAssertCloseSparseBSC(TestCase):
+    def test_matching(self):
+        ccol_indices = (0, 1, 2)
+        row_indices = (1, 0)
+        values = ([[1]], [[2]])
+        actual = torch.sparse_bsc_tensor(ccol_indices, row_indices, values, size=(2, 2))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_ccol_indices_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (1, 0)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = (0, 2, 2)
+        expected_row_indices = actual_row_indices
+        expected_values = actual_values
+        expected = torch.sparse_bsc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSC ccol_indices")):
+                fn()
+
+    def test_mismatching_row_indices_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (1, 0)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = actual_ccol_indices
+        expected_row_indices = (1, 1)
+        expected_values = actual_values
+        expected = torch.sparse_bsc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSC row_indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (1, 0)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = actual_ccol_indices
+        expected_row_indices = actual_row_indices
+        expected_values = ([[1]], [[3]])
+        expected = torch.sparse_bsc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSC values")):
                 fn()
 
 

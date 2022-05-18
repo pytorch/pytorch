@@ -302,11 +302,13 @@ Tensor norm_jvp(const Tensor& self_p, const Tensor& self_t, const optional<Scala
 }
 
 Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+  // No need to handle the dtype arg as it's handled via broadcasting in the function
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_jvp(self_p, self_t, scalar_ord, norm, dim, keepdim);
 }
 
 Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+  // No need to handle the dtype arg as it's handled via broadcasting in the function
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
 }
@@ -1012,8 +1014,7 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p
   }
   grad_output = grad_output.sum(
       reduce_dims, /*keepdim=*/true, /*dtype=*/real_acc_type);
-  auto nb = linalg_vector_norm_backward(
-      grad_output, self, p, norm, reduce_dims, /*keepdim=*/true);
+  auto nb = norm_backward(grad_output, self, p, norm, reduce_dims, /*keepdim=*/true);
 
   auto invnorm = (norm + 1e-7).reciprocal();
   auto grad_norm = maxnorm * invnorm * (grad - invnorm * nb);
@@ -1576,6 +1577,45 @@ Tensor binary_cross_entropy_target_backward(
   }
 
   return grad_target;
+}
+
+Tensor binary_cross_entropy_double_backward_target(
+  const Tensor& grad,
+  const Tensor& grad_output,
+  const Tensor& self,
+  const Tensor& target,
+  const c10::optional<Tensor>& weight,
+  int64_t reduction
+) {
+  auto res = -grad * grad_output;
+
+  if (isDefined(weight)) {
+    res = isTensorSubclassLike(weight.value())
+      ? res.mul(weight.value())
+      : res.mul_(weight.value());
+  }
+
+  auto neg_self = 1 - self;
+  auto denom = isTensorSubclassLike(self)
+    ? neg_self.mul(self)
+    : neg_self.mul_(self);
+  {
+    at::NoGradGuard guard;
+    // Default eps in binary_cross_entropy for ALL dtypes
+    // TODO: probably change this to a dtype-dependent value
+    double eps = 1e-12;
+    denom.clamp_min_(eps);
+  }
+
+  res = isTensorSubclassLike(denom)
+    ? res.div(denom)
+    : res.div_(denom);
+
+  if (reduction == at::Reduction::Mean) {
+    res.div_(target.numel());
+  }
+
+  return res;
 }
 
 
@@ -2380,6 +2420,22 @@ std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self
   return std::tuple<Tensor,Tensor>{
             output_mask[0] ? grad * other * recip : Tensor(),
             output_mask[1] ? grad * -self * recip : Tensor() };
+}
+
+Tensor prelu_jvp(const Tensor& x, const Tensor& dx, const Tensor& w, const Tensor& dw) {
+  const auto ndim = x.dim();
+  auto as_nd = [ndim](const Tensor& t) {
+    std::vector<int64_t> sizes(ndim, 1), strides(ndim, 0);
+    if (ndim >= 2) {
+      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+      return t.as_strided(sizes, strides);
+    }
+    return t.as_strided(sizes, strides);
+  };
+  auto w_ = as_nd(w);
+  auto dw_ = as_nd(dw);
+  return at::where(x >= 0, dx, w_ * dx + dw_ * x);
 }
 
 // TODO: Seriously consider writing the derivative formulas for
@@ -5525,7 +5581,7 @@ Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_opt
   return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
 }
 
-std::tuple<Tensor, Tensor> _index_reduce_backward(
+std::tuple<Tensor, Tensor> index_reduce_backward(
   const Tensor& grad,
   const Tensor& self,
   int dim,
@@ -5545,10 +5601,28 @@ std::tuple<Tensor, Tensor> _index_reduce_backward(
   }
 
   if (reduce == "prod") {
-    grad_self = (grad * result) / self;
-    grad_self.masked_fill_(self == 0, 0);
-    grad_src = (grad * result).index_select(dim, index) / source;
-    grad_src.masked_fill_(source == 0, 0);
+    Tensor masked_self = self.masked_fill(self == 0, 1);
+    Tensor masked_self_result = masked_self.index_reduce(dim, index, source, reduce, include_self);
+    grad_self = grad * masked_self_result / masked_self;
+    Tensor src_zero = source == 0;
+    Tensor src_num_zeros = zeros_like(self).index_add(dim, index, src_zero.to(self.dtype())).index_select(dim, index);
+    Tensor src_single_zero = bitwise_and(src_zero, src_num_zeros == 1);
+    // For src positions with src_single_zero, (grad * result).index_select(dim,index) / source.masked_fill(src_zero, 1)
+    // would incorrectly propagate zeros as the gradient
+    Tensor masked_src = source.masked_fill(src_single_zero, 1);
+    Tensor masked_src_result = self.index_reduce(dim, index, masked_src, reduce, include_self);
+    Tensor grad_src1 = where(src_single_zero,
+                             (grad * masked_src_result).index_select(dim, index),
+                             (grad * result).index_select(dim, index) / source.masked_fill(src_zero, 1));
+    if ((src_num_zeros > 1).any().item<bool>()) {
+      auto node = std::make_shared<DelayedError>(
+        "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
+        /* num inputs */ 1);
+      auto result = node->apply({ grad_src1 });
+      grad_src = result[0];
+    } else {
+      grad_src = grad_src1;
+    }
   } else if (reduce == "mean") {
     Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N = N.index_add(dim, index, ones_like(source));

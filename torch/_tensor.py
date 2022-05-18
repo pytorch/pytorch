@@ -202,9 +202,6 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        if self.dtype not in torch.storage._dtype_to_storage_type_map():
-            raise RuntimeError(f'unsupported Storage type: {self.dtype}')
-
         return torch._TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
 
     def _reduce_ex_internal(self, proto):
@@ -649,6 +646,7 @@ class Tensor(torch._C._TensorBase):
     __itruediv__ = _C._TensorBase.__idiv__
 
     __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(_C._TensorBase.pow)
+    __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(_C._TensorBase.pow_)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other):
@@ -660,10 +658,6 @@ class Tensor(torch._C._TensorBase):
         if self.dim() == 0 and not self.is_meta:
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
-
-    @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __ipow__(self, other):  # type: ignore[misc]
-        return NotImplemented
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
