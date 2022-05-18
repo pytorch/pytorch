@@ -460,6 +460,13 @@ class FullyShardedDataParallel(nn.Module):
         Changing the original parameter variable names after construction will
         lead to undefined behavior.
 
+    .. warning::
+        As of PyTorch 1.12, FSDP only offers limited support for shared parameters
+        (for example, setting one ``Linear`` layer's weight to another's). In
+        particular, modules that share parameters must be wrapped as part of the
+        same FSDP unit. If enhanced shared parameter support is needed for your
+        use case, please ping https://github.com/pytorch/pytorch/issues/77724
+
     .. note::
         Inputs into FSDP ``forward`` function will be moved to compute device
         (same device FSDP module is on) before running ``forward``, so user does
@@ -3170,8 +3177,6 @@ class FullyShardedDataParallel(nn.Module):
                 curr_iter_param_names = [
                     eod.get_unflat_param_names(index) for index in curr_param_order
                 ]
-                print(first_iter_param_names, type(first_iter_param_names))
-                print(curr_iter_param_names, type(curr_iter_param_names))
                 warnings.warn(
                     "Forward order differs from that of the first iteration "
                     f"on rank {self.rank} -- collectives are unchecked and may "
