@@ -105,21 +105,34 @@ Tensor _to_copy(
                   (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
-    if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
-      Tensor r;
-      if (self.is_quantized()) {
-        r = at::empty_quantized(self.sizes(), self, options);
-        at::QuantizerPtr quantizer = r.quantizer();
-        r.copy_(self, non_blocking);
-        set_quantizer_(r, quantizer);
+    if (options.device().supports_as_strided()) {
+      if (self.is_non_overlapping_and_dense()) {
+        Tensor r;
+        if (self.is_quantized()) {
+          r = at::empty_quantized(self.sizes(), self, options);
+          at::QuantizerPtr quantizer = r.quantizer();
+          r.copy_(self, non_blocking);
+          set_quantizer_(r, quantizer);
+        } else {
+          r = at::empty_strided(
+              self.sizes(),
+              self.strides(),
+              options.pinned_memory(pin_out));
+          r.copy_(self, non_blocking);
+        }
+        return r;
+      } else if (!self.is_quantized() && self.layout() == kStrided) {
+          Tensor r;
+          auto strides = infer_dense_strides(self.sizes(), self.strides());
+          r = at::empty_strided(
+              self.sizes(),
+              strides,
+              options.pinned_memory(pin_out));
+          r.copy_(self, non_blocking);
+          return r;
       } else {
-        r = at::empty_strided(
-            self.sizes(),
-            self.strides(),
-            options.pinned_memory(pin_out));
-        r.copy_(self, non_blocking);
+        memory_format = self.suggest_memory_format();
       }
-      return r;
     } else {
       memory_format = self.suggest_memory_format();
     }
@@ -867,4 +880,31 @@ Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
 }
 
 // Sparse layout conversions End
+
+Tensor to_meta(const Tensor& tensor) {
+  auto out = at::native::empty_strided_meta(tensor.sizes(), tensor.strides(), \
+/*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
+/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  // needs to handle wrapped numbers, so dtype promotion works properly.
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    out.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  return out;
+}
+c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor) {
+  if (tensor.has_value()) {
+    return to_meta(*tensor);
+  }
+  return c10::nullopt;
+}
+
+std::vector<Tensor> to_meta(const at::TensorList& t_list) {
+  std::vector<Tensor> outs;
+  outs.reserve(t_list.size());
+  for (const auto& i : c10::irange(t_list.size())) {
+    outs.push_back(to_meta(t_list[i]));
+  }
+  return outs;
+}
+
 }} // namespace at::native
