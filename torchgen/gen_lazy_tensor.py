@@ -13,17 +13,19 @@ from typing import (
     Callable,
     Iterable,
     Iterator,
-    Tuple,
     Type,
 )
+from torchgen.api.types import BaseCppType
 from torchgen.dest.lazy_ir import GenLazyIR, GenTSLazyIR
 from torchgen.gen import (
     get_grouped_native_functions,
     parse_native_yaml,
     NamespaceHelper,
 )
+
+from torchgen.api.lazy import setValueT
+
 from torchgen.model import (
-    FunctionSchema,
     NativeFunction,
     NativeFunctionsGroup,
     OperatorName,
@@ -276,8 +278,16 @@ def run_gen_lazy_tensor(
     metrics_counter: str = 'TORCH_LAZY_FN_COUNTER("lazy::")',
     create_tensor: str = "LazyTensor::Create",
     create_from_first_tensor: bool = False,
+    create_aten_from_ltc_tensor: str = "torch::lazy::CreateAtenFromLtcTensor",
+    tuple_aten_from_ltc_tensors: str = "torch::lazy::TupleAtenFromLtcTensors",
+    lazy_value_class: str = "torch::lazy::Value",
+    lazy_tensor_ptr: str = "LazyTensorPtr",
+    get_device_fn: str = "torch::lazy::GetBackendDevice",
 ) -> None:
-
+    lv_tokens = lazy_value_class.split("::")
+    lv_class = lv_tokens[-1]
+    lv_ns = "::".join(lv_tokens[:-1])
+    setValueT(BaseCppType(lv_ns, lv_class))
     template_dir = os.path.join(aten_path, "templates")
 
     def make_file_manager(install_dir: str) -> FileManager:
@@ -288,7 +298,8 @@ def run_gen_lazy_tensor(
     fm = make_file_manager(output_dir)
 
     native_yaml_path = os.path.join(aten_path, "native/native_functions.yaml")
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(aten_path, "native/tags.yaml")
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
@@ -318,39 +329,18 @@ def run_gen_lazy_tensor(
     def concat_map_codegen(
         func: Callable[[NativeFunction], Sequence[str]],
         xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]],
-        *,
-        codegenInplaceVariant: bool = False,
     ) -> Iterator[str]:
         """
         We code-gen for the functional variant, which is all we need for IR classes/lowerings/shape inferences, but we
         only code-gen additional entries for the inplace variant for the native functions.
-        Note: If xs is not sorted, there may be an edge case when generating IR classes. Considering relu and relu_, if
-        we encounter relu_ before relu. we will then generate an IR class with op = at::aten::relu_ for both relu and
-        relu_ which will cause problems for relu.
-        TODO(alanwaketan): Once all ops are grouped properly, we should no longer need this hack.
         """
-        generated = set()
-
-        def gen_key(func: FunctionSchema) -> Tuple[str, str]:
-            # we want to generate unique entries for overloads of functional variants,
-            # but not for inplace variants unless explicitly told `codegenInplaceVariant`
-            return (func.name.name.base, func.name.overload_name)
 
         for x in xs:
-            f = x.functional if isinstance(x, NativeFunctionsGroup) else x
-            # For the 'or'd terms:
-            # 1. codegenInplaceVariant means we can generate the in-place variant corresponding items.
-            # 2. not f.func.name.name.inplace means the op is not a in-place variant, so we can generate the item.
-            # 3. f.func.name.name.base not in generated means even for in-place ops we still need to generate the item
-            # as if they were the functional variants for one time.
-            if f.func.name in full_codegen and (
-                codegenInplaceVariant
-                or not f.func.name.name.inplace
-                or gen_key(f.func) not in generated
-            ):
-                generated.add(gen_key(f.func))
-                for r in func(f):
-                    yield r
+            fs = list(x.functions()) if isinstance(x, NativeFunctionsGroup) else [x]
+            for f in fs:
+                if f.func.name in full_codegen:
+                    for r in func(f):
+                        yield r
 
     selector = SelectiveBuilder.get_nop_selector()
 
@@ -389,7 +379,6 @@ def run_gen_lazy_tensor(
                     backend_indices[backend_key], tensor_class
                 ),
                 grouped_native_functions,
-                codegenInplaceVariant=True,
             )
         )
 
@@ -446,6 +435,7 @@ def run_gen_lazy_tensor(
                     "ATen/MetaFunctions.h",
                     "ATen/Operators.h",
                     "ATen/native/CPUFallback.h",
+                    "torch/csrc/lazy/core/ir_builder.h",
                     "torch/csrc/lazy/core/lazy_graph_executor.h",
                     "torch/csrc/lazy/core/metrics.h",
                     "torch/csrc/lazy/core/shape.h",
@@ -475,9 +465,12 @@ def run_gen_lazy_tensor(
                         metrics_counter,
                         create_tensor,
                         create_from_first_tensor,
+                        create_aten_from_ltc_tensor,
+                        tuple_aten_from_ltc_tensors,
+                        lazy_tensor_ptr,
+                        get_device_fn,
                     ),
                     grouped_native_functions,
-                    codegenInplaceVariant=True,
                 )
             ),
         },

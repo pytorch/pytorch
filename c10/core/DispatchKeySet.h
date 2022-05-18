@@ -367,6 +367,12 @@ class DispatchKeySet final {
     return DispatchKeySet(
         repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask));
   }
+  // You're allowed to remove a backend bit from a DispatchKeySet,
+  // but you have to be explicit about it (remove_backend() instead of
+  // remove()).
+  constexpr DispatchKeySet remove_backend(BackendComponent b) const {
+    return DispatchKeySet(repr_ & ~(DispatchKeySet(b).repr_));
+  }
   // Is the set empty?  (AKA undefined tensor)
   bool empty() const {
     return repr_ == 0;
@@ -724,7 +730,7 @@ constexpr auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
 constexpr auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
 constexpr auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
 constexpr auto autograd_lazy_ks = DispatchKeySet(DispatchKey::AutogradLazy);
-constexpr auto autograd_mlc_ks = DispatchKeySet(DispatchKey::AutogradMLC);
+constexpr auto autograd_mps_ks = DispatchKeySet(DispatchKey::AutogradMPS);
 constexpr auto autograd_hpu_ks = DispatchKeySet(DispatchKey::AutogradHPU);
 constexpr auto autograd_privateuse1_ks =
     DispatchKeySet(DispatchKey::AutogradPrivateUse1);
@@ -799,8 +805,8 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
       return inplace_or_view_ks | autograd_xla_ks;
     case BackendComponent::LazyBit:
       return inplace_or_view_ks | autograd_lazy_ks;
-    case BackendComponent::MLCBit:
-      return inplace_or_view_ks | autograd_mlc_ks;
+    case BackendComponent::MPSBit:
+      return inplace_or_view_ks | autograd_mps_ks;
     case BackendComponent::HPUBit:
       return inplace_or_view_ks | autograd_hpu_ks;
     case BackendComponent::PrivateUse1Bit:

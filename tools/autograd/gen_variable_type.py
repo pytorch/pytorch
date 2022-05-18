@@ -154,6 +154,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "view_as",
     "roll",
     "clone",
+    "block_diag",
     "diag_embed",
     "repeat",
     "expand",
@@ -197,6 +198,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "select",
     "where",
     "as_strided",
+    "as_strided_scatter",
     "slice",
     "constant_pad_nd",
     "unbind",
@@ -329,6 +331,9 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "im2col",
     "im2col_backward",
     "cholesky_inverse",
+    "to_sparse",
+    "sparse_sampled_addmm",
+    "linalg_lu",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -344,7 +349,7 @@ GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX.update(GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX)
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
-RESET_GRAD_ACCUMULATOR = {"set", "resize"}
+RESET_GRAD_ACCUMULATOR = {"set_", "resize_"}
 
 # NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
 #
@@ -672,6 +677,7 @@ for (const auto& _t: ${arg}) {
 def gen_variable_type(
     out: str,
     native_yaml_path: str,
+    tags_yaml_path: str,
     fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
@@ -724,7 +730,7 @@ def gen_variable_type_func(
 
         if (
             fn.info is None
-            and not get_base_name(f) in RESET_GRAD_ACCUMULATOR
+            and not str(f.func.name.name) in RESET_GRAD_ACCUMULATOR
             and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE
             and len(gen_differentiable_outputs(fn)) > 0
             and not cpp.name(f.func) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE
@@ -847,7 +853,14 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         and (len(differentiable_outputs) > 0)
     )
 
-    if info is not None and info.has_derivatives and not requires_derivative:
+    if (
+        info is not None
+        and info.has_derivatives
+        and not requires_derivative
+        # out= ops are allowed to have zero returns which cause requires_derivative to be False
+        # we shouldn't error out though (out= ops for autograd just redispatch)
+        and len(f.func.returns) > 0
+    ):
         raise RuntimeError(
             f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
         )
@@ -1299,7 +1312,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     and is_tensor_list_type(differentiable_inputs[0].type)
                 ):
                     raise RuntimeError(
-                        f'No differentiable input to "{name}" is a differentiable Tensor (as the provided'
+                        f'No differentiable input to "{name}" is a differentiable Tensor (as the provided '
                         "forward AD formula does not use any input tangent) even though a forward gradient "
                         "formula has been defined for it. This case should only happen for function that "
                         "take a single TensorList as input. All other cases are not supported right now."
@@ -1518,7 +1531,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # Save only after the forward AD has been set up
         body.append(emit_save_outputs())
 
-    if base_name in RESET_GRAD_ACCUMULATOR:
+    if str(f.func.name.name) in RESET_GRAD_ACCUMULATOR:
         # `inplace` implies that there is exactly one output named `self`,
         # so we can keep the generated code easy. If you need to
         # `reset_grad_accumulator` in an operator that's not `inplace`, you can

@@ -4,13 +4,18 @@ C10_DEFINE_bool(torch_lazy_ir_debug, false, "Enable lazy tensor IR debugging");
 
 C10_DEFINE_bool(
     torch_lazy_param_aliasing,
-    false,
+    true,
     "Enable parameter aliasing support");
 
 C10_DEFINE_bool(
     torch_lazy_handle_special_scalars,
     false,
     "Handle special scalars 0 and 1 diffrently");
+
+C10_DEFINE_bool(
+    torch_lazy_reuse_ir,
+    false,
+    "Reuse IR nodes from previous tracing when possible");
 
 C10_DEFINE_bool(
     torch_lazy_use_thread_pool,

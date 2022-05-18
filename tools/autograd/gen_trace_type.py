@@ -432,7 +432,8 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
 
     assign_return_values = (
         f"{tie_return_values(f)} = "
-        if f.func.kind() == SchemaKind.functional and f.func.returns
+        if f.func.kind() in [SchemaKind.functional, SchemaKind.mutable]
+        and f.func.returns
         else ""
     )
 

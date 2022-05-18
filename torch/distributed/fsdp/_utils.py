@@ -1,12 +1,22 @@
-from typing import Dict, List, Tuple, Union, Any, Callable, Set
-from torch.nn.utils.rnn import PackedSequence
+from collections import OrderedDict
+from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
 import torch
+from torch.nn.modules.batchnorm import _BatchNorm
 
-from collections import OrderedDict
+from torch.nn.utils.rnn import PackedSequence
 
 """Useful functions to deal with tensor types with other python container types."""
 
+def _contains_batchnorm(module):
+    return any(
+        isinstance(mod, _BatchNorm) for mod in module.modules()
+    )
+
+def _override_batchnorm_mixed_precision(module):
+    for mod in module.modules():
+        if isinstance(mod, _BatchNorm):
+            mod._wrap_overrides = {"mixed_precision": None}  # type: ignore[assignment]
 
 def _apply_to_tensors(
     fn: Callable, container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
@@ -33,26 +43,27 @@ def _apply_to_tensors(
 
     return apply(container)
 
-
-def _replace_by_prefix(
-    state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
-    old_prefix: str,
-    new_prefix: str,
-) -> None:
+def _apply_to_modules(
+    root_module: torch.nn.Module,
+    module_fn: Callable,
+    return_fn: Callable,
+    *args,
+    **kwargs,
+):
     """
-    Replace all keys that match a given old_prefix with a new_prefix (in-place).
-
-    Usage::
-
-        state_dict = {"layer.xyz": torch.tensor(1)}
-        replace_by_prefix_(state_dict, "layer.", "module.layer.")
-        assert state_dict == {"module.layer.xyz": torch.tensor(1)}
+    Performs a pre-order traversal of the modules in the hierarchy rooted at
+    ``root_module``, applying ``module_fn`` at each module and finally
+    returning a value using ``return_fn``. The traversal constructs the full
+    module prefix name (e.g. "module.submodule." just like in model state dict)
+    and makes that available to ``module_fn``.
     """
-    if old_prefix == new_prefix:
-        raise ValueError("old_prefix and new_prefix must be distinct")
-    for key in list(state_dict.keys()):
-        if not key.startswith(old_prefix):
-            continue
-        new_key = new_prefix + key[len(old_prefix) :]
-        state_dict[new_key] = state_dict[key]
-        del state_dict[key]
+    def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
+        # Call the module function before recursing over children (pre-order)
+        module_fn(module, prefix, *args, **kwargs)
+        for submodule_name, submodule in module.named_children():
+            if submodule is not None:
+                new_prefix = prefix + submodule_name + "."
+                f(submodule, new_prefix, *args, **kwargs)
+
+    f(root_module, "", *args, **kwargs)
+    return return_fn(*args, **kwargs)

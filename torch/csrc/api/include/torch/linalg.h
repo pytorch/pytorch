@@ -76,6 +76,14 @@ inline std::tuple<Tensor&, Tensor&> lu_factor_out(Tensor& LU, Tensor& pivots, co
   return torch::linalg_lu_factor_out(LU, pivots, self, pivot);
 }
 
+inline std::tuple<Tensor, Tensor, Tensor> lu(const Tensor& self, const bool pivot) {
+  return torch::linalg_lu(self, pivot);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> lu_out(Tensor& P, Tensor& L, Tensor& U, const Tensor& self, const bool pivot) {
+  return torch::linalg_lu_out(P, L, U, self, pivot);
+}
+
 inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<c10::string_view> driver) {
   return torch::linalg_lstsq(self, b, cond, driver);
 }
@@ -373,7 +381,7 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, c10::string_v
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// Computes the pivoted LU factorization
+/// Computes the LU factorization with partial pivoting
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.lu_factor
 inline std::tuple<Tensor, Tensor> lu_factor(const Tensor& input, const bool pivot=true) {
@@ -382,6 +390,17 @@ inline std::tuple<Tensor, Tensor> lu_factor(const Tensor& input, const bool pivo
 
 inline std::tuple<Tensor&, Tensor&> lu_factor_out(Tensor& LU, Tensor& pivots, const Tensor& self, const bool pivot=true) {
   return detail::lu_factor_out(LU, pivots, self, pivot);
+}
+
+/// Computes the LU factorization with partial pivoting
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.lu
+inline std::tuple<Tensor, Tensor, Tensor> lu(const Tensor& input, const bool pivot=true) {
+  return detail::lu(input, pivot);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> lu_out(Tensor& P, Tensor& L, Tensor& U, const Tensor& self, const bool pivot=true) {
+  return detail::lu_out(P, L, U, self, pivot);
 }
 
 inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
@@ -499,6 +518,48 @@ inline std::tuple<Tensor, Tensor> qr(const Tensor& input, c10::string_view mode=
 
 inline std::tuple<Tensor&, Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& input, c10::string_view mode="reduced") {
   return detail::qr_out(Q, R, input, mode);
+}
+
+/// Computes the LDL decomposition
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.ldl_factor_ex
+inline std::tuple<Tensor, Tensor, Tensor> ldl_factor_ex(
+    const Tensor& input,
+    bool hermitian,
+    bool check_errors) {
+  return torch::linalg_ldl_factor_ex(input, hermitian, check_errors);
+}
+
+inline std::tuple<Tensor&, Tensor&, Tensor&> ldl_factor_ex_out(
+    Tensor& LD,
+    Tensor& pivots,
+    Tensor& info,
+    const Tensor& input,
+    bool hermitian,
+    bool check_errors) {
+  return torch::linalg_ldl_factor_ex_out(
+      LD, pivots, info, input, hermitian, check_errors);
+}
+
+/// Solve a system of linear equations using the LDL decomposition
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.ldl_solve
+inline Tensor ldl_solve(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool hermitian) {
+  return torch::linalg_ldl_solve(LD, pivots, B, hermitian);
+}
+
+inline Tensor& ldl_solve_out(
+    Tensor& result,
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool hermitian) {
+  return torch::linalg_ldl_solve_out(
+      result, LD, pivots, B, hermitian);
 }
 
 /// Computes a tensor `x` such that `matmul(input, x) = other`.
