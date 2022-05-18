@@ -2270,13 +2270,13 @@ def get_torchgen_root():
     If you're depending on torchgen out-of-tree, you can use the root to figure
     out the path to native_functions.yaml.
     """
-    torchgen_dir = pathlib.Path(__file__).parent.resolve()
+    return pathlib.Path(__file__).parent.resolve()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate ATen source files")
     torchgen_dir = pathlib.Path(__file__).parent.resolve()
-    torchgen_aten_dir = pathlib.Path.joinpath(get_torchgen_root, 'ATen')
+    torchgen_aten_dir = pathlib.Path.joinpath(get_torchgen_root(), 'ATen')
     parser.add_argument(
         "-s",
         "--source-path",
