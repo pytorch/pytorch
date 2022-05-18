@@ -1116,33 +1116,19 @@ class TestSparseCSR(TestCase):
                 y = self.genSparseCSRTensor((dk, dj), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
                 _test(t, x, y)
 
-                # Test mm(CSR, CSR)
-                x = self.genSparseCSRTensor((di, dk), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
-                y = self.genSparseCSRTensor((dk, dj), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
-                _test_mm(x, y)
+                x_shape, y_shape = x.shape, y.shape
 
-                # Test mm(CSR, CSC)
-                x = self.genSparseCSRTensor((di, dk), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
-                y = self.genSparseCSRTensor((dj, dk), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
-                y = y.transpose(0, 1)
-                _test_mm(x, y)
+                gen_csr_csc = [self.genSparseCSRTensor, self.genSparseCSCTensor]
 
-                # Test mm(CSC, CSR)
-                x = self.genSparseCSRTensor((dk, di), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
-                y = self.genSparseCSRTensor((dk, dj), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
-                x = x.transpose(0, 1)
-                _test_mm(x, y)
+                # Test mm({CSR, CSC}, {CSR, CSC})
+                for gen_x, gen_y in itertools.product(gen_csr_csc, gen_csr_csc):
+                    x = gen_x(x_shape, nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                    y = gen_y(y_shape, nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
+                    _test_mm(x, y)
 
-                # Test mm(CSC, CSC)
-                x = self.genSparseCSRTensor((dk, di), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
-                y = self.genSparseCSRTensor((dj, dk), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
-                x = x.transpose(0, 1)
-                y = y.transpose(0, 1)
-                _test_mm(x, y)
-
-        for i in range(2, 5):
-            for j in range(2, 8):
-                for k in range(2, 8):
+        for i in [2, 4]:
+            for j in [2, 4, 7]:
+                for k in [2, 3, 7]:
                     test_shape(i, j, k)
         test_shape(4, 4, 4, 0, 0)
 
