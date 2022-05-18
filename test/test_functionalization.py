@@ -86,12 +86,21 @@ class TestFunctionalization(TestCase):
         finally:
             torch._disable_functionalization()
 
-        self.assertEqual(out_ref.size(), out_functional.size())
         # We need to sync the input tensors first, in case there are any queued mutations left.
         torch._sync(input_functional)
-        torch._sync(out_functional)
-        self.assertEqual(out_ref, torch._from_functional_tensor(out_functional))
         self.assertEqual(inpt, torch._from_functional_tensor(input_functional))  # input mutations should still occur
+
+        # Handle tests with multi-tensor outputs
+        if isinstance(out_ref, tuple) and isinstance(out_functional, tuple):
+            out_refs, out_functionals = list(out_ref), list(out_functional)
+        else:
+            out_refs, out_functionals = [out_ref], [out_functional]
+
+        for out_ref_, out_functional_ in zip(out_refs, out_functionals):
+            self.assertEqual(out_ref_.size(), out_functional_.size())
+            torch._sync(out_functional_)
+            out_functional_unwrapped = torch._from_functional_tensor(out_functional_)
+            self.assertEqual(out_ref_, out_functional_unwrapped)
 
     def test_multiple_views_of_same_base(self):
         def f(x):
@@ -508,6 +517,83 @@ $0 = input('input')
 $1 = torch._ops.aten.add.Tensor($0, $0)
 $2 = torch._ops.aten.diagonal_copy.default($1)
 $3 = torch._ops.aten.fill.Scalar($2, 0)""")
+
+    def test_resize_smaller(self):
+        def f(w):
+            # Resizing to a smaller size doesn't affect storage
+            x = w + 1
+            y = x.view(4, 4)
+            y.resize_(3, 3)
+            y2 = y.view(-1)
+            y2.add_(1)
+            z = y + 1
+            return z
+
+        self.assert_functionalization(f, torch.ones(8, 2))
+        logs = self.get_logs(f, torch.ones(8, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.add.Tensor($0, 1)
+$2 = torch._ops.aten.view_copy.default($1, [4, 4])
+$3 = torch._ops.aten.resize.functional($2, [3, 3])
+$4 = torch._ops.aten.as_strided_copy.default($2, [3, 3], [3, 1])
+$5 = torch._ops.aten.view_copy.default($4, [-1])
+$6 = torch._ops.aten.add.Tensor($5, 1)
+$7 = torch._ops.aten.view_copy.default($1, [4, 4])
+$8 = torch._ops.aten.as_strided_copy.default($7, [3, 3], [3, 1])
+$9 = torch._ops.aten.view_copy.default($6, [3, 3])
+$10 = torch._ops.aten.as_strided_scatter.default($7, $9, [3, 3], [3, 1])
+$11 = torch._ops.aten.view_copy.default($10, [8, 2])
+$12 = torch._ops.aten.view_copy.default($11, [4, 4])
+$13 = torch._ops.aten.as_strided_copy.default($12, [3, 3], [3, 1])
+$14 = torch._ops.aten.add.Tensor($13, 1)""")
+
+    def test_resize_larger_valid(self):
+        def f(x):
+            y = x + 1
+            # resizing a tensor to a larger size is only currently allowed
+            # if the tensor-to-resize is not a view / has no outstanding views.
+            # See Note [resize_() in functionalization pass]
+            y.resize_(5, 5)
+            y2 = y.view(25)
+            # Do a mutation to ensure that aliases of the output of resize_()
+            # propagate mutations correctly.
+            # I'm using fill_ specifically because I want to guarantee that
+            # none of the output has uninitialized memory at the end
+            # (since these tests compare the data output against a reference impl)
+            y2.fill_(1)
+            out = y + 1
+            return y, out
+
+        self.assert_functionalization(f, torch.ones(8, 2))
+        logs = self.get_logs(f, torch.ones(8, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.add.Tensor($0, 1)
+$2 = torch._ops.aten.resize.functional($1, [5, 5])
+$3 = torch._ops.aten.view_copy.default($2, [25])
+$4 = torch._ops.aten.fill.Scalar($3, 1)
+$5 = torch._ops.aten.view_copy.default($4, [5, 5])
+$6 = torch._ops.aten.add.Tensor($5, 1)""")
+
+    def test_resize_larger_invalid(self):
+        def f(x):
+            y = x + 1
+            z = y.view(4, 4)
+            # resizing a tensor to a larger size is only currently allowed
+            # if the tensor-to-resize is not a view / has no outstanding views.
+            # See Note [resize_() in functionalization pass]
+            # This should fail
+            z.resize_(5, 5)
+            z2 = z.view(25)
+            z2.fill_(1)
+            out = z + 1
+            return y, out
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r'Attempted to resize a view tensor to a larger size. This is not allowed in the functionalization pass'):
+            self.assert_functionalization(f, torch.ones(8, 2))
 
     def test_nested_functions_propagate_updates(self):
         def g(x):
