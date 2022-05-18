@@ -3881,6 +3881,18 @@ def _fill_indices(idx, dim, dim_size, elems_per_row, m, n, o):
                 ii[dim] = slice(0, idx.size(dim) + 1)
                 idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
+def error_inputs_bitwise_not(op_info, device, **kwargs):
+    bad = make_tensor((5, 5), device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(bad), error_regex="Float")
+
+def error_inputs_bitwise(op_info, device, **kwargs):
+    bad = make_tensor((5, 5), device=device, dtype=torch.float32)
+    good = make_tensor((5, 5), device=device, dtype=torch.int32)
+    yield ErrorInput(SampleInput(bad, args=(good,)), error_regex="Float")
+    yield ErrorInput(SampleInput(good, args=(bad,)), error_regex="Float")
+    yield ErrorInput(SampleInput(2.5, args=(good,)), error_regex="Float")
+    yield ErrorInput(SampleInput(good, args=(2.5,)), error_regex="Float")
+
 def error_inputs_gather(op_info, device, **kwargs):
     # src is [1, 2]
     #        [3, 4]
@@ -10244,20 +10256,11 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            sample_inputs_func=sample_inputs_block_diag),
-    BinaryUfuncInfo('bitwise_and',
-                    dtypes=integral_types_and(torch.bool),
-                    supports_autograd=False,
-                    operator_variant=operator.and_,
-                    inplace_operator_variant=operator.iand,
-                    skips=(
-                        # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
-                                     'test_type_promotion', device_type='cuda'),
-                    )),
     UnaryUfuncInfo('bitwise_not',
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
                    operator_variant=operator.invert,
+                   error_inputs_func=error_inputs_bitwise_not,
                    supports_autograd=False),
     BinaryUfuncInfo('bitwise_left_shift',
                     op=torch.bitwise_left_shift,
@@ -10265,6 +10268,7 @@ op_db: List[OpInfo] = [
                     dtypesIfCUDA=integral_types(),
                     operator_variant=operator.lshift,
                     inplace_operator_variant=operator.ilshift,
+                    error_inputs_func=error_inputs_bitwise,
                     supports_autograd=False,
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs=dict(low=0),
@@ -10277,6 +10281,7 @@ op_db: List[OpInfo] = [
                     dtypesIfCUDA=integral_types(),
                     operator_variant=operator.rshift,
                     inplace_operator_variant=operator.irshift,
+                    error_inputs_func=error_inputs_bitwise,
                     supports_autograd=False,
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs=dict(low=0),
@@ -12434,12 +12439,27 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     supports_rhs_python_scalar=False),
+    BinaryUfuncInfo('bitwise_and',
+                    ref=np.bitwise_and,
+                    dtypes=integral_types_and(torch.bool),
+                    operator_variant=operator.and_,
+                    inplace_operator_variant=operator.iand,
+                    supports_autograd=False,
+                    error_inputs_func=error_inputs_bitwise,
+                    supports_one_python_scalar=True,
+                    skips=(
+                        # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+                                     'test_type_promotion', device_type='cuda'),
+                    )),
     BinaryUfuncInfo('bitwise_or',
                     ref=np.bitwise_or,
                     dtypes=integral_types_and(torch.bool),
                     operator_variant=operator.or_,
                     inplace_operator_variant=operator.ior,
                     supports_autograd=False,
+                    error_inputs_func=error_inputs_bitwise,
+                    supports_one_python_scalar=True,
                     skips=(
                         # TODO: FIXME: RuntimeError: "bitwise_or_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure,
@@ -12453,6 +12473,8 @@ op_db: List[OpInfo] = [
                     operator_variant=operator.xor,
                     inplace_operator_variant=operator.ixor,
                     supports_autograd=False,
+                    error_inputs_func=error_inputs_bitwise,
+                    supports_one_python_scalar=True,
                     skips=(
                         # TODO: FIXME: RuntimeError: "bitwise_xor_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure,
