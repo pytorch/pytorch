@@ -770,7 +770,7 @@ inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, cons
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   int m = cuda_int_cast(A.size(-2), "m");
   int n = cuda_int_cast(A.size(-1), "n");
-  int k = std::min(m, n);
+  TORCH_INTERNAL_ASSERT(m >= n, "cusolver gesvdaStridedBatched requires m >= n");
   int batchsize = cuda_int_cast(batchCount(A), "batch size");
 
   int lda = A.stride(-1);
@@ -785,8 +785,8 @@ inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, cons
 
   // Need to pass allocated memory to the function, otherwise it fails
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr_U = !compute_uv ? allocator.allocate(sizeof(scalar_t) * batchsize * m * k) : c10::DataPtr{};
-  auto dataPtr_V = !compute_uv ? allocator.allocate(sizeof(scalar_t) * batchsize * n * k) : c10::DataPtr{};
+  auto dataPtr_U = !compute_uv ? allocator.allocate(sizeof(scalar_t) * batchsize * m * n) : c10::DataPtr{};
+  auto dataPtr_V = !compute_uv ? allocator.allocate(sizeof(scalar_t) * batchsize * n * n) : c10::DataPtr{};
 
   auto A_data = A.data_ptr<scalar_t>();
   auto U_data = compute_uv ? U.data_ptr<scalar_t>() : reinterpret_cast<scalar_t*>(dataPtr_U.get());
