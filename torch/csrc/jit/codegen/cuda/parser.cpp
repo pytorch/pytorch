@@ -3670,7 +3670,8 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
         auto profiled_int = pn->i(intAttr);
         auto input_int = value.toInt();
         if (input_int != profiled_int) {
-          TORCH_WARN_ONCE( __FUNCTION__,
+          TORCH_WARN_ONCE(
+              __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
           pn->removeAttribute(intAttr);
