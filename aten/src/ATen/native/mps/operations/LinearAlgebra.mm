@@ -454,11 +454,6 @@ Tensor& addbmm_or_baddbmm_out_mps_impl(
       batch1.size(1), "x", batch1.size(2), " and ",
       batch2.size(1), "x", batch2.size(2), ")");
 
-  const int64_t dim1 = batch1.size(1);
-  const int64_t dim2 = batch2.size(2);
-  TORCH_CHECK(input.size(0) == dim1 && input.size(1) == dim2,
-      "input tensor does not match matmul output shape");
-
   if (opType == ADDBMM_OP_TYPE)
   {
     result.resize_as_(input);

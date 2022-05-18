@@ -342,21 +342,28 @@ class TestMPS(TestCase):
         self.assertEqual(output_cpu.size(), output_mps.size())
 
     def test_baddbmm(self):
-        M_cpu = torch.randn(3, 5)
-        batch1_cpu = torch.randn(10, 3, 4)
-        batch2_cpu = torch.randn(10, 4, 5)
-        alpha = 1.2
-        beta = 0.8
+        def helper(input_shape, batch1_shape, batch2_shape):
+            M_cpu      = torch.randn(input_shape)
+            batch1_cpu = torch.randn(batch1_shape)
+            batch2_cpu = torch.randn(batch2_shape)
+            alpha = 1.2
+            beta  = 0.8
 
-        M_mps = M_cpu.detach().clone().to("mps")
-        batch1_mps = batch1_cpu.detach().clone().to("mps")
-        batch2_mps = batch2_cpu.detach().clone().to("mps")
+            M_mps = M_cpu.detach().clone().to("mps")
+            batch1_mps = batch1_cpu.detach().clone().to("mps")
+            batch2_mps = batch2_cpu.detach().clone().to("mps")
 
-        output_cpu = torch.baddbmm(M_cpu, batch1_cpu, batch2_cpu, beta=beta, alpha=alpha)
-        output_mps = torch.baddbmm(M_mps, batch1_mps, batch2_mps, beta=beta, alpha=alpha)
+            output_cpu = torch.baddbmm(M_cpu, batch1_cpu, batch2_cpu, beta=beta, alpha=alpha)
+            output_mps = torch.baddbmm(M_mps, batch1_mps, batch2_mps, beta=beta, alpha=alpha)
 
-        self.assertEqual(output_cpu, output_mps)
-        self.assertEqual(output_cpu.size(), output_mps.size())
+            print(output_cpu.shape)
+            print(output_mps.shape)
+            self.assertEqual(output_cpu, output_mps)
+            self.assertEqual(output_cpu.size(), output_mps.size())
+        
+        helper(input_shape=(3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
+        helper(input_shape=(10, 3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
+        helper(input_shape=(1, 77, 77), batch1_shape=(8, 77, 64), batch2_shape=(8, 64, 77))
 
     def test_local_scalar_dense_mps(self):
         x_cpu = torch.randn(1)
