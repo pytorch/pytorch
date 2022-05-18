@@ -39,11 +39,11 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
         t = data.detach().requires_grad_(requires_grad)
         if type(t) is not type(data):
-            raise RuntimeError("Creating a Parameter from an instance of type {} requires that detach() "
-                               "returns an instance of the same type, but return type {} was found instead. "
-                               "To use the type as a Parameter, please correct the detach() semantics defined by "
-                               "its __torch_dispatch__() implementation.".format(
-                                   type(data).__name__, type(t).__name__))
+            raise RuntimeError(f"Creating a Parameter from an instance of type {type(data).__name__} "
+                               "requires that detach() returns an instance of the same type, but return "
+                               f"type {type(t).__name__} was found instead. To use the type as a "
+                               "Parameter, please correct the detach() semantics defined by "
+                               "its __torch_dispatch__() implementation.")
         t._is_param = True
         return t
 
