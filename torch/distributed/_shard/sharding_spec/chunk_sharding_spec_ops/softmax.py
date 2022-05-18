@@ -9,9 +9,8 @@ from ._common import (
 )
 
 @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.softmax)
-def sharded_softmax(types, args=(), kwargs=None):
+def sharded_softmax(types, args=(), kwargs=None, pg=None):
     input = args[0]
-    pg = input._process_group
     dim = kwargs['dim']
     sharding_dim = input.sharding_spec().dim
     ndims = input.dim()

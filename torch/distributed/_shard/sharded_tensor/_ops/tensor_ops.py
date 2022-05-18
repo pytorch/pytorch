@@ -8,6 +8,7 @@ from torch.distributed._shard.sharded_tensor import (
 from ._common import (
     _register_sharded_op_on_local_shards,
 )
+from torch.distributed._shard.common_op_utils import _register_default_op
 
 @sharded_op_impl(torch.Tensor.__deepcopy__)
 def tensor_deepcopy(types, args=(), kwargs=None, pg=None):
@@ -29,35 +30,19 @@ def tensor_deepcopy(types, args=(), kwargs=None, pg=None):
     )
 
 
-def register_default_op(op):
-    @sharded_op_impl(op)
-    def tensor_default_op(types, args=(), kwargs=None, pg=None):
-        """
-        Handles ``__torch_function__`` dispatch for the default tensor ops that
-        behave the same as ``torch.Tensor`` such as ``torch.Tensor.shape`` or
-        ``torch.Tensor.dtype``. We simply lower to the real op call with
-        DisableTorchFunction context like ``torch.Tensor.__torch_function__``
-        to avoid recursions.
-        """
-        if kwargs is None:
-            kwargs = {}
-
-        with torch._C.DisableTorchFunction():
-            return op(*args, **kwargs)
-
 # Tensor properties access
-register_default_op(torch.Tensor.requires_grad.__get__)  # type: ignore[attr-defined]
-register_default_op(torch.Tensor.shape.__get__)  # type: ignore[attr-defined]
-register_default_op(torch.Tensor.dtype.__get__)  # type: ignore[attr-defined]
-register_default_op(torch.Tensor.layout.__get__)  # type: ignore[attr-defined]
-register_default_op(torch.Tensor.size)
-register_default_op(torch.Tensor.dim)
-register_default_op(torch.Tensor.ndim.__get__)  # type: ignore[attr-defined]
-register_default_op(torch.Tensor.is_contiguous)
-register_default_op(torch.Tensor.contiguous)
+_register_default_op(torch.Tensor.requires_grad.__get__, sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.shape.__get__, sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.dtype.__get__, sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.layout.__get__, sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.size, sharded_op_impl)
+_register_default_op(torch.Tensor.dim, sharded_op_impl)
+_register_default_op(torch.Tensor.ndim.__get__, sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.is_contiguous, sharded_op_impl)
+_register_default_op(torch.Tensor.contiguous, sharded_op_impl)
 
 # __reduce_ex__ to dispatch to get_state/set_state
-register_default_op(torch.Tensor.__reduce_ex__)
+_register_default_op(torch.Tensor.__reduce_ex__, sharded_op_impl)
 
 def sharded_type_as_check(*args, **kwargs):
     """
