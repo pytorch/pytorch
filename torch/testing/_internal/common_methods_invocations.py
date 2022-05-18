@@ -13910,12 +13910,6 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
-            # NotImplementedError: the derivative for 'binary_cross_entropy_backward wrt `target`' is not implemented.
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_gradgrad",
-            ),
         ),
     ),
     # We have to add 2 OpInfo entry for `igamma` and `igammac`.First is the
