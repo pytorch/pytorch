@@ -782,6 +782,12 @@ class FullyShardedDataParallel(nn.Module):
         ]
 
         if sync_module_states:
+            if params != [] and params[0].device == torch.device("cpu"):
+                raise ValueError(
+                    "Module has CPU parameters, but sync_module_states=True is specified."
+                    "This only works for GPU module, please specify `device_id` argument or move"
+                    " module to GPU before init."
+                )
             # Collect buffers we have to synchronize, avoiding buffers that have already
             # been synchronized to avoid redundant synchronization.
             bufs_to_sync = []

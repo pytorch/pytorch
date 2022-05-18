@@ -225,6 +225,27 @@ class TestFSDPMisc(FSDPTest):
         fsdp(inp[0]).sum().backward()
 
     @skip_if_lt_x_gpu(2)
+    def test_cpu_init_with_sync_module_raises(self):
+        """
+        CPU module with sync_module_states=True throws appropriate
+        error because it requires GPU comm.
+        """
+        mod = NestedWrappedModule(
+            group=self.process_group,
+            wrap_fsdp=False,
+            wrap_everything=True,
+            fsdp_init_mode=FSDPInitMode.CUDA_NEVER,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "Module has CPU parameters, but sync_module_states=True is specified."
+        ):
+            FSDP(mod, sync_module_states=True)
+
+        # Specifying device_id with sync_module_states=True works.
+        FSDP(mod, device_id=torch.cuda.current_device(), sync_module_states=True)
+
+    @skip_if_lt_x_gpu(2)
     def test_fsdp_same_model_across_ranks(self):
         """
         FSDP broadcasts model from rank 0 to ensure it starts off with the same
