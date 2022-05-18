@@ -109,8 +109,10 @@ Context::Context(const VkInstance instance, size_t adapter_i)
       adapter_i_(adapter_i),
       device_(runtime()->get_adapter(adapter_i).device_handle()),
       queue_(runtime()->get_adapter(adapter_i).request_queue()),
-      shader_(gpu()),
-      pipeline_(gpu()),
+      shader_layout_cache_(device_),
+      shader_cache_(device_),
+      pipeline_layout_cache_(device_),
+      pipeline_cache_(device_),
       threadcontext_(gpu()) {
 }
 
@@ -184,35 +186,36 @@ static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
 
 Descriptor::Set dispatch_prologue(
     Command::Buffer& command_buffer,
-    const Shader::Layout::Signature& shader_layout_signature,
-    const Shader::Descriptor& shader_descriptor,
-    const Shader::WorkGroup& local_work_group_size) {
+    const ShaderLayout::Signature& shader_layout_signature,
+    const ShaderSource& shader_descriptor,
+    const utils::uvec3& local_work_group_size) {
   Context* const context = api::context();
   Descriptor& descriptor = context->descriptor();
-  Pipeline& pipeline = context->pipeline();
-  Shader& shader = context->shader();
+  ShaderLayoutCache& shader_layout_cache = context->shader_layout_cache();
+  ShaderCache& shader_cache = context->shader_cache();
+  PipelineLayoutCache& pipeline_layout_cache = context->pipeline_layout_cache();
+  ComputePipelineCache& pipeline_cache = context->pipeline_cache();
 
-  const Shader::Layout::Object shader_layout =
-      shader.layout.cache.retrieve({
-        shader_layout_signature,
-      });
+  const VkDescriptorSetLayout shader_layout = shader_layout_cache.retrieve(
+      shader_layout_signature);
 
-  command_buffer.bind(
-      pipeline.cache.retrieve({
-        pipeline.layout.cache.retrieve({
-          shader_layout.handle,
-        }),
-        shader.cache.retrieve(shader_descriptor),
-        local_work_group_size,
-      }));
+  const VkPipelineLayout pipeline_layout = \
+      pipeline_layout_cache.retrieve(shader_layout);
 
-  return descriptor.pool.allocate(shader_layout);
+  const VkPipeline pipeline = pipeline_cache.retrieve({
+      pipeline_layout_cache.retrieve(shader_layout),
+      shader_cache.retrieve(shader_descriptor),
+      local_work_group_size});
+
+  command_buffer.bind(pipeline, pipeline_layout, local_work_group_size);
+
+  return descriptor.pool.allocate(shader_layout, shader_layout_signature);
 }
 
 void dispatch_epilogue(
     Command::Buffer& command_buffer,
     const Descriptor::Set& descriptor_set,
-    const Shader::WorkGroup& global_work_group) {
+    const utils::uvec3& global_work_group) {
   command_buffer.bind(descriptor_set);
   command_buffer.dispatch(global_work_group);
 }

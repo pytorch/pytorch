@@ -344,7 +344,7 @@ TransposeConv2dOpContext TransposeConv2dOpContext::create(
 }
 
 void TransposeConv2dOpContext::conv2d_transpose_sliding_window(
-    const api::Shader::Descriptor& shader,
+    const api::ShaderSource& shader,
     vTensor& v_output,
     const vTensor& v_input) const {
   bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && packed_.v_weight.has_image());

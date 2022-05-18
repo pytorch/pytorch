@@ -439,7 +439,7 @@ Conv2dOpContext Conv2dOpContext::create(
 }
 
 void Conv2dOpContext::conv2d_sliding_window(
-    const api::Shader::Descriptor& shader,
+    const api::ShaderSource& shader,
     vTensor& v_output,
     const vTensor& v_input,
     const std::string& op_name) const {

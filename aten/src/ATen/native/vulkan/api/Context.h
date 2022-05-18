@@ -33,15 +33,18 @@ class Context final {
   Context& operator=(const Context&) = delete;
 
   Context(Context&&) = default;
-  Context& operator=(Context&&) = default;
+  Context& operator=(Context&&) = delete;
 
   ~Context();
 
   GPU gpu();
   Command& command();
-  Shader& shader();
+  //Shader& shader();
+  ShaderLayoutCache& shader_layout_cache();
+  ShaderCache& shader_cache();
   QueryPool& querypool();
-  Pipeline& pipeline();
+  PipelineLayoutCache& pipeline_layout_cache();
+  ComputePipelineCache& pipeline_cache();
   Descriptor& descriptor();
   Resource& resource();
 
@@ -49,10 +52,10 @@ class Context final {
   template<typename... Arguments>
   void dispatch(
       Command::Buffer& command_buffer,
-      const Shader::Layout::Signature& shader_layout_signature,
-      const Shader::Descriptor& shader_descriptor,
-      const Shader::WorkGroup& global_work_group,
-      const Shader::WorkGroup& local_work_group_size,
+      const ShaderLayout::Signature& shader_layout_signature,
+      const ShaderSource& shader_descriptor,
+      const utils::uvec3& global_work_group,
+      const utils::uvec3& local_work_group_size,
       Arguments&&... arguments);
 
   // This function is expensive and its use consequential for performance. Only
@@ -75,8 +78,10 @@ class Context final {
   size_t adapter_i_;
   VkDevice device_;
   Adapter::Queue queue_;
-  Shader shader_;
-  Pipeline pipeline_;
+  ShaderLayoutCache shader_layout_cache_;
+  ShaderCache shader_cache_;
+  PipelineLayoutCache pipeline_layout_cache_;
+  ComputePipelineCache pipeline_cache_;
   ThreadContext threadcontext_;
 };
 
@@ -102,12 +107,20 @@ inline GPU Context::gpu() {
   };
 }
 
-inline Shader& Context::shader() {
-  return shader_;
+inline ShaderLayoutCache& Context::shader_layout_cache() {
+  return shader_layout_cache_;
 }
 
-inline Pipeline& Context::pipeline() {
-  return pipeline_;
+inline ShaderCache& Context::shader_cache() {
+  return shader_cache_;
+}
+
+inline PipelineLayoutCache& Context::pipeline_layout_cache() {
+  return pipeline_layout_cache_;
+}
+
+inline ComputePipelineCache& Context::pipeline_cache() {
+  return pipeline_cache_;
 }
 
 inline Command& Context::command() {
@@ -154,17 +167,17 @@ inline void bind(
 template<typename... Arguments>
 inline void Context::dispatch(
     Command::Buffer& command_buffer,
-    const Shader::Layout::Signature& shader_layout_signature,
-    const Shader::Descriptor& shader_descriptor,
-    const Shader::WorkGroup& global_work_group,
-    const Shader::WorkGroup& local_work_group_size,
+    const ShaderLayout::Signature& shader_layout_signature,
+    const ShaderSource& shader_descriptor,
+    const utils::uvec3& global_work_group,
+    const utils::uvec3& local_work_group_size,
     Arguments&&... arguments) {
   // Forward declaration
   Descriptor::Set dispatch_prologue(
       Command::Buffer&,
-      const Shader::Layout::Signature&,
-      const Shader::Descriptor&,
-      const Shader::WorkGroup&);
+      const ShaderLayout::Signature&,
+      const ShaderSource&,
+      const utils::uvec3&);
 
   // Factor out template parameter independent code to minimize code bloat.
   Descriptor::Set descriptor_set = dispatch_prologue(
@@ -182,7 +195,7 @@ inline void Context::dispatch(
   void dispatch_epilogue(
       Command::Buffer&,
       const Descriptor::Set&,
-      const Shader::WorkGroup&);
+      const utils::uvec3&);
 
   // Factor out template parameter independent code to minimize code bloat.
   dispatch_epilogue(

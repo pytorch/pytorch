@@ -104,7 +104,7 @@ Tensor pool2d(
     const IntArrayRef padding_arg,
     const IntArrayRef dilation_arg,
     const bool ceil_mode,
-    const api::Shader::Descriptor& shader_descriptor,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   if (stride_arg.empty()) {
     stride_arg = kernel_arg;

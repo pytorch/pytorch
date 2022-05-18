@@ -163,7 +163,7 @@ Tensor& clamp_(
 
 Tensor activation(
     const Tensor& self_arg,
-    const api::Shader::Descriptor& shader_descriptor,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   api::Context* const context = api::context();
 
@@ -226,7 +226,7 @@ Tensor activation(
 
 Tensor& activation_(
     Tensor& self,
-    const api::Shader::Descriptor& shader_descriptor,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   api::Context* const context = api::context();
 
@@ -319,7 +319,7 @@ Tensor& hardsigmoid_(Tensor& self) {
 Tensor activation_scalar(
     const Tensor& self_arg,
     const Scalar& scalar_arg,
-    const api::Shader::Descriptor& shader_descriptor,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   api::Context* const context = api::context();
 
@@ -385,7 +385,7 @@ Tensor activation_scalar(
 Tensor& activation_scalar_(
     Tensor& self,
     const Scalar& scalar_arg,
-    const api::Shader::Descriptor& shader_descriptor,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   api::Context* const context = api::context();
 

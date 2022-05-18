@@ -58,7 +58,7 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
       const c10::optional<Scalar>& output_max = c10::nullopt);
 
   void conv2d_sliding_window(
-      const api::Shader::Descriptor& shader,
+      const api::ShaderSource& shader,
       vTensor& v_output,
       const vTensor& v_input,
       const std::string& op_name) const;
