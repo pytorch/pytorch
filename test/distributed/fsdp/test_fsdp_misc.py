@@ -202,7 +202,7 @@ class TestFSDPMisc(FSDPTest):
         after FSDP init and we log a warning.
         """
         torch.cuda.set_device(self.rank)
-        regex = "Module is input on CPU"
+        regex = "Module is put on CPU"
         context = self.assertWarnsRegex(
             expected_warning=UserWarning, expected_regex=regex
         )

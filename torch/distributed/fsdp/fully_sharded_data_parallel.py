@@ -461,7 +461,7 @@ class FullyShardedDataParallel(nn.Module):
         lead to undefined behavior.
 
     .. warning::
-        Passing in `sync_module_states=True` flag requires module to be input
+        Passing in `sync_module_states=True` flag requires module to be put
         on GPU, or to use ``device_id`` argument to specify a CUDA device that
         FSDP will move module to. This is because ``sync_module_states=True``
         requires GPU communication.
@@ -914,7 +914,7 @@ class FullyShardedDataParallel(nn.Module):
 
                 if param.device == torch.device("cpu"):
                     warnings.warn(
-                        "Module is input on CPU and will thus have flattening and sharding"
+                        "Module is put on CPU and will thus have flattening and sharding"
                         " run on CPU, which is less efficient than on GPU. We recommend passing in "
                         "`device_id` argument which will enable FSDP to put module on GPU device,"
                         " module must also be on GPU device to work with `sync_module_states=True` flag"
