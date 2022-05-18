@@ -47,7 +47,9 @@
 
 #include <torch/csrc/lazy/core/shape.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/TensorConversions.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Functions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/WrapDimUtils.h>
 #include <aten/src/ATen/native/ReduceOpsUtils.h>
@@ -290,6 +292,14 @@ std::vector<Shape> compute_shape_index_select(const at::Tensor & self, int64_t d
 std::vector<Shape> compute_shape_kl_div_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, int64_t reduction, bool log_target) {
   // Based on definition of aten/src/ATen/native/Loss.cpp::kl_div_backward_cpu.
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_block_diag(at::TensorList tensors) {
+  // block_diag is composite but all of its base ops are structured, so we can
+  // run meta tensors through it.
+  auto meta_tensors = at::native::to_meta(tensors);
+  auto meta_out = at::block_diag(meta_tensors);
+  return {Shape(meta_out.scalar_type(), meta_out.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {

@@ -31,7 +31,12 @@ inline DimVector computeStrideForViewAsReal(IntArrayRef oldstride) {
   return res;
 }
 
-Tensor _view_as_real_physical(const Tensor& self) {
+// Returns meta info for view_as_real:
+// - dtype
+// - storage_offset
+// - sizes
+// - strides
+std::tuple<ScalarType, int64_t, DimVector, DimVector> _view_as_real_physical_meta(const Tensor& self) {
   TORCH_CHECK(self.is_complex(), "view_as_real is only supported for complex tensors");
   auto old_sizes = self.sizes();
   DimVector new_sizes(old_sizes.size() + 1);
@@ -41,6 +46,15 @@ Tensor _view_as_real_physical(const Tensor& self) {
   auto new_strides = computeStrideForViewAsReal(self.strides());
   auto new_storage_offset = 2 * self.storage_offset();
   const auto float_type = c10::toRealValueType(self.scalar_type());
+  return std::make_tuple(float_type, new_storage_offset, new_sizes, new_strides);
+}
+
+Tensor _view_as_real_physical(const Tensor& self) {
+  auto meta_info = _view_as_real_physical_meta(self);
+  auto float_type = std::get<0>(meta_info);
+  auto new_storage_offset = std::get<1>(meta_info);
+  auto new_sizes = std::get<2>(meta_info);
+  auto new_strides = std::get<3>(meta_info);
   auto real_tensor = view_tensor(self, float_type, new_storage_offset, new_sizes, new_strides);
   return real_tensor;
 }
@@ -51,6 +65,14 @@ Tensor _view_as_real_physical(const Tensor& self) {
 Tensor view_as_real(const Tensor& self) {
   TORCH_CHECK(!self.is_conj(), "view_as_real doesn't work on unresolved conjugated tensors.  To resolve the conjugate tensor so you can view it as real, use self.resolve_conj(); however, be warned that the resulting tensor will NOT alias the original.");
   return _view_as_real_physical(self);
+}
+
+Tensor view_as_real_meta(const Tensor& self) {
+  auto meta_info = _view_as_real_physical_meta(self);
+  ScalarType float_type = std::get<0>(meta_info);
+  DimVector new_sizes = std::get<2>(meta_info);
+  DimVector new_strides = std::get<3>(meta_info);
+  return at::native::empty_strided_meta(new_sizes, new_strides, float_type);
 }
 
 inline DimVector computeStrideForViewAsComplex(IntArrayRef oldstride) {
@@ -65,9 +87,14 @@ inline DimVector computeStrideForViewAsComplex(IntArrayRef oldstride) {
   return res;
 }
 
+// Returns meta info for view_as_real:
+// - dtype
+// - storage_offset
+// - sizes
+// - strides
 // expects as input a float or double tensor with last dimension of size 2
 // and returns back a tensor with corresponding complex dtype
-Tensor view_as_complex(const Tensor& self) {
+std::tuple<ScalarType, int64_t, DimVector, DimVector> _view_as_complex_meta(const Tensor& self) {
   TORCH_CHECK(
     self.scalar_type() == kFloat || self.scalar_type() == kDouble || self.scalar_type() == kHalf,
     "view_as_complex is only supported for half, float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
@@ -83,7 +110,25 @@ Tensor view_as_complex(const Tensor& self) {
   TORCH_CHECK(self.storage_offset() % 2 == 0, "Tensor must have a storage_offset divisible by 2");
   const auto new_storage_offset = self.storage_offset() / 2;
 
+  return std::make_tuple(complex_type, new_storage_offset, new_sizes, new_strides);
+}
+
+Tensor view_as_complex(const Tensor& self) {
+  auto meta_info = _view_as_real_physical_meta(self);
+  auto complex_type = std::get<0>(meta_info);
+  auto new_storage_offset = std::get<1>(meta_info);
+  auto new_sizes = std::get<2>(meta_info);
+  auto new_strides = std::get<3>(meta_info);
   return view_tensor(self, complex_type, new_storage_offset, new_sizes, new_strides);
+}
+
+Tensor view_as_complex_meta(const Tensor& self) {
+  auto meta_info = _view_as_real_physical_meta(self);
+  auto complex_type = std::get<0>(meta_info);
+  auto new_storage_offset = std::get<1>(meta_info);
+  auto new_sizes = std::get<2>(meta_info);
+  auto new_strides = std::get<3>(meta_info);
+  return at::native::empty_strided_meta(new_sizes, new_strides, complex_type);
 }
 
 }} // namespace at::native
