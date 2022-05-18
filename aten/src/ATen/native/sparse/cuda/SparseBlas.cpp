@@ -85,6 +85,7 @@ Tensor& addmm_out_sparse_compressed_cuda(
     Tensor& result) {
 
   if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
+    // TODO: Add native CSC support to avoid costly conversion.
     return addmm_out_sparse_compressed_cuda(self, mat1.to_sparse_csr(), mat2.to_sparse_csr(),
         beta, alpha, result);
   }

@@ -554,6 +554,14 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
         0.0,
         1.0);
   }
+  if ((mat1.layout() == kSparseCsc || mat1.layout() == kSparseCsr) &&
+      (mat2.layout() == kSparseCsc || mat2.layout() == kSparseCsr)) {
+    // TODO: Expensive conversion to CSR. Should add native support for CSC.
+    // Covers CSC @ CSR
+    // Covers CSR @ CSC
+    // Covers CSC @ CSC
+    return _sparse_csr_mm(mat1.to_sparse_csr(), mat2.to_sparse_csr());
+  }
   if (mat1.layout() == kSparseCsc && mat2.layout() == c10::kStrided) {
     // TODO: This is a costly conversion. We should have
     // native support for CSC.

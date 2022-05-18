@@ -2418,10 +2418,10 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
 
   TORCH_CHECK(
       !(self.layout() == kSparseCsr || self.layout() == kSparseCsc ||
-          self.layout() == kSparseBsr || self.layout() == kSparseBsc),
-      "Got layout ",
+        self.layout() == kSparseBsr || self.layout() == kSparseBsc),
+      "torch.transpose_: in-place transposition is not supported for ",
       self.layout(),
-      ", but SparseCsr, SparseCsc, SparseBsr, SparseBsc do not support in-place transposition.");
+      " layout");
 
   if (self.is_mkldnn()) {
     return at::_mkldnn_transpose_(self, dim0, dim1);
@@ -2448,7 +2448,7 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_transpose_(self_clone, dim0, dim1);
   }
   TORCH_CHECK(!(self.layout() == kSparseBsr || self.layout() == kSparseBsc),
-      "Transposition of layout ", self.layout(), " is currently not supported.");
+      "Transposition of tensors with ", self.layout(), " layout is currently not supported.");
 
   // Transpose of a strided tensor is a view operation.
   if (dim0 == dim1) {
@@ -2474,14 +2474,13 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
         self.device());
   }
   if (self.layout() == kSparseCsc) {
-    TORCH_CHECK(self.dim() == 2, "Transposition for layout ", self.layout(), " is only supported for 2D inputs.")
     return at::native::_sparse_csr_tensor_unsafe(
-        self.crow_indices(),
-        self.col_indices(),
+        self.ccol_indices(),
+        self.row_indices(),
         self.values(),
         sizes,
         self.scalar_type(),
-        c10::kSparseCsc,
+        c10::kSparseCsr,
         self.device());
   }
   DimVector strides(self.strides().begin(), self.strides().end());

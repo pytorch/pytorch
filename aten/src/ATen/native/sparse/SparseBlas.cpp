@@ -34,10 +34,9 @@ Tensor& addmv_out_sparse_compressed(
     Tensor& result) {
   TORCH_CHECK(
       mat.layout() != kSparseBsc,
-      "addmv_out_sparse_csr does not support layout SparseBsc, but mat has layout ",
-      mat.layout(),
-      ".");
+      "torch.addmv: operation not supported for mat with SparseBsc layout");
   if (mat.layout() == kSparseCsc) {
+    // TODO: Add native CSC support to avoid this expensive conversion
     return addmv_out_sparse_compressed(
         self, mat.to_sparse_csr(), vec, beta, alpha, result);
   }

@@ -1052,7 +1052,8 @@ class TestSparseCSR(TestCase):
                 alpha = random.random()
                 beta = random.random()
 
-                def _test(t, x, y):
+                def _test_addmm(t, x, y):
+                    # TODO: addmm doesn't support strided result for sparse inputs.
                     # res = beta * t  + alpha * (x @ y)
                     res = torch.addmm(t, x, y, beta=beta, alpha=alpha)
                     expected = torch.addmm(t, x.to_dense(), y.to_dense(), beta=beta, alpha=alpha)
@@ -1062,9 +1063,14 @@ class TestSparseCSR(TestCase):
                     expected = torch.addmm(t, x.to_dense(), y.to_dense())
                     self.assertEqual(res, expected)
 
+                def _test_mm(x, y):
                     res = torch.mm(x, y)
                     expected = torch.mm(x.to_dense(), y.to_dense())
                     self.assertEqual(res, expected)
+
+                def _test(t, x, y):
+                    _test_addmm(t, x, y)
+                    _test_mm(x, y)
 
                 if nnz0 is None:
                     nnz0 = random.randint(di * dk // 2, di * dk)
@@ -1079,6 +1085,30 @@ class TestSparseCSR(TestCase):
                 x = torch.randn(di, dk, dtype=dtype, device=device)
                 y = self.genSparseCSRTensor((dk, dj), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
                 _test(t, x, y)
+
+                # Test mm(CSR, CSR)
+                x = self.genSparseCSRTensor((di, dk), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                y = self.genSparseCSRTensor((dk, di), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                _test_mm(x, y)
+
+                # Test mm(CSR, CSC)
+                x = self.genSparseCSRTensor((di, dk), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                y = self.genSparseCSRTensor((di, dk), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                y = y.transpose(0, 1)
+                _test_mm(x, y)
+
+                # Test mm(CSC, CSR)
+                x = self.genSparseCSRTensor((di, dk), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                y = self.genSparseCSRTensor((di, dk), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                x = x.transpose(0, 1)
+                _test_mm(x, y)
+
+                # Test mm(CSC, CSC)
+                x = self.genSparseCSRTensor((di, dk), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                y = self.genSparseCSRTensor((dk, di), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                x = x.transpose(0, 1)
+                y = y.transpose(0, 1)
+                _test_mm(x, y)
 
         for i in range(2, 5):
             for j in range(2, 8):
@@ -1990,25 +2020,34 @@ class TestSparseCSR(TestCase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_transpose(self, device, dtype):
 
-        def run_test(shape, nnz, index_type, dim0, dim1):
+        def run_test(shape, nnz, index_type, dim0, dim1, transposed):
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            if transposed:
+                a = a.transpose(0, 1)
+                self.assertEqual(a.layout, torch.sparse_csc)
+            else:
+                self.assertEqual(a.layout, torch.sparse_csr)
 
             t = a.transpose(dim0, dim1)
-            self.assertEqual(a.layout, torch.sparse_csr)
             if (dim0 == dim1):
-                self.assertEqual(t.layout, torch.sparse_csr)
+                self.assertEqual(t.layout, a.layout)
             else:
-                self.assertEqual(t.layout, torch.sparse_csc)
+                if transposed:
+                    self.assertEqual(t.layout, torch.sparse_csr)
+                else:
+                    self.assertEqual(t.layout, torch.sparse_csc)
 
             self.assertEqual(t.to_dense(), a.to_dense().transpose(dim0, dim1))
 
-        for shape, index_dtype, (dim0, dim1) in itertools.product(
+
+        for shape, index_dtype, (dim0, dim1), transposed in itertools.product(
                 [(10, 5), (10, 10)],
                 [torch.int32, torch.int64],
-                [(0, 0), (0, 1)]):
-            run_test(shape, 0, index_dtype, dim0, dim1)
-            run_test(shape, max(shape), index_dtype, dim0, dim1)
-            run_test(shape, shape[0] * shape[1], index_dtype, dim0, dim1)
+                [(0, 0), (0, 1)],
+                [False, True]):
+            run_test(shape, 0, index_dtype, dim0, dim1, transposed)
+            run_test(shape, max(shape), index_dtype, dim0, dim1, transposed)
+            run_test(shape, shape[0] * shape[1], index_dtype, dim0, dim1, transposed)
 
     # TODO: This is a stopgap for a rigorous extension of our autograd tests
     # to test the functionality of detach
