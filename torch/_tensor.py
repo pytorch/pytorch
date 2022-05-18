@@ -202,6 +202,9 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
+        if self.dtype not in torch.storage._dtype_to_storage_type_map():
+            raise RuntimeError(f'unsupported Storage type: {self.dtype}')
+
         return torch._TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
 
     def _reduce_ex_internal(self, proto):
