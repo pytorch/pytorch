@@ -309,7 +309,6 @@ vjp_fail = {
     skip('pca_lowrank', ''),  # fails on cuda, runs okay on cpu
     skip('svd_lowrank', ''),  # fails on cuda, runs okay on cpu
     skip('nn.functional.dropout2d', ''),  # fails on cuda, runs okay on cpu
-    xfail('__getitem__', device_type='cuda'),
 }
 
 
@@ -318,18 +317,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
-        xfail('__getitem__', 'functorch', device_type='cuda'),
-        xfail('_masked.amax', device_type='cuda'),
-        xfail('_masked.amin', device_type='cuda'),
-        xfail('_masked.log_softmax', device_type='cuda'),
-        xfail('_masked.mean', device_type='cuda'),
-        xfail('_masked.norm', device_type='cuda'),
-        xfail('_masked.prod', device_type='cuda'),
-        xfail('_masked.softmax', device_type='cuda'),
-        xfail('_masked.softmin', device_type='cuda'),
-        xfail('_masked.std', device_type='cuda'),
-        xfail('_masked.sum', device_type='cuda'),
-        xfail('_masked.var', device_type='cuda'),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -409,16 +396,6 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         xfail('nn.functional.max_unpool3d'),
-        xfail('__getitem__', device_type='cuda'),
-        xfail('_masked.log_softmax', device_type='cuda'),
-        xfail('_masked.mean', device_type='cuda'),
-        xfail('_masked.norm', device_type='cuda'),
-        xfail('_masked.prod', device_type='cuda'),
-        xfail('_masked.softmax', device_type='cuda'),
-        xfail('_masked.softmin', device_type='cuda'),
-        xfail('_masked.std', device_type='cuda'),
-        xfail('_masked.sum', device_type='cuda'),
-        xfail('_masked.var', device_type='cuda'),
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
@@ -466,19 +443,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout2d', ''),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('svd_lowrank', ''),
-
-        xfail('__getitem__', 'functorch', device_type='cuda'),
-        xfail('_masked.amax', device_type='cuda'),
-        xfail('_masked.amin', device_type='cuda'),
-        xfail('_masked.log_softmax', device_type='cuda'),
-        xfail('_masked.mean', device_type='cuda'),
-        xfail('_masked.norm', device_type='cuda'),
-        xfail('_masked.prod', device_type='cuda'),
-        xfail('_masked.softmax', device_type='cuda'),
-        xfail('_masked.softmin', device_type='cuda'),
-        xfail('_masked.std', device_type='cuda'),
-        xfail('_masked.sum', device_type='cuda'),
-        xfail('_masked.var', device_type='cuda'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -524,19 +488,6 @@ class TestOperators(TestCase):
         skip('nn.functional.fractional_max_pool2d'), # randomness
         skip('nn.functional.fractional_max_pool3d'), # randomness
         xfail('nn.functional.binary_cross_entropy'),  # testing problem
-
-        xfail('__getitem__', 'functorch', device_type='cuda'),
-        xfail('_masked.amax', device_type='cuda'),
-        xfail('_masked.amin', device_type='cuda'),
-        xfail('_masked.log_softmax', device_type='cuda'),
-        xfail('_masked.mean', device_type='cuda'),
-        xfail('_masked.norm', device_type='cuda'),
-        xfail('_masked.prod', device_type='cuda'),
-        xfail('_masked.softmax', device_type='cuda'),
-        xfail('_masked.softmin', device_type='cuda'),
-        xfail('_masked.std', device_type='cuda'),
-        xfail('_masked.sum', device_type='cuda'),
-        xfail('_masked.var', device_type='cuda'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -672,19 +623,6 @@ class TestOperators(TestCase):
         # NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool2d', 'grad'),
-
-        xfail('__getitem__', 'functorch', device_type='cuda'),
-        xfail('_masked.amax', device_type='cuda'),
-        xfail('_masked.amin', device_type='cuda'),
-        xfail('_masked.log_softmax', device_type='cuda'),
-        xfail('_masked.mean', device_type='cuda'),
-        xfail('_masked.norm', device_type='cuda'),
-        xfail('_masked.prod', device_type='cuda'),
-        xfail('_masked.softmax', device_type='cuda'),
-        xfail('_masked.softmin', device_type='cuda'),
-        xfail('_masked.std', device_type='cuda'),
-        xfail('_masked.sum', device_type='cuda'),
-        xfail('_masked.var', device_type='cuda'),
     })
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -774,18 +712,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool3d'),
 
-        xfail('__getitem__', device_type='cuda'),
-        xfail('_masked.amax', device_type='cuda'),
-        xfail('_masked.amin', device_type='cuda'),
-        xfail('_masked.log_softmax', device_type='cuda'),
-        xfail('_masked.mean', device_type='cuda'),
-        xfail('_masked.norm', device_type='cuda'),
-        xfail('_masked.prod', device_type='cuda'),
-        xfail('_masked.softmax', device_type='cuda'),
-        xfail('_masked.softmin', device_type='cuda'),
-        xfail('_masked.std', device_type='cuda'),
-        xfail('_masked.sum', device_type='cuda'),
-        xfail('_masked.var', device_type='cuda'),
+        xfail('nn.functional.embedding'),  # embedding_renorm_ does not support fwd AD
+        xfail('put'),  # calls put_ during vmap with only vmaps over other, not self
     })
     def test_vmapjvp(self, device, dtype, op):
         if is_inplace(op, op.get_op()):
@@ -820,15 +748,13 @@ class TestOperators(TestCase):
 
         # The following are bugs that we should fix
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
-        xfail('_masked.mean', device_type='cuda'),
-        xfail('_masked.prod', device_type='cuda'),
         xfail('nn.functional.batch_norm', device_type='cuda'),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
         xfail('nn.functional.hinge_embedding_loss', device_type='cuda'),
+        xfail('_masked.mean'),
+        xfail('_masked.prod'),
 
         # Causing issues with multiple cpu levels of forward mode AD
-        xfail('_masked.mean', device_type='cpu'),
-        xfail('_masked.prod', device_type='cpu'),
         xfail('nn.functional.batch_norm', device_type='cpu'),
         xfail('nn.functional.hinge_embedding_loss', device_type='cpu'),
 
@@ -863,18 +789,9 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool3d'),
 
-        xfail('__getitem__', device_type='cuda'),
-        xfail('_masked.amax', device_type='cuda'),
-        xfail('_masked.amin', device_type='cuda'),
-        xfail('_masked.log_softmax', device_type='cuda'),
-        xfail('_masked.mean', device_type='cuda'),
-        xfail('_masked.norm', device_type='cuda'),
-        xfail('_masked.prod', device_type='cuda'),
-        xfail('_masked.softmax', device_type='cuda'),
-        xfail('_masked.softmin', device_type='cuda'),
-        xfail('_masked.std', device_type='cuda'),
-        xfail('_masked.sum', device_type='cuda'),
-        xfail('_masked.var', device_type='cuda'),
+        xfail('nn.functional.embedding'),  # embedding_renorm_ does not support fwd AD
+        xfail('put'),  # calls put_ during vmap with only vmaps over other, not self
+        xfail('nn.functional.prelu'),  # Call Tensor.as_strided
     }
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
@@ -962,6 +879,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('lu_unpack'),
         xfail('nn.functional.glu'),
+        xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1222,11 +1140,9 @@ class TestOperators(TestCase):
         xfail('nansum', ''),
         xfail('nn.functional.batch_norm', ''),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
-        xfail('nn.functional.bilinear', ''),
         xfail('nn.functional.embedding', ''),
         xfail('nn.functional.embedding', 'functorch'),
         xfail('nn.functional.embedding_bag', ''),
-        xfail('nn.functional.glu', ''),
         xfail('nn.functional.grid_sample', ''),
         xfail('nn.functional.hardsigmoid', ''),
         xfail('nn.functional.hardswish', ''),
@@ -1239,11 +1155,9 @@ class TestOperators(TestCase):
         xfail('nn.functional.softmin', ''),
         xfail('nn.functional.softmin', 'with_dtype'),
         xfail('nn.functional.softplus', ''),
-        xfail('put', ''),
         xfail('renorm', ''),
         xfail('std_mean', ''),
         xfail('symeig', ''),
-        xfail('take', ''),
         xfail('var_mean', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.kl_div', ''),
@@ -1264,18 +1178,6 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'prod'),
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('nn.functional.binary_cross_entropy_with_logits'),
-        xfail('__getitem__', 'functorch', device_type='cuda'),
-        xfail('_masked.amax', device_type='cuda'),
-        xfail('_masked.amin', device_type='cuda'),
-        xfail('_masked.log_softmax', device_type='cuda'),
-        xfail('_masked.mean', device_type='cuda'),
-        xfail('_masked.norm', device_type='cuda'),
-        xfail('_masked.prod', device_type='cuda'),
-        xfail('_masked.softmax', device_type='cuda'),
-        xfail('_masked.softmin', device_type='cuda'),
-        xfail('_masked.std', device_type='cuda'),
-        xfail('_masked.sum', device_type='cuda'),
-        xfail('_masked.var', device_type='cuda'),
     }))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:

@@ -19,7 +19,6 @@ from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing._internal.common_utils import IS_WINDOWS
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
-from contextlib import nullcontext
 
 import functorch
 from functorch import (
@@ -815,7 +814,6 @@ class TestGradTransform(TestCase):
         self.assertEqual(result, (x <= 0).type_as(x))
 
     def test_tensor_ctor_inside_grad(self, device):
-        self.skipTest("Only fails on CUDA but I can't figure out how to test that")
         def foo(x):
             return x * torch.tensor(2., device=device)
 
