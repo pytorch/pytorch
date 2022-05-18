@@ -609,18 +609,9 @@ class TestCommon(TestCase):
     #   - Case 3: out has the correct shape and dtype, but is on a different device type
     #   - Case 4: out has the with correct shape and device, but a dtype that cannot
     #       "safely" cast to
-    @ops(_ops_and_refs, dtypes=OpDTypes.none)
-    def test_out(self, device, op):
+    @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
+    def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
-        supported_dtypes = op.supported_dtypes(self.device_type)
-        if len(supported_dtypes) == 0:
-            self.skipTest("Skipped! Op has not supported dtypes on this device.")
-        dtype = (
-            torch.float32
-            if torch.float32 in supported_dtypes
-            else list(supported_dtypes)[0]
-        )
-
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
             # calls it normally to get the expected result
