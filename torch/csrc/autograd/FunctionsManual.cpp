@@ -719,6 +719,50 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
   return grad_inputs;
 }
 
+std::vector<Tensor> block_diag_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, const std::vector<ScalarType> &dtypes) {
+  std::vector<Tensor> grad_inputs(sizes.size());
+  if (!grad.defined()) {
+    return grad_inputs;
+  }
+  Tensor grad_;
+  bool grad_is_complex = grad.is_complex();
+  if (grad_is_complex) {
+    grad_ = at::real(grad);
+  }
+
+  int64_t cur_dim0 = 0;
+  int64_t cur_dim1 = 0;
+
+  for (const auto i : c10::irange(sizes.size())) {
+    Tensor grad_val;
+    if (!at::isComplexType(dtypes[i]) && grad_is_complex) {
+      // R -> C
+      grad_val = grad_;
+    } else {
+      grad_val = grad;
+    }
+    auto& shape = sizes[i];
+    // If input was empty tensor, gradInput should be empty tensor.
+    if (shape == std::vector<int64_t>({0})) {
+      grad_inputs[i] = at::zeros({0}, grad_val.options());
+      continue;
+    }
+    // 0d case
+    auto dim0 = 1;
+    auto dim1 = 1;
+    // 2d case
+    if (shape.size() == 2) {
+      dim0 = shape[0];
+      dim1 = shape[1];
+    // 1d case
+    } else if (shape.size() == 1) {
+      dim0 = shape[0];
+    }
+    grad_inputs[i] = grad_val.slice(0, cur_dim0, cur_dim0 + dim0).slice(1, cur_dim1, cur_dim1 + dim1);
+  }
+  return grad_inputs;
+}
+
 Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Scalar> & min, const optional<Scalar> & max) {
   // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
   if (max && min) {
@@ -4852,6 +4896,27 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
+  }
+
+  return out_fw_grad;
+}
+
+Tensor block_diag_jvp(at::TensorList tensors) {
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (const auto& t: tensors) {
+    any_defined |= isFwGradDefined(t);
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+
+    for (auto& t: tensors) {
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
+    }
+
+    out_fw_grad = at::block_diag(fw_grads);
   }
 
   return out_fw_grad;

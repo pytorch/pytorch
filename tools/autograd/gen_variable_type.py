@@ -154,6 +154,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "view_as",
     "roll",
     "clone",
+    "block_diag",
     "diag_embed",
     "repeat",
     "expand",
