@@ -3,7 +3,6 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
-#include <ATen/native/vulkan/api/Cache.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <c10/util/hash.h>
 
