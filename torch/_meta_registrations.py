@@ -116,7 +116,7 @@ def meta_adaptive_avg_pool3d(self, output_size):
     return self.new_empty(self.shape[:-3] + tuple(output_size))
 
 @torch.library.impl(meta_lib, "reflection_pad2d")
-def meta_reflection_pad2d(self, padding):
+def meta_pad2d(self, padding):
     valid_dims = self.size(1) != 0 and self.size(2) != 0
     check(
         (self.ndim == 3 and valid_dims)
@@ -138,8 +138,3 @@ def meta_reflection_pad2d(self, padding):
         return self.new_empty((nplane, output_h, output_w))
     else:
         return self.new_empty((nbatch, nplane, output_h, output_w))
-
-
-    return self.new_empty(self.shape[:-3] + tuple(output_size))
-
-
