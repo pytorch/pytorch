@@ -189,12 +189,12 @@ $2 = torch._ops.aten.add.Tensor($0, tensor([[1., 1.],
     # They also need special handling.
     def test_mutable_op_not_inplace_or_other(self):
         def f(x):
-            return torch._fused_moving_avg_obs_fq_helper(x, x, x, x, x, x, x, 1.0, 1, 1, 0)
+            return torch._fused_moving_avg_obs_fq_helper(x, x, x, x, x, x, x, 1.0, 0, 1, 0)
 
         logs = self.get_logs(f, torch.ones(1))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functional($0, $0, $0, $0, $0, $0, $0, 1.0, 1, 1, 0)""")
+$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functional($0, $0, $0, $0, $0, $0, $0, 1.0, 0, 1, 0)""")
 
     def test_as_strided(self):
         def f(x):
@@ -217,16 +217,9 @@ $2 = torch._ops.aten.add.Tensor($1, 1)""")
         logs = self.get_logs(f, torch.ones(2, 2))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten.expand_copy.default($0, [2, 2])
-$2 = torch._ops.aten.slice_scatter.default(tensor([[0., 0., 0., 0.],
-        [0., 0., 0., 0.]]), $1, 1, 0, 2)
-$3 = torch._ops.aten.slice_scatter.default(tensor([[0., 0., 0., 0.],
-        [0., 0., 0., 0.],
-        [0., 0., 0., 0.],
-        [0., 0., 0., 0.]]), $2, 0, 0, 2)
-$4 = torch._ops.aten.slice_copy.Tensor($3, 0, 2, 4)
-$5 = torch._ops.aten.slice_copy.Tensor($4, 1, 2, 4)
-$6 = torch._ops.aten.expand_copy.default($0, [2, 2])""")
+$1 = torch._ops.aten.block_diag.default([LoggingTensor(tensor([[1., 1.],
+        [1., 1.]])), LoggingTensor(tensor([[1., 1.],
+        [1., 1.]]))])""")
 
     def test_cat(self):
         def f(x):
