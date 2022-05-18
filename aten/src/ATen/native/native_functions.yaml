@@ -331,11 +331,13 @@
   variants: function
   dispatch:
     CPU, CUDA, MPS: view_as_real
+    Meta: view_as_real_meta
 
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
     CPU, CUDA: view_as_complex
+    Meta: view_as_complex_meta
 
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
@@ -1151,6 +1153,8 @@
 
 - func: block_diag(Tensor[] tensors) -> Tensor
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: block_diag
 
 - func: ceil(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -3618,8 +3622,14 @@
   variants: function, method
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
+  dispatch:
+    CPU: pixel_shuffle_cpu
+    CompositeExplicitAutograd: math_pixel_shuffle
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
+  dispatch:
+    CPU: pixel_unshuffle_cpu
+    CompositeExplicitAutograd: math_pixel_unshuffle
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:
@@ -5323,7 +5333,7 @@
   dispatch:
     CompositeExplicitAutograd: clone
     SparseCPU, SparseCUDA: clone_sparse
-    SparseCsrCPU, SparseCsrCUDA: clone_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: clone_sparse_compressed
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
@@ -6269,6 +6279,10 @@
 
 - func: lift(Tensor self) -> Tensor
   variants: method
+  dispatch:
+    # Not making it CompositeImplicitAutograd because lift
+    # should be a primitive w.r.t. functorch
+    CompositeExplicitAutograd: lift
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
@@ -6571,6 +6585,12 @@
   dispatch:
     CompositeExplicitAutograd: bitwise_and
 
+- func: bitwise_and.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: bitwise_and
+
 - func: bitwise_and.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
@@ -6619,6 +6639,12 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
 
+- func: bitwise_or.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: bitwise_or
+
 - func: bitwise_or.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
@@ -6666,6 +6692,12 @@
 - func: bitwise_xor.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+
+- func: bitwise_xor.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: bitwise_xor
 
 - func: bitwise_xor.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator

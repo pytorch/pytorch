@@ -24,6 +24,7 @@ full_codegen:
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
   - bitwise_or.Tensor
+  - block_diag
   - bmm
   - cat
   - clamp
