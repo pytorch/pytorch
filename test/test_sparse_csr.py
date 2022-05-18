@@ -1972,6 +1972,11 @@ class TestSparseCSR(TestCase):
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
 
             t = a.transpose(dim0, dim1)
+            self.assertEqual(a.layout, torch.sparse_csr)
+            if (dim0 == dim1):
+                self.assertEqual(t.layout, torch.sparse_csr)
+            else:
+                self.assertEqual(t.layout, torch.sparse_csc)
 
             self.assertEqual(t.to_dense(), a.to_dense().transpose(dim0, dim1))
 

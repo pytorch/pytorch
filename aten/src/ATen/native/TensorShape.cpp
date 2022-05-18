@@ -2463,6 +2463,7 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   std::swap(sizes[dim0], sizes[dim1]);
 
   if (self.layout() == kSparseCsr) {
+    TORCH_CHECK(self.dim() == 2, "Transposition for layout ", self.layout(), " is only supported for 2D inputs.")
     return at::native::_sparse_csc_tensor_unsafe(
         self.crow_indices(),
         self.col_indices(),
@@ -2473,6 +2474,7 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
         self.device());
   }
   if (self.layout() == kSparseCsc) {
+    TORCH_CHECK(self.dim() == 2, "Transposition for layout ", self.layout(), " is only supported for 2D inputs.")
     return at::native::_sparse_csr_tensor_unsafe(
         self.crow_indices(),
         self.col_indices(),
