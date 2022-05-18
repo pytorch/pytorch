@@ -3508,10 +3508,8 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
   // We need to distinguish the cuSOLVER case, as cuSOLVER expects F-contig matrices, but
   // it computes V rather than Vh
   const bool use_cusolver = at::native::svd_uses_cusolver(A);
-  if (!use_cusolver && driver.has_value()) {
-    TORCH_CHECK(false,
-      "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
-  }
+  TORCH_CHECK(use_cusolver || !driver.has_value(),
+    "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
 
   // A always needs to be copied as its contents will be destroyed during the computaton of the SVD
   // Now, MAGMA needs the copy to be on CPU, while cuSOLVER needs it to be on CUDA, so we'll defer
@@ -3598,13 +3596,13 @@ Tensor linalg_svdvals(const Tensor& A, c10::optional<c10::string_view> driver) {
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv,
-    c10::optional<c10::string_view> driver, Tensor& U, Tensor& S, Tensor& V) {
+    Tensor& U, Tensor& S, Tensor& V) {
 
   if (compute_uv) {
     if (V.dim() >= 2) {
       V.transpose_(-2, -1);
     }
-    at::linalg_svd_out(U, S, V, self, /*full_matrices=*/!some, driver);
+    at::linalg_svd_out(U, S, V, self, /*full_matrices=*/!some);
     V.transpose_(-2, -1);
     if (V.is_complex()) {
       // We cannot use `_set_conj` as it does not play well with backwards
@@ -3617,7 +3615,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
     TORCH_CHECK(self.scalar_type() == V.scalar_type(),
     "torch.svd: Expected out tensor to have dtype ", self.scalar_type(), " but got ", V.scalar_type(), " instead");
 
-    at::linalg_svdvals_out(S, self, driver);
+    at::linalg_svdvals_out(S, self);
     // some == false returns U, Vh of size (m, m), (n, n) full of zeros
     const auto m = self.size(-2);
     const auto n = self.size(-1);
@@ -3636,7 +3634,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
   return std::tie(U, S, V);
 }
 
-std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv, c10::optional<c10::string_view> driver) {
+std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
   // TODO: uncomment the following when svd is deprecated not only in docs
   // torch/xla is blocking the transition from at::svd to at::linalg_svd in at::linalg_pinv code
   // see https://github.com/pytorch/xla/issues/2755
@@ -3654,9 +3652,9 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
   TORCH_CHECK(self.dim() >= 2, "linalg.svd: input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor U, S, Vh;
   if (compute_uv) {
-    std::tie(U, S, Vh) = at::linalg_svd(self, /*full_matrices=*/!some, driver);
+    std::tie(U, S, Vh) = at::linalg_svd(self, /*full_matrices=*/!some);
   } else {
-    S = at::linalg_svdvals(self, driver);
+    S = at::linalg_svdvals(self);
     // some == false returns U, Vh of size (m, m), (n, n) full of zeros
     const auto m = self.size(-2);
     const auto n = self.size(-1);

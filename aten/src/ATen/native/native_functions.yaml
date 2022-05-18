@@ -7493,9 +7493,9 @@
   dispatch:
     CompositeExplicitAutograd: eig
 
-- func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, str? driver=None, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
+- func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
-- func: svd(Tensor self, bool some=True, bool compute_uv=True, *, str? driver=None) -> (Tensor U, Tensor S, Tensor V)
+- func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
 
 # swapaxes, alias for transpose

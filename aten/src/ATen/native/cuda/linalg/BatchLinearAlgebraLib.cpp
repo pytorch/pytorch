@@ -808,9 +808,6 @@ inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, cons
   //   for example, certain conditions hold (required singular value is far from zero),
   //   then the performance can be improved by passing a null pointer to h_RnrmF, i.e. no computation of residual norm.
   // Comment: calculation of Frobenius norm is expensive and doesn't affect accuracy of the result
-  //   We may consider to return or check this array in some way in the future.
-  // auto& host_allocator = *at::getCPUAllocator();
-  // auto residual_frobenius_norm = host_allocator.allocate(sizeof(double) * batchsize);
 
   at::cuda::solver::gesvdaStridedBatched<scalar_t>(
     handle, jobz, rank, m, n, A_data, lda, A_stride, S_data, S_stride, U_data, ldu, U_stride, V_data, ldv, V_stride,
@@ -905,43 +902,28 @@ void svd_cusolver(const Tensor& A,
 
   static const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
 
-  const bool gesvdj_batched_requirements = (m <= 32 && n <= 32 && batch_size > 1 && (full_matrices || m == n));
-  bool convergence_check_needed = false;
-
-  if (!driver.has_value()) {
-    // use the default heuristics
-    if (gesvdj_batched_requirements) {
+  // The default heuristic is to use gesvdj driver
+  const auto driver_v = driver.value_or("gesvdj");
+ 
+  if (driver_v == "gesvd") {
+    svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
+  } else if (driver_v == "gesvdj") {
+    if (m <= 32 && n <= 32 && batch_size > 1 && (full_matrices || m == n)) {
       svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
-      convergence_check_needed = true;
     } else {
       // gesvdj driver may be numerically unstable for large sized matrix
       svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
-      convergence_check_needed = true;
     }
-    // DO NOT use gesvdaStridedBatched as a default SVD backend driver since it may be inaccurate.
+  } else if (driver_v == "gesvda") {
+    // cuSOLVER: gesvdaStridedBatched is preferred for "tall skinny" (m > n) matrices
+    // We do a transpose here to make it also work for (m < n) matrices.
+    svd_cusolver_gesvdaStridedBatched(A, U, S, V, info, full_matrices, compute_uv);
   } else {
-    if (driver.value() == "gesvd") {
-      svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
-    } else if (driver.value() == "gesvdj") {
-      if (gesvdj_batched_requirements) {
-        svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
-        convergence_check_needed = true;
-      } else {
-        // gesvdj driver may be numerically unstable for large sized matrix
-        svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
-        convergence_check_needed = true;
-      }
-    } else if (driver.value() == "gesvda") {
-      // cuSOLVER: gesvdaStridedBatched is preferred for "tall skinny" (m > n) matrices
-      // We do a transpose here to make it also work for (m < n) matrices.
-      svd_cusolver_gesvdaStridedBatched(A, U, S, V, info, full_matrices, compute_uv);
-      convergence_check_needed = true;
-    } else {
-      TORCH_CHECK(false, "torch.linalg.svd: unknown svd driver ", driver.value(), " in svd_cusolver computation. ", check_svd_doc);
-    }
+    TORCH_CHECK(false, "torch.linalg.svd: unknown svd driver ", driver_v, " in svd_cusolver computation. ", check_svd_doc);
   }
 
-  if (convergence_check_needed) {
+  // Need convergence check
+  if (driver_v != "gesvd") {
     // A device-host sync will be performed.
     // Todo: implement the svd_ex variant to not check result convergence, thus removing the device-host sync
     const auto svd_non_converging_batches = _check_gesvdj_convergence(info, k + 1);

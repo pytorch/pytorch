@@ -1631,6 +1631,18 @@ Differences with `numpy.linalg.svd`:
 
 .. note:: Selection of `driver` (this keyword argument only works on CUDA inputs with cuSOLVER backend):
 
+    The `driver` kwarg may be used in CUDA with a cuSOLVER backend to choose the algorithm used to compute the SVD.
+    The choice of a driver is a trade-off between accuracy and speed.
+    
+    - If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
+    
+      - For a general matrix: `'gesvdj'` (Jacobi method)
+      - If :attr:`A` is tall or wide (`m >> n` or `m << n`): `'gesvda'` (Approximate method)
+    
+    - If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
+    
+    By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
+
     - When `driver` is not given or set to `None` (*default*), a driver will be selected automatically
       based on the shape of the inputs.
       The default choice should be efficient and precise for most inputs. However, if input matrices
@@ -1645,7 +1657,7 @@ Differences with `numpy.linalg.svd`:
       but it may get less accurate results for ill-conditioned matrices or matrices with very large sizes
       (be cautious if matrix size > 2048).
     - The `gesvda` driver directly calls the cuSOLVER `cusolverDn<t>gesvdaStridedBatch` method. This is an
-      approximation method that is preferred when the number of rows is much different from the number of columns
+      approximate method that is faster for very tall or very wide matrices.
       (`m >> n` or `n >> m`).
 
 .. note:: When :attr:`full_matrices`\ `= True`, the gradients with respect to `U[..., :, min(m, n):]`
@@ -1702,7 +1714,6 @@ Args:
 
 Keyword args:
     driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
-        If `None`, a default heuristic of algorithms will be used.
         Available options are: `None`, `gesvd`, `gesvdj`, and `gesvda`.
         Default: `None`.
     out (tuple, optional): output tuple of three tensors. Ignored if `None`.

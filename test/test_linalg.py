@@ -2601,13 +2601,11 @@ class TestLinalg(TestCase):
             torch.backends.cuda.preferred_linalg_library(backend)
 
             for batch, m, n, driver in product(batches, ns, ns, drivers):
-                if backend == 'cusolver' or driver is None:
-                    # only test cases below and skip otherwise:
-                    # - backend == 'cusolver' (driver can be anything)
-                    # - backend != 'cusolver' (driver should only be None)
-                    pass
-                else:
-                    continue
+                if not (backend == 'cusolver' or driver is None):
+	                # only test cases below and skip otherwise:
+	                # - backend == 'cusolver' (driver can be anything)
+	                # - backend != 'cusolver' (driver should only be None)
+	                continue
 
                 shape = batch + (m, n)
                 k = min(m, n)
@@ -2622,14 +2620,14 @@ class TestLinalg(TestCase):
                 S_s = torch.linalg.svdvals(A, driver=driver)
                 self.assertEqual(S_s, S)
 
-                U, S, V = torch.svd(A, some=True, driver=driver)
+                U, S, V = torch.svd(A, some=True)
                 self.assertEqual((U @ S.to(A.dtype).diag_embed()) @ V.mH, A)
 
-                U_f, S_f, V_f = torch.svd(A, some=False, driver=driver)
+                U_f, S_f, V_f = torch.svd(A, some=False)
                 self.assertEqual(S_f, S)
                 self.assertEqual((U_f[..., :k] @ S_f.to(A.dtype).diag_embed()) @ V_f[..., :k].mH, A)
 
-                S_s = torch.svd(A, compute_uv=False, driver=driver).S
+                S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
 
     @skipCUDAIfNoMagmaAndNoCusolver
