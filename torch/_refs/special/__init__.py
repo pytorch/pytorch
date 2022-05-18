@@ -14,14 +14,10 @@ __all__ = [
 i0e = _make_elementwise_unary_reference(
     prims.bessel_i0e,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_opmath=True,
-    CPU_use_opmath=False,
     aten_op=torch.ops.aten.special_i0e,
 )
 i1e = _make_elementwise_unary_reference(
     prims.bessel_i1e,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_opmath=True,
-    CPU_use_opmath=False,
     aten_op=torch.ops.aten.special_i1e,
 )

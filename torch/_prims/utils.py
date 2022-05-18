@@ -184,6 +184,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
 
     if a.device != b.device:
         # Handles special cuda:0 vs cuda case
+        # TODO: we should review why this happens and see about fixing it
         if (str(a.device) == "cuda:0" or str(a.device) == "cuda") and (
             str(b.device) == "cuda:0" or str(b.device) == "cuda"
         ):
@@ -192,32 +193,50 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
             msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
             raise AssertionError(msg)
 
+    same_strides, idx = check_significant_strides(a, b)
+    if not same_strides:
+        msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+            a.stride(), b.stride(), idx
+        )
+        raise RuntimeError(msg)
+
+
+def check_significant_strides(
+    a: TensorLikeType, b: TensorLikeType
+) -> Tuple[bool, Optional[int]]:
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
-    if a.device.type == "cuda" or b.device.type == "cuda":
-        stride_result, idx = compare_significant_strides(a, b)
-        if not stride_result:
-            msg = (
-                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-                    a.stride(), b.stride(), idx
-                )
-            )
-            raise RuntimeError(msg)
+    # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
+    # and for tensors with more than one element
+    if (a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
+        for idx in range(a.ndim):
+            if a.stride()[idx] != b.stride()[idx] and a.shape[idx] > 1:
+                return False, idx
+
+    return True, None
 
 
-def compare_significant_strides(
-    a: TensorLikeType, b: TensorLikeType
-) -> Tuple[bool, int]:
-    assert a.ndim == b.ndim
+def is_contiguous(a: TensorLikeType) -> bool:
+    """
+    Tests whether a tensor is contiguous or not.
 
-    for idx in range(a.ndim):
-        assert a.shape[idx] == b.shape[idx]
-        if a.shape[idx] == 0 or a.shape[idx] == 1:
+    Tensors are contiguous when they have no elements,
+    or when they have "nested" strides.
+    """
+    if a.numel() == 0:
+        return True
+
+    expected_stride = 1
+    for x, y in reversed(tuple(zip(a.shape, a.stride()))):
+        # Skips checking strides when a dimension has length 1
+        if x == 1:
             continue
-        if a.stride()[idx] != b.stride()[idx]:
-            return False, idx
 
-    return True, -1
+        if y != expected_stride:
+            return False
+        expected_stride = expected_stride * x
+
+    return True
 
 
 # NOTE: Based on the implementation in TensorIterator.cpp, but note that
@@ -226,6 +245,8 @@ def compare_significant_strides(
 # "non overlapping and dense", but this is incorrect. The
 # output of elementwise operations are always given
 # non overlapping and dense strides.
+# This is also INCORRECT because it does not model TensorIterator's
+# short-circuit, which can cause different strides.
 def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
     """
     Computes the output strides for elementwise operations.
@@ -235,8 +256,10 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
 
-    # Acquires the shape
     check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
+
+    # Filters the tensors to actual tensors
+    all_tensors = all(isinstance(a, TensorLike) for a in tensors)
     tensors = tuple(
         a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
     )
@@ -289,6 +312,9 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
         permuted_shape[idx] = shape[x]
 
     new_strides = make_contiguous_strides_for(permuted_shape)
+    # print(f"new_strides is {new_strides}")
+    # print(f"shape is {shape}")
+    # print(f"permuted_shape is {permuted_shape}")
     permuted_strides = [-1] * ndim
     for idx, x in enumerate(perm):
         permuted_strides[x] = new_strides[idx]
@@ -779,17 +805,17 @@ def _get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
 
 class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     DEFAULT = (0,)
-    INT_TO_FLOAT = (1,)
-    ALWAYS_BOOL = (2,)
-    COMPLEX_TO_FLOAT = (3,)
-    BOOL_TO_LONG = (4,)
+    NO_OPMATH = (1,)
+    INT_TO_FLOAT = (2,)
+    ALWAYS_BOOL = (3,)
+    COMPLEX_TO_FLOAT = (4,)
+    BOOL_TO_LONG = (5,)
 
 
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
-    use_opmath=False,
 ) -> Tuple[torch.dtype, torch.dtype]:
     """
     Computes the computation and result dtypes for elementwise type promotion
@@ -797,7 +823,7 @@ def elementwise_dtypes(
 
     Note that not all inputs to an elementwise operation necessarily participate in type promotion.
     For example, the "alpha" parameter of torch.add does not participate in type promotion,
-    although it is cast to the Python type corresponding to the computation dtype that
+    although it may be cast to the Python type corresponding to the computation dtype that
     the type promotion algorithm determines.
 
     Default elementwise type promotion, which all other type promotion kinds tweak (see below),
@@ -840,33 +866,36 @@ def elementwise_dtypes(
       complex64  -> complex64
       complex128 -> complex128
 
-    The DEFAULT type promotion option computes per above, and uses the result dtype as the computation dtype.
+    The DEFAULT type promotion kind computes per above, and then uses the result dtype to pick a computation
+    dtype by mapping low precision floating point and complex dtypes as follows:
 
-    The INT_TO_FLOAT and BOOL_TO_LONG options map the result dtype to another dtype first, while COMPLEX_TO_FLOAT
-    maps the result dtype to another dtype, as follows:
+      float16   -> float32
+      bfloat16  -> float32
+      complex32 -> complex64
 
-        INT_TO_FLOAT  maps all boolean and integer result dtypes to the default floating point dtype
-        COMPLEX_TO_FLOAT  maps complex result dtypes to their corresponding floating point dtype
-        BOOL_TO_LONG maps the boolean result dtype to long
+    This is referred to as "op math", and the NO_OPMATH type promotion kind disables this mapping, making the
+    computation dtype the same as the result dtype when it's selected. NO_OPMATH is appropriate for kernels
+    which perform no mathematical operations on their tensors (see below for examples).
 
-    The "corresponding floating point dtypes" used by COMPLEX_TO_FLOAT are:
+    The INT_TO_FLOAT type promotion kind maps boolean and integer maps result dtypes to the default floating point dtype,
+    and computation dtypes to the appropriate op math dtype.
+
+    The COMPLEX_TO_FLOAT type promotion kind maps complex result dtypes to the corresponding float dtype, following this
+    mapping:
 
         complex32  -> float16
         complex64  -> float32
         complex128 -> float64
 
+    Note that COMPLEX_TO_FLOAT derives the computation dtype as the DEFAULT setting does.
 
-    The optional use_opmath flag tweaks the above slightly. If use_opmath=True then the "computation dtype" is
-    determined by mapping the result_dtype above as follows:
+    The BOOL_TO_LONG type promotion kind maps boolean computation and result dtypes to long.
 
-        float16   -> float32
-        bfloat16  -> float32
-        complex32 -> complex64
-
-    The ALWAYS_BOOL type promotion option always maps the result dtype to bool.
+    The ALWAYS_BOOL type promotion kind always sets the result dtype to bool.
 
     Example operators for each type promotion option:
-      DEFAULT                 : nextafter
+      DEFAULT                 : add
+      NO_OPMATH               : where, nextafter, cat
       INT_TO_FLOAT            : sin
       COMPLEX_TO_FLOAT        : abs
       BOOL_TO_LONG            : pow
@@ -962,32 +991,25 @@ def elementwise_dtypes(
         result_dtype = torch.bool
 
     if type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
-        if use_opmath:
-            return _get_computation_dtype(result_dtype), result_dtype
+        return _get_computation_dtype(result_dtype), result_dtype
+    elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH:
         return result_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
         if is_integer_dtype(result_dtype) or is_boolean_dtype(result_dtype):
             result_dtype = torch.get_default_dtype()
-        if use_opmath:
-            return _get_computation_dtype(result_dtype), result_dtype
-        return result_dtype, result_dtype
+        return _get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
+        # NOTE: computation can still occur in a complex dtype
+        computation_dtype = _get_computation_dtype(result_dtype)
         if is_complex_dtype(result_dtype):
-            # Note: computation still occurs in complex
-            return _get_computation_dtype(result_dtype), corresponding_real_dtype(
-                result_dtype
-            )
-        if use_opmath:
-            return _get_computation_dtype(result_dtype), result_dtype
-        return result_dtype, result_dtype
+            result_dtype = corresponding_real_dtype(result_dtype)
+        return computation_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG:
         if is_boolean_dtype(result_dtype):
             return torch.long, torch.long
-        if use_opmath:
-            return _get_computation_dtype(result_dtype), result_dtype
-        return result_dtype, result_dtype
+        return _get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
-        return result_dtype, torch.bool
+        return _get_computation_dtype(result_dtype), torch.bool
     else:
         raise ValueError(
             "Unknown type promotion kind {0}".format(str(type_promotion_kind))
@@ -1020,7 +1042,7 @@ def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
             strides.append(multiplier)
             multiplier = l * multiplier
         else:
-            strides.append(1)
+            strides.append(multiplier)
 
     result = tuple(reversed(strides))
     return result

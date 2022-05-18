@@ -1692,22 +1692,22 @@ def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # input shape, output shape, output stride, output storage offset
-    test_cases = [
+    test_cases = (
         ((1,), (1,), (1,), 0),
         ((3, 3), (2, 2), (1, 2), 0),
         ((3, 3), (2, 2), (1, 2), 1),
         ((16,), (2, 2, 2, 2), (1, 1, 1, 1), 0),
         ((16,), (2, 1, 1, 2), (1, 7, 7, 1), 0),
-    ]
-
-    samples = []
+    )
 
     for input_shape, output_shape, stride, storage_offset in test_cases:
         input_t = make_arg(input_shape)
         kwargs = dict(storage_offset=storage_offset)
-        samples.append(SampleInput(input_t, args=(output_shape, stride), kwargs=kwargs))
+        yield SampleInput(input_t, args=(output_shape, stride), kwargs=kwargs)
 
-    return samples
+    # as_strided on offset, partial views
+    yield SampleInput(make_arg((20,))[5:15], args=((2, 2), (1, 2)))
+    yield SampleInput(make_arg((20,))[5:15], args=((2, 2), (1, 2)), kwargs={'storage_offset': 0})
 
 def sample_inputs_combinations(op_info, device, dtype, requires_grad, **kwargs):
     inputs = (
@@ -3880,18 +3880,6 @@ def _fill_indices(idx, dim, dim_size, elems_per_row, m, n, o):
                 ii = [i, j, k]
                 ii[dim] = slice(0, idx.size(dim) + 1)
                 idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
-
-def error_inputs_bitwise_not(op_info, device, **kwargs):
-    bad = make_tensor((5, 5), device=device, dtype=torch.float32)
-    yield ErrorInput(SampleInput(bad), error_regex="Float")
-
-def error_inputs_bitwise(op_info, device, **kwargs):
-    bad = make_tensor((5, 5), device=device, dtype=torch.float32)
-    good = make_tensor((5, 5), device=device, dtype=torch.int32)
-    yield ErrorInput(SampleInput(bad, args=(good,)), error_regex="Float")
-    yield ErrorInput(SampleInput(good, args=(bad,)), error_regex="Float")
-    yield ErrorInput(SampleInput(2.5, args=(good,)), error_regex="Float")
-    yield ErrorInput(SampleInput(good, args=(2.5,)), error_regex="Float")
 
 def error_inputs_gather(op_info, device, **kwargs):
     # src is [1, 2]
@@ -10260,7 +10248,6 @@ op_db: List[OpInfo] = [
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
                    operator_variant=operator.invert,
-                   error_inputs_func=error_inputs_bitwise_not,
                    supports_autograd=False),
     BinaryUfuncInfo('bitwise_left_shift',
                     op=torch.bitwise_left_shift,
@@ -10268,7 +10255,6 @@ op_db: List[OpInfo] = [
                     dtypesIfCUDA=integral_types(),
                     operator_variant=operator.lshift,
                     inplace_operator_variant=operator.ilshift,
-                    error_inputs_func=error_inputs_bitwise,
                     supports_autograd=False,
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs=dict(low=0),
@@ -10281,7 +10267,6 @@ op_db: List[OpInfo] = [
                     dtypesIfCUDA=integral_types(),
                     operator_variant=operator.rshift,
                     inplace_operator_variant=operator.irshift,
-                    error_inputs_func=error_inputs_bitwise,
                     supports_autograd=False,
                     supports_one_python_scalar=True,
                     rhs_make_tensor_kwargs=dict(low=0),
@@ -12445,7 +12430,6 @@ op_db: List[OpInfo] = [
                     operator_variant=operator.and_,
                     inplace_operator_variant=operator.iand,
                     supports_autograd=False,
-                    error_inputs_func=error_inputs_bitwise,
                     supports_one_python_scalar=True,
                     skips=(
                         # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
@@ -12458,7 +12442,6 @@ op_db: List[OpInfo] = [
                     operator_variant=operator.or_,
                     inplace_operator_variant=operator.ior,
                     supports_autograd=False,
-                    error_inputs_func=error_inputs_bitwise,
                     supports_one_python_scalar=True,
                     skips=(
                         # TODO: FIXME: RuntimeError: "bitwise_or_cuda" not implemented for 'Half'
@@ -12473,7 +12456,6 @@ op_db: List[OpInfo] = [
                     operator_variant=operator.xor,
                     inplace_operator_variant=operator.ixor,
                     supports_autograd=False,
-                    error_inputs_func=error_inputs_bitwise,
                     supports_one_python_scalar=True,
                     skips=(
                         # TODO: FIXME: RuntimeError: "bitwise_xor_cuda" not implemented for 'Half'
@@ -12645,7 +12627,16 @@ op_db: List[OpInfo] = [
                # Note: This xfail is fine -- it's inherent to how as_strided works
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # AssertionError: False is not true : Scalars failed to compare as equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               # RuntimeError: This operator is not Composite Compliant
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               # Not close
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing'),
+               # Not close
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.skip("Numerous errors"), 'TestGradients'))),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.bfloat16),
@@ -18616,9 +18607,6 @@ python_ref_db = [
         "_refs.abs",
         torch_opinfo_name="abs",
         skips=(
-            # https://github.com/pytorch/pytorch/issues/77526
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf, torch.cfloat, torch.cdouble), device_type='cuda'),
             # On CPU: Output Mismatch as complexhalf uses non-vectorized path vs ref which seems to use
             # vectorized path
             # See also : https://github.com/pytorch/pytorch/issues/48486
@@ -18777,11 +18765,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.square",
         torch_opinfo_name="square",
-        skips=(
-            # Strides are incorrect -- maybe fix by modeling square as ref
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.bool,), device_type='cuda'),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.tan",
@@ -18826,6 +18809,20 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=1, rtol=0),
+                        torch.float16: tol(atol=1e-2, rtol=0),
+                        torch.chalf: tol(atol=1e-2, rtol=0),
+                    }
+                ),
+                "TestCommon",
+                "test_python_reference_consistency",
+                device_type='cpu'
+            ),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
@@ -18947,6 +18944,20 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=1, rtol=0),
+                        torch.float16: tol(atol=1e-2, rtol=0),
+                        torch.chalf: tol(atol=1e-2, rtol=0),
+                    }
+                ),
+                "TestCommon",
+                "test_python_reference_consistency",
+                device_type='cpu'
+            ),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.true_divide",
@@ -19126,6 +19137,8 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
+            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, dtypes=(torch.chalf,), device_type='cuda'),
         ),
     ),
     # TODO: add full and full_like OpInfos

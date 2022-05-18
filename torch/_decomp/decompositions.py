@@ -24,13 +24,12 @@ class Reduction(Enum):
 # This wraps a decomposition and performs various type promotion logic within it, depending on the strategy provided
 # We're currently re-using ELEMENTWISE_TYPE_PROMOTION_KIND, although some of the usages are on non-elementwise ops
 # Will need to validate the non-elementwise uses
-def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND, use_opmath=True):
+def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND):
     @functools.wraps(f)
     def inner(*args, **kwargs):
         flat_args = [x for x in tree_flatten((args, kwargs))[0] if isinstance(x, Tensor)]
         computation_dtype, result_dtype = utils.elementwise_dtypes(*flat_args,
-                                                                   type_promotion_kind=type_promotion,
-                                                                   use_opmath=use_opmath)
+                                                                   type_promotion_kind=type_promotion)
 
         # TODO: pretty sure this is not quite right
         def increase_prec(x):

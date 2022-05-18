@@ -19,8 +19,6 @@ __all__ = [
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    use_opmath=True,
-    CPU_use_opmath=False,
 )
 def elu(
     a: TensorLikeType, alpha: Optional[NumberType] = None, inplace: bool = False

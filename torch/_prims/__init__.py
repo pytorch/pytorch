@@ -236,8 +236,10 @@ class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
     COMPLEX_TO_FLOAT = (3,)
 
 
-# TODO: implement and test type promotion and stride behavior
-def _elementwise_meta(*args, type_promotion):
+# TODO: implement dtype validation here, too, or on the corresponding refs
+def _elementwise_meta(
+    *args, type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
+) -> TensorMeta:
     """
     Meta function for elementwise operations that produce outputs in the same dtype
     as their inputs.
@@ -1904,9 +1906,11 @@ empty = _make_prim(
 def _empty_like_meta(
     a: TensorLikeType, *, dtype: torch.dtype, device: torch.device, requires_grad: bool
 ) -> TensorLikeType:
-    strides = strides = utils.compute_elementwise_output_strides(a)
+    strides: Tuple[int, ...]
     if a.numel() == 0:
         strides = a.stride()
+    else:
+        strides = utils.compute_elementwise_output_strides(a)
 
     return TensorMeta(a, strides=strides, dtype=dtype, device=device)
 
