@@ -1972,9 +1972,6 @@ class TestSparseCSR(TestCase):
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
 
             t = a.transpose(dim0, dim1)
-            print("(dim0, dim1): ", (dim0, dim1))
-            print("a.layout: ", a.layout)
-            print("t.layout: ", t.layout)
 
             self.assertEqual(t.to_dense(), a.to_dense().transpose(dim0, dim1))
 

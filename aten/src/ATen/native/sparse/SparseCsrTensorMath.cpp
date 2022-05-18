@@ -447,6 +447,11 @@ Tensor& addmm_out_sparse_csr_cpu(
       mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
       mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
+  if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
+    return addmm_out_sparse_csr_cpu(
+        self, mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
+  }
+
   c10::MaybeOwned<at::Tensor> self_;
   // Don't expand self if this is an in-place operation
   if (&result == &self) {
