@@ -947,7 +947,7 @@ endif()
 
 if(APPLE)
     if(USE_MPS)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_MPS -fno-objc-arc -framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_MPS -fno-objc-arc -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
     endif()
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
