@@ -280,21 +280,7 @@ namespace std {
 #define C10_MPARK_BUILTIN_UNREACHABLE
 #endif
 
-// NOTE [nvcc bug workaround]
-//
-// The original line `typename Front = lib::type_pack_element_t<0, Ts...>,`
-// throws the following compiler error on nvcc:
-// ```
-// c10/util/variant.h(2367): error: parameter pack "Ts" was referenced but not
-// expanded
-// ```
-// As a workaround, we skip defining C10_MPARK_TYPE_PACK_ELEMENT for nvcc
-// compiler
-//
-// See the following issues for more context:
-// https://github.com/pytorch/extension-cpp/issues/58
-// https://github.com/mpark/variant/issues/77
-#if __has_builtin(__type_pack_element) && !defined(__CUDACC__)
+#if __has_builtin(__type_pack_element)
 #define C10_MPARK_TYPE_PACK_ELEMENT
 #endif
 

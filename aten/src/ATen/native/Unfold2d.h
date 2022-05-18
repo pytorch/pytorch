@@ -20,8 +20,7 @@ using unfold2d_fn = void (*)(
     int64_t input_height,
     int64_t input_width,
     int64_t output_height,
-    int64_t output_width,
-    bool is_channels_last
+    int64_t output_width
 );
 
 DECLARE_DISPATCH(unfold2d_fn, unfolded2d_copy_stub);

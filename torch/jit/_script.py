@@ -13,7 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict, List, Set, Tuple, Union, Callable
+from typing import Any, Dict, List, Tuple, Union, Callable
 
 
 import torch
@@ -75,7 +75,7 @@ Attribute.__doc__ = """
     This method is a pass-through function that returns `value`, mostly
     used to indicate to the TorchScript compiler that the left-hand side
     expression is a class instance attribute with type of `type`. Note that
-    `torch.jit.Attribute` should only be used in `__init__` method of `jit.ScriptModule`
+    `torch.jit.Attribute` should only be used in `__init__` method of `nn.Module`
     subclasses.
 
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
@@ -95,9 +95,9 @@ Attribute.__doc__ = """
         import torch
         from typing import Dict
 
-        class AttributeModule(torch.jit.ScriptModule):
+        class AttributeModule(torch.nn.Module):
             def __init__(self):
-                super(AttributeModule, self).__init__()
+                super(M, self).__init__()
                 self.foo = torch.jit.Attribute(0.1, float)
 
                 # we should be able to use self.foo as a float here
@@ -111,27 +111,6 @@ Attribute.__doc__ = """
         # m will contain two attributes
         # 1. foo of type float
         # 2. names_ages of type Dict[str, int]
-
-    .. testcleanup::
-
-        del AttributeModule
-        del m
-
-    Note: it's now preferred to instead use type annotations instead of `torch.jit.Annotate`:
-
-    .. testcode::
-
-        import torch
-        from typing import Dict
-
-        class AttributeModule(torch.nn.Module):
-            names: Dict[str, int]
-
-            def __init__(self):
-                super(AttributeModule, self).__init__()
-                self.names = {}
-
-        m = AttributeModule()
 
     .. testcleanup::
 
@@ -270,7 +249,7 @@ class ScriptMeta(type):
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
                 cls._methods[k] = v
-            base_constants: Set = getattr(base, "_constants_set", set())
+            base_constants = getattr(base, "_constants_set", set())
             cls._constants_set = cls._constants_set.union(base_constants)
 
         # find all the script methods of the current class
@@ -438,7 +417,7 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__getattr__(attr)  # type: ignore[misc]
 
             if attr in self._props:
-                return self._props[attr].fget()  # type: ignore[call-arg, misc]
+                return self._props[attr].fget()
 
             return getattr(self._c, attr)
 
@@ -447,7 +426,7 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__setattr__(attr, value)
 
             if attr in self._props:
-                return self._props[attr].fset(value)  # type: ignore[call-arg, misc]
+                return self._props[attr].fset(value)
 
             setattr(self._c, attr, value)
 
@@ -914,6 +893,7 @@ if _enabled:
         "double",
         "half",
         "state_dict",
+        "_state_dict_impl",
         "_save_to_state_dict",
         "load_state_dict",
         "_load_from_state_dict",
@@ -1326,7 +1306,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
-            obj = obj.__original_fn  # type: ignore[union-attr]
+            obj = obj.__original_fn
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
 
         # some functions are explicitly marked as not supported in script mode

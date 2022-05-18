@@ -231,7 +231,6 @@ def build_constructor_arg_db():
         }),
         torch.nn.quantized.ReLU6: ((), {}),
         torch.nn.quantized.Sigmoid: ((0.1, 0), {}),
-        torch.nn.quantized.Softmax: ((), {}),
         torch.nn.quantized.FloatFunctional: ((), {}),
         torch.nn.quantized.FXFloatFunctional: ((), {}),
         torch.nn.quantized.QFunctional: ((), {}),

@@ -1,13 +1,13 @@
 #pragma once
-#include <c10/util/DimVector.h>
+
+#include <c10/util/SmallVector.h>
+#include <stdint.h>
 
 namespace at {
 
-// Re-declaring 'DimVector' type and size inside 'at' namespace.
-// This is done to avoid modifying every use into their 'c10'
-// equivalent.
+constexpr size_t kDimVectorStaticSize = 5;
 
-using c10::kDimVectorStaticSize;
-using c10::DimVector;
+/// A container for sizes or strides
+using DimVector = SmallVector<int64_t, kDimVectorStaticSize>;
 
 } // namespace at

@@ -86,8 +86,7 @@ def run_command(
         logging.debug("took %dms", (end_time - start_time) * 1000)
 
 
-# Severity is either "error" or "note":
-# https://github.com/python/mypy/blob/8b47a032e1317fb8e3f9a818005a6b63e9bf0311/mypy/errors.py#L46-L47
+# Severity is either "error" or "note": https://git.io/JiLOP
 severities = {
     "error": LintSeverity.ERROR,
     "warning": LintSeverity.WARNING,

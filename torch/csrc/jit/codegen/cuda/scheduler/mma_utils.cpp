@@ -109,6 +109,7 @@ bool canValidateIsInnerDim(
     } else if (auto merge = dynamic_cast<Merge*>(expr)) {
       // Might consider just rejecting merge.
       auto outer = merge->outer();
+      auto inner = merge->inner();
       if (outer->isBroadcast()) {
         return false;
       }

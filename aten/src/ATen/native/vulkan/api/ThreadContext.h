@@ -5,7 +5,6 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
-#include <ATen/native/vulkan/api/QueryPool.h>
 #include <ATen/native/vulkan/api/Resource.h>
 
 namespace at {
@@ -30,7 +29,6 @@ class ThreadContext final {
   Command& command();
   Descriptor& descriptor();
   Resource& resource();
-  QueryPool& querypool();
 
  private:
   GPU gpu_;
@@ -67,10 +65,6 @@ inline Descriptor& ThreadContext::descriptor() {
 
 inline Resource& ThreadContext::resource() {
   return SingletonThreadLocalObject<Resource>::get(gpu_);
-}
-
-inline QueryPool& ThreadContext::querypool() {
-  return SingletonThreadLocalObject<QueryPool>::get(gpu_);
 }
 
 } // namespace api

@@ -1,13 +1,14 @@
-import difflib
-import io
-
-import numpy as np
-import onnx
-import onnx.helper
-
 import torch
 import torch.jit
 import torch.onnx
+
+import onnx
+import onnx.helper
+
+import numpy as np
+
+import difflib
+import io
 
 
 def colonize(msg, sep=": "):
@@ -38,7 +39,6 @@ class Errors(object):
         # can be used
         class ShortCircuit(Exception):
             pass
-
         self.exc_class = ShortCircuit
 
     def requireAlmostEqual(self, x, y, msg=None):
@@ -67,9 +67,8 @@ class Errors(object):
         """
         if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
             try:
-                np.testing.assert_allclose(
-                    x, y, rtol=self.rtol, atol=self.atol, equal_nan=True, verbose=True
-                )
+                np.testing.assert_allclose(x, y, rtol=self.rtol, atol=self.atol,
+                                           equal_nan=True, verbose=True)
             except AssertionError as e:
                 raise
                 k("{}{}".format(colonize(msg), str(e).lstrip()))
@@ -118,11 +117,8 @@ class Errors(object):
                 if len(sx) > 40 or len(sy) > 40 or "\n" in sx or "\n" in sy:
                     # long form
                     l = "=" * 50
-                    k(
-                        "\n{}The value\n{}\n{}\n{}\n\ndoes not equal\n\n{}\n{}\n{}".format(
-                            colonize(msg, ":\n"), l, sx, l, l, sy, l
-                        )
-                    )
+                    k("\n{}The value\n{}\n{}\n{}\n\ndoes not equal\n\n{}\n{}\n{}"
+                        .format(colonize(msg, ":\n"), l, sx, l, l, sy, l))
                 else:
                     k("{}{} != {}".format(colonize(msg), sx, sy))
 
@@ -197,7 +193,6 @@ class Errors(object):
             def __exit__(self, exc_type, exc_value, traceback):
                 if exc_type == parent_self.exc_class:
                     return True
-
         return Recover()
 
     def addErrCtxt(self, msg):
@@ -217,7 +212,6 @@ class Errors(object):
 
             def __exit__(self, exc_type, exc_value, traceback):
                 parent_self.context.pop()
-
         return AddContext()
 
     def __enter__(self):
@@ -231,25 +225,12 @@ class Errors(object):
         if exc_type == self.exc_class:
             raise RuntimeError("ShortCircuit was raised, but no errors were recorded")
 
-
-def verify(
-    model,
-    args,
-    backend,
-    verbose=False,
-    training=torch.onnx.TrainingMode.EVAL,
-    rtol=1e-3,
-    atol=1e-7,
-    test_args=2,
-    do_constant_folding=True,
-    opset_version=None,
-    keep_initializers_as_inputs=True,
-    add_node_names=False,
-    operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
-    input_names=None,
-    dynamic_axes=None,
-    remained_onnx_input_idx=None,
-):
+def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode.EVAL, rtol=1e-3, atol=1e-7,
+           test_args=2, do_constant_folding=True, opset_version=None,
+           keep_initializers_as_inputs=True, add_node_names=False,
+           operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
+           input_names=None, dynamic_axes=None,
+           remained_onnx_input_idx=None):
     """
     Export a model into ONNX, import it into a specified ONNX backend, and then
     on a few random inputs verify that PyTorch and the backend produced the same
@@ -298,7 +279,6 @@ def verify(
         dynamic_axes (dict of (string, list)): dynamic_axes.
         remained_onnx_input_idx (list of int, default None): The remained ONNX input index.
     """
-
     def _nested_map(condition, fn, condition_msg=None):
         def _map(obj):
             if condition(obj):
@@ -308,18 +288,11 @@ def verify(
             elif isinstance(obj, (list, tuple)):
                 return type(obj)(_map(x) for x in obj)
             else:
-                raise ValueError(
-                    "Auto nesting doesn't know how to process "
-                    "an input object of type "
-                    + torch.typename(obj)
-                    + (
-                        ". Accepted types: "
-                        + condition_msg
-                        + ", or lists/tuples of them"
-                        if condition_msg
-                        else ""
-                    )
-                )
+                raise ValueError("Auto nesting doesn't know how to process "
+                                 "an input object of type " + torch.typename(obj) +
+                                 (". Accepted types: " + condition_msg +
+                                  ", or lists/tuples of them"
+                                  if condition_msg else ""))
 
         return _map
 
@@ -336,18 +309,11 @@ def verify(
             elif allow_unknown:
                 yield obj
             else:
-                raise ValueError(
-                    "Auto nesting doesn't know how to process "
-                    "an input object of type "
-                    + torch.typename(obj)
-                    + (
-                        ". Accepted types: "
-                        + condition_msg
-                        + ", or lists/tuples of them"
-                        if condition_msg
-                        else ""
-                    )
-                )
+                raise ValueError("Auto nesting doesn't know how to process "
+                                 "an input object of type " + torch.typename(obj) +
+                                 (". Accepted types: " + condition_msg +
+                                  ", or lists/tuples of them"
+                                  if condition_msg else ""))
 
         return _iter
 
@@ -386,19 +352,14 @@ def verify(
 
     with torch.onnx.select_model_mode_for_export(model, training):
         proto_bytes = io.BytesIO()
-        torch_out = torch.onnx._export(
-            model,
-            args,
-            proto_bytes,
-            verbose=verbose,
-            do_constant_folding=do_constant_folding,
-            opset_version=opset_version,
-            keep_initializers_as_inputs=keep_initializers_as_inputs,
-            add_node_names=add_node_names,
-            operator_export_type=operator_export_type,
-            input_names=input_names,
-            dynamic_axes=dynamic_axes,
-        )
+        torch_out = torch.onnx._export(model, args, proto_bytes, verbose=verbose,
+                                       do_constant_folding=do_constant_folding,
+                                       opset_version=opset_version,
+                                       keep_initializers_as_inputs=keep_initializers_as_inputs,
+                                       add_node_names=add_node_names,
+                                       operator_export_type=operator_export_type,
+                                       input_names=input_names,
+                                       dynamic_axes=dynamic_axes)
         if isinstance(model, torch.jit.ScriptModule):
             torch_out = model(*args)
         proto = load_bytes(proto_bytes)
@@ -406,19 +367,14 @@ def verify(
 
         def run(args, remained_onnx_input_idx):
             alt_proto_bytes = io.BytesIO()
-            torch_out = torch.onnx._export(
-                model,
-                args,
-                alt_proto_bytes,
-                verbose=verbose,
-                do_constant_folding=do_constant_folding,
-                opset_version=opset_version,
-                keep_initializers_as_inputs=keep_initializers_as_inputs,
-                add_node_names=add_node_names,
-                operator_export_type=operator_export_type,
-                input_names=input_names,
-                dynamic_axes=dynamic_axes,
-            )
+            torch_out = torch.onnx._export(model, args, alt_proto_bytes, verbose=verbose,
+                                           do_constant_folding=do_constant_folding,
+                                           opset_version=opset_version,
+                                           keep_initializers_as_inputs=keep_initializers_as_inputs,
+                                           add_node_names=add_node_names,
+                                           operator_export_type=operator_export_type,
+                                           input_names=input_names,
+                                           dynamic_axes=dynamic_axes)
             if isinstance(model, torch.jit.ScriptModule):
                 torch_out = model(*args)
             alt_proto = load_bytes(alt_proto_bytes)
@@ -430,36 +386,26 @@ def verify(
                 with Errors(msg, rtol=rtol, atol=atol) as errs:
                     # First, check if we have the same number of parameters, and
                     # that they"re the same order.  If they don"t, something has *really* gone wrong.
-                    initializer_order_hint = (
-                        "This is really strange! The second time I exported your model,\n"
-                        "it had a different set of parameters.  Are you assigning Parameters\n"
-                        "in the forward() of your model definition?"
-                    )
+                    initializer_order_hint = ("This is really strange! The second time I exported your model,\n"
+                                              "it had a different set of parameters.  Are you assigning Parameters\n"
+                                              "in the forward() of your model definition?")
                     with errs.addErrCtxt(initializer_order_hint):
-                        errs.requireEqual(
-                            [x.name for x in proto.graph.initializer],
-                            [x.name for x in alt_proto.graph.initializer],
-                            msg="Parameters list differs",
-                        )
+                        errs.requireEqual([x.name for x in proto.graph.initializer],
+                                          [x.name for x in alt_proto.graph.initializer],
+                                          msg="Parameters list differs")
 
                     # Now check if the embedded parameters are actually the same
-                    initializer_hint = (
-                        "A difference in embedded parameters usually means that\n"
-                        "your model is updating parameters/buffers even in inference\n"
-                        "mode.  Look for a buggy nn.Module which isn't respecting train().\n"
-                    )
+                    initializer_hint = ("A difference in embedded parameters usually means that\n"
+                                        "your model is updating parameters/buffers even in inference\n"
+                                        "mode.  Look for a buggy nn.Module which isn't respecting train().\n")
                     with errs.recover(), errs.addErrCtxt(initializer_hint):
-                        for x, y in zip(
-                            proto.graph.initializer, alt_proto.graph.initializer
-                        ):
+                        for x, y in zip(proto.graph.initializer, alt_proto.graph.initializer):
                             errs.checkEqual(x, y)
 
                     # Next, check if the model structure lines up.
-                    structure_hint = (
-                        "A difference in model structure usually means that\n"
-                        "your model has dynamic control flow.  These models are not\n"
-                        "currently supported by the exporter."
-                    )
+                    structure_hint = ("A difference in model structure usually means that\n"
+                                      "your model has dynamic control flow.  These models are not\n"
+                                      "currently supported by the exporter.")
                     with errs.recover(), errs.addErrCtxt(structure_hint):
                         # Delete initializers since we already tested them
                         stripped_proto = onnx.ModelProto()
@@ -471,16 +417,12 @@ def verify(
                         del stripped_alt_proto.graph.initializer[:]
 
                         # Compare the printable graph representations first
-                        errs.requireMultiLineEqual(
-                            onnx.helper.printable_graph(stripped_proto.graph),
-                            onnx.helper.printable_graph(stripped_alt_proto.graph),
-                        )
+                        errs.requireMultiLineEqual(onnx.helper.printable_graph(stripped_proto.graph),
+                                                   onnx.helper.printable_graph(stripped_alt_proto.graph))
 
                         # Compare the actual protobuf text formats now (not
                         # very user-friendly!)
-                        errs.requireMultiLineEqual(
-                            str(stripped_proto), str(stripped_alt_proto)
-                        )
+                        errs.requireMultiLineEqual(str(stripped_proto), str(stripped_alt_proto))
 
                         # One last ditch effort, using built-in equality on
                         # protobufs
@@ -495,9 +437,7 @@ def verify(
                     # case.  We EXPECT these requires to fail.  If they don't,
                     # that is a bug in verify
                     errs.requireEqual(proto, alt_proto)
-                    errs.requireEqual(
-                        proto_bytes.getvalue(), alt_proto_bytes.getvalue()
-                    )
+                    errs.requireEqual(proto_bytes.getvalue(), alt_proto_bytes.getvalue())
                     raise AssertionError()
 
             # TODO: test that the traced model also returns the same thing...
@@ -517,18 +457,12 @@ def verify(
             torch_out, _ = torch._C._jit_flatten(torch_out)
             # NB: onnx backend NEVER returns bare numpy array
             msg = "ONNX backend returned different results from PyTorch"
-            result_hint = (
-                "If you are not using trained parameters, a difference in results\n"
-                "could mean that your network is numerically unstable.  Otherwise\n"
-                "it indicates a bug in PyTorch/ONNX; please file a bug report."
-            )
-            with Errors(msg, rtol=rtol, atol=atol) as errs, errs.addErrCtxt(
-                result_hint
-            ):
+            result_hint = ("If you are not using trained parameters, a difference in results\n"
+                           "could mean that your network is numerically unstable.  Otherwise\n"
+                           "it indicates a bug in PyTorch/ONNX; please file a bug report.")
+            with Errors(msg, rtol=rtol, atol=atol) as errs, errs.addErrCtxt(result_hint):
                 for i, (x, y) in enumerate(zip(torch_out, backend_out)):
-                    errs.checkAlmostEqual(
-                        x.data.cpu().numpy(), y, "In output {}".format(i)
-                    )
+                    errs.checkAlmostEqual(x.data.cpu().numpy(), y, "In output {}".format(i))
 
         run_helper(torch_out, args, remained_onnx_input_idx)
 

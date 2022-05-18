@@ -50,10 +50,9 @@ enum class Backend {
   QuantizedXPU,
   Undefined,
   MkldnnCPU,
-  MPS,
+  MLC,
   HPU,
   Lazy,
-  PrivateUse1,
   NumOptions
 };
 
@@ -74,8 +73,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::XLA;
   } else if (t == DispatchKey::Lazy || t == DispatchKey::AutogradLazy) {
     return Backend::Lazy;
-  } else if (t == DispatchKey::MPS || t == DispatchKey::AutogradMPS) {
-    return Backend::MPS;
+  } else if (t == DispatchKey::MLC || t == DispatchKey::AutogradMLC) {
+    return Backend::MLC;
   } else if (t == DispatchKey::Vulkan) {
     return Backend::Vulkan;
   } else if (t == DispatchKey::Metal) {
@@ -108,8 +107,6 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedXPU;
   } else if (t == DispatchKey::HPU || t == DispatchKey::AutogradHPU) {
     return Backend::HPU;
-  } else if (t == DispatchKey::PrivateUse1) {
-    return Backend::PrivateUse1;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {
@@ -165,12 +162,10 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::QuantizedCUDA;
     case Backend::Undefined:
       return DispatchKey::Undefined;
-    case Backend::MPS:
-      return DispatchKey::MPS;
+    case Backend::MLC:
+      return DispatchKey::MLC;
     case Backend::HPU:
       return DispatchKey::HPU;
-    case Backend::PrivateUse1:
-      return DispatchKey::PrivateUse1;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -221,12 +216,10 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::Vulkan;
     case Backend::Metal:
       return DeviceType::Metal;
-    case Backend::MPS:
-      return DeviceType::MPS;
+    case Backend::MLC:
+      return DeviceType::MLC;
     case Backend::HPU:
       return DeviceType::HPU;
-    case Backend::PrivateUse1:
-      return DeviceType::PrivateUse1;
     case Backend::Undefined:
       TORCH_CHECK(false, "Undefined backend is not a valid device type");
     default:
@@ -257,8 +250,8 @@ static inline const char* toString(Backend b) {
       return "XLA";
     case Backend::Lazy:
       return "Lazy";
-    case Backend::MPS:
-      return "MPS";
+    case Backend::MLC:
+      return "MLC";
     case Backend::SparseCPU:
       return "SparseCPU";
     case Backend::SparseCUDA:
@@ -287,8 +280,6 @@ static inline const char* toString(Backend b) {
       return "QuantizedXPU";
     case Backend::HPU:
       return "HPU";
-    case Backend::PrivateUse1:
-      return "PrivateUseOne";
     default:
       return "UNKNOWN_BACKEND";
   }

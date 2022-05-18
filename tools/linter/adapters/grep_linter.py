@@ -43,17 +43,11 @@ def as_posix(name: str) -> str:
     return name.replace("\\", "/") if IS_WINDOWS else name
 
 
-def run_command(
-    args: List[str],
-) -> "subprocess.CompletedProcess[bytes]":
+def run_command(args: List[str],) -> "subprocess.CompletedProcess[bytes]":
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
-        return subprocess.run(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,)
     finally:
         end_time = time.monotonic()
         logging.debug("took %dms", (end_time - start_time) * 1000)
@@ -122,18 +116,13 @@ def lint_file(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="grep wrapper linter.",
-        fromfile_prefix_chars="@",
+        description="grep wrapper linter.", fromfile_prefix_chars="@",
     )
     parser.add_argument(
-        "--pattern",
-        required=True,
-        help="pattern to grep for",
+        "--pattern", required=True, help="pattern to grep for",
     )
     parser.add_argument(
-        "--linter-name",
-        required=True,
-        help="name of the linter",
+        "--linter-name", required=True, help="name of the linter",
     )
     parser.add_argument(
         "--error-name",
@@ -153,14 +142,10 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="verbose logging",
+        "--verbose", action="store_true", help="verbose logging",
     )
     parser.add_argument(
-        "filenames",
-        nargs="+",
-        help="paths to lint",
+        "filenames", nargs="+", help="paths to lint",
     )
     args = parser.parse_args()
 
@@ -175,7 +160,7 @@ def main() -> None:
     )
 
     try:
-        proc = run_command(["grep", "-nEHI", args.pattern, *args.filenames])
+        proc = run_command(["grep", "-nPHI", args.pattern, *args.filenames])
     except Exception as err:
         err_msg = LintMessage(
             path=None,

@@ -22,7 +22,7 @@
  * BuiltinRegisterer object. The constructor of BuiltinRegisterer does the real
  * registration work.
  */
-#include <gtest/gtest_prod.h>
+#include <gtest/gtest.h>
 #include <cstdarg>
 #include <memory>
 #include <unordered_map>

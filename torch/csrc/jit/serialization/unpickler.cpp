@@ -77,7 +77,6 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StreamObjType::Kind:
       case QSchemeType::Kind:
       case LayoutType::Kind:
-      case MemoryFormatType::Kind:
       case ScalarTypeType::Kind:
       case RRefType::Kind:
       case AnyType::Kind:
@@ -472,7 +471,7 @@ PickleOpCode Unpickler::readInstruction() {
         caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
 
         at::DataPtr storage_ptr;
-        if (numel > 0 && !device.is_meta()) {
+        if (numel > 0) {
           // If there are no elements in the tensor, there's no point in
           // reading a zero (0) byte file from the input stream and paying
           // that cost.
@@ -492,7 +491,7 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       auto options = at::CPU(type).options();
-      if (use_storage_device_ && !device.is_meta()) {
+      if (use_storage_device_) {
         options = options.device(storage.device());
         device = storage.device();
       }

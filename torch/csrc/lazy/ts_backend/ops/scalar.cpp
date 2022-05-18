@@ -12,7 +12,7 @@ using at::operator<<;
 
 Scalar::Scalar(const at::Scalar& value, Shape shape)
     : TsNode(
-          ClassOpKind(),
+          OpKind(at::prim::Constant),
           std::move(shape),
           /*num_outputs=*/1,
           ScalarHash(value)),
@@ -20,7 +20,7 @@ Scalar::Scalar(const at::Scalar& value, Shape shape)
 
 Scalar::Scalar(const at::Scalar& value, c10::ScalarType type)
     : TsNode(
-          ClassOpKind(),
+          OpKind(at::prim::Constant),
           {Shape(type, {})},
           /*num_outputs=*/1,
           ScalarHash(value)),

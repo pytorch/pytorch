@@ -7,10 +7,10 @@ set(VULKAN_GEN_OUTPUT_PATH "${CMAKE_BINARY_DIR}/vulkan/ATen/native/vulkan")
 set(VULKAN_GEN_ARG_ENV "")
 
 if(USE_VULKAN_RELAXED_PRECISION)
-  list(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
+  string(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
 endif()
 if(USE_VULKAN_FP16_INFERENCE)
-  list(APPEND VULKAN_GEN_ARG_ENV "format=rgba16f")
+  string(APPEND VULKAN_GEN_ARG_ENV "format=rgba16f")
 endif()
 
 if(USE_VULKAN_SHADERC_RUNTIME)

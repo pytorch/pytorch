@@ -3547,7 +3547,6 @@ struct to_ir {
         }
         auto createNode =
             graph->insertNode(graph->createObject(class_arg->type_));
-        createNode->setSourceRange(apply.range());
         return std::make_shared<SimpleValue>(createNode->output());
       }
       // We construct the iterable tree here using the IterableTree
@@ -5544,6 +5543,7 @@ std::vector<Function*> CompilationUnit::define(
 
 void eraseListLiterals(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
+  Node* n = nullptr;
 
   for (auto next_node = it.next(); next_node != nullptr;) {
     Node* node = next_node;

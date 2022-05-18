@@ -52,7 +52,6 @@ full_codegen:
   - gelu_backward
   - glu
   - glu_backward
-  - glu_jvp
   - grid_sampler_2d
   - grid_sampler_2d_backward
   - gt.Scalar
@@ -141,7 +140,6 @@ full_codegen:
   - upsample_nearest2d
   - upsample_nearest2d_backward
   - zero_
-  - narrow_copy.SymInt
 supported:
   - as_strided
   - as_strided_

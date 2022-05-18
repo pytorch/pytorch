@@ -4,7 +4,9 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/core/ops/arithmetic_ir_ops.h>
+#include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
+#include <torch/csrc/lazy/ts_backend/ops/cast.h>
+#include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
 #include <torch/csrc/lazy/core/ir_util.h>
@@ -12,8 +14,11 @@
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/core/util.h>
-#include <torch/csrc/lazy/core/ir_builder.h>
-#include <torch/csrc/lazy/core/ops/utils.h>
+#include <torch/csrc/lazy/core/view_ops/as_strided.h>
+#include <torch/csrc/lazy/core/view_ops/permute.h>
+#include <torch/csrc/lazy/core/view_ops/squeeze.h>
+#include <torch/csrc/lazy/core/view_ops/unsqueeze.h>
+#include <torch/csrc/lazy/core/view_ops/view.h>
 #include <torch/csrc/lazy/generated/LazyIr.h>
 #include <algorithm>
 #include <functional>
@@ -30,7 +35,7 @@ torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
   if (input.shape().sizes() == target_shape.sizes()) {
     return input;
   }
-  return torch::lazy::MakeExpand(
+  return torch::lazy::MakeNode<torch::lazy::Expand>(
       input, target_shape.sizes().vec(),
       /*is_scalar_expand=*/false);
 }
@@ -99,7 +104,7 @@ void as_strided_(torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size,
                  std::vector<int64_t> stride,
                  c10::optional<int64_t> storage_offset) {
   if (input->data()->view == nullptr) {
-    input->SetIrValue(torch::lazy::MakeAsStrided(
+    input->SetIrValue(torch::lazy::MakeNode<torch::lazy::AsStrided>(
         input->GetIrValue(), std::move(size), std::move(stride),
         storage_offset.value_or(0)));
   } else {
@@ -111,7 +116,7 @@ void as_strided_(torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size,
 
 torch::lazy::LazyTensorPtr expand(const torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size) {
   auto input_shape = input->shape();
-  auto output = torch::lazy::LazyTensor::Create(torch::lazy::MakeExpand(
+  auto output = torch::lazy::LazyTensor::Create(torch::lazy::MakeNode<torch::lazy::Expand>(
       input->GetIrValue(),
       GetExpandDimensions(input_shape.Get(), std::move(size)),
       /*is_scalar_expand=*/false), input->GetDevice());
@@ -213,7 +218,7 @@ void copy_(torch::lazy::LazyTensorPtr& input, torch::lazy::LazyTensorPtr& src) {
     if (input->dtype() == src->dtype()) {
       copy_value = src->GetIrValue();
     } else {
-      copy_value = torch::lazy::MakeCast(
+      copy_value = torch::lazy::MakeNode<torch::lazy::Cast>(
           src->GetIrValue(), input->dtype(), src->dtype());
     }
     input->SetIrValue(MaybeExpand(copy_value, input->shape()));
@@ -272,11 +277,11 @@ torch::lazy::LazyTensorPtr squeeze(const torch::lazy::LazyTensorPtr& input, int6
 
 void squeeze_(torch::lazy::LazyTensorPtr& input) {
   input->SetIrValue(
-      torch::lazy::MakeSqueeze(input->GetIrValue(), -1));
+      torch::lazy::MakeNode<Squeeze>(input->GetIrValue(), -1));
 }
 
 void squeeze_(torch::lazy::LazyTensorPtr& input, int64_t dim) {
-  input->SetIrValue(torch::lazy::MakeSqueeze(
+  input->SetIrValue(torch::lazy::MakeNode<Squeeze>(
       input->GetIrValue(),
       torch::lazy::GetCanonicalDimensionIndex(dim, input->shape().Get().dim())));
 }
@@ -311,7 +316,7 @@ torch::lazy::LazyTensorPtr unsqueeze(const torch::lazy::LazyTensorPtr& input, in
 void unsqueeze_(torch::lazy::LazyTensorPtr& input, int64_t dim) {
   int squeeze_dim = torch::lazy::GetCanonicalDimensionIndex(
       dim, input->shape().Get().dim() + 1);
-  input->SetIrValue(torch::lazy::MakeUnsqueeze(input->GetIrValue(),
+  input->SetIrValue(torch::lazy::MakeNode<Unsqueeze>(input->GetIrValue(),
                                                              squeeze_dim));
 }
 

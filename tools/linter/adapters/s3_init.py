@@ -16,19 +16,12 @@ from pathlib import Path
 HOST_PLATFORM = platform.system()
 
 # PyTorch directory root
-try:
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        stdout=subprocess.PIPE,
-        check=True,
-    )
-    PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
-except subprocess.CalledProcessError:
-    # If git is not installed, compute repo root as 3 folders up from this file
-    path_ = os.path.abspath(__file__)
-    for _ in range(4):
-        path_ = os.path.dirname(path_)
-    PYTORCH_ROOT = path_
+result = subprocess.run(
+    ["git", "rev-parse", "--show-toplevel"],
+    stdout=subprocess.PIPE,
+    check=True,
+)
+PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
 
 DRY_RUN = False
 

@@ -3,7 +3,6 @@
       "name": "ONNX exporter",
       "patterns": [
          ".jenkins/caffe2/*",
-         "scripts/onnx/**",
          "docs/source/onnx.rst",
          "test/onnx/**",
          "test/jit/test_export_modes.py",
@@ -22,13 +21,8 @@
    },
    {
       "name": "NVFuser",
-      "patterns": [
-         "test/test_jit_cuda_fuser.py",
-         "torch/csrc/jit/codegen/fuser/cuda/**",
-         "torch/csrc/jit/codegen/cuda/**",
-         "benchmarks/cpp/nvfuser/**"
-      ],
-      "approved_by": ["csarofeen", "ngimel", "jjsjann123"],
+      "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
+      "approved_by": ["csarofeen", "ngimel"],
       "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {

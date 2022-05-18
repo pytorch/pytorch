@@ -166,8 +166,6 @@ CUDA_STUB1(cuModuleUnload, CUmodule);
 CUDA_STUB3(cuDevicePrimaryCtxGetState, CUdevice, unsigned int *, int *);
 CUDA_STUB4(cuLinkCreate, unsigned int, CUjit_option *, void **, CUlinkState *);
 CUDA_STUB3(cuLinkComplete, CUlinkState, void **, size_t *);
-CUDA_STUB3(cuFuncSetAttribute, CUfunction, CUfunction_attribute, int);
-CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction);
 
 // Irregularly shaped functions
 CUresult CUDAAPI cuLaunchKernel(CUfunction f,

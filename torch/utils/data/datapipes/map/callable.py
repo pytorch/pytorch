@@ -1,9 +1,7 @@
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import check_lambda_fn
 from typing import Callable, TypeVar
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import MapDataPipe
-
-__all__ = ["MapperMapDataPipe", "default_fn"]
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -48,7 +46,7 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
     ) -> None:
         super().__init__()
         self.datapipe = datapipe
-        _check_lambda_fn(fn)
+        check_lambda_fn(fn)
         self.fn = fn  # type: ignore[assignment]
 
     def __len__(self) -> int:

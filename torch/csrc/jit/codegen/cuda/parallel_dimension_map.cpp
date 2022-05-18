@@ -93,6 +93,8 @@ void ParallelDimensionMap::populateDimensionMapWithSingleCASet(
     const std::unordered_set<IterDomain*>& dom_set) {
   TORCH_INTERNAL_ASSERT(dom_set.size() == 1);
 
+  const auto gpu_lower = GpuLower::current();
+
   // pt is used by only one concrete domain
   auto id = *dom_set.begin();
   auto it = constant_extent_map_.find(id);
@@ -116,6 +118,8 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
     ParallelType pt,
     const std::unordered_set<IterDomain*>& dom_set) {
   TORCH_INTERNAL_ASSERT(dom_set.size() > 1);
+
+  const auto gpu_lower = GpuLower::current();
 
   bool all_equal = true;
   // Use nullptr to signal it's not initialied yet

@@ -20,16 +20,13 @@ using c10::FloatType;
 using c10::FutureType;
 using c10::GeneratorType;
 using c10::IntType;
-using c10::LayoutType;
 using c10::ListType;
-using c10::MemoryFormatType;
 using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
-using c10::ScalarTypeType;
 using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
@@ -47,9 +44,9 @@ TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", c10::TypeFactory::get<GeneratorType>()},
       {"Dimname", c10::TypeFactory::get<StringType>()},
-      {"ScalarType", c10::TypeFactory::get<ScalarTypeType>()},
-      {"Layout", c10::TypeFactory::get<LayoutType>()},
-      {"MemoryFormat", c10::TypeFactory::get<MemoryFormatType>()},
+      {"ScalarType", c10::TypeFactory::get<IntType>()},
+      {"Layout", c10::TypeFactory::get<IntType>()},
+      {"MemoryFormat", c10::TypeFactory::get<IntType>()},
       {"Storage", c10::TypeFactory::get<StorageType>()},
       {"QScheme", c10::TypeFactory::get<QSchemeType>()},
       {"Quantizer", c10::TypeFactory::get<QuantizerType>()},
@@ -307,14 +304,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
 }
 
 std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
-  auto r = parseFakeAndRealType();
-  return std::make_pair(std::move(std::get<0>(r)), std::move(std::get<2>(r)));
-}
-
-std::tuple</*fake*/ TypePtr, /*real*/ TypePtr, c10::optional<AliasInfo>>
-SchemaTypeParser::parseFakeAndRealType() {
-  TypePtr fake_value;
-  TypePtr real_value;
+  TypePtr value;
   c10::optional<AliasInfo> alias_info;
   // Tuple type
   if (L.cur().kind == '(') {
@@ -326,8 +316,7 @@ SchemaTypeParser::parseFakeAndRealType() {
         alias_info->addContainedType(std::move(*r.second));
       }
     });
-    fake_value = real_value =
-        c10::TypeFactory::create<TupleType>(std::move(types));
+    value = c10::TypeFactory::create<TupleType>(std::move(types));
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
     L.next(); // Future
     L.expect('(');
@@ -335,7 +324,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<FutureType>(subtype);
+    value = c10::TypeFactory::create<FutureType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
     L.next(); // RRef
     L.expect('(');
@@ -343,10 +332,10 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<RRefType>(subtype);
+    value = c10::TypeFactory::create<RRefType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
     L.next();
-    fake_value = real_value = c10::TypeFactory::get<TensorType>();
+    value = c10::TypeFactory::get<TensorType>();
     alias_info = parseAliasAnnotation();
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
     L.next();
@@ -356,8 +345,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto value_type = parseType().first;
     L.expect(')');
     alias_info = parseAliasAnnotation();
-    fake_value = real_value =
-        c10::TypeFactory::create<DictType>(key_type, value_type);
+    value = c10::TypeFactory::create<DictType>(key_type, value_type);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
     L.next();
     L.expect('(');
@@ -369,12 +357,11 @@ SchemaTypeParser::parseFakeAndRealType() {
     }
     L.expect(')');
     alias_info = parseAliasAnnotation();
-    fake_value = real_value =
-        c10::TypeFactory::create<c10::UnionType>(std::move(types));
+    value = c10::TypeFactory::create<c10::UnionType>(std::move(types));
   } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {
-    fake_value = real_value = parseRefinedTensor();
+    value = parseRefinedTensor();
     alias_info = parseAliasAnnotation();
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "__torch__") {
     L.next();
@@ -394,46 +381,36 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto ns_tok = L.expect(TK_IDENT);
     L.expect('.');
     auto class_tok = L.expect(TK_IDENT);
-    fake_value = real_value = getCustomClass(
+    value = getCustomClass(
         std::string("__torch__.torch.classes.") + ns_tok.text() + "." +
         class_tok.text());
-    if (!fake_value) {
+    if (!value) {
       throw ErrorReport(class_tok.range)
           << "Unknown custom class type "
           << ns_tok.text() + "." + class_tok.text()
           << ". Please ensure it is registered.";
     }
   } else {
-    real_value = parseBaseType();
-    if (real_value->kind() == ScalarTypeType::Kind ||
-        real_value->kind() == MemoryFormatType::Kind ||
-        real_value->kind() == LayoutType::Kind) {
-      fake_value = c10::TypeFactory::get<IntType>();
-    } else {
-      fake_value = real_value;
-    }
+    value = parseBaseType();
     alias_info = parseAliasAnnotation();
   }
   while (true) {
     if (L.cur().kind == '[' && L.lookahead().kind == ']') {
       L.next(); // [
       L.next(); // ]
-      fake_value = c10::TypeFactory::create<ListType>(fake_value);
-      real_value = c10::TypeFactory::create<ListType>(real_value);
+      value = c10::TypeFactory::create<ListType>(value);
       auto container = parseAliasAnnotation();
       if (container && alias_info) {
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {
-      fake_value = c10::TypeFactory::create<c10::OptionalType>(fake_value);
-      real_value = c10::TypeFactory::create<c10::OptionalType>(real_value);
+      value = c10::TypeFactory::create<c10::OptionalType>(value);
     } else {
       break;
     }
   }
-  return std::make_tuple(
-      std::move(fake_value), std::move(real_value), std::move(alias_info));
+  return std::make_pair(std::move(value), std::move(alias_info));
 }
 
 void SchemaTypeParser::parseList(

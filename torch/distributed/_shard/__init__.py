@@ -1,7 +1,1 @@
-from .api import (
-    _replicate_tensor,
-    _shard_tensor,
-    load_with_process_group,
-    shard_module,
-    shard_parameter,
-)
+from .api import shard_parameter, _shard_tensor, _replicate_tensor, load_with_process_group

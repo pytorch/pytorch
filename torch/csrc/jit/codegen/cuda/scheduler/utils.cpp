@@ -808,6 +808,7 @@ PersistentBufferSizeReturn persistentBufferSize(
   std::vector<bool> persistent_mask(all_buffers.size(), false);
 
   for (auto buffer_i : c10::irange(persistent_buffers.size())) {
+    auto buffer = all_buffers[buffer_i];
     persistent_mask[buffer_i] = true;
   }
 
@@ -854,6 +855,7 @@ PersistentBufferSizeReturn persistentBufferSize(
   int64_t max_persistence_size = 0;
   int64_t max_proj_persistence_size = 0;
   for (const auto& entry : scoped_persistence_factor) {
+    auto val = entry.first;
     auto active_buffers = entry.second;
     auto persistent_buffer_size = masked_dot_product(
         persistent_mask, active_buffers, persistent_buffer_sizes);

@@ -10,7 +10,7 @@ from functools import wraps
 import unittest
 
 from torch.testing._internal.common_utils import \
-    (TestCase, parametrize, suppress_warnings, _TestParametrizer, run_tests)
+    (TestCase, parametrize, suppress_warnings, _TestParametrizer)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
@@ -427,6 +427,3 @@ class TestMasked(TestCase):
 
 
 instantiate_device_type_tests(TestMasked, globals(), except_for='meta')
-
-if __name__ == "__main__":
-    run_tests()

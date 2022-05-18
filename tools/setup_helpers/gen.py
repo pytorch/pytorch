@@ -6,6 +6,6 @@ import sys
 root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, root)
 
-import torchgen.gen
+import tools.codegen.gen
 
-torchgen.gen.main()
+tools.codegen.gen.main()

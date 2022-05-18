@@ -9,7 +9,7 @@ namespace lazy {
 
 DeviceData::DeviceData(std::shared_ptr<BackendData> data)
     : TsNode(
-          ClassOpKind(),
+          ltc_device_data,
           data->shape(),
           /*num_outputs=*/1,
           /*hash_seed=*/static_cast<uint32_t>(101)),
@@ -22,7 +22,7 @@ std::string DeviceData::ToString() const {
 }
 
 const DeviceData* DeviceData::Cast(const Node* node) {
-  return NodeCast<DeviceData>(node);
+  return NodeCast<DeviceData>(node, ltc_device_data);
 }
 
 } // namespace lazy

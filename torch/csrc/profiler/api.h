@@ -25,7 +25,6 @@ enum class C10_API_ENUM ProfilerState {
   NVTX, // only emit NVTX markers
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
-  KINETO_ONDEMAND, // run the profiler in on-demand mode
   NUM_PROFILER_STATES, // must be the last one
 };
 
@@ -36,21 +35,6 @@ enum class C10_API_ENUM ActiveProfilerType {
   NVTX
 };
 
-struct TORCH_API ExperimentalConfig {
-  explicit ExperimentalConfig(
-      std::vector<std::string> profiler_metrics = {},
-      bool profiler_measure_per_kernel = false)
-    : profiler_metrics(std::move(profiler_metrics)),
-      profiler_measure_per_kernel(profiler_measure_per_kernel) {}
-  ~ExperimentalConfig() = default;
-  std::vector<std::string> profiler_metrics;
-  bool profiler_measure_per_kernel = false;
-
-  bool hasOptions() const {
-    return profiler_metrics.size() > 0;
-  }
-};
-
 struct TORCH_API ProfilerConfig {
   explicit ProfilerConfig(
       ProfilerState state,
@@ -58,10 +42,8 @@ struct TORCH_API ProfilerConfig {
       bool profile_memory = false,
       bool with_stack = false,
       bool with_flops = false,
-      bool with_modules = false,
-      ExperimentalConfig experimental_config = ExperimentalConfig())
+      bool with_modules = false)
       : state(state),
-        experimental_config(experimental_config),
         report_input_shapes(report_input_shapes),
         profile_memory(profile_memory),
         with_stack(with_stack),
@@ -69,7 +51,6 @@ struct TORCH_API ProfilerConfig {
         with_modules(with_modules) {}
   ~ProfilerConfig() = default;
   ProfilerState state;
-  ExperimentalConfig experimental_config;
   bool report_input_shapes;
   bool profile_memory;
   bool with_stack;

@@ -83,13 +83,13 @@ from torch.ao.quantization.fx.pattern_utils import (
 from torch.ao.quantization.fx.utils import NodeInfo
 
 from torch.ao.quantization.fake_quantize import (
-    default_fixed_qparams_range_0to1_fake_quant,
-    default_fixed_qparams_range_neg1to1_fake_quant,
+    default_affine_fixed_qparams_fake_quant,
+    default_symmetric_fixed_qparams_fake_quant,
 )
 
 from torch.ao.quantization.observer import (
-    default_fixed_qparams_range_0to1_observer,
-    default_fixed_qparams_range_neg1to1_observer,
+    default_affine_fixed_qparams_observer,
+    default_symmetric_fixed_qparams_observer,
 )
 
 # test utils
@@ -4085,11 +4085,11 @@ class TestQuantizeFx(QuantizationTestCase):
         class DummyQuant():
             pass
 
-        @register_quant_pattern("dummy_quant2", default_fixed_qparams_range_0to1_observer)
+        @register_quant_pattern("dummy_quant2", default_affine_fixed_qparams_observer)
         class DummyQuant2():
             pass
 
-        @register_quant_pattern("dummy_quant3", default_fixed_qparams_range_neg1to1_observer)
+        @register_quant_pattern("dummy_quant3", default_symmetric_fixed_qparams_observer)
         class DummyQuant3():
             pass
 
@@ -4097,17 +4097,17 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(DEFAULT_QUANTIZATION_PATTERNS["dummy_quant"], DummyQuant)
         self.assertEqual(DEFAULT_QUANTIZATION_PATTERNS["dummy_quant2"], DummyQuant2)
         self.assertEqual(DEFAULT_QUANTIZATION_PATTERNS["dummy_quant3"], DummyQuant3)
-        self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant2"], default_fixed_qparams_range_0to1_observer)
-        self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant3"], default_fixed_qparams_range_neg1to1_observer)
+        self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant2"], default_affine_fixed_qparams_observer)
+        self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant3"], default_symmetric_fixed_qparams_observer)
         self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant2"],
-                                                  default_fixed_qparams_range_0to1_fake_quant)
+                                                  default_affine_fixed_qparams_fake_quant)
         self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant3"],
-                                                  default_fixed_qparams_range_neg1to1_fake_quant)
+                                                  default_symmetric_fixed_qparams_fake_quant)
         output_fake_quantize_map = get_default_output_activation_post_process_map(is_training=True)
         output_observer_map = get_default_output_activation_post_process_map(is_training=False)
-        self.assertEqual(output_observer_map.get("dummy_quant3"), default_fixed_qparams_range_neg1to1_observer)
+        self.assertEqual(output_observer_map.get("dummy_quant3"), default_symmetric_fixed_qparams_observer)
         self._assertFixedQParamsFakeQuantizeEqual(output_fake_quantize_map.get("dummy_quant3"),
-                                                  default_fixed_qparams_range_neg1to1_fake_quant)
+                                                  default_symmetric_fixed_qparams_fake_quant)
 
 
 
@@ -4291,17 +4291,11 @@ class TestQuantizeFx(QuantizationTestCase):
                 for name, mod in m.named_modules():
                     if is_activation_post_process(mod) and mod.dtype == torch.quint8:
                         if backend == "fbgemm":
-                            lower_bnd = 0
-                            upper_bnd = 127
+                            self.assertEqual(mod.quant_min, 0)
+                            self.assertEqual(mod.quant_max, 127)
                         else:
-                            lower_bnd = 0
-                            upper_bnd = 255
-                        if issubclass(type(mod), FakeQuantize):
-                            self.assertEqual(mod.activation_post_process.quant_min, lower_bnd)
-                            self.assertEqual(mod.activation_post_process.quant_max, upper_bnd)
-                        else:
-                            self.assertEqual(mod.quant_min, lower_bnd)
-                            self.assertEqual(mod.quant_max, upper_bnd)
+                            self.assertEqual(mod.quant_min, 0)
+                            self.assertEqual(mod.quant_max, 255)
 
     def test_prepare_mode(self):
         class LinearModel(torch.nn.Module):
@@ -5496,7 +5490,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
         is_reference = False
         node_list = [
-            ns.call_module(torch.nn.quantized.Softmax),
+            ns.call_module(module),
             ns.call_function(functional),
         ]
         self._test_default_node_quant_handler_ops(
@@ -6053,7 +6047,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.sigmoid = torch.nn.Sigmoid()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
                 self.tanh = torch.nn.Tanh()
-                self.softmax = torch.nn.Softmax(dim=0)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -6068,8 +6061,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # F.tanh is deprecated
                 x = torch.tanh(x)
                 x = x.tanh()
-                # TODO(future PR): handle F.softmax
-                x = self.softmax(x)
                 return x
 
         for eval_mode in [True, False]:
@@ -6080,12 +6071,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 m.eval()
                 qconfig = default_qconfig
                 prepare = prepare_fx
-                fq_count = 10
+                fq_count = 9
             else:
                 m.train()
                 qconfig = default_qat_qconfig
                 prepare = prepare_qat_fx
-                fq_count = 10
+                fq_count = 9
 
             # nothing to fuse so skipping the fuse step
             m_copy = copy.deepcopy(m)
@@ -6120,7 +6111,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_module(nnq.Conv2d),
                 ns.call_module(nn.Sigmoid),
-                ns.call_module(nnq.Softmax),
                 ns.call_method('dequantize'),
             ]
             self.checkGraphModuleNodes(
@@ -6129,8 +6119,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 expected_node_list=order_check)
 
             reference_count_check = {
-                ns.call_function(torch.quantize_per_tensor) : 12,
-                ns.call_method('dequantize') : 12
+                ns.call_function(torch.quantize_per_tensor) : 11,
+                ns.call_method('dequantize') : 11
             }
             reference_order_check = [
                 ns.call_function(torch.quantize_per_tensor),
@@ -6141,18 +6131,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_module(nn.Sigmoid),
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_method('dequantize'),
-                ns.call_module(nn.Softmax),
-                ns.call_function(torch.quantize_per_tensor),
-                ns.call_method('dequantize'),
             ]
             self.checkGraphModuleNodes(
                 quantized_reference,
                 expected_node_occurrence=reference_count_check,
                 expected_node_list=reference_order_check)
 
-            # Verify that softmax scale and zero_point are correct
-            self.assertTrue(quantized.softmax.scale - (1.0 / 256) <= 1e-8)
-            self.assertTrue(quantized.softmax.zero_point == 0)
 
     def test_float_functional(self):
         class TorchAdd(nn.Module):

@@ -78,7 +78,7 @@ ProcessGroup::Work::Work(
           inputs.emplace_back(tensor);
         }
       }
-      recordingFunction->before(profilingTitle, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+      recordingFunction->before(profilingTitle, inputs);
       std::function<void()> end_handler = [recordingFunction]() {
         recordingFunction->end();
       };

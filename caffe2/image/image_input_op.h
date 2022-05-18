@@ -62,7 +62,7 @@ class ImageInputOp final : public PrefetchOperator<Context> {
   bool CopyPrefetched() override;
 
  private:
-  struct BoundingBox {
+  using BoundingBox = struct {
     bool valid;
     int ymin;
     int xmin;
@@ -73,7 +73,7 @@ class ImageInputOp final : public PrefetchOperator<Context> {
   // Structure to store per-image information
   // This can be modified by the DecodeAnd* so needs
   // to be privatized per launch.
-  struct PerImageArg { BoundingBox bounding_params; };
+  using PerImageArg = struct { BoundingBox bounding_params; };
 
   bool GetImageAndLabelAndInfoFromDBValue(
       const string& value,

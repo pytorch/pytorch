@@ -27,17 +27,13 @@ class Gamma(ExponentialFamily):
             (often referred to as beta)
     """
     arg_constraints = {'concentration': constraints.positive, 'rate': constraints.positive}
-    support = constraints.nonnegative
+    support = constraints.positive
     has_rsample = True
     _mean_carrier_measure = 0
 
     @property
     def mean(self):
         return self.concentration / self.rate
-
-    @property
-    def mode(self):
-        return ((self.concentration - 1) / self.rate).clamp(min=0)
 
     @property
     def variance(self):
@@ -70,8 +66,8 @@ class Gamma(ExponentialFamily):
         value = torch.as_tensor(value, dtype=self.rate.dtype, device=self.rate.device)
         if self._validate_args:
             self._validate_sample(value)
-        return (torch.xlogy(self.concentration, self.rate) +
-                torch.xlogy(self.concentration - 1, value) -
+        return (self.concentration * torch.log(self.rate) +
+                (self.concentration - 1) * torch.log(value) -
                 self.rate * value - torch.lgamma(self.concentration))
 
     def entropy(self):

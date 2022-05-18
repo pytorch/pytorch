@@ -78,10 +78,6 @@ class Independent(Distribution):
         return self.base_dist.mean
 
     @property
-    def mode(self):
-        return self.base_dist.mode
-
-    @property
     def variance(self):
         return self.base_dist.variance
 

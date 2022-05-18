@@ -2,7 +2,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ThreadLocal.h>
-#include <c10/util/overloaded.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -500,72 +499,32 @@ C10_ALWAYS_INLINE bool tryRunCallback(
 RecordFunction::RecordFunction(RecordScope scope)
     : RecordFunction(getStepCallbacks(scope)) {}
 
-RecordFunction::RecordFunction(StepCallbacks&& step_callbacks)
-    : step_callbacks_{std::move(step_callbacks)} {
-  ctx_.resize(step_callbacks_.callbacks_.size());
-  if (step_callbacks_.needs_ids_) {
-    setHandle(next_unique_record_function_handle());
+RecordFunction::RecordFunction(StepCallbacks&& step_callbacks) {
+  if (!step_callbacks.empty()) {
+    state_.emplace(std::move(step_callbacks));
+    state_->ctx_.resize(state_->step_callbacks_.callbacks_.size());
+    if (state_->step_callbacks_.needs_ids_) {
+      setHandle(next_unique_record_function_handle());
+    }
   }
 }
 
 void RecordFunction::runStartCallbacks() {
-  for (const auto i : c10::irange(step_callbacks_.callbacks_.size())) {
+  for (const auto i : c10::irange(state_->step_callbacks_.callbacks_.size())) {
     tryRunCallback</*is_start=*/true>(
-        step_callbacks_.callbacks_[i], *this, ctx_[i]);
+        state_->step_callbacks_.callbacks_[i], *this, state_->ctx_[i]);
   }
-  called_start_callbacks_ = true;
+  state_->called_start_callbacks_ = true;
 }
 
 void RecordFunction::end() {
-  if (called_start_callbacks_) {
-    for (const auto i : c10::irange(step_callbacks_.callbacks_.size())) {
+  if (isActive() && state_->called_start_callbacks_) {
+    for (const auto i : c10::irange(state_->step_callbacks_.callbacks_.size())) {
       tryRunCallback</*is_start=*/false>(
-        step_callbacks_.callbacks_[i], *this, ctx_[i]);
+        state_->step_callbacks_.callbacks_[i], *this, state_->ctx_[i]);
     }
-    step_callbacks_.callbacks_.clear();
+    state_.reset();
   }
-}
-
-const char* RecordFunction::name() const {
-  return c10::visit(
-      c10::overloaded(
-          [](const std::string& name) { return name.c_str(); },
-          [](const schema_ref_t schema) {
-            return schema.get().name().c_str();
-          }),
-      fn_);
-}
-
-size_t RecordFunction::num_inputs() const {
-  return c10::visit(
-      c10::overloaded(
-          [&](const std::string&) { return inputs_.size(); },
-          [](const schema_ref_t schema) {
-            return schema.get().arguments().size();
-          }),
-      fn_);
-}
-
-size_t RecordFunction::num_outputs() const {
-  return c10::visit(
-      c10::overloaded(
-          [&](const std::string&) { return outputs_.size(); },
-          [](const schema_ref_t schema) {
-            return schema.get().returns().size();
-          }),
-      fn_);
-}
-
-c10::optional<OperatorName> RecordFunction::operator_name() const {
-  return c10::visit(
-      c10::overloaded(
-          [&](const std::string&) -> c10::optional<OperatorName> {
-            return c10::nullopt;
-          },
-          [](const schema_ref_t schema) -> c10::optional<OperatorName> {
-            return schema.get().operator_name();
-          }),
-      fn_);
 }
 
 StepCallbacks getStepCallbacks(RecordScope scope) {
@@ -669,29 +628,42 @@ uint64_t RecordFunction::currentThreadId() {
 }
 
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
-  fn_ = name;
-  sequence_nr_ = sequence_nr;
+  if (!isActive()) {
+    return;
+  }
+  state_->op_input_size = state_->inputs_.size();
+  state_->name_ = name;
+  state_->sequence_nr_ = sequence_nr;
+  state_->operator_name_.reset();
 
   runStartCallbacks();
-  invalidateInputs();
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
-  fn_ = std::move(name);
-  sequence_nr_ = sequence_nr;
+  if (!isActive()) {
+    return;
+  }
+  state_->op_input_size = state_->inputs_.size();
+  state_->name_ = std::move(name);
+  state_->sequence_nr_ = sequence_nr;
+  state_->operator_name_.reset();
 
   runStartCallbacks();
-  invalidateInputs();
 }
 
 void RecordFunction::before(
-    RecordFunction::schema_ref_t schema,
+    c10::OperatorHandle const& op,
     int64_t sequence_nr) {
-  sequence_nr_ = sequence_nr;
-  fn_ = schema;
+  if (!isActive()) {
+    return;
+  }
+  state_->sequence_nr_ = sequence_nr;
+  state_->operator_name_ = op.operator_name();
+  state_->op_input_size = op.schema().arguments().size();
+  state_->op_output_size = op.schema().returns().size();
+  state_->name_ = op.schema().name();
 
   runStartCallbacks();
-  invalidateInputs();
 }
 
 /* static */ void RecordFunction::setDefaultNodeId(int64_t newDefaultNodeId) {
@@ -708,23 +680,16 @@ RecordFunction::~RecordFunction() {
 }
 
 void RecordFunction::_setAsync() {
-  is_async_ = true;
+  if (isActive()) {
+    state_->is_async_ = true;
+  }
 }
 
 bool RecordFunction::isAsync() const {
-  return is_async_;
-}
-
-void RecordFunction::_setStaticRuntimeOutVariant() {
   if (isActive()) {
-    is_static_runtime_out_variant_ = true;
-  }
-}
-
-bool RecordFunction::isStaticRuntimeOutVariant() const {
-  if (isActive()) {
-    return is_static_runtime_out_variant_;
+    return state_->is_async_;
   }
   return false;
 }
+
 } // namespace at

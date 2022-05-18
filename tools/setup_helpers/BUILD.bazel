@@ -3,7 +3,7 @@ py_binary(
     srcs = ["generate_code.py"],
     deps = [
         "//tools/autograd",
-        "//torchgen",
+        "//tools/codegen",
     ],
     visibility = ["//:__pkg__"],
 )

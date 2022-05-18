@@ -17,16 +17,12 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // For now I'm retroactively setting this in functorch,
   // but once Open Multiple Dispatch lands we should be able to calculate this in core.
   level_ = -1;
-  // mirror all of the generic tensor metadata onto the wrapper
-  copy_generic_tensor_metadata(value_.getIntrusivePtr().get(), this);
-  refresh_numel();
-  refresh_contiguous();
+  // shallow_copy_from overwrites the storage and dispatch keyset...
+  auto functional_storage = storage_;
+  shallow_copy_from(value_.getIntrusivePtr());
+  storage_ = functional_storage;
   storage_access_should_throw_ = false;
   key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize) | value_.key_set();
-  // All of the keys corresponding to functorch transforms should not be copied over.
-  // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
-  // to participate in the functorch transforms.
-  key_set_ = key_set_ - c10::functorch_transforms_ks;
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -260,7 +256,7 @@ std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list) {
   }
   return outputs;
 }
-std::vector<Tensor> to_functional_tensor(const TensorList& t_list) {
+TensorList to_functional_tensor(const TensorList& t_list) {
   std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs[i] = to_functional_tensor(t_list[i]);
@@ -299,10 +295,10 @@ c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::opt
   }
   return outputs;
 }
-std::vector<Tensor> from_functional_tensor(const TensorList& t_list) {
+TensorList from_functional_tensor(const TensorList& t_list) {
   std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = from_functional_tensor(t_list[i]);
+    outputs.push_back(from_functional_tensor(t_list[i]));
   }
   return outputs;
 }
@@ -342,30 +338,6 @@ void sync(const at::TensorList t_list) {
 void sync(const c10::List<c10::optional<Tensor>> t_list) {
   for (const auto i : c10::irange(t_list.size())) {
     sync(t_list[i]);
-  }
-}
-
-void replace_(const Tensor& functional_tensor, const Tensor& other) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
-  unsafeGetFunctionalWrapper(functional_tensor)->replace_(other);
-}
-
-void replace_(const TensorList functional_tensor, TensorList other) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
-  for (const auto i : c10::irange(functional_tensor.size())) {
-    replace_(functional_tensor[i], other[i]);
-  }
-}
-
-
-void commit_update(const Tensor& functional_tensor) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
-  unsafeGetFunctionalWrapper(functional_tensor)->commit_update();
-}
-
-void commit_update(const TensorList functional_tensor) {
-  for (const auto i : c10::irange(functional_tensor.size())) {
-    commit_update(functional_tensor[i]);
   }
 }
 

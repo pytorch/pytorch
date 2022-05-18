@@ -10,7 +10,6 @@ from warnings import warn
 import torch
 import torch.autograd.profiler as prof
 from torch.autograd import ProfilerActivity, kineto_available
-from torch._C._autograd import _ExperimentalConfig
 
 
 def supported_activities():
@@ -46,9 +45,6 @@ class _KinetoProfile(object):
             Note that this support exist, at the moment, only for TorchScript models
             and not eager mode models.
 
-        experimental_config (_ExperimentalConfig) : A set of experimental options
-            used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
-
     .. note::
         This API is an experimental and subject to change in future.
 
@@ -65,15 +61,13 @@ class _KinetoProfile(object):
             profile_memory: bool = False,
             with_stack: bool = False,
             with_flops: bool = False,
-            with_modules: bool = False,
-            experimental_config: Optional[_ExperimentalConfig] = None):
+            with_modules: bool = False):
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
         self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.with_modules = with_modules
-        self.experimental_config = experimental_config
         self.profiler: Optional[prof.profile] = None
 
     def start(self):
@@ -93,7 +87,6 @@ class _KinetoProfile(object):
             with_stack=self.with_stack,
             with_modules=self.with_modules,
             use_kineto=True,
-            experimental_config=self.experimental_config,
         )
         self.profiler._prepare_trace()
 
@@ -288,9 +281,6 @@ class profile(_KinetoProfile):
             then aten::add's module hierarchy is A.B
             Note that this support exist, at the moment, only for TorchScript models
             and not eager mode models.
-        experimental_config (_ExperimentalConfig) : A set of experimental options
-            used for Kineto library features. Note, backward compatibility is not guaranteed.
-
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -386,7 +376,6 @@ class profile(_KinetoProfile):
             with_stack: bool = False,
             with_flops: bool = False,
             with_modules: bool = False,
-            experimental_config: Optional[_ExperimentalConfig] = None,
             # deprecated:
             use_cuda: Optional[bool] = None):
 
@@ -405,8 +394,7 @@ class profile(_KinetoProfile):
             profile_memory=profile_memory,
             with_stack=with_stack,
             with_flops=with_flops,
-            with_modules=with_modules,
-            experimental_config=experimental_config,
+            with_modules=with_modules
         )
 
         if schedule:

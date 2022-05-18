@@ -131,10 +131,6 @@ class VonMises(Distribution):
         """
         return self.loc
 
-    @property
-    def mode(self):
-        return self.loc
-
     @lazy_property
     def variance(self):
         """
