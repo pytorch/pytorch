@@ -7,8 +7,6 @@ torch.fft
 Discrete Fourier transforms and related functions.
 
 .. automodule:: torch.fft
-    :noindex:
-
 .. currentmodule:: torch.fft
 
 Fast Fourier Transforms

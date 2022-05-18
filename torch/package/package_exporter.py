@@ -3,6 +3,7 @@ import importlib.machinery
 import io
 import linecache
 import pickletools
+import platform
 import types
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
@@ -84,6 +85,11 @@ class PackagingErrorReason(Enum):
         "Module did not match against any action pattern. Extern, mock, or intern it."
     )
     DENIED = "Module was denied by a pattern."
+    MOCKED_BUT_STILL_USED = (
+        "Module was mocked out, but is still being used in the package. "
+        "Please intern or extern the mocked modules if objects are supposed to be in "
+        "the package."
+    )
 
 
 @dataclass
@@ -191,6 +197,8 @@ class PackageExporter:
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
         """
+        torch._C._log_api_usage_once("torch.package.PackageExporter")
+
         if isinstance(f, (Path, str)):
             f = str(f)
             self.buffer: Optional[BinaryIO] = None
@@ -586,7 +594,7 @@ class PackageExporter:
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
-
+        mocked_modules = defaultdict(list)
         name_in_dependency_graph = f"<{package}.{resource}>"
         self.dependency_graph.add_node(
             name_in_dependency_graph,
@@ -596,6 +604,15 @@ class PackageExporter:
         )
 
         def _check_mocked_error(module: Optional[str], field: Optional[str]):
+            """
+            checks if an object (field) comes from a mocked module and then adds
+            the pair to mocked_modules which contains mocked modules paired with their
+            list of mocked objects present in the pickle.
+
+            We also hold the invariant that the first user defined rule that applies
+            to the module is the one we use.
+            """
+
             assert isinstance(module, str)
             assert isinstance(field, str)
             if self._can_implicitly_extern(module):
@@ -603,15 +620,8 @@ class PackageExporter:
             for pattern, pattern_info in self.patterns.items():
                 if pattern.matches(module):
                     if pattern_info.action == _ModuleProviderAction.MOCK:
-                        raise NotImplementedError(
-                            f"Object '{field}' from module {module} was mocked out during packaging "
-                            f"but is being used in resource - {resource} in package {package}. "
-                            "If this error is happening during 'save_pickle', please ensure that your "
-                            "pickled object doesn't contain any mocked objects. Try interning or externing"
-                            f"{module} if {field} is supposed to be in the package."
-                        )
-                    else:
-                        return
+                        mocked_modules[module].append(field)
+                    return
 
         if dependencies:
             all_dependencies = []
@@ -655,7 +665,23 @@ class PackageExporter:
                     _check_mocked_error(module, field)
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
-                self.add_dependency(module_name)
+
+                """ If an object happens to come from a mocked module, then we collect these errors and spit them
+                    out with the other errors found by package exporter.
+                """
+                if module in mocked_modules:
+                    assert isinstance(module, str)
+                    fields = mocked_modules[module]
+                    self.dependency_graph.add_node(
+                        module_name,
+                        action=_ModuleProviderAction.MOCK,
+                        error=PackagingErrorReason.MOCKED_BUT_STILL_USED,
+                        error_context=f"Object(s) '{fields}' from module `{module_name}` was mocked out during packaging "
+                        f"but is being used in resource - `{resource}` in package `{package}`. ",
+                        provided=True,
+                    )
+                else:
+                    self.add_dependency(module_name)
 
         self._write(filename, data_value)
 
@@ -905,7 +931,7 @@ class PackageExporter:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        # If __exit__ was called because an exception was raised, we do not attempt to
+        # If __exit__ was called because an exception was raised, we do not
         # attempt to finalize the package. Instead, control is returned to the
         # caller to continue raising the exception.
         if exc_type is not None:
@@ -987,7 +1013,7 @@ class PackageExporter:
                     )
 
                 if attrs.get("is_pickle") is True:
-                    # This node came from save_source_pickle, we don't need to write any source for it.
+                    # This node came from save_pickle, we don't need to write any source for it.
                     continue
 
                 is_package = attrs["is_package"]
@@ -1006,6 +1032,10 @@ class PackageExporter:
         extern_file_contents = "\n".join(extern_modules) + "\n"
         self._write(".data/extern_modules", extern_file_contents)
 
+    def _write_python_version(self):
+        """Writes the python version that the package was created with to .data/python_version"""
+        self._write(".data/python_version", platform.python_version())
+
     def close(self):
         """Write the package to the filesystem. Any calls after :meth:`close` are now invalid.
         It is preferable to use resource guard syntax instead::
@@ -1014,6 +1044,7 @@ class PackageExporter:
                 ...
         """
         self._execute_dependency_graph()
+        self._write_python_version()
 
         self.script_module_serializer.write_files()
         self._finalize_zip()

@@ -816,6 +816,10 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
+    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
+        # See https://github.com/pytorch/pytorch/issues/74352
+        target_compile_options(asmjit PRIVATE -Wno-deprecated-copy -Wno-unused-but-set-variable)
+    endif()
   endif()
 
   if(USE_FBGEMM)
@@ -1305,7 +1309,7 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${PYTORCH_RCCL_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
 
     # Note [rocblas & rocfft cmake bug]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1369,18 +1373,39 @@ if(USE_CUDA)
   endif()
 endif()
 
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
+  if(MSVC)
+    message(WARNING "Tensorpipe cannot be used on Windows.")
+  else()
+    if(USE_CUDA)
+      set(TP_USE_CUDA ON CACHE BOOL "" FORCE)
+      set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
+    endif()
+    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
+    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
+
+    # Tensorpipe uses cuda_add_library
+    torch_update_find_cuda_flags()
+    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+    if(USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
+    elseif(USE_ROCM)
+      message(WARNING "TensorPipe doesn't yet support ROCm")
+      # Not yet...
+      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
+    endif()
+  endif()
+endif()
+
 if(USE_GLOO)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    if(MSVC)
-      # Don't install gloo on Windows
-      # It is already handled in builder scripts
-      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
-    else()
-      set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
-    endif()
+    # Don't install gloo
+    set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Temporarily override variables to avoid building Gloo tests/benchmarks
@@ -1392,6 +1417,10 @@ if(USE_GLOO)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
     if(NOT USE_SYSTEM_GLOO)
+      if(USE_DISTRIBUED AND USE_TENSORPIPE)
+        get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
+        set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
+      endif()
       # gloo uses cuda_add_library
       torch_update_find_cuda_flags()
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
@@ -1426,32 +1455,6 @@ if(USE_GLOO)
       list(APPEND Caffe2_HIP_DEPENDENCY_LIBS gloo_hip)
     endif()
     add_compile_options(-DCAFFE2_USE_GLOO)
-  endif()
-endif()
-
-if(USE_DISTRIBUTED AND USE_TENSORPIPE)
-  if(MSVC)
-    message(WARNING "Tensorpipe cannot be used on Windows.")
-  else()
-    if(USE_CUDA)
-      set(TP_USE_CUDA ON CACHE BOOL "" FORCE)
-      set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
-    endif()
-    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
-
-    # Tensorpipe uses cuda_add_library
-    torch_update_find_cuda_flags()
-    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-
-    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
-    if(USE_CUDA)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
-    elseif(USE_ROCM)
-      message(WARNING "TensorPipe doesn't yet support ROCm")
-      # Not yet...
-      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
-    endif()
   endif()
 endif()
 
@@ -1843,10 +1846,6 @@ set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
-if(USE_BREAKPAD)
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad)
-endif()
-
 # ---[ Kineto
 # edge profiler depends on KinetoProfiler but it only does cpu
 # profiling. Thus we dont need USE_CUDA/USE_ROCM
@@ -1906,7 +1905,8 @@ if(USE_KINETO)
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
-        ${CUDA_SOURCE_DIR}/lib64)
+        ${CUDA_SOURCE_DIR}/lib64
+        NO_DEFAULT_PATH)
 
     find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
         ${CUDA_SOURCE_DIR}/extras/CUPTI/include
@@ -1921,6 +1921,32 @@ if(USE_KINETO)
       message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
       message(STATUS "Found CUPTI")
       set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
+
+      # I've only tested this sanity check on Linux; if someone
+      # runs into this bug on another platform feel free to
+      # generalize it accordingly
+      if(NOT USE_CUPTI_SO AND UNIX)
+        include(CheckCXXSourceRuns)
+        # rt is handled by the CMAKE_REQUIRED_LIBRARIES set above
+        if(NOT APPLE)
+          set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl")
+        endif()
+        set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUPTI_LIBRARY_PATH},--no-whole-archive")
+        check_cxx_source_runs("#include <stdexcept>
+  int main() {
+    try {
+      throw std::runtime_error(\"error\");
+    } catch (...) {
+      return 0;
+    }
+    return 1;
+  }" EXCEPTIONS_WORK)
+        set(CMAKE_REQUIRED_LINK_OPTIONS "")
+        if(NOT EXCEPTIONS_WORK)
+          message(FATAL_ERROR "Detected that statically linking against CUPTI causes exceptions to stop working.  See https://github.com/pytorch/pytorch/issues/57744 for more details.  Perhaps try: USE_CUPTI_SO=1 python setup.py develop --cmake")
+        endif()
+      endif()
+
     else()
       message(STATUS "Could not find CUPTI library, using CPU-only Kineto build")
       set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)

@@ -7,6 +7,7 @@ import contextlib
 import ctypes
 import gc
 import io
+import os
 import pickle
 import queue
 import sys
@@ -574,11 +575,33 @@ class TestCuda(TestCase):
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
     def test_cublas_allow_tf32_get_set(self):
+        skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
+            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
+        if skip_tf32_cublas:
+            self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+            return
+
         orig = torch.backends.cuda.matmul.allow_tf32
         self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_float32_matmul_precision_get_set(self):
+        self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
+        skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
+            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
+        if not skip_tf32_cublas:
+            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        for p in ('medium', 'high'):
+            torch.set_float32_matmul_precision(p)
+            self.assertEqual(torch.get_float32_matmul_precision(), p)
+            if not skip_tf32_cublas:
+                self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+        torch.set_float32_matmul_precision('highest')
+        self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
+        if not skip_tf32_cublas:
+            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
 
     def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
         orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
@@ -1519,6 +1542,7 @@ except RuntimeError as e:
         self.assertTrue(any([msg in out or msg in err for msg in expected_messages]))
 
     @slowTest
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_multinomial_invalid_probs_cuda(self):
@@ -1956,8 +1980,7 @@ t1.start()
 t2.start()
 """])
 
-    # ROCm doesn't support device side asserts
-    @skipIfRocm
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
@@ -3128,6 +3151,14 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_capture_oom(self):
+        with self.assertRaisesRegex(RuntimeError, "out of memory"):
+            with torch.cuda.graph(torch.cuda.CUDAGraph()):
+                torch.zeros(2 ** 40, device="cuda")
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_rng_functional(self):
         ops_with_kwargs = ((torch.nn.functional.dropout, {"p": 0.1}),
                            (torch.nn.functional.rrelu, {"training": True}),)
@@ -3941,7 +3972,7 @@ class TestCudaComm(TestCase):
         r_tensors = [comm.reduce_add(t) for t in zip(*dup_tensors)]
         for r, t in zip(r_tensors, tensors):
             self.assertEqualTypeString(r, t)
-            self.assertEqual(r, t * 2)
+            self.assertEqual(r.coalesce() if r.is_sparse else r, t * 2)
 
         rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
         self.assertEqual(r_tensors, rc_tensors)

@@ -62,6 +62,8 @@ from torch.testing._internal.common_quantized import (
     override_qengines,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import skipIfNoCaffe2
+
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -198,6 +200,77 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             {'in_features': 5, 'out_features': 10},
             (16, 5)
         )
+
+    @override_qengines
+    def test_int16_reference_module(self):
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.ConvTranspose2d(1, 1, 1)
+                self.quant1 = QuantStub()
+                self.dequant1 = DeQuantStub()
+                self.quant2 = QuantStub()
+                self.dequant2 = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant1(x)
+                x = self.dequant1(x)
+                x = self.conv(x)
+                x = self.quant2(x)
+                x = self.dequant2(x)
+                return x
+
+
+        input_size = (16, 1, 10, 10)
+        data = torch.randn(*input_size, dtype=torch.float)
+
+        original_ref_m = RefM()
+        rand_w = torch.randn_like(original_ref_m.conv.weight)
+        rand_b = torch.randn_like(original_ref_m.conv.bias)
+        original_ref_m.conv.weight = torch.nn.Parameter(rand_w, requires_grad=False)
+        original_ref_m.conv.bias = torch.nn.Parameter(rand_b, requires_grad=False)
+
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines:
+            return
+        from torch.ao.quantization.observer import MovingAverageMinMaxObserver
+
+        weight_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            # set qmin and qmax to represent qint16
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+            qscheme=torch.per_tensor_symmetric,
+        )
+        act_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+        )
+        custom_qconfig = QConfig(activation=act_obs, weight=weight_obs)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = custom_qconfig
+
+        ref_m = prepare(original_ref_m)
+        # calibration
+        ref_m(torch.randn(*input_size, dtype=torch.float))
+
+        ref_m = convert(ref_m, is_reference=True)
+
+        myobs = MovingAverageMinMaxObserver(averaging_constant=0.5,
+                                            dtype=torch.qint32,
+                                            # set qmin and qmax to represent qint16
+                                            quant_min=-1 * (2 ** 15),
+                                            quant_max=(2 ** 15) - 1,
+                                            qscheme=torch.per_tensor_symmetric,
+                                            )
+        result = myobs(rand_w)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(ref_m.conv.weight_scale, qparams[0])
+
 
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
@@ -1388,10 +1461,12 @@ class TestQuantizeEagerONNXExport(JitTestCase):
             model = torch.jit.load(buf)
             f = io.BytesIO()
             torch.onnx.export(model, input, f, input_names=input_names,
-                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                              opset_version=9)
         onnx_model = export_to_onnx(model, data, input_names)
 
     @skipIfNoFBGEMM
+    @skipIfNoCaffe2
     def test_lower_graph_linear(self):
         model = torch.ao.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
@@ -1399,6 +1474,7 @@ class TestQuantizeEagerONNXExport(JitTestCase):
         self._test_lower_graph_impl(model, data)
 
     @skipIfNoFBGEMM
+    @skipIfNoCaffe2
     def test_lower_graph_conv2d(self):
         model = torch.ao.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)

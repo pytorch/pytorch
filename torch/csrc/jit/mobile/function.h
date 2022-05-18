@@ -34,12 +34,10 @@ class TORCH_API Function : public torch::jit::Function {
   // misaligned. Therefore only use ONE variant at time.
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle);
   void append_instruction(OpCode op, int X, int N);
-  bool append_operator(
+  void append_operator(
       const std::string& name,
       const std::string& overload_name,
-      const c10::optional<int>& num_specified_args,
-      int64_t model_version); /* TODO: T90339189 deprecate all v3 when v3 models
-                                are removed */
+      const c10::optional<int>& num_specified_args);
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
   void append_function(mobile::Function& func);
@@ -65,6 +63,12 @@ class TORCH_API Function : public torch::jit::Function {
       const std::vector<c10::TypePtr>& types,
       const size_t register_size);
 
+  // if not initialize, initialize by loading operators.
+  // return true of all op loaded, return false if some op is not found
+  // in the current runtime. Then, the ops that did not found will be filled
+  // in unsupported_op_names
+  bool initialize_operators(bool should_check_operators);
+
  private:
   c10::QualifiedName name_;
   Code code_;
@@ -73,8 +77,9 @@ class TORCH_API Function : public torch::jit::Function {
 
 c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
     c10::OperatorName opname,
-    c10::optional<int> num_specified_args,
-    int64_t model_version);
+    c10::optional<int> num_specified_args);
+
+TORCH_API std::string operator_str(const c10::OperatorName& opname);
 
 } // namespace mobile
 } // namespace jit

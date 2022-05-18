@@ -76,6 +76,134 @@ TEST(MemDependency, BoundOverlap) {
   ASSERT_EQ(ContainedOrEqual, boundOverlap(CB(15, 15), CB(2, 15)));
 }
 
+TEST(MemDependency, BoundComparison) {
+  using namespace analysis;
+
+  auto CB = [](int s, int e) {
+    return Bound(alloc<IntImm>(s), alloc<IntImm>(e));
+  };
+
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kEQ));
+  ASSERT_EQ(
+      CmpEvalResult::TRUE,
+      compareBound(CB(10, 10), CB(10, 10), CompareSelectOperation::kEQ));
+  ASSERT_EQ(
+      CmpEvalResult::FALSE,
+      compareBound(CB(10, 20), CB(30, 40), CompareSelectOperation::kEQ));
+  ASSERT_EQ(
+      CmpEvalResult::FALSE,
+      compareBound(CB(30, 40), CB(10, 20), CompareSelectOperation::kEQ));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 40), CB(40, 50), CompareSelectOperation::kEQ));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 40), CB(20, 30), CompareSelectOperation::kEQ));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 45), CB(40, 50), CompareSelectOperation::kEQ));
+
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kNE));
+  ASSERT_EQ(
+      CmpEvalResult::FALSE,
+      compareBound(CB(10, 10), CB(10, 10), CompareSelectOperation::kNE));
+  ASSERT_EQ(
+      CmpEvalResult::TRUE,
+      compareBound(CB(10, 20), CB(30, 40), CompareSelectOperation::kNE));
+  ASSERT_EQ(
+      CmpEvalResult::TRUE,
+      compareBound(CB(30, 40), CB(10, 20), CompareSelectOperation::kNE));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 40), CB(40, 50), CompareSelectOperation::kNE));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 40), CB(20, 30), CompareSelectOperation::kEQ));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 45), CB(40, 50), CompareSelectOperation::kNE));
+
+  ASSERT_EQ(
+      CmpEvalResult::TRUE,
+      compareBound(CB(10, 20), CB(30, 40), CompareSelectOperation::kLT));
+  ASSERT_EQ(
+      CmpEvalResult::FALSE,
+      compareBound(CB(30, 40), CB(10, 20), CompareSelectOperation::kLT));
+  ASSERT_EQ(
+      CmpEvalResult::FALSE,
+      compareBound(CB(30, 40), CB(10, 30), CompareSelectOperation::kLT));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kLT));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 40), CB(40, 50), CompareSelectOperation::kLT));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 45), CB(40, 50), CompareSelectOperation::kLT));
+
+  ASSERT_EQ(
+      CmpEvalResult::FALSE,
+      compareBound(CB(10, 20), CB(30, 40), CompareSelectOperation::kGE));
+  ASSERT_EQ(
+      CmpEvalResult::TRUE,
+      compareBound(CB(30, 40), CB(10, 20), CompareSelectOperation::kGE));
+  ASSERT_EQ(
+      CmpEvalResult::TRUE,
+      compareBound(CB(30, 40), CB(10, 30), CompareSelectOperation::kGE));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kGE));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 40), CB(40, 50), CompareSelectOperation::kGE));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 45), CB(40, 50), CompareSelectOperation::kGE));
+
+  ASSERT_EQ(
+      CmpEvalResult::FALSE,
+      compareBound(CB(10, 20), CB(30, 40), CompareSelectOperation::kGT));
+  ASSERT_EQ(
+      CmpEvalResult::FALSE,
+      compareBound(CB(30, 40), CB(40, 50), CompareSelectOperation::kGT));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kGT));
+  ASSERT_EQ(
+      CmpEvalResult::TRUE,
+      compareBound(CB(30, 40), CB(10, 20), CompareSelectOperation::kGT));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 40), CB(10, 30), CompareSelectOperation::kGT));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 45), CB(40, 50), CompareSelectOperation::kGT));
+
+  ASSERT_EQ(
+      CmpEvalResult::TRUE,
+      compareBound(CB(10, 20), CB(30, 40), CompareSelectOperation::kLE));
+  ASSERT_EQ(
+      CmpEvalResult::TRUE,
+      compareBound(CB(30, 40), CB(40, 50), CompareSelectOperation::kLE));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(10, 100), CB(10, 100), CompareSelectOperation::kLE));
+  ASSERT_EQ(
+      CmpEvalResult::FALSE,
+      compareBound(CB(30, 40), CB(10, 20), CompareSelectOperation::kLE));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 40), CB(10, 30), CompareSelectOperation::kLE));
+  ASSERT_EQ(
+      CmpEvalResult::NOT_DETERMINED,
+      compareBound(CB(30, 45), CB(40, 50), CompareSelectOperation::kLE));
+}
+
 TEST(MemDependency, BoundOverlapSymbolic) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -274,7 +402,7 @@ TEST(MemDependency, BoundSubtractMultiDim) {
     if (x.size() != y.size()) {
       return false;
     }
-    for (auto i = 0; i < x.size(); ++i) {
+    for (auto i = 0U; i < x.size(); ++i) {
       if (!indexBoundsEquals(x[i], y[i])) {
         return false;
       }
@@ -338,7 +466,7 @@ TEST(MemDependency, BoundSubtractMultiDimSymbolic) {
     if (x.size() != y.size()) {
       return false;
     }
-    for (auto i = 0; i < x.size(); ++i) {
+    for (auto i = 0U; i < x.size(); ++i) {
       if (!indexBoundsEquals(x[i], y[i])) {
         return false;
       }

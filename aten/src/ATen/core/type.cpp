@@ -11,6 +11,28 @@
 #include <ATen/core/function.h>
 #include <iostream>
 
+namespace std {
+template<>
+struct hash<std::tuple<std::string, c10::TypePtr, c10::TypePtr>> {
+  size_t operator()(std::tuple<std::string, c10::TypePtr, c10::TypePtr> const& t) const {
+    // This hashing is all hidden behind a static initializer so it
+    // doesn't have to be optimal
+    auto hash = std::hash<std::string>()(std::get<0>(t));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<2>(t)));
+    return hash;
+  }
+};
+template<>
+struct hash<std::tuple<std::string, c10::TypePtr>> {
+  size_t operator()(std::tuple<std::string, c10::TypePtr> const& t) const {
+    auto hash = std::hash<std::string>()(std::get<0>(t));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
+    return hash;
+  }
+};
+} // namespace std
+
 namespace c10 {
 
 static_assert(
@@ -208,6 +230,10 @@ LayoutTypePtr LayoutType::get() {
 static LayoutTypePtr value(new LayoutType());
 return value;
 }
+MemoryFormatTypePtr MemoryFormatType::get() {
+static MemoryFormatTypePtr value(new MemoryFormatType());
+return value;
+}
 PyObjectTypePtr PyObjectType::get() {
   static PyObjectTypePtr value(new PyObjectType());
   return value;
@@ -237,6 +263,47 @@ ListTypePtr ListType::ofStrings() {
   return value;
 }
 
+TypePtr OptionalType::get(TypePtr inner) {
+  static ska::flat_hash_map<TypePtr, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(inner) == containerTypePtrs.end()) {
+    TypePtr t = TypeFactory::create<OptionalType>(inner);
+    containerTypePtrs.emplace(inner, std::move(t));
+  }
+  return containerTypePtrs[inner];
+}
+
+TypePtr ListType::get(std::string identifier, TypePtr inner) {
+  static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  auto key = std::make_tuple(identifier, inner);
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(key) == containerTypePtrs.end()) {
+    TypePtr t = ListType::create(inner);
+    containerTypePtrs.emplace(key, std::move(t));
+  }
+  return containerTypePtrs[key];
+}
+
+TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
+  static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  auto map_key = std::make_tuple(identifier, key, value);
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(map_key) == containerTypePtrs.end()) {
+    TypePtr t = DictType::create(key, value);
+    containerTypePtrs.emplace(map_key, std::move(t));
+  }
+  return containerTypePtrs[map_key];
+}
+
 AnyListTypePtr AnyListType::get() {
   static AnyListTypePtr value(new AnyListType());
   return value;
@@ -254,6 +321,11 @@ AnyClassTypePtr AnyClassType::get() {
 
 AnyEnumTypePtr AnyEnumType::get() {
   static AnyEnumTypePtr value(new AnyEnumType());
+  return value;
+}
+
+SymIntTypePtr SymIntType::get() {
+  static SymIntTypePtr value(new SymIntType());
   return value;
 }
 

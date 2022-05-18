@@ -1060,6 +1060,24 @@ Args:
     {memory_format}
 """.format(**common_args))
 
+add_docstr_all('ipu',
+               r"""
+ipu(device=None, non_blocking=False, memory_format=torch.preserve_format) -> Tensor
+
+Returns a copy of this object in IPU memory.
+
+If this object is already in IPU memory and on the correct device,
+then no copy is performed and the original object is returned.
+
+Args:
+    device (:class:`torch.device`): The destination IPU device.
+        Defaults to the current IPU device.
+    non_blocking (bool): If ``True`` and the source is in pinned memory,
+        the copy will be asynchronous with respect to the host.
+        Otherwise, the argument has no effect. Default: ``False``.
+    {memory_format}
+""".format(**common_args))
+
 add_docstr_all('xpu',
                r"""
 xpu(device=None, non_blocking=False, memory_format=torch.preserve_format) -> Tensor
@@ -1798,6 +1816,12 @@ The :attr:`dim`\ th dimension of ``source`` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
+For a 3-D tensor the output is given as::
+
+    self[index[i], :, :] += alpha * src[i, :, :]  # if dim == 0
+    self[:, index[i], :] += alpha * src[:, i, :]  # if dim == 1
+    self[:, :, index[i]] += alpha * src[:, :, i]  # if dim == 2
+
 Note:
     {forward_reproducibility_note}
 
@@ -1911,6 +1935,73 @@ index_put(indices, values, accumulate=False) -> Tensor
 
 Out-place version of :meth:`~Tensor.index_put_`.
 """)
+
+add_docstr_all('index_reduce_',
+               r"""
+index_reduce_(dim, index, source, reduce, *, include_self=True) -> Tensor
+
+Accumulate the elements of ``source`` into the :attr:`self`
+tensor by accumulating to the indices in the order given in :attr:`index`
+using the reduction given by the ``reduce`` argument. For example, if ``dim == 0``,
+``index[i] == j``, ``reduce == prod`` and ``include_self == True`` then the ``i``\ th
+row of ``source`` is multiplied by the ``j``\ th row of :attr:`self`. If
+:obj:`include_self="True"`, the values in the :attr:`self` tensor are included
+in the reduction, otherwise, rows in the :attr:`self` tensor that are accumulated
+to are treated as if they were filled with the reduction identites.
+
+The :attr:`dim`\ th dimension of ``source`` must have the same size as the
+length of :attr:`index` (which must be a vector), and all other dimensions must
+match :attr:`self`, or an error will be raised.
+
+For a 3-D tensor with :obj:`reduce="prod"` and :obj:`include_self=True` the
+output is given as::
+
+    self[index[i], :, :] *= src[i, :, :]  # if dim == 0
+    self[:, index[i], :] *= src[:, i, :]  # if dim == 1
+    self[:, :, index[i]] *= src[:, :, i]  # if dim == 2
+
+Note:
+    {forward_reproducibility_note}
+
+.. note::
+
+    This function only supports floating point tensors.
+
+.. warning::
+
+    This function is in beta and may change in the near future.
+
+Args:
+    dim (int): dimension along which to index
+    index (Tensor): indices of ``source`` to select from,
+        should have dtype either `torch.int64` or `torch.int32`
+    source (FloatTensor): the tensor containing values to accumulate
+    reduce (str): the reduction operation to apply
+        (:obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
+
+Keyword args:
+    include_self (bool): whether the elements from the ``self`` tensor are
+        included in the reduction
+
+Example::
+
+    >>> x = torch.empty(5, 3).fill_(2)
+    >>> t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]], dtype=torch.float)
+    >>> index = torch.tensor([0, 4, 2, 0])
+    >>> x.index_reduce_(0, index, t, 'prod')
+    tensor([[20., 44., 72.],
+            [ 2.,  2.,  2.],
+            [14., 16., 18.],
+            [ 2.,  2.,  2.],
+            [ 8., 10., 12.]])
+    >>> x = torch.empty(5, 3).fill_(2)
+    >>> x.index_reduce_(0, index, t, 'prod', include_self=False)
+    tensor([[10., 22., 36.],
+            [ 2.,  2.,  2.],
+            [ 7.,  8.,  9.],
+            [ 2.,  2.,  2.],
+            [ 4.,  5.,  6.]])
+""".format(**reproducibility_notes))
 
 add_docstr_all('index_select',
                r"""
@@ -3374,11 +3465,68 @@ Example::
 
 """.format(**reproducibility_notes))
 
-add_docstr_all('scatter_reduce', r"""
-scatter_reduce(input, dim, index, reduce, *, output_size=None) -> Tensor
+add_docstr_all('scatter_reduce_', r"""
+scatter_reduce_(dim, index, src, reduce, *, include_self=True) -> Tensor
 
-See :func:`torch.scatter_reduce`
-""")
+Reduces all values from the :attr:`src` tensor to the indices specified in
+the :attr:`index` tensor in the :attr:`self` tensor using the applied reduction
+defined via the :attr:`reduce` argument (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`,
+:obj:`"amax"`, :obj:`"amin"`). For each value in :attr:`src`, it is reduced to an
+index in :attr:`self` which is specified by its index in :attr:`src` for
+``dimension != dim`` and by the corresponding value in :attr:`index` for
+``dimension = dim``. If :obj:`include_self="True"`, the values in the :attr:`self`
+tensor are included in the reduction.
+
+:attr:`self`, :attr:`index` and :attr:`src` should all have
+the same number of dimensions. It is also required that
+``index.size(d) <= src.size(d)`` for all dimensions ``d``, and that
+``index.size(d) <= self.size(d)`` for all dimensions ``d != dim``.
+Note that ``index`` and ``src`` do not broadcast.
+
+For a 3-D tensor with :obj:`reduce="sum"` and :obj:`include_self=True` the
+output is given as::
+
+    self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
+    self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
+    self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
+
+Note:
+    {forward_reproducibility_note}
+
+.. note::
+
+    The backward pass is implemented only for ``src.shape == index.shape``.
+
+.. warning::
+
+    This function is in beta and may change in the near future.
+
+Args:
+    dim (int): the axis along which to index
+    index (LongTensor): the indices of elements to scatter and reduce.
+    src (Tensor): the source elements to scatter and reduce
+    reduce (str): the reduction operation to apply for non-unique indices
+        (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
+    include_self (bool): whether elements from the :attr:`self` tensor are
+        included in the reduction
+
+Example::
+
+    >>> src = torch.tensor([1., 2., 3., 4., 5., 6.])
+    >>> index = torch.tensor([0, 1, 0, 1, 2, 1])
+    >>> input = torch.tensor([1., 2., 3., 4.])
+    >>> input.scatter_reduce(0, index, src, reduce="sum")
+    tensor([5., 14., 8., 4.])
+    >>> input.scatter_reduce(0, index, src, reduce="sum", include_self=False)
+    tensor([4., 12., 5., 4.])
+    >>> input2 = torch.tensor([5., 4., 3., 2.])
+    >>> input2.scatter_reduce(0, index, src, reduce="amax")
+    tensor([5., 6., 5., 2.])
+    >>> input2.scatter_reduce(0, index, src, reduce="amax", include_self=False)
+    tensor([3., 6., 5., 2.])
+
+
+""".format(**reproducibility_notes))
 
 add_docstr_all('select',
                r"""
@@ -3544,13 +3692,6 @@ Example::
     >>> t.size(dim=1)
     4
 
-""")
-
-add_docstr_all('solve',
-               r"""
-solve(A) -> Tensor, Tensor
-
-See :func:`torch.solve`
 """)
 
 add_docstr_all('sort',
@@ -3978,6 +4119,16 @@ Args:
     {memory_format}
 """.format(**common_args))
 
+add_docstr_all('chalf',
+               r"""
+chalf(memory_format=torch.preserve_format) -> Tensor
+
+``self.chalf()`` is equivalent to ``self.to(torch.complex32)``. See :func:`to`.
+
+Args:
+     {memory_format}
+ """.format(**common_args))
+
 add_docstr_all('half',
                r"""
 half(memory_format=torch.preserve_format) -> Tensor
@@ -4144,6 +4295,35 @@ Example::
     tensor(indices=tensor([[1]]),
            values=tensor([[ 9,  0, 10]]),
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
+""")
+
+add_docstr_all('to_sparse_csr',
+               r"""
+to_sparse_csr() -> Tensor
+Convert a tensor to compressed row storage format. Only works with 2D tensors.
+
+Example::
+
+    >>> dense = torch.randn(5, 5)
+    >>> sparse = dense.to_sparse_csr()
+    >>> sparse._nnz()
+    25
+
+""")
+
+add_docstr_all('to_sparse_bsr',
+               r"""
+to_sparse_bsr(blocksize) -> Tensor
+Convert a CSR tensor to a block sparse row (BSR) storage format of given blocksize.
+
+Example::
+
+    >>> dense = torch.randn(10, 10)
+    >>> sparse = dense.to_sparse_csr()
+    >>> sparse_bsr = sparse.to_sparse_bsr((5, 5))
+    >>> sparse_bsr.col_indices()
+    tensor([0, 1, 0, 1])
+
 """)
 
 add_docstr_all('to_mkldnn',
@@ -4752,6 +4932,13 @@ scatter_add(dim, index, src) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
 
+add_docstr_all('scatter_reduce',
+               r"""
+scatter_reduce(dim, index, src, reduce, *, include_self=True) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_reduce_`
+""")
+
 add_docstr_all('masked_scatter',
                r"""
 masked_scatter(mask, tensor) -> Tensor
@@ -4866,6 +5053,11 @@ Tensors may not have two named dimensions with the same name.
 add_docstr_all('is_cuda',
                r"""
 Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
+""")
+
+add_docstr_all('is_ipu',
+               r"""
+Is ``True`` if the Tensor is stored on the IPU, ``False`` otherwise.
 """)
 
 add_docstr_all('is_xpu',
