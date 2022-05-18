@@ -530,7 +530,6 @@ meta_function_expected_failures = {
     torch.histogramdd: {f32, f64},  # aten::_histogramdd_bin_edges, aten::_histogramdd_from_bin_tensors
     torch.kthvalue: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::kthvalue.values
     torch.linalg.qr: {f32, f64},  # aten::_linalg_qr_helper
-    torch.linalg.vector_norm: {bf16, f16, f32, f64},  # aten::linalg_vector_norm
     torch.logcumsumexp: {bf16, f32, f64},  # aten::_logcumsumexp, aten::_logcumsumexp.out
     torch.masked_select: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::masked_select, aten::masked_select.out
     torch.matrix_exp: {bf16, f32, f64},  # aten::linalg_matrix_exp
@@ -596,7 +595,6 @@ meta_function_expected_failures = {
     torch.linalg.ldl_factor: {f32, f64},  # aten::_local_scalar_dense
     torch.linalg.lstsq: {f32, f64},  # aten::linalg_lstsq.out
     torch.linalg.lu_factor: {f32, f64},  # aten::_local_scalar_dense
-    torch.linalg.norm: {bf16, f16, f32, f64},  # aten::linalg_vector_norm
     torch.linalg.slogdet: {f32, f64},  # aten::linalg_slogdet
     torch.linalg.solve: {f32, f64},  # aten::linalg_solve, aten::linalg_solve.out
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular
@@ -645,6 +643,7 @@ meta_function_skips = {
     torch.linalg.matrix_power: {f32, f64},
     torch.linalg.matrix_rank: {f32, f64},
     torch.linalg.pinv: {f32, f64},
+    torch.empty: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
 }
 
 meta_function_device_expected_failures = defaultdict(dict)
@@ -688,7 +687,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.linalg.inv: {f32, f64},  # aten::_local_scalar_dense
     torch.linalg.ldl_factor: {f32, f64},  # aten::_local_scalar_dense
     torch.linalg.lu_factor: {f32, f64},  # aten::_local_scalar_dense
-    torch.linalg.norm: {bf16, f16, f32, f64},  # aten::linalg_vector_norm
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular, aten::linalg_solve_triangular.out
     torch.linalg.tensorinv: {f32, f64},  # aten::_local_scalar_dense
     torch.logcumsumexp: {bf16, f16},  # aten::_logcumsumexp, aten::_logcumsumexp.out
@@ -830,7 +828,6 @@ meta_dispatch_expected_failures = {
     aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32},
     aten.kthvalue.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.linalg_matrix_exp.default: {bf16, f64, f32},
-    aten.linalg_vector_norm.default: {bf16, f16, f64, f32},
     aten.log_sigmoid_forward.output: {bf16, f64, f32},
     aten.logcumsumexp.default: {bf16, f64, f32},
     aten.logcumsumexp.out: {bf16, f64, f32},
@@ -912,7 +909,6 @@ meta_dispatch_expected_failures = {
     aten.linalg_solve.out: {f32, f64},  # aten::linalg_solve.out
     aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
     aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
-    aten.linalg_vector_norm.out: {bf16, f16, f32, f64},  # aten::linalg_vector_norm.out
     aten.logdet.default: {f32, f64},  # aten::_local_scalar_dense, aten::nonzero
     aten.lu_solve.default: {f32, f64},  # aten::lu_solve
     aten.lu_solve.out: {f32, f64},  # aten::lu_solve.out
@@ -939,6 +935,7 @@ meta_dispatch_skips = {
     aten.slice.Tensor: {c32},  # TODO
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
+    aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
 }
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
