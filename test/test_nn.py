@@ -20532,8 +20532,14 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.double)
     @torch.no_grad()
     def test_multihead_attn_fast_path_query_and_bias_have_different_dtypes(self, device, dtype):
-        mha = torch.nn.MultiheadAttention(3, 3, batch_first=True, dtype=dtype, device=device).eval()
-        mha.in_proj_bias = torch.nn.Parameter(mha.in_proj_bias.to(torch.half).to(device))
+        mha = torch.nn.MultiheadAttention(1, 1, batch_first=True, dtype=dtype, device=device).eval()
+        query = torch.rand(3, 2, 1)
+        mha(query, query, query)
+
+    @dtypes(torch.double)
+    @torch.no_grad()
+    def test_multihead_attn_no_bias(self, device, dtype):
+        mha = torch.nn.MultiheadAttention(3, 3, bias=False, dtype=dtype, device=device)
         query = torch.randn(3, 3, 3, dtype=dtype, device=device)
         mha(query, query, query)
 
