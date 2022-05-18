@@ -40,6 +40,18 @@
 
 namespace at { namespace cuda { namespace jit {
 
+#ifdef USE_ROCM
+const std::string jit_preamble = R"ESCAPE(
+#pragma clang force_cuda_host_device begin
+)ESCAPE";
+const std::string jit_epilogue = R"ESCAPE(
+#pragma clang force_cuda_host_device end
+)ESCAPE";
+#else
+const std::string jit_preamble;
+const std::string jit_epilogue;
+#endif
+
 const std::string jit_common_types = R"ESCAPE(
   #define POS_INFINITY __int_as_float(0x7f800000)
   #define INFINITY POS_INFINITY
@@ -501,7 +513,7 @@ const std::string jit_code_template = R"ESCAPE(
     int idx = blockIdx.x;
 
     int remaining = numel - block_work_size * idx;
-    auto thread_idx = threadIdx.x;
+    int thread_idx = threadIdx.x;
 
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++){
@@ -954,7 +966,8 @@ std::string generate_code(
     }
     env.s("store_outputs", store_outputs.str());
 
-    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + offset_calc_template + jit_code_template);
+    static auto cuda_template = at::jit::CodeTemplate(
+      jit_preamble + jit_common_types + offset_calc_template + jit_code_template + jit_epilogue);
     const auto code = cuda_template.format(env);
     return code;
   }
@@ -1020,7 +1033,8 @@ std::string generate_code(
   }
   env.s("store_unrolled_outputs", store_unrolled_outputs.str());
 
-  static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_vectorized_code_template);
+  static auto cuda_template = at::jit::CodeTemplate(
+    jit_preamble + jit_common_types + jit_vectorized_code_template + jit_epilogue);
   const auto code = cuda_template.format(env);
   return code;
 }
@@ -1174,7 +1188,7 @@ std::string generate_reduction_code(
       env.s("functor", func);
       env.s("output_vec_size", std::to_string(vec_size));
       static auto cuda_template = at::jit::CodeTemplate(
-        jit_common_types + offset_calc_template + get_reduction_template());
+        jit_preamble + jit_common_types + offset_calc_template + get_reduction_template() + jit_epilogue);
       const auto code = cuda_template.format(env);
       return code;
 }
