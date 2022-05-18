@@ -378,7 +378,7 @@ sqrt = _make_elementwise_unary_reference(
 square = _make_elementwise_unary_reference(
     prims.square,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
-    aten_op=torch.ops.aten.square.out,
+    aten_op=None,  # CompositeImplicitAutograd
 )
 
 tan = _make_elementwise_unary_reference(
