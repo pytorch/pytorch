@@ -360,15 +360,18 @@ class TestCommon(TestCase):
                 exact_is_coalesced=True,
             )
 
-            # TODO: move Sequence case into utils.compare_significant_strides
             if isinstance(actual, torch.Tensor):
+                assert isinstance(expected, torch.Tensor)
                 prims.utils.compare_significant_strides(actual, expected)
+                if getattr(op, 'validate_view_consistency', True):
+                    self.assertEqual(actual._is_view(), expected._is_view())
             if isinstance(actual, Sequence):
+                assert isinstance(expected, Sequence)
                 for a, b in zip(actual, expected):
                     prims.utils.compare_significant_strides(a, b)
+                    if getattr(op, 'validate_view_consistency', True):
+                        self.assertEqual(a._is_view(), b._is_view())
 
-            # TODO: FIXME: enable view consistency testing
-            # self.assertEqual(actual._is_view(), expected._is_view())
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -788,16 +791,18 @@ class TestCommon(TestCase):
     #   against eager's gold standard op function variant
     @_variant_ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
-        # Acquires variants (method variant, inplace variant, aliases)
+        # Acquires variants (method variant, inplace variant, operator variant, inplace_operator variant, aliases)
 
         method = op.method_variant
         inplace = op.inplace_variant
+        operator = op.operator_variant
+        inplace_operator = op.inplace_operator_variant
+
 
         # list of all inplace ops: inplace variant + alias inplace variants if exist
-        inplace_ops = [
-            inplace,
-        ]
-        variants = [method, inplace]
+        inplace_ops = [inplace, inplace_operator]
+        variants = [method, inplace, operator, inplace_operator]
+        operators = [operator, inplace_operator]
 
         for a_op in op.aliases:
             variants.append(a_op.op)
@@ -807,6 +812,7 @@ class TestCommon(TestCase):
 
         inplace_variants = tuple(filter(None, inplace_ops))
         variants = tuple(filter(None, variants))
+        operators = tuple(filter(None, operators))
 
         _requires_grad = dtype in op.supported_backward_dtypes(
             torch.device(device).type
@@ -892,6 +898,10 @@ class TestCommon(TestCase):
                             )
                         continue
 
+                    if variant in operators and sample.kwargs:
+                        # skip samples with kwargs for operator variants
+                        continue
+
                     variant_forward = variant(cloned, *sample.args, **sample.kwargs)
                     self.assertEqual(expected_forward, variant_forward)
 
@@ -932,6 +942,10 @@ class TestCommon(TestCase):
                         cloned if isinstance(cloned, torch.Tensor) else cloned[0]
                     )
                     data_ptr = inp_tensor.data_ptr()
+                    if variant in operators and sample.kwargs:
+                        # skip samples with kwargs for operator variants
+                        continue
+
                     variant_forward = variant(cloned, *sample.args, **sample.kwargs)
                     # TODO Support non-tensor outputs if they exist for inplace ops
                     if isinstance(variant_forward, torch.Tensor):
@@ -959,7 +973,10 @@ class TestCommon(TestCase):
 
         for sample in op.sample_inputs(device, dtype):
             actual = op(sample.input, *sample.args, **sample.kwargs)
-            transformed_sample = sample.transform(lambda x: x.to(torch.complex64))
+            # sample.transform applies the lambda to torch.Tensor and torch.dtype.
+            # However, we only want to apply it to Tensors with dtype `torch.complex32`..
+            transformed_sample = sample.transform(lambda x: x.to(torch.complex64) if isinstance(
+                x, torch.Tensor) and x.dtype is torch.complex32 else x)
             expected = op(
                 transformed_sample.input,
                 *transformed_sample.args,
