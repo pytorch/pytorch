@@ -10615,7 +10615,8 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='no_rounding_mode',
-                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -11813,7 +11814,7 @@ op_db: List[OpInfo] = [
                    domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.chalf),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -11822,15 +11823,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
-                       # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    dtypes=(torch.chalf,))
                    ),
                    # log(z)->-inf for |z|->0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
