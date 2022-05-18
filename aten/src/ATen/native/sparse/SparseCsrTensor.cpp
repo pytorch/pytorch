@@ -520,13 +520,23 @@ Tensor& copy_sparse_compressed_(Tensor& self, const Tensor& src, bool non_blocki
       "torch.copy_: copy of sparse compressed tensors having different layouts is not supported.",
       " self layout is ", self.layout(), " and src layout is ", src.layout());
   TORCH_CHECK(
-      self._nnz() == src._nnz(),
+      self._nnz() == src._nnz(),  // actually, values copy allows different shapes as long as operands are broadcastable
       "torch.copy_: only sparse compressed tensors with the same number of specified elements are supported.");
-  TORCH_CHECK(self.size(compressedDimension(self.layout(), self.sizes())) == src.size(compressedDimension(src.layout(), src.sizes())),
-              "torch.copy_: only sparse compressed tensors with the same number of compressed dimensions are supported.");
-  TORCH_CHECK(self.values().sizes() == src.values().sizes(),
-              "torch.copy_: only sparse compressed tensors with the same values shape are supported.");
-
+  auto self_compressed_dims = self.size(compressedDimension(self.layout(), self.sizes()));
+  auto src_compressed_dims = src.size(compressedDimension(src.layout(), src.sizes()));
+  TORCH_CHECK(self_compressed_dims == src_compressed_dims,
+              "torch.copy_: only sparse compressed tensors with the same number of compressed dimensions are supported.",
+              " self and src compressed dimensions are ",
+              self_compressed_dims, " and ", src_compressed_dims, ", respectively.");
+  AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "copy_sparse_compressed_",
+                                              [&]{},
+                                              [&]{
+                                                auto self_block_size = DimVector(self.values().sizes().slice(-2));
+                                                auto src_block_size = DimVector(src.values().sizes().slice(-2));
+                                                TORCH_CHECK(self_block_size == src_block_size,
+                                                            "torch.copy_: copy of sparse compressed tensors having different block sizes is not supported.",
+                                                            " self and src block sizes are ", self_block_size, " and ", src_block_size, ", respectivly.");
+                                              });
   AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "copy_sparse_compressed_",
                                             [&]{
                                               self.crow_indices().copy_(src.crow_indices(), non_blocking);

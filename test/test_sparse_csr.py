@@ -418,7 +418,7 @@ class TestSparseCompressed(TestCase):
                 d = self.genSparseCompressedTensor(shape1, 1, dtype=dtype, layout=layout, device=device,
                                                    index_dtype=index_dtype, block_size=block_size1)
                 with self.assertRaisesRegex(RuntimeError,
-                                            "only sparse compressed tensors with the same values shape are supported."):
+                                            "copy of sparse compressed tensors having different block sizes is not supported"):
                     b.copy_(d)
 
 
