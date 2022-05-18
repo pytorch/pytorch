@@ -145,18 +145,18 @@ TEST_F(NVFuserTest, FusionVoltaMMATT_CUDA) {
   tv2->configureMma(mma_builder.build());
 
   // Write A to smem
-  auto tv0cw = tv0b->cache_after();
+  auto tv0cw = tv0b->cacheAfter();
   // Read A from smem
-  auto tv0cr = tv0cw->cache_after();
+  auto tv0cr = tv0cw->cacheAfter();
 
   // Write B to smem
-  auto tv1cw = tv1b->cache_after();
+  auto tv1cw = tv1b->cacheAfter();
 
   // Read B from smem
-  auto tv1cr = tv1cw->cache_after();
+  auto tv1cr = tv1cw->cacheAfter();
 
   // Register accumulator
-  auto tv2c = tv2->cache_before();
+  auto tv2c = tv2->cacheBefore();
 
   // [M,K,N]->[M,N,K]
   tv0cr->reorder({{-2, -1}, {-1, -2}});
@@ -239,11 +239,11 @@ TEST_F(NVFuserTest, FusionVoltaMMATN_CUDA) {
 
   tv2->configureMma(mma_builder.build());
 
-  auto tv0cw = tv0b->cache_after();
-  auto tv0cr = tv0cw->cache_after();
-  auto tv1cw = tv1b->cache_after();
-  auto tv1cr = tv1cw->cache_after();
-  auto tv2c = tv2->cache_before();
+  auto tv0cw = tv0b->cacheAfter();
+  auto tv0cr = tv0cw->cacheAfter();
+  auto tv1cw = tv1b->cacheAfter();
+  auto tv1cr = tv1cw->cacheAfter();
+  auto tv2c = tv2->cacheBefore();
 
   tv0cr->applyMmaSwizzle(mma_builder.operand(MmaOptions::Operand::A).build());
   tv1cr->applyMmaSwizzle(mma_builder.operand(MmaOptions::Operand::B).build());
@@ -300,11 +300,11 @@ TEST_F(NVFuserTest, FusionVoltaMMANT_CUDA) {
 
   tv2->configureMma(mma_builder.build());
 
-  auto tv0cw = tv0b->cache_after();
-  auto tv0cr = tv0cw->cache_after();
-  auto tv1cw = tv1b->cache_after();
-  auto tv1cr = tv1cw->cache_after();
-  auto tv2c = tv2->cache_before();
+  auto tv0cw = tv0b->cacheAfter();
+  auto tv0cr = tv0cw->cacheAfter();
+  auto tv1cw = tv1b->cacheAfter();
+  auto tv1cr = tv1cw->cacheAfter();
+  auto tv2c = tv2->cacheBefore();
 
   // To MNK
   tv0cr->reorder({{0, 2}, {1, 0}, {2, 1}});
@@ -372,13 +372,13 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTT_CUDA) {
 
   tv2->configureMma(mma_builder.build());
 
-  auto tv0r = tv0->cache_after();
-  auto tv1r = tv1->cache_after();
-  auto tv0cw = tv0b->cache_after();
-  auto tv0cr = tv0cw->cache_after();
-  auto tv1cw = tv1b->cache_after();
-  auto tv1cr = tv1cw->cache_after();
-  auto tv2c = tv2->cache_before();
+  auto tv0r = tv0->cacheAfter();
+  auto tv1r = tv1->cacheAfter();
+  auto tv0cw = tv0b->cacheAfter();
+  auto tv0cr = tv0cw->cacheAfter();
+  auto tv1cw = tv1b->cacheAfter();
+  auto tv1cr = tv1cw->cacheAfter();
+  auto tv2c = tv2->cacheBefore();
 
   // Make a CTA tile
   // ------------------------------------------------------------------
@@ -622,13 +622,13 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTN_CUDA) {
 
   tv2->configureMma(mma_builder.build());
 
-  auto tv0r = tv0->cache_after();
-  auto tv1r = tv1->cache_after();
-  auto tv0cw = tv0b->cache_after();
-  auto tv0cr = tv0cw->cache_after();
-  auto tv1cw = tv1b->cache_after();
-  auto tv1cr = tv1cw->cache_after();
-  auto tv2c = tv2->cache_before();
+  auto tv0r = tv0->cacheAfter();
+  auto tv1r = tv1->cacheAfter();
+  auto tv0cw = tv0b->cacheAfter();
+  auto tv0cr = tv0cw->cacheAfter();
+  auto tv1cw = tv1b->cacheAfter();
+  auto tv1cr = tv1cw->cacheAfter();
+  auto tv2c = tv2->cacheBefore();
 
   // Make a CTA tile
   // ------------------------------------------------------------------
@@ -771,13 +771,13 @@ TEST_F(NVFuserTest, FusionVoltaMatMulNT_CUDA) {
 
   tv2->configureMma(mma_builder.build());
 
-  auto tv0r = tv0->cache_after();
-  auto tv1r = tv1->cache_after();
-  auto tv0cw = tv0b->cache_after();
-  auto tv0cr = tv0cw->cache_after();
-  auto tv1cw = tv1b->cache_after();
-  auto tv1cr = tv1cw->cache_after();
-  auto tv2c = tv2->cache_before();
+  auto tv0r = tv0->cacheAfter();
+  auto tv1r = tv1->cacheAfter();
+  auto tv0cw = tv0b->cacheAfter();
+  auto tv0cr = tv0cw->cacheAfter();
+  auto tv1cw = tv1b->cacheAfter();
+  auto tv1cr = tv1cw->cacheAfter();
+  auto tv2c = tv2->cacheBefore();
 
   // Make a CTA tile
   // ------------------------------------------------------------------

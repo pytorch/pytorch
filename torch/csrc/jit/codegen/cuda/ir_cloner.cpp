@@ -108,6 +108,10 @@ void IrCloner::handle(const ReductionOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
+void IrCloner::handle(const GroupedReductionOp* op) {
+  clone_ = IrBuilder::clone(op, this);
+}
+
 void IrCloner::handle(const WelfordOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
@@ -128,7 +132,7 @@ void IrCloner::handle(const GatherOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
-void IrCloner::handle(const ViewDtypeOp* op) {
+void IrCloner::handle(const ViewAsScalar* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 

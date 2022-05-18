@@ -395,29 +395,27 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   //
   TensorView* rFactor(const std::vector<int>& axes);
 
-  //! Welford Version of rFactor, semantically similar with
-  //!  the reduction version except that the rfactor is done
-  //!  in a multi-output scan pattern
-  WelfordResult rFactor(
+  //! Multi-output version of rFactor, semantically similar with
+  //! the reduction version except that the rfactor is done
+  //! for all outputs in a consistent way
+  std::vector<TensorView*> rFactor(
       const std::vector<int>& axes,
-      TensorView* avg,
-      TensorView* var,
-      TensorView* n);
+      const std::vector<TensorView*>& tvs);
 
   // Create a TensorView before the original tensor. A common use case is to
   // write results into shared memory or registers before moving to global
   // memory. Analogous to TVM Cache_Write
-  TensorView* cache_before();
+  TensorView* cacheBefore();
 
   // Create a TensorView after the original tensor. A common use case is to
   // read tensor into shared memory or registers. Analogous to TVM Cache_Read
-  TensorView* cache_after();
+  TensorView* cacheAfter();
 
   // For a fusion output with other uses, we want to avoid writing to global
   // memory and then reading the output again. We write to global memory
   // separately after an operation. We replace this fusion output with the
   // direct write TensorView.
-  TensorView* cache_fork();
+  TensorView* cacheFork();
 
   MemoryType getMemoryType() const {
     return memory_type_;
@@ -462,8 +460,9 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   friend TORCH_CUDA_CU_API TransformReplay;
   friend TORCH_CUDA_CU_API OptOutMutator;
   friend ComputeAt;
-  friend void adjustMemoryTypes(Fusion* fusion);
   friend class ir_utils::TVDomainGuard;
+  friend TORCH_CUDA_CU_API void groupReductions(
+      const std::vector<TensorView*>&);
 
  protected:
   void setDomain(TensorDomain* td) {
@@ -482,9 +481,9 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return pos;
   }
 
-  //! A helper function to maintain the consistency of welford output
-  //! schedules when doing rfactor on welford ops.
-  TensorView* welfordRfactorHelper(
+  //! A helper function to maintain the consistency of schedules of
+  //! multiple outputs wheen doing rfactor on multi-output reduction ops.
+  TensorView* multiOutputRfactorHelper(
       TensorView* tv,
       const std::vector<int>& axes);
 

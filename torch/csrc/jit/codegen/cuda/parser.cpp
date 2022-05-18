@@ -87,6 +87,25 @@ bool isInputNonSizeZeroTensor(const Node* node) {
   return true;
 }
 
+bool isScalarTypeCompatible(const Node* node, size_t offset) {
+  auto val = node->input(offset);
+  // return true if it's not specified
+  if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(NoneType::get()))) {
+    return true;
+  }
+  // return false if it's runtime value
+  if (val->node()->kind() != prim::Constant) {
+    return false;
+  }
+  auto dtype = toIValue(val)->toScalarType();
+
+  // we do NOT support half math type yet
+  if (dtype == at::ScalarType::Half || dtype == at::ScalarType::BFloat16) {
+    return false;
+  }
+  return true;
+}
+
 // Note [ Permutation Bookkeeping and Propagation in Parser ]
 //
 // The goal in supporting permutation propagation in parser is to:
@@ -836,15 +855,6 @@ class IrParser {
     std::call_once(once_flag_, []() {
       std::lock_guard<std::mutex> lock(parser_mutex_);
       registerJitOperator();
-      parser_skip_set_.insert(
-          c10::Symbol::fromQualString("aten::_batch_norm_impl_index"));
-      parser_skip_set_.insert(
-          c10::Symbol::fromQualString("aten::native_batch_norm"));
-      parser_skip_set_.insert(c10::Symbol::fromQualString("aten::batch_norm"));
-      parser_skip_set_.insert(
-          c10::Symbol::fromQualString("aten::_batch_norm_impl_index_backward"));
-      parser_skip_set_.insert(
-          c10::Symbol::fromQualString("aten::native_batch_norm_backward"));
     });
   }
 
@@ -1285,15 +1295,49 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
-                value_map[node->inputs()[0]->unique()]);
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
             auto operand = list_val.front();
             list_val.pop_front();
 
+            if (!node->input(3)->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              auto device = constant_as<c10::Device>(node->input(3));
+              TORCH_INTERNAL_ASSERT(
+                  device.has_value() && device->is_cuda(),
+                  "rand_like in nvfuser is not on cuda device");
+              auto input_tensor_type =
+                  node->input(0)->type()->cast<TensorType>();
+              // device->index() == -1 indicating that we don't change device
+              // index
+              if (device->index() != -1 && input_tensor_type) {
+                auto input_device = input_tensor_type->device();
+                // we expect device index to be consistent with input and it
+                // should have already been handled by partition
+                TORCH_INTERNAL_ASSERT(
+                    !input_device.has_value() ||
+                        input_device->index() == device->index(),
+                    "rand_like in nvfuser is not on cuda device");
+              }
+            }
+
             auto out = randlike(operand);
-            value_map.emplace(node->output()->unique(), out);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (!node->input(1)->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get())) ||
+                !node->input(2)->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get())) ||
+                !node->input(5)->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -1501,7 +1545,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
+                c10::nullopt,
                 value_map[node->inputs()[0]->unique()],
                 value_map[node->inputs()[1]->unique()]);
             auto input = list_val.front();
@@ -1516,8 +1560,11 @@ class IrParser {
             if (train.value()) {
               auto result = dropout(input->as<TensorView>(), prob);
 
-              value_map.emplace(node->output(0)->unique(), result.output);
-              value_map.emplace(node->output(1)->unique(), result.mask);
+              value_map.emplace(
+                  node->output(0)->unique(),
+                  ValueHolder(result.output, format));
+              value_map.emplace(
+                  node->output(1)->unique(), ValueHolder(result.mask, format));
             } else {
               value_map.emplace(node->output(0)->unique(), input);
               value_map.emplace(
@@ -1525,7 +1572,15 @@ class IrParser {
                   ValueHolder(TensorViewBuilder().build(), format));
             }
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -1538,7 +1593,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
+                c10::nullopt,
                 value_map[node->inputs()[0]->unique()],
                 value_map[node->inputs()[1]->unique()]);
             auto input = list_val.front();
@@ -1553,12 +1608,22 @@ class IrParser {
             if (train.value()) {
               auto result = dropout(input->as<TensorView>(), prob);
 
-              value_map.emplace(node->output()->unique(), result.output);
+              value_map.emplace(
+                  node->output()->unique(), ValueHolder(result.output, format));
             } else {
-              value_map.emplace(node->output()->unique(), input);
+              value_map.emplace(
+                  node->output()->unique(), ValueHolder(input, format));
             }
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -1571,7 +1636,7 @@ class IrParser {
             MemoryFormat format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getPWFormatValues(
-                MemoryFormat::Contiguous(),
+                c10::nullopt,
                 value_map[node->inputs()[0]->unique()],
                 value_map[node->inputs()[1]->unique()],
                 value_map[node->inputs()[2]->unique()]);
@@ -1584,7 +1649,8 @@ class IrParser {
 
             auto output = dropout_backward(
                 grad->as<TensorView>(), mask->as<TensorView>(), scale);
-            value_map.emplace(node->output()->unique(), output);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
           },
           isInputNonSizeZeroTensor,
           nullptr);
@@ -1796,6 +1862,9 @@ class IrParser {
                       node->input(0)->type()->cast<TensorType>())) {
                 return false;
               }
+              if (node->input(5)->node()->kind() != prim::Constant) {
+                return false;
+              }
               return true;
             },
             [](const Node* node) -> OperatorType {
@@ -2001,6 +2070,31 @@ class IrParser {
                       node->input(1)->type()->cast<TensorType>())) {
                 return false;
               }
+              if (node->kind() ==
+                  c10::Symbol::fromQualString(
+                      "aten::_batch_norm_impl_index_backward")) {
+                if (node->inputs()[8]->node()->kind() != prim::Constant) {
+                  return false;
+                }
+                if (node->inputs()[10]->node()->kind() != prim::Constant) {
+                  return false;
+                }
+              } else if (
+                  node->kind() ==
+                  c10::Symbol::fromQualString(
+                      "aten::native_batch_norm_backward")) {
+                if (node->inputs()[7]->node()->kind() != prim::Constant) {
+                  return false;
+                }
+                if (node->inputs()[9]->node()->kind() != prim::Constant) {
+                  return false;
+                }
+              } else {
+                TORCH_INTERNAL_ASSERT(
+                    false,
+                    "Forgot to update profiled constant check for",
+                    node->kind().toDisplayString());
+              }
               return true;
             },
             [](const Node* node) -> OperatorType {
@@ -2071,6 +2165,9 @@ class IrParser {
             [](const Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
                       node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              if (node->inputs()[1]->node()->kind() != prim::Constant) {
                 return false;
               }
               return true;
@@ -2177,6 +2274,12 @@ class IrParser {
                     node->input(0)->type()->cast<TensorType>())) {
               return false;
             }
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            if (node->inputs()[7]->node()->kind() != prim::Constant) {
+              return false;
+            }
             return true;
           },
           [](const Node* node) -> OperatorType {
@@ -2234,10 +2337,7 @@ class IrParser {
               if (node->inputs()[1]->node()->kind() != prim::Constant) {
                 return false;
               }
-              // TODO: support dynamic input by profiling it
-              if (!node->inputs()[2]->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get())) &&
-                  node->inputs()[2]->node()->kind() != prim::Constant) {
+              if (!isScalarTypeCompatible(node, 2)) {
                 return false;
               }
               return true;
@@ -2307,11 +2407,19 @@ class IrParser {
         REGISTER_PARSE_RULE(
             ptr_op,
             {
-              auto grad_output =
-                  value_map[node->input(0)->unique()]->as<TensorView>();
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(),
+                  value_map[node->inputs()[0]->unique()],
+                  value_map[node->inputs()[1]->unique()]);
+              auto grad_output_t = list_val.front();
+              list_val.pop_front();
+              auto grad_output = grad_output_t->as<TensorView>();
 
-              auto output =
-                  value_map[node->input(1)->unique()]->as<TensorView>();
+              auto output_t = list_val.front();
+              list_val.pop_front();
+              auto output = output_t->as<TensorView>();
 
               auto dim_value = constant_as<int>(node->input(2));
               TORCH_INTERNAL_ASSERT(
@@ -2333,6 +2441,9 @@ class IrParser {
                 return false;
               }
               if (node->inputs()[2]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              if (node->inputs()[3]->node()->kind() != prim::Constant) {
                 return false;
               }
               return true;
@@ -2558,7 +2669,13 @@ class IrParser {
                   size_to.has_value(),
                   "aten::sum cannot be fused with dynamic axes");
               if (!size_to->empty()) {
-                auto out = sum_to(self->as<TensorView>(), size_to->vec());
+                auto input = self->as<TensorView>();
+                auto out = sum_to(input, size_to->vec());
+                // this copy is not necessary, but making copy avoids tricky
+                // computational graph where no-op could be challenging.
+                if (out == input) {
+                  out = set(input);
+                }
                 value_map.emplace(node->output()->unique(), out);
               } else {
                 // We are introducing alias here!
@@ -2647,7 +2764,20 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            // we do not support explicit memory_format on output
+            if (!node->inputs()[4]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -2762,7 +2892,15 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->input(1)->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -2796,7 +2934,15 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(grad_in, format));
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->input(2)->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
           nullptr);
     }
 
@@ -2953,6 +3099,45 @@ class IrParser {
     }
 
     {
+      auto flatten_op = getOperatorForLiteral(
+          "prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor");
+      REGISTER_PARSE_RULE(
+          flatten_op,
+          {
+            auto self_value = node->inputs()[0];
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                MemoryFormat::Contiguous(), value_map[self_value->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto start_dim_value = constant_as<int>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                start_dim_value.has_value(), "start_dim is not valid");
+            auto end_dim_value = constant_as<int>(node->input(2));
+            TORCH_INTERNAL_ASSERT(
+                end_dim_value.has_value(), "end_dim is not valid");
+
+            TensorView* output =
+                flatten(self, start_dim_value.value(), end_dim_value.value());
+            value_map.emplace(node->output()->unique(), output);
+          },
+          [](const Node* node) -> bool {
+            // we don't support dynamic start_dim;
+            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            // we don't support dynamic end_dim yet;
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
+          nullptr);
+    }
+
+    {
       auto ptr_op =
           getOperatorForLiteral("prim::squeeze_copy(Tensor self) -> Tensor");
       REGISTER_PARSE_RULE(
@@ -2970,7 +3155,13 @@ class IrParser {
             TORCH_INTERNAL_ASSERT(self_type != nullptr);
             auto self_sizes = getTensorSizes(self_type);
 
-            auto output = squeeze(self, self_sizes);
+            TensorView* output = nullptr;
+            if (self_sizes.empty()) {
+              // squeeze on scalar tensor should just return itself;
+              output = set(self);
+            } else {
+              output = squeeze(self, self_sizes);
+            }
             value_map.emplace(node->output()->unique(), output);
           },
           [](const Node* node) -> bool {
@@ -3016,7 +3207,12 @@ class IrParser {
                 auto self_type = self_value->type()->cast<c10::TensorType>();
                 TORCH_INTERNAL_ASSERT(self_type != nullptr);
                 auto self_sizes = getTensorSizes(self_type);
-                output = squeeze(self, self_sizes, dim_value.value());
+                if (self_sizes.empty()) {
+                  // squeeze on scalar tensor should just return itself;
+                  output = set(self);
+                } else {
+                  output = squeeze(self, self_sizes, dim_value.value());
+                }
               }
               value_map.emplace(node->output()->unique(), output);
             },
@@ -3028,6 +3224,9 @@ class IrParser {
                 return false;
               }
               if (!isInputNonSizeZeroTensor(node)) {
+                return false;
+              }
+              if (node->input(1)->node()->kind() != prim::Constant) {
                 return false;
               }
               auto optional_sizes = tensor_type->sizes().concrete_sizes();
@@ -3100,10 +3299,12 @@ class IrParser {
     } else if (
         val->type()->isSubtypeOf(
             static_cast<c10::TypePtr>(StringType::get())) ||
+        val->type()->isSubtypeOf(
+            static_cast<c10::TypePtr>(DeviceObjType::get())) ||
         val->type()->isSubtypeOf(static_cast<c10::TypePtr>(NoneType::get()))) {
       // TODO: should we consider adding support for NoneType;
-      // String scalars are only used in parsing rules;
-      // Do not register string with codegen IR.
+      // Note: String/Device scalars are only used in parsing rules, do not
+      // register string with codegen IR.
       return true;
     } else if (val->type()->cast<ListType>()) {
       // TODO: we don't support list type in codegen yet;
@@ -3634,23 +3835,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       getOperatorForLiteral(
           "aten::dropout(Tensor input, float p, bool train) -> Tensor")
           ->schema();
-  if (node->matches(dropout_schema)) {
-    switch (offset) {
-      // argument 2: Is training?
-      case 2:
-        profileBool(pr, node, offset);
-        break;
-      default:
-        return false;
-    }
-    return true;
-  }
-
   static auto native_dropout_schema =
       getOperatorForLiteral(
           "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)")
           ->schema();
-  if (node->matches(native_dropout_schema)) {
+  if (node->matches(dropout_schema) || node->matches(native_dropout_schema)) {
     switch (offset) {
       // argument 2: Is training?
       case 2:
@@ -3748,6 +3937,28 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       // argument 1: new tensor size;
       case 1:
         profileViewSize(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto flatten_schema1 =
+      getOperatorForLiteral(
+          "aten::flatten.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor")
+          ->schema();
+  static auto flatten_schema2 =
+      getOperatorForLiteral(
+          "prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor")
+          ->schema();
+  if (node->matches(flatten_schema1) || node->matches(flatten_schema2)) {
+    switch (offset) {
+      // argument 1: start_dim;
+      // argument 2: end_dim;
+      case 1:
+      case 2:
+        profileInt(pr, node, offset);
         break;
       default:
         return false;
@@ -3961,6 +4172,9 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   if (node->matches(log_softmax_backward_data_schema) ||
       node->matches(softmax_backward_data_schema)) {
     switch (offset) {
+      case 2:
+        profileInt(pr, node, offset);
+        return true;
       case 3:
         profileInt(pr, node, offset);
         return true;

@@ -233,7 +233,7 @@ TensorDomain* TransformRFactor::runReplay(
         return rfactor_root_id;
       });
 
-  auto orig_td_root = orig_td->getRootDomain();
+  auto orig_td_root = orig_td->getMaybeRFactorDomain();
 
   // Generate a new TensorDomain and set up map from one root to this one.
   std::vector<IterDomain*> new_root(orig_td_root.size(), nullptr);
@@ -264,7 +264,7 @@ TensorDomain* TransformRFactor::runReplay(
             IterType::Iteration,
             false);
       } else {
-        new_root[i] = id->clone();
+        new_root[i] = id->cloneWithoutRFactor();
       }
       replay_map[id] = new_root[i++];
     }
@@ -376,9 +376,9 @@ TensorDomain* TransformRFactor::runReplay2(
   // the domain we're creating
   std::vector<IterDomain*> new_root;
   std::unordered_map<IterDomain*, IterDomain*> replay_root_map;
-  for (auto id : orig_td->getRootDomain()) {
+  for (auto id : orig_td->getMaybeRFactorDomain()) {
     if (rfactor_root_axes.find(id) == rfactor_root_axes.end()) {
-      new_root.push_back(id->clone());
+      new_root.push_back(id->cloneWithoutRFactor());
       replay_root_map[id] = new_root.back();
     }
   }
@@ -401,7 +401,7 @@ TensorDomain* TransformRFactor::runReplay2(
           replayed_id->padToMultipleOfWarp(orig_id->getMaybeSizeAfterPadding());
         }
       } else if (axes_set.find(i) == axes_set.end()) {
-        IterDomain* new_id = orig_id->clone();
+        IterDomain* new_id = orig_id->cloneWithoutRFactor();
         new_domain.push_back(new_id);
         new_root.push_back(new_id);
       }

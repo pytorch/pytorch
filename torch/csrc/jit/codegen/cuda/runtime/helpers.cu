@@ -152,19 +152,19 @@ __device__ constexpr int alignBufferSize(int buffer, int size) {
 }
 
 __device__ double clamp(double x, double minv, double maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return fmin(fmax(x, minv), maxv);
 }
 
 __device__ float clamp(float x, double minv, double maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return fmin(fmax((double)x, minv), maxv);
 }
 
 __device__ int clamp(int x, int64_t minv, int64_t maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return min(max((int64_t)x, minv), maxv);
 }
 
 __device__ int64_t clamp(int64_t x, int64_t minv, int64_t maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return min(max(x, minv), maxv);
 }
 
 __device__ double frac(double x) {

@@ -12,7 +12,7 @@
 
 #include <sstream>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -70,9 +70,8 @@ static void NvFuserScheduler_Broadcast(
   auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
   auto executor_instance = compile_log.fusion_executor;
   TORCH_INTERNAL_ASSERT(compile_log.pointwise_params.has_value());
-  TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
   auto params = toString(compile_log.pointwise_params.value());
-  auto lparams = toString(compile_log.launch_constraints.value());
+  auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
 
   benchmark_state.SetLabel(params + lparams);
 
