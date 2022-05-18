@@ -23,6 +23,8 @@ def _maybe_convert_to_dtype(
 ) -> Union[TensorLikeType, NumberType, Sequence]:
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
+            # NOTE: this is incorrect on the CPU
+            # See https://github.com/pytorch/pytorch/issues/77553
             return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
@@ -98,14 +100,13 @@ class elementwise_type_promotion_wrapper(object):
             )
 
             flattened_type_promoting_args = tree_flatten(type_promoting_args)[0]
-
             compute_dtype, result_dtype = utils.elementwise_dtypes(
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,
             )
 
             promoted_args = {
-                x: _maybe_convert_to_dtype(bound.arguments[x], dtype=compute_dtype)
+                x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
                 if x in bound.arguments.keys()
             }
