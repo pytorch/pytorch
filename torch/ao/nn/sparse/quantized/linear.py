@@ -67,16 +67,6 @@ class LinearPackedParams(torch.nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
-        self.__init__()
-
-        if len(state) == 6:
-            # An earlier version of __setstate__ and __getstate__ used until
-            # serializing packed params in sparse form was added in D34392761
-            self.set_weight_bias(state[0], state[1], state[2], state[3])
-            self.training = state[4]
-            self.dtype = state[5]
-            return
-
         (self._packed_params, self.training, self.dtype) = state
 
     def __repr__(self):
