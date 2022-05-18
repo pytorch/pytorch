@@ -3845,6 +3845,41 @@ torch.cuda.synchronize()
         self.assertEqual(matmul_expand_mem, matmul_mem)
         self.assertEqual(bmm_mem, matmul_mem)
 
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-only test")
+    def test_rocm_backward_pass_guard(self):
+        # The test exercises a ROCm-specific feature.
+
+        class MyFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, tensor, constant):
+                self.assertFalse(torch._C._rocm_is_backward_pass())
+                ctx.constant = constant
+                return tensor * constant
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                self.assertTrue(torch._C._rocm_is_backward_pass())
+                return grad_output * ctx.constant, None
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.randn(()))
+
+            def forward(self, x):
+                return MyFunction.apply(x, self.a)
+
+        model = MyModule()
+        criterion = torch.nn.MSELoss(reduction='sum')
+        optimizer = torch.optim.SGD(model.parameters(), lr=1e-6)
+
+        x = torch.randn(5, 5)
+        result = model(x)
+        loss = criterion(result, x)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
 
 class TestCudaComm(TestCase):
     def _test_broadcast(self, input):
