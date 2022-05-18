@@ -251,42 +251,41 @@ def verify(
         model.train()
     elif training is None or training == torch.onnx.TrainingMode.EVAL:
         model.eval()
-    with torch.no_grad():
-        with contextlib.ExitStack() as stack:
-            model_f: Union[str, io.BytesIO] = io.BytesIO()
-            if use_external_data:
-                tmpdirname = stack.enter_context(tempfile.TemporaryDirectory())
-                model_f = os.path.join(tmpdirname, "model.onnx")
+    with torch.no_grad(), contextlib.ExitStack() as stack:
+        model_f: Union[str, io.BytesIO] = io.BytesIO()
+        if use_external_data:
+            tmpdirname = stack.enter_context(tempfile.TemporaryDirectory())
+            model_f = os.path.join(tmpdirname, "model.onnx")
 
-            inputs_for_export = _format_input_for_export(input_args, input_kwargs)
+        inputs_for_export = _format_input_for_export(input_args, input_kwargs)
 
-            # TODO: remove this and treat mutating model separately. See #77679
-            model_copy = _try_clone_model(model)
-            torch.onnx._export(
-                model,
-                inputs_for_export,
-                model_f,
-                opset_version=opset_version,
-                do_constant_folding=do_constant_folding,
-                keep_initializers_as_inputs=keep_initializers_as_inputs,
-                dynamic_axes=dynamic_axes,
-                input_names=input_names,
-                output_names=output_names,
-                fixed_batch_size=fixed_batch_size,
-                training=training,
-                verbose=verbose,
-            )
+        # TODO: remove this and treat mutating model separately. See #77679
+        model_copy = _try_clone_model(model)
+        torch.onnx._export(
+            model,
+            inputs_for_export,
+            model_f,
+            opset_version=opset_version,
+            do_constant_folding=do_constant_folding,
+            keep_initializers_as_inputs=keep_initializers_as_inputs,
+            dynamic_axes=dynamic_axes,
+            input_names=input_names,
+            output_names=output_names,
+            fixed_batch_size=fixed_batch_size,
+            training=training,
+            verbose=verbose,
+        )
 
-            ort_session = _create_ort_session(model_f, ort_providers)
+        ort_session = _create_ort_session(model_f, ort_providers)
 
-            _compare_ort_pytorch_model(
-                model_copy,
-                ort_session,
-                input_args,
-                input_kwargs,
-                additional_test_inputs,
-                remained_onnx_input_idx,
-                flatten,
-                rtol,
-                atol,
-            )
+        _compare_ort_pytorch_model(
+            model_copy,
+            ort_session,
+            input_args,
+            input_kwargs,
+            additional_test_inputs,
+            remained_onnx_input_idx,
+            flatten,
+            rtol,
+            atol,
+        )
