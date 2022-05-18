@@ -87,9 +87,9 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
     buffer_size: int
     _buffer: List[T_co]
     _enabled: bool
-    _running: bool
     _seed: Optional[int]
     _rng: random.Random
+    _restored: bool
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
@@ -108,9 +108,9 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
         self._enabled = True
-        self._running = False
         self._seed = None
         self._rng = random.Random()
+        self._restored = False
 
     def set_shuffle(self, shuffle=True):
         self._enabled = shuffle
@@ -134,7 +134,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self._rng.shuffle(self._buffer)
             while self._buffer:
                 yield self._buffer.pop()
-            self._running = False
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
@@ -142,13 +141,14 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
     def reset(self) -> None:
-        if not self._running:
+        if not self._restored:
             self._buffer = []
             if self._enabled and self._seed is None:
                 self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
             self._rng.seed(self._seed)
             self._seed = None
-        self._running = True
+        else:
+            self._restored = False
 
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
@@ -157,7 +157,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self.datapipe,
             self.buffer_size,
             self._enabled,
-            self._running,
             self._seed,
             self._rng.getstate(),
         )
@@ -168,13 +167,13 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self.datapipe,
             self.buffer_size,
             self._enabled,
-            self._running,
             self._seed,
             rng_state,
         ) = state
         self._rng = random.Random()
         self._rng.setstate(rng_state)
         self._buffer = []
+        self._restored = True
 
     def __del__(self):
         self._buffer.clear()
