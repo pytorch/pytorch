@@ -253,6 +253,11 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         rqr2 = dequant_m(qr2)
         self.assertEqual(rqr, rqr2)
 
+    def test_trace_quant(self):
+        t = torch.randn(16)
+        m = nnq.Quantize(0.03, 0, torch.qint8)
+        torch.jit.trace(m, t)
+
     def _test_conv_api_impl(
             self, module_name, qconv_module, conv_module, batch_size,
             in_channels_per_group, input_feature_map_size, out_channels_per_group,

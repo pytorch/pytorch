@@ -50,8 +50,7 @@ class Quantize(torch.nn.Module):
         self.dtype = dtype
 
     def forward(self, X):
-        return torch.quantize_per_tensor(X, float(self.scale),
-                                         int(self.zero_point), self.dtype)
+        return torch.quantize_per_tensor(X, self.scale, self.zero_point, self.dtype)
 
     @staticmethod
     def from_float(mod):
