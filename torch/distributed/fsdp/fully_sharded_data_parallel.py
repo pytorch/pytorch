@@ -28,7 +28,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-from torch.distributed.utils import _to_kwargs, _replace_by_prefix
+from torch.distributed.utils import _to_kwargs, _sync_params_and_buffers, _replace_by_prefix
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -75,6 +75,8 @@ except ImportError:
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
+
+_PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
 
 
 def _default_meta_device_init_fn(module):
@@ -283,10 +285,21 @@ class FullStateDictConfig(StateDictConfig):
     together to optimize memory savings when taking checkpoints. Note that
     this config class is meant for user via the :func:`state_dict_type`
     context manager as follows:
+        >>> fsdp = FSDP(model, auto_wrap_policy=...)
         >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        >>> with fsdp.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
+        >>> with FullyShardedDataParallel.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
         >>>     state = fsdp.state_dict()
         >>>     # state will be empty on non rank 0 and contain CPU tensors on rank 0.
+        >>> # To reload checkpoint for inference, finetuning, transfer learning, etc:
+        >>> model = model_fn() # Initialize model on CPU in preparation for wrapping with FSDP
+        >>> if dist.get_rank() == 0:
+        >>>     # Load checkpoint only on rank 0 to avoid memory redundancy
+        >>>     state_dict = torch.load("my_checkpoint.pt")
+        >>>     model.load_state_dict(state_dict)
+        >>> # All ranks initialize FSDP module as usual. ``sync_module_states`` argument
+        >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
+        >>> fsdp = FSDP(Model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
+        >>> # After this point, all ranks have FSDP model with loaded checkpoint.
     """
     offload_to_cpu: bool = False
     rank0_only: bool = False
@@ -567,6 +580,15 @@ class FullyShardedDataParallel(nn.Module):
             Note that if ``device_id`` is specified but ``module`` is already
             on a different CUDA device, an error will be thrown. (Default: ``None``)
 
+        sync_module_states (bool): If ``True``, each individually wrapped FSDP unit will broadcast
+            module parameters from rank 0 to ensure they are the same across all ranks after
+            initialization. This helps ensure model parameters are the same across ranks
+            before starting training, but adds communication overhead to ``__init__``, as at least
+            one broadcast is triggered per individually wrapped FSDP unit.
+            This can also help load checkpoints taken by ``state_dict`` and to be loaded by
+            ``load_state_dict`` in a memory efficient way. See documentation for
+            :class:`FullStateDictConfig` for an example of this. (Default: ``False``)
+
     """
 
     def __init__(
@@ -581,6 +603,7 @@ class FullyShardedDataParallel(nn.Module):
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
         device_id: Optional[Union[int, torch.device]] = None,
+        sync_module_states: bool = False,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -643,6 +666,8 @@ class FullyShardedDataParallel(nn.Module):
                 backward_prefetch=backward_prefetch,
                 mixed_precision=mixed_precision,
                 param_init_fn=param_init_fn,
+                device_id=device_id,
+                sync_module_states=sync_module_states,
             )
 
         self.process_group = process_group or _get_default_group()
@@ -749,6 +774,25 @@ class FullyShardedDataParallel(nn.Module):
             p for p in module.parameters()
             if p not in ignored_params and not isinstance(p, FlatParameter)
         ]
+
+        if sync_module_states:
+            # Collect buffers we have to synchronize, avoiding buffers that have already
+            # been synchronized to avoid redundant synchronization.
+            bufs_to_sync = []
+            for buf in module.buffers():
+                if not getattr(buf, '_fsdp_has_been_sync', False):
+                    buf._fsdp_has_been_sync = True
+                    bufs_to_sync.append(buf.detach())
+
+            states_to_sync = [param.detach() for param in params]
+            states_to_sync.extend(bufs_to_sync)
+            _sync_params_and_buffers(
+                process_group=self.process_group,
+                module_states=states_to_sync,
+                # Same bucket size as DDP
+                broadcast_bucket_size=_PARAM_BROADCAST_BUCKET_SIZE,
+                src=0,
+            )
 
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
             module, param_list=params
