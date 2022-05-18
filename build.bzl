@@ -47,7 +47,7 @@ def define_targets(rules):
 
     gen_aten_cmd = " ".join([
         "$(location //torchgen:gen)",
-        "--install_dir=${OUT}",
+        "--install_dir=$(RULEDIR)",
         "--source-path aten/src/ATen",
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
 
