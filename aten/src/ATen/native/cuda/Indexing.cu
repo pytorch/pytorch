@@ -1305,14 +1305,23 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
 
   // If indexing into sparse dimensions
   if (dim < sparse_dim) {
-    // short-circuit if index is empty
-    if (!index_len) {
-      auto res_indices = indices.index_select(1, index);
-      res_indices[dim] = index;
-      const auto res_values = values.index_select(0, index);
+    const auto make_output = [
+      dim, sparse_dim, dense_dim, res_sizes, &self, &indices, &values
+    ](
+        const Tensor& selected_dim_indices,
+        const Tensor& res_dim_indices
+    ) -> Tensor {
+      auto res_indices = indices.index_select(1, selected_dim_indices);
+      res_indices[dim] = res_dim_indices;
+      const auto res_values = values.index_select(0, selected_dim_indices);
 
       return at::_sparse_coo_tensor_with_dims_and_tensors(
           sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
+    };
+
+    // short-circuit if index is empty
+    if (!index_len) {
+      return make_output(index, index);
     }
 
     const auto nneg_index = [&index, size]() -> Tensor {
@@ -1382,16 +1391,16 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
       return intrsc_counts_nneg_index;
     }();
 
+    // Unavoidable sync since the shape of the result is not known in advance
+    auto res_len = intrsc_counts_nneg_index.sum().item<int64_t>();
+    // Short-circuit if empty intersection
+    if (!res_len) {
+      auto empty_idx = at::empty({0}, nneg_index.options());
+      return make_output(empty_idx, empty_idx);
+    }
+
     Tensor selected_dim_indices, res_dim_indices;
     std::tie(selected_dim_indices, res_dim_indices) = [&]() -> std::tuple<Tensor, Tensor> {
-      // Unavoidable sync since the shape of the result is not known in advance
-      auto res_len = intrsc_counts_nneg_index.sum().item<int64_t>();
-      // Short-circuit if empty intersection
-      if (!res_len) {
-        auto empty_idx = at::empty({0}, nneg_index.options());
-        return std::make_tuple(empty_idx, empty_idx);
-      }
-
       const auto res_dim_indices = at::repeat_interleave(
           /*self=*/idx_nneg_index,
           /*counts=*/intrsc_counts_nneg_index,
@@ -1445,12 +1454,7 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
       return std::make_tuple(selected_dim_indices, res_dim_indices);
     }();
 
-    auto res_indices = indices.index_select(1, selected_dim_indices);
-    res_indices[dim] = res_dim_indices;
-    const auto res_values = values.index_select(0, selected_dim_indices);
-
-    return _sparse_coo_tensor_with_dims_and_tensors(
-        sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
+    return make_output(selected_dim_indices, res_dim_indices);
   }
   // If indexing into dense dimensions
   else {
