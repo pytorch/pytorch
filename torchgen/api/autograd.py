@@ -9,7 +9,6 @@ from torchgen.model import (
     Type,
     SchemaKind,
     NativeFunctionsViewGroup,
-    NativeFunctionsGroup,
 )
 from torchgen.utils import IDENT_REGEX
 
@@ -195,34 +194,6 @@ class DifferentiabilityInfo:
             output_differentiability_conditions=self.output_differentiability_conditions,
         )
 
-    def create_functional_derivative(
-        self, g: NativeFunctionsGroup
-    ) -> "DifferentiabilityInfo":
-        assert "generated" in g.functional.tags
-
-        f = g.functional
-
-        name = str(g.functional.func.name.name)
-        op_name = None if self.op is None else f"{self.op}_functional"
-
-        return DifferentiabilityInfo(
-            # Use the "_functional" version of name/func/op
-            name=name,
-            func=f,
-            op=op_name,
-            # But keep all derivative info the same
-            derivatives=self.derivatives,
-            forward_derivatives=self.forward_derivatives,
-            all_saved_inputs=self.all_saved_inputs,
-            all_saved_outputs=self.all_saved_outputs,
-            available_named_gradients=self.available_named_gradients,
-            used_named_gradients=self.used_named_gradients,
-            args_with_derivatives=self.args_with_derivatives,
-            non_differentiable_arg_names=self.non_differentiable_arg_names,
-            output_differentiability=self.output_differentiability,
-            output_differentiability_conditions=self.output_differentiability_conditions,
-        )
-
 
 def uses_ident(info: Optional[DifferentiabilityInfo], ident: str) -> bool:
     if info is None:
@@ -358,10 +329,20 @@ def match_differentiability_info(
             return functional_info_by_signature[f_sig], False
 
         # (3) Some operators have a derivative explicitly defined for the mutable
-        # variant, but get a code-generated out-of-place variant.
-        # Use that if available
+        # variant, but get a code-generated out-of-place variant which does *not*
+        # come with a derivative formula.
+        # For the generated out-of-place variant, use the mutable variant's formula
+        # if it exists.
         if "generated" in f.tags and f_sig in non_functional_info_by_signature:
-            return non_functional_info_by_signature[f_sig], False
+            info = non_functional_info_by_signature[f_sig]
+            # See https://github.com/pytorch/pytorch/pull/76320/files#r874816389
+            assert not any(
+                "self" in str(inpt.nctype.name) for inpt in info.all_saved_inputs
+            ), f"""\
+Attempted to convert a derivative formula for a mutable operator
+ to be used by automatically by its functional variant ("{str(f.func)}").
+ this is not currently supported (we'd need to fix up the formula in the codegen)."""
+            return info, False
 
         return None, False
 
