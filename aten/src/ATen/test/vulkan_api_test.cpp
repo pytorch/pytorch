@@ -3,8 +3,6 @@
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/native/vulkan/api/api.h>
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
@@ -173,11 +171,9 @@ class VulkanAPITest : public ::testing::Test {
 public:
 #if defined (__ANDROID__)  // to avoid `Undefined symbols for architecture arm64` error
     static void SetUpTestSuite() {
-      at::native::vulkan::api::context()->querypool().enable();
     }
 
     static void TearDownTestSuite() {
-      at::native::vulkan::api::context()->querypool().disable(false);
     }
 #endif
 };
@@ -222,6 +218,7 @@ TEST_F(VulkanAPITest, add) {
   ASSERT_TRUE(check);
 }
 
+/*
 TEST_F(VulkanAPITest, add_broadcast0) {
   if (!at::is_vulkan_available()) {
     return;
@@ -3325,99 +3322,6 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         has_biases, num_layers, 1.0, train, bidirectional, batch_first);
   }, ::c10::Error);
 }
-
-#if defined (__ANDROID__)  // to avoid `Undefined symbols for architecture arm64` error
-TEST_F(VulkanAPITest, profiling_invalideinputs_exceptions) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
-  // Act: The device doesn't support for timestamps on all graphics and compute queues.
-  EXPECT_THROW({
-    const bool is_timestamps_supported_ = false;
-    const float timestamp_period = 1.f;
-    at::native::vulkan::api::QueryPool querypool(at::native::vulkan::api::context()->gpu().device, is_timestamps_supported_, timestamp_period);
-    querypool.enable();
-  }, ::c10::Error);
-
-  // Act: The query pool already exists.
-  EXPECT_THROW({
-    auto context = at::native::vulkan::api::context();
-    at::native::vulkan::api::QueryPool querypool(
-        context->gpu().device,
-        context->gpu().adapter->timestamp_compute_and_graphics(),
-        context->gpu().adapter->timestamp_period());
-    querypool.enable();
-    querypool.enable(); // already enabled
-  }, ::c10::Error);
-
-  // Act: The query index cannot exceed Configuration::kMaxQueryCount.
-  EXPECT_THROW({
-    auto context = at::native::vulkan::api::context();
-    at::native::vulkan::api::QueryPool querypool(
-        context->gpu().device,
-        context->gpu().adapter->timestamp_compute_and_graphics(),
-        context->gpu().adapter->timestamp_period());
-    querypool.enable();
-    for (uint32_t i = 0u; i < at::native::vulkan::api::QueryPool::Configuration::kMaxQueryCount + 1u; ++i) {
-      at::native::vulkan::api::Command::Buffer& command_buffer = context->command().pool.stream();
-      {
-        at::native::vulkan::api::OpProfiler profiler(command_buffer, querypool, "test");
-      }
-      context->command().pool.submit(context->gpu().queue, command_buffer);
-    }
-  }, ::c10::Error);
-}
-
-// NOTE: Keep the following test at the end of file
-//       so that it can print out the op execution time for all prior tests
-TEST_F(VulkanAPITest, profiling_result_success) {
-  // Guard
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
-  // Arrange
-  auto is_enabled = at::native::vulkan::api::context()->querypool().is_enabled();
-  if (is_enabled) {
-    auto perf_info = at::native::vulkan::api::context()->querypool().disable(false);
-    std::cout
-        << "-----------------------------------------------------------------------------------------" << std::endl
-        << "Query Name                                  Execution             Start               End" << std::endl
-        << "-----------------------------------------------------------------------------------------" << std::endl;
-    for (size_t i = 0; i < perf_info.size(); i++) {
-      std::cout << std::left << std::setw(35) << perf_info[i].query_name.c_str()
-        << std::right << std::setw(15) << perf_info[i].execution_time_us << " us"
-        << std::setw(15) << perf_info[i].start_time_us << " us"
-        << std::setw(15) << perf_info[i].end_time_us << " us" << std::left << std::endl;
-    }
-  }
-  at::native::vulkan::api::context()->querypool().enable();
-  const auto in_cpu1 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu2 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu3 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1);
-  out_vulkan.cpu();  // to make sure all GPU operations are done
-
-  // Act
-  auto perf_info = at::native::vulkan::api::context()->querypool().disable(true);
-  for (size_t i = 0; i < perf_info.size(); i++) {
-    std::cout << std::left << std::setw(35) << perf_info[i].query_name.c_str()
-      << std::right << std::setw(15) << perf_info[i].execution_time_us << " us"
-      << std::setw(15) << perf_info[i].start_time_us << " us"
-      << std::setw(15) << perf_info[i].end_time_us << " us" << std::left << std::endl;
-  }
-
-  // Assert
-  ASSERT_TRUE(perf_info.size() == 5u);
-  ASSERT_TRUE(perf_info[0].query_name == "aten::_cat (cat_feature_mult4ch)");
-
-  if (is_enabled) {
-    at::native::vulkan::api::context()->querypool().enable();
-  }
-}
-#endif
 
 } // namespace
 
