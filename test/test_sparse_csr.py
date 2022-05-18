@@ -185,7 +185,7 @@ class TestSparseCompressed(TestCase):
                    torch.tensor([], device=device, dtype=index_dtype),
                    torch.tensor([], device=device, dtype=dtype),
                    (0, 0))
-            for batch_shape in {(2, 3), (2,)}:
+            for batch_shape in [(2,), (2, 3)]:
                 prod = reduce(mul, batch_shape, 1)
                 yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
                        torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
@@ -201,7 +201,7 @@ class TestSparseCompressed(TestCase):
                    torch.tensor([], device=device, dtype=index_dtype),
                    torch.tensor([], device=device, dtype=dtype).reshape(1, 0, 0),
                    (0, 0))
-            for batch_shape in {(2, 3), (2,)}:
+            for batch_shape in [(2,), (2, 3)]:
                 prod = reduce(mul, batch_shape, 1)
                 yield (torch.tensor([0, 2, 4], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
                        torch.tensor([0, 1, 0, 1], device=device, dtype=index_dtype).repeat(prod, 1).reshape(*batch_shape, -1),
