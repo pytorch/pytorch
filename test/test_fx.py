@@ -488,6 +488,8 @@ class TestFX(JitTestCase):
         f = Foo()
         x, y = torch.randn(5), torch.randn(5)
 
+        print(torch.__version__)
+
         tracer = Tracer()
         torch.testing.assert_close(GraphModule(f, tracer.trace(f))(x, y), f(x, y))
 
