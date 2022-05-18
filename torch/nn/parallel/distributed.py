@@ -20,7 +20,7 @@ from torch.distributed.algorithms.join import (
 )
 from torch.distributed.utils import (
     _verify_param_shape_across_processes,
-    _sync_params_and_buffers,
+    _sync_module_states,
     _to_kwargs,
 )
 
@@ -645,7 +645,7 @@ class DistributedDataParallel(Module, Joinable):
         # Verify model equivalence.
         _verify_param_shape_across_processes(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
-        _sync_params_and_buffers(
+        _sync_module_states(
             module=self.module,
             process_group=self.process_group,
             broadcast_bucket_size=self.broadcast_bucket_size,
@@ -1114,7 +1114,7 @@ class DistributedDataParallel(Module, Joinable):
         self._authoritative_rank = self._find_common_rank(
             self._distributed_rank, is_last_joiner
         )
-        _sync_params_and_buffers(
+        _sync_module_states(
             module=self.module,
             process_group=self.process_group,
             broadcast_bucket_size=self.broadcast_bucket_size,
