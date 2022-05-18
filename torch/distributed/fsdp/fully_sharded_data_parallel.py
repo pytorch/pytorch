@@ -3170,8 +3170,6 @@ class FullyShardedDataParallel(nn.Module):
                 curr_iter_param_names = [
                     eod.get_unflat_param_names(index) for index in curr_param_order
                 ]
-                print(first_iter_param_names, type(first_iter_param_names))
-                print(curr_iter_param_names, type(curr_iter_param_names))
                 warnings.warn(
                     "Forward order differs from that of the first iteration "
                     f"on rank {self.rank} -- collectives are unchecked and may "
@@ -3852,10 +3850,10 @@ def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Ten
         local_norm = torch.tensor(max(par.grad.detach().abs().max() for par in parameters))
     else:
         # Compute the norm in full precision no matter what
-        local_norm = torch.linalg.norm(
+        local_norm = torch.linalg.vector_norm(
             torch.stack(
                 [
-                    torch.linalg.norm(par.grad.detach(), p, dtype=torch.float32)
+                    torch.linalg.vector_norm(par.grad.detach(), p, dtype=torch.float32)
                     for par in parameters
                 ]
             ),
