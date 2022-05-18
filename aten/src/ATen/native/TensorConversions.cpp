@@ -105,21 +105,34 @@ Tensor _to_copy(
                   (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
-    if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
-      Tensor r;
-      if (self.is_quantized()) {
-        r = at::empty_quantized(self.sizes(), self, options);
-        at::QuantizerPtr quantizer = r.quantizer();
-        r.copy_(self, non_blocking);
-        set_quantizer_(r, quantizer);
+    if (options.device().supports_as_strided()) {
+      if (self.is_non_overlapping_and_dense()) {
+        Tensor r;
+        if (self.is_quantized()) {
+          r = at::empty_quantized(self.sizes(), self, options);
+          at::QuantizerPtr quantizer = r.quantizer();
+          r.copy_(self, non_blocking);
+          set_quantizer_(r, quantizer);
+        } else {
+          r = at::empty_strided(
+              self.sizes(),
+              self.strides(),
+              options.pinned_memory(pin_out));
+          r.copy_(self, non_blocking);
+        }
+        return r;
+      } else if (!self.is_quantized() && self.layout() == kStrided) {
+          Tensor r;
+          auto strides = infer_dense_strides(self.sizes(), self.strides());
+          r = at::empty_strided(
+              self.sizes(),
+              strides,
+              options.pinned_memory(pin_out));
+          r.copy_(self, non_blocking);
+          return r;
       } else {
-        r = at::empty_strided(
-            self.sizes(),
-            self.strides(),
-            options.pinned_memory(pin_out));
-        r.copy_(self, non_blocking);
+        memory_format = self.suggest_memory_format();
       }
-      return r;
     } else {
       memory_format = self.suggest_memory_format();
     }
