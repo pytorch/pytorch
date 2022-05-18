@@ -74,7 +74,7 @@ See :ref:`locally-disable-grad-doc` for more information on the differences
 between no-grad and inference mode as well as other related mechanisms that
 may be confused with the two.
 
-.. torchsummary::
+.. autosummary::
     :toctree: generated
     :nosignatures:
 
