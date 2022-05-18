@@ -482,7 +482,7 @@ meta_function_expected_failures = {
     torch.Tensor.to_sparse: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::to_sparse, aten::to_sparse.sparse_dim
     torch.addbmm: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::addbmm, aten::addbmm.out
     torch.allclose: {bf16, f16, f32, f64},  # aten::_local_scalar_dense
-    torch.angle: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::angle, aten::angle.out
+    torch.angle: {b8, bf16, c32, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::angle, aten::angle.out
     torch.argwhere: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero
     torch.bincount: {i16, i32, i64, i8, u8},  # aten::bincount
     torch.bucketize: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::bucketize.Tensor, aten::bucketize.Tensor_out
@@ -629,6 +629,7 @@ meta_function_skips = {
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
     # BEGIN TODO
     torch.nn.functional.nll_loss: {bf16, f32, f64},
+    torch.nn.functional.pad: {f32, f64},
     torch.normal: {bf16, f16, f32, f64},
     torch.prod: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.tensor_split: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
@@ -796,7 +797,7 @@ meta_dispatch_expected_failures = {
     aten._unique2.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.addbmm.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.addbmm.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.angle.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
+    aten.angle.default: {c32, i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.angle.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.bincount.default: {i8, i64, i16, u8, i32},
     aten.bucketize.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
@@ -860,6 +861,7 @@ meta_dispatch_expected_failures = {
     aten.polar.default: {f64, f32},
     aten.prelu.default: {bf16, f64, f32},
     aten.prod.default: {i64, u8, b8, f32, i8, f64, i16, i32},
+    aten.reflection_pad2d.default: {f64, f32},
     aten.relu.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.repeat_interleave.Tensor: {c64, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.roll.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
@@ -996,6 +998,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
     aten.prelu.default: {f16},  # aten::prelu
     aten.prod.default: {bf16, c32, f16},  # aten::prod
+    aten.reflection_pad2d.default: {f16},  # aten::reflection_pad2d
     aten.relu.default: {f16},  # aten::relu
     aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
     aten.tensordot.out: {f16},  # aten::tensordot.out

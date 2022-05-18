@@ -1278,7 +1278,12 @@ Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tenso
 }
 
 Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
-  return at::zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
+  // for composite compliance, use out-of-place variant of
+  // `index_add` if index tensor is a Tensor Subclass.
+  if (isTensorSubclassLike(index)) {
+    return grad.new_zeros(self_sizes, grad.options()).index_add(dim, index, grad);
+  }
+  return grad.new_zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
 }
 
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
