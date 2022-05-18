@@ -16198,6 +16198,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                             'TestCommon',
                             'test_out_warning'),
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                            'TestLazyOpInfo'),
            )),
     OpInfo('new_full',
            op=lambda x, *args, **kwargs: x.new_full(*args, **kwargs),
