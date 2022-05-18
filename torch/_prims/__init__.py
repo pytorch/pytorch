@@ -18,7 +18,7 @@ from torch.overrides import has_torch_function, handle_torch_function
 import torch.library
 from torch.utils._pytree import tree_map
 
-from typing import Sequence, Optional, Union, Callable, List, Tuple, Any
+from typing import Sequence, Optional, Union, Callable, List, Tuple, Any, Type
 from functools import reduce, partial
 from enum import Enum
 import operator
@@ -1056,7 +1056,7 @@ def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeTy
 
 
 # Note: saves the Python slice object because we're about to clobber its name with the slice prim
-pyslice = slice
+pyslice: Type[slice] = slice
 
 
 def _slice_meta(
