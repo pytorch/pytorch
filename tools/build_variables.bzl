@@ -1103,10 +1103,6 @@ aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveMaxPoolKernel.cpp",
 ]
 
-aten_ufunc_headers = [
-    "aten/src/ATen/native/ufunc/add.h",
-]
-
 # When building lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
 # codegen process. The codegen version of this file, like Activation.cpp.DEFAULT.cpp, will be included
 # in ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt. As a result, in aten/src/ATen/CMakeLists.txt,

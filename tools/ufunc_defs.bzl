@@ -1,5 +1,8 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load(":build_variables.bzl", "aten_ufunc_headers")
+
+aten_ufunc_headers = [
+    "aten/src/ATen/native/ufunc/add.h",
+]
 
 aten_ufunc_names = [
     paths.split_extension(paths.basename(h))[0]
