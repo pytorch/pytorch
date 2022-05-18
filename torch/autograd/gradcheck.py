@@ -1108,8 +1108,12 @@ def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, che
     if not outputs:
         return _check_no_differentiable_outputs(func, tupled_inputs, func_out, eps)
 
-    numerical = _transpose(_get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, is_forward_ad=use_forward_ad))
-
+    numerical = _transpose(_get_numerical_jacobian(func, tupled_inputs, func_out, eps=eps, is_forward_ad=use_forward_ad))
+    # Note: [numerical vs analytical output length]
+    # The numerical path needs to to return jacobian quantity for all outputs, even if requires_grad
+    # of that output is False to test that they have a numerical Jacobian of zero. Here, we must
+    # filter them out before comparing with the analytical quantities.
+    numerical = [nj for o, nj in zip(func_out, numerical) if o.requires_grad]
     if use_forward_ad:
         analytical_forward = _get_analytical_jacobian_forward_ad(func, tupled_inputs, func_out, check_grad_dtypes=check_grad_dtypes)
 
@@ -1294,6 +1298,8 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=use_forward_ad)
 
     numerical_vJu = _get_numerical_vJu(func, inputs, inp_tensors_idx, func_out, all_u, all_v, eps, is_forward_ad=use_forward_ad)
+    # See note: [numerical vs analytical output length]
+    numerical_vJu = [nj for o, nj in zip(func_out, numerical_vJu) if o.requires_grad]
     if use_forward_ad:
         assert all_v is None
         analytical_vJu = _get_analytical_jacobian_forward_ad(func, inputs, _as_tuple(func_out),
