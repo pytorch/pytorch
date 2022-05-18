@@ -73,6 +73,16 @@ class SymIntArrayRef final {
   /* implicit */ constexpr SymIntArrayRef(const c10::SymInt (&Arr)[N])
       : wrapped_symint_array_ref(Arr) {}
 
+  static SymIntArrayRef fromIntArrayRef(IntArrayRef array_ref) {
+    for (size_t i = 0; i < array_ref.size(); ++i) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          array_ref[i] >= 0,
+          "Expected all elements in array to be non-negative");
+    }
+    return SymIntArrayRef(
+        reinterpret_cast<const SymInt*>(array_ref.data()), array_ref.size());
+  }
+
   /// @}
   /// @name Simple Operations
   /// @{

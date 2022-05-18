@@ -26,8 +26,8 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   sizes_and_strides_.resize(public_dims);
   for (const auto dim : c10::irange(public_dims)) {
     auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
-    sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
-    sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
+    sizes_and_strides_.size_at_unchecked(dim) = SymInt(value_sizes.at(actual_dim));
+    sizes_and_strides_.stride_at_unchecked(dim) = SymInt(value_strides.at(actual_dim));
   }
   storage_offset_ = value_.storage_offset();
   refresh_numel();

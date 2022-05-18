@@ -575,7 +575,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
       return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
     }
-    return sizes_and_strides_.size_at_unchecked(d);
+    return sizes_and_strides_.size_at_unchecked(d).data();
   }
 
   /**
@@ -592,7 +592,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
       return strides_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
     }
-    return sizes_and_strides_.stride_at_unchecked(d);
+    return sizes_and_strides_.stride_at_unchecked(d).data();
   }
 
   /**
@@ -661,7 +661,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // These are factored into separate functions in case subclasses
   // want to use them
   inline IntArrayRef strides_default() const {
-    return sizes_and_strides_.strides_arrayref();
+    return c10::IntArrayRef(
+        reinterpret_cast<const int64_t*>(sizes_and_strides_.strides_data()),
+        sizes_and_strides_.size());
   }
   inline bool is_contiguous_default(at::MemoryFormat memory_format) const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
@@ -673,7 +675,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_;
   }
   inline IntArrayRef sizes_default() const {
-    return sizes_and_strides_.sizes_arrayref();
+    return c10::IntArrayRef(
+        reinterpret_cast<const int64_t*>(sizes_and_strides_.sizes_data()),
+        sizes_and_strides_.size());
   }
   inline int64_t dim_default() const {
     return sizes_and_strides_.size();
@@ -1248,7 +1252,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         allow_tensor_metadata_change(),
         "set_size ",
         err_msg_tensor_metadata_change_not_allowed);
-    sizes_and_strides_.size_at(dim) = new_size;
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "set_size() called on tensor with symbolic shape")
+    sizes_and_strides_.size_at(dim) = SymInt(new_size);
     refresh_numel();
     refresh_contiguous();
   }
@@ -1264,7 +1271,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         allow_tensor_metadata_change(),
         "set_stride ",
         err_msg_tensor_metadata_change_not_allowed);
-    sizes_and_strides_.stride_at_unchecked(dim) = new_stride;
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "set_stride() called on tensor with symbolic shape")
+    sizes_and_strides_.stride_at_unchecked(dim) = SymInt(new_stride);
     refresh_contiguous();
   }
 
@@ -1295,8 +1305,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         allow_tensor_metadata_change(),
         "set_sizes_contiguous ",
         err_msg_tensor_metadata_change_not_allowed);
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+      TORCH_CHECK(false, "todo, I guess we want to throw here");
+    }
 
-    sizes_and_strides_.set_sizes(new_size);
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "set_sizes_contiguous() called on tensor with symbolic shape")
+    sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(new_size));
 
     refresh_numel();
     empty_tensor_restride(MemoryFormat::Contiguous);
@@ -1315,6 +1333,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "set_sizes_and_strides ",
         err_msg_tensor_metadata_change_not_allowed);
     TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "set_sizes_and_strides() called on tensor with symbolic shape")
+    TORCH_CHECK(
         new_size.size() == new_stride.size(),
         "dimensionality of sizes (",
         new_size.size(),
@@ -1323,24 +1344,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         ")");
     const auto new_dim = new_size.size();
 
-    sizes_and_strides_.set_sizes(new_size);
+    sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(new_size));
 
     if (new_dim > 0) {
       for (size_t dim = new_dim - 1;; dim--) {
         if (new_stride[dim] >= 0) {
-          sizes_and_strides_.stride_at_unchecked(dim) = new_stride[dim];
+          sizes_and_strides_.stride_at_unchecked(dim) = SymInt(new_stride[dim]);
         } else {
           // XXX: This behavior is surprising and may need to be removed to
           // support negative strides. Some pytorch functions rely on it:
           // for example, torch.cat (run TestTorch.test_cat_empty).
           if (dim == new_dim - 1) {
-            sizes_and_strides_.stride_at_unchecked(dim) = 1;
+            sizes_and_strides_.stride_at_unchecked(dim) = SymInt(1);
           } else {
             // Keep stride monotonically increasing to match NumPy.
-            sizes_and_strides_.stride_at_unchecked(dim) =
+            sizes_and_strides_.stride_at_unchecked(dim) = SymInt(
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
-                sizes_and_strides_.stride_at_unchecked(dim + 1);
+                    sizes_and_strides_.size_at_unchecked(dim + 1).data(), 1) *
+                sizes_and_strides_.stride_at_unchecked(dim + 1).data());
           }
         }
         if (dim == 0)
@@ -1902,6 +1923,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * memory contiguous
    */
   void empty_tensor_restride(MemoryFormat memory_format) {
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "empty_tensor_restride() called on tensor with symbolic shape")
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(
         compute_numel() == numel_,
@@ -1915,12 +1939,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         sizes_and_strides_.resize(dim_);
         if (dim_ > 0) {
           const auto last_idx = dim_ - 1;
-          sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
+          sizes_and_strides_.stride_at_unchecked(last_idx) = SymInt(1);
           for (auto i = last_idx - 1; i >= 0; --i) {
-            sizes_and_strides_.stride_at_unchecked(i) =
-                sizes_and_strides_.stride_at_unchecked(i + 1) *
+            sizes_and_strides_.stride_at_unchecked(i) = SymInt(
+                sizes_and_strides_.stride_at_unchecked(i + 1).data() *
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1), 1);
+                    sizes_and_strides_.size_at_unchecked(i + 1).data(), 1));
           }
         }
         break;
@@ -1979,12 +2003,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDimsTemplate(ArrayRef<T> src) {
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "SetDims() called on tensor with symbolic shape")
+
     auto old_numel = numel_;
     sizes_and_strides_.resize(src.size());
     int64_t new_numel = 1;
     for (const auto i : c10::irange(src.size())) {
       new_numel *= src[i];
-      sizes_and_strides_.size_at_unchecked(i) = src[i];
+      sizes_and_strides_.size_at_unchecked(i) = SymInt(src[i]);
     }
     numel_ = new_numel;
     empty_tensor_restride(MemoryFormat::Contiguous);
@@ -2324,17 +2352,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // (which do not have a device.)
   c10::optional<c10::Device> device_opt_;
 
-  // Tensor is contiguous
-  bool is_contiguous_ : 1;
-
-  // Tensor is a subclass that does not permit storage access.
-  bool storage_access_should_throw_ : 1;
-
   // default member initializers for bit-fields only available with -std=c++2a
   // or -std=gnu++2a
   inline void init_bitfields() {
     is_contiguous_ = true;
-
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;
     is_channels_last_3d_ = false;
@@ -2345,7 +2366,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     reserved_ = false;
     sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::Default);
     storage_access_should_throw_ = false;
+    has_symbolic_sizes_strides_ = false;
   }
+
+  // Tensor is contiguous
+  bool is_contiguous_ : 1;
+
+  // Tensor is a subclass that does not permit storage access.
+  bool storage_access_should_throw_ : 1;
 
   // Tensor is stored in the channels last 2d memory format, when dimensions
   // order is (N)CHW and C-strides < W-strides < H-strides (< N-strides)
@@ -2400,6 +2428,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Call _custom() virtual methods for
   // strides()/is_contiguous()/sizes()/dim()/numel()
   uint8_t sizes_strides_policy_ : 2;
+
+  // Whether or not sizes_and_strides_ contains a symbolic value.
+  bool has_symbolic_sizes_strides_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
