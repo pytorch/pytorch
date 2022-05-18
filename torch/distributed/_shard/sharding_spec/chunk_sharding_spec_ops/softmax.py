@@ -1,7 +1,4 @@
 import torch
-from torch.distributed._shard.sharded_tensor import (
-    ShardedTensor,
-)
 from ._common import (
     _register_sharded_op_on_local_tensor,
 )
