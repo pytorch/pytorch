@@ -14810,12 +14810,18 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
                                      dtypes=[torch.int16, torch.int32, torch.int64]),
                         # FIXME Complex values error with: Greatest absolute difference: nan at index
+                        # Ref: https://github.com/pytorch/pytorch/issues/76853
+                        # For `chalf`, reference computation in `numpy` is computed in `cfloat`.
+                        # Output of `chalf` saturates to `inf` quicker than reference due to its small range
+                        # which leads to failure of this test.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics',
+                                     dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
-                                     dtypes=[torch.complex64, torch.complex128]),
+                                     dtypes=(torch.complex32, torch.complex64, torch.complex128)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
-                                     dtypes=[torch.complex64, torch.complex128]),
+                                     dtypes=(torch.complex32, torch.complex64, torch.complex128)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
-                                     dtypes=[torch.complex64, torch.complex128]),
+                                     dtypes=(torch.complex32, torch.complex64, torch.complex128)),
                     )),
     BinaryUfuncInfo('float_power',
                     ref=np.float_power,
