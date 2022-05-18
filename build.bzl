@@ -53,15 +53,15 @@ def define_targets(rules):
 
     gen_aten_outs_cuda = (
         GENERATED_H_CUDA + GENERATED_CPP_CUDA +
-        aten_ufunc_generated_cuda_sources()
+        aten_ufunc_generated_cuda_sources("aten/src/ATen/{}")
     )
 
     gen_aten_outs = (
         GENERATED_H + GENERATED_H_CORE +
         GENERATED_CPP + GENERATED_CPP_CORE +
-        aten_ufunc_generated_cpu_sources() +
-        aten_ufunc_generated_cpu_kernel_sources() + [
-            "Declarations.yaml",
+        aten_ufunc_generated_cpu_sources("aten/src/ATen/{}") +
+        aten_ufunc_generated_cpu_kernel_sources("aten/src/ATen/{}") + [
+            "aten/src/ATen/Declarations.yaml",
         ] + gen_aten_outs_cuda
     )
 
@@ -69,7 +69,7 @@ def define_targets(rules):
         name = "gen_aten",
         srcs = gen_aten_srcs,
         tools = ["//torchgen:gen"],
-        outs = ["aten/src/ATen/" + out for out in gen_aten_outs],
+        outs = gen_aten_outs,
         cmd = gen_aten_cmd,
     )
 
@@ -77,7 +77,7 @@ def define_targets(rules):
         name = "gen_aten_hip",
         srcs = gen_aten_srcs,
         tools = ["//torchgen:gen"],
-        outs = ["aten/src/ATen/" + out for out in gen_aten_outs_cuda],
+        outs = gen_aten_outs_cuda,
         cmd = gen_aten_cmd + " --rocm",
         features = ["-create_bazel_outputs"],
         tags = ["-bazel"],
@@ -136,75 +136,75 @@ def define_targets(rules):
 # https://fb.facebook.com/groups/askbuck/permalink/1924258337622772/
 
 GENERATED_H = [
-    "Functions.h",
-    "NativeFunctions.h",
-    "NativeMetaFunctions.h",
-    "FunctionalInverses.h",
-    "RedispatchFunctions.h",
-    "RegistrationDeclarations.h",
+    "aten/src/ATen/Functions.h",
+    "aten/src/ATen/NativeFunctions.h",
+    "aten/src/ATen/NativeMetaFunctions.h",
+    "aten/src/ATen/FunctionalInverses.h",
+    "aten/src/ATen/RedispatchFunctions.h",
+    "aten/src/ATen/RegistrationDeclarations.h",
 ]
 
 GENERATED_H_CORE = [
-    "Operators.h",
+    "aten/src/ATen/Operators.h",
     # CPUFunctions.h (and likely similar headers) need to be part of core because
     # of the static dispatch build: TensorBody.h directly includes CPUFunctions.h.
     # The disinction looks pretty arbitrary though; maybe will can kill core
     # and merge the two?
-    "CPUFunctions.h",
-    "CPUFunctions_inl.h",
-    "CompositeExplicitAutogradFunctions.h",
-    "CompositeExplicitAutogradFunctions_inl.h",
-    "CompositeImplicitAutogradFunctions.h",
-    "CompositeImplicitAutogradFunctions_inl.h",
-    "MetaFunctions.h",
-    "MetaFunctions_inl.h",
-    "core/TensorBody.h",
-    "MethodOperators.h",
-    "core/aten_interned_strings.h",
+    "aten/src/ATen/CPUFunctions.h",
+    "aten/src/ATen/CPUFunctions_inl.h",
+    "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
+    "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
+    "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/MetaFunctions.h",
+    "aten/src/ATen/MetaFunctions_inl.h",
+    "aten/src/ATen/core/TensorBody.h",
+    "aten/src/ATen/MethodOperators.h",
+    "aten/src/ATen/core/aten_interned_strings.h",
 ]
 
 GENERATED_H_CUDA = [
-    "CUDAFunctions.h",
-    "CUDAFunctions_inl.h",
+    "aten/src/ATen/CUDAFunctions.h",
+    "aten/src/ATen/CUDAFunctions_inl.h",
 ]
 
 GENERATED_CPP_CUDA = [
-    "RegisterCUDA.cpp",
-    "RegisterNestedTensorCUDA.cpp",
-    "RegisterSparseCUDA.cpp",
-    "RegisterSparseCsrCUDA.cpp",
-    "RegisterQuantizedCUDA.cpp",
+    "aten/src/ATen/RegisterCUDA.cpp",
+    "aten/src/ATen/RegisterNestedTensorCUDA.cpp",
+    "aten/src/ATen/RegisterSparseCUDA.cpp",
+    "aten/src/ATen/RegisterSparseCsrCUDA.cpp",
+    "aten/src/ATen/RegisterQuantizedCUDA.cpp",
 ]
 
 GENERATED_CPP = [
-    "Functions.cpp",
-    "RegisterBackendSelect.cpp",
-    "RegisterCPU.cpp",
-    "RegisterQuantizedCPU.cpp",
-    "RegisterNestedTensorCPU.cpp",
-    "RegisterSparseCPU.cpp",
-    "RegisterSparseCsrCPU.cpp",
-    "RegisterMkldnnCPU.cpp",
-    "RegisterCompositeImplicitAutograd.cpp",
-    "RegisterZeroTensor.cpp",
-    "RegisterMeta.cpp",
-    "RegisterCompositeExplicitAutograd.cpp",
-    "CompositeViewCopyKernels.cpp",
-    "RegisterSchema.cpp",
-    "RegisterFunctionalization_0.cpp",
-    "RegisterFunctionalization_1.cpp",
-    "RegisterFunctionalization_2.cpp",
-    "RegisterFunctionalization_3.cpp",
+    "aten/src/ATen/Functions.cpp",
+    "aten/src/ATen/RegisterBackendSelect.cpp",
+    "aten/src/ATen/RegisterCPU.cpp",
+    "aten/src/ATen/RegisterQuantizedCPU.cpp",
+    "aten/src/ATen/RegisterNestedTensorCPU.cpp",
+    "aten/src/ATen/RegisterSparseCPU.cpp",
+    "aten/src/ATen/RegisterSparseCsrCPU.cpp",
+    "aten/src/ATen/RegisterMkldnnCPU.cpp",
+    "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
+    "aten/src/ATen/RegisterZeroTensor.cpp",
+    "aten/src/ATen/RegisterMeta.cpp",
+    "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+    "aten/src/ATen/CompositeViewCopyKernels.cpp",
+    "aten/src/ATen/RegisterSchema.cpp",
+    "aten/src/ATen/RegisterFunctionalization_0.cpp",
+    "aten/src/ATen/RegisterFunctionalization_1.cpp",
+    "aten/src/ATen/RegisterFunctionalization_2.cpp",
+    "aten/src/ATen/RegisterFunctionalization_3.cpp",
 ]
 
 GENERATED_CPP_CORE = [
-    "Operators_0.cpp",
-    "Operators_1.cpp",
-    "Operators_2.cpp",
-    "Operators_3.cpp",
-    "Operators_4.cpp",
-    "core/ATenOpList.cpp",
-    "core/TensorMethods.cpp",
+    "aten/src/ATen/Operators_0.cpp",
+    "aten/src/ATen/Operators_1.cpp",
+    "aten/src/ATen/Operators_2.cpp",
+    "aten/src/ATen/Operators_3.cpp",
+    "aten/src/ATen/Operators_4.cpp",
+    "aten/src/ATen/core/ATenOpList.cpp",
+    "aten/src/ATen/core/TensorMethods.cpp",
 ]
 
 # These lists are temporarily living in and exported from the shared
