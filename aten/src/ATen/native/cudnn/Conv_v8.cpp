@@ -269,7 +269,7 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
   return opGraph;
 }
 
-const auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const Tensor& x, const bool deterministic, const bool allow_tf32, const cudnnBackendHeurMode_t heur_mode) {
+auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const Tensor& x, const bool deterministic, const bool allow_tf32, const cudnnBackendHeurMode_t heur_mode) {
    // Method for engine config generator based on heuristics
   auto heurgen_method = [/*&desc,*/ &x, deterministic, allow_tf32, heur_mode](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
       auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
