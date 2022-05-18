@@ -204,9 +204,6 @@ void TensorImpl::HandleResize() {
 }
 
 bool TensorImpl::compute_contiguous() const {
-  TORCH_INTERNAL_ASSERT(
-      sizes_strides_policy_ ==
-      static_cast<uint8_t>(SizesStridesPolicy::Default));
   bool is_contiguous = true;
   if (is_empty())
     return is_contiguous;

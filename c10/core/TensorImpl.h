@@ -2128,6 +2128,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * or strides.
    */
   void refresh_contiguous() {
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "refresh_contiguous() called on tensor with symbolic shape")
+
     is_contiguous_ = compute_contiguous();
     // Note:
     // Dim 0, 1, 2 will never be a channels last 2d/3d format
