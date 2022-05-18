@@ -3,7 +3,12 @@ import torch
 import torch._prims as prims
 import torch._prims.utils as utils
 from typing import Sequence, Optional, Union, Callable, List, Tuple
-from torch._prims.utils import TensorLikeType, NumberType, Number
+from torch._prims.utils import (
+    TensorLike,
+    TensorLikeType,
+    Number,
+    NumberType,
+)
 from torch._prims.wrappers import out_wrapper, elementwise_type_promotion_wrapper
 from torch._refs import (
     _make_elementwise_unary_reference,
@@ -18,8 +23,8 @@ __all__ = [
     "i1",
     "i0e",
     "i1e",
-    "zeta",
     "xlog1py",
+    "zeta",
 ]
 
 i1 = _make_elementwise_unary_reference(
@@ -41,15 +46,20 @@ i1e = _make_elementwise_unary_reference(
 )
 
 
-def _xlog1py(a: Union[Tensor, NumberType], b: Union[Tensor, NumberType]):
-    if isinstance(a, Tensor) and isinstance(b, Number):
+def _xlog1py(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    assert isinstance(a, TensorLike) or isinstance(b, TensorLike)
+
+    # torch.xlog1py supports scalar inputs but torch.log does not.
+    # TODO Add support for scalar inputs to refs.log (and other elementwise unary ops)
+    if isinstance(a, TensorLike) and isinstance(b, Number):
         b = prims._wrap_scalar(b, dtype=a.dtype, device=a.device)
-    elif isinstance(b, Tensor) and isinstance(a, Number):
+    elif isinstance(b, TensorLike) and isinstance(a, Number):
         a = prims._wrap_scalar(a, dtype=b.dtype, device=b.device)
 
-    cond = refs.bitwise_and(refs.eq(a, 0), refs.bitwise_not(refs.isnan(b)))
-    rhs = refs.where(cond, a, refs.mul(a, refs.log1p(b)))
-    return refs.where(refs.isnan(b), b, rhs)
+    rhs = refs.where(refs.eq(a, 0), 0, refs.mul(a, refs.log1p(b)))
+    return refs.where(refs.isnan(b), float("nan"), rhs)
 
 
 # TODO add docstring

@@ -359,6 +359,7 @@ i0 = _make_elementwise_unary_reference(
     aten_op=torch.ops.aten.special_i0,
 )
 
+
 def _isfinite(a: TensorLikeType) -> TensorLikeType:
     if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
         return prims.is_finite(a)
@@ -839,14 +840,18 @@ true_divide = _make_elementwise_binary_reference(
 )
 
 
-def _xlogy(a: Union[Tensor, NumberType], b: Union[Tensor, NumberType]):
-    if isinstance(a, Tensor) and isinstance(b, Number):
+def _xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
+    assert isinstance(a, TensorLike) or isinstance(b, TensorLike)
+
+    # torch.xlogy supports scalar inputs but torch.log does not.
+    # TODO Add support for scalar inputs to refs.log (and other elementwise unary ops)
+    if isinstance(a, TensorLike) and isinstance(b, Number):
         b = prims._wrap_scalar(b, dtype=a.dtype, device=a.device)
-    elif isinstance(b, Tensor) and isinstance(a, Number):
+    elif isinstance(b, TensorLike) and isinstance(a, Number):
         a = prims._wrap_scalar(a, dtype=b.dtype, device=b.device)
 
-    rhs = where(eq(a, 0), a, mul(a, log(b)))
-    return where(isnan(b), b, rhs)
+    rhs = where(eq(a, 0), 0, mul(a, log(b)))
+    return where(isnan(b), float("nan"), rhs)
 
 
 # TODO: add docstring
