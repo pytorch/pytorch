@@ -7,6 +7,7 @@ import argparse
 import pathlib
 import json
 from dataclasses import dataclass
+import functools
 
 from torchgen.model import (
     STRUCTURED_DISPATCH_KEYS,
@@ -31,7 +32,10 @@ from torchgen.model import (
     NativeFunctionsViewGroup,
     ViewSchemaKind,
     BaseOperatorName,
-    Tag,
+)
+from torchgen.native_function_generation import (
+    pre_group_native_functions,
+    add_generated_native_functions,
 )
 from torchgen.api.types import (
     Binding,
@@ -72,6 +76,7 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
     gen_composite_view_copy_kernel,
+    gen_composite_functional_kernel,
 )
 
 T = TypeVar("T")
@@ -152,7 +157,12 @@ _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
 ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
 
 
-def parse_native_yaml_struct(es: object, path: str = "<stdin>") -> ParsedYaml:
+def parse_native_yaml_struct(
+    es: object,
+    valid_tags: Set[str],
+    ignore_keys: Optional[Set[DispatchKey]] = None,
+    path: str = "<stdin>",
+) -> ParsedYaml:
     assert isinstance(es, list)
     rs: List[NativeFunction] = []
     bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = defaultdict(dict)
@@ -161,7 +171,7 @@ def parse_native_yaml_struct(es: object, path: str = "<stdin>") -> ParsedYaml:
         loc = Location(path, e["__line__"])
         funcs = e.get("func")
         with context(lambda: f"in {loc}:\n  {funcs}"):
-            func, m = NativeFunction.from_yaml(e, loc)
+            func, m = NativeFunction.from_yaml(e, loc, valid_tags, ignore_keys)
             rs.append(func)
             BackendIndex.grow_index(bs, m)
     error_check_native_functions(rs)
@@ -175,6 +185,7 @@ def parse_native_yaml_struct(es: object, path: str = "<stdin>") -> ParsedYaml:
             index={},
         )
     )
+    add_generated_native_functions(rs, bs)
     for k, v in bs.items():
         # All structured in-tree operators are implemented in terms of their out operator.
         indices[k] = BackendIndex(
@@ -188,12 +199,44 @@ def parse_native_yaml_struct(es: object, path: str = "<stdin>") -> ParsedYaml:
     return ParsedYaml(rs, indices)
 
 
-def parse_native_yaml(path: str) -> ParsedYaml:
+def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
+    assert isinstance(es, list)
+    rs: Set[str] = set()
+    for e in es:
+        assert isinstance(e.get("__line__"), int), e
+        loc = Location(path, e["__line__"])
+        tags = e.get("tag")
+        with context(lambda: f"in {loc}:\n  {tags}"):
+            e_i = e.copy()
+            name = e_i.pop("tag")
+            desc = e_i.pop("desc", "")
+            # ensure that each tag has a non-empty description
+            assert desc != ""
+            rs.add(name)
+    return rs
+
+
+@functools.lru_cache(maxsize=None)
+def parse_tags_yaml(path: str) -> Set[str]:
+    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
+    with open(path, "r") as f:
+        es = yaml.load(f, Loader=LineLoader)
+        valid_tags = parse_tags_yaml_struct(es, path=path)
+    return valid_tags
+
+
+def parse_native_yaml(
+    path: str, tags_yaml_path: str, ignore_keys: Optional[Set[DispatchKey]] = None
+) -> ParsedYaml:
+    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
+        valid_tags = parse_tags_yaml(tags_yaml_path)
         with open(path, "r") as f:
             es = yaml.load(f, Loader=LineLoader)
-        _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(es, path=path)
+        _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(
+            es, valid_tags, ignore_keys, path=path
+        )
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
 
@@ -214,7 +257,7 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
                 f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. "
                 f"Consider adding 'structured=True' to the delegated operator"
             )
-        if f.tag is not None and f.tag is Tag.inplace_view:
+        if "inplace_view" in f.tags:
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
             assert base_name.inplace, (
@@ -255,6 +298,7 @@ def cpp_string(s: str) -> str:
 # to be generated.  This pattern makes it convenient to use map, concatMap
 # and similar functional combinators.
 
+
 def static_dispatch_keys(backends: List[BackendIndex]) -> List[DispatchKey]:
     if len(backends) == 0:
         return []
@@ -282,8 +326,8 @@ def get_static_dispatch_backend(
 
 
 def static_dispatch_ops_header(
-        f: NativeFunction,
-        backend_index: List[BackendIndex]) -> Optional[str]:
+    f: NativeFunction, backend_index: List[BackendIndex]
+) -> Optional[str]:
     if backend_index is None or f.manual_kernel_registration:
         return None
 
@@ -291,15 +335,17 @@ def static_dispatch_ops_header(
     for index in backend_index:
         dispatch_key = get_static_dispatch_backend(f, index)
         if dispatch_key is not None:
-            output.append(f'#include <ATen/ops/{f.root_name}_{dispatch_key.lower()}_dispatch.h>')
-    return '\n'.join(output)
+            output.append(
+                f"#include <ATen/ops/{f.root_name}_{dispatch_key.lower()}_dispatch.h>"
+            )
+    return "\n".join(output)
 
 
-def static_dispatch_extra_headers(
-    backends: List[BackendIndex]
-) -> List[str]:
-    return [f'#include <ATen/{dispatch_key}Functions.h>'
-            for dispatch_key in static_dispatch_keys(backends)]
+def static_dispatch_extra_headers(backends: List[BackendIndex]) -> List[str]:
+    return [
+        f"#include <ATen/{dispatch_key}Functions.h>"
+        for dispatch_key in static_dispatch_keys(backends)
+    ]
 
 
 # Translates arguments of a native function from DispatcherSignature form to CppSignature form with support for
@@ -310,14 +356,15 @@ def translate_args_dispatcher_to_cpp(
 ) -> str:
 
     # Adds SpecialArgName.possibly_redundant_memory_format NamedCType for memory_format bindings
-    def add_spl_memory_format_binding(
-        input_bindings: List[Binding]
-    ) -> List[Binding]:
+    def add_spl_memory_format_binding(input_bindings: List[Binding]) -> List[Binding]:
         output_bindings: List[Binding] = []
         for binding in input_bindings:
-            if binding.name == 'memory_format':
+            if binding.name == "memory_format":
                 spl_mem_format_binding = Binding(
-                    nctype=NamedCType(SpecialArgName.possibly_redundant_memory_format, binding.nctype.type),
+                    nctype=NamedCType(
+                        SpecialArgName.possibly_redundant_memory_format,
+                        binding.nctype.type,
+                    ),
                     name=binding.name,
                     default=binding.default,
                     argument=binding.argument,
@@ -328,7 +375,9 @@ def translate_args_dispatcher_to_cpp(
         return output_bindings
 
     disp_sig = DispatcherSignature.from_schema(f.func)
-    cpp_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False).signature
+    cpp_sig = CppSignatureGroup.from_native_function(
+        f, method=False, fallback_binding=False
+    ).signature
     disp_bindings = disp_sig.arguments()
     # When last argument of CPP signature has SpecialArgName.possibly_redundant_memory_format NCType,
     # get memory_format bindings of dispatcher signature to have the same NCType as well
@@ -337,7 +386,7 @@ def translate_args_dispatcher_to_cpp(
             disp_bindings = add_spl_memory_format_binding(disp_sig.arguments())
             break
     exprs = translate(disp_bindings, cpp_sig.arguments())
-    return ', '.join(a.expr for a in exprs)
+    return ", ".join(a.expr for a in exprs)
 
 
 def generate_static_dispatch_backend_call(
@@ -346,7 +395,7 @@ def generate_static_dispatch_backend_call(
 ) -> str:
     name = DispatcherSignature.from_schema(f.func).name()
     exprs = translate_args_dispatcher_to_cpp(f)
-    return f'return at::{backend_index.dispatch_key.lower()}::{name}({exprs});'
+    return f"return at::{backend_index.dispatch_key.lower()}::{name}({exprs});"
 
 
 def generate_static_dispatch_fallback_call(
@@ -356,9 +405,9 @@ def generate_static_dispatch_fallback_call(
     name = DispatcherSignature.from_schema(f.func).name()
     exprs = translate_args_dispatcher_to_cpp(f)
     if f.has_composite_explicit_autograd_kernel:
-        return f'return at::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});'
+        return f"return at::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
     elif f.has_composite_implicit_autograd_kernel:
-        return f'return at::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs});'
+        return f"return at::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs});"
     else:
         return f"""TORCH_CHECK(false, "Static dispatch does not support {name} for\
 {', '.join([str(index.dispatch_key)for index in backend_indices])} ");"""
@@ -371,8 +420,15 @@ def static_dispatch(
     if len(backend_indices) == 0 or f.manual_kernel_registration:
         return ""
 
-    keys = [b for b in backend_indices if b.has_kernel(f) or (f.structured_delegate is not None
-                                                              and b.dispatch_key in STRUCTURED_DISPATCH_KEYS)]
+    keys = [
+        b
+        for b in backend_indices
+        if b.has_kernel(f)
+        or (
+            f.structured_delegate is not None
+            and b.dispatch_key in STRUCTURED_DISPATCH_KEYS
+        )
+    ]
     if len(keys) == 1:
         return generate_static_dispatch_backend_call(f, keys[0])
     elif len(keys) == 0:
@@ -380,28 +436,35 @@ def static_dispatch(
 
     sig = DispatcherSignature.from_schema(f.func)
     native_tensor_args = [
-        a.name for a in sig.arguments()
-        if isinstance(a.argument, SelfArgument) or isinstance(a.argument, Argument) and a.argument.type.is_tensor_like()
+        a.name
+        for a in sig.arguments()
+        if isinstance(a.argument, SelfArgument)
+        or isinstance(a.argument, Argument)
+        and a.argument.type.is_tensor_like()
     ]
-    tensor_args = ', '.join(native_tensor_args)
+    tensor_args = ", ".join(native_tensor_args)
     tensor_opts = f.func.arguments.tensor_options
 
     stmts = []
     subexprs: List[str] = []
     if tensor_opts is not None:
-        subexprs.append('DispatchKeySet(c10::computeDispatchKey(dtype, layout, device))')
+        subexprs.append(
+            "DispatchKeySet(c10::computeDispatchKey(dtype, layout, device))"
+        )
     if tensor_args != "":
-        subexprs.append(f'c10::detail::multi_dispatch_key_set({tensor_args})')
+        subexprs.append(f"c10::detail::multi_dispatch_key_set({tensor_args})")
     stmts.append(f"""DispatchKeySet _dk_set = {' | '.join(subexprs)};""")
-    stmts.append('DispatchKey _dk = c10::highestPriorityBackendTypeId(_dk_set);')
+    stmts.append("DispatchKey _dk = c10::highestPriorityBackendTypeId(_dk_set);")
 
     dispatch_code = []
     for index in keys:
         dispatch_code.append(f"""case DispatchKey::{index.dispatch_key}:""")
-        dispatch_code.append(f"""\t{generate_static_dispatch_backend_call(f, index)};""")
+        dispatch_code.append(
+            f"""\t{generate_static_dispatch_backend_call(f, index)};"""
+        )
 
     fallback = generate_static_dispatch_fallback_call(f, backend_indices)
-    connector = '\n\t\t'
+    connector = "\n\t\t"
 
     return f"""
     {connector.join(stmts)}
@@ -434,10 +497,7 @@ class RegisterSchema:
 # and (2) don't want to worry about method-only operators.
 @dataclass(frozen=True)
 class ComputeOperators:
-    target: Union[
-        Literal[Target.DECLARATION],
-        Literal[Target.DEFINITION]
-    ]
+    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
     static_dispatch_backend_indices: List[BackendIndex]
 
     @method_with_native_function
@@ -504,17 +564,22 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
                     dispatcher_call = "redispatch"
                     method_name = f"{name}::{redispatch_method_name}"
                 else:
-                    method_name = f'{name}::{call_method_name}'
-                    dispatcher_exprs_str = ', '.join([a.name for a in sig.arguments()])
-                    dispatcher_call = 'call'
+                    method_name = f"{name}::{call_method_name}"
+                    dispatcher_exprs_str = ", ".join([a.name for a in sig.arguments()])
+                    dispatcher_call = "call"
 
                 fn_body = f"""
     static auto op = create_{name}_typed_handle();
     return op.{dispatcher_call}({dispatcher_exprs_str});"""
 
-                if not is_redispatching_fn and len(self.static_dispatch_backend_indices) > 0:
+                if (
+                    not is_redispatching_fn
+                    and len(self.static_dispatch_backend_indices) > 0
+                ):
                     # call() should go through static dispatch
-                    fn_body = static_dispatch(f, backend_indices=self.static_dispatch_backend_indices)
+                    fn_body = static_dispatch(
+                        f, backend_indices=self.static_dispatch_backend_indices
+                    )
                 defns += f"""
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
@@ -530,7 +595,6 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
 # and the scaffolding to call into the dispatcher from these functions.
 @dataclass(frozen=True)
 class ComputeFunction:
-
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if Variant.function not in f.variants:
@@ -611,6 +675,7 @@ inline {sig.defn(prefix="Tensor::")} const {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
+
         result = generate_defn(faithful=False)
         if sig_group.faithful_signature is not None:
             result += generate_defn(faithful=True)
@@ -881,7 +946,7 @@ def format_yaml(data: object) -> str:
     # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
     # width=1e9 turns off optional line breaks and improves
     # the portability of the outputted yaml.
-    return yaml.dump(data, default_flow_style=False, Dumper=YamlDumper, width=1e9)  # type: ignore[no-any-return]
+    return yaml.dump(data, default_flow_style=False, Dumper=YamlDumper, width=1e9)  # type: ignore[no-any-return, call-overload]
 
 
 # For some reason, some defaults we write to YAML are written as native
@@ -1219,59 +1284,48 @@ def get_custom_build_selector(
     return selector
 
 
-def pre_group_native_functions(
-    native_functions: Sequence[NativeFunction],
-) -> Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]]:
-    pre_grouped_native_functions: Dict[
-        FunctionSchema, Dict[SchemaKind, NativeFunction]
-    ] = defaultdict(dict)
-    for f in native_functions:
-        d = pre_grouped_native_functions[f.func.signature()]
-        assert f.func.kind() not in d
-        d[f.func.kind()] = f
-    return pre_grouped_native_functions
-
-
 def get_grouped_by_view_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[Union[NativeFunction, NativeFunctionsViewGroup]]:
     def maybe_create_view_group(
-        d: Dict[ViewSchemaKind, NativeFunction]
+        d: Dict[Union[ViewSchemaKind, SchemaKind], NativeFunction]
     ) -> List[Union[NativeFunction, NativeFunctionsViewGroup]]:
         funcs: List[Union[NativeFunction, NativeFunctionsViewGroup]] = []
-        if ViewSchemaKind.aliasing not in d:
-            # Case 1: this op / op group is not aliasing, so we don't create a view group.
-            # return the original (ungrouped) native functions instead.
-            for func in d.values():
-                funcs.append(func)
-        else:
-            # Case 2: this op group contains an aliasing op, so we create a ViewGroup for it.
-            # The handling for out= ops here is unfortunate.
-            # out= ops don't really make sense for view operators.
-            # However, we have at least one existing {view}_copy.out operator in native_functions.yaml.
-            # It shouldn't be part of a view group, so we explicitly don't group it.
-            # There currently aren't any out= view ops (and there probably shouldn't be).
-            # We also expect that when we hit this case, the `non_aliasing` op in the dict
-            # *must* be a view_copy op (this is asserted in the NativeFunctionsViewGroup constructor)
-            if ViewSchemaKind.out in d:
-                funcs.append(d[ViewSchemaKind.out])
+        if ViewSchemaKind.aliasing in d:
+            view = d.pop(ViewSchemaKind.aliasing)
+            view_inplace = d.pop(ViewSchemaKind.aliasing_inplace, None)
+            view_copy = d.pop(SchemaKind.functional, None)
 
             funcs.append(
                 NativeFunctionsViewGroup(
-                    view=d[ViewSchemaKind.aliasing],
-                    view_copy=d.get(ViewSchemaKind.non_aliasing, None),
-                    view_inplace=d.get(ViewSchemaKind.inplace, None),
+                    view=view,
+                    view_copy=view_copy,
+                    view_inplace=view_inplace,
                 )
             )
+        # Take the remaining functions that weren't part of the view group
+        # and emit them separately
+        for func in d.values():
+            funcs.append(func)
         return funcs
 
     grouped_by_views: Dict[
-        FunctionSchema, Dict[ViewSchemaKind, NativeFunction]
+        FunctionSchema, Dict[Union[SchemaKind, ViewSchemaKind], NativeFunction]
     ] = defaultdict(dict)
     for f in native_functions:
         schema = f.func.view_signature()
-        assert f.view_schema_kind not in grouped_by_views[schema]
-        grouped_by_views[schema][f.view_schema_kind] = f
+        view_kind: ViewSchemaKind = f.view_schema_kind
+        # We need to group up ops relevant to the same "view", consisting of:
+        # view op (ViewSchemaKind.aliasing)
+        # view_inplace op (ViewSchemaKind.aliasing_inplace)
+        # view_copy op (SchemaKind.functional)
+        if view_kind == ViewSchemaKind.non_aliasing:
+            kind = f.func.kind()
+            assert kind not in grouped_by_views[schema]
+            grouped_by_views[schema][kind] = f
+        else:
+            assert view_kind not in grouped_by_views[schema]
+            grouped_by_views[schema][view_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
 
@@ -1284,6 +1338,9 @@ def get_grouped_native_functions(
     ) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
         r = NativeFunctionsGroup.from_dict(d)
         if r is None:
+            # Invariant: any NativeFunctions that are code-generated
+            # should have been grouped into NativeFunctionsGroup objects
+            assert not any("generated" in f.tags for f in d.values())
             return list(d.values())
         else:
             return [r]
@@ -1332,8 +1389,11 @@ def gen_aggregated_headers(
             "MethodOperators_includes": [],
             "MethodOperators_declarations": list(
                 mapMaybe(
-                    ComputeOperators(Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx),
-                    method_native_functions
+                    ComputeOperators(
+                        Target.DECLARATION,
+                        static_dispatch_backend_indices=static_dispatch_idx,
+                    ),
+                    method_native_functions,
                 )
             ),
         },
@@ -1344,8 +1404,11 @@ def gen_aggregated_headers(
             "Operators_includes": ["#include <ATen/MethodOperators.h>"],
             "Operators_declarations": list(
                 mapMaybe(
-                    ComputeOperators(Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx),
-                    non_method_native_functions
+                    ComputeOperators(
+                        Target.DECLARATION,
+                        static_dispatch_backend_indices=static_dispatch_idx,
+                    ),
+                    non_method_native_functions,
                 )
             ),
         },
@@ -1392,7 +1455,7 @@ def gen_aggregated_headers(
     for dispatch_key in dispatch_keys:
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
         if dispatch_key in functions_keys:
-            inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
+            inl_headers = f"#include <ATen/{dispatch_key}Functions_inl.h>"
 
             fm.write_with_template(
                 f"{dispatch_key}Functions.h",
@@ -1462,8 +1525,11 @@ def gen_per_operator_headers(
             lambda: {
                 "declarations": list(
                     mapMaybe(
-                        ComputeOperators(Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx),
-                        functions
+                        ComputeOperators(
+                            Target.DECLARATION,
+                            static_dispatch_backend_indices=static_dispatch_idx,
+                        ),
+                        functions,
                     )
                 ),
             },
@@ -1546,13 +1612,13 @@ def gen_per_operator_headers(
         ("NativeFunctions", "_native"),
     ]:
         cpu_fm.write(
-            f'{category}.h',
+            f"{category}.h",
             lambda: {
-                f'{category}_includes': [
-                    f'#include <ATen/ops/{name}{suffix}.h>'
+                f"{category}_includes": [
+                    f"#include <ATen/ops/{name}{suffix}.h>"
                     for name in sorted(functions_by_root_name.keys())
                 ],
-                f'{category}_declarations': [],
+                f"{category}_declarations": [],
             },
         )
 
@@ -1594,26 +1660,26 @@ def gen_per_operator_headers(
             )
 
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
-        inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
+        inl_headers = f"#include <ATen/{dispatch_key}Functions_inl.h>"
 
         fm.write_with_template(
-            f'{dispatch_key}Functions.h',
-            'DispatchKeyFunctions.h',
+            f"{dispatch_key}Functions.h",
+            "DispatchKeyFunctions.h",
             lambda: {
-                'dispatch_key': str(dispatch_key),
-                'inline_headers': inl_headers,
+                "dispatch_key": str(dispatch_key),
+                "inline_headers": inl_headers,
             },
         )
         fm.write_with_template(
-            f'{dispatch_key}Functions_inl.h',
-            'DispatchKeyFunctions_inl.h',
+            f"{dispatch_key}Functions_inl.h",
+            "DispatchKeyFunctions_inl.h",
             lambda: {
-                'dispatch_namespace': dispatch_namespace,
-                'DispatchKeyFunctions_inl_includes': [
-                    f'#include <ATen/ops/{name}_{dispatch_namespace}_dispatch.h>'
+                "dispatch_namespace": dispatch_namespace,
+                "DispatchKeyFunctions_inl_includes": [
+                    f"#include <ATen/ops/{name}_{dispatch_namespace}_dispatch.h>"
                     for name in sorted(dispatch_names)
                 ],
-                'dispatch_namespaced_declarations': [],
+                "dispatch_namespaced_declarations": [],
             },
         )
         del fm
@@ -1767,9 +1833,7 @@ def gen_source_files(
     native_functions: Sequence[NativeFunction],
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     structured_native_functions: Sequence[NativeFunctionsGroup],
-    native_functions_with_view_groups: Sequence[
-        Union[NativeFunction, NativeFunctionsViewGroup]
-    ],
+    view_groups: Sequence[NativeFunctionsViewGroup],
     selector: SelectiveBuilder,
     static_dispatch_idx: List[BackendIndex],
     backend_indices: Dict[DispatchKey, BackendIndex],
@@ -2018,14 +2082,25 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
         native_functions,
         key_fn=key_func,
         env_callable=lambda fn: {
-            'operator_headers': [f'#include <ATen/ops/{fn.root_name}.h>'],
-            'definitions': [ComputeOperators(Target.DEFINITION,
-                                             static_dispatch_backend_indices=static_dispatch_idx)(fn)]},
+            "operator_headers": [f"#include <ATen/ops/{fn.root_name}.h>"],
+            "definitions": [
+                ComputeOperators(
+                    Target.DEFINITION,
+                    static_dispatch_backend_indices=static_dispatch_idx,
+                )(fn)
+            ],
+        },
         base_env={
-            'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
+            "static_dispatch_extra_headers": static_dispatch_extra_headers(
+                static_dispatch_idx
+            ),
         },
         num_shards=5,
-        sharded_keys={'operator_headers', 'definitions', 'static_dispatch_extra_headers'}
+        sharded_keys={
+            "operator_headers",
+            "definitions",
+            "static_dispatch_extra_headers",
+        },
     )
 
     cpu_fm.write("Functions.cpp", lambda: {})
@@ -2039,30 +2114,11 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
         },
     )
 
-    # We need to easily map from [inplace_op_name] -> [functional_op] for the functionalization pass,
-    # so here I generate a mapping from every operator name to its corresponding functional NativeFunction (if it exist).
-    pre_grouped_d: Dict[
-        FunctionSchema, Dict[SchemaKind, NativeFunction]
-    ] = pre_group_native_functions(native_functions)
-    to_functional_op: Dict[OperatorName, Optional[NativeFunction]] = {
-        k: v
-        for d in [
-            {
-                f.func.name: pre_grouped_d[func][SchemaKind.functional]
-                if SchemaKind.functional in pre_grouped_d[func].keys()
-                else None
-                for f in pre_grouped_d[func].values()
-            }
-            for func in pre_grouped_d.keys()
-        ]
-        for k, v in d.items()
-    }
-
     def functionalization_env_callable(
-        g: Union[NativeFunction, NativeFunctionsViewGroup]
+        g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
     ) -> Dict[str, List[str]]:
         def gen_op_headers(
-            g: Union[NativeFunction, NativeFunctionsViewGroup]
+            g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
         ) -> List[str]:
             if isinstance(g, NativeFunctionsViewGroup):
                 # view ops always get a functionalization kernel
@@ -2076,11 +2132,28 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                         f"#include <ATen/ops/{g.view_copy.root_name}_ops.h>",
                     ]
                 return headers
+            elif isinstance(g, NativeFunctionsGroup):
+                headers = [
+                    f"#include <ATen/ops/{g.functional.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
+                    f"#include <ATen/ops/{g.out.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.out.root_name}_ops.h>",
+                ]
+                if g.inplace is not None:
+                    headers += [
+                        f"#include <ATen/ops/{g.inplace.root_name}_native.h>",
+                        f"#include <ATen/ops/{g.inplace.root_name}_ops.h>",
+                    ]
+                if g.mutable is not None:
+                    headers += [
+                        f"#include <ATen/ops/{g.mutable.root_name}_native.h>",
+                        f"#include <ATen/ops/{g.mutable.root_name}_ops.h>",
+                    ]
+                return headers
             else:
-                f = g
                 return [
-                    f"#include <ATen/ops/{f.root_name}_native.h>",
-                    f"#include <ATen/ops/{f.root_name}_ops.h>",
+                    f"#include <ATen/ops/{g.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.root_name}_ops.h>",
                 ]
 
         return {
@@ -2088,11 +2161,6 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
             "func_definitions": gen_functionalization_definition(
                 selector,
                 g,
-                # We need to manually map inplace ops to their out-of-place variants
-                # (we can't do this with NativeFunctionsGroup today because not all inplace ops have out= variants)
-                None
-                if isinstance(g, NativeFunctionsViewGroup)
-                else to_functional_op.get(g.func.name, None),
             ),
             "func_registrations": gen_functionalization_registration(
                 selector,
@@ -2101,9 +2169,30 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
             ),
         }
 
+    all_groups: List[
+        Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
+    ] = list(structured_native_functions) + list(
+        view_groups  # type: ignore[assignment, arg-type, operator]
+    )
+    # Note: all operators that functionalization needs to handle (mutable and aliasing ops) should be grouped properly.
+    # The only reason we really need to deal with direct NativeFunctions here (instead of the groups) is because:
+    # (1) We can provide better error checking (error out if someone introduces a mutable op that doesn't obey the grouping logic)
+    # (2) functionalization needs to manually register CompositeImplicitAutograd kernels, which might not be grouped.
+    #     Although this could go away long-term if we add a dedicated dispatch key for decompositions.
+    structured_map: Dict[OperatorName, NativeFunction] = {
+        f.func.name: f
+        for f in concatMap(lambda g: list(g.functions()), structured_native_functions)
+    }
+    view_map: Dict[OperatorName, NativeFunction] = {
+        f.func.name: f for f in concatMap(lambda g: list(g.functions()), view_groups)
+    }
+    for f in native_functions:
+        if f.func.name not in structured_map and f.func.name not in view_map:
+            all_groups.append(f)
+
     cpu_fm.write_sharded(
         "RegisterFunctionalization.cpp",
-        native_functions_with_view_groups,
+        all_groups,
         key_fn=key_func,
         env_callable=functionalization_env_callable,
         num_shards=4,
@@ -2124,11 +2213,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                     lambda g: gen_functionalization_view_inverse_declaration(
                         selector, g
                     ),
-                    [
-                        g
-                        for g in native_functions_with_view_groups
-                        if isinstance(g, NativeFunctionsViewGroup)
-                    ],
+                    view_groups,
                 )
             )
         },
@@ -2160,17 +2245,23 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                         [g.view] if g.view_copy is None else [g.view, g.view_copy]
                     )
                 )
-                for g in native_functions_with_view_groups
-                if isinstance(g, NativeFunctionsViewGroup)
+                for g in view_groups
+            ]
+            + [
+                "\n".join(
+                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    for f in [g.inplace, g.mutable]
+                    if f is not None and "generated" not in f.tags
+                )
+                for g in structured_native_functions
             ],
             "CompositeViewCopyKernel_Definitions": list(
+                mapMaybe(gen_composite_view_copy_kernel, view_groups)
+            ),
+            "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
-                    gen_composite_view_copy_kernel,
-                    [
-                        g
-                        for g in native_functions_with_view_groups
-                        if isinstance(g, NativeFunctionsViewGroup)
-                    ],
+                    gen_composite_functional_kernel,
+                    structured_native_functions,
                 )
             ),
         },
@@ -2217,6 +2308,11 @@ def main() -> None:
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
     )
+    parser.add_argument(
+        "--mps",
+        action="store_true",
+        help="Generate MPS registration code when set",
+    )
     # TODO: --op_registration_whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
     # custom build.
@@ -2242,9 +2338,10 @@ def main() -> None:
         "e.g.: CPU CUDA QuantizedCPU ...",
     )
     parser.add_argument(
-        '--static_dispatch_backend',
-        nargs='*',
-        help='generate static dispatch code for the specific backend (if set)')
+        "--static_dispatch_backend",
+        nargs="*",
+        help="generate static dispatch code for the specific backend (if set)",
+    )
     parser.add_argument(
         "--skip_dispatcher_op_registration",
         action="store_true",
@@ -2264,6 +2361,7 @@ def main() -> None:
         default=["headers", "sources", "declarations_yaml"],
         help="Generate only a subset of files",
     )
+
     options = parser.parse_args()
 
     selector = get_custom_build_selector(
@@ -2272,19 +2370,37 @@ def main() -> None:
     )
 
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(options.source_path, "native/tags.yaml")
+
+    from torchgen.model import dispatch_keys
+
+    # TODO: stop generating CUDA kernels for non-CUDA builds
+    ignore_keys = set()
+    if not options.mps:
+        ignore_keys.add(DispatchKey.MPS)
+
+        if DispatchKey.MPS in dispatch_keys:
+            del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
+
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
     )
 
     grouped_native_functions = get_grouped_native_functions(native_functions)
+
     structured_native_functions = [
         g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)
     ]
     native_functions_with_view_groups = get_grouped_by_view_native_functions(
         native_functions
     )
+    view_groups = [
+        g
+        for g in native_functions_with_view_groups
+        if isinstance(g, NativeFunctionsViewGroup)
+    ]
 
     template_dir = os.path.join(options.source_path, "templates")
 
@@ -2321,8 +2437,6 @@ def main() -> None:
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>"""
 
-    from torchgen.model import dispatch_keys
-
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
     functions_keys = {
@@ -2341,7 +2455,10 @@ def main() -> None:
 
     static_dispatch_idx: List[BackendIndex] = []
     if options.static_dispatch_backend:
-        static_dispatch_idx = [backend_indices[DispatchKey.parse(key)] for key in options.static_dispatch_backend]
+        static_dispatch_idx = [
+            backend_indices[DispatchKey.parse(key)]
+            for key in options.static_dispatch_backend
+        ]
         for key in options.static_dispatch_backend:
             dp_key = DispatchKey.parse(key)
             if dp_key not in functions_keys:
@@ -2352,7 +2469,7 @@ def main() -> None:
             native_functions=native_functions,
             grouped_native_functions=grouped_native_functions,
             structured_native_functions=structured_native_functions,
-            native_functions_with_view_groups=native_functions_with_view_groups,
+            view_groups=view_groups,
             selector=selector,
             static_dispatch_idx=static_dispatch_idx,
             backend_indices=backend_indices,
