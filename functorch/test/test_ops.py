@@ -1148,7 +1148,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.hardswish', ''),
         xfail('nn.functional.huber_loss', ''),
         xfail('nn.functional.instance_norm', ''),
-        xfail('nn.functional.layer_norm', ''),
         xfail('nn.functional.logsigmoid', ''),
         xfail('nn.functional.pad', 'circular'),
         xfail('nn.functional.prelu', ''),
@@ -1199,6 +1198,11 @@ class TestOperators(TestCase):
             primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
             cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
 
+            if isinstance(primals[0], torch.Tensor) and primals[0].numel() == 0:
+                # typically the first primal arg is the input. If the input has no elements, we will typically run
+                # into an issue of "Expected Tensor but got None"
+                continue
+
             def push_vjp(primals, cotangents):
                 _, vjp_fn = vjp(fn, *primals)
                 return vjp_fn(cotangents)
@@ -1228,19 +1232,23 @@ class TestOperators(TestCase):
                     expected = (tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec))
                 return expected
 
-            def compare_jacobians(primals, cotangents, in_dims=(0,1)):
-                def get_vjp(primals, cotangents):
+            def compare_jacobians(cotangents_and_primals, in_dims, atol_rtol):
+                def get_vjp(cotangents, *primals):
                     _, vjp_fn = vjp(fn, *primals)
                     return vjp_fn(cotangents)
 
-                jacobian_jvp = jacfwd(get_vjp, in_dims)(primals, cotangents)
-                jacobian_vjp = jacrev(get_vjp, in_dims)(primals, cotangents)
+                jacobian_jvp = jacfwd(get_vjp, in_dims)(*cotangents_and_primals)
+                jacobian_vjp = jacrev(get_vjp, in_dims)(*cotangents_and_primals)
 
                 # For dtype changing operations, the jacobians have different dtype.
                 jacobian_jvp = tree_map(lambda x: x.to(torch.float), jacobian_jvp)
                 jacobian_vjp = tree_map(lambda x: x.to(torch.float), jacobian_vjp)
 
-                self.assertEqual(jacobian_jvp, jacobian_vjp)
+                if atol_rtol is not None:
+                    (atol, rtol) = atol_rtol
+                    self.assertEqual(jacobian_jvp, jacobian_vjp, atol=atol, rtol=rtol)
+                else:
+                    self.assertEqual(jacobian_jvp, jacobian_vjp)
 
             # HACK: obviously pytorch should also have the same coverage
             # For things that do have the same coverage, we test that jvp x vjp
@@ -1255,12 +1263,19 @@ class TestOperators(TestCase):
                 'log_softmax',
                 'nn.functional.cross_entropy',
                 'nn.functional.binary_cross_entropy',
+                'nn.functional.layer_norm'
             }
             if op.name in FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH:
-                in_dims = (0, 1)
-                if op.name == 'nn.functional.binary_cross_entropy':  # reverse second derivative wrt target not defined
-                    in_dims = 1
-                compare_jacobians(primals, cotangents, in_dims)
+                def is_differentiable(t):
+                    return isinstance(t, torch.Tensor) and t.dtype == torch.float32
+                args = (cotangents, *primals)
+                if op.name == 'nn.functional.binary_cross_entropy':
+                    in_dims = (0, 1)  # targets is float32 but isn't differentiable
+                    atol_rtol = 1.5E-4, 1.3e-06
+                else:
+                    in_dims = tuple(i for i in range(len(args)) if is_differentiable(args[i]))
+                    atol_rtol = None
+                compare_jacobians(args, in_dims, atol_rtol)
             else:
                 expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
                 self.assertEqual(result, expected)
