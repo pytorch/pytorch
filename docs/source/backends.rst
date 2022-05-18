@@ -93,7 +93,6 @@ torch.backends.mps
 .. autofunction::  torch.backends.mps.is_available
 
 .. autofunction::  torch.backends.mps.is_built
-=======
 
 
 torch.backends.mkl
