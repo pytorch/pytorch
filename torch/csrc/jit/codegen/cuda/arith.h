@@ -24,6 +24,9 @@ namespace cuda {
 TORCH_CUDA_CU_API Val* castOp(DataType dtype, Val* v1);
 TORCH_CUDA_CU_API TensorView* castOp(DataType dtype, TensorView* v1);
 
+TORCH_CUDA_CU_API Val* bitCastOp(DataType dtype, Val* v1);
+TORCH_CUDA_CU_API TensorView* bitCastOp(DataType dtype, TensorView* v1);
+
 // Perform unary op type and return the output
 TORCH_CUDA_CU_API Val* unaryOp(UnaryOpType type, Val* v1);
 TORCH_CUDA_CU_API TensorView* unaryOp(UnaryOpType type, TensorView* v1);
@@ -578,6 +581,11 @@ TORCH_CUDA_CU_API TensorView* gather(
     const std::vector<std::vector<int>>& pad_width,
     const std::vector<int>& strides = {},
     bool trim_out_of_bounds = false);
+
+// Append a new IterDomain to the end of a TenorView to allow
+// iterating on a vector type. The input tensor must have
+// vector dtype.
+TORCH_CUDA_CU_API TensorView* viewAsScalar(TensorView* inp);
 
 //! A fused pointwise multiply and sum
 //!  operator that instantiates the following
