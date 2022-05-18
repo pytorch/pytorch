@@ -24,6 +24,25 @@ tensor([], dtype=torch.int32)
 # _values
 tensor([])
 
+########## torch.float32/torch.int32/batch_shape=(2,)/block_shape=() ##########
+# sparse tensor
+tensor(ccol_indices=tensor([[0, 2, 4],
+                            [0, 2, 4]]),
+       row_indices=tensor([[0, 1, 0, 1],
+                           [0, 1, 0, 1]]),
+       values=tensor([[1., 2., 3., 4.],
+                      [1., 2., 3., 4.]]), size=(2, 2, 2), nnz=4,
+       layout=torch.sparse_csc)
+# _ccol_indices
+tensor([[0, 2, 4],
+        [0, 2, 4]], dtype=torch.int32)
+# _row_indices
+tensor([[0, 1, 0, 1],
+        [0, 1, 0, 1]], dtype=torch.int32)
+# _values
+tensor([[1., 2., 3., 4.],
+        [1., 2., 3., 4.]])
+
 ########## torch.float32/torch.int32/batch_shape=(2, 3)/block_shape=() ##########
 # sparse tensor
 tensor(ccol_indices=tensor([[[0, 2, 4],
@@ -73,25 +92,6 @@ tensor([[[1., 2., 3., 4.],
          [1., 2., 3., 4.],
          [1., 2., 3., 4.]]])
 
-########## torch.float32/torch.int32/batch_shape=(2,)/block_shape=() ##########
-# sparse tensor
-tensor(ccol_indices=tensor([[0, 2, 4],
-                            [0, 2, 4]]),
-       row_indices=tensor([[0, 1, 0, 1],
-                           [0, 1, 0, 1]]),
-       values=tensor([[1., 2., 3., 4.],
-                      [1., 2., 3., 4.]]), size=(2, 2, 2), nnz=4,
-       layout=torch.sparse_csc)
-# _ccol_indices
-tensor([[0, 2, 4],
-        [0, 2, 4]], dtype=torch.int32)
-# _row_indices
-tensor([[0, 1, 0, 1],
-        [0, 1, 0, 1]], dtype=torch.int32)
-# _values
-tensor([[1., 2., 3., 4.],
-        [1., 2., 3., 4.]])
-
 
 ########## torch.float64/torch.int32/batch_shape=()/block_shape=() ##########
 # sparse tensor
@@ -118,6 +118,25 @@ tensor([0], dtype=torch.int32)
 tensor([], dtype=torch.int32)
 # _values
 tensor([], dtype=torch.float64)
+
+########## torch.float64/torch.int32/batch_shape=(2,)/block_shape=() ##########
+# sparse tensor
+tensor(ccol_indices=tensor([[0, 2, 4],
+                            [0, 2, 4]]),
+       row_indices=tensor([[0, 1, 0, 1],
+                           [0, 1, 0, 1]]),
+       values=tensor([[1., 2., 3., 4.],
+                      [1., 2., 3., 4.]]), size=(2, 2, 2), nnz=4,
+       dtype=torch.float64, layout=torch.sparse_csc)
+# _ccol_indices
+tensor([[0, 2, 4],
+        [0, 2, 4]], dtype=torch.int32)
+# _row_indices
+tensor([[0, 1, 0, 1],
+        [0, 1, 0, 1]], dtype=torch.int32)
+# _values
+tensor([[1., 2., 3., 4.],
+        [1., 2., 3., 4.]], dtype=torch.float64)
 
 ########## torch.float64/torch.int32/batch_shape=(2, 3)/block_shape=() ##########
 # sparse tensor
@@ -168,25 +187,6 @@ tensor([[[1., 2., 3., 4.],
          [1., 2., 3., 4.],
          [1., 2., 3., 4.]]], dtype=torch.float64)
 
-########## torch.float64/torch.int32/batch_shape=(2,)/block_shape=() ##########
-# sparse tensor
-tensor(ccol_indices=tensor([[0, 2, 4],
-                            [0, 2, 4]]),
-       row_indices=tensor([[0, 1, 0, 1],
-                           [0, 1, 0, 1]]),
-       values=tensor([[1., 2., 3., 4.],
-                      [1., 2., 3., 4.]]), size=(2, 2, 2), nnz=4,
-       dtype=torch.float64, layout=torch.sparse_csc)
-# _ccol_indices
-tensor([[0, 2, 4],
-        [0, 2, 4]], dtype=torch.int32)
-# _row_indices
-tensor([[0, 1, 0, 1],
-        [0, 1, 0, 1]], dtype=torch.int32)
-# _values
-tensor([[1., 2., 3., 4.],
-        [1., 2., 3., 4.]], dtype=torch.float64)
-
 
 ########## torch.float32/torch.int64/batch_shape=()/block_shape=() ##########
 # sparse tensor
@@ -213,6 +213,25 @@ tensor([0])
 tensor([], dtype=torch.int64)
 # _values
 tensor([])
+
+########## torch.float32/torch.int64/batch_shape=(2,)/block_shape=() ##########
+# sparse tensor
+tensor(ccol_indices=tensor([[0, 2, 4],
+                            [0, 2, 4]]),
+       row_indices=tensor([[0, 1, 0, 1],
+                           [0, 1, 0, 1]]),
+       values=tensor([[1., 2., 3., 4.],
+                      [1., 2., 3., 4.]]), size=(2, 2, 2), nnz=4,
+       layout=torch.sparse_csc)
+# _ccol_indices
+tensor([[0, 2, 4],
+        [0, 2, 4]])
+# _row_indices
+tensor([[0, 1, 0, 1],
+        [0, 1, 0, 1]])
+# _values
+tensor([[1., 2., 3., 4.],
+        [1., 2., 3., 4.]])
 
 ########## torch.float32/torch.int64/batch_shape=(2, 3)/block_shape=() ##########
 # sparse tensor
@@ -263,25 +282,6 @@ tensor([[[1., 2., 3., 4.],
          [1., 2., 3., 4.],
          [1., 2., 3., 4.]]])
 
-########## torch.float32/torch.int64/batch_shape=(2,)/block_shape=() ##########
-# sparse tensor
-tensor(ccol_indices=tensor([[0, 2, 4],
-                            [0, 2, 4]]),
-       row_indices=tensor([[0, 1, 0, 1],
-                           [0, 1, 0, 1]]),
-       values=tensor([[1., 2., 3., 4.],
-                      [1., 2., 3., 4.]]), size=(2, 2, 2), nnz=4,
-       layout=torch.sparse_csc)
-# _ccol_indices
-tensor([[0, 2, 4],
-        [0, 2, 4]])
-# _row_indices
-tensor([[0, 1, 0, 1],
-        [0, 1, 0, 1]])
-# _values
-tensor([[1., 2., 3., 4.],
-        [1., 2., 3., 4.]])
-
 
 ########## torch.float64/torch.int64/batch_shape=()/block_shape=() ##########
 # sparse tensor
@@ -308,6 +308,25 @@ tensor([0])
 tensor([], dtype=torch.int64)
 # _values
 tensor([], dtype=torch.float64)
+
+########## torch.float64/torch.int64/batch_shape=(2,)/block_shape=() ##########
+# sparse tensor
+tensor(ccol_indices=tensor([[0, 2, 4],
+                            [0, 2, 4]]),
+       row_indices=tensor([[0, 1, 0, 1],
+                           [0, 1, 0, 1]]),
+       values=tensor([[1., 2., 3., 4.],
+                      [1., 2., 3., 4.]]), size=(2, 2, 2), nnz=4,
+       dtype=torch.float64, layout=torch.sparse_csc)
+# _ccol_indices
+tensor([[0, 2, 4],
+        [0, 2, 4]])
+# _row_indices
+tensor([[0, 1, 0, 1],
+        [0, 1, 0, 1]])
+# _values
+tensor([[1., 2., 3., 4.],
+        [1., 2., 3., 4.]], dtype=torch.float64)
 
 ########## torch.float64/torch.int64/batch_shape=(2, 3)/block_shape=() ##########
 # sparse tensor
@@ -357,23 +376,4 @@ tensor([[[1., 2., 3., 4.],
         [[1., 2., 3., 4.],
          [1., 2., 3., 4.],
          [1., 2., 3., 4.]]], dtype=torch.float64)
-
-########## torch.float64/torch.int64/batch_shape=(2,)/block_shape=() ##########
-# sparse tensor
-tensor(ccol_indices=tensor([[0, 2, 4],
-                            [0, 2, 4]]),
-       row_indices=tensor([[0, 1, 0, 1],
-                           [0, 1, 0, 1]]),
-       values=tensor([[1., 2., 3., 4.],
-                      [1., 2., 3., 4.]]), size=(2, 2, 2), nnz=4,
-       dtype=torch.float64, layout=torch.sparse_csc)
-# _ccol_indices
-tensor([[0, 2, 4],
-        [0, 2, 4]])
-# _row_indices
-tensor([[0, 1, 0, 1],
-        [0, 1, 0, 1]])
-# _values
-tensor([[1., 2., 3., 4.],
-        [1., 2., 3., 4.]], dtype=torch.float64)
 
