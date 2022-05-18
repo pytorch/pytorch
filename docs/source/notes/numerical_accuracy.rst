@@ -95,15 +95,15 @@ When training using FP16 precision, some models may fail to converge with FP16 d
 
 The following is the list of operations where rocBLAS may be used:
 
-* `torch.addbmm`
-* `torch.addmm`
-* `torch.baddbmm`
-* `torch.bmm`
-* `torch.mm`
-* `torch.nn.GRUCell`
-* `torch.nn.LSTMCell`
-* `torch.nn.Linear`
-* `torch.sparse.addmm`
+* torch.addbmm
+* torch.addmm
+* torch.baddbmm
+* torch.bmm
+* torch.mm
+* torch.nn.GRUCell
+* torch.nn.LSTMCell
+* torch.nn.Linear
+* torch.sparse.addmm
 * the following torch._C._ConvBackend implementations:
 
   * slowNd
