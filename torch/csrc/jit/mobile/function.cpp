@@ -44,18 +44,14 @@ void Function::append_instruction(OpCode op, int X, int N) {
   code_.instructions_.emplace_back(op, X, N);
 }
 
-bool Function::append_operator(
+void Function::append_operator(
     const std::string& name,
     const std::string& overload_name,
     const c10::optional<int>& num_specified_args) {
   // Keep the original opname in code_
   code_.op_names_.emplace_back(name, overload_name);
   code_.operator_input_sizes_.emplace_back(num_specified_args.value_or(-1));
-  return true;
 }
-
-void print_unsupported_ops_and_throw(
-    const std::unordered_set<std::string>& unsupported_ops) {}
 
 std::string operator_str(const c10::OperatorName& opname) {
   std::string result = opname.name;
@@ -70,7 +66,7 @@ bool Function::initialize_operators(bool should_check_operators) {
     return true;
   }
   std::unordered_set<std::string> unsupported_op_names;
-  code_.operators_.clear();
+  code_.operators_.resize(code_.op_names_.size());
   bool all_ops_supported = true;
   for (int i = 0; i < code_.op_names_.size(); i++) {
     const auto& opname = code_.op_names_[i];
@@ -81,8 +77,10 @@ bool Function::initialize_operators(bool should_check_operators) {
     if (!func.has_value()) {
       unsupported_op_names.insert(operator_str(opname));
       all_ops_supported = false;
+      break;
+    } else {
+      code_.operators_[i] = *func;
     }
-    code_.operators_.emplace_back(*func);
   }
   if (should_check_operators) {
     TORCH_CHECK(
@@ -150,6 +148,7 @@ size_t Function::num_inputs() const {
 }
 
 bool Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
+  initialize_operators(true);
   f(code_);
   return true;
 }
