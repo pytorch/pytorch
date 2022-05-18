@@ -331,13 +331,11 @@
   variants: function
   dispatch:
     CPU, CUDA, MPS: view_as_real
-    Meta: view_as_real_meta
 
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
     CPU, CUDA: view_as_complex
-    Meta: view_as_complex_meta
 
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
