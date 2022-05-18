@@ -330,14 +330,12 @@
 - func: view_as_real(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
-    CPU, CUDA, MPS: view_as_real
-    Meta: view_as_real_meta
+    CPU, CUDA, MPS, Meta: view_as_real
 
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
-    CPU, CUDA: view_as_complex
-    Meta: view_as_complex_meta
+    CPU, CUDA, Meta: view_as_complex
 
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
