@@ -5820,6 +5820,32 @@ class TestNN(NNTestCase):
             # output_2d in shape of [T, 1, D]
             self.assertEqual(output_3d[i].unsqueeze(0).transpose(0, 1), output_2d)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_self_attn_TxT_attn_mask(self):
+        embed_dim = 16
+        num_heads = 4
+        batch_size = 10
+        tgt_len = 16
+
+        query = torch.rand(batch_size, tgt_len, embed_dim, device="cuda")  # [N, T, D]
+        attn_mask = torch.randint(0, 2, (tgt_len, tgt_len)).cuda().float()  # [T, T]
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
+
+        attn_mask_4d = attn_mask.expand(batch_size, num_heads, tgt_len, tgt_len)
+
+        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).cuda()
+        mta_model.eval()
+
+        # Generate 3D results
+        with torch.inference_mode():
+            output_mask_4d = mta_model(query, query, query, attn_mask=attn_mask_4d)[0]
+            output_mask_4d = output_mask_4d.transpose(0, 1)  # [N, T, D]
+
+            output_mask_TxT = mta_model(query, query, query, attn_mask=attn_mask)[0]
+            output_mask_TxT = output_mask_TxT.transpose(0, 1)  # [N, T, D]
+
+            self.assertEqual(output_mask_4d, output_mask_TxT)
+
     def test_multihead_attn_no_bias(self):
         embed_dim = 8
         num_heads = 4
@@ -16859,6 +16885,26 @@ class TestNNDeviceType(NNTestCase):
         mask = mask.bool()
         native_res = torch._masked_softmax(input, mask, dim)
         mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L)
+        mask = ~mask
+        mask = mask.float()
+
+        pt_res = self._slow_masked_softmax(input, mask)
+        self.assertEqual(pt_res, native_res, exact_dtype=True)
+
+    @onlyCUDA
+    def test_masked_softmax_TxT_layout(self, device):
+        B = 211
+        num_heads = 16
+        L = 42
+        input = torch.randn((B, num_heads, L, L))
+        dim = input.dim() - 1
+        mask = torch.randint(0, 2, (L, L))
+        if (self.device_type == "cuda"):
+            input = input.cuda()
+            mask = mask.cuda()
+        mask = mask.bool()
+        native_res = torch._masked_softmax(input, mask, dim)
+        mask = mask.expand(B, num_heads, L, L)
         mask = ~mask
         mask = mask.float()
 
