@@ -630,6 +630,22 @@ PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_rocm_is_backward_pass(PyObject *_unused, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+#if USE_ROCM
+  if (at::ROCmBackwardPassGuard::is_backward_pass()) {
+    Py_RETURN_TRUE;
+  }
+  else {
+    Py_RETURN_FALSE;
+  }
+#else
+  Py_RETURN_FALSE;
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, cppcoreguidelines-avoid-c-arrays)
 static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_init",        THCPModule_initExtension,    METH_NOARGS,  nullptr},
@@ -674,6 +690,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_nccl_all_gather", THCPModule_nccl_all_gather, METH_VARARGS, nullptr},
   {"_nccl_reduce_scatter", THCPModule_nccl_reduce_scatter, METH_VARARGS, nullptr},
 #endif
+  {"_rocm_is_backward_pass", THCPModule_rocm_is_backward_pass, METH_NOARGS, nullptr},
   {nullptr}
 };
 
