@@ -16706,15 +16706,10 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/56012
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    dtypes=(torch.chalf,)),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=[torch.complex64, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=[torch.chalf, torch.complex64, torch.cdouble]),
-                       # RuntimeError: "div_true_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=(torch.complex32,)),
                        # alias, nn.functional.sigmoid, will produce (because of warning string saved):
                        # "RuntimeError: Expected to not find "sigmoid" but found it"
                        DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping')),
