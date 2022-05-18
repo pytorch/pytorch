@@ -2659,19 +2659,22 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
-REGISTER_OPERATOR_FUNCTOR(quantized::embedding_bag_byte_unpack, quantized_embedding_bag_byte_unpack, [](Node*) -> SROperator {
-  return [](ProcessedNode* pnode) {
-    auto& weight = pnode->Input(0).toTensor();
-    if (pnode->Output(0).isNone()) {
-      pnode->Output(0) = at::empty(
-          {},
-          weight.options().dtype(at::kFloat),
-          weight.suggest_memory_format());
-    }
-    auto& out = pnode->Output(0).toTensor();
-    at::native::qembeddingbag_byte_unpack_out(out, weight);
-  };
-});
+REGISTER_OPERATOR_FUNCTOR(
+    quantized::embedding_bag_byte_unpack,
+    quantized_embedding_bag_byte_unpack,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        auto& weight = pnode->Input(0).toTensor();
+        if (pnode->Output(0).isNone()) {
+          pnode->Output(0) = at::empty(
+              {},
+              weight.options().dtype(at::kFloat),
+              weight.suggest_memory_format());
+        }
+        auto& out = pnode->Output(0).toTensor();
+        at::native::qembeddingbag_byte_unpack_out(out, weight);
+      };
+    });
 
 } // namespace jit
 } // namespace torch
