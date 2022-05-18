@@ -174,7 +174,7 @@ class TestShardParameter(ShardedTensorTestBase):
         with self.assertRaisesRegex(ValueError, 'does not match with src_rank'):
             shard_parameter(fc, 'weight', spec, src_rank=self.rank)
 
-        with self.assertRaisesRegex(ValueError, 'does not have parameter'):
+        with self.assertRaisesRegex(AttributeError, 'Linear have no attribute'):
             shard_parameter(fc, 'foo', spec)
 
         with self.assertRaisesRegex(ValueError, 'Expected Linear.bias to be a Tensor, but found str'):
@@ -1070,9 +1070,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         # Test with invalid input
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
-            st.size(-1)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
+        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[-2, 2\\)'):
+            st.size(-3)
+        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[-2, 2\\)'):
             st.size(2)
 
         with self.assertRaises(TypeError):
@@ -2488,8 +2488,10 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
 
         t = torch.rand(10, 10).cuda(self.rank)
 
-        @sharded_op_impl(torch.nn.functional.linear)
-        def my_sharded_linear(types, args, kwargs, process_group):
+        from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
+
+        @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.linear)
+        def my_sharded_linear(types, args, kwargs):
             return t
 
         spec = ChunkShardingSpec(
