@@ -1943,6 +1943,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // Cleaning warning messages, no need to break as TORCH_CHECK(false)
         // terminates flow.
         // break;
+      case MemoryFormat::NumOptions:
+        TORCH_INTERNAL_ASSERT(false, "invalid memory format ", memory_format);
     }
     // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
     // exclusive see #24090
@@ -2197,7 +2199,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
   }
 
- protected:
+ public:
   enum class SizesStridesPolicy : uint8_t {
     // Default behavior, e.g., dense tensor.
     //
