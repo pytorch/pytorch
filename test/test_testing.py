@@ -3,6 +3,8 @@
 import collections
 import doctest
 import functools
+import importlib
+import inspect
 import itertools
 import math
 import os
@@ -1760,6 +1762,34 @@ class TestTestParametrizationDeviceType(TestCase):
 
 instantiate_parametrized_tests(TestTestParametrization)
 instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
+
+
+class TestImports(TestCase):
+    def test_circular_dependencies(self) -> None:
+        """ Checks that all modules inside torch can be imported
+        Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
+        torch_dir = os.path.dirname(torch.__file__)
+        for base, folders, files in os.walk(torch_dir):
+            prefix = os.path.relpath(base, os.path.dirname(torch_dir)).replace(os.path.sep, ".")
+            for f in files:
+                if not f.endswith(".py"):
+                    continue
+                mod_name = f"{prefix}.{f[:-3]}" if f != "__init__.py" else prefix
+                # Do not attempt to import executable modules
+                if f == "__main__.py":
+                    continue
+                ignored_modules = ["torch.utils.tensorboard",  # deps on tensorboard
+                                   "torch.distributed.elastic.rendezvous",  # depps on etcd
+                                   "torch.backends._coreml",  # depends on pycoreml
+                                   "torch.contrib.",  # something weird
+                                   "torch.testing._internal.common_fx2trt",  # needs fx
+                                   "torch.testing._internal.distributed.",  # just fails
+                                   ]
+
+                if any(mod_name.startswith(x) for x in ignored_modules):
+                    continue
+                mod = importlib.import_module(mod_name)
+                self.assertTrue(inspect.ismodule(mod))
 
 
 if __name__ == '__main__':
