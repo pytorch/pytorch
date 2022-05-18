@@ -40,6 +40,9 @@ runs:
         submodules: ${{ inputs.submodules }}
     - name: other refs
       shell: bash
+      env:
+        SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       run: |
+        git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin "$SHA"
         git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin master
         git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin viable/strict
