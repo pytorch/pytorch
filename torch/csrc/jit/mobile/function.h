@@ -34,7 +34,7 @@ class TORCH_API Function : public torch::jit::Function {
   // misaligned. Therefore only use ONE variant at time.
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle);
   void append_instruction(OpCode op, int X, int N);
-  bool append_operator(
+  void append_operator(
       const std::string& name,
       const std::string& overload_name,
       const c10::optional<int>& num_specified_args);
