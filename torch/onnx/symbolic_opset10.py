@@ -544,6 +544,16 @@ class Quantized:
         return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    def add_relu(g, x, y, op_scale, op_zero_point):
+        x, _, _, _ = sym_help.dequantize_helper(g, x)
+        y, _, _, _ = sym_help.dequantize_helper(g, y)
+
+        output = add(g, x, y)
+        output = relu(g, output)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
     def mul(g, x, y, op_scale, op_zero_point):
         x, _, _, _ = sym_help.dequantize_helper(g, x)
         y, _, _, _ = sym_help.dequantize_helper(g, y)
