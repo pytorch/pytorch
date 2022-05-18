@@ -831,7 +831,7 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
         f = fx.symbolic_trace(f, concrete_args={'b': False})
         assert f(3, False)  == 6
 
-    Note that although you can still pass in different values of `b`, they will be ignored.
+    Note that if you pass in different values of `b`, you will get an assertion error.
 
     We can also use `concrete_args` to eliminate data-structure handling from
     our function. This will use pytrees to flatten your input. To avoid
