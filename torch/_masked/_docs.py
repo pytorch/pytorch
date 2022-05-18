@@ -279,6 +279,120 @@ Example::
     tensor([0, 0])
 """
 
+cumprod_docstring = """cumprod(input, dim, *, dtype=None, mask=None) -> Tensor
+
+Returns cumulative_prod of all the slices in the :attr:`input` tensor
+along :attr:`dim` while the :attr:`input` elements are masked out
+according to the boolean tensor :attr:`mask`.
+
+Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
+defined as ``prod(x[:i])``.
+
+The boolean tensor :attr:`mask` defines the "validity" of
+:attr:`input` tensor elements: if :attr:`mask` element is True then
+the corresponding element in :attr:`input` tensor will be included in
+cumulative_prod computation, otherwise the element is ignored.
+
+The values of masked-out elements of the output tensor have undefined
+value: it may or may not be set to zero or nan; the choice may correspond to
+the value that leads to the most efficient storage of :attr:`output`
+tensor.
+
+The mask of the cumulative_prod output tensor can be computed as
+``torch.broadcast_to(mask, input.shape)``.
+
+The shapes of the :attr:`mask` tensor and the :attr:`input` tensor
+don't need to match, but they must be :ref:`broadcastable
+<broadcasting-semantics>` and the dimensionality of the :attr:`mask`
+tensor must not be greater than of the :attr:`input` tensor.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int): the dimension along which cumulative_prod is computed.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type
+      of returned tensor.  If specified, the input tensor is
+      casted to :attr:`dtype` before the operation is
+      performed. Default: None.
+    mask (:class:`torch.Tensor`, optional): the boolean tensor
+      containing the binary mask of validity of input tensor
+      elements.
+      Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.
+
+Example::
+
+    >>> input = tensor([[-3., -2., -1.], [ 0., 1., 2.]])
+    >>> input
+    tensor([[-3., -2., -1.],
+            [ 0.,  1.,  2.]])
+    >>> mask = tensor([[ True, False, True], [False, False, False]])
+    >>> mask
+    tensor([[ True, False,  True],
+            [False, False, False]])
+    >>> torch._masked.cumprod(input, 1, mask=mask)
+    tensor([[-3., -3.,  3.],
+            [ 1.,  1.,  1.]])
+"""
+
+cumsum_docstring = """cumsum(input, dim, *, dtype=None, mask=None) -> Tensor
+
+Returns cumulative_sum of all the slices in the :attr:`input` tensor
+along :attr:`dim` while the :attr:`input` elements are masked out
+according to the boolean tensor :attr:`mask`.
+
+Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
+defined as ``sum(x[:i])``.
+
+The boolean tensor :attr:`mask` defines the "validity" of
+:attr:`input` tensor elements: if :attr:`mask` element is True then
+the corresponding element in :attr:`input` tensor will be included in
+cumulative_sum computation, otherwise the element is ignored.
+
+The values of masked-out elements of the output tensor have undefined
+value: it may or may not be set to zero or nan; the choice may correspond to
+the value that leads to the most efficient storage of :attr:`output`
+tensor.
+
+The mask of the cumulative_sum output tensor can be computed as
+``torch.broadcast_to(mask, input.shape)``.
+
+The shapes of the :attr:`mask` tensor and the :attr:`input` tensor
+don't need to match, but they must be :ref:`broadcastable
+<broadcasting-semantics>` and the dimensionality of the :attr:`mask`
+tensor must not be greater than of the :attr:`input` tensor.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int): the dimension along which cumulative_sum is computed.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type
+      of returned tensor.  If specified, the input tensor is
+      casted to :attr:`dtype` before the operation is
+      performed. Default: None.
+    mask (:class:`torch.Tensor`, optional): the boolean tensor
+      containing the binary mask of validity of input tensor
+      elements.
+      Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.
+
+Example::
+
+    >>> input = tensor([[-3., -2., -1.], [ 0., 1., 2.]])
+    >>> input
+    tensor([[-3., -2., -1.],
+            [ 0.,  1.,  2.]])
+    >>> mask = tensor([[ True, False, True], [False, False, False]])
+    >>> mask
+    tensor([[ True, False,  True],
+            [False, False, False]])
+    >>> torch._masked.cumsum(input, 1, mask=mask)
+    tensor([[-3., -3., -4.],
+            [ 0.,  0.,  0.]])
+"""
+
 log_softmax_docstring = """log_softmax(input, dim, *, dtype=None, mask=None) -> Tensor
 
 Returns log_softmax of all the slices in the :attr:`input` tensor
