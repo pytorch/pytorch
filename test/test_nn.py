@@ -20548,7 +20548,7 @@ class TestNNDeviceType(NNTestCase):
     @torch.no_grad()
     def test_multihead_attn_in_proj_weight_none(self, device, dtype):
         # Setting kdim == vdim == 2 means that vdim != embed_dim
-        # will cause the logic to use per-input project weights, thereby 
+        # will cause the logic to use per-input project weights, thereby
         # forcing self.in_proj_weight = None
         mha = torch.nn.MultiheadAttention(4, 4, vdim=2, kdim=2, dtype=dtype, device=device)
         query = torch.rand(4, 4, 4)
