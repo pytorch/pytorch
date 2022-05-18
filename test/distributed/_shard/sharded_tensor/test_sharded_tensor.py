@@ -39,6 +39,7 @@ from torch.distributed._shard.sharded_tensor.api import (
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
+    tp_transports,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -979,7 +980,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.init_pg()
 
         # Init RPC with different ranks.
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(_transports=tp_transports())
         rpc_backend_options.init_method = f"file://{self.file_name}"
         rank = (self.rank + 1) % self.world_size
         rpc.init_rpc(
