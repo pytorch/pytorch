@@ -1633,32 +1633,15 @@ Differences with `numpy.linalg.svd`:
 
     The `driver` kwarg may be used in CUDA with a cuSOLVER backend to choose the algorithm used to compute the SVD.
     The choice of a driver is a trade-off between accuracy and speed.
-    
+
     - If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
-    
+
       - For a general matrix: `'gesvdj'` (Jacobi method)
       - If :attr:`A` is tall or wide (`m >> n` or `m << n`): `'gesvda'` (Approximate method)
-    
-    - If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
-    
-    By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
 
-    - When `driver` is not given or set to `None` (*default*), a driver will be selected automatically
-      based on the shape of the inputs.
-      The default choice should be efficient and precise for most inputs. However, if input matrices
-      have large condition numbers or could be ill-conditioned, it's recommended to choose the `gesvd` driver
-      or use higher precision data type (e.g. use double instead of float).
-    - The `gesvd` driver directly calls the cuSOLVER `cusolverDn<t>gesvd` method. This QR-based algorithm is
-      less performant on GPU, but it can converge ill-conditioned matrices and get more precise results for those inputs
-      than the other drivers.
-    - The `gesvdj` driver calls the cuSOLVER `cusolverDn<t>gesvdjBatched` method if input batched matrices
-      are square matrices with sizes less than or equal to 32. Otherwise, the `gesvdj` driver calls the cuSOLVER
-      `cusolverDn<t>gesvdj` method. This Jacobi-based algorithm has better performance than `gesvd` on GPU,
-      but it may get less accurate results for ill-conditioned matrices or matrices with very large sizes
-      (be cautious if matrix size > 2048).
-    - The `gesvda` driver directly calls the cuSOLVER `cusolverDn<t>gesvdaStridedBatch` method. This is an
-      approximate method that is faster for very tall or very wide matrices.
-      (`m >> n` or `n >> m`).
+    - If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
+
+    By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
 
 .. note:: When :attr:`full_matrices`\ `= True`, the gradients with respect to `U[..., :, min(m, n):]`
           and `Vh[..., min(m, n):, :]` will be ignored, as those vectors can be arbitrary bases
