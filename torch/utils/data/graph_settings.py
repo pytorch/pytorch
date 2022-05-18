@@ -62,7 +62,7 @@ def apply_shuffle_seed(datapipe, rng):
     shufflers = {pipe for pipe in all_pipes if isinstance(pipe, Shuffler)}
 
     for shuffler in shufflers:
-        shuffle_seed = torch.empty((), dtype=torch.int64).random_(generator=rng).item()
+        shuffle_seed = int(torch.empty((), dtype=torch.int64).random_(generator=rng).item())
         shuffler.set_seed(shuffle_seed)
 
     return datapipe

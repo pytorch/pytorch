@@ -145,7 +145,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         if not self._running:
             self._buffer = []
             if self._enabled and self._seed is None:
-                self._seed = torch.empty((), dtype=torch.int64).random_().item()
+                self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
             self._rng.seed(self._seed)
             self._seed = None
         self._running = True
