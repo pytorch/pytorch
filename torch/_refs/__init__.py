@@ -13,7 +13,6 @@ from torch._prims.utils import (
     Number,
     NumberType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
-    elementwise_dtypes,
 )
 from torch._prims.wrappers import (
     elementwise_type_promotion_wrapper,
@@ -150,6 +149,14 @@ __all__ = [
     "transpose",
     "unsqueeze",
     "view",
+    #
+    # Tensor Creation
+    #
+    "empty",
+    "empty_like",
+    "full",
+    "full_like",
+    "ones_like",
 ]
 
 Tensor = torch.Tensor
@@ -236,13 +243,27 @@ infer_aten_op = object()
 
 # TODO: add type promotion support
 def _make_elementwise_unary_reference(
-    prim: Callable, *, type_promotion_kind, aten_op=infer_aten_op, register_meta=False
+    prim: Callable,
+    *,
+    type_promotion_kind,
+    aten_op=infer_aten_op,
+    register_meta=False,
+    extra_meta=None,
 ) -> Callable:
     @out_wrapper
     @elementwise_type_promotion_wrapper(
-        type_promoting_args=("a",), type_promotion_kind=type_promotion_kind
+        type_promoting_args=("a",),
+        type_promotion_kind=type_promotion_kind,
     )
-    def _ref(a: Tensor) -> Tensor:
+    def _ref(a: TensorLikeType) -> TensorLikeType:
+        if not isinstance(a, TensorLike):
+            raise RuntimeError(
+                "Expected a tensor input for an elementwise unary operation!"
+            )
+
+        if extra_meta is not None:
+            extra_meta(a)
+
         return prim(a)
 
     if aten_op is infer_aten_op:
@@ -254,43 +275,53 @@ def _make_elementwise_unary_reference(
 
 
 abs = _make_elementwise_unary_reference(
-    prims.abs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+    prims.abs,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
 )
 
 acos = _make_elementwise_unary_reference(
-    prims.acos, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.acos,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 acosh = _make_elementwise_unary_reference(
-    prims.acosh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.acosh,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 asin = _make_elementwise_unary_reference(
-    prims.asin, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.asin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 atan = _make_elementwise_unary_reference(
-    prims.atan, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.atan,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 ceil = _make_elementwise_unary_reference(
-    prims.ceil, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.ceil,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 cos = _make_elementwise_unary_reference(
-    prims.cos, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.cos,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 cosh = _make_elementwise_unary_reference(
-    prims.cosh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.cosh,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 digamma = _make_elementwise_unary_reference(
-    prims.digamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.digamma,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 erf = _make_elementwise_unary_reference(
-    prims.erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.erf,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 erfinv = _make_elementwise_unary_reference(
@@ -300,29 +331,41 @@ erfinv = _make_elementwise_unary_reference(
 )
 
 erfc = _make_elementwise_unary_reference(
-    prims.erfc, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.erfc,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 exp = _make_elementwise_unary_reference(
-    prims.exp, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.exp,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 expm1 = _make_elementwise_unary_reference(
-    prims.expm1, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.expm1,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 floor = _make_elementwise_unary_reference(
-    prims.floor, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.floor,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _isfinite(a: TensorLikeType) -> TensorLikeType:
+    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
+        return prims.is_finite(a)
+
+    return ones_like(a, dtype=torch.bool)
+
+
 isfinite = _make_elementwise_unary_reference(
-    prims.is_finite,
+    _isfinite,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
 )
 
 
-def _isnan(a: Tensor) -> Tensor:
+def _isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
 
@@ -334,23 +377,36 @@ isnan = _make_elementwise_unary_reference(
 )
 
 lgamma = _make_elementwise_unary_reference(
-    prims.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.lgamma,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 log = _make_elementwise_unary_reference(
-    prims.log, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.log,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 log1p = _make_elementwise_unary_reference(
-    prims.log1p, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.log1p,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+
+def _neg_meta(a: TensorLikeType):
+    if a.dtype is torch.bool:
+        msg = "neg is not supported on bool tensors."
+        raise RuntimeError(msg)
+
+
 neg = _make_elementwise_unary_reference(
-    prims.neg, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.neg,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    extra_meta=_neg_meta,
 )
 
 reciprocal = _make_elementwise_unary_reference(
-    prims.reciprocal, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.reciprocal,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 # TODO: round takes additional kwargs
@@ -361,29 +417,34 @@ round = _make_elementwise_unary_reference(
 )
 
 sign = _make_elementwise_unary_reference(
-    prims.sign, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.sign,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 sin = _make_elementwise_unary_reference(
-    prims.sin, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.sin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 sinh = _make_elementwise_unary_reference(
-    prims.sinh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.sinh,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 sqrt = _make_elementwise_unary_reference(
-    prims.sqrt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.sqrt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 square = _make_elementwise_unary_reference(
     prims.square,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
-    aten_op=None,  # CompositeImplicitAutograd
+    aten_op=None,  # CompositeImplicitAutograd,
 )
 
 tan = _make_elementwise_unary_reference(
-    prims.tan, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.tan,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
 
@@ -393,15 +454,34 @@ def _make_elementwise_binary_reference(
     type_promotion_kind,
     aten_op=infer_aten_op,
     has_out=True,
+    supports_lhs_python_scalar=True,
+    supports_rhs_python_scalar=True,
     register_meta=False,
 ) -> Callable:
     @elementwise_type_promotion_wrapper(
-        type_promoting_args=("a", "b"), type_promotion_kind=type_promotion_kind
+        type_promoting_args=("a", "b"),
+        type_promotion_kind=type_promotion_kind,
     )
     def _ref(
         a: Union[Tensor, NumberType],
         b: Union[Tensor, NumberType],
     ) -> Tensor:
+        if not supports_lhs_python_scalar and isinstance(a, Number):
+            raise ValueError(
+                "Received a lhs Python scalar to an elementwise binary operation that does not accept lhs scalars!"
+            )
+
+        if not supports_rhs_python_scalar and isinstance(b, Number):
+            raise ValueError(
+                "Received a rhs Python scalar to an elementwise binary operation that does not accept rhs scalars!"
+            )
+
+        # TODO: enable this for operations that support it, like add
+        if isinstance(a, Number) and isinstance(b, Number):
+            raise ValueError(
+                "Receive two Number inputs to an elementwise binary operation!"
+            )
+
         a, b = _maybe_broadcast(a, b)
         return prim(a, b)
 
@@ -420,7 +500,7 @@ def _make_elementwise_binary_reference(
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def add(
     a: Union[TensorLikeType, NumberType],
@@ -431,6 +511,12 @@ def add(
     """
     Reference implementation of torch.add
     """
+
+    if isinstance(a, Number) and isinstance(b, Number):
+        raise ValueError(
+            "Receive two Number inputs to an elementwise binary operation!"
+        )
+
     a, b = _maybe_broadcast(a, b)
 
     if alpha is not None:
@@ -450,7 +536,10 @@ def add(
 
 # TODO: add docstring
 atan2 = _make_elementwise_binary_reference(
-    prims.atan2, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.atan2,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -468,7 +557,8 @@ bitwise_left_shift = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 bitwise_or = _make_elementwise_binary_reference(
-    prims.bitwise_or, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.bitwise_or,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
@@ -480,7 +570,8 @@ bitwise_right_shift = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 bitwise_xor = _make_elementwise_binary_reference(
-    prims.bitwise_xor, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.bitwise_xor,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
@@ -488,7 +579,9 @@ bitwise_xor = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 eq = _make_elementwise_binary_reference(
-    prims.eq, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.eq,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    supports_lhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -500,6 +593,11 @@ def float_power(
     b: Union[TensorLikeType, NumberType],
 ) -> Tensor:
 
+    if isinstance(a, Number) and isinstance(b, Number):
+        raise ValueError(
+            "Receive two Number inputs to an elementwise binary operation!"
+        )
+
     # Handles type promotion
     dtype = utils.get_higher_dtype(a, b)
     assert dtype is not None
@@ -508,29 +606,43 @@ def float_power(
     else:
         dtype = torch.float64
 
-    a = _maybe_convert_to_dtype(a, dtype=dtype)  # type: ignore[assignment]
-    b = _maybe_convert_to_dtype(b, dtype=dtype)  # type: ignore[assignment]
+    # Float power has the following contiguous cast behavior to be
+    # consistent with its C++ impl
+    if isinstance(a, TensorLike) and a.dtype != dtype:
+        a = prims.to_dtype(a, dtype)
+    if isinstance(b, TensorLike) and b.dtype != dtype:
+        b = prims.to_dtype(b, dtype)
+
     a, b = _maybe_broadcast(a, b)
     return prims.pow(a, b)
 
 
 # TODO: add docstring
 ge = _make_elementwise_binary_reference(
-    prims.ge, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.ge,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    supports_lhs_python_scalar=False,
 )
 
 # TODO: add docstring
 gt = _make_elementwise_binary_reference(
     prims.gt,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    supports_lhs_python_scalar=False,
 )
 
 igamma = _make_elementwise_binary_reference(
-    prims.igamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.igamma,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 igammac = _make_elementwise_binary_reference(
-    prims.igammac, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.igammac,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 
@@ -587,7 +699,9 @@ def isclose(
 
 # TODO: add docstring
 le = _make_elementwise_binary_reference(
-    prims.le, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.le,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    supports_lhs_python_scalar=False,
 )
 
 
@@ -626,41 +740,46 @@ logical_or = _make_elementwise_binary_reference(
 lt = _make_elementwise_binary_reference(
     prims.lt,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    supports_lhs_python_scalar=False,
 )
 
 # TODO: add docstring
 maximum = _make_elementwise_binary_reference(
-    prims.max,
+    prims.maximum,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.maximum,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 minimum = _make_elementwise_binary_reference(
-    prims.min,
+    prims.minimum,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.minimum,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 mul = _make_elementwise_binary_reference(
     prims.mul,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 ne = _make_elementwise_binary_reference(
-    prims.ne, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.ne,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    supports_lhs_python_scalar=False,
 )
 
 # TODO: add docstring
 nextafter = _make_elementwise_binary_reference(
-    prims.nextafter, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.nextafter,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
 pow = _make_elementwise_binary_reference(
-    prims.pow, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
+    prims.pow,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
 )
 
 # TODO: add docstring
@@ -670,7 +789,7 @@ pow = _make_elementwise_binary_reference(
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def sub(
     a: Union[TensorLikeType, NumberType],
@@ -681,6 +800,12 @@ def sub(
     """
     Reference implementation of torch.add
     """
+
+    if isinstance(a, Number) and isinstance(b, Number):
+        raise ValueError(
+            "Receive two Number inputs to an elementwise binary operation!"
+        )
+
     a, b = _maybe_broadcast(a, b)
 
     if alpha is not None:
@@ -715,7 +840,7 @@ true_divide = _make_elementwise_binary_reference(
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def where(
     pred: Tensor,
@@ -737,6 +862,7 @@ def where(
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
+
     return prims.clone(a, memory_format=memory_format)
 
 
@@ -815,7 +941,6 @@ def _reduction(
         result_dtype = dtype if dtype else a.dtype
         if result.dtype != result_dtype:
             result = prims.convert_element_type(result, result_dtype)
-
     return result
 
 
@@ -857,6 +982,14 @@ def amin(
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
+
+    if a.ndim > 64:
+        raise RuntimeError(
+            "Received a tensor with {0} dimensions, but only tensors with up to 64 dims are supported!".format(
+                a.ndim
+            )
+        )
+
     return _reduction(
         a,
         prims.amin,
@@ -879,6 +1012,14 @@ def amax(
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
+
+    if a.ndim > 64:
+        raise RuntimeError(
+            "Received a tensor with {0} dimensions, only tensors with up to 64 dims are supported!".format(
+                a.ndim
+            )
+        )
+
     return _reduction(
         a,
         prims.amax,
@@ -900,7 +1041,7 @@ def as_strided(
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     _dim = utils.canonicalize_dims(tensors[0].ndim, dim)
@@ -1056,7 +1197,10 @@ def _reshape_view_helper(
         # Handles tail unsqueezes
         if idx >= a_.ndim:
             assert length == 1
-            a_ = unsqueeze(a_, -1)
+            last_dim = a_.ndim - 1
+            # NOTE: using split_dim instead of unsqueeze may seem silly here,
+            # but it's necessary to get the strides correct
+            a_ = prims.split_dim(a_, last_dim, a_.shape[last_dim])
             idx = idx + 1
             continue
 
@@ -1236,3 +1380,72 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 
 def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=False)
+
+
+@out_wrapper
+def empty(
+    *shape,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    dtype = torch.get_default_dtype() if dtype is None else dtype
+    device = torch.device("cpu") if device is None else device
+    if len(shape) > 0 and isinstance(shape[0], tuple):
+        return prims.empty(
+            *shape, dtype=dtype, device=device, requires_grad=requires_grad
+        )
+    return prims.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+
+
+def empty_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    dtype = a.dtype if dtype is None else dtype
+    device = a.device if device is None else device
+    return prims.empty_like(a, dtype=dtype, device=device, requires_grad=requires_grad)
+
+
+@out_wrapper
+def full(
+    shape: ShapeType,
+    fill_value: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> TensorLikeType:
+    dtype = torch.get_default_dtype() if dtype is None else dtype
+    device = torch.device("cpu") if device is None else device
+    return prims.full(
+        shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
+    )
+
+
+def full_like(
+    a: TensorLikeType,
+    fill_value: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    dtype = a.dtype if dtype is None else dtype
+    device = a.device if device is None else device
+    return prims.full_like(
+        a, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
+    )
+
+
+def ones_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    return full_like(a, 1, dtype=dtype, device=device, requires_grad=requires_grad)
