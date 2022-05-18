@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <ATen/SparseTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -105,21 +106,34 @@ Tensor _to_copy(
                   (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
-    if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
-      Tensor r;
-      if (self.is_quantized()) {
-        r = at::empty_quantized(self.sizes(), self, options);
-        at::QuantizerPtr quantizer = r.quantizer();
-        r.copy_(self, non_blocking);
-        set_quantizer_(r, quantizer);
+    if (options.device().supports_as_strided()) {
+      if (self.is_non_overlapping_and_dense()) {
+        Tensor r;
+        if (self.is_quantized()) {
+          r = at::empty_quantized(self.sizes(), self, options);
+          at::QuantizerPtr quantizer = r.quantizer();
+          r.copy_(self, non_blocking);
+          set_quantizer_(r, quantizer);
+        } else {
+          r = at::empty_strided(
+              self.sizes(),
+              self.strides(),
+              options.pinned_memory(pin_out));
+          r.copy_(self, non_blocking);
+        }
+        return r;
+      } else if (!self.is_quantized() && self.layout() == kStrided) {
+          Tensor r;
+          auto strides = infer_dense_strides(self.sizes(), self.strides());
+          r = at::empty_strided(
+              self.sizes(),
+              strides,
+              options.pinned_memory(pin_out));
+          r.copy_(self, non_blocking);
+          return r;
       } else {
-        r = at::empty_strided(
-            self.sizes(),
-            self.strides(),
-            options.pinned_memory(pin_out));
-        r.copy_(self, non_blocking);
+        memory_format = self.suggest_memory_format();
       }
-      return r;
     } else {
       memory_format = self.suggest_memory_format();
     }
@@ -312,7 +326,7 @@ Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
   if (tensor.layout() == c10::kSparse) {
     return tensor._to_dense(dtype);
   }
-  if (tensor.layout() == c10::kSparseCsr) {
+  if (tensor.layout() == c10::kSparseCsr || tensor.layout() == c10::kSparseCsc) {
     return tensor._to_dense(dtype);
   }
   if (tensor.layout() == c10::kMkldnn) {
@@ -334,13 +348,16 @@ Tensor sparse_to_dense(
   return dst.add_(self);
 }
 
-Tensor sparse_csr_to_dense(
+Tensor sparse_compressed_to_dense(
     const Tensor& self,
     c10::optional<ScalarType> dtype) {
   TORCH_CHECK(
       !dtype.has_value(), "dtype argument is not supported by sparse_csr_to_dense");
-  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
-  return dst.add_(self);
+  if (self.layout() == kSparseCsr) {
+    Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
+    return dst.add_(self);
+  }
+  return self.to_sparse().to_dense();
 }
 
 // Computes the strides for view_dtype output when the view dtype is
@@ -469,9 +486,7 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
 }
 
 Tensor dense_to_sparse_csc(const Tensor& self) {
-  AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
-  return self;
+  return self.to_sparse().to_sparse_csc();
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
@@ -487,24 +502,68 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
 }
 
 Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
-  // Just returning self doesn't work
-  // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
-  // "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152, please
-  // report a bug to PyTorch. aten::to_sparse_csr
-  return at::native::_sparse_csr_tensor_unsafe(
-      self.crow_indices(),
-      self.col_indices(),
-      self.values(),
-      self.sizes(),
-      self.scalar_type(),
-      c10::kSparseCsr,
-      self.device());
+  if (self.layout() == kSparseCsc) {
+    TORCH_CHECK(
+        self.dim() == 2,
+        "Expected self to be of dimension 2, but got ",
+        self.dim(),
+        ".");
+    auto sizes = self.sizes();
+    auto ccol_indices = self.ccol_indices();
+    auto row_indices = self.row_indices();
+    auto values = self.values();
+
+    // convert CSC indices to COO indices and swap its rows
+    const bool out_int32 = ccol_indices.scalar_type() == ScalarType::Int;
+    Tensor indices_transposed = _convert_indices_from_csr_to_coo(
+        ccol_indices, row_indices, out_int32, true);
+
+    // sort transposed indices
+    auto indices_scalar =
+        at::sparse::flatten_indices(indices_transposed, {sizes[0], sizes[1]});
+    auto indicesPermutation = std::get<1>(indices_scalar.sort(0));
+    auto indices_transposed_sorted =
+        indices_transposed.index_select(1, indicesPermutation);
+
+    // construct a CSR tensor
+    auto new_row_indices = indices_transposed_sorted.select(0, 0);
+    auto new_col_indices = indices_transposed_sorted.select(0, 1);
+    auto new_values = values.index_select(0, indicesPermutation);
+    Tensor new_crow_indices =
+        _convert_indices_from_coo_to_csr(new_row_indices, sizes[0], out_int32);
+
+    return _sparse_csr_tensor_unsafe(
+        new_crow_indices,
+        new_col_indices,
+        new_values,
+        {sizes[0], sizes[1]},
+        new_values.scalar_type(),
+        c10::kSparseCsr,
+        new_values.device());
+  }
+  if (self.layout() == kSparseCsr) {
+    // Just returning self doesn't work
+    // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
+    // "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152,
+    // please report a bug to PyTorch. aten::to_sparse_csr
+    return at::native::_sparse_csr_tensor_unsafe(
+        self.crow_indices(),
+        self.col_indices(),
+        self.values(),
+        self.sizes(),
+        self.scalar_type(),
+        c10::kSparseCsr,
+        self.device());
+  }
+  AT_ERROR(
+      "sparse_compressed_to_sparse_csr expected SparseCsr or SparseCsc layout but got ",
+      self.layout());
 }
 
 Tensor coo_to_sparse_csr(const Tensor& self) {
   TORCH_CHECK(
       self.dim() == 2,
-      "Only 2D tensors can be converted to the CSR format but got shape: ",
+      "Only 2D tensors can be converted to the SparseCsr layout but got shape: ",
       self.sizes());
   auto coalesced_self = self.coalesce();
   auto row_indices = coalesced_self.indices()[0];
@@ -522,9 +581,19 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
 }
 
 Tensor coo_to_sparse_csc(const Tensor& self) {
-  AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
-  return self;
+  TORCH_CHECK(
+      self.dim() == 2,
+      "Only 2D tensors can be converted to the SparseCsc layout but got shape: ",
+      self.sizes());
+  auto coalesced_self = self.transpose(0, 1).coalesce().to_sparse_csr();
+  return at::native::_sparse_csc_tensor_unsafe(
+      coalesced_self.crow_indices(),
+      coalesced_self.col_indices(),
+      coalesced_self.values(),
+      self.sizes(),
+      coalesced_self.scalar_type(),
+      c10::kSparseCsc,
+      coalesced_self.device());
 }
 
 Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
@@ -861,9 +930,50 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
 }
 
 Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
+  if (self.layout() == kSparseCsc) {
+    // Based on to_sparse_csr just returning self doesn't work
+    return _sparse_csc_tensor_unsafe(
+        self.ccol_indices(),
+        self.row_indices(),
+        self.values(),
+        self.sizes(),
+        self.scalar_type(),
+        c10::kSparseCsc,
+        self.device());
+  }
   AT_ERROR(
       "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
-  return self;
+}
+
+Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
+  TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
+  TORCH_CHECK(sparse_dim <= 2,
+              "sparse_dim must be less than or equal to 2");
+  // TODO: implement coo.to_sparse(sparse_dim) and then use
+  // return self.to_sparse().to_sparse(sparse_dim);
+  TORCH_CHECK(
+      sparse_dim == 2, "sparse dim 1 is not supported by sparse_csr_to_dense");
+  if (self.layout() == kSparseCsc) {
+    Tensor indices = at::_convert_indices_from_csr_to_coo(
+        self.ccol_indices(), self.row_indices(), false, true);
+    return at::native::_sparse_coo_tensor_unsafe(
+               indices, self.values(), self.sizes())
+        ._coalesced_(true);
+  }
+  if (self.layout() == kSparseCsr) {
+    Tensor indices = at::_convert_indices_from_csr_to_coo(
+        self.crow_indices(), self.col_indices(), false, false);
+    return at::native::_sparse_coo_tensor_unsafe(
+               indices, self.values(), self.sizes())
+        ._coalesced_(true);
+  }
+  AT_ERROR(
+      "sparse_compressed_to_sparse expected SparseCsr or SparseCsc layout but got ",
+      self.layout());
+}
+
+Tensor sparse_compressed_to_sparse(const Tensor& self) {
+  return sparse_compressed_to_sparse(self, 2);
 }
 
 // Sparse layout conversions End
