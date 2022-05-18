@@ -115,6 +115,7 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.slowest_ptr = 0
         self.leading_ptr = 0
         self.end_ptr: Optional[int] = None
+        self._restored = False
 
     def __len__(self):
         return len(self.main_datapipe)
@@ -151,13 +152,16 @@ class _ForkerIterDataPipe(IterDataPipe):
     def is_every_instance_exhausted(self) -> bool:
         return all(self.end_ptr == ptr for ptr in self.child_pointers)
 
-    def reset(self):
-        self._datapipe_iterator = iter(self.main_datapipe)
-        self.buffer = deque()
-        self.child_pointers = [0] * self.num_instances
-        self.slowest_ptr = 0
-        self.leading_ptr = 0
-        self.end_ptr = None
+    def reset(self) -> None:
+        if self._restored:
+            self._restored = False
+        else:
+            self._datapipe_iterator = iter(self.main_datapipe)
+            self.buffer = deque()
+            self.child_pointers = [0] * self.num_instances
+            self.slowest_ptr = 0
+            self.leading_ptr = 0
+            self.end_ptr = None
 
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
@@ -182,6 +186,7 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.slowest_ptr = 0
         self.leading_ptr = 0
         self.end_ptr = None
+        self._restored = True
 
     def __del__(self):
         self.buffer.clear()
@@ -333,6 +338,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.classifier_fn = classifier_fn
         self.drop_none = drop_none
         self.main_datapipe_exhausted = False
+        self._restored = False
 
     def _find_next(self, instance_id: int) -> T_co:
         while True:
@@ -376,11 +382,14 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
     def is_every_instance_exhausted(self) -> bool:
         return self.main_datapipe_exhausted and all(not child_buffer for child_buffer in self.child_buffers)
 
-    def reset(self):
-        self._datapipe_iterator = None
-        self.current_buffer_usage = 0
-        self.child_buffers = [deque() for _ in range(self.num_instances)]
-        self.main_datapipe_exhausted = False
+    def reset(self) -> None:
+        if self._restored:
+            self._restored = False
+        else:
+            self._datapipe_iterator = None
+            self.current_buffer_usage = 0
+            self.child_buffers = [deque() for _ in range(self.num_instances)]
+            self.main_datapipe_exhausted = False
 
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
@@ -407,6 +416,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
         self.main_datapipe_exhausted = False
+        self._restored = True
 
     def __del__(self):
         for dq in self.child_buffers:
