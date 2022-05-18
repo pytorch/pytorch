@@ -374,6 +374,8 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
+const char elliptic_integral_e_name[] = "elliptic_integral_e";
+
 void elliptic_integral_e_kernel_cuda(TensorIteratorBase& iterator) {
 #ifdef USE_JITERATOR
     AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "elliptic_integral_e_cuda", [&]() {
@@ -387,6 +389,8 @@ void elliptic_integral_e_kernel_cuda(TensorIteratorBase& iterator) {
     });
 #endif
 } // elliptic_integral_e_kernel_cuda
+
+const char elliptic_integral_k_name[] = "elliptic_integral_k";
 
 void elliptic_integral_k_kernel_cuda(TensorIteratorBase& iterator) {
 #ifdef USE_JITERATOR
