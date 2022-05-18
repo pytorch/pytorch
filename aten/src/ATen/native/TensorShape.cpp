@@ -2399,6 +2399,13 @@ Tensor transpose(const Tensor& self, Dimname dim0, Dimname dim1) {
 
 
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
+  TORCH_CHECK(
+      !(self.layout() == kSparseCsr || self.layout() == kSparseCsc ||
+        self.layout() == kSparseBsr || self.layout() == kSparseBsc),
+      "torch.transpose_: in-place transposition is not supported for ",
+      self.layout(),
+      " layout");
+
   auto ndims = self.dim();
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
@@ -2415,13 +2422,6 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   if (self.is_sparse()) {
     return sparse_transpose_(self, dim0, dim1);
   }
-
-  TORCH_CHECK(
-      !(self.layout() == kSparseCsr || self.layout() == kSparseCsc ||
-        self.layout() == kSparseBsr || self.layout() == kSparseBsc),
-      "torch.transpose_: in-place transposition is not supported for ",
-      self.layout(),
-      " layout");
 
   if (self.is_mkldnn()) {
     return at::_mkldnn_transpose_(self, dim0, dim1);
@@ -2450,7 +2450,7 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(!(self.layout() == kSparseBsr || self.layout() == kSparseBsc),
       "Transposition of tensors with ", self.layout(), " layout is currently not supported.");
 
-  // Transpose of a strided tensor is a view operation.
+  // Transpose of a tensor is a view operation.
   if (dim0 == dim1) {
     return self;
   }
