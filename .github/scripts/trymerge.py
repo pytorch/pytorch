@@ -683,6 +683,7 @@ class GitHubPR:
         find_matching_merge_rule(self, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
+        repo._run_git("pull", "origin", self.default_branch())
         if not self.is_ghstack_pr():
             # Adding the url here makes it clickable within the Github UI
             approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
