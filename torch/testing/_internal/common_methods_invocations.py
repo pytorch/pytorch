@@ -13960,6 +13960,9 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         gradcheck_fast_mode=False,
+        supports_autograd=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=False,
         decorators=(
             # RuntimeError: expected int at position 0, but got: Tensor
             DecorateInfo(

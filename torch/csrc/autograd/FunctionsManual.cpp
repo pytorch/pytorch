@@ -1618,6 +1618,19 @@ Tensor binary_cross_entropy_double_backward_target(
   return res;
 }
 
+Tensor binary_cross_entropy_jvp(
+    const Tensor& dself,
+    const Tensor& dtarget,
+    const Tensor& self,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight,
+    int64_t reduction
+) {
+  const auto self_contrib = at::binary_cross_entropy_backward(dself, self, target, weight, at::Reduction::None);
+  const auto target_contrib = binary_cross_entropy_target_backward(dtarget, self, target, weight, at::Reduction::None);
+  const auto dresult = self_contrib + target_contrib;
+  return apply_loss_reduction(dresult, reduction);
+}
 
 Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const c10::optional<Tensor>& weight, const c10::optional<Tensor>& pos_weight, int64_t reduction) {
   Tensor grad_target;

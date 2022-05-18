@@ -157,6 +157,14 @@ Tensor binary_cross_entropy_double_backward_target(
   const c10::optional<Tensor>& weight,
   int64_t reduction
 );
+Tensor binary_cross_entropy_jvp(
+    const Tensor& dself,
+    const Tensor& dtarget,
+    const Tensor& self,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight,
+    int64_t reduction
+);
 at::Tensor binary_cross_entropy_with_logits_target_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& pos_weight, int64_t reduction);
 at::Tensor binary_cross_entropy_with_logits_jvp(const Tensor& input_t, const Tensor& target_t, const Tensor& input_p, const Tensor& target_p, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction);
 at::Tensor log_sigmoid_double_backward(const at::Tensor & grad, const at::Tensor & input);
