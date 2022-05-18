@@ -3852,10 +3852,10 @@ def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Ten
         local_norm = torch.tensor(max(par.grad.detach().abs().max() for par in parameters))
     else:
         # Compute the norm in full precision no matter what
-        local_norm = torch.linalg.norm(
+        local_norm = torch.linalg.vector_norm(
             torch.stack(
                 [
-                    torch.linalg.norm(par.grad.detach(), p, dtype=torch.float32)
+                    torch.linalg.vector_norm(par.grad.detach(), p, dtype=torch.float32)
                     for par in parameters
                 ]
             ),
