@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -92,10 +93,12 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::TernaryOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
        expr->getExprType().value() == ExprType::WelfordOp ||
+       expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
        expr->getExprType().value() == ExprType::GatherOp ||
+       expr->getExprType().value() == ExprType::ViewDtypeOp ||
        expr->getExprType().value() == ExprType::ViewOp ||
        expr->getExprType().value() == ExprType::GridReduction ||
        expr->getExprType().value() == ExprType::GridBroadcast ||
@@ -334,48 +337,21 @@ BasicAllocInfo getAllocInformation(
 
 namespace {
 
-class ReplaceExprInput : public OptOutDispatch {
+class ReplaceExprInput : private kir::ExprMutator {
  public:
-  using OptOutDispatch::handle;
-  static Expr* replace(
-      Expr* expr,
-      const std::unordered_map<Val*, Val*>& replacement_map) {
-    ReplaceExprInput replacer(expr, replacement_map);
-    TORCH_INTERNAL_ASSERT(expr != nullptr);
-    replacer.handle(expr);
-    TORCH_INTERNAL_ASSERT(replacer.replaced_expr_ != nullptr);
-    auto ret_expr = replacer.replaced_expr_;
-
-    // Copy predicates if the original expr is predicated
-    if (ret_expr != expr) {
-      ret_expr->setPredicate(expr->predicate());
-      ret_expr->setWritePredicate(expr->writePredicate());
-    }
-    return ret_expr;
-  }
-
   static std::vector<Expr*> replace(
-      const std::vector<Expr*>& scope,
+      const std::vector<Expr*>& exprs,
       const std::unordered_map<Val*, Val*>& replacement_map) {
-    std::vector<Expr*> ret_expr;
-    ret_expr.reserve(scope.size());
-
-    for (auto expr : scope) {
-      ret_expr.push_back(replace(expr, replacement_map));
-    }
-
-    return ret_expr;
+    ReplaceExprInput replacer(replacement_map);
+    replacer.traverseAndInsert(exprs);
+    return replacer.exprs_;
   }
 
  private:
-  // TODO: Replace this with mutator, example of this is done in replace
-  // symbolic sizes
-  ReplaceExprInput(
-      Expr* expr,
-      const std::unordered_map<Val*, Val*>& replacement_map)
-      : replacement_map_(replacement_map) {
-    replaced_expr_ = expr;
-  }
+  ReplaceExprInput(const std::unordered_map<Val*, Val*>& replacement_map)
+      : replacement_map_(replacement_map) {}
+
+  using kir::ExprMutator::handle;
 
   c10::optional<std::unordered_map<Val*, Val*>> getMaybeInputReplacementMap(
       Expr* expr) {
@@ -398,93 +374,77 @@ class ReplaceExprInput : public OptOutDispatch {
     }
   }
 
-  // IR visitor interface
-  void handle(kir::ForLoop* for_loop) final {
-    auto new_for_loop = IrBuilder::create<kir::ForLoop>(for_loop);
-
-    auto replaced_loop_body =
-        replace(for_loop->body().exprs(), replacement_map_);
-
-    for (auto new_expr : replaced_loop_body) {
-      new_for_loop->body().push_back(new_expr);
-    }
-    replaced_expr_ = new_for_loop;
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    auto new_ite = IrBuilder::create<kir::IfThenElse>(ite->predicate());
-    auto replaced_then_body =
-        replace(ite->thenBody().exprs(), replacement_map_);
-    for (auto new_expr : replaced_then_body) {
-      new_ite->thenBody().push_back(new_expr);
-    }
-    if (ite->hasElse()) {
-      auto replaced_else_body =
-          replace(ite->elseBody().exprs(), replacement_map_);
-      for (auto new_expr : replaced_else_body) {
-        new_ite->elseBody().push_back(new_expr);
-      }
-    }
-    replaced_expr_ = new_ite;
+  // Copy predicates and register expression replacement
+  void registerReplaceWithPredicate(Expr* old_expr, Expr* new_expr) {
+    new_expr->setPredicate(old_expr->predicate());
+    new_expr->setWritePredicate(old_expr->writePredicate());
+    registerReplace(old_expr, new_expr);
   }
 
   void handle(UnaryOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = IrBuilder::create<UnaryOp>(
+      auto replacement = IrBuilder::create<UnaryOp>(
           node->getUnaryOpType(),
           node->out(),
           replaced_inputs.value().at(node->in()));
+      registerReplaceWithPredicate(node, replacement);
     }
   }
+
   void handle(BinaryOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = IrBuilder::create<BinaryOp>(
+      auto replacement = IrBuilder::create<BinaryOp>(
           node->getBinaryOpType(),
           node->out(),
           replaced_inputs.value().at(node->lhs()),
           replaced_inputs.value().at(node->rhs()));
+      registerReplaceWithPredicate(node, replacement);
     }
   }
 
   void handle(TernaryOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = IrBuilder::create<TernaryOp>(
+      auto replacement = IrBuilder::create<TernaryOp>(
           node->getTernaryOpType(),
           node->out(),
           replaced_inputs.value().at(node->in1()),
           replaced_inputs.value().at(node->in2()),
           replaced_inputs.value().at(node->in3()));
+      registerReplaceWithPredicate(node, replacement);
     }
   }
 
   void handle(ReductionOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = IrBuilder::create<ReductionOp>(
+      auto replacement = IrBuilder::create<ReductionOp>(
           node->getReductionOpType(),
           node->init(),
           node->out(),
-          replaced_inputs.value().at(node->in()));
+          replaced_inputs.value().at(node->in()),
+          node->isFused());
+      registerReplaceWithPredicate(node, replacement);
     }
   }
 
   void handle(BroadcastOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = IrBuilder::create<BroadcastOp>(
+      auto replacement = IrBuilder::create<BroadcastOp>(
           node->out(),
           replaced_inputs.value().at(node->in()),
           node->getBroadcastDimFlags());
+      registerReplaceWithPredicate(node, replacement);
     }
   }
 
   void handle(WelfordOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
-      replaced_expr_ = IrBuilder::create<WelfordOp>(
+      auto replacement = IrBuilder::create<WelfordOp>(
           node->outAvg(),
           node->outVar(),
           node->outN(),
@@ -494,11 +454,24 @@ class ReplaceExprInput : public OptOutDispatch {
           replaced_inputs.value().at(node->inAvg()),
           replaced_inputs.value().at(node->inVar()),
           replaced_inputs.value().at(node->inN()));
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(MmaOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<MmaOp>(
+          node->out(),
+          replaced_inputs.value().at(node->inA()),
+          replaced_inputs.value().at(node->inB()),
+          node->init(),
+          node->options());
+      registerReplaceWithPredicate(node, replacement);
     }
   }
 
  private:
-  Expr* replaced_expr_ = nullptr;
   const std::unordered_map<Val*, Val*>& replacement_map_;
 };
 
@@ -508,6 +481,15 @@ std::vector<Expr*> replaceInputsInExpr(
     const std::vector<Expr*>& exprs,
     const std::unordered_map<Val*, Val*>& replacement_map) {
   return ReplaceExprInput::replace(exprs, replacement_map);
+}
+
+bool isTrivialIterDomain(IterDomain* id) {
+  auto pt = id->getParallelType();
+  return id->isReduction() || id->isBroadcast() || id->isStride() ||
+      (id->extent()->isOneInt() && id->start()->isZeroInt()) ||
+      pt == ParallelType::Vectorize ||
+      (isParallelTypeThread(pt) &&
+       !GpuLower::current()->haloInfo().hasHaloWidth(id));
 }
 
 } // namespace cuda

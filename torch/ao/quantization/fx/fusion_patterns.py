@@ -1,10 +1,7 @@
 import torch
 from torch.fx.graph import Node, Graph
-from .pattern_utils import (
-    register_fusion_pattern,
-)
 from ..utils import _parent_name
-from .quantization_types import NodePattern, Pattern
+from torch.ao.quantization.quantization_types import NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union, List
@@ -34,31 +31,7 @@ class FuseHandler(ABC):
              is_qat: bool) -> Node:
         pass
 
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv2d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv3d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv1d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Linear))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Linear))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm2d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm2d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm3d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm3d))
-@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.Conv1d))
-@register_fusion_pattern((torch.nn.BatchNorm2d, torch.nn.Conv2d))
-@register_fusion_pattern((torch.nn.BatchNorm3d, torch.nn.Conv3d))
-@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.Linear))
-@register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
-@register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
-@register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
-@register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
-@register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
-@register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
-@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.ConvTranspose1d))
-@register_fusion_pattern((torch.nn.BatchNorm2d, torch.nn.ConvTranspose2d))
-@register_fusion_pattern((torch.nn.BatchNorm3d, torch.nn.ConvTranspose3d))
+# TODO: move this to backend_config.fuse_handler
 class DefaultFuseHandler(FuseHandler):
     def __init__(
             self,
@@ -75,11 +48,9 @@ class DefaultFuseHandler(FuseHandler):
              fuse_custom_config_dict: Dict[str, Any],
              fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
              is_qat: bool) -> Node:
-        additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
         root_module = named_modules[str(root_node.target)]
-        assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
-        "undergoing changes, additoinal_fuser_method_mapping is not supported currently."
+
         def get_modules(pattern):
             """ Given a node pattern, extract the corresponding modules
             e.g. input: (relu_node, (bn_node, conv_node))

@@ -49,12 +49,10 @@ float runPureRecordFunctionBench(int iter) {
   typedef std::chrono::microseconds us;
   std::chrono::time_point<clock> start_time = clock::now();
   for (auto idx = 0; idx < iter; ++idx) {
-    bool pre_sampled = false;
-    if (at::shouldRunRecordFunction(&pre_sampled)) {
-      at::RecordFunction guard(at::RecordScope::USER_SCOPE, pre_sampled);
-      if (C10_UNLIKELY(guard.isActive())) {
-        guard.before("Test", -1);
-      }
+    auto step_callbacks = at::getStepCallbacks(at::RecordScope::USER_SCOPE);
+    if (!step_callbacks.empty()) {
+      at::RecordFunction guard(std::move(step_callbacks));
+      guard.before("Test", -1);
     }
   }
   auto duration = static_cast<float>(

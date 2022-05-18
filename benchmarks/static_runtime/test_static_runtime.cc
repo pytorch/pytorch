@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
+#include <torch/csrc/jit/testing/file_check.h>
 #include <stdexcept>
 
 #include "deep_wide_pt.h"
@@ -170,6 +172,44 @@ TEST(StaticRuntime, Clamp) {
 
   testStaticRuntime(clamp_script_1, {a, -1, 1}, {b, -1, 1});
   testStaticRuntime(clamp_script_2, {a, min_t, max_t}, {b, max_t1, min_t1});
+}
+
+TEST(StaticRuntime, ClampMinOnly) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, min: float):
+        a = torch.clamp(inp, min, None).clone()
+        return (a)
+  )JIT";
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+  testStaticRuntime(src, {a, 0.5});
+  testStaticRuntime(src, {a, 0.5}, {b, 0.25});
+}
+
+TEST(StaticRuntime, ClampMaxOnly) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, max: float):
+        a = torch.clamp(inp, None, max).clone()
+        return (a)
+  )JIT";
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+  testStaticRuntime(src, {a, 0.5});
+  testStaticRuntime(src, {a, 0.5}, {b, 0.25});
+}
+
+TEST(StaticRuntime, ClampIntTensor) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, min: float, max: float):
+        a = torch.clamp(inp, min, max).clone()
+        return (a)
+  )JIT";
+  auto a = at::randint(0, 20, {2, 3});
+  auto b = at::randint(0, 20, {4, 3, 2});
+  auto min = 5.0f;
+  auto max = 5.0f;
+  testStaticRuntime(src, {a, min, max});
+  testStaticRuntime(src, {a, min, max}, {b, min, max});
 }
 
 TEST(StaticRuntime, LenWithTuple) {
@@ -395,6 +435,99 @@ TEST(StaticRuntime, EmbeddingBagWithManagedOutput) {
   testStaticRuntime(embedding_bag_managed_output, args, args2);
 }
 
+TEST(StaticRuntime, EmbeddingBagWithExtraneousOutput) {
+  const std::string embedding_bag_default_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=0]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  auto graph = getGraphFromIR(embedding_bag_default_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_mean_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=1]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_mean_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_max_last_offset_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=2]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=1]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_max_last_offset_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_normal_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=0]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res0 : Tensor = aten::clone(%y0, %none)
+        %res1 : Tensor = aten::clone(%y1, %none)
+        %res2 : Tensor = aten::clone(%y2, %none)
+        %res3 : Tensor = aten::clone(%y3, %none)
+        return (%res0, %res1, %res2, %res3)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_normal_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check_not("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  at::Tensor weight = torch::randn({3, 11}, at::ScalarType::Float);
+  at::Tensor input = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset = torch::tensor({0, 2, 4});
+  std::vector<IValue> args{weight, input, offset};
+  testStaticRuntime(embedding_bag_default_ir, args);
+  testStaticRuntime(embedding_bag_mean_ir, args);
+  testStaticRuntime(embedding_bag_max_last_offset_ir, args);
+
+  at::Tensor weight2 = torch::randn({10, 11}, at::ScalarType::Float);
+  at::Tensor input2 = torch::tensor({0, 1, 0, 2, 1});
+  at::Tensor offset2 = torch::tensor({0, 1, 2, 3, 4, 5});
+  std::vector<IValue> args2{weight2, input2, offset2};
+  testStaticRuntime(embedding_bag_default_ir, args, args2);
+  testStaticRuntime(embedding_bag_mean_ir, args, args2);
+  testStaticRuntime(embedding_bag_max_last_offset_ir, args, args2);
+}
+
 TEST(StaticRuntime, LayerNorm) {
   const std::string layer_norm_with_weights = R"JIT(
     def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):
@@ -406,13 +539,6 @@ TEST(StaticRuntime, LayerNorm) {
         return torch.layer_norm(input, normalized_shape, None, None, 1e-05, False).clone()
   )JIT";
 
-#ifdef FBCODE_CAFFE2
-  script::Module module("module");
-  module.define(layer_norm_with_weights);
-  torch::jit::StaticModule smodule(module);
-  ASSERT_EQ(getNodeWithKind(smodule, "aten::layer_norm"), nullptr);
-  ASSERT_NE(getNodeWithKind(smodule, "static_runtime::layer_norm"), nullptr);
-#endif
   const auto a = torch::rand({1, 2, 2, 2});
   const auto b = torch::rand({3, 2, 2, 2});
   for (int normalized_size : {2, 3}) {
@@ -1272,13 +1398,23 @@ TEST(StaticRuntime, Full) {
         return (a.clone())
   )JIT";
 
-  auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
   c10::List<int64_t> size0{2, 5};
-  std::vector<IValue> args{size0, 4, dtype, at::kStrided, cpu, false};
+  std::vector<IValue> args{
+      size0, 4, at::ScalarType::Int, at::kStrided, cpu, false};
+  std::vector<IValue> args1{
+      size0, 4, at::ScalarType::Float, at::kStrided, cpu, false};
   c10::List<int64_t> size1{5, 6};
-  std::vector<IValue> args2{size1, 5, dtype, at::kStrided, cpu, false};
+  std::vector<IValue> args2{
+      size1, 5, at::ScalarType::Float, at::kStrided, cpu, false};
   testStaticRuntime(full_script, args);
+  testStaticRuntime(
+      full_script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
   testStaticRuntime(full_script, args, args2);
 }
 
@@ -1304,13 +1440,39 @@ TEST(StaticRuntime, FullLike) {
 
   auto a = at::randn({2, 3});
   auto b = at::randn({3, 4, 2});
-  auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
   std::vector<IValue> args{
-      a, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
+      a,
+      4,
+      at::ScalarType::Int,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
+  std::vector<IValue> args1{
+      a,
+      4,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
   std::vector<IValue> args2{
-      b, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
+      b,
+      4,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
   testStaticRuntime(full_like_script, args);
+  testStaticRuntime(
+      full_like_script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
   testStaticRuntime(full_like_script, args, args2);
 }
 
@@ -1337,6 +1499,95 @@ TEST(StaticRuntime, Ones) {
   c10::List<int64_t> size1{5, 6};
   std::vector<IValue> args2{size1, dtype, at::kStrided, cpu, false};
   testStaticRuntime(script, args);
+  testStaticRuntime(script, args, args2);
+}
+
+TEST(StaticRuntime, OnesLike) {
+  const auto script = R"JIT(
+    def forward(self,
+                input: Tensor,
+                dtype: Optional[int],
+                layout: Optional[int],
+                device: Optional[Device],
+                pin_memory: Optional[bool],
+                memory_format: Optional[int]):
+        a = torch.ones_like(input,
+                            dtype=dtype,
+                            layout=layout,
+                            device=device,
+                            pin_memory=pin_memory,
+                            memory_format=memory_format)
+        return (a.clone())
+  )JIT";
+
+  auto cpu = at::Device(DeviceType::CPU);
+  auto input0 = at::randn({2, 5});
+  std::vector<IValue> args{
+      input0,
+      at::ScalarType::Int,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
+  std::vector<IValue> args1{
+      input0,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
+  auto input1 = at::randn({5, 6});
+  std::vector<IValue> args2{
+      input1,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
+  testStaticRuntime(script, args);
+  testStaticRuntime(
+      script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
+  testStaticRuntime(script, args, args2);
+}
+
+TEST(StaticRuntime, Zeros) {
+  const auto script = R"JIT(
+    def forward(self,
+                size: List[int],
+                dtype: Optional[int],
+                layout: Optional[int],
+                device: Optional[Device],
+                pin_memory: Optional[bool]):
+        a = torch.zeros(size,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       pin_memory=pin_memory)
+        return (a.clone())
+  )JIT";
+
+  auto cpu = at::Device(DeviceType::CPU);
+  c10::List<int64_t> size0{2, 5};
+  std::vector<IValue> args{
+      size0, at::ScalarType::Int, at::kStrided, cpu, false};
+  std::vector<IValue> args1{
+      size0, at::ScalarType::Float, at::kStrided, cpu, false};
+  c10::List<int64_t> size1{5, 6};
+  std::vector<IValue> args2{
+      size1, at::ScalarType::Float, at::kStrided, cpu, false};
+  testStaticRuntime(script, args);
+  testStaticRuntime(
+      script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
   testStaticRuntime(script, args, args2);
 }
 
@@ -1568,6 +1819,28 @@ TEST(StaticRuntime, Index) {
   std::vector<IValue> args_d{d, idx_d1, idx_d2};
 
   testStaticRuntime(index_with_two_tensors_script, args_c, args_d);
+}
+
+TEST(StaticRuntime, IndexSelect) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %dim: int, %index: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::index_select(%self, %dim, %index)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6});
+  auto dim0 = 0;
+  auto index0 = at::randint(0, 5, {6}, torch::kInt32);
+  std::vector<IValue> args{self0, dim0, index0};
+  testStaticRuntime(script, args);
+
+  auto self1 = at::rand({128});
+  auto dim1 = 0;
+  auto index1 = at::randint(0, 127, {127}, torch::kInt32);
+  std::vector<IValue> args2{self1, dim1, index1};
+  testStaticRuntime(script, args, args2);
 }
 
 TEST(StaticRuntime, ClampMin) {
@@ -1898,7 +2171,7 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
         %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
         %output = quantized::linear_dynamic_fp16(%input, %packed_params)
         %ret = aten::clone(%output, %bias)
-        return (%output)
+        return (%ret)
   )IR";
   at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
   at::Tensor input = torch::randn({3, 2}, torch::kFloat);
@@ -1908,6 +2181,27 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
 
   testStaticRuntime(
       quantized_linear_dynamic_fp16_script,
+      {input, weight},
+      {input_2, weight_2});
+}
+
+TEST(StaticRuntime, QuantizedLinearReluDynamicFp16) {
+  const std::string quantized_linear_relu_dynamic_fp16_script = R"IR(
+    graph(%input: Tensor, %weights: Tensor):
+        %bias: None = prim::Constant()
+        %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+        %output = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
+        %ret = aten::clone(%output, %bias)
+        return (%ret)
+  )IR";
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({5, 3}, torch::kFloat);
+
+  testStaticRuntime(
+      quantized_linear_relu_dynamic_fp16_script,
       {input, weight},
       {input_2, weight_2});
 }
@@ -2874,6 +3168,35 @@ TEST(StaticRuntime, IfThenElse) {
   testStaticRuntime(src, args2);
 }
 
+TEST(StaticRuntime, EmptyIfBlock) {
+  const auto src =
+      R"JIT(
+      def forward(self, cond: bool, a: Tensor, b: Tensor):
+          l = []
+          if cond:
+              l.append((a + b).clone())
+          return l
+  )JIT";
+
+  testStaticRuntime(src, {true, at::rand(1), at::rand({1, 2})});
+  testStaticRuntime(src, {false, at::rand(1), at::rand({1, 2})});
+}
+
+TEST(StaticRuntime, EmptyNestedIfBlock) {
+  const auto src =
+      R"JIT(
+      def forward(self, cond: bool, a: Tensor, b: Tensor):
+          l = []
+          if cond:
+              if cond:
+                  l.append((a + b).clone())
+          return l
+  )JIT";
+
+  testStaticRuntime(src, {true, at::rand(1), at::rand({1, 2})});
+  testStaticRuntime(src, {false, at::rand(1), at::rand({1, 2})});
+}
+
 TEST(StaticRuntime, StackEmpty) {
   const auto src = R"JIT(
     def forward(self):
@@ -2900,4 +3223,157 @@ TEST(StaticRuntime, ConcatEmpty) {
 
   torch::jit::StaticModule smod(mod);
   EXPECT_THROW(smod({}), c10::Error);
+}
+
+TEST(StaticRuntime, IntImplicit) {
+  const auto src = R"IR(
+    graph(%a: Tensor):
+        %y: int = aten::IntImplicit(%a)
+        return (%y)
+  )IR";
+  testStaticRuntime(src, {at::tensor({1}, at::kInt).squeeze()});
+}
+
+TEST(StaticRuntime, IntImplicit_ThrowOnBadInputs) {
+  const auto src = R"IR(
+    graph(%a: Tensor):
+        %y: int = aten::IntImplicit(%a)
+        return (%y)
+  )IR";
+  auto graph = getGraphFromIR(src);
+  torch::jit::StaticModule smod(graph);
+  // Not 0D tensor
+  EXPECT_THROW(smod({at::tensor({1, 2}, at::kInt)}), std::runtime_error);
+  // Wrong dtype
+  EXPECT_THROW(
+      smod({at::tensor({1}, at::kFloat).squeeze()}), std::runtime_error);
+}
+
+TEST(StaticRuntime, Select) {
+  const auto src = R"IR(
+    graph(%a: Tensor, %dim: int, %index: int):
+        %none: NoneType = prim::Constant()
+        %b: Tensor = aten::select(%a, %dim, %index)
+        %c: Tensor = aten::clone(%b, %none)
+        return (%c)
+  )IR";
+  testStaticRuntime(src, {at::randn({2, 2}), 0, 1});
+}
+
+TEST(StaticRuntime, ReshapeAs) {
+  const auto src = R"JIT(
+    def forward(self, a, b):
+        return a.reshape_as(b).clone()
+  )JIT";
+  testStaticRuntime(src, {at::randn({2, 2}), at::randn({4})});
+}
+
+TEST(StaticRuntime, MoveCtor) {
+  auto mod = getDeepAndWideSciptModel();
+  std::vector<IValue> args{
+      at::randn({1, 1, 32}), at::randn({1, 1, 32}), at::randn({1, 50})};
+
+  torch::jit::StaticModule smod(mod);
+
+  torch::jit::StaticRuntime runtime(smod);
+  auto expected = runtime(args);
+
+  torch::jit::StaticRuntime new_runtime(std::move(runtime));
+  auto actual = new_runtime(args);
+  compareResults(expected, actual);
+}
+
+TEST(StaticRuntime, SingleBlockIfReturnList) {
+  const auto src = R"JIT(
+    def forward(self, a, b, cond: bool):
+        lst = []
+        if cond:
+            lst.append(a + b)
+        return lst
+  )JIT";
+  std::vector<IValue> args1{at::randn({1}), at::randn({1}), true};
+  std::vector<IValue> args2{at::randn({42, 42}), at::randn({42, 42}), false};
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, NestedBlockIfReturnList) {
+  const auto src = R"JIT(
+    def forward(self, a, b, cond1: bool, cond2: bool):
+        if cond1:
+            lst = []
+            if cond2:
+                lst.append(a + b)
+            lst.append(a * b)
+            return lst
+        return []
+  )JIT";
+  std::vector<IValue> args1{at::randn({1}), at::randn({1}), true, true};
+  std::vector<IValue> args2{
+      at::randn({42, 42}), at::randn({42, 42}), true, false};
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, QuantizedLinearDynamicFp16ReluFusion) {
+  const auto src = R"IR(
+    graph(%input: Tensor, %weights: Tensor):
+        %bias: None = prim::Constant()
+        %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+        %x = quantized::linear_dynamic_fp16(%input, %packed_params)
+        %y = aten::relu(%x)
+        %ret = aten::clone(%y, %bias)
+        return (%ret)
+  )IR";
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({5, 3}, torch::kFloat);
+
+  testStaticRuntime(src, {input, weight}, {input_2, weight_2});
+
+  auto graph = getGraphFromIR(src);
+  QuantizedLinearReluFusion(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "quantized::linear_dynamic_fp16"));
+  EXPECT_TRUE(hasNodeWithKind(graph, "quantized::linear_relu_dynamic_fp16"));
+}
+
+TEST(StaticRuntime, ClampNaNToNum) {
+  const auto src1 = R"JIT(
+    def forward(self, a):
+        return torch.clamp(a, min=1.0, max=2.0).nan_to_num().clone()
+  )JIT";
+
+  const auto src2 = R"JIT(
+    def forward(self, a, nan: float):
+        return torch.clamp(a, min=-1.0, max=2.0).nan_to_num(nan=nan).clone()
+  )JIT";
+
+  const auto src3 = R"JIT(
+    def forward(self, a):
+        return torch.clamp(a, min=1.0, max=-1.0).nan_to_num().clone()
+  )JIT";
+
+  auto a = at::tensor({
+      std::numeric_limits<float>::quiet_NaN(),
+      std::numeric_limits<float>::infinity(),
+      -std::numeric_limits<float>::infinity(),
+      0.0f,
+      3.0f
+    });
+  auto b = a.repeat({10, 5});
+
+  // Have to use_allclose even though all NaNs will be replaced - testStaticRuntime
+  // also checks inputs at the end to make sure they're not changed
+  testStaticRuntime(src1, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src1, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  testStaticRuntime(src2, {a, 42.0}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src2, {a, 2.0}, {b, 1.0}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  testStaticRuntime(src3, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src3, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  // Non-NNC path
+  testStaticRuntime(src1, {a.to(at::kDouble)}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src1, {a.to(at::kDouble)}, {b.to(at::kDouble)}, /*use_allclose=*/true, /*use_equalnan=*/true);
 }

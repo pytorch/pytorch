@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
