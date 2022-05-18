@@ -183,6 +183,9 @@ class TORCH_API LazyGraphExecutor {
       const std::vector<LazyTensorPtr>& tensors,
       const SyncTensorsConfig& config);
 
+  // Waits for this SyncTensorCollection's device barrier and acuire the lock.
+  void TensorCollectionBarrier(SyncTensorCollection* coll);
+
   std::vector<Value> CollectRoots(
       const std::vector<LazyTensorPtr>& tensors,
       c10::ArrayRef<size_t> indices);
@@ -194,7 +197,7 @@ class TORCH_API LazyGraphExecutor {
 
   PostOrderData RunPostOrder(
       const std::vector<LazyTensorPtr>& tensors,
-      c10::ArrayRef<size_t> indices);
+      SyncTensorCollection* coll);
   std::shared_ptr<Async> TryRunCachedSync(
       std::vector<LazyTensorPtr>* tensors,
       SyncTensorCollection* coll,

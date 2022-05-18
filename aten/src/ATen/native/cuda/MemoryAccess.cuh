@@ -116,6 +116,15 @@ struct LoadWithCast {
     }
   }
 
+  LoadWithCast(const TensorIteratorBase& iter) {
+    assert(iter.ninputs() == N);
+    #pragma unroll
+    for (auto i = 0; i < N; ++i) {
+      this->dtypes[i] = iter.dtype(i + 1);
+      element_sizes[i] = c10::elementSize(iter.dtype(i + 1));
+    }
+  }
+
   template<typename scalar_t>
   __device__ scalar_t load(char *base_ptr, uint32_t offset, int arg) {
     void *ptr = base_ptr + element_sizes[arg] * offset;

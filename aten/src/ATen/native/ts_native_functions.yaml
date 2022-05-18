@@ -52,6 +52,7 @@ full_codegen:
   - gelu_backward
   - glu
   - glu_backward
+  - glu_jvp
   - grid_sampler_2d
   - grid_sampler_2d_backward
   - gt.Scalar
@@ -96,6 +97,7 @@ full_codegen:
   - nll_loss_forward
   - nll_loss2d_backward
   - nll_loss2d_forward
+  - nonzero
   - norm.ScalarOpt_dim
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor

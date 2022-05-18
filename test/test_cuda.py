@@ -7,6 +7,7 @@ import contextlib
 import ctypes
 import gc
 import io
+import os
 import pickle
 import queue
 import sys
@@ -574,11 +575,33 @@ class TestCuda(TestCase):
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
     def test_cublas_allow_tf32_get_set(self):
+        skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
+            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
+        if skip_tf32_cublas:
+            self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+            return
+
         orig = torch.backends.cuda.matmul.allow_tf32
         self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_float32_matmul_precision_get_set(self):
+        self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
+        skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
+            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
+        if not skip_tf32_cublas:
+            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        for p in ('medium', 'high'):
+            torch.set_float32_matmul_precision(p)
+            self.assertEqual(torch.get_float32_matmul_precision(), p)
+            if not skip_tf32_cublas:
+                self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+        torch.set_float32_matmul_precision('highest')
+        self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
+        if not skip_tf32_cublas:
+            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
 
     def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
         orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
@@ -3821,6 +3844,41 @@ torch.cuda.synchronize()
 
         self.assertEqual(matmul_expand_mem, matmul_mem)
         self.assertEqual(bmm_mem, matmul_mem)
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-only test")
+    def test_rocm_backward_pass_guard(self):
+        # The test exercises a ROCm-specific feature.
+
+        class MyFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, tensor, constant):
+                self.assertFalse(torch._C._rocm_is_backward_pass())
+                ctx.constant = constant
+                return tensor * constant
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                self.assertTrue(torch._C._rocm_is_backward_pass())
+                return grad_output * ctx.constant, None
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.randn(()))
+
+            def forward(self, x):
+                return MyFunction.apply(x, self.a)
+
+        model = MyModule()
+        criterion = torch.nn.MSELoss(reduction='sum')
+        optimizer = torch.optim.SGD(model.parameters(), lr=1e-6)
+
+        x = torch.randn(5, 5)
+        result = model(x)
+        loss = criterion(result, x)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
 
 class TestCudaComm(TestCase):

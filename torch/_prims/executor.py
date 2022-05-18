@@ -3,27 +3,12 @@ from typing import Callable
 import torch
 
 from torch.fx import GraphModule
-from torch._prims.utils import TensorMeta
+from torch._prims.utils import TensorMeta, getnvFuserDtype
 from torch._prims.context import PrimContext
+import torch.overrides
 
-import torch._C._nvfuser as nvfuser  # type: ignore[import]
-
-DataType = nvfuser.DataType  # type: ignore[attr-defined]
-Fusion = nvfuser.Fusion  # type: ignore[attr-defined]
-FusionDefinition = nvfuser.FusionDefinition  # type: ignore[attr-defined]
-
-# TODO: refactor me into a common place
-_torch_dtype_to_nvfuser_dtype_map = {
-    torch.cdouble: DataType.ComplexDouble,
-    torch.cfloat: DataType.ComplexFloat,
-    torch.double: DataType.Double,
-    torch.float: DataType.Float,
-    torch.half: DataType.Half,
-    torch.bfloat16: DataType.BFloat16,
-    torch.long: DataType.Int,
-    torch.int: DataType.Int32,
-    torch.bool: DataType.Bool,
-}
+if torch.cuda.is_available():
+    from torch._C._nvfuser import Fusion, FusionDefinition  # type: ignore[import]
 
 
 def execute(ctx: PrimContext, *args, executor: str = "aten", **kwargs):
@@ -37,6 +22,11 @@ def execute(ctx: PrimContext, *args, executor: str = "aten", **kwargs):
         gm = GraphModule({}, ctx.graph)
         return gm.forward(*args, **kwargs)
     elif executor == "nvfuser":
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "Attempting to use nvFuser trace executor but CUDA is not available!"
+            )
+
         # PROTOTYPE nvfuser executor
         # Only accepts tensor inputs and single tensor outputs
         # Does not handle kwargs
@@ -54,7 +44,7 @@ def execute(ctx: PrimContext, *args, executor: str = "aten", **kwargs):
             for arg in args:
                 if isinstance(arg, torch.Tensor):
                     x = fd.define_tensor(
-                        arg.ndim, _torch_dtype_to_nvfuser_dtype_map[arg.dtype]
+                        arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
                     )
                     fd.add_input(x)
                     nv_args.append(x)
@@ -107,8 +97,8 @@ def make_traced(fn: Callable):
     """
 
     def _traced(*args, executor="aten"):
-        ctx = PrimContext()
-        with ctx:
+        ctx: PrimContext
+        with torch.overrides.push_torch_function_mode(PrimContext) as ctx:  # type: ignore[attr-defined, assignment]
             placeholders = []
             for arg in args:
                 if isinstance(arg, torch.Tensor):

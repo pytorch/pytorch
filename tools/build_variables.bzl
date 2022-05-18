@@ -9,39 +9,6 @@
 # bzl files are not exported via ShipIt by default, so you may also need to
 # update PyTorch's ShipIt config)
 
-# In both open-source and fbcode builds, these are generated into
-# torch/csrc/{autograd,jit}/generated.i
-GENERATED_CPP = [
-    "autograd/generated/Functions.cpp",
-    "autograd/generated/VariableType_0.cpp",
-    "autograd/generated/VariableType_1.cpp",
-    "autograd/generated/VariableType_2.cpp",
-    "autograd/generated/VariableType_3.cpp",
-    "autograd/generated/VariableType_4.cpp",
-    "autograd/generated/TraceType_0.cpp",
-    "autograd/generated/TraceType_1.cpp",
-    "autograd/generated/TraceType_2.cpp",
-    "autograd/generated/TraceType_3.cpp",
-    "autograd/generated/TraceType_4.cpp",
-    "autograd/generated/ADInplaceOrViewType_0.cpp",
-    "autograd/generated/ADInplaceOrViewType_1.cpp",
-    "autograd/generated/python_functions_0.cpp",
-    "autograd/generated/python_functions_1.cpp",
-    "autograd/generated/python_functions_2.cpp",
-    "autograd/generated/python_functions_3.cpp",
-    "autograd/generated/python_functions_4.cpp",
-    "autograd/generated/python_nn_functions.cpp",
-    "autograd/generated/python_fft_functions.cpp",
-    "autograd/generated/python_linalg_functions.cpp",
-    "autograd/generated/python_return_types.cpp",
-    "autograd/generated/python_sparse_functions.cpp",
-    "autograd/generated/python_special_functions.cpp",
-    "autograd/generated/python_torch_functions_0.cpp",
-    "autograd/generated/python_torch_functions_1.cpp",
-    "autograd/generated/python_torch_functions_2.cpp",
-    "autograd/generated/python_variable_methods.cpp",
-]
-
 # This is duplicated in caffe2/CMakeLists.txt for now and not yet used in buck
 GENERATED_LAZY_TS_CPP = [
     "lazy/generated/LazyNativeFunctions.cpp",
@@ -79,19 +46,19 @@ libtorch_nvfuser_generated_headers = ["{}.h".format(name.split("/")[-1].split(".
 
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
-        "autograd/generated/Functions.cpp",
-        "autograd/generated/VariableType_0.cpp",
-        "autograd/generated/VariableType_1.cpp",
-        "autograd/generated/VariableType_2.cpp",
-        "autograd/generated/VariableType_3.cpp",
-        "autograd/generated/VariableType_4.cpp",
-        "autograd/generated/TraceType_0.cpp",
-        "autograd/generated/TraceType_1.cpp",
-        "autograd/generated/TraceType_2.cpp",
-        "autograd/generated/TraceType_3.cpp",
-        "autograd/generated/TraceType_4.cpp",
-        "autograd/generated/ADInplaceOrViewType_0.cpp",
-        "autograd/generated/ADInplaceOrViewType_1.cpp",
+        "torch/csrc/autograd/generated/Functions.cpp",
+        "torch/csrc/autograd/generated/VariableType_0.cpp",
+        "torch/csrc/autograd/generated/VariableType_1.cpp",
+        "torch/csrc/autograd/generated/VariableType_2.cpp",
+        "torch/csrc/autograd/generated/VariableType_3.cpp",
+        "torch/csrc/autograd/generated/VariableType_4.cpp",
+        "torch/csrc/autograd/generated/TraceType_0.cpp",
+        "torch/csrc/autograd/generated/TraceType_1.cpp",
+        "torch/csrc/autograd/generated/TraceType_2.cpp",
+        "torch/csrc/autograd/generated/TraceType_3.cpp",
+        "torch/csrc/autograd/generated/TraceType_4.cpp",
+        "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
+        "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
     ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
@@ -290,6 +257,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/peephole_non_tensor.cpp",
     "torch/csrc/jit/passes/create_functional_graphs.cpp",
+    "torch/csrc/jit/passes/refine_tuple_types.cpp",
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
@@ -443,6 +411,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
     "torch/csrc/lazy/core/thread_pool.cpp",
+    "torch/csrc/lazy/core/trie.cpp",
 ]
 
 # We can't build all of the ts backend under certain build configurations, e.g. mobile,
@@ -513,6 +482,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/exception.cpp",
     "torch/csrc/distributed/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/logging.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/socket.cpp",
@@ -698,6 +668,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/executor_utils.cpp",
     "torch/csrc/jit/codegen/cuda/fusion.cpp",
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
+    "torch/csrc/jit/codegen/cuda/grouped_reduction.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
     "torch/csrc/jit/codegen/cuda/index_reference_replay.cpp",
     "torch/csrc/jit/codegen/cuda/instrumentation.cpp",
@@ -728,6 +699,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_magic_zero.cpp",
     "torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.cpp",
     "torch/csrc/jit/codegen/cuda/lower_predicate.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_predicate_elimination.cpp",
     "torch/csrc/jit/codegen/cuda/lower_replace_size.cpp",
     "torch/csrc/jit/codegen/cuda/lower_shift.cpp",
     "torch/csrc/jit/codegen/cuda/lower_sync_information.cpp",
@@ -854,7 +826,6 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
-    "torch/csrc/utils/crash_handler.cpp",
 ]
 
 libtorch_python_cuda_core_sources = [
@@ -898,7 +869,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/profiler_python.cpp",
     "torch/csrc/autograd/python_anomaly_mode.cpp",
     "torch/csrc/autograd/python_saved_variable_hooks.cpp",
-    "torch/csrc/autograd/python_mode.cpp",
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_engine.cpp",
     "torch/csrc/autograd/python_function.cpp",
@@ -977,7 +947,6 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
-    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
@@ -995,21 +964,21 @@ libtorch_python_distributed_sources = libtorch_python_distributed_core_sources +
 
 def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     _libtorch_python_sources = [gencode_pattern.format(name) for name in [
-        "autograd/generated/python_functions_0.cpp",
-        "autograd/generated/python_functions_1.cpp",
-        "autograd/generated/python_functions_2.cpp",
-        "autograd/generated/python_functions_3.cpp",
-        "autograd/generated/python_functions_4.cpp",
-        "autograd/generated/python_nn_functions.cpp",
-        "autograd/generated/python_fft_functions.cpp",
-        "autograd/generated/python_linalg_functions.cpp",
-        "autograd/generated/python_return_types.cpp",
-        "autograd/generated/python_sparse_functions.cpp",
-        "autograd/generated/python_special_functions.cpp",
-        "autograd/generated/python_torch_functions_0.cpp",
-        "autograd/generated/python_torch_functions_1.cpp",
-        "autograd/generated/python_torch_functions_2.cpp",
-        "autograd/generated/python_variable_methods.cpp",
+        "torch/csrc/autograd/generated/python_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_functions_2.cpp",
+        "torch/csrc/autograd/generated/python_functions_3.cpp",
+        "torch/csrc/autograd/generated/python_functions_4.cpp",
+        "torch/csrc/autograd/generated/python_nn_functions.cpp",
+        "torch/csrc/autograd/generated/python_fft_functions.cpp",
+        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+        "torch/csrc/autograd/generated/python_return_types.cpp",
+        "torch/csrc/autograd/generated/python_sparse_functions.cpp",
+        "torch/csrc/autograd/generated/python_special_functions.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
+        "torch/csrc/autograd/generated/python_variable_methods.cpp",
     ]]
 
     _libtorch_python_sources.extend(libtorch_python_core_sources)
@@ -1064,7 +1033,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Generator.cpp",
     "aten/src/ATen/core/List.cpp",
     "aten/src/ATen/core/NamedTensor.cpp",
-    "aten/src/ATen/core/SymIntArrayRef.cpp",
     "aten/src/ATen/core/Tensor.cpp",
     "aten/src/ATen/core/VariableFallbackKernel.cpp",
     "aten/src/ATen/core/VariableHooksInterface.cpp",
@@ -1081,7 +1049,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/op_registration/infer_schema.cpp",
     "aten/src/ATen/core/op_registration/op_registration.cpp",
     "aten/src/ATen/core/operator_name.cpp",
-    "aten/src/ATen/core/PythonModeTLS.cpp",
+    "aten/src/ATen/core/TorchDispatchModeTLS.cpp",
     "aten/src/ATen/core/register_symbols.cpp",
     "aten/src/ATen/core/class_type.cpp",
     "aten/src/ATen/core/type.cpp",
@@ -1096,7 +1064,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/detail/ORTHooksInterface.cpp",
     "aten/src/ATen/metal/Context.cpp",
     "aten/src/ATen/native/AutogradComposite.cpp",
-    "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
     "aten/src/ATen/native/DispatchStub.cpp",
     "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
@@ -1114,6 +1081,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/MkldnnTensorMath.cpp",
     "aten/src/ATen/native/mkldnn/Normalization.cpp",
     "aten/src/ATen/native/mkldnn/Pooling.cpp",
+    "aten/src/ATen/native/mkldnn/Prelu.cpp",
     "aten/src/ATen/native/mkldnn/Relu.cpp",
     "aten/src/ATen/native/mkldnn/SoftMax.cpp",
     "aten/src/ATen/native/mkldnn/TensorFactories.cpp",
@@ -1173,6 +1141,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/MaxPoolKernel.cpp",
     "aten/src/ATen/native/cpu/MaxUnpoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
+    "aten/src/ATen/native/cpu/PixelShuffleKernel.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
     "aten/src/ATen/native/cpu/PowKernel.cpp",
     "aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp",
@@ -1193,6 +1162,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/WeightNormKernel.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]
 
@@ -1269,6 +1239,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/AveragePool2d.cpp",
     "aten/src/ATen/native/AveragePool3d.cpp",
     "aten/src/ATen/native/BatchLinearAlgebra.cpp",
+    "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
     "aten/src/ATen/native/Batching.cpp",
     "aten/src/ATen/native/BinaryOps.cpp",
     "aten/src/ATen/native/Blas.cpp",

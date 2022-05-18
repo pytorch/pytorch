@@ -174,6 +174,44 @@ TEST(StaticRuntime, Clamp) {
   testStaticRuntime(clamp_script_2, {a, min_t, max_t}, {b, max_t1, min_t1});
 }
 
+TEST(StaticRuntime, ClampMinOnly) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, min: float):
+        a = torch.clamp(inp, min, None).clone()
+        return (a)
+  )JIT";
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+  testStaticRuntime(src, {a, 0.5});
+  testStaticRuntime(src, {a, 0.5}, {b, 0.25});
+}
+
+TEST(StaticRuntime, ClampMaxOnly) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, max: float):
+        a = torch.clamp(inp, None, max).clone()
+        return (a)
+  )JIT";
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+  testStaticRuntime(src, {a, 0.5});
+  testStaticRuntime(src, {a, 0.5}, {b, 0.25});
+}
+
+TEST(StaticRuntime, ClampIntTensor) {
+  const auto src = R"JIT(
+    def forward(self, inp: Tensor, min: float, max: float):
+        a = torch.clamp(inp, min, max).clone()
+        return (a)
+  )JIT";
+  auto a = at::randint(0, 20, {2, 3});
+  auto b = at::randint(0, 20, {4, 3, 2});
+  auto min = 5.0f;
+  auto max = 5.0f;
+  testStaticRuntime(src, {a, min, max});
+  testStaticRuntime(src, {a, min, max}, {b, min, max});
+}
+
 TEST(StaticRuntime, LenWithTuple) {
   const auto src = R"IR(
     graph(%input : int[]):
@@ -3273,4 +3311,69 @@ TEST(StaticRuntime, NestedBlockIfReturnList) {
   std::vector<IValue> args2{
       at::randn({42, 42}), at::randn({42, 42}), true, false};
   testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, QuantizedLinearDynamicFp16ReluFusion) {
+  const auto src = R"IR(
+    graph(%input: Tensor, %weights: Tensor):
+        %bias: None = prim::Constant()
+        %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
+        %x = quantized::linear_dynamic_fp16(%input, %packed_params)
+        %y = aten::relu(%x)
+        %ret = aten::clone(%y, %bias)
+        return (%ret)
+  )IR";
+  at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
+  at::Tensor input = torch::randn({3, 2}, torch::kFloat);
+
+  at::Tensor weight_2 = torch::randn({4, 3}, torch::kFloat);
+  at::Tensor input_2 = torch::randn({5, 3}, torch::kFloat);
+
+  testStaticRuntime(src, {input, weight}, {input_2, weight_2});
+
+  auto graph = getGraphFromIR(src);
+  QuantizedLinearReluFusion(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "quantized::linear_dynamic_fp16"));
+  EXPECT_TRUE(hasNodeWithKind(graph, "quantized::linear_relu_dynamic_fp16"));
+}
+
+TEST(StaticRuntime, ClampNaNToNum) {
+  const auto src1 = R"JIT(
+    def forward(self, a):
+        return torch.clamp(a, min=1.0, max=2.0).nan_to_num().clone()
+  )JIT";
+
+  const auto src2 = R"JIT(
+    def forward(self, a, nan: float):
+        return torch.clamp(a, min=-1.0, max=2.0).nan_to_num(nan=nan).clone()
+  )JIT";
+
+  const auto src3 = R"JIT(
+    def forward(self, a):
+        return torch.clamp(a, min=1.0, max=-1.0).nan_to_num().clone()
+  )JIT";
+
+  auto a = at::tensor({
+      std::numeric_limits<float>::quiet_NaN(),
+      std::numeric_limits<float>::infinity(),
+      -std::numeric_limits<float>::infinity(),
+      0.0f,
+      3.0f
+    });
+  auto b = a.repeat({10, 5});
+
+  // Have to use_allclose even though all NaNs will be replaced - testStaticRuntime
+  // also checks inputs at the end to make sure they're not changed
+  testStaticRuntime(src1, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src1, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  testStaticRuntime(src2, {a, 42.0}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src2, {a, 2.0}, {b, 1.0}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  testStaticRuntime(src3, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src3, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
+
+  // Non-NNC path
+  testStaticRuntime(src1, {a.to(at::kDouble)}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(src1, {a.to(at::kDouble)}, {b.to(at::kDouble)}, /*use_allclose=*/true, /*use_equalnan=*/true);
 }
