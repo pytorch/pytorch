@@ -59,7 +59,7 @@ void atan_kernel_cuda(TensorIteratorBase& iter) {
   });
 #endif
   } else {
-  AT_DISPATCH_FLOATING_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       common_dtype, "atan_cuda",
       [&]() {
@@ -158,7 +158,7 @@ void atanh_kernel_cuda(TensorIteratorBase& iter) {
       });
 }
 
-onst char tan_name[] = "tan_kernel";
+const char tan_name[] = "tan_kernel";
 void tan_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -185,7 +185,7 @@ void tan_kernel_cuda(TensorIteratorBase& iter) {
   });
 #endif
   } else {
-  AT_DISPATCH_FLOATING_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       common_dtype, "tan_cuda",
       [&]() {
