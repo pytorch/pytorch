@@ -146,6 +146,16 @@ $3 = torch._ops.aten.mul.Tensor($2, $2)""")
 $0 = input('input')
 $1, $2 = torch._ops.aten.aminmax.default($0, dim=0)""")
 
+    def test_tensor_ctr(self):
+        def f(x):
+            y = torch.tensor((1, 2, 3))
+            z = y.view(-1)
+            z.add_(1)
+            return y
+        self.assert_functionalization(f, torch.arange(3, dtype=torch.float32))
+        logs = self.get_logs(f, torch.arange(3, dtype=torch.float32))
+        self.assertExpectedInline('\n'.join(logs), """$0 = input('input')""")
+
     def test_inplace_on_non_view(self):
         def f(x):
             # test for the case where we functionalize an inplace op on the other tensor - not a view.
@@ -340,7 +350,7 @@ $14, $15 = torch._ops.aten.split_copy.Tensor($13, 2)
 $16 = torch._ops.aten.add.Tensor($14, tensor([[1., 1.],
         [1., 1.]]))
 $17 = torch._ops.aten.select_copy.int($3, 0, 0)
-$18 = torch._ops.aten.clone.default($16, memory_format=0)
+$18 = torch._ops.aten.clone.default($16, memory_format=torch.contiguous_format)
 $19 = torch._ops.aten._unsafe_view.default($18, [4])
 $20 = torch._ops.aten.view_copy.default($1, [8])
 $21 = torch._ops.aten._reshape_alias_copy.default($20, [2, 4], [4, 1])
@@ -433,7 +443,7 @@ $2 = torch._ops.aten.add.Tensor($1, $0)""")
         logs = self.get_logs(f, torch.ones(2, dtype=torch.long))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten._to_copy.default($0, dtype=6, layout=0, device=device(type='cpu'), pin_memory=False)
+$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float32, layout=torch.strided, device=device(type='cpu'), pin_memory=False)
 $2 = torch._ops.aten.expand_copy.default($1, [2])
 $3 = torch._ops.aten.add.Tensor($2, $0)""")
 
@@ -442,7 +452,7 @@ $3 = torch._ops.aten.add.Tensor($2, $0)""")
         logs = self.get_logs(f, torch.ones(1, dtype=torch.long))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten._to_copy.default($0, dtype=6, layout=0, device=device(type='cpu'), pin_memory=False)
+$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float32, layout=torch.strided, device=device(type='cpu'), pin_memory=False)
 $2 = torch._ops.aten.expand_copy.default($1, [2])
 $3 = torch._ops.aten.add.Tensor($2, $0)""")
 
