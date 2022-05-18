@@ -610,10 +610,10 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
         .make_tensor();
   data.set_requires_grad(r.toBool(9));
 
-  if (r.toBool(11)) {
+  if (r.toBool(10)) {
     data.unsafeGetTensorImpl()->set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
   }
-  if (r.toBool(12)) {
+  if (r.toBool(11)) {
     data.unsafeGetTensorImpl()->set_custom_device(true);
   }
 
