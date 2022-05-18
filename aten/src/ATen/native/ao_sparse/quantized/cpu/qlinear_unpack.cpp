@@ -50,9 +50,13 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
 #ifdef USE_PYTORCH_QNNPACK
 
 LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
-  std::vector<int64_t> block_pattern(
-      {out_features_block_size_, in_features_block_size_});
-  return std::make_tuple(orig_weight_, orig_bias_, std::move(block_pattern));
+  TORCH_CHECK(
+      false, "Sparse Quantized Linear Unpack not supported for QNNPack");
+
+  // TODO: Enable once unpack is implemented for BCSRMatrix
+  // std::vector<int64_t> block_pattern(
+  //  {out_features_block_size_, in_features_block_size_});
+  // return std::make_tuple(..., orig_bias_, std::move(block_pattern));
 }
 
 #endif // USE_FBGEMM
