@@ -103,9 +103,7 @@ function clone_pytorch_xla() {
     pushd xla
     # if this is a scheduled workflow (should be nightly), we will update the file containing the commit hash
     # if the workflow succeeds, then in the "Update XLA commit hash" step it will commit this change to master
-    if [[ $GITHUB_EVENT_NAME == 'schedule' ]]; then
-      git rev-parse master > ../.github/xla_commit_hash.txt
-    fi
+    git rev-parse master > ../.github/xla_commit_hash.txt
     pwd
     git checkout "$(cat ../.github/xla_commit_hash.txt)"
     popd
