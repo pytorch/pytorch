@@ -428,7 +428,7 @@ test_torch_function_benchmark() {
 
 build_xla() {
   XLA_DIR=xla
-  USE_CACHE=0
+  USE_CACHE=1
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "xla/.circleci/common.sh"
