@@ -14810,7 +14810,7 @@ op_db: List[OpInfo] = [
                                     device_type='cuda', dtypes=[torch.float64],
                                     active_if=TEST_WITH_ROCM),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
-                                    'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'), 
+                                    'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    ),
                    # tan(pi/2 * odd_number) is nan
                    reference_numerics_filter=NumericsFilter(
