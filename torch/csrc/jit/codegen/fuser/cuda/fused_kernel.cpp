@@ -35,6 +35,11 @@ void codegenOutputQuery(
     int& major,
     int& minor,
     bool& compile_to_sass) {
+#ifdef USE_ROCM
+  AT_CUDA_NVRTC_CHECK(
+      nvrtc().nvrtcVersion(&major, &minor));
+  compile_to_sass = false;
+#else
   using CudaVersion = std::pair<int, int>;
   CudaVersion nvrtc_version;
   AT_CUDA_NVRTC_CHECK(
@@ -75,6 +80,7 @@ void codegenOutputQuery(
     minor = dev_version.second;
     compile_to_sass = true;
   }
+#endif
 }
 
 // Compiles the specified kernel and stores the metadata required to run it

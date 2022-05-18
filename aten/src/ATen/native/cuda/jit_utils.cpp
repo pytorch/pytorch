@@ -668,7 +668,12 @@ void codegenOutputQuery(
     int& nvrtc_major,
     int& nvrtc_minor,
     bool& compile_to_sass) {
-
+#ifdef USE_ROCM
+  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
+  cuda_major = prop->major;
+  cuda_minor = prop->minor;
+  compile_to_sass = false;
+#else
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
   TORCH_CHECK(
       nvrtc_major >= 6, "NVRTC versions less than 6 are not supported. Is: ", nvrtc_major);
@@ -711,6 +716,7 @@ void codegenOutputQuery(
     // compile to sass is not allowed prior to CUDA 11.1
     compile_to_sass = false;
   #endif
+#endif
 }
 
 // TODO: another copy paste from jit, refactor so it's usable from both
@@ -1312,6 +1318,9 @@ NvrtcFunction jit_pwise_function(
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
+#ifdef USE_ROCM
+  std::vector<const char*> args = {"--std=c++14"};
+#else
   // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
@@ -1326,6 +1335,7 @@ NvrtcFunction jit_pwise_function(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
+#endif
 
   #ifndef NDEBUG
     // Add line info to generated kernels
