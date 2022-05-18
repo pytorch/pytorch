@@ -162,6 +162,7 @@ def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
             raise RuntimeError(
                 f"Difference from float64 is larger with decomposition {op.__name__}"
                 f" than original. Original max diff: {orig_diff}, Decomp max diff: {decomp_diff}\n"
+                f"atol = {atol}\n"
                 f"args = {args}\n"
                 f"kwargs = {kwargs}"
             )
