@@ -157,7 +157,27 @@ class TestCommon(TestCase):
                     unsupported(dtype)
                     continue
 
-                # Checks for backward support in the same dtype
+                # Checks for backward support in the same dtype, if the input has
+                # one or more tensors requiring grad
+                def _tensor_requires_grad(x):
+                    if isinstance(x, dict):
+                        for k, v in x.items():
+                            if _tensor_requires_grad(v):
+                                return True
+                    if isinstance(x, (list, tuple)):
+                        for a in x:
+                            if _tensor_requires_grad(a):
+                                return True
+                    if isinstance(x, torch.Tensor) and x.requires_grad:
+                        return True
+
+                    return False
+
+                requires_grad = _tensor_requires_grad(sample.input) \
+                    or _tensor_requires_grad(sample.args) or _tensor_requires_grad(sample.kwargs)
+                if not requires_grad:
+                    continue
+
                 try:
                     result = sample.output_process_fn_grad(result)
                     if isinstance(result, torch.Tensor):
@@ -327,14 +347,17 @@ class TestCommon(TestCase):
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
                 return prims.utils.TensorMeta(x)
+            return x
 
         # TODO: iterate over requires_grad true/false
         inps = tuple(op.reference_inputs(device, dtype, requires_grad=False))
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
+
             result = op(sample.input, *sample.args, **sample.kwargs)
 
             meta_sample = sample.transform(_to_tensormeta)
             meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
+
             if isinstance(result, torch.Tensor):
                 prims.utils.compare_tensor_meta(result, meta_result)
             elif isinstance(result, Sequence):
@@ -348,6 +371,7 @@ class TestCommon(TestCase):
     @ops(python_ref_db)
     def test_python_reference_consistency(self, device, dtype, op):
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
+
             actual = op(sample.input, *sample.args, **sample.kwargs)
             expected = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
@@ -362,26 +386,43 @@ class TestCommon(TestCase):
 
             if isinstance(actual, torch.Tensor):
                 assert isinstance(expected, torch.Tensor)
-                prims.utils.compare_significant_strides(actual, expected)
+                prims.utils.compare_tensor_meta(actual, expected)
                 if getattr(op, 'validate_view_consistency', True):
                     self.assertEqual(actual._is_view(), expected._is_view())
             if isinstance(actual, Sequence):
                 assert isinstance(expected, Sequence)
                 for a, b in zip(actual, expected):
-                    prims.utils.compare_significant_strides(a, b)
+                    prims.utils.compare_tensor_meta(a, b)
                     if getattr(op, 'validate_view_consistency', True):
                         self.assertEqual(a._is_view(), b._is_view())
 
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @ops([op for op in ops_and_refs if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
         for ei in error_inputs:
             si = ei.sample_input
             with self.assertRaisesRegex(ei.error_type, ei.error_regex):
                 op(si.input, *si.args, **si.kwargs)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    def test_python_reference_errors(self, device, op):
+        def _to_tensormeta(x):
+            if isinstance(x, torch.Tensor):
+                return prims.utils.TensorMeta(x)
+            return x
+
+        error_inputs = op.error_inputs(device)
+        for ei in error_inputs:
+            si = ei.sample_input
+            meta_sample = si.transform(_to_tensormeta)
+            # TODO: match strings
+            with self.assertRaisesRegex(ei.error_type, ""):
+                op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
@@ -609,18 +650,9 @@ class TestCommon(TestCase):
     #   - Case 3: out has the correct shape and dtype, but is on a different device type
     #   - Case 4: out has the with correct shape and device, but a dtype that cannot
     #       "safely" cast to
-    @ops(_ops_and_refs, dtypes=OpDTypes.none)
-    def test_out(self, device, op):
+    @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
+    def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
-        supported_dtypes = op.supported_dtypes(self.device_type)
-        if len(supported_dtypes) == 0:
-            self.skipTest("Skipped! Op has not supported dtypes on this device.")
-        dtype = (
-            torch.float32
-            if torch.float32 in supported_dtypes
-            else list(supported_dtypes)[0]
-        )
-
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
             # calls it normally to get the expected result

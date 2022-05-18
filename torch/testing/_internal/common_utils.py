@@ -1848,21 +1848,21 @@ class TestCase(expecttest.TestCase):
         if not RETRY_TEST_CASES or not using_unittest:
             return
 
-        (typ, val, _) = sys.exc_info()
+        err = sys.exc_info()
         num_retries_left = num_runs_left - 1
         if failures_before < len(result.failures):
             print(f"    {self._testMethodName} failed - num_retries_left: {num_retries_left}")
             if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
-                _, exc_info = result.failures.pop(-1)
-                print(exc_info)
-                result.addExpectedFailure(self, (typ, val, exc_info))
+                _, traceback_str = result.failures.pop(-1)
+                print(traceback_str)
+                result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
         elif errors_before < len(result.errors):
             print(f"    {self._testMethodName} errored - num_retries_left: {num_retries_left}")
             if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
-                _, exc_info = result.errors.pop(-1)
-                print(exc_info)
-                result.addExpectedFailure(self, (typ, val, exc_info))
+                _, traceback_str = result.errors.pop(-1)
+                print(traceback_str)
+                result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
         elif report_only and num_retries_left < MAX_NUM_RETRIES:
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
