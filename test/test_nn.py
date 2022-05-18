@@ -20532,16 +20532,25 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.double)
     @torch.no_grad()
     def test_multihead_attn_fast_path_query_and_bias_have_different_dtypes(self, device, dtype):
-        mha = torch.nn.MultiheadAttention(1, 1, batch_first=True, dtype=dtype, device=device).eval()
+        mha = torch.nn.MultiheadAttention(3, 3, batch_first=True, dtype=dtype, device=device).eval()
+        mha.in_proj_bias = torch.nn.Parameter(mha.in_proj_bias.to(torch.half).to(device))
+        query = torch.randn(3, 3, 3, dtype=dtype, device=device)
+        mha(query, query, query)
+
+    @dtypes(torch.double)
+    @torch.no_grad()
+    def test_multihead_attn_in_proj_bias_none(self, device, dtype):
+        mha = torch.nn.MultiheadAttention(1, 1, bias=True, dtype=dtype, device=device)
         query = torch.rand(3, 2, 1)
         mha(query, query, query)
 
     @dtypes(torch.double)
     @torch.no_grad()
-    def test_multihead_attn_no_bias(self, device, dtype):
-        mha = torch.nn.MultiheadAttention(3, 3, bias=False, dtype=dtype, device=device)
-        query = torch.randn(3, 3, 3, dtype=dtype, device=device)
-        mha(query, query, query)
+    def test_multihead_attn_in_proj_weight_none(self, device, dtype):
+        mha = torch.nn.MultiheadAttention(4, 4, vdim=2, kdim=2, dtype=dtype, device=device)
+        query = torch.rand(4, 4, 4)
+        key = torch.rand(4, 4, 2)
+        mha(query, key, key)
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
