@@ -280,7 +280,8 @@ Tensor internal_new_from_data(
     c10::impl::ExcludeDispatchKeyGuard torchdispatchmode_snapshot_guard(c10::DispatchKey::PythonTLSSnapshot);
     // functorch uses FuncTorchDynamicLayerBackMode as a mode key to wrap all
     // tensors returned from operators in special TensorWrapper tensor extension
-    c10::impl::ExcludeDispatchKeyGuard functorch_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
+    c10::impl::ExcludeDispatchKeyGuard functorch_front_guard(c10::DispatchKey::FuncTorchDynamicLayerFrontMode);
+    c10::impl::ExcludeDispatchKeyGuard functorch_back_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
     // We disable DeferredInit handler for similar reasons as functorch.
     c10::impl::ExcludeDispatchKeyGuard deferred_init_guard(c10::DispatchKey::DeferredInit);
     // Note [Functionalization <> torch.Tensor constructor]
@@ -333,8 +334,6 @@ Tensor internal_new_from_data(
   // torch.jit.trace will continue to trace out `.to()` instead of `.lift()`, since
   // changing it is BC-breaking.
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
-  // lift has no autograd implementation, so we need to make sure we don't try to dispatch to it.
-  at::AutoDispatchBelowADInplaceOrView guard;
   return tensor.lift();
 }
 
