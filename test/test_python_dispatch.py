@@ -267,9 +267,6 @@ class TestPythonRegistration(TestCase):
             assert torch.ops.foo._op() is None
             assert called[0] == 1
 
-            assert _test() is None
-            assert called[0] == 2
-
         with self.assertRaises(AssertionError):
             test_helper("")  # alias_analysis="FROM_SCHEMA"
 
