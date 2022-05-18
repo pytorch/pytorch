@@ -95,7 +95,6 @@ def translate(
     *,
     method: bool = False,
     allow_expensive_conversions: bool = False,
-    allow_tensor_const_cast: bool = False,
 ) -> List[Expr]:
 
     binding_exprs: List[Expr] = []
@@ -369,16 +368,14 @@ Check this module for more information.
             # With arguments like std::vector<IntArrayRef>.
             # If that changes, we'll have to add the translation here.
 
-        if allow_tensor_const_cast:
-            # We allow const casting on tensors, although you need to explicitly turn it on
-            # with the "allow_tensor_const_flag".
-            # We could probably generalize this to non-tensor types too.
-            if goal.type == MutRefCType(BaseCType(tensorT)):
-                const_ref_tensor_ctype = NamedCType(
-                    goal.name, ConstRefCType(BaseCType(tensorT))
-                )
-                argname = direct_solve(const_ref_tensor_ctype)
-                return f"const_cast<Tensor&>({argname})"
+        # We allow const casting on tensors, since const-correctness is a bit broken for at::Tensor.
+        # We could probably generalize this to non-tensor types too.
+        if goal.type == MutRefCType(BaseCType(tensorT)):
+            const_ref_tensor_ctype = NamedCType(
+                goal.name, ConstRefCType(BaseCType(tensorT))
+            )
+            argname = direct_solve(const_ref_tensor_ctype)
+            return f"const_cast<Tensor&>({argname})"
 
         unsat(goal)
 
