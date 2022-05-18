@@ -1,8 +1,6 @@
-"""Functions to verify exported ONNX model against original PyTorch model.
+"""Functions to verify exported ONNX model is functionally equivalent to original PyTorch model.
 
-ONNXRuntime is required, and is used as the ONNX backend for export verification.
-The goal is to verify that the exported ONNX model is functionally equivalent to the
-original PyTorch model.
+ONNXRuntime is required, serving as the ONNX backend for verification.
 """
 
 import contextlib
@@ -10,7 +8,7 @@ import copy
 import io
 import os
 import tempfile
-from typing import Optional, Tuple, Union
+from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -108,14 +106,14 @@ def _create_ort_session(
     return ort_session
 
 
-def _compare_ort_pytorch_outputs(ort_outs, output, rtol, atol):
-    output, _ = torch.jit._flatten(output)
-    outputs = _unpack_to_numpy(output)
+def _compare_ort_pytorch_outputs(ort_outs, pt_outs, rtol, atol):
+    pt_outs, _ = torch.jit._flatten(pt_outs)
+    pt_outs = _unpack_to_numpy(pt_outs)
 
-    assert len(outputs) == len(ort_outs), "number of outputs differ"
+    assert len(pt_outs) == len(ort_outs), "number of outputs differ"
 
-    for out, ort_out in zip(outputs, ort_outs):
-        np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol)
+    for ort_out, pt_out in zip(ort_outs, pt_outs):
+        np.testing.assert_allclose(ort_out, pt_out, rtol=rtol, atol=atol)
 
 
 def _format_input_for_pytorch(args, kwargs):
@@ -229,23 +227,21 @@ def verify(
         opset_version (int, optional): See :func:`torch.onnx.export`.
         keep_initializers_as_inputs (bool, optional): See :func:`torch.onnx.export`.
         verbose (bool, optional): See :func:`torch.onnx.export`.
-        fixed_batch_size (bool, optional):
-        use_external_data (bool, optional):
-        additional_test_inputs (list, optional):
-        remained_onnx_input_idx (list, optional):
-        flatten (bool, optional):
-        ort_providers (list, optional):
-        rtol (float, optional):
-        atol (float, optional):
-
-
-        dict_check (bool, optional): If True, expect last input, if dictionary,
-            to be keyword arguments to model forward. Otherwise, last input, if
-            dictionary, is treated as the last positional argument. An empty dictionary
-            will appended to the end of the input list, informing the export api that
-            keyword arguments to model forward is empty.
-        ort_providers (tuple, optional): A tuple of ONNX Runtime providers to use.
-            Default is _ORT_PROVIDERS in torch.onnx.verification.
+        fixed_batch_size (bool, optional): Legacy argument, used only by rnn test cases.
+        use_external_data (bool, optional): Explicitly specify whether to export the
+            model with external data.
+        additional_test_inputs (list, optional): List of tuples. Each tuple is a set of
+            input arguments to test. Currently only *args are supported.
+        remained_onnx_input_idx (list, optional): If set, only the specified inputs will
+            be passed to ONNX model. This is used when there are unused inputs in original
+            PyTorch model. ONNX model will remove unused inputs automatically.
+        flatten (bool, optional): Default True. If True, unpack nested list/tuple/dict
+            inputs into a flattened list of Tensors for ONNX. Set this to False if nested
+            structures are to be preserved for ONNX, which is usually the case with
+            exporting ScriptModules.
+        ort_providers (sequence, optional): ONNXRuntime providers to use.
+        rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
+        atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
     """
     if training is not None and training == torch.onnx.TrainingMode.TRAINING:
         model.train()
