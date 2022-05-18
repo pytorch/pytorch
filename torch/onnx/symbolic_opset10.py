@@ -350,11 +350,15 @@ def embedding_bag(
         list_ = []
         for i in range(offset_len):
             start_ = symbolic_helper._unsqueeze_helper(
-                g, opset9.select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), [0]
+                g,
+                opset9.select(g, offsets_extended, torch.tensor(0), torch.tensor(i)),
+                [0],
             )
             end_ = symbolic_helper._unsqueeze_helper(
                 g,
-                opset9.select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)),
+                opset9.select(
+                    g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)
+                ),
                 [0],
             )
             axes_ = g.op("Constant", value_t=torch.tensor([0]))
@@ -495,7 +499,9 @@ def nan_to_num(g, input, nan, posinf, neginf):
     neginf_cond = opset9.logical_and(
         g,
         isinf(g, nan_posinf_result),
-        opset9.lt(g, nan_posinf_result, g.op("Constant", value_t=torch.LongTensor([0]))),
+        opset9.lt(
+            g, nan_posinf_result, g.op("Constant", value_t=torch.LongTensor([0]))
+        ),
     )
     return g.op(
         "Where",
