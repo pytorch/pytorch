@@ -9940,9 +9940,8 @@ op_db: List[OpInfo] = [
                                                                              np.sum(np.matmul(batch1, batch2), axis=0))),
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                                *[torch.bfloat16] if (SM53OrLater or TEST_WITH_ROCM) else []),
+                                                       *[torch.bfloat16]
+                                                       if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            decorators=[
@@ -9951,9 +9950,8 @@ op_db: List[OpInfo] = [
                                       torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestCommon', 'test_reference_testing')],
            skips=(
-               # FIXME: bfloat16 backward support likely depends on CUDA11+
-               #   and SM53+
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
+               # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                # addbmm does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # https://github.com/pytorch/pytorch/issues/55907
@@ -9997,17 +9995,15 @@ op_db: List[OpInfo] = [
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM)else []),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16]
-                                                                if (SM53OrLater or TEST_WITH_ROCM) else []),
+                                                       *[torch.bfloat16]
+                                                       if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # FIXME: bfloat16 backward support likely depends on CUDA11+
-               #   and SM53+
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
+               # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
@@ -10030,7 +10026,6 @@ op_db: List[OpInfo] = [
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                             dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', dtypes=(torch.bool,)),
            ),
            sample_inputs_func=sample_inputs_addr,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -10706,6 +10701,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='no_rounding_mode',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -10744,6 +10740,7 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -10821,7 +10818,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
     BinaryUfuncInfo('eq',
-                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                     always_returns_bool=True,
                     supports_autograd=False,
                     sample_inputs_func=sample_inputs_comparison_ops,
@@ -11443,8 +11440,6 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Skip since real and imag don't have out variants.
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
-                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
-                                    dtypes=(torch.complex32,)),
                    )),
     OpInfo('gradient',
            dtypes=floating_and_complex_types_and(torch.int8, torch.int16,
@@ -11881,7 +11876,7 @@ op_db: List[OpInfo] = [
                    domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.chalf),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -11890,15 +11885,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
-                       # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    dtypes=(torch.chalf,))
                    ),
                    # log(z)->-inf for |z|->0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
@@ -12047,6 +12033,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           skips=(skipCPUIfNoLapack,),
            sample_inputs_func=sample_inputs_lu_unpack),
     OpInfo('lu',
            op=torch.lu,
@@ -12080,7 +12067,7 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_lu_solve,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
@@ -12092,12 +12079,20 @@ op_db: List[OpInfo] = [
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
            ),
     OpInfo('masked_fill',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_masked_fill,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # RuntimeError: "where_cpu" not implemented for 'ComplexHalf'
+               # RuntimeError: "where_cuda" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive', dtypes=(torch.chalf,)),
+               # RuntimeError: "where_cpu" not implemented for 'ComplexHalf'
+               # RuntimeError: "where_cuda" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick', dtypes=(torch.chalf,)),
+           )),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_scatter,
@@ -12137,11 +12132,8 @@ op_db: List[OpInfo] = [
            aliases=('linalg.matmul',),
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if ((SM53OrLater and CUDA11OrLater)
-                                                                             or TEST_WITH_ROCM) else []),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                                *[torch.bfloat16] if ((SM60OrLater and CUDA11OrLater)
-                                                                                      or TEST_WITH_ROCM) else []),
+                                                       *[torch.bfloat16]
+                                                       if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
@@ -12149,13 +12141,21 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_matmul,
            decorators=[
+               # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                # ROCm intermittently fails the test with standard atol/rtol
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
+                            'TestCommon', 'test_noncontiguous_samples', device_type='cuda',
+                            active_if=TEST_WITH_ROCM),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
+                            'TestCommon', 'test_out', device_type='cuda',
+                            active_if=TEST_WITH_ROCM),
+               # mv for the sample with shapes (S, S, M, M), (M,) has some variance in the
+               # backward on CPU
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=0, rtol=1e-5)}),
                             'TestCommon', 'test_noncontiguous_samples',
-                            active_if=TEST_WITH_ROCM), ],
+                            device_type='cpu'), ],
            skips=(
-               # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # https://github.com/pytorch/pytorch/issues/67470
                DecorateInfo(unittest.skip("67470!"),
                             'TestCommon', 'test_noncontiguous_samples',
@@ -12593,7 +12593,6 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Resizing an out= argument with no elements threw a resize warning!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cpu'),
            )),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
@@ -13332,9 +13331,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cpu'),
-               # RuntimeError: "max_pool1d_impl" not implemented for 'BFloat16'
-               DecorateInfo(unittest.skip("Works on some configs"), 'TestMeta',
-                            'test_meta', dtypes=(torch.bfloat16,)),
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.bfloat16,)),
                DecorateInfo(unittest.skip("Works on some conifgs"), 'TestCudaFuserOpInfo',
@@ -13489,8 +13485,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Problem, needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
            ),
            decorators=(
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
@@ -13501,12 +13495,11 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_bilinear,
            dtypes=all_types_and(torch.bfloat16),
-           dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfCUDA=floating_types_and(torch.float16,
+                                           *[torch.bfloat16] if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
            skips=(
-               # FIXME: bfloat16 backward support likely depends on CUDA11+ and SM53+
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda'),
+               # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
            ),
            supports_forward_ad=True,
@@ -14383,8 +14376,6 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Skip since real and imag don't have out variants.
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
-                       DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta',
-                                    dtypes=(torch.complex32,)),
                    )),
     OpInfo('roll',
            ref=np.roll,
@@ -14678,13 +14669,9 @@ op_db: List[OpInfo] = [
     OpInfo('__rmatmul__',
            op=torch.Tensor.__rmatmul__,
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16,
-                                           *[torch.bfloat16] if ((SM53OrLater and CUDA11OrLater)
-                                                                 or TEST_WITH_ROCM) else [],
-                                           torch.complex64, torch.complex128),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16]
-                                                    if ((SM60OrLater and CUDA11OrLater) or TEST_WITH_ROCM) else [],
-                                                    torch.complex64, torch.complex128),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+                                                       *[torch.bfloat16]
+                                                       if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            supports_out=False,
@@ -14692,11 +14679,12 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
            decorators=(
+               # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestMathBits', 'test_conj_view'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
-                            'TestCommon', 'test_noncontiguous_samples',
-                            device_type='cuda', active_if=TEST_WITH_ROCM),
+                            'TestCommon', 'test_noncontiguous_samples'),
            ),
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -14900,7 +14888,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
-           decorators=[skipCUDAIfNoMagma],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -15123,12 +15111,7 @@ op_db: List[OpInfo] = [
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                    supports_out=False,
-                   supports_autograd=False,
-                   skips=(
-                       # NotImplementedError:
-                       # Could not run 'aten::view_as_real' with arguments from the 'Meta' backend.
-                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta", dtypes=(torch.chalf,)),
-                   )),
+                   supports_autograd=False),
     UnaryUfuncInfo('isinf',
                    ref=np.isinf,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -15137,8 +15120,6 @@ op_db: List[OpInfo] = [
                    supports_sparse_csr=True,
                    supports_autograd=False,
                    skips=(
-                       # Could not run 'aten::view_as_real' with arguments from the 'Meta' backend.
-                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta", dtypes=(torch.chalf,)),
                        # "nonzero_count_cpu" not implemented for 'ComplexHalf'
                        # "nonzero_cuda" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, "TestSparseCSR",
@@ -15164,12 +15145,7 @@ op_db: List[OpInfo] = [
                    ref=np.isreal,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                    supports_out=False,
-                   supports_autograd=False,
-                   skips=(
-                       # NotImplementedError:
-                       # Could not run 'aten::view_as_real' with arguments from the 'Meta' backend.
-                       DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta", dtypes=(torch.chalf,)),
-                   )),
+                   supports_autograd=False),
     UnaryUfuncInfo('isnan',
                    ref=np.isnan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -15202,6 +15178,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_solve_triangular,
            supports_fwgrad_bwgrad=True,
+           skips=(skipCPUIfNoLapack,),
            # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
            supports_forward_ad=True),
     OpInfo('linalg.matrix_rank',
@@ -15246,6 +15223,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_pinv,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # errors with "leaked XXXX bytes CUDA memory on device 0"
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),)
@@ -15348,9 +15326,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               # stride mismatch
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda',
-                            dtypes=(torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -15375,9 +15350,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               # stride mismatch
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda',
-                            dtypes=(torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -15422,8 +15394,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               # stride mismatch
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda', active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('pca_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -15448,8 +15418,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               # stride mismatch
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda', active_if=not TEST_WITH_ROCM),
            )),
     BinaryUfuncInfo('polar',
                     dtypes=floating_types(),
@@ -15776,7 +15744,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),),
            sample_inputs_func=sample_inputs_getitem),
     OpInfo('index_put',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_inplace_autograd=True,
            supports_forward_ad=True,
@@ -16808,15 +16776,10 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/56012
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    dtypes=(torch.chalf,)),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=[torch.complex64, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=[torch.chalf, torch.complex64, torch.cdouble]),
-                       # RuntimeError: "div_true_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=(torch.complex32,)),
                        # alias, nn.functional.sigmoid, will produce (because of warning string saved):
                        # "RuntimeError: Expected to not find "sigmoid" but found it"
                        DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping')),
@@ -17177,10 +17140,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types(),
            skips=(
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # RuntimeError not raised :
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -17436,7 +17395,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_tensorsolve,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
+        decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagma],
     ),
     OpInfo(
         "nn.functional.mse_loss",
@@ -18945,6 +18904,16 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        skips=(
+            # complex("-501.-501.j")/complex("-501.-infj")
+            # PyTorch jiterated Path : 0
+            # Python : 0
+            # PyTorch non-jiterated path : nan + nanj
+            # See also: https://github.com/pytorch/pytorch/issues/52332
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,), device_type='cuda',
+                         active_if=not TEST_WITH_ROCM),
+        ),
     ),
     #
     # Data Conversion & Data Movement Opinfos

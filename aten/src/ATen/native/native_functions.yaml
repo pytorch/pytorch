@@ -330,12 +330,12 @@
 - func: view_as_real(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
-    CPU, CUDA, MPS: view_as_real
+    CPU, CUDA, MPS, Meta: view_as_real
 
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
-    CPU, CUDA: view_as_complex
+    CPU, CUDA, Meta: view_as_complex
 
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
@@ -1419,7 +1419,7 @@
     MkldnnCPU: copy_mkldnn_
     SparseCPU, SparseCUDA: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
-    SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
+    SparseCsrCPU, SparseCsrCUDA: copy_sparse_compressed_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch:
