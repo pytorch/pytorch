@@ -823,7 +823,7 @@ meta_dispatch_expected_failures = {
     aten.addbmm.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.addbmm.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.angle.default: {c32, i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.angle.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
+    aten.angle.out: {c32, i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.bernoulli.out: {bf16, f64, f32},
     aten.bincount.default: {i8, i64, i16, u8, i32},
     aten.bucketize.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
