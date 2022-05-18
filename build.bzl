@@ -43,7 +43,7 @@ def define_targets(rules):
     gen_aten_srcs = [
         "aten/src/ATen/native/native_functions.yaml",
         "aten/src/ATen/native/tags.yaml",
-    ] + glob(["aten/src/ATen/templates/*"])
+    ] + rules.glob(["aten/src/ATen/templates/*"])
 
     gen_aten_cmd = " ".join([
         "$(location //torchgen:gen)",
@@ -80,6 +80,7 @@ def define_targets(rules):
         outs = gen_aten_outs_cuda,
         cmd = gen_aten_cmd + " --rocm",
         features = ["-create_bazel_outputs"],
+        tags = ["-bazel"],
     )
 
     rules.genrule(
