@@ -221,7 +221,7 @@ class TORCH_API TensorBase {
     return impl_->sizes();
   }
   c10::SymIntArrayRef sym_sizes() const {
-    return impl_->sym_sizes();
+    return c10::SymIntArrayRef(reinterpret_cast<const SymInt*>(sizes().data()), sizes().size());
   }
   IntArrayRef strides() const {
     return impl_->strides();
