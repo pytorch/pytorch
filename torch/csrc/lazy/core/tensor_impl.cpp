@@ -6,6 +6,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
 
 namespace torch {
 namespace lazy {
@@ -83,6 +84,14 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   // according to https://github.com/pytorch/xla/pull/2682.
   is_non_overlapping_and_dense_ = false;
   set_sizes_strides_policy(SizesStridesPolicy::CustomSizes);
+
+  auto rank = tensor_->shape().Get().sizes().size();
+  sym_sizes_.reserve(rank);
+  for (auto i: c10::irange(rank)) {
+    auto dim_node = getBackend()->GetIrBuilder()->MakeSizeNode(this->tensor_->GetIrValue(), i);
+    auto sn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
+    sym_sizes_.push_back(sn->toSymInt());
+  }
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
@@ -125,6 +134,10 @@ void LTCTensorImpl::shallow_copy_from(
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
   ltc_impl->tensor_->ShallowCopyTo(tensor_);
   generation_ = 0;
+}
+
+c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
+  return c10::SymIntArrayRef(sym_sizes_.data(), sym_sizes_.size());
 }
 
 void LTCTensorImpl::setup_size_properties() {
