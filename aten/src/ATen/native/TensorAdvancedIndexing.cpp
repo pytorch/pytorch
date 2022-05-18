@@ -298,7 +298,7 @@ void index_func_meta_impl(
   // A hack to run TensorIterator checks in the meta function.
   // See comment: https://github.com/pytorch/pytorch/pull/65993#discussion_r760307417
   // TODO: (@krshrimali) Try inheriting from TensorIteratorBase instead.
-  if (result.device() == kMeta && result.dim() > 0) {
+  if (result.device() == kMeta) {
     auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);

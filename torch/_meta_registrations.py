@@ -1,11 +1,6 @@
 import torch
-from torch._prims import utils
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
-
-def check(b, s):
-    if not b:
-        raise RuntimeError(s)
 
 def toRealValueType(dtype):
     from_complex = {
@@ -71,49 +66,6 @@ def meta_linalg_eigh(self, uplo="L"):
     values.transpose_(-2, -1)
     vectors = self.new_empty(self.shape[:-1])
     return (values, vectors)
-
-@torch.library.impl(meta_lib, "dot")
-def meta_dot(self, tensor):
-    check(
-        self.dim() == 1 and tensor.dim() == 1,
-        f"1D tensors expected, but got {self.dim()}D and {tensor.dim()}D tensors"
-    )
-    return self.new_empty(())
-
-@torch.library.impl(meta_lib, "var_mean.correction")
-def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
-    dim = utils.reduction_dims(self.shape, dim)
-    if keepdim:
-        output_shape = tuple(self.shape[i] if i not in dim else 1 for i in range(self.ndim))
-    else:
-        output_shape = utils.compute_reduction_output_shape(self.shape, dim)
-    result1 = self.new_empty(output_shape, dtype=toRealValueType(self.dtype))
-    result2 = self.new_empty(output_shape)
-    return result1, result2
-
-@torch.library.impl(meta_lib, "inverse")
-def meta_inverse(self):
-    # Bug: https://github.com/pytorch/pytorch/issues/77498
-    if self.numel() == 0:
-        return torch.empty_like(self)
-    r = self.new_empty(self.shape)
-    r.transpose_(-2, -1)
-    return r
-
-@torch.library.impl(meta_lib, "bernoulli.out")
-def meta_bernoulli(self, *, generator=None, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out
-
-@torch.library.impl(meta_lib, "_adaptive_avg_pool2d")
-def meta_adaptive_avg_pool2d(self, output_size):
-    check(self.ndim == 3 or self.ndim == 4, f"Expected 3D or 4D tensor, but got {self.shape}")
-    return self.new_empty(self.shape[:-2] + tuple(output_size))
-
-@torch.library.impl(meta_lib, "_adaptive_avg_pool3d")
-def meta_adaptive_avg_pool3d(self, output_size):
-    check(self.ndim == 4 or self.ndim == 5, f"Expected 4D or 5D tensor, but got {self.shape}")
-    return self.new_empty(self.shape[:-3] + tuple(output_size))
 
 @torch.library.impl(meta_lib, "reflection_pad2d")
 def meta_pad2d(self, padding):
