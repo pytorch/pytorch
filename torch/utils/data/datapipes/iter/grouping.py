@@ -232,7 +232,6 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
         self.wrapper_class = DataChunk
-        self._restored = False
 
     def _remove_biggest_key(self):
         biggest_key = None
@@ -277,11 +276,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             yield self.wrapper_class(res)
 
     def reset(self) -> None:
-        if self._restored:
-            self._restored = False
-        else:
-            self.curr_buffer_size = 0
-            self.buffer_elements = defaultdict(list)
+        self.curr_buffer_size = 0
+        self.buffer_elements = defaultdict(list)
 
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
@@ -309,7 +305,6 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         ) = state
         self.curr_buffer_size = 0
         self.buffer_elements = defaultdict(list)
-        self._restored = True
 
     def __del__(self):
         self.buffer_elements.clear()
