@@ -33,37 +33,16 @@ from torchgen.model import (
     NativeFunctionsViewGroup,
     ListType,
 )
+from torchgen.native_function_generation import (
+    OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
+    MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT,
+    INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
+)
+
 from torchgen.selective_build.selector import SelectiveBuilder
 
 from typing import List, Optional, Union, Tuple, Callable
 
-
-# See Note: [Out ops with functional variants that don't get grouped properly]
-OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
-    # This has a functional variant, but it's currently marked private. Promote to public?
-    "adaptive_avg_pool3d_backward.grad_input",
-    # There's a functional variant, _slow_conv2d_backward.output_mask, that isn't grouped properly.
-    # Maybe we can kill this operator in favor of convolution_backward?
-    "_slow_conv2d_backward.grad_input",
-]
-
-
-# See Note: [Mutable ops that cannot get an out variant]
-MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
-    # should be out=?
-    "_cummax_helper",
-    # should be out=?
-    "_cummin_helper",
-]
-
-INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
-    # polygamma and polygamma.out both exist, but have a
-    # pre-self arg (while polygamma_ does not)
-    # We should either fix this schema so it can be grouped properly,
-    # or allow the codegen to generate new functional/out= NativeFunctions for this op
-    # (which would require changing its overload name to prevent overload ambiguity).
-    "polygamma_"
-]
 
 # Note: [Mutable Ops Not Using Functionalization]
 # Ops in this list currently do not work with functionalization and should be fixed.
@@ -164,6 +143,7 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
     # We should only be generating these for code-generated NativeFunctions
     if "generated" not in g.functional.tags:
         return None
+    # And we always write the kernel for a generated op in terms of a non-generated op.
     if g.inplace is not None and "generated" not in g.inplace.tags:
         target_f = g.inplace
     elif g.mutable is not None and "generated" not in g.mutable.tags:
@@ -173,7 +153,6 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
         # See Note: [Mutable Ops Not Using Functionalization]
         raise AssertionError(str(g.functional.func))
 
-    # And we always write the kernel for a generated op in terms of a non-generated op.
     sig = DispatcherSignature(g.functional.func)
     target_sig = DispatcherSignature(target_f.func)
 
@@ -201,14 +180,7 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
             cloned_return_names.append(f"{a_curr.name}_clone")
         else:
             context.append(dispatcher.argument(a_curr))
-    exprs = ", ".join(
-        [
-            e.expr
-            for e in translate(
-                context, target_sig.arguments(), allow_tensor_const_cast=True
-            )
-        ]
-    )
+    exprs = ", ".join([e.expr for e in translate(context, target_sig.arguments())])
 
     out_name = "output"
     maybe_assign = f"auto {out_name} = " if len(target_f.func.returns) > 0 else ""
