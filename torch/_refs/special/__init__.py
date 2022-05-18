@@ -40,6 +40,7 @@ i1e = _make_elementwise_unary_reference(
     aten_op=torch.ops.aten.special_i1e,
 )
 
+
 def _xlog1py(a: Union[Tensor, NumberType], b: Union[Tensor, NumberType]):
     if isinstance(a, Tensor) and isinstance(b, Number):
         b = prims._wrap_scalar(b, dtype=a.dtype, device=a.device)
@@ -49,6 +50,7 @@ def _xlog1py(a: Union[Tensor, NumberType], b: Union[Tensor, NumberType]):
     cond = refs.bitwise_and(refs.eq(a, 0), refs.bitwise_not(refs.isnan(b)))
     rhs = refs.where(cond, a, refs.mul(a, refs.log1p(b)))
     return refs.where(refs.isnan(b), b, rhs)
+
 
 # TODO add docstring
 xlog1py = _make_elementwise_binary_reference(
