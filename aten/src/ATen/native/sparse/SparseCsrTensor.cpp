@@ -531,8 +531,8 @@ Tensor& copy_sparse_compressed_(Tensor& self, const Tensor& src, bool non_blocki
   AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "copy_sparse_compressed_",
                                               [&]{},
                                               [&]{
-                                                auto self_block_size = DimVector(self.values().sizes().slice(-2));
-                                                auto src_block_size = DimVector(src.values().sizes().slice(-2));
+                                                auto self_block_size = DimVector(self.values().sizes().slice(self.values().dim()-2, 2));
+                                                auto src_block_size = DimVector(src.values().sizes().slice(src.values().dim()-2, 2));
                                                 TORCH_CHECK(self_block_size == src_block_size,
                                                             "torch.copy_: copy of sparse compressed tensors having different block sizes is not supported.",
                                                             " self and src block sizes are ", self_block_size, " and ", src_block_size, ", respectivly.");
