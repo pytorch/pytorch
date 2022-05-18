@@ -162,7 +162,6 @@ def _safe_copy_out(*, copy_from: TensorLikeType, copy_to: TensorLikeType):
 
 
 # FIXME: only supports single tensor out
-# FIXME: only supports out parameter that is literally called "out"
 def out_wrapper(fn: Callable) -> Callable:
     """
     Adds the out parameter to a Python reference.
