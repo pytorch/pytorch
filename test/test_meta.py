@@ -654,6 +654,7 @@ meta_function_skips = {
     torch.linalg.matrix_power: {f32, f64},
     torch.linalg.matrix_rank: {f32, f64},
     torch.linalg.pinv: {f32, f64},
+    torch.empty: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
 }
 
 meta_function_device_expected_failures = defaultdict(dict)
@@ -967,6 +968,7 @@ meta_dispatch_skips = {
     aten.inverse.default: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
+    aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
 }
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
