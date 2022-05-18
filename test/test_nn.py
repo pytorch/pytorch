@@ -20541,7 +20541,7 @@ class TestNNDeviceType(NNTestCase):
     @torch.no_grad()
     def test_multihead_attn_in_proj_bias_none(self, device, dtype):
         mha = torch.nn.MultiheadAttention(1, 1, bias=False, dtype=dtype, device=device)
-        query = torch.rand(3, 2, 1)
+        query = torch.rand(3, 2, 1, dtype=dtype, device=device)
         mha(query, query, query)
 
     @dtypes(torch.double)
@@ -20551,8 +20551,8 @@ class TestNNDeviceType(NNTestCase):
         # will cause the logic to use per-input project weights, thereby
         # forcing self.in_proj_weight = None
         mha = torch.nn.MultiheadAttention(4, 4, vdim=2, kdim=2, dtype=dtype, device=device)
-        query = torch.rand(4, 4, 4)
-        key = torch.rand(4, 4, 2)
+        query = torch.rand(4, 4, 4, dtype=dtype, device=device)
+        key = torch.rand(4, 4, 2, dtype=dtype, device=device)
         mha(query, key, key)
 
     @dtypes(torch.float)
