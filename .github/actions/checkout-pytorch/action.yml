@@ -44,5 +44,5 @@ runs:
         SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       run: |
         git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin "$SHA"
-        git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin master
-        git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin viable/strict
+        git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +refs/heads/master:refs/remotes/origin/master
+        git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +refs/heads/viable/strict:refs/remotes/origin/viable/strict
