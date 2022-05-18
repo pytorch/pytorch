@@ -5267,24 +5267,31 @@
   dispatch:
     CPU, CUDA: frexp_out
 
+# Deprecated (v.1.12)
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function
 
+# Deprecated (v.1.12)
 - func: frobenius_norm.dim(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   variants: function
 
+# Deprecated (v.1.12)
 - func: frobenius_norm.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
+# Deprecated (v.1.12)
 - func: nuclear_norm(Tensor self, bool keepdim=False) -> Tensor
   variants: function
 
+# Deprecated (v.1.12)
 - func: nuclear_norm.out(Tensor self, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
+# Deprecated (v.1.12)
 - func: nuclear_norm.dim(Tensor self, int[2] dim, bool keepdim=False) -> Tensor
   variants: function
 
+# Deprecated (v.1.12)
 - func: nuclear_norm.dim_out(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
@@ -11577,11 +11584,11 @@
 - func: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    CPU, CUDA: linalg_vector_norm
+  structured_delegate: linalg_vector_norm.out
 
 - func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  structured: True
   dispatch:
     CPU, CUDA: linalg_vector_norm_out
 
