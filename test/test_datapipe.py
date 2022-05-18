@@ -434,7 +434,7 @@ class TestIterableDataPipeBasic(TestCase):
         numbers = NumbersDataset(10)
         n1, n2, n3 = numbers.demux(3, lambda x: x % 3)
         n = n1.mux(n2, n3)
-        self.assertEqual(list(range(10)), list(n))
+        self.assertEqual(list(range(9)), list(n))
 
         # Functional Test: Uneven DataPipes
         source_numbers = list(range(0, 10)) + [10, 12]
@@ -443,7 +443,7 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual([0, 2, 4, 6, 8, 10, 12], list(n1))
         self.assertEqual([1, 3, 5, 7, 9], list(n2))
         n = n1.mux(n2)
-        self.assertEqual(source_numbers, list(n))
+        self.assertEqual(list(range(10)), list(n))
 
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_with_col_file_handle_datapipe(self):
@@ -929,7 +929,7 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp2 = dp.iter.IterableWrapper([10])
         input_dp3 = dp.iter.IterableWrapper([100, 200, 300])
         output_dp = input_dp1.mux(input_dp2, input_dp3)
-        expected_output = [1, 10, 100, 2, 200, 3, 300, 4]
+        expected_output = [1, 10, 100]
         self.assertEqual(len(expected_output), len(output_dp))
         self.assertEqual(expected_output, list(output_dp))
 
@@ -937,8 +937,8 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp1 = dp.iter.IterableWrapper([0, 1, 2, 3])
         input_dp2 = dp.iter.IterableWrapper([])
         output_dp = input_dp1.mux(input_dp2)
-        self.assertEqual(len(input_dp1), len(output_dp))
-        self.assertEqual(list(input_dp1), list(output_dp))
+        self.assertEqual(len(input_dp2), len(output_dp))
+        self.assertEqual(list(input_dp2), list(output_dp))
 
         # __len__ Test: raises TypeError when __len__ is called and an input doesn't have __len__
         input_dp1 = dp.iter.IterableWrapper(range(10))
@@ -2275,15 +2275,14 @@ class TestSharding(TestCase):
         sharded_dp = self._get_pipeline().sharding_filter()
         torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 1)
         items = list(sharded_dp)
-        self.assertEqual([1, 20, 40, 70], items)
+        self.assertEqual([1, 20], items)
 
-        all_items = list(self._get_pipeline())
+        all_items = [0, 1, 10, 4, 20, 7]
         items = []
         for i in range(3):
             sharded_dp = self._get_pipeline().sharding_filter()
             torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, i)
             items += list(sharded_dp)
-
         self.assertEqual(sorted(all_items), sorted(items))
 
     def test_sharding_length(self):
