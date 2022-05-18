@@ -148,9 +148,9 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
     if (result.numel() == 0) {
       at::native::resize_as_sparse_csr_(result, self);
     }
-    // copy_sparse_csr_ internally checks the sizes of result and self tensors
+    // copy_sparse_compressed_ internally checks the sizes of result and self tensors
     // Hence no external size check required
-    at::native::copy_sparse_csr_(result, self);
+    at::native::copy_sparse_compressed_(result, self);
   }
 
   auto self_values = self.values();
