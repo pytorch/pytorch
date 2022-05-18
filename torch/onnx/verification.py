@@ -8,7 +8,7 @@ import copy
 import io
 import os
 import tempfile
-from typing import Optional, Sequence, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import numpy as np
 
@@ -212,6 +212,7 @@ def verify(
     ort_providers=_ORT_PROVIDERS,
     rtol=0.001,
     atol=1e-7,
+    **kwargs,
 ):
     """Verify model export to ONNX with ONNXRuntime.
 
