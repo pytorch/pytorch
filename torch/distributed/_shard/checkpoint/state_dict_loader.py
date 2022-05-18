@@ -116,7 +116,7 @@ def load_state_dict(
 
     This function can be used for local inference and load a checkpoint
     produced by ``save_state_dict`` without having a process group initialized
-    by passing `no_dist=True` and by using Tensors instead of ShardedTensors.
+    by passing ``no_dist=True`` and by using Tensors instead of ShardedTensors.
 
     Args:
         state_dict (Dict[str, Any]) : The state_dict to load. Note that this
@@ -124,7 +124,7 @@ def load_state_dict(
         storage_reader (StorageReader): StorageReader used to load data from.
         process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
         coordinator_rank (int): Rank to use to coordinate the checkpoint, rank0 is used by default
-        no_dist (bool): Don't attempt to load in SPMD style. Default to false
+        no_dist (bool): Don't attempt to load in SPMD style. Default to False
 
     Returns:
         None.
@@ -179,7 +179,6 @@ def load_state_dict(
 
     global_result: Optional[CheckpointException] = None
     if not no_dist:
-        # FIXME we could do an all_to_all_object if once existed
         all_errors = [None] * dist.get_world_size(process_group)
 
         dist.all_gather_object(

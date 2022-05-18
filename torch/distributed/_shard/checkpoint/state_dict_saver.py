@@ -111,7 +111,7 @@ def save_state_dict(
     call `save_state_dict` and that all data in state_dict belong to it.
 
     This function can be used to save a state_dict with an intialized process
-    group by passing `no_dist=True`. This can be used to produce a checkpoint
+    group by passing ``no_dist=True``. This can be used to produce a checkpoint
     that can consumed by load_state_dict is a SPMD fashion.
 
     Args:
@@ -119,7 +119,7 @@ def save_state_dict(
         storage_writer (StorageWriter): Instance of StorageWrite use to perform writes.
         process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
         coordinator_rank (int): Rank to use to coordinate the checkpoint, rank0 is used by default
-        no_dist (bool): Don't attempt to save in SPMD style. Default to false
+        no_dist (bool): Don't attempt to save in SPMD style. Default to False
 
     Example:
         >>> my_model = MyModule()
