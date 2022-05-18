@@ -629,7 +629,6 @@ meta_function_skips = {
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
     # BEGIN TODO
     torch.nn.functional.nll_loss: {bf16, f32, f64},
-    torch.normal: {bf16, f16, f32, f64},
     torch.prod: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.tensor_split: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     # END TODO
@@ -851,10 +850,6 @@ meta_dispatch_expected_failures = {
     aten.nll_loss2d_forward.default: {bf16, f64, f32},
     aten.nonzero.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.normal.Tensor_Tensor: {bf16, f16, f64, f32},
-    aten.normal.Tensor_Tensor_out: {bf16, f16, f64, f32},
-    aten.normal.float_Tensor: {bf16, f16, f64, f32},
-    aten.normal.float_Tensor_out: {bf16, f16, f64, f32},
     aten.polar.default: {f64, f32},
     aten.prelu.default: {bf16, f64, f32},
     aten.prod.default: {i64, u8, b8, f32, i8, f64, i16, i32},
