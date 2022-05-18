@@ -460,6 +460,12 @@ class FullyShardedDataParallel(nn.Module):
         Changing the original parameter variable names after construction will
         lead to undefined behavior.
 
+    .. warning::
+        Passing in `sync_module_states=True` flag requires module to be input
+        on GPU, or to use ``device_id`` argument to specify a CUDA device that
+        FSDP will move module to. This is because ``sync_module_states=True``
+        requires GPU communication.
+
     .. note::
         Inputs into FSDP ``forward`` function will be moved to compute device
         (same device FSDP module is on) before running ``forward``, so user does
@@ -734,7 +740,7 @@ class FullyShardedDataParallel(nn.Module):
             )
 
         # Move module appropriately depending on device_id and whether module is on CPU.
-        needs_move_back_to_cpu = self._move_module_if_needed(module)
+        self._move_module_if_needed(module)
 
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
@@ -853,17 +859,10 @@ class FullyShardedDataParallel(nn.Module):
             for p in self.params:
                 self._offload_to_cpu(p)
 
-        if needs_move_back_to_cpu:
-            # _fsdp_wrapped_module took ownership of module and we deleted
-            # module, so move _fsdp_wrapped_module back.
-            self._fsdp_wrapped_module = self._fsdp_wrapped_module.to(
-                torch.device("cpu")
-            )
-
         # For validating execution order across ranks
         self._exec_order_data = _ExecOrderData()
 
-    def _move_module_if_needed(self, module) -> bool:
+    def _move_module_if_needed(self, module) -> None:
         """
         Moves module appropriately depending on device_id and
         whether module is on CPU. Returns a ``bool`` indicating
@@ -872,7 +871,6 @@ class FullyShardedDataParallel(nn.Module):
         """
         # Move module to device specified. Note that this is done prior to
         # setting compute_device to ensure that they align.
-        needs_move_back_to_cpu = False
         if self.device_id is not None:
             param = None
             try:
@@ -898,7 +896,8 @@ class FullyShardedDataParallel(nn.Module):
                 )
         else:
             # device_id argument is not specified
-            # If module is on CPU, move it to current device and log a warning.
+            # If module is on CPU, log a warning asking user to use `device_id` for faster
+            # GPU init.
             try:
                 # Get the next unflat param
                 param_gen = module.parameters()
@@ -909,20 +908,15 @@ class FullyShardedDataParallel(nn.Module):
 
                 if param.device == torch.device("cpu"):
                     warnings.warn(
-                        f"Module is input on CPU, we are moving it to {torch.cuda.current_device()}"
-                        " to perform parameter verification, flattening, sharding, and will"
-                        " move it back after."
+                        "Module is input on CPU and will thus have flattening and sharding"
+                        " run on CPU, which is less efficient than on GPU. We recommend passing in "
+                        "`device_id` argument which will enable FSDP to put module on GPU device,"
+                        " module must also be on GPU device to work with `sync_module_states=True` flag"
+                        " which requires GPU communication."
                     )
-                    needs_move_back_to_cpu = True
-                    # Note that this will match self.compute_device, because
-                    # compute_device is computed as current_device for CPU
-                    # modules.
-                    module = module.to(torch.cuda.current_device())
             except StopIteration:
                 # this FSDP instance manages no parameters
                 pass
-
-        return needs_move_back_to_cpu
 
     def _init_reshard_after_forward(self):
         if self.sharding_strategy == ShardingStrategy.FULL_SHARD:

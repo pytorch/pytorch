@@ -199,8 +199,7 @@ class TestFSDPMisc(FSDPTest):
     def test_fsdp_cpu_init_stays_on_cpu(self):
         """
         Ensure that CPU model input stays on CPU
-        after FSDP init even though sharding, flattening
-        is run on GPU.
+        after FSDP init and we log a warning.
         """
         torch.cuda.set_device(self.rank)
         regex = "Module is input on CPU"
@@ -246,6 +245,15 @@ class TestFSDPMisc(FSDPTest):
         fsdp = FSDP(m, sync_module_states=True)
         with fsdp.summon_full_params(fsdp):
             _validate(fsdp, process_group=self.process_group, assert_fn=self.assertEqual)
+
+        # sync_module_states also works with CPU module with device_id passed in
+        m = MyModel(self.rank)
+        _validate(m, process_group=self.process_group, assert_fn=self.assertNotEqual)
+        # Passing sync_module_states into FSDP makes model the same during init.
+        fsdp = FSDP(m, device_id=torch.cuda.current_device(), sync_module_states=True)
+        with fsdp.summon_full_params(fsdp):
+            _validate(fsdp, process_group=self.process_group, assert_fn=self.assertEqual)
+
 
 instantiate_parametrized_tests(TestFSDPMisc)
 
