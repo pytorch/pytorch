@@ -41,5 +41,5 @@ runs:
     - name: other refs
       shell: bash
       run: |
-        git fetch origin master
-        git fetch origin viable/strict
+        git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin master
+        git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin viable/strict
