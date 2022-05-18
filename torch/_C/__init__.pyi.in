@@ -964,6 +964,7 @@ def _nccl_reduce_scatter(input: Sequence[Tensor],
                          op: _int,
                          streams: Optional[Sequence[_CudaStreamBase]],
                          comms: Optional[Sequence[object]]) -> None: ...
+def _rocm_is_backward_pass() -> _bool: ...
 
 
 class _CudaDeviceProperties:
