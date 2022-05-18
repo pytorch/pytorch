@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import itertools
-from torch._six import inf, nan
+from torch._six import inf
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
 import torch.backends.mps
@@ -207,48 +207,6 @@ class TestAvgPool(TestCase):
 
 
 class TestMPS(TestCase):
-    def test_masked_fill(self):
-        device = "mps"
-        dtype = torch.float32
-        mask_dtype = torch.bool
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            num_dest = 10
-            dst = torch.zeros(num_dest, dtype=dtype, device=device)
-            mask = torch.randint(2, (num_dest,), dtype=mask_dtype, device=device)
-            val = random.random()
-            dst2 = torch.zeros(num_dest, dtype=dtype)
-            mask_cpu = mask.to("cpu")
-
-            dst.masked_fill_(mask, val)
-            for i in range(num_dest):
-                if mask_cpu[i]:
-                    dst2[i] = val
-            self.assertEqual(dst.to("cpu"), dst2, atol=0, rtol=0)
-
-            # test non-contiguous case
-            dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
-            dst2 = dst.contiguous()
-            if dtype.is_complex:
-                mask = dst.abs() > 0
-            else:
-                mask = dst > 0
-            self.assertTrue(not dst.is_contiguous())
-            self.assertTrue(dst2.is_contiguous())
-            dst.masked_fill_(mask.to(mask_dtype), val)
-            dst2.masked_fill_(mask.to(mask_dtype), val)
-            self.assertEqual(dst, dst2, atol=0, rtol=0)
-
-            if mask_dtype == torch.uint8:
-                self.assertEqual(len(w), 3)
-
-                warn = 'masked_fill_ received a mask with dtype torch.uint8,'
-                for wi in w:
-                    self.assertEqual(str(wi.message)[0:52], str(warn))
-            else:
-                self.assertEqual(len(w), 0)
-
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, device="cpu") / 3 * math.pi
@@ -343,11 +301,11 @@ class TestMPS(TestCase):
 
     def test_baddbmm(self):
         def helper(input_shape, batch1_shape, batch2_shape):
-            M_cpu      = torch.randn(input_shape)
+            M_cpu = torch.randn(input_shape)
             batch1_cpu = torch.randn(batch1_shape)
             batch2_cpu = torch.randn(batch2_shape)
             alpha = 1.2
-            beta  = 0.8
+            beta = 0.8
 
             M_mps = M_cpu.detach().clone().to("mps")
             batch1_mps = batch1_cpu.detach().clone().to("mps")
@@ -360,7 +318,6 @@ class TestMPS(TestCase):
             print(output_mps.shape)
             self.assertEqual(output_cpu, output_mps)
             self.assertEqual(output_cpu.size(), output_mps.size())
-        
         helper(input_shape=(3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(10, 3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
         helper(input_shape=(1, 77, 77), batch1_shape=(8, 77, 64), batch2_shape=(8, 64, 77))
@@ -551,7 +508,7 @@ class TestMPS(TestCase):
             net = torch.nn.AdaptiveAvgPool2d((1, 1))
             out = net(x)
             ref_out = x.contiguous().mean((-1, -2)).view((x.size(0), x.size(1), 1, 1))
-            print (ref_out)
+            print(ref_out)
 
             out.sum().backward()    # make sure it doesn't crash
 
@@ -621,7 +578,7 @@ class TestMPS(TestCase):
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             # This passes
-            self.assertEqual(x, cpu_x.permute(0,2,3,1))
+            self.assertEqual(x, cpu_x.permute(0, 2, 3, 1))
 
         helper((2, 2, 2, 2), True)
 
@@ -981,7 +938,7 @@ class TestMPS(TestCase):
             self.assertEqual(x.grad, cpu_x.grad, rtol=2.6e-06, atol=2e-05)
             self.assertEqual(wt.grad, cpu_wt.grad, atol=8e-04, rtol=10.4e-05)
             if(bias_shape is not None):
-             self.assertEqual(bias.grad, cpu_bias.grad, atol=8e-04, rtol=10.4e-05)
+                self.assertEqual(bias.grad, cpu_bias.grad, atol=8e-04, rtol=10.4e-05)
 
         N = 1
         C_in = 3
@@ -1239,8 +1196,8 @@ class TestMPS(TestCase):
 
         cpu_x.transpose_(0, 1)
         mps_x.transpose_(0, 1)
-        print (cpu_x)
-        print (mps_x.to('cpu'))
+        print(cpu_x)
+        print(mps_x.to('cpu'))
         self.assertEqual(cpu_x, mps_x.to('cpu'))
 
     def test_slice(self):
@@ -1448,6 +1405,7 @@ class TestNLLLoss(TestCase):
             self.assertEqual(strided_mps, strided_cpu)
 
         helper(3, 3)
+
     def test_sum_backward(self):
         def helper(n, c):
             values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
@@ -1464,6 +1422,7 @@ class TestNLLLoss(TestCase):
             self.assertEqual(x.grad, cpu_x.grad)
 
         helper(3, 3)
+
     def test_nll_loss_empty_tensor_reduction_none(self, device='cpu'):
         self._nll_loss_helper([1, 3], "none", torch.empty([0], device=device))
         self._nll_loss_helper([3, 5, 7], "none", torch.empty([5, 7], device=device))
@@ -3288,7 +3247,7 @@ class TestNLLLoss(TestCase):
 
     def test_transpose_4D(self):
         values = [[[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]],
-                    [[[13.0, 14.0, 15.0], [16.0, 17.0, 18.0]], [[19.0, 20.0, 21.0], [22.0, 23.0, 24.0]]]]
+                  [[[13.0, 14.0, 15.0], [16.0, 17.0, 18.0]], [[19.0, 20.0, 21.0], [22.0, 23.0, 24.0]]]]
         cpu_x = torch.tensor(values, device='cpu')
         mps_x = torch.tensor(values, device='mps')
 
