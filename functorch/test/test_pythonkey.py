@@ -376,7 +376,6 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('linalg.householder_product'),
         xfail('logit'),
         xfail('matrix_exp'),
-        xfail('trace'),
         xfail('trapezoid'),
         xfail('trapz'),
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
