@@ -528,9 +528,9 @@ C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorH
     .template getDispatchKeySetUnboxed<Args...>(args...);
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  auto step_callbacks = at::getStepCallbacks(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(!step_callbacks.empty() && op.operatorDef_->op.isObserved())) {
-    return callWithDispatchKeySlowPath<Return, Args...>(op, step_callbacks, dispatchKeySet, kernel, std::forward<Args>(args)...);
+  auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(step_callbacks.has_value() && !step_callbacks->empty() && op.operatorDef_->op.isObserved())) {
+    return callWithDispatchKeySlowPath<Return, Args...>(op, *step_callbacks, dispatchKeySet, kernel, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
@@ -551,9 +551,9 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  auto step_callbacks = at::getStepCallbacks(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(!step_callbacks.empty() && entry.isObserved())) {
-    at::RecordFunction guard(std::move(step_callbacks));
+  auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(step_callbacks.has_value() && !step_callbacks->empty() && entry.isObserved())) {
+    at::RecordFunction guard(std::move(*step_callbacks));
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
     auto& schema = op.schema();
     auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
