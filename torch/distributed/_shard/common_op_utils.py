@@ -1,5 +1,6 @@
 import torch
 from torch.utils._pytree import tree_map
+from typing import Optional
 
 def _basic_validation(op, args=(), kwargs=None):
     """
@@ -30,7 +31,7 @@ def _basic_validation(op, args=(), kwargs=None):
         )
 
     # Validate all distributed tensors use the same PG.
-    cur_pg: torch.distributed.ProcessGroup = None
+    cur_pg: Optional[torch.distributed.ProcessGroup] = None
 
     def validate_pg(e):
         nonlocal cur_pg
