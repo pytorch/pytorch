@@ -1,8 +1,9 @@
 import re
 
-from torchgen.utils import assert_never, concatMap
+from torchgen.utils import assert_never
 
 from dataclasses import dataclass
+import dataclasses
 from typing import List, Dict, Optional, Iterator, Tuple, Set, Sequence, Callable, Union
 from enum import Enum, auto
 import itertools
@@ -900,90 +901,6 @@ class NativeFunctionsGroup:
             out=out,
         )
 
-    # This function, given a "base" function of one SchemaKind, as well as a target SchemaKind,
-    # generates a new NativeFunction with the same properties, but using the target SchemaKind.
-    # We only actually generate functions for either functional or out= SchemaKinds.
-    @staticmethod
-    def generate_function(
-        f: NativeFunction, k: SchemaKind
-    ) -> Tuple[
-        NativeFunction, Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
-    ]:
-        from torchgen.api import cpp
-
-        if k == SchemaKind.functional:
-            assert f.func.kind() != SchemaKind.functional
-            gets_composite_kernel = True
-            # The new "functional" NativeFunction has:
-            # - any mutable arguments have been converted into (immutable) returns.
-            #   (if a mutable argument was not also a return, it gets converted to one)
-            # - a "functional" overload name.
-            # The default grouping logic in signature() actually already does this,
-            # so we can piggy-back off it (but we still want return names)
-            func = f.func.signature(keep_return_names=True).with_name(
-                f.func.name.remove_inplace().with_overload(
-                    "functional"
-                    if not f.func.name.overload_name
-                    else f"{f.func.name.overload_name}_functional"
-                )
-            )
-        elif k == SchemaKind.out:
-            # We generate out= ops mostly just so that we can pair up NativeFunctions into groups easily,
-            # but at least today, there is no good reason to actually use them.
-            # we'll generate a dispatcher entry for them, but won't actually register any kernels for them.
-            gets_composite_kernel = False
-            if f.func.kind() == SchemaKind.inplace:
-                func = f.func.self_to_out_signature()
-            elif f.func.kind() == SchemaKind.mutable:
-                func = f.func.mutable_to_out_signature()
-            else:
-                raise AssertionError(
-                    "We only bother generating out= functions from either inplace or mutable variants"
-                )
-        else:
-            raise AssertionError(
-                "We currently only generate either functional or out= NativeFunctions"
-            )
-
-        if gets_composite_kernel:
-            backend_metadata = {
-                DispatchKey.CompositeExplicitAutograd: {
-                    func.name: BackendMetadata(cpp.name(func), structured=False)
-                }
-            }
-        else:
-            backend_metadata = {}
-
-        return (
-            NativeFunction(
-                func=func,
-                use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
-                # These generated fn's aren't meant to be user friendly- don't generate methods.
-                variants=set([Variant.function]),
-                structured=False,
-                structured_delegate=None,
-                structured_inherits=None,
-                precomputed=None,
-                autogen=[],
-                ufunc_inner_loop={},
-                manual_kernel_registration=False,
-                manual_cpp_binding=False,
-                python_module=None,
-                category_override=None,
-                device_guard=False,
-                device_check=DeviceCheckType.NoCheck,
-                loc=f.loc,
-                cpp_no_default_args=set(),
-                is_abstract=f.is_abstract,
-                has_composite_implicit_autograd_kernel=False,
-                has_composite_explicit_autograd_kernel=gets_composite_kernel,
-                # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
-                # which NativeFunction objects did not come directly from native_functions.yaml.
-                tags=set(["generated"]),
-            ),
-            backend_metadata,
-        )
-
 
 @dataclass(frozen=True)
 class BackendMetadata:
@@ -1270,12 +1187,15 @@ class FunctionSchema:
                 "This is not allowed- tensor options arguments are only allowed for factory functions."
                 f"schema: {str(self)}"
             )
-        if "functional" in str(self.name.overload_name):
+        if self.is_functional_fn():
             assert self.kind() == SchemaKind.functional, (
                 "Found an operator that is not functional, but its overload contains the string 'functional'."
                 "This is a special keyword in the codegen, please use a different overload name."
                 f"schema: {str(self)}"
             )
+
+    def is_functional_fn(self) -> bool:
+        return "functional" in self.name.overload_name
 
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
@@ -1367,29 +1287,40 @@ class FunctionSchema:
         keep_return_names: bool = False,
     ) -> "FunctionSchema":
         """
-        Certain schemas are 'related', in that they are simply
-        inplace/out/functional versions of the same function.  This method
-        factors these schemas into the "core" functional signature which
-        is equal across all versions.
+                Certain schemas are 'related', in that they are simply
+                inplace/out/functional versions of the same function.  This method
+                factors these schemas into the "core" functional signature which
+                is equal across all versions.
 
-        Here is what normalization happens to the schema to convert
-        it to a signature:
-        - The overload name is stripped (name is retained, since
-          it expresses semantic content about what the function does)
-        - Inplace is set False
-        - Out arguments are stripped
-        - Mutable post_self_positional args are converted to returns
-        - Mutability annotations are stripped  (this is sound
-          because you cannot overload on mutability annotation)
-        - Return names are stripped since they are not overloadable and
-          some variants have return names but some not
-        - TensorOptions are dropped
-          because out= variants of factory functions don't include them
-          (and we want to be able to pair up factory functions with their out variants)
+                Here is what normalization happens to the schema to convert
+                it to a signature:
+                - The overload name is stripped (name is retained, since
+                  it expresses semantic content about what the function does)
+                - Inplace is set False
+                - Out arguments are stripped
+                - Mutable post_self_positional args are converted to returns
+                - Mutability annotations are stripped  (this is sound
+                  because you cannot overload on mutability annotation)
+                - Return names are stripped since they are not overloadable and
+                  some variants have return names but some not
+                - TensorOptions are dropped
+                  because out= variants of factory functions don't include them
+                  (and we want to be able to pair up factory functions with their out variants)
 
-        Finally, we want to be able to pair up related "view" and their
-        corresponding "view_copy" operators. We do this by optionally
-        stripping the trailing "_copy" from the base name.
+                Finally, we want to be able to pair up related "view" and their
+                corresponding "view_copy" operators. We do this by optionally
+                stripping the trailing "_copy" from the base name.
+
+                Example of a mutable op before and after:
+
+                f.func (Mutable operator):
+        _fused_moving_avg_obs_fq_helper(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor output, Tensor mask)  # noqa: B950
+
+                f.func (Corresponding functional operator):
+        _fused_moving_avg_obs_fq_helper.functional(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor running_min, Tensor running_max, Tensor scale, Tensor zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor output, Tensor mask, Tensor running_min_out, Tensor running_max_out, Tensor scale_out, Tensor zero_point_out)  # noqa: B950
+
+                f.func.signature() output:
+        _fused_moving_avg_obs_fq_helper(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor running_min, Tensor running_max, Tensor scale, Tensor zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)  # noqa: B950
         """
 
         def strip_ret_annotation(r: Return) -> Return:
@@ -1455,104 +1386,6 @@ class FunctionSchema:
 
     def view_signature(self) -> "FunctionSchema":
         return self.signature(strip_view_copy_name=True)
-
-    def self_to_out_signature(self) -> "FunctionSchema":
-        # Generating an out= schema from an inplace schema.
-        assert self.kind() == SchemaKind.inplace
-        assert self.arguments.self_arg is not None
-        # The new out= schema has:
-        # - a new out argument with the same type as "self" (but with a mutable annotation)
-        # - The returns (if any) now alias the out= argument instead of "self"
-        # - an "out" overload name
-        return FunctionSchema(
-            name=self.name.remove_inplace().with_overload(
-                "out"
-                if not self.name.overload_name
-                else f"{self.name.overload_name}_out"
-            ),
-            arguments=self.arguments.remove_self_annotation().with_out_args(
-                [
-                    Argument(
-                        name="out",
-                        type=self.arguments.self_arg.argument.type,
-                        default=None,
-                        annotation=self.arguments.self_arg.argument.annotation,
-                    )
-                ]
-            ),
-            returns=self.returns,
-        )
-
-    def mutable_to_out_signature(self) -> "FunctionSchema":
-        # Generating an out= schema from a mutable schema.
-        assert self.kind() == SchemaKind.mutable
-        # The new out= schema has:
-        # - Any non-aliased tensor-like returns are converted to mutable, aliased out= arguments
-        #   (if the argument is a tensor then we also return it for method chaining,
-        #   otherwise we return nothing)
-        # - an "out" overload name
-        #
-        # Note that:
-        # (1) This also means that we can *only* generate an out= variant from a mutable schema
-        #     if the mutable schema has at least one tensor-like non-aliasing return.
-        # (2) The generated out= variant still has mutable positional arguments,
-        #     but if necessary we could probably add another out= variant that also
-        #     functionalizes the mutable arguments (a functional_out variant)
-
-        # More of a sanity check - our existing restrictions on schemas should enforce that
-        # mutable schema kinds never return their mutable arguments.
-        assert not any(
-            r.annotation is not None and r.annotation.is_write for r in self.returns
-        )
-
-        tensorlike_rets = [r for r in self.returns if r.type.is_tensor_like()]
-        assert len(tensorlike_rets) > 0
-
-        used_annotations = concatMap(
-            lambda a: [] if a.annotation is None else a.annotation.alias_set,
-            self.arguments.flat_all,
-        )
-        valid_annotations = [
-            x for x in "abcdefghijklmnopqrstuvwxyz" if x not in used_annotations
-        ]
-
-        all_rets_are_tensors = all(
-            r.type == BaseType(BaseTy.Tensor) for r in self.returns
-        )
-
-        new_out_args: List[Argument] = []
-        # The end result of new_returns is that:
-        # - If every return is a plain tensor, then the new returns == the old returns, but with the out= alias annotations added.
-        # - Otherwise, none of the out arguments show up in the returns (and we're only left with non-tensor-like returns, if any).
-        new_returns: List[Return] = []
-        for (i, r) in enumerate(self.returns):
-            if r.type.is_tensor_like():
-                new_out = Argument(
-                    name=f"out{i}",
-                    type=r.type,
-                    default=None,
-                    annotation=Annotation.parse(f"{valid_annotations[i]}!"),
-                )
-                new_out_args.append(new_out)
-                if all_rets_are_tensors:
-                    # The convention for out= schemas is that they only return their out arguments
-                    # if the return is a plain Tensor (or if it's a tuple of plain Tensors)
-                    new_ret = Return(
-                        name=None, type=new_out.type, annotation=new_out.annotation
-                    )
-                    new_returns.append(new_ret)
-            else:
-                new_returns.append(r)
-
-        return FunctionSchema(
-            name=self.name.remove_inplace().with_overload(
-                "out"
-                if not self.name.overload_name
-                else f"{self.name.overload_name}_out"
-            ),
-            arguments=self.arguments.with_out_args(new_out_args),
-            returns=tuple(new_returns),
-        )
 
     def with_name(self, name: "OperatorName") -> "FunctionSchema":
         return FunctionSchema(
@@ -2048,32 +1881,17 @@ class Arguments:
 
     def remove_self_annotation(self) -> "Arguments":
         assert self.self_arg is not None
-        return Arguments(
-            pre_self_positional=self.pre_self_positional,
+        return dataclasses.replace(
+            self,
             self_arg=SelfArgument(
-                Argument(
-                    name=self.self_arg.argument.name,
-                    type=self.self_arg.argument.type,
-                    default=self.self_arg.argument.default,
-                    annotation=None,
-                )
+                dataclasses.replace(self.self_arg.argument, annotation=None)
             ),
-            post_self_positional=self.post_self_positional,
-            pre_tensor_options_kwarg_only=self.pre_tensor_options_kwarg_only,
-            tensor_options=self.tensor_options,
-            post_tensor_options_kwarg_only=self.post_tensor_options_kwarg_only,
-            out=self.out,
         )
 
     def with_out_args(self, outs: List[Argument]) -> "Arguments":
         assert len(self.out) == 0
-        return Arguments(
-            pre_self_positional=self.pre_self_positional,
-            self_arg=self.self_arg,
-            post_self_positional=self.post_self_positional,
-            pre_tensor_options_kwarg_only=self.pre_tensor_options_kwarg_only,
-            tensor_options=self.tensor_options,
-            post_tensor_options_kwarg_only=self.post_tensor_options_kwarg_only,
+        return dataclasses.replace(
+            self,
             out=tuple(outs),
         )
 
