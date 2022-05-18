@@ -6,7 +6,6 @@ from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, T
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import _check_lambda_fn
-from torch.utils.data._utils.serialization import DILL_AVAILABLE, SerializationType, serialize_fn, deserialize_fn
 
 __all__ = [
     "ConcaterIterDataPipe",
@@ -187,6 +186,9 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.leading_ptr = 0
         self.end_ptr = None
 
+    def __del__(self):
+        self.buffer.clear()
+
 
 class _ChildDataPipe(IterDataPipe):
     r"""
@@ -356,7 +358,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            serialize_fn(self.classifier_fn) if DILL_AVAILABLE else self.classifier_fn,
+            self.classifier_fn,
             self.drop_none,
         )
         return state
@@ -366,18 +368,18 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            fn,
+            self.classifier_fn,
             self.drop_none,
         ) = state
-        if isinstance(fn, tuple) and len(fn) == 2 and isinstance(fn[1], SerializationType):
-            self.classifier_fn = deserialize_fn(fn)
-        else:
-            self.classifier_fn = fn
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
         self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
+
+    def __del__(self):
+        for dq in self.child_buffers:
+            dq.clear()
 
 
 @functional_datapipe('mux')

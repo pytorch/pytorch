@@ -113,7 +113,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         if list(period_group_size_dict.values())[-1] != overall_group_size:
             raise ValueError(
                 f"The last value in arg ``period_process_group_dict`` {list(period_group_size_dict.values())[-1]} "
-                "must be equal to the size of arg ``process_group`` {overall_group_size}."
+                f"must be equal to the size of arg ``process_group`` {overall_group_size}."
             )
 
         self.period_process_group_dict = OrderedDict()

@@ -28,9 +28,28 @@ from torchgen.api.types import (
     scalarT,
     scalarTypeT,
     memoryFormatT,
+    SymIntT,
 )
 
-valueT = BaseCppType("torch::lazy", "Value")
+
+_valueT = None
+
+
+def getValueT() -> BaseCppType:
+    global _valueT
+    if not _valueT:
+        raise NotImplementedError(
+            "The value type needs to be set with setValueT() in run_gen_lazy_tensor()"
+        )
+
+    return _valueT
+
+
+def setValueT(val: BaseCppType) -> None:
+    global _valueT
+    _valueT = val
+
+
 # this is a bad hack. I need to refactor the data model to represent each arg in the schema as an object,
 # making it easier to represent special properties of an arg.
 tensorListValueT = BaseCppType("torch::lazy", "Value")
@@ -56,15 +75,17 @@ def process_ir_type(
     """
     if isinstance(typ, BaseType):
         if typ.name == BaseTy.Tensor:
-            return BaseCType(valueT)
+            return BaseCType(getValueT())
         elif typ.name == BaseTy.Scalar:
             # at::scalar has special handling,
             # and is wrapped in an lazy::Value just like at::tensor
-            return BaseCType(valueT)
+            return BaseCType(getValueT())
         elif typ.name == BaseTy.ScalarType:
             return BaseCType(scalarTypeT)
         elif typ.name == BaseTy.int:
             return BaseCType(longT)
+        elif typ.name == BaseTy.SymInt:
+            return BaseCType(getValueT())
         elif typ.name == BaseTy.bool:
             return BaseCType(boolT)
         elif typ.name == BaseTy.float:
@@ -84,7 +105,7 @@ def process_ir_type(
     elif isinstance(typ, ListType):
         if str(typ.elem) == "Tensor?":
             # TODO(whc) is this actually correct? or should it use a Vector like above
-            return ListCType(OptionalCType(BaseCType(valueT)))
+            return ListCType(OptionalCType(BaseCType(getValueT())))
         elif str(typ.elem) == "Tensor":
             # this is a TensorList which comes in from GetTensorList as a Value
             return BaseCType(tensorListValueT)
@@ -102,10 +123,14 @@ def isValueType(typ: CType) -> bool:
     if isinstance(typ, BaseCType):
         # I am regretting my naming conventions, but now we are wrapping at::scalar in
         # lazy value, while preserving other 'scalar' types as scalars in the IR
-        return typ.type == valueT or typ.type == scalarT
+        return typ.type == getValueT() or typ.type == scalarT or typ.type == SymIntT
     elif isinstance(typ, (OptionalCType, ListCType, VectorCType)):
         return isValueType(typ.elem)
     return False
+
+
+def isSymIntType(typ: Type) -> bool:
+    return isinstance(typ, BaseType) and typ.name == BaseTy.SymInt
 
 
 def isWrappedScalarType(typ: Type) -> bool:
@@ -137,6 +162,7 @@ class LazyArgument:
     lazy_type_: Optional[CType]
     is_wrapped_scalar: bool
     is_generator: bool
+    is_symint_or_list: bool
 
     # true if this argument is or contains a lazy IR value
     is_lazy_value: bool
@@ -156,6 +182,7 @@ class LazyArgument:
         else:
             self.lazy_type_ = process_ir_type(arg.type)
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
+        self.is_symint_or_list = isSymIntType(arg.type)
 
         self.is_lazy_value = not self.is_generator and isValueType(self.lazy_type)
 

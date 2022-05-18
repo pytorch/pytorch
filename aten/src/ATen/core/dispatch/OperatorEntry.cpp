@@ -214,7 +214,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // For any dispatch key, it'll pick a kernel using the following order:
   //  (1) Use kernel if it's directly registered to this key
   //  (2) Handle runtime keys that have kernels available from alias keys
-  //    (2.1) Use kernel from DispatchKey::CompositeExplicitAutogradWithMutations if available.
+  //    (2.1) Use kernel from DispatchKey::CompositeExplicitAutogradNonFunctional if available.
   //          This is used to register a kernel that works for all backends in inference, except "functional" backends
   //          like LazyTensor/XLA. But it requires separate registration for Autograd keys to support training.
   //    (2.2) Use kernel from DispatchKey::CompositeExplicitAutograd if available.
@@ -235,7 +235,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
   //  (3) Use fallthrough kernel that are registered as fallback.
   // Alias Key Precedence:
-  //   CompositExplicitAutogradWithMutations > CompositeExplicitAutograd > CompositeImplicitAutograd > Autograd
+  //   CompositExplicitAutogradNonFunctional > CompositeExplicitAutograd > CompositeImplicitAutograd > Autograd
   // Note [CompositeExplicitAutograd and CompositeImplicitAutograd]
   //   When there're registrations to both CompositeExplicitAutograd & CompositeImplicitAutograd & Autograd, from (2.2) we know CompositeExplicitAutograd
   //   and Autograd kernels will be picked up and CompositeImplicitAutograd is overriden.
@@ -247,10 +247,10 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     return {*direct_registration, "kernel"};
   }
 
-  // 2.1 Use CompositeExplicitAutogradWithMutations kernel if available.
+  // 2.1 Use CompositeExplicitAutogradNonFunctional kernel if available.
   //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
-  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutogradWithMutations)) {
-    if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::CompositeExplicitAutogradWithMutations)) {
+  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutogradNonFunctional)) {
+    if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::CompositeExplicitAutogradNonFunctional)) {
       return {*default_backend_registration, "default backend kernel"};
     }
   }
@@ -336,11 +336,11 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   for (auto k : c10::getRuntimeDispatchKeySet(dispatch_key)) {
     updateDispatchTableEntry_(dispatcher, k);
   }
-  // Registration to CompositeExplicitAutogradWithMutations, CompositeExplicitAutograd and CompositeImplicitAutograd should be populated to Undefined.
+  // Registration to CompositeExplicitAutogradNonFunctional, CompositeExplicitAutograd and CompositeImplicitAutograd should be populated to Undefined.
   // We cannot do this above since Undefined cannot be represented in DispatchKeySet.
   if (dispatch_key == DispatchKey::CompositeImplicitAutograd
    || dispatch_key == DispatchKey::CompositeExplicitAutograd
-   || dispatch_key == DispatchKey::CompositeExplicitAutogradWithMutations) {
+   || dispatch_key == DispatchKey::CompositeExplicitAutogradNonFunctional) {
     updateDispatchTableEntry_(dispatcher, DispatchKey::Undefined);
   }
   // Note [Refresh Runtime Autograd entries in dispatchTable_]
