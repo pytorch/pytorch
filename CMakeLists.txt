@@ -212,7 +212,7 @@ cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
     "USE_CUDA;BUILD_TEST" OFF)
 cmake_dependent_option(
-    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" OFF
+    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
@@ -951,7 +951,7 @@ endif()
 
 if(APPLE)
     if(USE_MPS)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_MPS -fno-objc-arc -framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_MPS -fno-objc-arc -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
     endif()
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
