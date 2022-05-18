@@ -193,6 +193,7 @@ def out_wrapper(fn: Callable) -> Callable:
     _fn.__annotations__["out"] = TensorLikeType
     return _fn
 
+
 def out_wrapper_multi(*out_names):
     def go(fn: Callable) -> Callable:
         @wraps(fn)
@@ -221,12 +222,14 @@ def out_wrapper_multi(*out_names):
         sig = inspect.signature(fn)
         out_params = []
         for o in out_names:
-            out_params.append(inspect.Parameter(
-                o,
-                kind=inspect.Parameter.KEYWORD_ONLY,
-                default=None,
-                annotation=TensorLikeType,
-            ))
+            out_params.append(
+                inspect.Parameter(
+                    o,
+                    kind=inspect.Parameter.KEYWORD_ONLY,
+                    default=None,
+                    annotation=TensorLikeType,
+                )
+            )
         params = chain(sig.parameters.values(), out_params)
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
@@ -235,4 +238,5 @@ def out_wrapper_multi(*out_names):
         for o in out_names:
             _fn.__annotations__[o] = TensorLikeType
         return _fn
+
     return go
