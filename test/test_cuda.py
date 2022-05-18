@@ -7,6 +7,7 @@ import contextlib
 import ctypes
 import gc
 import io
+import os
 import pickle
 import queue
 import sys
@@ -574,6 +575,12 @@ class TestCuda(TestCase):
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
     def test_cublas_allow_tf32_get_set(self):
+        skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
+            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
+        if skip_tf32_cublas:
+            self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+            return
+
         orig = torch.backends.cuda.matmul.allow_tf32
         self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
         torch.backends.cuda.matmul.allow_tf32 = not orig
@@ -582,14 +589,19 @@ class TestCuda(TestCase):
 
     def test_float32_matmul_precision_get_set(self):
         self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
-        self.assertFalse(torch.backends.cuda.matmul.allow_tf32, False)
+        skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
+            int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
+        if not skip_tf32_cublas:
+            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
         for p in ('medium', 'high'):
             torch.set_float32_matmul_precision(p)
             self.assertEqual(torch.get_float32_matmul_precision(), p)
-            self.assertTrue(torch.backends.cuda.matmul.allow_tf32, True)
+            if not skip_tf32_cublas:
+                self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
         torch.set_float32_matmul_precision('highest')
         self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
-        self.assertFalse(torch.backends.cuda.matmul.allow_tf32, False)
+        if not skip_tf32_cublas:
+            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
 
     def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
         orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
@@ -3114,6 +3126,15 @@ torch.cuda.synchronize()
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_to_numpy(self):
         self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
+
+    def test_graph_is_current_stream_capturing(self):
+        self.assertFalse(torch.cuda.is_current_stream_capturing())
+
+        if (TEST_CUDA and (not TEST_WITH_ROCM) and int(torch.version.cuda.split(".")[0]) >= 11):
+            g = torch.cuda.CUDAGraph()
+            g.capture_begin()
+            self.assertTrue(torch.cuda.is_current_stream_capturing())
+            g.capture_end()
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
