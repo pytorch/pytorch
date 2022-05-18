@@ -392,7 +392,7 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss)
+@register_decomposition(aten.huber_loss, register_meta=True)
 @pw_cast_for_opmath
 def huber_loss(
     self: Tensor,
@@ -1114,7 +1114,7 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(aten.detach, disable_meta=True)
+@register_decomposition(aten.detach)
 def detach_decomposition(x):
     return x
 
