@@ -32,7 +32,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             torch.cuda.set_device(self.rank)
 
     def init_rpc(self):
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(_transports=["shm", "uv"])
         rpc_backend_options.init_method = f"file://{self.file_name}"
         for rank in range(self.world_size):
             rpc_backend_options.set_device_map(
