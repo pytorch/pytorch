@@ -1481,6 +1481,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       constexpr auto dense_backends = DispatchKeySet(
           {BackendComponent::CPUBit,
            BackendComponent::CUDABit,
+           BackendComponent::MPSBit,
            BackendComponent::HIPBit,
            BackendComponent::XPUBit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
@@ -1942,6 +1943,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // Cleaning warning messages, no need to break as TORCH_CHECK(false)
         // terminates flow.
         // break;
+      case MemoryFormat::NumOptions:
+        TORCH_INTERNAL_ASSERT(false, "invalid memory format ", memory_format);
     }
     // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
     // exclusive see #24090
