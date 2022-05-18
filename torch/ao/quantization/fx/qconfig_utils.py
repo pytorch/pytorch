@@ -1,6 +1,5 @@
 import torch
 from collections import defaultdict, OrderedDict
-import dataclasses
 from typing import Callable, Any, Dict, Tuple, Set, Optional, List
 from torch.ao.quantization import QConfig
 from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
@@ -55,14 +54,12 @@ def maybe_adjust_qconfig_for_module_name_object_type_order(
     fallback_qconfig: QConfigAny,
 ) -> QConfigAny:
     for qconfig_entry in qconfig_mapping.module_name_object_type_order_qconfigs:
-        (module_path, object_type, object_type_idx, qconfig) = dataclasses.astuple(qconfig_entry)
         if (
-            (module_path == cur_module_path) and
-            (object_type == cur_object_type) and
-            (object_type_idx == cur_object_type_idx)
+            (qconfig_entry.module_name == cur_module_path) and
+            (qconfig_entry.object_type == cur_object_type) and
+            (qconfig_entry.index == cur_object_type_idx)
         ):
-            return qconfig
-
+            return qconfig_entry.qconfig
     return fallback_qconfig
 
 

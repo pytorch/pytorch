@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections import OrderedDict
-from dataclasses import astuple, dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Callable, Dict, List, Union
 
 from .qconfig import QConfigAny
@@ -163,8 +163,10 @@ class QConfigMapping:
         The values of this dictionary are lists of tuples.
         """
 
-        def to_tuple_list(l):
-            return [astuple(e) for e in l]
+        def to_tuple_list(dataclass_list):
+            # Convert a list of dataclasses to a list of tuples
+            # Do not use dataclasses.astuple, which performs a deepcopy of the values
+            return [tuple([getattr(e, f.name) for f in fields(e)]) for e in dataclass_list]
         return {
             GLOBAL_DICT_KEY: self.global_qconfig,
             OBJECT_TYPE_DICT_KEY: to_tuple_list(self.object_type_qconfigs),

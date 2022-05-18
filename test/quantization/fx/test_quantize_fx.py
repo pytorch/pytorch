@@ -1846,16 +1846,18 @@ class TestQuantizeFx(QuantizationTestCase):
                 prepare_fx(m, qconfig_dict)
 
     def test_qconfig_mapping_set_global(self):
-        qconfig = QConfig(123, "global")
+        qconfig = get_default_qconfig()
         qconfig_mapping = QConfigMapping()
         self.assertEqual(qconfig_mapping.global_qconfig, None)
         qconfig_mapping.set_global(qconfig)
         self.assertEqual(qconfig_mapping.global_qconfig, qconfig)
 
     def test_qconfig_mapping_set_object_type(self):
-        qconfig1 = QConfig(1, "one")
-        qconfig2 = QConfig(2, "two")
-        qconfig3 = QConfig(3, "three")
+        qconfig1 = get_default_qconfig()
+        qconfig2 = get_default_qconfig()
+        qconfig3 = get_default_qconfig()
+        self.assertNotEqual(qconfig1, qconfig2)
+        self.assertNotEqual(qconfig1, qconfig3)
         qconfig_mapping = QConfigMapping()
         self.assertEqual(qconfig_mapping.object_type_qconfigs, [])
         # Insert some entries
@@ -1878,9 +1880,11 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(get_object_type_qconfig(qconfig_mapping, "nomatch", None), None)
 
     def test_qconfig_mapping_set_module_name_regex(self):
-        qconfig1 = QConfig(1, "one")
-        qconfig2 = QConfig(2, "two")
-        qconfig3 = QConfig(3, "three")
+        qconfig1 = get_default_qconfig()
+        qconfig2 = get_default_qconfig()
+        qconfig3 = get_default_qconfig()
+        self.assertNotEqual(qconfig1, qconfig2)
+        self.assertNotEqual(qconfig1, qconfig3)
         qconfig_mapping = QConfigMapping()
         self.assertEqual(qconfig_mapping.module_name_regex_qconfigs, [])
         # Insert some entries
@@ -1905,9 +1909,11 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "nomatch", None), None)
 
     def test_qconfig_mapping_set_module_name(self):
-        qconfig1 = QConfig(1, "one")
-        qconfig2 = QConfig(2, "two")
-        qconfig3 = QConfig(3, "three")
+        qconfig1 = get_default_qconfig()
+        qconfig2 = get_default_qconfig()
+        qconfig3 = get_default_qconfig()
+        self.assertNotEqual(qconfig1, qconfig2)
+        self.assertNotEqual(qconfig1, qconfig3)
         qconfig_mapping = QConfigMapping()
         self.assertEqual(qconfig_mapping.module_name_qconfigs, [])
         # Insert some entries
@@ -1930,9 +1936,11 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(get_module_name_qconfig(qconfig_mapping, "nomatch", None), None)
 
     def test_qconfig_mapping_set_module_name_object_type_order(self):
-        qconfig1 = QConfig(1, "one")
-        qconfig2 = QConfig(2, "two")
-        qconfig3 = QConfig(3, "three")
+        qconfig1 = get_default_qconfig()
+        qconfig2 = get_default_qconfig()
+        qconfig3 = get_default_qconfig()
+        self.assertNotEqual(qconfig1, qconfig2)
+        self.assertNotEqual(qconfig1, qconfig3)
         qconfig_mapping = QConfigMapping()
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs, [])
         # Insert some entries

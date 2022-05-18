@@ -368,20 +368,15 @@ def prepare_fx(
 
       * `qconfig_mapping`: mapping from model ops to qconfigs::
 
-          qconfig_mapping = QConfigMapping()
-              # default_qconfig
-              .set_global(global_qconfig)
-              # match on module type, function, or method name
-              .set_object_type(torch.nn.Linear, qconfig1)
-              .set_object_type(torch.nn.functional.linear, qconfig1)
-              # match on module name regex
-              .set_module_name_regex("foo.*bar.*conv[0-9]+", qconfig1)
-              .set_module_name_regex("foo.*bar.*", qconfig2)
-              .set_module_name_regex("foo.*", qconfig3)
-              # match on module name
-              .set_module_name("module1", qconfig1)
-              .set_module_name("module2", qconfig2)
-              # match on module name, object type, and index
+          qconfig_mapping = QConfigMapping() \
+              .set_global(global_qconfig) \
+              .set_object_type(torch.nn.Linear, qconfig1) \
+              .set_object_type(torch.nn.functional.linear, qconfig1) \
+              .set_module_name_regex("foo.*bar.*conv[0-9]+", qconfig1) \
+              .set_module_name_regex("foo.*bar.*", qconfig2) \
+              .set_module_name_regex("foo.*", qconfig3) \
+              .set_module_name("module1", qconfig1) \
+              .set_module_name("module2", qconfig2) \
               .set_module_name_object_type_order("module3", torch.nn.functional.linear, 0, qconfig3)
 
       * `prepare_custom_config_dict`: customization configuration dictionary for quantization tool::
