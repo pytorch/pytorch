@@ -10,7 +10,7 @@ import copy
 import io
 import os
 import tempfile
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 import numpy as np
 
@@ -49,64 +49,6 @@ def _to_numpy(elem):
     return elem
 
 
-def _convert_to_onnx(
-    model,
-    model_f: Optional[Union[str, io.BytesIO]] = None,
-    input=None,
-    opset_version=None,
-    do_constant_folding=True,
-    keep_initializers_as_inputs=True,
-    dynamic_axes=None,
-    input_names=None,
-    output_names=None,
-    fixed_batch_size=False,
-    training=None,
-    verbose=False,
-    ort_providers=_ORT_PROVIDERS,
-    ort_optim_on=True,
-):
-    if model_f is None:
-        model_f = io.BytesIO()
-    input_copy = copy.deepcopy(input)
-
-    torch.onnx._export(
-        model,
-        input_copy,
-        model_f,
-        opset_version=opset_version,
-        do_constant_folding=do_constant_folding,
-        keep_initializers_as_inputs=keep_initializers_as_inputs,
-        dynamic_axes=dynamic_axes,
-        input_names=input_names,
-        output_names=output_names,
-        fixed_batch_size=fixed_batch_size,
-        training=training,
-        verbose=verbose,
-    )
-
-    try:
-        import onnxruntime  # type: ignore[import]
-    except ImportError:
-        raise RuntimeError("ONNXRuntime is required for export verification.")
-
-    # compute onnxruntime output prediction
-    so = onnxruntime.SessionOptions()
-    so.graph_optimization_level = (
-        onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
-        if ort_optim_on
-        else onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
-    )
-    # suppress ort warnings.
-    # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
-    so.log_severity_level = 3
-    ort_session = onnxruntime.InferenceSession(
-        model_f if isinstance(model_f, str) else model_f.getvalue(),
-        so,
-        providers=ort_providers,
-    )
-    return ort_session
-
-
 def _inline_flatten_list(inputs, res_list):
     for i in inputs:
         res_list.append(i) if not isinstance(
@@ -143,79 +85,187 @@ def _run_ort(ort_session, inputs):
     return _inline_flatten_list(ort_outs, [])
 
 
-def _ort_compare_with_pytorch(ort_outs, output, rtol, atol):
+def _create_ort_session(
+    model: Union[str, io.BytesIO], ort_providers: Optional[Tuple[str, ...]] = None
+):
+    try:
+        import onnxruntime  # type: ignore[import]
+    except ImportError:
+        raise RuntimeError("ONNXRuntime is required for export verification.")
+
+    if ort_providers is None:
+        ort_providers = _ORT_PROVIDERS
+
+    so = onnxruntime.SessionOptions()
+    # suppress ort warnings.
+    # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
+    so.log_severity_level = 3
+    ort_session = onnxruntime.InferenceSession(
+        model if isinstance(model, str) else model.getvalue(),
+        so,
+        providers=ort_providers,
+    )
+    return ort_session
+
+
+def _compare_ort_pytorch_outputs(ort_outs, output, rtol, atol):
     output, _ = torch.jit._flatten(output)
     outputs = _unpack_to_numpy(output)
 
-    # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"
 
-    # compare onnxruntime and PyTorch results
     for out, ort_out in zip(outputs, ort_outs):
         np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol)
 
 
+def _format_input_for_pytorch(args, kwargs):
+    if isinstance(args, (Tensor, dict)):
+        args = (args,)
+    # In-place operators will update input tensor data as well.
+    # Thus inputs are replicated before every forward call.
+    args = copy.deepcopy(args)
+    if kwargs:
+        kwargs = copy.deepcopy(kwargs)
+    else:
+        kwargs = {}
+    return args, kwargs
+
+
+def _format_input_for_export(args, kwargs):
+    args, kwargs = _format_input_for_pytorch(args, kwargs)
+    if not kwargs and isinstance(args[-1], dict):
+        onnx_inputs = args + ({},)
+    elif kwargs:
+        onnx_inputs = args + (kwargs,)
+    else:
+        onnx_inputs = args
+    return onnx_inputs
+
+
+def _format_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
+    onnx_inputs = _format_input_for_export(args, kwargs)
+    if flatten:
+        onnx_inputs, _ = torch.jit._flatten(onnx_inputs)
+    elif onnx_inputs and onnx_inputs[-1] == {}:
+        # Handle empty kwargs (normally removed by flatten).
+        onnx_inputs = onnx_inputs[:-1]
+    if remained_onnx_input_idx is not None:
+        return [onnx_inputs[i] for i in remained_onnx_input_idx]
+    else:
+        return onnx_inputs
+
+
+def _try_clone_model(model):
+    """Used for preserving original model incase forward mutates model states."""
+    try:
+        return copy.deepcopy(model)
+    except Exception:
+        return model
+
+
+def _compare_ort_pytorch_model(
+    model,
+    ort_session,
+    input_args,
+    input_kwargs,
+    additional_test_inputs,
+    remained_onnx_input_idx,
+    flatten,
+    rtol,
+    atol,
+):
+    def compare_ort_pytorch_model_with_input(input_args, input_kwargs):
+        pt_args, pt_kwargs = _format_input_for_pytorch(input_args, input_kwargs)
+        # TODO: remove this and treat mutating model separately. See #77679
+        model_copy = _try_clone_model(model)
+        pt_outs = model_copy(*pt_args, **pt_kwargs)
+
+        ort_inputs = _format_input_for_ort(
+            input_args, input_kwargs, remained_onnx_input_idx, flatten
+        )
+        ort_outs = _run_ort(ort_session, ort_inputs)
+
+        _compare_ort_pytorch_outputs(ort_outs, pt_outs, rtol, atol)
+
+    compare_ort_pytorch_model_with_input(input_args, input_kwargs)
+
+    if additional_test_inputs:
+        for test_input_args in additional_test_inputs:
+            compare_ort_pytorch_model_with_input(test_input_args, {})
+
+
 def verify(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    input=None,
-    batch_size=2,
-    rtol=0.001,
-    atol=1e-7,
+    input_args,
+    input_kwargs=None,
     do_constant_folding=True,
     dynamic_axes=None,
-    additional_test_inputs=None,
     input_names=None,
     output_names=None,
-    fixed_batch_size=False,
-    dict_check=True,
     training=None,
+    opset_version=None,
+    keep_initializers_as_inputs=True,
+    verbose=False,
+    fixed_batch_size=False,
+    use_external_data=False,
+    additional_test_inputs=None,
     remained_onnx_input_idx=None,
     flatten=True,
-    verbose=False,
     ort_providers=_ORT_PROVIDERS,
-    ort_optim_on=True,
-    use_external_data=False,
-    opset_version: Optional[int] = None,
-    keep_initializers_as_inputs: bool = True,
+    rtol=0.001,
+    atol=1e-7,
 ):
-    """Verify model export to ONNX with ONNXRuntime."""
+    """Verify model export to ONNX with ONNXRuntime.
+
+    Args:
+        model (torch.nn.Module or torch.jit.ScriptModule): See :func:`torch.onnx.export`.
+        input_args (tuple): See :func:`torch.onnx.export`.
+        input_kwargs (dict): See :func:`torch.onnx.export`.
+        do_constant_folding (bool, optional): See :func:`torch.onnx.export`.
+        dynamic_axes (dict, optional): See :func:`torch.onnx.export`.
+        input_names (list, optional): See :func:`torch.onnx.export`.
+        output_names (list, optional): See :func:`torch.onnx.export`.
+        training (bool, optional): See :func:`torch.onnx.export`.
+        opset_version (int, optional): See :func:`torch.onnx.export`.
+        keep_initializers_as_inputs (bool, optional): See :func:`torch.onnx.export`.
+        verbose (bool, optional): See :func:`torch.onnx.export`.
+        fixed_batch_size (bool, optional):
+        use_external_data (bool, optional):
+        additional_test_inputs (list, optional):
+        remained_onnx_input_idx (list, optional):
+        flatten (bool, optional):
+        ort_providers (list, optional):
+        rtol (float, optional):
+        atol (float, optional):
+
+
+        dict_check (bool, optional): If True, expect last input, if dictionary,
+            to be keyword arguments to model forward. Otherwise, last input, if
+            dictionary, is treated as the last positional argument. An empty dictionary
+            will appended to the end of the input list, informing the export api that
+            keyword arguments to model forward is empty.
+        ort_providers (tuple, optional): A tuple of ONNX Runtime providers to use.
+            Default is _ORT_PROVIDERS in torch.onnx.verification.
+    """
     if training is not None and training == torch.onnx.TrainingMode.TRAINING:
         model.train()
     elif training is None or training == torch.onnx.TrainingMode.EVAL:
         model.eval()
-    if input is None:
-        input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
     with torch.no_grad():
-        if isinstance(input, (Tensor, dict)):
-            input = (input,)
-        # In-place operators will update input tensor data as well.
-        # Thus inputs are replicated before every forward call.
-        input_args = copy.deepcopy(input)
-        input_kwargs = {}
-        if dict_check and isinstance(input_args[-1], dict):
-            input_kwargs = input_args[-1]
-            input_args = input_args[:-1]
-        try:
-            model_copy = copy.deepcopy(model)
-            output = model_copy(*input_args, **input_kwargs)
-        except Exception:
-            output = model(*input_args, **input_kwargs)
-        if isinstance(output, Tensor):
-            output = (output,)
-
-        if not dict_check and isinstance(input[-1], dict):
-            input = input + ({},)
-
         with contextlib.ExitStack() as stack:
             model_f: Union[str, io.BytesIO] = io.BytesIO()
             if use_external_data:
                 tmpdirname = stack.enter_context(tempfile.TemporaryDirectory())
                 model_f = os.path.join(tmpdirname, "model.onnx")
 
-            ort_session = _convert_to_onnx(
+            inputs_for_export = _format_input_for_export(input_args, input_kwargs)
+
+            # TODO: remove this and treat mutating model separately. See #77679
+            model_copy = _try_clone_model(model)
+            torch.onnx._export(
                 model,
+                inputs_for_export,
                 model_f,
-                input=input,
                 opset_version=opset_version,
                 do_constant_folding=do_constant_folding,
                 keep_initializers_as_inputs=keep_initializers_as_inputs,
@@ -225,41 +275,18 @@ def verify(
                 fixed_batch_size=fixed_batch_size,
                 training=training,
                 verbose=verbose,
-                ort_providers=ort_providers,
-                ort_optim_on=ort_optim_on,
             )
-            # compute onnxruntime output prediction
-            if remained_onnx_input_idx is not None:
-                input_onnx = []
-                for idx in remained_onnx_input_idx:
-                    input_onnx.append(input[idx])
-                input = input_onnx
 
-            input_copy = copy.deepcopy(input)
-            if flatten:
-                input_copy, _ = torch.jit._flatten(input_copy)
-            elif input_copy and input_copy[-1] == {}:
-                # Handle empty kwargs (normally removed by flatten).
-                input_copy = input_copy[:-1]
-            ort_outs = _run_ort(ort_session, input_copy)
-            _ort_compare_with_pytorch(ort_outs, output, rtol, atol)
+            ort_session = _create_ort_session(model_f, ort_providers)
 
-            # if additional test inputs are provided run the onnx
-            # model with these inputs and check the outputs
-            if additional_test_inputs is not None:
-                for test_input in additional_test_inputs:
-                    if isinstance(test_input, Tensor):
-                        test_input = (test_input,)
-                    test_input_copy = copy.deepcopy(test_input)
-                    output = model(*test_input_copy)
-                    if isinstance(output, Tensor):
-                        output = (output,)
-                    if remained_onnx_input_idx is not None:
-                        test_input_onnx = []
-                        for idx in remained_onnx_input_idx:
-                            test_input_onnx.append(test_input[idx])
-                        test_input = test_input_onnx
-                    if flatten:
-                        test_input, _ = torch.jit._flatten(test_input)
-                    ort_outs = _run_ort(ort_session, test_input)
-                    _ort_compare_with_pytorch(ort_outs, output, rtol, atol)
+            _compare_ort_pytorch_model(
+                model_copy,
+                ort_session,
+                input_args,
+                input_kwargs,
+                additional_test_inputs,
+                remained_onnx_input_idx,
+                flatten,
+                rtol,
+                atol,
+            )
