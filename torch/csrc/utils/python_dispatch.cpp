@@ -151,6 +151,7 @@ void initDispatchBindings(PyObject* module) {
     }, "", py::arg("name"), py::arg("dispatch"), py::arg("func"))
     .def("define", [](py::object self, const char* schema, const char* alias_analysis) {
       self.cast<torch::Library&>().def(torch::schema(schema, parseAliasAnalysisKind(alias_analysis)));
+      return torch::schema(schema, parseAliasAnalysisKind(alias_analysis)).name();
     }, "", py::arg("schema"), py::arg("alias_analysis") = "")
     .def("fallback_fallthrough", [](py::object self, const char* dispatch) {
       self.cast<torch::Library&>().fallback(

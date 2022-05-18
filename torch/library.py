@@ -68,12 +68,14 @@ class Library:
         Takes a schema to define a new operator.
         Also, optionally takes `alias_analysis` argument to indicate if the aliasing properties of the arguments
         can be inferred from the schema (default behavior) or not ("CONSERVATIVE").
+
+        Returns the name of the operator as inferred from the schema.
         '''
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
             raise RuntimeError("Invalid alias_analysis type")
-        self.m.define(schema, alias_analysis)
+        return self.m.define(schema, alias_analysis)
 
     def __del__(self):
         for key in self._op_impls:
@@ -82,7 +84,13 @@ class Library:
 
 # decorator to register python functions for library ops
 # Note: this decorator API should remain consistent with `Library.impl` API
-def impl(lib, name, dispatch_key=''):
+def impl(lib, name, dispatch_key=""):
     def wrap(f):
         lib.impl(name, f, dispatch_key)
+    return wrap
+
+def define(lib, schema, alias_analysis=""):
+    def wrap(f):
+        name = lib.define(schema, alias_analysis)
+        lib.impl(name, f)
     return wrap

@@ -5,7 +5,8 @@ import torch
 from copy import deepcopy
 from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
+import unittest
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
@@ -247,15 +248,14 @@ class TestPythonRegistration(TestCase):
         del my_lib2
         del my_lib1
 
+    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     def test_alias_analysis(self):
         def test_helper(alias_analysis=""):
             my_lib1 = Library("foo", "DEF")
 
             called = [0]
 
-            my_lib1.define("_op() -> None", alias_analysis=alias_analysis)
-
-            @torch.library.impl(my_lib1, "_op")
+            @torch.library.define(my_lib1, "_op() -> None", alias_analysis=alias_analysis)
             def _op(*args, **kwargs):
                 called[0] += 1
 
