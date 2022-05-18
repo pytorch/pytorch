@@ -149,6 +149,8 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
+
+    @quantized_args(True, False, False, False, False, False, False)
     @parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
@@ -195,6 +197,7 @@ avg_pool3d = _avg_pool("avg_pool3d", _triple)
 
 
 def _interpolate(name, dim, interpolate_mode):
+    @quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = sym_help._get_interpolate_attributes(
             g, interpolate_mode, args

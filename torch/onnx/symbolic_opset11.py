@@ -414,6 +414,7 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
 
 
 def _avg_pool(name, tuple_fn):
+    @quantized_args(True, False, False, False, False, False, False)
     @parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
