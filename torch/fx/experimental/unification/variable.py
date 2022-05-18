@@ -19,7 +19,7 @@ class Var(object):
             token = token[0]
 
         obj = object.__new__(cls)
-        obj.token = token  # type: ignore[attr-defined]
+        obj.token = token
         return obj
 
     def __str__(self):

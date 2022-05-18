@@ -20,6 +20,7 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-gcc5.4
       docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
+      needs-viable-strict: true
 
   linux-xenial-py3_7-gcc5_4-test:
     name: linux-xenial-py3.7-gcc5.4
@@ -52,6 +53,7 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-py3.7-gcc7
+      needs-viable-strict: true
 
   linux-xenial-py3_7-gcc7-test:
     name: linux-xenial-py3.7-gcc7
@@ -72,6 +74,7 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-clang7-asan
       docker-image-name: pytorch-linux-xenial-py3-clang7-asan
+      needs-viable-strict: true
 
   linux-xenial-py3_7-clang7-asan-test:
     name: linux-xenial-py3.7-clang7-asan
@@ -80,13 +83,12 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-clang7-asan
       docker-image: ${{ needs.linux-xenial-py3_7-clang7-asan-build.outputs.docker-image }}
+      needs-viable-strict: true
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.2xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.2xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
         ]}
 
   linux-xenial-py3_7-gcc7-no-ops:
@@ -95,6 +97,7 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-gcc7-no-ops
       docker-image-name: pytorch-linux-xenial-py3.7-gcc7
+      needs-viable-strict: true
 
   linux-xenial-py3_7-clang7-onnx-build:
     name: linux-xenial-py3.7-clang7-onnx
@@ -102,6 +105,7 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-clang7-onnx
       docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
+      needs-viable-strict: true
 
   linux-xenial-py3_7-clang7-onnx-test:
     name: linux-xenial-py3.7-clang7-onnx
@@ -134,8 +138,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "crossref", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
   linux-bionic-cuda11_3-py3_7-clang9-build:
@@ -170,6 +173,7 @@ jobs:
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      needs-viable-strict: true
 
   linux-xenial-cuda11_3-py3_7-gcc7-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7
@@ -180,28 +184,25 @@ jobs:
       docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.8xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-rocm5_1-py3_7-build:
-    name: linux-bionic-rocm5.1-py3.7
+  linux-bionic-rocm5_0-py3_7-build:
+    name: linux-bionic-rocm5.0-py3.7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-rocm5.1-py3.7
-      docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
+      build-environment: linux-bionic-rocm5.0-py3.7
+      docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
 
-  linux-bionic-rocm5_1-py3_7-test:
-    name: linux-bionic-rocm5.1-py3.7
+  linux-bionic-rocm5_0-py3_7-test:
+    name: linux-bionic-rocm5.0-py3.7
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-bionic-rocm5_1-py3_7-build
+    needs: linux-bionic-rocm5_0-py3_7-build
     with:
-      build-environment: linux-bionic-rocm5.1-py3.7
-      docker-image: ${{ needs.linux-bionic-rocm5_1-py3_7-build.outputs.docker-image }}
+      build-environment: linux-bionic-rocm5.0-py3.7
+      docker-image: ${{ needs.linux-bionic-rocm5_0-py3_7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
@@ -266,15 +267,26 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "windows.4xlarge" },
         ]}
 
-  # please ensure that this and its corresponding job in trunk.yml are in sync
   win-vs2019-cuda11_3-py3-build:
-    # don't run build twice on master
-    if: github.event_name == 'pull_request'
     name: win-vs2019-cuda11.3-py3
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.3-py3
       cuda-version: "11.3"
+
+  win-vs2019-cuda11_3-py3-test:
+    name: win-vs2019-cuda11.3-py3
+    uses: ./.github/workflows/_win-test.yml
+    needs: win-vs2019-cuda11_3-py3-build
+    with:
+      build-environment: win-vs2019-cuda11.3-py3
+      cuda-version: "11.3"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
+        ]}
 
   linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
@@ -311,6 +323,7 @@ jobs:
     with:
       build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      needs-viable-strict: true
 
   deploy-linux-xenial-cuda11_3-py3_7-gcc7-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7

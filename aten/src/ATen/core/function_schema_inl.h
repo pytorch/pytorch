@@ -162,7 +162,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     }
   }
 
-  // we want to test both out and default args separately
+  // we want to test both out and default args seperately
   size_t old_out_start_idx = findFirstOutArg(old.arguments());
   size_t new_out_start_idx = findFirstOutArg(arguments());
 
@@ -212,7 +212,7 @@ inline bool FunctionSchema::isForwardCompatibleWith(
     return false;
   }
 
-  // we want to test both out and default args separately
+  // we want to test both out and default args seperately
   size_t old_out_start_idx = findFirstOutArg(old.arguments());
   size_t new_out_start_idx = findFirstOutArg(arguments());
 

@@ -30,16 +30,6 @@ class RegisterInterface {
 };
 
 static RegisterInterface register_interface_;
-
-class RegisterNVFuserPass {
- public:
-  RegisterNVFuserPass() {
-    NVFuserPassManager::registerPass(true);
-  }
-};
-
-static RegisterNVFuserPass register_nvfuser_pass_;
-
 } // namespace
 
 } // namespace cuda

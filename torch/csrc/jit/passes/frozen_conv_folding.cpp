@@ -45,11 +45,10 @@ bool supportedConvNode(Node* n) {
   }
 }
 
-bool FoldFrozenConvBatchnorm(Block* b) {
-  bool graph_modified = false;
+void FoldFrozenConvBatchnorm(Block* b) {
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      graph_modified |= FoldFrozenConvBatchnorm(block);
+      FoldFrozenConvBatchnorm(block);
     }
 
     if (n->kind() == aten::batch_norm &&
@@ -119,10 +118,8 @@ bool FoldFrozenConvBatchnorm(Block* b) {
       conv->replaceInputWith(conv_b_value, fused_conv_b);
 
       bn->output()->replaceAllUsesWith(conv->output());
-      graph_modified = true;
     }
   }
-  return graph_modified;
 }
 
 bool supportedAddOrSub(Node* n) {
@@ -228,11 +225,10 @@ Tensor resizeConstantScalarOrTensorToShape(
   return ret_tensor;
 }
 
-bool FoldFrozenConvAddOrSub(Block* b) {
-  bool graph_modified = false;
+void FoldFrozenConvAddOrSub(Block* b) {
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      graph_modified |= FoldFrozenConvAddOrSub(block);
+      FoldFrozenConvAddOrSub(block);
     }
 
     if (supportedAddOrSub(n) && supportedConvNode(n->inputs().at(0)->node())) {
@@ -276,11 +272,9 @@ bool FoldFrozenConvAddOrSub(Block* b) {
           add_or_sub->kind().toUnqualString());
       conv->replaceInputWith(conv_b_value, fused_conv_b);
       add_or_sub->output()->replaceAllUsesWith(conv->output());
-      graph_modified = true;
       // DCE run after cleans up nodes
     }
   }
-  return graph_modified;
 }
 
 bool supportedMulOrDiv(Node* n) {
@@ -294,11 +288,10 @@ bool supportedMulOrDiv(Node* n) {
   return n->isMemberOf(add_set);
 }
 
-bool FoldFrozenConvMulOrDiv(Block* b) {
-  bool graph_modified = false;
+void FoldFrozenConvMulOrDiv(Block* b) {
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      graph_modified |= FoldFrozenConvMulOrDiv(block);
+      FoldFrozenConvMulOrDiv(block);
     }
 
     if (supportedMulOrDiv(n) && supportedConvNode(n->inputs().at(0)->node())) {
@@ -370,31 +363,26 @@ bool FoldFrozenConvMulOrDiv(Block* b) {
             mul_or_div->kind().toUnqualString());
         conv->replaceInputWith(conv_b_value, fused_conv_bias);
       }
-      graph_modified = true;
       // DCE run after cleans up nodes
     }
   }
-  return graph_modified;
 }
 
 } // namespace
 
-bool FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
-  bool graph_modified = FoldFrozenConvBatchnorm(graph->block());
+void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
+  FoldFrozenConvBatchnorm(graph->block());
   EliminateDeadCode(graph);
-  return graph_modified;
 }
 
-bool FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph) {
-  bool graph_modified = FoldFrozenConvAddOrSub(graph->block());
+void FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph) {
+  FoldFrozenConvAddOrSub(graph->block());
   EliminateDeadCode(graph);
-  return graph_modified;
 }
 
-bool FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph) {
-  bool graph_modified = FoldFrozenConvMulOrDiv(graph->block());
+void FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph) {
+  FoldFrozenConvMulOrDiv(graph->block());
   EliminateDeadCode(graph);
-  return graph_modified;
 }
 
 } // namespace jit

@@ -1816,12 +1816,6 @@ The :attr:`dim`\ th dimension of ``source`` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
-For a 3-D tensor the output is given as::
-
-    self[index[i], :, :] += alpha * src[i, :, :]  # if dim == 0
-    self[:, index[i], :] += alpha * src[:, i, :]  # if dim == 1
-    self[:, :, index[i]] += alpha * src[:, :, i]  # if dim == 2
-
 Note:
     {forward_reproducibility_note}
 
@@ -1935,73 +1929,6 @@ index_put(indices, values, accumulate=False) -> Tensor
 
 Out-place version of :meth:`~Tensor.index_put_`.
 """)
-
-add_docstr_all('index_reduce_',
-               r"""
-index_reduce_(dim, index, source, reduce, *, include_self=True) -> Tensor
-
-Accumulate the elements of ``source`` into the :attr:`self`
-tensor by accumulating to the indices in the order given in :attr:`index`
-using the reduction given by the ``reduce`` argument. For example, if ``dim == 0``,
-``index[i] == j``, ``reduce == prod`` and ``include_self == True`` then the ``i``\ th
-row of ``source`` is multiplied by the ``j``\ th row of :attr:`self`. If
-:obj:`include_self="True"`, the values in the :attr:`self` tensor are included
-in the reduction, otherwise, rows in the :attr:`self` tensor that are accumulated
-to are treated as if they were filled with the reduction identites.
-
-The :attr:`dim`\ th dimension of ``source`` must have the same size as the
-length of :attr:`index` (which must be a vector), and all other dimensions must
-match :attr:`self`, or an error will be raised.
-
-For a 3-D tensor with :obj:`reduce="prod"` and :obj:`include_self=True` the
-output is given as::
-
-    self[index[i], :, :] *= src[i, :, :]  # if dim == 0
-    self[:, index[i], :] *= src[:, i, :]  # if dim == 1
-    self[:, :, index[i]] *= src[:, :, i]  # if dim == 2
-
-Note:
-    {forward_reproducibility_note}
-
-.. note::
-
-    This function only supports floating point tensors.
-
-.. warning::
-
-    This function is in beta and may change in the near future.
-
-Args:
-    dim (int): dimension along which to index
-    index (Tensor): indices of ``source`` to select from,
-        should have dtype either `torch.int64` or `torch.int32`
-    source (FloatTensor): the tensor containing values to accumulate
-    reduce (str): the reduction operation to apply
-        (:obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
-
-Keyword args:
-    include_self (bool): whether the elements from the ``self`` tensor are
-        included in the reduction
-
-Example::
-
-    >>> x = torch.empty(5, 3).fill_(2)
-    >>> t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]], dtype=torch.float)
-    >>> index = torch.tensor([0, 4, 2, 0])
-    >>> x.index_reduce_(0, index, t, 'prod')
-    tensor([[20., 44., 72.],
-            [ 2.,  2.,  2.],
-            [14., 16., 18.],
-            [ 2.,  2.,  2.],
-            [ 8., 10., 12.]])
-    >>> x = torch.empty(5, 3).fill_(2)
-    >>> x.index_reduce_(0, index, t, 'prod', include_self=False)
-    tensor([[10., 22., 36.],
-            [ 2.,  2.,  2.],
-            [ 7.,  8.,  9.],
-            [ 2.,  2.,  2.],
-            [ 4.,  5.,  6.]])
-""".format(**reproducibility_notes))
 
 add_docstr_all('index_select',
                r"""
@@ -3694,6 +3621,13 @@ Example::
 
 """)
 
+add_docstr_all('solve',
+               r"""
+solve(A) -> Tensor, Tensor
+
+See :func:`torch.solve`
+""")
+
 add_docstr_all('sort',
                r"""
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
@@ -4119,16 +4053,6 @@ Args:
     {memory_format}
 """.format(**common_args))
 
-add_docstr_all('chalf',
-               r"""
-chalf(memory_format=torch.preserve_format) -> Tensor
-
-``self.chalf()`` is equivalent to ``self.to(torch.complex32)``. See :func:`to`.
-
-Args:
-     {memory_format}
- """.format(**common_args))
-
 add_docstr_all('half',
                r"""
 half(memory_format=torch.preserve_format) -> Tensor
@@ -4308,21 +4232,6 @@ Example::
     >>> sparse = dense.to_sparse_csr()
     >>> sparse._nnz()
     25
-
-""")
-
-add_docstr_all('to_sparse_bsr',
-               r"""
-to_sparse_bsr(blocksize) -> Tensor
-Convert a CSR tensor to a block sparse row (BSR) storage format of given blocksize.
-
-Example::
-
-    >>> dense = torch.randn(10, 10)
-    >>> sparse = dense.to_sparse_csr()
-    >>> sparse_bsr = sparse.to_sparse_bsr((5, 5))
-    >>> sparse_bsr.col_indices()
-    tensor([0, 1, 0, 1])
 
 """)
 

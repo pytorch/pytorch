@@ -673,8 +673,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::XLA;
         case DeviceType::Lazy:
           return DispatchKey::Lazy;
-        case DeviceType::MPS:
-          return DispatchKey::MPS;
+        case DeviceType::MLC:
+          return DispatchKey::MLC;
         case DeviceType::Vulkan:
           return DispatchKey::Vulkan;
         case DeviceType::Metal:
@@ -683,9 +683,6 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::Meta;
         case DeviceType::HPU:
           return DispatchKey::HPU;
-        case DeviceType::PrivateUse1: {
-          return DispatchKey::PrivateUse1;
-        }
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
@@ -804,16 +801,14 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::QuantizedXPU:
     case DispatchKey::AutogradXPU:
       return DeviceType::XPU;
-    case DispatchKey::MPS:
-    case DispatchKey::AutogradMPS:
-      return DeviceType::MPS;
+    case DispatchKey::MLC:
+    case DispatchKey::AutogradMLC:
+      return DeviceType::MLC;
     case DispatchKey::HPU:
     case DispatchKey::AutogradHPU:
       return DeviceType::HPU;
     case DispatchKey::ORT:
       return DeviceType::ORT;
-    case DispatchKey::PrivateUse1:
-      return DeviceType::PrivateUse1;
     default:
       TORCH_CHECK(
           false,

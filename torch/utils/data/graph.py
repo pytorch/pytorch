@@ -2,32 +2,24 @@ import io
 import pickle
 
 from torch.utils.data import IterDataPipe, MapDataPipe
-from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
-from typing import Any, Dict, Set, Tuple, Type, Union
+from typing import Any, Dict, Set
 
-__all__ = ["traverse", ]
-
-DataPipe = Union[IterDataPipe, MapDataPipe]
 reduce_ex_hook = None
 
 
-def _stub_unpickler():
+def stub_unpickler():
     return "STUB"
 
 
 # TODO(VitalyFedyunin): Make sure it works without dill module installed
-def _list_connected_datapipes(scan_obj, only_datapipe, cache):
+def list_connected_datapipes(scan_obj, only_datapipe, cache):
+
     f = io.BytesIO()
     p = pickle.Pickler(f)  # Not going to work for lambdas, but dill infinite loops on typing and can't be used as is
-    if DILL_AVAILABLE:
-        from dill import Pickler as dill_Pickler
-        d = dill_Pickler(f)
-    else:
-        d = None
 
     def stub_pickler(obj):
-        return _stub_unpickler, ()
+        return stub_unpickler, ()
 
     captured_connections = []
 
@@ -43,46 +35,35 @@ def _list_connected_datapipes(scan_obj, only_datapipe, cache):
             raise NotImplementedError
         else:
             captured_connections.append(obj)
-            return _stub_unpickler, ()
-
-    datapipe_classes: Tuple[Type[DataPipe]] = (IterDataPipe, MapDataPipe)  # type: ignore[assignment]
+            return stub_unpickler, ()
 
     try:
-        for cls in datapipe_classes:
-            cls.set_reduce_ex_hook(reduce_hook)
-            if only_datapipe:
-                cls.set_getstate_hook(getstate_hook)
-        try:
-            p.dump(scan_obj)
-        except (pickle.PickleError, AttributeError, TypeError):
-            if DILL_AVAILABLE:
-                d.dump(scan_obj)
-            else:
-                raise
+        IterDataPipe.set_reduce_ex_hook(reduce_hook)
+        if only_datapipe:
+            IterDataPipe.set_getstate_hook(getstate_hook)
+        p.dump(scan_obj)
+    except AttributeError:  # unpickable DataPipesGraph
+        pass  # TODO(VitalyFedyunin): We need to tight this requirement after migrating from old DataLoader
     finally:
-        for cls in datapipe_classes:
-            cls.set_reduce_ex_hook(None)
-            if only_datapipe:
-                cls.set_getstate_hook(None)
-        if DILL_AVAILABLE:
-            from dill import extend as dill_extend
-            dill_extend(False)  # Undo change to dispatch table
+        IterDataPipe.set_reduce_ex_hook(None)
+        if only_datapipe:
+            IterDataPipe.set_getstate_hook(None)
     return captured_connections
 
 
 def traverse(datapipe, only_datapipe=False):
-    cache: Set[DataPipe] = set()
+    cache: Set[IterDataPipe] = set()
     return _traverse_helper(datapipe, only_datapipe, cache)
 
 
 # Add cache here to prevent infinite recursion on DataPipe
 def _traverse_helper(datapipe, only_datapipe, cache):
-    if not isinstance(datapipe, (IterDataPipe, MapDataPipe)):
-        raise RuntimeError("Expected `IterDataPipe` or `MapDataPipe`, but {} is found".format(type(datapipe)))
+    if not isinstance(datapipe, IterDataPipe):
+        raise RuntimeError("Expected `IterDataPipe`, but {} is found".format(type(datapipe)))
 
     cache.add(datapipe)
-    items = _list_connected_datapipes(datapipe, only_datapipe, cache)
-    d: Dict[DataPipe, Any] = {datapipe: {}}
+    items = list_connected_datapipes(datapipe, only_datapipe, cache)
+    d: Dict[IterDataPipe, Any] = {datapipe: {}}
     for item in items:
         # Using cache.copy() here is to prevent recursion on a single path rather than global graph
         # Single DataPipe can present multiple times in different paths in graph

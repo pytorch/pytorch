@@ -55,6 +55,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/crash_handler.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/lazy/python/init.h>
@@ -64,6 +65,7 @@
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
+#include <torch/csrc/utils/crash_handler.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 
 #ifdef USE_DISTRIBUTED
@@ -73,6 +75,10 @@
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
 #endif
+#endif
+
+#if defined(USE_MLCOMPUTE)
+#include <mlc/torch_mlc/csrc/MLCInit.h>
 #endif
 
 #if defined(USE_VALGRIND)
@@ -393,27 +399,6 @@ PyObject *THPModule_allowTF32CuDNN(PyObject *_unused, PyObject *noargs)
   else Py_RETURN_FALSE;
 }
 
-PyObject *THPModule_setFloat32MatmulPrecision(PyObject *_unused, PyObject *arg)
-{
-  THPUtils_assert(THPUtils_checkString(arg), "set_float32_matmul_precision expects a str, "
-          "but got %s", THPUtils_typename(arg));
-  std::string s = THPUtils_unpackString(arg);
-  at::globalContext().setFloat32MatmulPrecision(s);
-  Py_RETURN_NONE;
-}
-
-PyObject *THPModule_float32MatmulPrecision(PyObject *_unused, PyObject *noargs)
-{
-  std::string s = "highest";
-  auto p = at::globalContext().float32MatmulPrecision();
-  if (p == at::Float32MatmulPrecision::HIGH) {
-    s = "high";
-  } else if (p == at::Float32MatmulPrecision::MEDIUM) {
-    s = "medium";
-  }
-  return THPUtils_packString(s);
-}
-
 PyObject *THPModule_setUserEnabledCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_enabled_cudnn expects a bool, "
@@ -707,8 +692,6 @@ static PyMethodDef TorchMethods[] = {
   {"_set_warnAlways", THPModule_setWarnAlways, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
-  {"_get_float32_matmul_precision", THPModule_float32MatmulPrecision, METH_NOARGS,     nullptr},
-  {"_set_float32_matmul_precision", THPModule_setFloat32MatmulPrecision, METH_O,  nullptr},
   {"_get_cublas_allow_fp16_reduced_precision_reduction", THPModule_allowFP16ReductionCuBLAS, METH_NOARGS, nullptr},
   {"_set_cublas_allow_fp16_reduced_precision_reduction", THPModule_setAllowFP16ReductionCuBLAS, METH_O, nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
@@ -747,6 +730,15 @@ namespace torch { namespace cuda {
 void initModule(PyObject *module);
 
 }} // namespace torch::cuda
+#endif
+
+#ifdef USE_MLCOMPUTE
+PyMethodDef* ModuleMLC_methods();
+namespace torch { namespace mlc {
+
+void initBindings(PyObject *module);
+
+}} // namespace torch::mlc
 #endif
 
 bool THDPByteStorage_init(PyObject *module);
@@ -802,6 +794,9 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
+#ifdef USE_MLCOMPUTE
+  THPUtils_addPyMethodDefs(methods, ModuleMLC_methods());
+#endif
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
@@ -841,6 +836,7 @@ PyObject* initModule() {
   torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
+  torch::crash_handler::initCrashHandlerBindings(module);
   torch::autograd::initReturnTypes(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
@@ -852,6 +848,9 @@ PyObject* initModule() {
   torch::lazy::initLazyBindings(module);
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
+#endif
+#ifdef USE_MLCOMPUTE
+  torch::mlc::init_bindings(module);
 #endif
   ASSERT_TRUE(THPByteStorage_init(module));
 
@@ -894,6 +893,10 @@ PyObject* initModule() {
 
   // Automatically translate errors thrown from pybind11 functions
   py::register_exception_translator([](std::exception_ptr e) { // NOLINT
+    if (torch::crash_handler::is_enabled_on_exceptions()) {
+      torch::crash_handler::write_minidump();
+    }
+
     try {
       if (e) {
         std::rethrow_exception(e);
@@ -1017,16 +1020,15 @@ Call this whenever a new thread is created in order to propagate values from
 #else
   PyObject *has_cuda = Py_False;
 #endif
-
-#ifdef USE_MPS
-  PyObject *has_mps = Py_True;
+#ifdef USE_MLCOMPUTE
+  PyObject *has_mlc = Py_True;
 #else
-  PyObject *has_mps = Py_False;
+  PyObject *has_mlc = Py_False;
 #endif
 
+  ASSERT_TRUE(set_module_attr("has_mlc", has_mlc));
+
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
-  ASSERT_TRUE(set_module_attr("has_mps", has_mps));
-  ASSERT_TRUE(set_module_attr("_is_mps_available", at::hasMPS() ? Py_True : Py_False));
 
   ASSERT_TRUE(set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 

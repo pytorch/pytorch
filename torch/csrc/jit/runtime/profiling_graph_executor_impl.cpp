@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
-#include <torch/csrc/jit/passes/check_strict_fusion.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -121,6 +120,7 @@ FusionStrategy setFusionStrategy(FusionStrategy& strategy) {
 }
 
 static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
+static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
@@ -651,7 +651,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
     // value
 #ifndef C10_MOBILE
-    if (torch::jit::fuser::cuda::isEnabled()) {
+    if (RegisterCudaFuseGraph::isRegistered()) {
       torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
     }
 #endif
@@ -672,7 +672,6 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
   runFinalOptimizations(copy);
-  CheckStrictFusion(copy);
   GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ = ExecutionPlan(copy, function_name_);
   return *optimized_plan_;

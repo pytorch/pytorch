@@ -208,14 +208,6 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       const SourceRange& loc,
       GraphFunction& m);
 
-  std::shared_ptr<SugaredDict> getSugaredNamedParameterList(
-      const SourceRange& loc,
-      GraphFunction& m);
-
-  std::shared_ptr<SugaredDict> getSugaredNamedParameterDict(
-      const SourceRange& loc,
-      GraphFunction& m);
-
   void setAttr(
       const SourceRange& loc,
       GraphFunction& m,

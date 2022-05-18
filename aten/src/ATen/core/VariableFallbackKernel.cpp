@@ -56,7 +56,7 @@ TORCH_LIBRARY_IMPL(_, AutogradLazy, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
-TORCH_LIBRARY_IMPL(_, AutogradMPS, m) {
+TORCH_LIBRARY_IMPL(_, AutogradMLC, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 

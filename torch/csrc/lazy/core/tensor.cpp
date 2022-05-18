@@ -8,7 +8,9 @@
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
-#include <torch/csrc/lazy/core/ir_builder.h>
+#include <torch/csrc/lazy/ts_backend/ops/cast.h>
+#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
+#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
 
 
 namespace torch {
@@ -202,7 +204,7 @@ void LazyTensor::SetInPlaceIrValue(Value ir_value) {
   auto tensor_shape = shape();
   if (tensor_shape.Get().scalar_type() !=
       ir_value.shape().scalar_type()) {
-    ir_value = MakeCast(ir_value, tensor_shape.Get().scalar_type(), c10::nullopt);
+    ir_value = MakeNode<Cast>(ir_value, tensor_shape.Get().scalar_type());
   }
   SetIrValue(std::move(ir_value));
 }
@@ -273,7 +275,7 @@ Value LazyTensor::GetIrValueForTensor(
   if (tensor.dim() == 0 && tensor.numel() == 1) {
     at::Scalar value = tensor.item();
     if (IsSpecialScalar(value)) {
-      return MakeScalar(value, tensor.scalar_type());
+      return MakeNode<Scalar>(value, tensor.scalar_type());
     }
     data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
     read_only = true;
@@ -426,7 +428,7 @@ void LazyTensor::UpdateFromTensorOut(const LazyTensorPtr& tensor) {
 Value LazyTensor::CreateTensorNode(BackendDataPtr data, bool read_only) const {
   data->SetInfo(std::make_shared<LazyGraphExecutor::DeviceDataInfo>(
       GetUniqueId(), read_only));
-  return MakeDeviceData(std::move(data));
+  return MakeNode<DeviceData>(std::move(data));
 }
 
 std::vector<LazyTensorPtr> LazyTensor::MakeOutputTensors(NodePtr node) const {
@@ -471,7 +473,7 @@ torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors) {
     values.push_back(impl->tensor()->GetIrValue());
   }
 
-  return torch::lazy::Value(torch::lazy::MakeTensorList(std::move(values)));
+  return torch::lazy::Value(torch::lazy::MakeNode<TensorList>(std::move(values)));
 }
 
 LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {

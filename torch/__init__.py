@@ -47,7 +47,6 @@ __all__ = [
     'are_deterministic_algorithms_enabled',
     'is_deterministic_algorithms_warn_only_enabled',
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
-    'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled',
 ]
 
@@ -570,23 +569,6 @@ def get_deterministic_debug_mode() -> builtins.int:
     else:
         return 0
 
-def get_float32_matmul_precision() -> builtins.str:
-    r"""Returns the current value of float32 matrix multiplication precision. Refer to
-    :func:`torch.set_float32_matmul_precision` documentation for more details.
-    """
-    return _C._get_float32_matmul_precision()
-
-def set_float32_matmul_precision(precision):
-    r"""Sets the precision of float32 matrix multiplication (one of HIGHEST, HIGH, MEDIUM).
-    Original RFC: https://github.com/pytorch/pytorch/issues/76440
-    Args:
-        precision(str): default "highest": avoid internally reducing precision with
-        formats such as TF32.
-        If "high," allow TF32.
-        If "medium," allow TF32.
-    """
-    _C._set_float32_matmul_precision(precision)
-
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
     appear once per process. This helps avoid excessive warning information.
@@ -769,8 +751,7 @@ for name in dir(_C._VariableFunctions):
     obj = getattr(_C._VariableFunctions, name)
     obj.__module__ = 'torch'
     globals()[name] = obj
-    if not name.startswith("_"):
-        __all__.append(name)
+    __all__.append(name)
 
 ################################################################################
 # Import interface functions defined in Python
@@ -838,7 +819,6 @@ from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
 import torch.backends.cuda
-import torch.backends.mps
 import torch.backends.cudnn
 import torch.backends.mkl
 import torch.backends.mkldnn
@@ -901,9 +881,6 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 # information.
 from . import _masked
 
-# Import removed ops with error message about removal
-from ._linalg_utils import solve
-
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
@@ -922,6 +899,3 @@ def _register_device_module(device_type, module):
 
 # expose return_types
 from . import return_types
-if sys.executable != 'torch_deploy':
-    from . import library
-    from . import _meta_registrations

@@ -320,7 +320,6 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
 Tensor computeChunk(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   return Compute(
@@ -354,7 +353,6 @@ Tensor computeChunk(
 Tensor computeTranspose(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = c10::get<BufHandle>(inputs[0]);
@@ -381,7 +379,6 @@ Tensor computeTranspose(
 Tensor computeExpand(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = c10::get<BufHandle>(inputs[0]);
@@ -395,7 +392,6 @@ Tensor computeExpand(
 Tensor computeReshape(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = c10::get<BufHandle>(inputs[0]);
@@ -463,7 +459,6 @@ Tensor computeReshape(
 Tensor computeFlatten(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   std::vector<int64_t> outputShapeVec;
@@ -473,8 +468,7 @@ Tensor computeFlatten(
   std::vector<ArgValue> reshapeInputs;
   reshapeInputs.push_back(inputs[0]);
   reshapeInputs.emplace_back(outputShapeVec);
-  return computeReshape(
-      reshapeInputs, outputShape, outputStrides, outputType, device);
+  return computeReshape(reshapeInputs, outputShape, outputType, device);
 }
 
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
@@ -592,7 +586,6 @@ Tensor computeCatWoConditionals(
 Tensor computeCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   if (device == at::kCPU && getCatWoConditionals()) {
@@ -605,10 +598,7 @@ Tensor computeCat(
   ScalarType highType = catInfo.first;
   std::vector<BufHandle> nonEmptyInputs = catInfo.second;
   return Compute(
-      "aten_cat",
-      outputShape,
-      outputStrides,
-      [&](const std::vector<VarHandle>& axes) {
+      "aten_cat", outputShape, [&](const std::vector<VarHandle>& axes) {
         if (nonEmptyInputs.size() == 0) {
           return ExprHandle(0);
         }
@@ -655,7 +645,6 @@ Tensor computeCat(
 Tensor computeEmbedding(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;

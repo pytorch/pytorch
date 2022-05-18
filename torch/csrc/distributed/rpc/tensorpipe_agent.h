@@ -182,7 +182,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
-  void join(bool shutdown = false, float timeout = 0) override;
+  void join(bool shutdown = false) override;
   void sync() override{};
   void startImpl() override;
   void shutdownImpl() override;
@@ -454,10 +454,6 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // Mutex to guard access to group membership data
   // e.g. updates to (workerIdToInfo_, workerNameToInfo_, workerNameToURL_)
   mutable std::mutex groupMembershipMutex_;
-
-  // CV to watch for changes after groupMembership is updated
-  mutable std::mutex unknownWorkerMutex_;
-  mutable std::condition_variable unknownWorkerCV_;
 
   // Map to Track Network Data
   NetworkDataDict networkData_;

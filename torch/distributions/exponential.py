@@ -29,10 +29,6 @@ class Exponential(ExponentialFamily):
         return self.rate.reciprocal()
 
     @property
-    def mode(self):
-        return torch.zeros_like(self.rate)
-
-    @property
     def stddev(self):
         return self.rate.reciprocal()
 

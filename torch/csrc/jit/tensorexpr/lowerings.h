@@ -32,7 +32,6 @@ using ArgValue = c10::variant<
 using NNCLoweringFunction = std::function<Tensor(
     const std::vector<ArgValue>&,
     const std::vector<ExprHandle>&,
-    const std::vector<ExprHandle>&,
     const c10::optional<ScalarType>&,
     at::Device)>;
 

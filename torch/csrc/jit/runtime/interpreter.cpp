@@ -26,7 +26,6 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <string>
 
 #ifdef USE_RPC
@@ -797,7 +796,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         python_class_name = jit_exception->getPythonClassName();
       }
       handleError(
-          e, (bool)jit_exception, not_implemented_error, python_class_name);
+          ExceptionMessage(e),
+          (bool)jit_exception,
+          not_implemented_error,
+          python_class_name);
       return false;
     }
   }
@@ -814,11 +816,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void handleError(
-      const std::exception& e,
+      const ExceptionMessage& msg,
       bool is_jit_exception,
       c10::NotImplementedError* not_implemented_error,
       c10::optional<std::string> python_class_name) {
-    ExceptionMessage msg(e);
     std::ostringstream ss;
     std::string class_name =
         python_class_name ? *python_class_name : "RuntimeError";
@@ -828,17 +829,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     if (future_) {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
-      // save the original exception's message when creating a new JITException
-      throw JITException(ss.str(), python_class_name, e.what());
+      throw JITException(ss.str(), python_class_name);
     } else if (not_implemented_error) {
       throw c10::NotImplementedError(
           ss.str(),
           not_implemented_error->backtrace(),
           not_implemented_error->caller());
     } else {
-      if (get_cpp_stacktraces_enabled()) {
-        ss << e.what() << "\n";
-      }
       throw std::runtime_error(ss.str());
     }
   }

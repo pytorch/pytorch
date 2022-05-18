@@ -18,13 +18,12 @@ void OptimizeFrozenGraph(
   FrozenConcatLinear(graph);
   // run a couple times to capture Conv -> Mul -> Add etc
   if (optimize_numerics) {
-    bool changed = false;
-    do {
-      changed = false;
-      changed |= FoldFrozenConvBatchnorm(graph);
-      changed |= FoldFrozenConvAddOrSub(graph);
-      changed |= FoldFrozenConvMulOrDiv(graph);
-    } while (changed);
+    for (const auto i : c10::irange(2)) {
+      (void)i; // Suppress unused variable warning
+      FoldFrozenConvBatchnorm(graph);
+      FoldFrozenConvAddOrSub(graph);
+      FoldFrozenConvMulOrDiv(graph);
+    }
   }
 }
 

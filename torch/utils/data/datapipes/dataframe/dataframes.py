@@ -7,26 +7,6 @@ from torch.utils.data.datapipes.dataframe.structures import DataChunkDF
 
 # TODO(VitalyFedyunin): Add error when two different traces get combined
 
-__all__ = [
-    "Capture",
-    "CaptureAdd",
-    "CaptureCall",
-    "CaptureDataFrame",
-    "CaptureDataFrameWithDataPipeOps",
-    "CaptureF",
-    "CaptureGetAttr",
-    "CaptureGetItem",
-    "CaptureInitial",
-    "CaptureMul",
-    "CaptureSetItem",
-    "CaptureSub",
-    "CaptureVariable",
-    "CaptureVariableAssign",
-    "DataFrameTracer",
-    "DataFrameTracedOps",
-    "get_val",
-]
-
 
 class DataFrameTracedOps(DFIterDataPipe):
     def __init__(self, source_datapipe, output_var):
@@ -305,7 +285,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
     def __getattr__(self, attrname):  # ?
         if attrname in DATAPIPES_OPS:
             return (self.as_datapipe()).__getattr__(attrname)
-        return super().__getattr__(attrname)
+        return super().__getattr__(attrname=attrname)
 
 
 @functional_datapipe('trace_as_dataframe')

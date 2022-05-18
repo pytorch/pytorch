@@ -18,28 +18,10 @@ import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
 
-from . import (
-    IterDataPipe,
-    MapDataPipe,
-    IterableDataset,
-    Sampler,
-    SequentialSampler,
-    RandomSampler,
-    BatchSampler,
-    Dataset,)
-
-from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
-
+from . import IterDataPipe, IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
 from . import _utils
 
 import torch.utils.data.graph_settings
-
-__all__ = [
-    "DataLoader",
-    "get_worker_info",
-    "default_collate",
-    "default_convert",
-]
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -121,7 +103,7 @@ class DataLoader(Generic[T_co]):
             mini-batch of Tensor(s).  Used when using batched loading from a
             map-style dataset.
         pin_memory (bool, optional): If ``True``, the data loader will copy Tensors
-            into device/CUDA pinned memory before returning them.  If your data elements
+            into CUDA pinned memory before returning them.  If your data elements
             are a custom type, or your :attr:`collate_fn` returns a batch that is a custom type,
             see the example below.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
@@ -142,8 +124,6 @@ class DataLoader(Generic[T_co]):
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
-        pin_memory_device (str, optional): the data loader will copy Tensors
-            into device pinned memory before returning them if pin_memory is set to true.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -179,7 +159,6 @@ class DataLoader(Generic[T_co]):
     drop_last: bool
     timeout: float
     sampler: Union[Sampler, Iterable]
-    pin_memory_device: str
     prefetch_factor: int
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
@@ -192,8 +171,7 @@ class DataLoader(Generic[T_co]):
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
                  multiprocessing_context=None, generator=None,
                  *, prefetch_factor: int = 2,
-                 persistent_workers: bool = False,
-                 pin_memory_device: str = ""):
+                 persistent_workers: bool = False):
         torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
@@ -215,16 +193,9 @@ class DataLoader(Generic[T_co]):
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
         self.pin_memory = pin_memory
-        self.pin_memory_device = pin_memory_device
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
-
-        # _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
-        if isinstance(self.dataset, IterDataPipe):
-            self.dataset = _IterDataPipeSerializationWrapper(self.dataset)
-        elif isinstance(self.dataset, MapDataPipe):
-            self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
 
         # Arg-check dataset related before checking samplers because we want to
         # tell users that iterable-style datasets are incompatible with custom
@@ -532,20 +503,7 @@ class _BaseDataLoaderIter(object):
         self._index_sampler = loader._index_sampler
         self._num_workers = loader.num_workers
         self._prefetch_factor = loader.prefetch_factor
-        # for other backends, pin_memory_device need to set. if not set
-        # default behaviour is CUDA device. if pin_memory_device is selected
-        # and pin_memory is not set, the default behaviour false.
-        if (len(loader.pin_memory_device) == 0):
-            self._pin_memory = loader.pin_memory and torch.cuda.is_available()
-            self._pin_memory_device = None
-        else:
-            if not loader.pin_memory:
-                warn_msg = ("pin memory device is set and pin_memory flag is not used then device pinned memory won't be used"
-                            "please set pin_memory to true, if you need to use the device pin memory")
-                warnings.warn(warn_msg)
-
-            self._pin_memory = loader.pin_memory
-            self._pin_memory_device = loader.pin_memory_device
+        self._pin_memory = loader.pin_memory and torch.cuda.is_available()
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
@@ -571,8 +529,7 @@ class _BaseDataLoaderIter(object):
     def __next__(self) -> Any:
         with torch.autograd.profiler.record_function(self._profile_name):
             if self._sampler_iter is None:
-                # TODO(https://github.com/pytorch/pytorch/issues/76750)
-                self._reset()  # type: ignore[call-arg]
+                self._reset()
             data = self._next_data()
             self._num_yielded += 1
             if self._dataset_kind == _DatasetKind.Iterable and \
@@ -615,7 +572,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         index = self._next_index()  # may raise StopIteration
         data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
         if self._pin_memory:
-            data = _utils.pin_memory.pin_memory(data, self._pin_memory_device)
+            data = _utils.pin_memory.pin_memory(data)
         return data
 
 
@@ -982,7 +939,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(self._worker_result_queue, self._data_queue,
                       torch.cuda.current_device(),
-                      self._pin_memory_thread_done_event, self._pin_memory_device))
+                      self._pin_memory_thread_done_event))
             pin_memory_thread.daemon = True
             pin_memory_thread.start()
             # Similar to workers (see comment above), we only register

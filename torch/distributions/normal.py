@@ -34,10 +34,6 @@ class Normal(ExponentialFamily):
         return self.loc
 
     @property
-    def mode(self):
-        return self.loc
-
-    @property
     def stddev(self):
         return self.scale
 

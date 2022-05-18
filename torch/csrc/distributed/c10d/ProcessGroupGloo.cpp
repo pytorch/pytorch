@@ -490,7 +490,7 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
           inputs.emplace_back(tensor);
         }
       }
-      recordingFunction->before(profilingTitle, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+      recordingFunction->before(profilingTitle, inputs);
     };
     recordFunctionBeforeCallback_ = at::wrapPropagateTLSState(before_handler);
     std::function<void()> end_handler = [recordingFunction]() {
@@ -2836,9 +2836,8 @@ void ProcessGroupGloo::monitoredBarrier(
 
   waitLoop(sendWorkMap);
 
-  using namespace std::chrono;
-  C10_UNUSED auto elapsedTime = duration_cast<milliseconds>(
-      steady_clock::now() - startTime);
+  auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - startTime);
 }
 
 void ProcessGroupGloo::setSequenceNumberForGroup() {

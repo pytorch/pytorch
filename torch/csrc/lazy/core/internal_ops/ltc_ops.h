@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 #include <mutex>
 #include <string>

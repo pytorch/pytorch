@@ -24,9 +24,10 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             sizes,
             false),
         strides_(strides.vec()) {
+    TensorImpl::set_has_contiguity_policy(TensorImpl::HasContiguityPolicy::CustomBehavior);
   }
 
-  IntArrayRef strides_custom() const override {
+  IntArrayRef strides() const override {
     return strides_;
   }
 
@@ -34,13 +35,16 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
     return true;
   }
 
+  int64_t stride(int64_t d) const override {
+    d = at::maybe_wrap_dim(d, this->dim(), false);
+    return strides_[d];
+  }
+
  private:
   const char* tensorimpl_type_name() const override {
     return "VulkanOpaqueTensorImpl";
   }
 
-  // TODO: storing strides separately is unnecessary, the base TensorImpl
-  // has space for them
   SmallVector<int64_t, 5> strides_;
 };
 

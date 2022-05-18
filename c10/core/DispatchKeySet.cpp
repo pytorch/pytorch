@@ -75,8 +75,8 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::XLA);
     case DispatchKey::AutogradLazy:
       return DispatchKeySet(DispatchKey::Lazy);
-    case DispatchKey::AutogradMPS:
-      return DispatchKeySet(DispatchKey::MPS);
+    case DispatchKey::AutogradMLC:
+      return DispatchKeySet(DispatchKey::MLC);
     case DispatchKey::AutogradHPU:
       return DispatchKeySet(DispatchKey::HPU);
     case DispatchKey::AutogradIPU:

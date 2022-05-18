@@ -71,7 +71,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         next_nodes = {
             "asan": AsanConfigNode,
             "xla": XlaConfigNode,
-            "mps": MPSConfigNode,
+            "mlc": MLCConfigNode,
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
             "crossref": CrossRefConfigNode,
@@ -116,12 +116,12 @@ class XlaConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
-class MPSConfigNode(TreeConfigNode):
+class MLCConfigNode(TreeConfigNode):
     def modify_label(self, label):
-        return "MPS=" + str(label)
+        return "MLC=" + str(label)
 
     def init2(self, node_name):
-        self.props["is_mps"] = node_name
+        self.props["is_mlc"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

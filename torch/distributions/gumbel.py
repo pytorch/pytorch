@@ -55,10 +55,6 @@ class Gumbel(TransformedDistribution):
         return self.loc + self.scale * euler_constant
 
     @property
-    def mode(self):
-        return self.loc
-
-    @property
     def stddev(self):
         return (math.pi / math.sqrt(6)) * self.scale
 

@@ -1,7 +1,5 @@
 self-hosted-runner:
   labels:
-    - linux.20_04.4x
-    - linux.20_04.16x
     - linux.large
     - linux.2xlarge
     - linux.4xlarge
@@ -12,4 +10,3 @@ self-hosted-runner:
     - windows.8xlarge.nvidia.gpu
     - bm-runner
     - linux.rocm.gpu
-    - macos-12

@@ -4,7 +4,6 @@
 #include <test/cpp/lazy/test_lazy_ops_util.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
@@ -52,8 +51,11 @@ class LazyShapeTest : public ::testing::Test {
 class DynamicInputShapeNode : public Node {
  public:
   explicit DynamicInputShapeNode(Shape& shape)
-      : Node(OpKind(), /* num_outputs */ 1),
-        hash_(0),
+      : Node(
+            OpKind(),
+            /* num_outputs */ 1,
+            /* hash_func */
+            [&](bool /*bakeInSizes*/) -> hash_t { return 0; }),
         shape_(shape) {}
   ~DynamicInputShapeNode() override = default;
 
@@ -71,11 +73,7 @@ class DynamicInputShapeNode : public Node {
     return {shape_};
   }
 
-  hash_t hash() const override { return hash_; }
-  hash_t shapeHash() const override { return hash_; }
-
  private:
-  hash_t hash_;
   Shape shape_;
 };
 
@@ -128,32 +126,7 @@ TEST_F(LazyShapeTest, TestMulBasic) {
   expected = {false, true};
   EXPECT_EQ(getIsSymbolic(res), expected);
 };
-
-TEST_F(LazyShapeTest, TestCatBasic) {
-  // Basic propagation
-  torch::Tensor a = tensorWithSymbolicShape({2, 2}, {true, false});
-  torch::Tensor b = tensorWithSymbolicShape({2, 2}, {true, false});
-  torch::Tensor c = tensorWithSymbolicShape({2, 2}, {true, false});
-
-  auto res = torch::cat({a, b, c}, 1);
-  std::vector<bool> expected = {true, false};
-  EXPECT_EQ(getIsSymbolic(res), expected);
-
-  torch::Tensor d = tensorWithSymbolicShape({2, 2}, {false, true});
-  res = torch::cat({a, d}, 0);
-  expected = {true, false};
-  EXPECT_EQ(getIsSymbolic(res), expected);
-
-  // Test handling of symbolic dims of inequal sizes, Currently crashes
-  // As we can't handle cases where upper bound dims are not equal
-  /*
-  torch::Tensor e = tensorWithSymbolicShape({2, 2}, {true, false});
-  torch::Tensor f = tensorWithSymbolicShape({2, 3}, {false, true});
-  res = torch::cat({e, f}, 0);
-  expected = {true, false};
-  EXPECT_EQ(getIsSymbolic(res), expected);
-  */
-}
 #endif // FBCODE_CAFFE2
+
 } // namespace lazy
 } // namespace torch

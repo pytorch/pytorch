@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -55,19 +54,7 @@
 namespace torch {
 namespace jit {
 
-class FuserTest : public ::testing::Test {
-  void SetUp() override {
-    old_nvfuser_value_ = fuser::cuda::setEnabled(false);
-  }
-  void TearDown() override {
-    fuser::cuda::setEnabled(old_nvfuser_value_);
-  }
-
- private:
-  bool old_nvfuser_value_;
-};
-
-TEST_F(FuserTest, TestSimple_CUDA) {
+TEST(FuserTest, TestSimple_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif
@@ -90,7 +77,7 @@ TEST_F(FuserTest, TestSimple_CUDA) {
   ASSERT_EQ(max_diff, 0);
 }
 
-TEST_F(FuserTest, TestOne_CUDA) {
+TEST(FuserTest, TestOne_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif
@@ -150,7 +137,7 @@ TEST_F(FuserTest, TestOne_CUDA) {
   testOne(0, 2);
 }
 
-TEST_F(FuserTest, FusedConcat_CUDA) {
+TEST(FuserTest, FusedConcat_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif
@@ -195,7 +182,7 @@ TEST_F(FuserTest, FusedConcat_CUDA) {
   };
 }
 
-TEST_F(FuserTest, FusionAliasing) {
+TEST(FuserTest, FusionAliasing) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif
@@ -223,7 +210,7 @@ TEST_F(FuserTest, FusionAliasing) {
       ->run(*g);
 }
 
-TEST_F(FuserTest, KernelCaching) {
+TEST(FuserTest, KernelCaching) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif

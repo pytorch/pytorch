@@ -271,16 +271,6 @@ Tensor FunctionalInverses::col_indices_copy_inverse(const at::Tensor& base, cons
     return Tensor();
 }
 
-Tensor FunctionalInverses::ccol_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views) {
-    TORCH_INTERNAL_ASSERT(false, "Attempted to call ccol_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
-    return Tensor();
-}
-
-Tensor FunctionalInverses::row_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views) {
-    TORCH_INTERNAL_ASSERT(false, "Attempted to call row_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
-    return Tensor();
-}
-
 Tensor FunctionalInverses::unbind_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, int64_t dim) {
     dim = at::maybe_wrap_dim(dim, base.sizes().size());
     // Pessimism: we can't reapply views for select_scatter.

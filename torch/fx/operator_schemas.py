@@ -1,7 +1,6 @@
 import torch
 import inspect
 import numbers
-import types
 import typing
 import enum
 import warnings
@@ -135,22 +134,20 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
             return_schemas=True, returns a tuple containing the optional Python signatures
             and the optional TorchScript Function signature
     """
-    if isinstance(op, OpOverload):
-        schemas = [op._schema]
-    elif isinstance(op, OpOverloadPacket):
-        schemas = [getattr(op, overload)._schema for overload in op.overloads()]
-    else:
-        override = _manual_overrides.get(op)
-        if override:
-            return (override, None) if return_schemas else None
+    if isinstance(op, OpOverloadPacket) or isinstance(op, OpOverload):
+        op = op.op
+    override = _manual_overrides.get(op)
+    if override:
+        return (override, None) if return_schemas else None
 
-        aten_fn = torch.jit._builtins._find_builtin(op)
+    aten_fn = torch.jit._builtins._find_builtin(op)
 
-        if aten_fn is None:
-            return (None, None) if return_schemas else None
-        schemas = torch._C._jit_get_schemas_for_operator(aten_fn)
+    if aten_fn is None:
+        return (None, None) if return_schemas else None
 
+    schemas = torch._C._jit_get_schemas_for_operator(aten_fn)
     signatures = [_torchscript_schema_to_signature(schema) for schema in schemas]
+
     return (signatures, schemas) if return_schemas else signatures
 
 @compatibility(is_backward_compatible=False)
@@ -259,9 +256,7 @@ def normalize_function(
     if kwargs is None:
         kwargs = {}
     new_args_and_kwargs = None
-    if not isinstance(target, types.BuiltinFunctionType) and not (
-        isinstance(target, OpOverloadPacket) or isinstance(target, OpOverload)
-    ):
+    if target in boolean_dispatched or target.__module__ in ['torch.nn.functional', 'torch.functional']:
         target_for_analysis = target
         if target in boolean_dispatched:
             # HACK: `boolean_dispatch` as used in `torch.nn.functional` makes it so that we have

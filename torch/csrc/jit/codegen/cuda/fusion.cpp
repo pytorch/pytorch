@@ -30,9 +30,6 @@ FusionGuard::~FusionGuard() {
 Fusion* FusionGuard::getCurFusion() {
   return ACTIVE_FUSION;
 }
-void FusionGuard::setCurFusion(Fusion* fusion) {
-  ACTIVE_FUSION = fusion;
-}
 
 void swap(Fusion& a, Fusion& b) noexcept {
   FUSER_PERF_SCOPE("Fusion swap");
@@ -591,7 +588,7 @@ bool Fusion::isAliasCompatible(Val* left, Val* right) {
 }
 
 void Fusion::aliasOutputToInput(Val* output, Val* input) {
-  // Because we could cast output when input is cast.
+  // Because we could cast output when input is casted.
   TORCH_INTERNAL_ASSERT(
       !output->isFusionOutput(),
       "Do NOT add aliased output to fusion output outside of `aliasOutputToInput");

@@ -407,6 +407,7 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
   for (auto& ms : managed_tensors_) {
     const auto& tensors = ms.group();
     size_t max = ms.maxTensorSize();
+    auto tensor_idx = 0;
     for (auto& tensor : tensors) {
       const auto& storage = tensor->storage();
       size_t current_size = compute_aligned_tensor_size(storage.nbytes());

@@ -1847,6 +1847,10 @@ set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
+if(USE_BREAKPAD)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad)
+endif()
+
 # ---[ Kineto
 # edge profiler depends on KinetoProfiler but it only does cpu
 # profiling. Thus we dont need USE_CUDA/USE_ROCM
@@ -1906,8 +1910,7 @@ if(USE_KINETO)
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
-        ${CUDA_SOURCE_DIR}/lib64
-        NO_DEFAULT_PATH)
+        ${CUDA_SOURCE_DIR}/lib64)
 
     find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
         ${CUDA_SOURCE_DIR}/extras/CUPTI/include

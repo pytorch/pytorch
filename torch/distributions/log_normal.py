@@ -47,10 +47,6 @@ class LogNormal(TransformedDistribution):
         return (self.loc + self.scale.pow(2) / 2).exp()
 
     @property
-    def mode(self):
-        return (self.loc - self.scale.square()).exp()
-
-    @property
     def variance(self):
         return (self.scale.pow(2).exp() - 1) * (2 * self.loc + self.scale.pow(2)).exp()
 

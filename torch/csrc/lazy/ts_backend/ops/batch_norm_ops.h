@@ -8,10 +8,6 @@ namespace lazy {
 // Node for the backward batch norm operator.
 class TSNativeBatchNormBackward : public torch::lazy::TsNode {
  public:
-  static OpKind ClassOpKind() {
-    return OpKind(at::aten::native_batch_norm_backward);
-  }
-
   TSNativeBatchNormBackward(const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
                             const torch::lazy::Value& weight, const torch::lazy::Value& running_mean,
                             const torch::lazy::Value& running_var, const torch::lazy::Value& save_mean,
@@ -39,10 +35,6 @@ class TSNativeBatchNormBackward : public torch::lazy::TsNode {
 
 class TSNativeBatchNormForward : public torch::lazy::TsNode {
  public:
-  static OpKind ClassOpKind() {
-    return OpKind(at::aten::native_batch_norm);
-  }
-
   TSNativeBatchNormForward(const torch::lazy::Value& input, const torch::lazy::Value& weight,
                            const torch::lazy::Value& bias, const torch::lazy::Value& running_mean,
                            const torch::lazy::Value& running_var, bool training,

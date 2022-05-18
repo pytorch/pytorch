@@ -536,8 +536,7 @@ class DeviceCachingAllocator {
           || (release_available_cached_blocks(params) &&
               alloc_block(params, false))
           // Free all non-split cached blocks and retry alloc.
-          || (C10_LIKELY(captures_underway == 0) && release_cached_blocks() &&
-              alloc_block(params, true));
+          || (release_cached_blocks() && alloc_block(params, true));
     }
 
     if (!block_found) {

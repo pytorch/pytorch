@@ -9,7 +9,7 @@ import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import Dict
+from typing import cast, Dict, Iterable, Optional, Tuple, Union
 
 import torch._six as six
 from torch.distributed import FileStore, PrefixStore, Store, TCPStore
@@ -52,8 +52,11 @@ def register_rendezvous_handler(scheme, handler):
 
 # Query will have format "rank=0&world_size=1" and is
 # converted into {"rank": 0, "world_size": 1}
-def _query_to_dict(query: str) -> Dict[str, str]:
-    return dict((pair[0], pair[1]) for pair in (pair.split("=") for pair in filter(None, query.split("&"))))
+def _query_to_dict(query):
+    query_dict: Dict[str, str] = dict(
+        cast(Tuple[str, str], pair.split("=")) for pair in cast(Iterable[str], filter(None, query.split("&")))
+    )
+    return query_dict
 
 def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if not isinstance(url, six.string_classes):
@@ -102,7 +105,6 @@ def _create_store_from_options(backend_options, rank):
         world_size = int(os.environ.get("WORLD_SIZE", world_size))
 
     query_dict = _query_to_dict(result.query)
-    # if rank is -1 then intentionally exclude rank for the query, error will be thrown later
     query_dict["rank"] = rank
     query_dict["world_size"] = world_size
 
@@ -233,12 +235,11 @@ def _env_rendezvous_handler(
             return env_val
 
     result = urlparse(url)
-    query_dict = _query_to_dict(result.query)
+    query_dict: Dict[str, Union[int, str]] = _query_to_dict(result.query)
 
-    rank: int
-    world_size: int
-    master_port: int
-    master_addr: str
+    rank: Optional[Union[str, int]]
+    world_size: Optional[Union[str, int]]
+    master_port: Optional[Union[str, int]]
 
     if "rank" in query_dict:
         rank = int(query_dict["rank"])

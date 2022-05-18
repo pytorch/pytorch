@@ -32,10 +32,6 @@ class Poisson(ExponentialFamily):
         return self.rate
 
     @property
-    def mode(self):
-        return self.rate.floor()
-
-    @property
     def variance(self):
         return self.rate
 

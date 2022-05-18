@@ -35,7 +35,7 @@ ApproximateClockToUnixTimeConverter::measurePair() {
 ApproximateClockToUnixTimeConverter::time_pairs
     ApproximateClockToUnixTimeConverter::measurePairs() {
   static constexpr auto n_warmup = 5;
-  for (C10_UNUSED const auto _ : c10::irange(n_warmup)) {
+  for (const auto _ : c10::irange(n_warmup)) {
     getApproximateTime();
     steady_clock_t::now();
   }
@@ -317,7 +317,7 @@ static constexpr auto kMat2Size = "mat2_size";
 static bool validateInput(
     const std::string& op_name,
     size_t min_size,
-    c10::ArrayRef<const c10::IValue> inputs,
+    const std::vector<c10::IValue>& inputs,
     const c10::ArrayRef<int>& should_be_tensor) {
   std::stringstream ss;
   if (inputs.size() < min_size) {
@@ -342,7 +342,7 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
     const at::RecordFunction& fn) {
   // for specific types of fn, return the saved extra args for computing flops
   std::unordered_map<std::string, c10::IValue> map;
-  auto inputs = fn.inputs();
+  std::vector<c10::IValue> inputs = fn.inputs();
   std::string fname(fn.name());
 
   if (inputs.empty()) {

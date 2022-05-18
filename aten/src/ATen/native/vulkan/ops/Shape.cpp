@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
@@ -8,10 +7,9 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-Tensor view_internal(
+Tensor view(
     const Tensor& self_arg,
-    const IntArrayRef shape,
-    const std::string& op_name) {
+    const IntArrayRef shape) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -26,8 +24,6 @@ Tensor view_internal(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
-
     command_buffer.copy(
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
@@ -46,17 +42,11 @@ Tensor view_internal(
   return convert(v_output);
 }
 
-inline Tensor view(
-    const Tensor& self_arg,
-    const IntArrayRef shape) {
-  return view_internal(self_arg, shape, "aten::view");
-}
-
 Tensor _reshape_alias(
     const Tensor& self_arg,
     const IntArrayRef shape,
     const IntArrayRef strides) {
-  return view_internal(self_arg, shape, "aten::_reshape_alias");
+  return view(self_arg, shape);
 }
 
 #ifdef USE_VULKAN_API

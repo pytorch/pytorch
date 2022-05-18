@@ -51,7 +51,7 @@ enum class BackendComponent : uint8_t {
   CUDABit,
   HIPBit,
   XLABit,
-  MPSBit,
+  MLCBit,
   IPUBit,
   XPUBit,
   HPUBit,
@@ -97,7 +97,7 @@ enum class BackendComponent : uint8_t {
 
 // See Note [DispatchKeySet Internal Representation] for more details.
 //
-// NOTE: Keep the list in sync with `DispatchKey` in torchgen/model.py
+// NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint16_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -214,10 +214,6 @@ enum class DispatchKey : uint16_t {
   BackendSelect,
 
   Python,
-
-  // Out-of-core key for Fake Tensor in torchdistx.
-  // See https://pytorch.org/torchdistx/latest/fake_tensor.html
-  Fake,
 
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
@@ -360,10 +356,6 @@ enum class DispatchKey : uint16_t {
   // See Note [Functionalization Pass In Core] for details.
   Functionalize,
 
-  // Out-of-core key for Deferred Module Initialization in torchdistx.
-  // See https://pytorch.org/torchdistx/latest/deferred_init.html
-  DeferredInit,
-
   // Used by Python key logic to know the set of tls on entry to the dispatcher
   // This kernel assumes it is the top-most non-functorch-related DispatchKey.
   // If you add a key above, make sure to update the fallback implementation for
@@ -403,7 +395,7 @@ enum class DispatchKey : uint16_t {
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
   // CUDA]
   XLA, // lives out of tree at https://github.com/pytorch/xla
-  MPS, // registered at build/aten/src/ATen/RegisterMPS.cpp
+  MLC, // lives out of tree at https://github.com/pytorch/MLCompute
   IPU, // lives out of tree at https://github.com/graphcore/poptorch
   XPU, // For out of tree Intel's heterogeneous computing plug-in
   HPU, // For out of tree & closed source integration of HPU / Habana
@@ -427,7 +419,7 @@ enum class DispatchKey : uint16_t {
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
   _QuantizedHIP,
   _QuantizedXLA,
-  _QuantizedMPS,
+  _QuantizedMLC,
   _QuantizedIPU,
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
   _QuantizedHPU,
@@ -449,7 +441,7 @@ enum class DispatchKey : uint16_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
   // [Masquerading as CUDA]
   _SparseXLA,
-  _SparseMPS,
+  _SparseMLC,
   _SparseIPU,
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
   _SparseHPU,
@@ -473,7 +465,7 @@ enum class DispatchKey : uint16_t {
   NestedTensorCUDA,
   _NestedTensorHIP,
   _NestedTensorXLA,
-  _NestedTensorMPS,
+  _NestedTensorMLC,
   _NestedTensorIPU,
   _NestedTensorXPU,
   _NestedTensorHPU,
@@ -494,7 +486,7 @@ enum class DispatchKey : uint16_t {
   AutogradCUDA,
   _AutogradHIP,
   AutogradXLA,
-  AutogradMPS,
+  AutogradMLC,
   AutogradIPU,
   AutogradXPU,
   AutogradHPU,
@@ -718,8 +710,7 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
   }
 }
 
-// Given (DispatchKey::Dense, BackendComponent::CUDABit), returns
-// DispatchKey::CUDA.
+// Given (DispatchKey::Dense, DispatchKey::CUDABit), returns DispatchKey::CUDA
 // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
 // This function relies on the invariant that the dispatch keys between
 // StartOfDenseBackends and EndOfRuntimeBackendKeys are ordered by backend

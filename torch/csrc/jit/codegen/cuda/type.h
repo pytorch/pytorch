@@ -2,7 +2,6 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 
 #include <c10/macros/Export.h>
 
@@ -153,15 +152,7 @@ enum class UnaryOpType {
   Trunc,
 
   // Might be a bitwise operator or boolean operator.
-  Not,
-
-  // Operators returning boolean values
-  IsFinite,
-  IsInf,
-  IsNan,
-  IsNegInf,
-  IsPosInf,
-  IsReal,
+  Not
 };
 
 // Primarily for Not, which could be Not a boolean, or a bitwise not.
@@ -217,7 +208,7 @@ bool isLogicalOp(const BinaryOpType bopt);
 // on input, for example bitwise_and is also used for boolean and in the jit
 bool alsoBooleanOperator(const BinaryOpType bopt);
 
-enum class TernaryOpType { Clamp, Lerp, Threshold, Where };
+enum class TernaryOpType { Clamp, Threshold, Where };
 
 enum class ParallelType {
   BIDz,

@@ -10,7 +10,11 @@ logger = logging.getLogger(__name__)
 def _group_membership_management(store, name, is_join):
     token_key = "RpcGroupManagementToken"
     join_or_leave = "join" if is_join else "leave"
+<<<<<<< Updated upstream:torch/distributed/rpc/_utils.py
     my_token = f"Token_for_{name}_{join_or_leave}"
+=======
+    my_token = f"Token-{name}-{join_or_leave}"
+>>>>>>> Stashed changes:torch/distributed/rpc/utils.py
     while True:
         # Retrieve token from store to signal start of rank join/leave critical section
         returned = store.compare_set(token_key, "", my_token).decode()
@@ -27,9 +31,15 @@ def _group_membership_management(store, name, is_join):
             # Store will wait for the token to be released
             try:
                 store.wait([returned])
+<<<<<<< Updated upstream:torch/distributed/rpc/_utils.py
             except RuntimeError:
                 logger.error(f"Group membership token {my_token} timed out waiting for {returned} to be released.")
                 raise
+=======
+            except RuntimeError as e:
+                logger.warning(f"Group membership token {my_token} timed out waiting for {returned} to be released.")
+                raise e
+>>>>>>> Stashed changes:torch/distributed/rpc/utils.py
 
 def _update_group_membership(worker_info, my_devices, reverse_device_map, is_join):
     agent = cast(TensorPipeAgent, api._get_current_rpc_agent())

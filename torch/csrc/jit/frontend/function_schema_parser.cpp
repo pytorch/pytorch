@@ -148,20 +148,16 @@ struct SchemaParser {
   }
 
   Argument parseArgument(size_t /*idx*/, bool is_return, bool kwarg_only) {
-    // fake and real type coincide except for Layout/MemoryFormat/ScalarType
-    // the fake type for these is Int instead
-    auto p = type_parser.parseFakeAndRealType();
-    auto fake_type = std::move(std::get<0>(p));
-    auto real_type = std::move(std::get<1>(p));
-    auto alias_info = std::move(std::get<2>(p));
+    auto p = type_parser.parseType();
+    auto type = std::move(p.first);
+    auto alias_info = std::move(p.second);
     c10::optional<int32_t> N;
     c10::optional<IValue> default_value;
     c10::optional<std::string> alias_set;
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
-      fake_type = ListType::create(std::move(fake_type));
-      real_type = ListType::create(std::move(real_type));
+      type = ListType::create(std::move(type));
       N = c10::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
@@ -170,10 +166,7 @@ struct SchemaParser {
       }
       alias_info = std::move(container);
       if (L.nextIf('?')) {
-        fake_type =
-            c10::TypeFactory::create<c10::OptionalType>(std::move(fake_type));
-        real_type =
-            c10::TypeFactory::create<c10::OptionalType>(std::move(real_type));
+        type = c10::TypeFactory::create<c10::OptionalType>(std::move(type));
       }
     }
     if (is_return) {
@@ -186,14 +179,12 @@ struct SchemaParser {
     } else {
       name = L.expect(TK_IDENT).text();
       if (L.nextIf('=')) {
-        // NB: this means we have to unswizzle default too
-        default_value = parseDefaultValue(*fake_type, fake_type->kind(), N);
+        default_value = parseDefaultValue(*type, type->kind(), N);
       }
     }
     return Argument(
         std::move(name),
-        std::move(fake_type),
-        std::move(real_type),
+        std::move(type),
         N,
         std::move(default_value),
         !is_return && kwarg_only,

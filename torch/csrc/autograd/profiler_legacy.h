@@ -122,15 +122,15 @@ struct TORCH_API LegacyEvent {
 
   double cpuElapsedUs(const LegacyEvent& e) const {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
-    return static_cast<double>(e.cpu_ns_ - cpu_ns_)/(1000.0);
+    return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
 
   void setCpuUs(int64_t cpu_us) {
-    cpu_ns_ = static_cast<double>(cpu_us) * 1000.0;
+    cpu_ns_ = cpu_us * 1000.0;
   }
 
   double cpuUs() const {
-    return static_cast<double>(cpu_ns_) / (1000.0);
+    return cpu_ns_ / (1000.0);
   }
 
   double cudaElapsedUs(const LegacyEvent& e) const;

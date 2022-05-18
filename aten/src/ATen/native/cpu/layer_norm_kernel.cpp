@@ -9,7 +9,6 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/moments_utils.h>
-#include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -23,161 +22,69 @@ namespace native {
 
 namespace {
 
-template <typename T, typename T_ACC>
-struct LayerNormKernelImplInternal {
-  constexpr static void apply(
-      const Tensor& X,
-      const Tensor& gamma,
-      const Tensor& beta,
-      int64_t M,
-      int64_t N,
-      T eps,
-      Tensor* Y,
-      Tensor* mean,
-      Tensor* rstd) {
-    using Vec = vec::Vectorized<T>;
-    const T* X_data = X.data_ptr<T>();
-    const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-    const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
-    T* Y_data = Y->data_ptr<T>();
-    T* mean_data = mean ? mean->data_ptr<T>() : nullptr;
-    T* rstd_data = rstd ? rstd->data_ptr<T>() : nullptr;
-    const bool gamma_null = gamma_data == nullptr;
-    const bool beta_null = beta_data == nullptr;
-    const bool mean_null = mean_data == nullptr;
-    const bool rstd_null = rstd_data == nullptr;
-    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
-      for (const auto i : c10::irange(start, end)) {
-        const T* X_ptr = X_data + i * N;
-        T* Y_ptr = Y_data + i * N;
-        T mean_val;
-        T rstd_val;
-        std::tie(mean_val, rstd_val) = utils::RowwiseMoments(X_ptr, N);
-        rstd_val = T(1) / std::sqrt(rstd_val + eps);
-        const T scale = rstd_val;
-        const T bias = -rstd_val * mean_val;
-        if (gamma_null || beta_null) {
-          for (const auto j : c10::irange(N)) {
-            const T gamma_v = gamma_null ? T(1) : gamma_data[j];
-            const T beta_v = beta_null ? T(0) : beta_data[j];
-            Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
-          }
-        } else {
-          vec::map3<T>(
-              [scale, bias](Vec x, Vec gamma, Vec beta) {
-                return (x * Vec(scale) + Vec(bias)) * gamma + beta;
-              },
-              Y_ptr,
-              X_ptr,
-              gamma_data,
-              beta_data,
-              N);
+template <typename T>
+void LayerNormKernelImplInternal(
+    const Tensor& X,
+    const Tensor& gamma,
+    const Tensor& beta,
+    int64_t M,
+    int64_t N,
+    T eps,
+    Tensor* Y,
+    Tensor* mean,
+    Tensor* rstd) {
+  using T_ACC = vec::vec_scalar_t<T>;
+  using Vec = vec::Vectorized<T_ACC>;
+  DCHECK_EQ(X.numel(), M * N);
+  DCHECK(!gamma.defined() || gamma.numel() == N);
+  DCHECK(!beta.defined() || beta.numel() == N);
+  const T* X_data = X.data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
+  const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
+  T* Y_data = Y->data_ptr<T>();
+  T* mean_data = mean ? mean->data_ptr<T>() : nullptr;
+  T* rstd_data = rstd ? rstd->data_ptr<T>() : nullptr;
+
+  const bool gamma_null = gamma_data == nullptr;
+  const bool beta_null = beta_data == nullptr;
+  const bool mean_null = mean_data == nullptr;
+  const bool rstd_null = rstd_data == nullptr;
+  at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+    for (const auto i : c10::irange(start, end)) {
+      const T* X_ptr = X_data + i * N;
+      T* Y_ptr = Y_data + i * N;
+      T mean_val;
+      T rstd_val;
+      std::tie(mean_val, rstd_val) = utils::RowwiseMoments(X_ptr, N);
+      rstd_val = T(1) / std::sqrt(rstd_val + eps);
+      const T_ACC scale = rstd_val;
+      const T_ACC bias = -rstd_val * mean_val;
+      if (gamma_null || beta_null) {
+        for (const auto j : c10::irange(N)) {
+          const T gamma_v = gamma_null ? T(1) : gamma_data[j];
+          const T beta_v = beta_null ? T(0) : beta_data[j];
+          Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
         }
-        if (!mean_null) {
-          mean_data[i] = mean_val;
-        }
-        if (!rstd_null) {
-          rstd_data[i] = rstd_val;
-        }
+      } else {
+        vec::map3<T>(
+            [scale, bias](Vec x, Vec gamma, Vec beta) {
+              return (x * Vec(scale) + Vec(bias)) * gamma + beta;
+            },
+            Y_ptr,
+            X_ptr,
+            gamma_data,
+            beta_data,
+            N);
       }
-    });
-  }
-};
-
-template <typename T_ACC>
-struct LayerNormKernelImplInternal<BFloat16, T_ACC> {
-  constexpr static void apply(
-      const Tensor& X,
-      const Tensor& gamma,
-      const Tensor& beta,
-      int64_t M,
-      int64_t N,
-      BFloat16 eps,
-      Tensor* Y,
-      Tensor* mean,
-      Tensor* rstd) {
-    using bVec = vec::Vectorized<BFloat16>;
-    using fVec = vec::Vectorized<float>;
-    const BFloat16* X_data = X.data_ptr<BFloat16>();
-    const T_ACC* gamma_data = gamma.defined() ? gamma.data_ptr<T_ACC>() : nullptr;
-    const T_ACC* beta_data = beta.defined() ? beta.data_ptr<T_ACC>() : nullptr;
-    BFloat16* Y_data = Y->data_ptr<BFloat16>();
-    T_ACC* mean_data = mean ? mean->data_ptr<T_ACC>() : nullptr;
-    T_ACC* rstd_data = rstd ? rstd->data_ptr<T_ACC>() : nullptr;
-    const bool gamma_null = gamma_data == nullptr;
-    const bool beta_null = beta_data == nullptr;
-    const bool mean_null = mean_data == nullptr;
-    const bool rstd_null = rstd_data == nullptr;
-
-    // pre convert `gamma` and `beta` to float when they are both defined
-    const bool pre_convert_gamma_beta = !gamma_null && !beta_null;
-
-    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
-      // temp buffer holding input, gamma/beta (if defined) in float
-      //
-      // pre convert input slice to float has 2 benefits:
-      //   a. Welford algorithm involves more arithmetic operations,
-      //      this will reduce rounding error and improve performance.
-      //   b. The input slice (float) can be reused when updating
-      //      corresponding output slice.
-      //
-      int64_t buffer_size = pre_convert_gamma_beta ? 3 * N : N;
-      std::unique_ptr<float []> buffer(new float[buffer_size]);
-      float* input_buffer_ptr = buffer.get();
-      float* gamma_buffer_ptr = nullptr;
-      float* beta_buffer_ptr = nullptr;
-      if (pre_convert_gamma_beta) {
-        gamma_buffer_ptr = buffer.get() + N;
-        beta_buffer_ptr = buffer.get() + 2 * N;
-        vec::convert(gamma_data, gamma_buffer_ptr, N);
-        vec::convert(beta_data, beta_buffer_ptr, N);
+      if (!mean_null) {
+        mean_data[i] = mean_val;
       }
-
-      for (const auto i : c10::irange(start, end)) {
-        const BFloat16* X_ptr = X_data + i * N;
-        BFloat16* Y_ptr = Y_data + i * N;
-        vec::convert(X_ptr, input_buffer_ptr, N);
-
-        float mean_val;
-        float rstd_val;
-        std::tie(mean_val, rstd_val) = utils::RowwiseMoments(input_buffer_ptr, N);
-        rstd_val = float(1) / std::sqrt(rstd_val + eps);
-        const float scale = rstd_val;
-        const float bias = -rstd_val * mean_val;
-        if (gamma_null || beta_null) {
-          for (const auto j : c10::irange(N)) {
-            const float gamma_v = gamma_null ? float(1) : float(gamma_data[j]);
-            const float beta_v = beta_null ? float(0) : float(beta_data[j]);
-            Y_ptr[j] = (input_buffer_ptr[j] * scale + bias) * gamma_v + beta_v;
-          }
-        } else {
-          int64_t d = 0;
-          for (; d < N - (N % bVec::size()); d += bVec::size()) {
-            fVec x_fvec0 = fVec::loadu(input_buffer_ptr + d);
-            fVec x_fvec1 = fVec::loadu(input_buffer_ptr + d + fVec::size());
-            fVec gamma_fvec0 = fVec::loadu(gamma_buffer_ptr + d);
-            fVec gamma_fvec1 = fVec::loadu(gamma_buffer_ptr + d + fVec::size());
-            fVec beta_fvec0 = fVec::loadu(beta_buffer_ptr + d);
-            fVec beta_fvec1 = fVec::loadu(beta_buffer_ptr + d + fVec::size());
-            fVec y_fvec0 = (x_fvec0 * fVec(scale) + fVec(bias)) * gamma_fvec0 + beta_fvec0;
-            fVec y_fvec1 = (x_fvec1 * fVec(scale) + fVec(bias)) * gamma_fvec1 + beta_fvec1;
-            bVec y_bvec = convert_float_bfloat16(y_fvec0, y_fvec1);
-            y_bvec.store(Y_ptr + d);
-          }
-          for (; d < N; d++) {
-            Y_ptr[d] = (input_buffer_ptr[d] * scale + bias) * gamma_data[d] + beta_data[d];
-          }
-        }
-        if (!mean_null) {
-          mean_data[i] = T_ACC(mean_val);
-        }
-        if (!rstd_null) {
-          rstd_data[i] = T_ACC(rstd_val);
-        }
+      if (!rstd_null) {
+        rstd_data[i] = rstd_val;
       }
-    });
-  }
-};
+    }
+  });
+}
 
 void LayerNormKernelImpl(
     const Tensor& X,
@@ -189,21 +96,10 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  DCHECK_EQ(X.numel(), M * N);
-  DCHECK(!gamma.defined() || gamma.numel() == N);
-  DCHECK(!beta.defined() || beta.numel() == N);
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
       "LayerNormKernelImpl", [&]() {
-    using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/false>;
-    const bool mixed_type = is_mixed_type(X, gamma, beta);
-    if (mixed_type) {
-      check_mixed_data_type(X, gamma, beta);
-      LayerNormKernelImplInternal<scalar_t, accscalar_t>::apply(
-          X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
-    } else {
-      LayerNormKernelImplInternal<scalar_t, scalar_t>::apply(
-          X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
-    }
+    LayerNormKernelImplInternal<scalar_t>(
+        X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
   });
 }
 
