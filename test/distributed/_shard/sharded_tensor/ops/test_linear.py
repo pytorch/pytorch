@@ -142,7 +142,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         self.assertNotEqual(previous_sharded_bias, sharded_linear.bias)
         self.assertEqual(sharded_linear.bias, local_linear.bias)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_linear_colwise(self):
@@ -164,7 +164,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             self._run_sharded_linear(spec, [23], [23, 13], 0)
             self._run_sharded_linear(spec, [15], [15, 14], 0)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_linear_rowwise(self):
@@ -186,7 +186,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             self._run_sharded_linear(spec, [19], [19, 11], 1)
             self._run_sharded_linear(spec, [21], [21, 11], 1)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_linear_errors(self):

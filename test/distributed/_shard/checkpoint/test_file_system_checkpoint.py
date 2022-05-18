@@ -207,7 +207,7 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_read_write_shard_tensor(self) -> None:
@@ -271,7 +271,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         _sharded_tensor_gather(tensor, out=res)
         return cast(Tensor, res)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_load_with_different_shard_plan(self) -> None:
@@ -385,7 +385,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                         torch.allclose(store_tensor, load_tensor), msg=f"{s0} vs {s1}"
                     )
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_load_rowwise_to_colwise(self) -> None:
@@ -437,7 +437,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             self.assertTrue(torch.allclose(store_tensor, load_tensor))
 
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_save_load_bytes(self) -> None:

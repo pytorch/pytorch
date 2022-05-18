@@ -85,7 +85,7 @@ class CustomSharder(Sharder):
 
 class TestCustomSharder(ShardedTensorTestBase):
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_custom_sharder(self):
@@ -128,7 +128,7 @@ class TestCustomSharder(ShardedTensorTestBase):
 
         self.assertEqual(local_output, sharded_output)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_custom_sharder_errors(self):

@@ -121,7 +121,7 @@ class TestShardedEmbedding(ShardedTensorTestBase):
 
         self.assertEqual(local_output, sharded_output)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_embedding_colwise(self):
@@ -144,7 +144,7 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             )
             self._run_sharded_embedding(spec, [30], 15, 14, max_norm=2.0, sharded_dim=1)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_embedding_rowwise(self):

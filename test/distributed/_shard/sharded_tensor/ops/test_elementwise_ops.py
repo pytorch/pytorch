@@ -45,7 +45,7 @@ class TestShardedTensorElementWiseOps(ShardedTensorTestBase):
             new_st_local_shard,
         )
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_gelu(self):
@@ -58,7 +58,7 @@ class TestShardedTensorElementWiseOps(ShardedTensorTestBase):
             self._run_sharded_elementwise_ops(spec, [17, 23], torch.nn.functional.gelu)
             self._run_sharded_elementwise_ops(spec, [14, 15], torch.nn.functional.gelu)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_relu(self):
@@ -71,7 +71,7 @@ class TestShardedTensorElementWiseOps(ShardedTensorTestBase):
             self._run_sharded_elementwise_ops(spec, [17, 23], torch.nn.functional.relu)
             self._run_sharded_elementwise_ops(spec, [14, 15], torch.nn.functional.relu)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_dropout(self):

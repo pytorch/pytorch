@@ -35,7 +35,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestShardedTensorMatrixOps(ShardedTensorTestBase):
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_contiguous(self):
@@ -47,7 +47,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             self.assertTrue(st.is_contiguous())
             self.assertTrue(st.local_tensor().is_contiguous())
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_type_as(self):
@@ -66,7 +66,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             self.assertEqual(torch.bool, st_3.dtype)
             self.assertEqual(torch.bool, st_3.local_tensor().dtype)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_transpose(self):
@@ -92,7 +92,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 torch.allclose(_shard_tensor(tensor, spec).transpose(1, 2), st_expected)
             )
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_transpose_error(self):
@@ -106,7 +106,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
         ):
             st.transpose(1, 0)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_softmax(self):
@@ -140,7 +140,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 )
             )
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_masked_fill(self):
@@ -149,7 +149,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
         self._test_masked_fill_with_sizes((35, 26), broadcast_style=True)
         self._test_masked_fill_with_sizes((26,))
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_masked_fill_error(self):
@@ -176,7 +176,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             ):
                 st.masked_fill(mask, 25.0)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_view(self):
@@ -202,7 +202,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 )
             )
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_view_error(self):
@@ -227,7 +227,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             ):
                 st.view(5, 7, -1, -1)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_layer_norm(self):
@@ -267,7 +267,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 )
             )
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_layer_norm_error(self):

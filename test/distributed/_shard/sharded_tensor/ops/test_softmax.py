@@ -39,14 +39,14 @@ class TestShardedSoftmax(ShardedTensorTestBase):
 
         self.assertEqual(local_softmax.chunk(self.world_size, dim=sharding_dim)[self.rank], sharded_softmax.local_tensor())
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_softmax_basic(self):
         self._test_sharded_softmax(0, 1)
         self._test_sharded_softmax(-2, 1)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_softmax_on_sharding_dim(self):

@@ -70,7 +70,7 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
         self.assertEqual(1, len(local_shards))
         self.assertEqual(local_shards[0].tensor, local_result_compare)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_partial_tensor_reshard(self):
@@ -81,7 +81,7 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
         self._run_partial_tensor_n_reshard(spec, [13, 21], 3, dist.ReduceOp.SUM)
         self._run_partial_tensor_n_reshard(spec, [17, 21], 2, dist.ReduceOp.MAX)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_partial_tensor_reshard_errors(self):
@@ -121,7 +121,7 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
             )
 
 class TestPartialTensorOps(ShardedTensorTestBase):
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_transpose(self):
@@ -129,7 +129,7 @@ class TestPartialTensorOps(ShardedTensorTestBase):
         partial_tensor = partial_tensor.transpose(0, 1)
         self.assertEqual(partial_tensor.size(), torch.Size((10, 5)))
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_cat(self):
@@ -150,7 +150,7 @@ class TestPartialTensorOps(ShardedTensorTestBase):
         local_concat = torch.cat([t1, t2, t3], dim=1)
         self.assertEqual(local_concat.size(), partial_concat.size())
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_cat_errors(self):

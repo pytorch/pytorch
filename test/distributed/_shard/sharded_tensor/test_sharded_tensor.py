@@ -128,7 +128,7 @@ class TestCreateTensorFromParams(TestCase):
 
 
 class TestShardParameter(ShardedTensorTestBase):
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_shard_parameter(self):
@@ -155,7 +155,7 @@ class TestShardParameter(ShardedTensorTestBase):
         self.assertEqual(12, local_shards[0].tensor.size(1))
         self.assertEqual(torch.narrow(weight_og, 0, 3 * self.rank, 3), local_shards[0].tensor)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_shard_parameter_errors(self):
@@ -214,7 +214,7 @@ class TestShardParameter(ShardedTensorTestBase):
 
 
 class TestShardTensor(ShardedTensorTestBase):
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_shard_tensor(self):
@@ -237,7 +237,7 @@ class TestShardTensor(ShardedTensorTestBase):
         self.assertEqual(torch.Size([3, 12]), local_shard.size())
         self.assertEqual(torch.narrow(tensor, 0, 3 * self.rank, 3), local_shard)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_shard_tensor_errors(self):
@@ -298,7 +298,7 @@ class TestModuleHookApi(ShardedTensorTestBase):
         def forward(self):
             return self.st
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_reshard_output(self):
@@ -323,7 +323,7 @@ class TestModuleHookApi(ShardedTensorTestBase):
         self.assertEqual(local_shard.size(0), 24)
         self.assertEqual(local_shard.size(1), 3)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_collect_local_shard(self):
@@ -339,7 +339,7 @@ class TestModuleHookApi(ShardedTensorTestBase):
 
 
 class TestLocalTensor(ShardedTensorTestBase):
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_local_tensor(self):
@@ -357,7 +357,7 @@ class TestLocalTensor(ShardedTensorTestBase):
         self.assertEqual(torch.Size([6, 12]), local_shard.size())
         self.assertEqual(st.local_tensor(), local_shard)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_local_tensor_error(self):
@@ -433,7 +433,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         with self.assertRaisesRegex(AttributeError, "can't set attribute"):
             st.requires_grad = True
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_complete_world_size(self):
@@ -741,7 +741,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 new_op_st = op(st, dtype=dtype)
                 self.assertEqual(new_op_st.local_tensor(), expect_tensor)
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_partial_world_size(self):
@@ -790,7 +790,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 self.assertEqual(f'rank:{rpc_rank}/cuda:{rpc_rank}', str(shard.metadata.placement))
                 self.assertEqual((5, 20), shard.tensor.size())
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_new_group(self):
@@ -1312,7 +1312,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, 10, 10, pin_memory=True, init_rrefs=True)
         self.assertTrue(st.is_pinned())
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_grid_sharding(self):
@@ -1664,7 +1664,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             verify_size(rank, shard_metadata.shard_sizes)
             self.assertEqual(f'rank:{rank}/cuda:{rank}', str(shard_metadata.placement))
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_partial_world_size(self):
@@ -1723,7 +1723,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_new_group(self):
@@ -1780,7 +1780,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_multiple_local_shards(self):
@@ -1849,7 +1849,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_with_rpc_names(self):
@@ -1971,7 +1971,7 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
                         rank_to_metadata[rpc_rank].shard_sizes, shard.tensor.size()
                     )
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_init_from_local_tensor(self):
@@ -2023,7 +2023,7 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
 
 class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_local_shards(self):
@@ -2054,7 +2054,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 metadata=wrong_local_shard_metadata,
             )
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_init_from_local_shards(self):
@@ -2100,7 +2100,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 self.assertEqual((5, 5), shard.tensor.size())
 
 
-    @with_comms
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_init_from_local_shards_and_global_metadata(self):

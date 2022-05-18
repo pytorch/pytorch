@@ -76,7 +76,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         self.assertEqual(len(st1.remote_shards()), len(st2.remote_shards()))
 
 # wrapper to initialize comms (processgroup + rpc)
-def with_comms(func=None, init_rpc=True, backend="nccl"):
+def with_comms(func=None, init_rpc=False, backend="nccl"):
     if func is None:
         return partial(
             with_comms,

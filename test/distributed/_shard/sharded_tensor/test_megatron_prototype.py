@@ -175,7 +175,7 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         self.assertNotEqual(previous_bias_fc2, bias_fc2)
         self.assertEqual(bias_fc2, local_bias_fc2)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_megatron_two_layer_prototype(self):

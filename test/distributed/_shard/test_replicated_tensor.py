@@ -27,7 +27,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor import TEST_GPU_N
 
 class TestReplicatedTensor(ShardedTensorTestBase):
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_basics(self):
@@ -48,7 +48,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
         with self.assertRaisesRegex(ValueError, 'have different values'):
             replica_tensor.validate()
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_inter_op_replicated_tensor(self):
@@ -68,7 +68,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             replica_tensor_new_group * replica_tensor1
 
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_inter_op_tensor(self):
@@ -83,7 +83,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
 
         self.assertEqual(new_tensor, local_tensor + local_rand_tensor)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_inter_op_sharded_tensor(self):
@@ -131,7 +131,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
                 self.assertEqual(reflect_output, reflect_local_output)
 
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_implicit_broadcasting(self):
@@ -173,7 +173,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
                 self.assertEqual(output, local_output)
 
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_inter_op_sharded_tensor_errors(self):
@@ -200,7 +200,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, 'not supported for ShardedTensor'):
             st1 % replica_tensor
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_with_ddp(self):
@@ -307,7 +307,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             obj = torch.load(buffer)
             self.assertEqual(expected_state_dict, obj.state_dict())
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_unsqueeze(self):
@@ -322,7 +322,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
         self.assertEqual(unsqueezed_local_tensor, unsqueezed_replicated_tensor)
         self.assertEqual(torch.unsqueeze(replicated_tensor, 0), unsqueezed_replicated_tensor)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_getitem(self):

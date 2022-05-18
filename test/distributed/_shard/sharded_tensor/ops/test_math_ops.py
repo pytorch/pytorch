@@ -27,7 +27,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common 
 )
 
 class TestMathOps(ShardedTensorTestBase):
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_basic_math_ops(self):
@@ -87,7 +87,7 @@ class TestMathOps(ShardedTensorTestBase):
 
 
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_math_ops_errors(self):
@@ -135,7 +135,7 @@ class TestMathOps(ShardedTensorTestBase):
             torch.add(st, sharded_rhs)
 
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_bmm(self):
@@ -150,7 +150,7 @@ class TestMathOps(ShardedTensorTestBase):
             self.assertTrue(torch.allclose(st_lhs.bmm(st_rhs), st_expected))
 
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_bmm_errors(self):

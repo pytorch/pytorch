@@ -70,7 +70,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_validate_metadata(self) -> None:
@@ -117,7 +117,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
         return metadata[0]
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_checkpoint_has_shard_too_small(self) -> None:
@@ -141,7 +141,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         with self.assertRaisesRegex(ValueError, "only has 1 available"):
             validate_metadata(module.state_dict(), metadata)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_checkpoint_has_shard_overlap(self) -> None:
@@ -166,7 +166,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
             validate_metadata(module.state_dict(), metadata)
 
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_checkpoint_has_storage_type_mismatch(self) -> None:
@@ -185,7 +185,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
             validate_metadata(module.state_dict(), metadata)
 
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_tensor_metadata_with_missing_rank_spec(self) -> None:
@@ -206,7 +206,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         self.assertEqual(1, len(mapping))
 
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_storage_key_mapping(self) -> None:

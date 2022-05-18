@@ -52,7 +52,7 @@ class TestShardedTensorChunkOps(ShardedTensorTestBase):
         chunked_st = st_tensor.chunk(chunk_num, dim=-1)
         self._compare_chunk_result(local_tensor_chunked, chunked_st)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_chunk(self):
@@ -68,7 +68,7 @@ class TestShardedTensorChunkOps(ShardedTensorTestBase):
             self._run_sharded_chunk_test([128, 512], spec, 8)
             self._run_sharded_chunk_test([1024, 2048], spec, 4)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_chunk_error(self):

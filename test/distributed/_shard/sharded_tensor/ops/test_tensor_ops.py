@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import (
 )
 
 class TestTensorOps(ShardedTensorTestBase):
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_deep_copy(self):
@@ -41,7 +41,7 @@ class TestTensorOps(ShardedTensorTestBase):
         self.assertEqual(copied_st.local_tensor(), st.local_tensor())
         self.assertFalse(copied_st is st)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_clone(self):
@@ -60,7 +60,7 @@ class TestTensorOps(ShardedTensorTestBase):
         self.assertEqual(copied_st.local_tensor(), st.local_tensor())
         self.assertFalse(copied_st is st)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_detach(self):
@@ -85,7 +85,7 @@ class TestTensorOps(ShardedTensorTestBase):
         for local_shard in detached_st.local_shards():
             self.assertFalse(local_shard.tensor.requires_grad)
 
-    @with_comms(init_rpc=False)
+    @with_comms
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_set_requires_grad(self):
