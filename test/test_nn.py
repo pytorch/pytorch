@@ -19733,6 +19733,20 @@ class TestNNDeviceType(NNTestCase):
                 output_unit = m_unit(input, target)
                 self.assertEqual(output, output_unit)
 
+    @parametrize_test('reduction', ['none', 'mean', 'sum'])
+    @parametrize_test('weighted', [False, True])
+    def test_cross_entropy_loss_prob_target_no_batch_dim(self, device, reduction, weighted):
+        C = 5
+        input = torch.randn(C, device=device).log_softmax(dim=-1)
+        target = torch.randn(C, device=device).softmax(dim=-1)
+        weight = torch.randn(C, device=device) if weighted else None
+        m = nn.CrossEntropyLoss(reduction=reduction, weight=weight)
+        loss_no_batch = m(input, target)
+        loss_batch = m(input.unsqueeze(0), target.unsqueeze(0))
+        if reduction == 'none':
+            loss_batch = loss_batch.squeeze(0)
+        self.assertEqual(loss_no_batch, loss_batch)
+
     def test_cross_entropy_loss_index_target_unit_weights(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
@@ -20536,6 +20550,24 @@ class TestNNDeviceType(NNTestCase):
         mha.in_proj_bias = torch.nn.Parameter(mha.in_proj_bias.to(torch.half).to(device))
         query = torch.randn(3, 3, 3, dtype=dtype, device=device)
         mha(query, query, query)
+
+    @dtypes(torch.double)
+    @torch.no_grad()
+    def test_multihead_attn_in_proj_bias_none(self, device, dtype):
+        mha = torch.nn.MultiheadAttention(1, 1, bias=False, dtype=dtype, device=device)
+        query = torch.rand(3, 2, 1, dtype=dtype, device=device)
+        mha(query, query, query)
+
+    @dtypes(torch.double)
+    @torch.no_grad()
+    def test_multihead_attn_in_proj_weight_none(self, device, dtype):
+        # Setting kdim == vdim == 2 means that vdim != embed_dim
+        # will cause the logic to use per-input project weights, thereby
+        # forcing self.in_proj_weight = None
+        mha = torch.nn.MultiheadAttention(4, 4, vdim=2, kdim=2, dtype=dtype, device=device)
+        query = torch.rand(4, 4, 4, dtype=dtype, device=device)
+        key = torch.rand(4, 4, 2, dtype=dtype, device=device)
+        mha(query, key, key)
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
