@@ -177,6 +177,9 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 
 @with_native_function
 def should_generate_py_binding(f: NativeFunction) -> bool:
+    # So far, all NativeFunctions that are entirely code-generated do not get python bindings.
+    if "generated" in f.tags:
+        return False
     name = cpp.name(f.func)
     for skip_regex in SKIP_PYTHON_BINDINGS:
         if skip_regex.match(name):

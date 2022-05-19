@@ -32,7 +32,10 @@ from torchgen.api.types import (
     stringT,
 )
 from torchgen.api import cpp
-from torchgen.gen import parse_native_yaml, get_grouped_by_view_native_functions
+from torchgen.gen import (
+    parse_native_yaml,
+    get_grouped_by_view_native_functions,
+)
 from torchgen.context import with_native_function
 from torchgen.model import (
     FunctionSchema,
