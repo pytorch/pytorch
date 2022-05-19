@@ -25,7 +25,7 @@ MPSDevice::~MPSDevice() {
 }
 
 MPSDevice::MPSDevice() {
-  NSArray* devices = MTLCopyAllDevices();
+  NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0 ; i < [devices count] ; i++) {
     id<MTLDevice>  device = devices[i];
     if(![device isLowPower]) { // exclude Intel GPUs

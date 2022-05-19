@@ -260,9 +260,9 @@ void printTensorNDArray(const Tensor& t) {
 
   // Initialize data
   id<MTLBuffer> selfBuf = __builtin_bit_cast(id<MTLBuffer>, t.storage().data());
-  MPSGraphTensorData* tdata = [[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
+  MPSGraphTensorData* tdata = [[[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
                                                             shape:selfShape
-                                                         dataType:selfDType];
+                                                         dataType:selfDType] autorelease];
   [tdata printNDArray];
 }
 
@@ -294,13 +294,13 @@ id<MTLBuffer> gatherViewTensor(const at::Tensor& src, id<MTLBuffer> sourceBuffer
                         kMPS,
                         c10::nullopt,
                         c10::nullopt);
-        MPSGraphTensorData* inputTensorData = [[MPSGraphTensorData alloc] initWithMTLBuffer: sourceBuffer
+        MPSGraphTensorData* inputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: sourceBuffer
                                                                             shape: [inputTensor shape]
-                                                                            dataType: [inputTensor dataType]];
+                                                                            dataType: [inputTensor dataType]] autorelease];
         id<MTLBuffer> resultBuffer = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
-        MPSGraphTensorData* outputTensorData = [[MPSGraphTensorData alloc] initWithMTLBuffer: resultBuffer
+        MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: resultBuffer
                                                                             shape: getMPSShape(src.sizes())
-                                                                            dataType: getMPSDataType(src.scalar_type())];
+                                                                            dataType: getMPSDataType(src.scalar_type())] autorelease];
         NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
           inputTensor : inputTensorData
         };
@@ -347,7 +347,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPS
 
   _value = [[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
                                                    shape:mpsShape
-                                                dataType:mpsDataType];
+                                                dataType:mpsDataType] autorelease];
   TORCH_INTERNAL_ASSERT(_value);
   _placeholder = mpsGraphTensor;
 }
