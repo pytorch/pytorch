@@ -461,7 +461,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_impl(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {

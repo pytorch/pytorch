@@ -237,15 +237,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str("ProcessGroup ", getBackendName(), "does not support reduce"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather(
-      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
-      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ", getBackendName(), "does not support allgather"));
-  }
+  c10::intrusive_ptr<ProcessGroup::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = {});
 
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
   // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
@@ -432,13 +427,23 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "ProcessGroup ", getBackendName(), "does not support broadcast"));
   }
 
-    virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_impl(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_impl(
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
             "ProcessGroup ", getBackendName(), "does not support allreduce"));
+  }
+
+  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_impl(
+      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
+      std::vector<at::Tensor>& /* inputTensors */,
+      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ", getBackendName(), "does not support allgather"));
   }
 
  protected:

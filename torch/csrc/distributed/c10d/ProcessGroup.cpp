@@ -33,6 +33,16 @@ at::Tensor allreduce_(const at::Tensor& tensor,
   return tensor;
 }
 
+std::vector<at::Tensor> allgather_(const std::vector<at::Tensor>& output_tensors, const at::Tensor& input_tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group, int64_t timeout) {
+  std::vector<std::vector<at::Tensor>> output_tensorss{output_tensors};
+  std::vector<at::Tensor> input_tensors{input_tensor};
+  auto work = process_group->allgather_impl(output_tensorss, input_tensors,
+      AllgatherOptions {std::chrono::milliseconds(timeout)});
+  work->wait();
+  return output_tensors;
+}
+
 TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup and Work definations are more like declarations.
   // They don't expose the details of the two classes into TorchScript.
@@ -45,6 +55,7 @@ TORCH_LIBRARY(c10d, m) {
   m.def("broadcast", dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast));
   m.def("broadcast_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast_));
   m.def("allreduce_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
+  m.def("allgather_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, allgather_));
 }
 
 }  // namespace
@@ -272,6 +283,34 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::allreduce(
   future->markCompleted(tensor);
   auto work = c10::make_intrusive<c10d::ProcessGroup::Work>(getRank(), c10d::OpType::ALLREDUCE,
       /*profilingTitle=*/nullptr, tensors);
+  work->setFuture(std::move(future));
+  work->finish();
+  return work;
+}
+
+  c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::allgather(
+      std::vector<std::vector<at::Tensor>>& output_tensorss,
+      std::vector<at::Tensor>& input_tensors,
+      const AllgatherOptions& opts) {
+  TORCH_CHECK(output_tensorss.size() == 1lu, "Only one tensor output is supported for c10d::allreduce.");
+  auto& output_tensors = output_tensorss[0];
+  TORCH_CHECK(input_tensors.size() == 1lu, "Only one tensor input is supported for c10d::allreduce.");
+  auto& input_tensor = input_tensors[0];
+
+  static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::allgather_", "")
+      .typed<std::vector<at::Tensor>(const std::vector<at::Tensor>&, const at::Tensor&,
+          const c10::intrusive_ptr<::c10d::ProcessGroup>&, int64_t)>();
+  op.call(output_tensors, input_tensor, c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+      opts.timeout.count());
+
+  std::vector<c10::Device> devices;
+  for (auto& tensor : output_tensors) {
+    devices.push_back(tensor.device());
+  }
+  auto future = c10::make_intrusive<at::ivalue::Future>(c10::ListType::create(c10::TensorType::get()), devices);
+  future->markCompleted(output_tensors);
+  auto work = c10::make_intrusive<c10d::ProcessGroup::Work>(getRank(), c10d::OpType::ALLGATHER,
+      /*profilingTitle=*/nullptr, input_tensors);
   work->setFuture(std::move(future));
   work->finish();
   return work;

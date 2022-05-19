@@ -41,7 +41,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::reduce(
   return next()->reduce(tensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::allgather(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::allgather_impl(
     std::vector<std::vector<at::Tensor>>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {

@@ -108,6 +108,26 @@ class TestDistributedLazy(MultiProcessTestCase):
 
         self._all_close(result_lazy, result_cuda)
 
+    def _all_gather(self, tensors, tensor):
+        dist.all_gather(tensors, tensor)
+        return tensors
+
+    def test_AllGatherLazy(self):
+        # disable all JIT optimizations and fusions.
+        torch._C._jit_set_bailout_depth(0)
+
+        source = torch.full((2, 3), self.rank)
+        outputs = [torch.zeros(2, 3, dtype=torch.int64) for _ in range(self.world_size)]
+
+        device_lazy = torch.device("lazy", self.rank)
+        result_lazy = self._all_gather([output.to(device_lazy) for output in outputs], source.to(device_lazy))
+        torch._lazy.mark_step(str(device_lazy))
+
+        device_cuda = torch.device("cuda", self.rank)
+        result_cuda = self._all_gather([output.to(device_cuda) for output in outputs], source.to(device_cuda))
+
+        self._all_close(result_lazy, result_cuda)
+
 
 if __name__ == "__main__":
     run_tests()

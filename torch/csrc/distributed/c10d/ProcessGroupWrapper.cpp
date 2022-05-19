@@ -217,7 +217,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::reduce(
   return pg_->reduce(tensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allgather(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allgather_impl(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {

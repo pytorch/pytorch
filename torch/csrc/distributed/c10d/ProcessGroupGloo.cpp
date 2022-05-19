@@ -1820,7 +1820,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
 // Note: current CUDA implementation holds the assumption that the
 // tensors in the nested output tensor vectors are on the same device.
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_impl(
     std::vector<std::vector<at::Tensor>>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {

@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor.h>
+#include <torch/csrc/lazy/ts_backend/ops/allgather.h>
 #include <torch/csrc/lazy/ts_backend/ops/allreduce.h>
 #include <torch/csrc/lazy/ts_backend/ops/broadcast.h>
 #include <torch/library.h>
@@ -55,9 +56,26 @@ at::Tensor allreduce(const at::Tensor& tensor,
   return tensor;
 }
 
+std::vector<at::Tensor> allgather(const std::vector<at::Tensor>& output_tensors, const at::Tensor& input_tensor,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group, int64_t timeout) {
+  TORCH_LAZY_FN_COUNTER("lazy::");
+  auto outputs = GetLtcTensors(output_tensors);
+  auto input = GetLtcTensor(input_tensor);
+  std::vector<Shape> shape;
+  for (auto& output_tensor : output_tensors) {
+    shape.emplace_back(output_tensor.scalar_type(), output_tensor.sizes().vec());
+  }
+  auto node = MakeNode<Allgather>(GetTensorList(output_tensors), input->GetIrValue(), process_group, timeout, std::move(shape), output_tensors.size());
+  for (int i = 0; i < output_tensors.size(); i++) {
+    outputs[i]->SetIrValue(Value(node, i));
+  }
+  return output_tensors;
+}
+
 TORCH_LIBRARY_IMPL(c10d, Lazy, m) {
     m.impl("broadcast_", broadcast);
     m.impl("allreduce_", allreduce);
+    m.impl("allgather_", allgather);
 }
 
 }  // namespace lazy
