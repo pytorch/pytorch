@@ -436,7 +436,7 @@ def _unimplemented(op, msg):
         warnings.warn(
             "ONNX export failed on " + op + " because " + msg + " not supported"
         )
-    elif GLOBALS.operator_export_type == _C._onnx.OperatorExportTypes.ONNX:
+    elif GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}")
 
 
