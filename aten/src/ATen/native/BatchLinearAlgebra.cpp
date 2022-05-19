@@ -4456,8 +4456,16 @@ TransposeType to_transpose_type(const bool contig, const bool conj) {
 } // end of anonymous namespace
 
 Tensor& linalg_vecdot_out(const Tensor& x, const Tensor& y, int64_t dim, Tensor& out) {
-  at::native::checkFloatingOrComplex(x, "linalg.vecdot");
-  at::native::checkFloatingOrComplex(y, "linalg.vecdot");
+  checkFloatingOrComplex(x, "linalg.vecdot");
+  TORCH_CHECK(x.scalar_type() == y.scalar_type(),
+              "linalg.vecdot: Expected x and y to have the same dtype, but found x of type ",
+              x.scalar_type(), " and y of type ", y.scalar_type(), " instead");
+  // out checks
+  TORCH_CHECK(out.scalar_type() == x.scalar_type(),
+              "linalg.vecdot: Expected out of dtype", x.scalar_type(),
+              " but found ", out.scalar_type());
+  checkSameDevice("linalg.vecdot", x, out);
+
   // Computes x^H y
   if (x.dim() == 1 && y.dim() == 1) {
     at::native::resize_output(out, {});
@@ -4468,8 +4476,10 @@ Tensor& linalg_vecdot_out(const Tensor& x, const Tensor& y, int64_t dim, Tensor&
 }
 
 Tensor linalg_vecdot(const Tensor& x, const Tensor& y, int64_t dim) {
-  at::native::checkFloatingOrComplex(x, "linalg.vecdot");
-  at::native::checkFloatingOrComplex(y, "linalg.vecdot");
+  checkFloatingOrComplex(x, "linalg.vecdot");
+  TORCH_CHECK(x.scalar_type() == y.scalar_type(),
+              "linalg.vecdot: Expected x and y to have the same dtype, but found x of type ",
+              x.scalar_type(), " and y of type ", y.scalar_type(), " instead");
   // Computes x^H y
   if (x.dim() == 1 && y.dim() == 1) {
     return at::vdot(x, y);
