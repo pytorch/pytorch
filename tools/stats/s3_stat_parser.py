@@ -1,6 +1,7 @@
 import bz2
 import json
 import logging
+import os
 import subprocess
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -152,6 +153,7 @@ def _parse_master_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[R
     for summary in summaries:
         # master summary format: "test_time/{sha}/{job}/file"
         summary_job = summary.key.split("/")[2]
+        print(f"cats logging _parse_master_summaries {summary_job}")
         if summary_job in jobs or len(jobs) == 0:
             binary = summary.get()["Body"].read()
             string = bz2.decompress(binary).decode("utf-8")
@@ -190,6 +192,7 @@ def get_test_stats_summaries_for_job(
 ) -> Dict[str, List[Report]]:
     bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
     summaries = bucket.objects.filter(Prefix=f"test_time/{sha}/{job_prefix}")
+    print(f"cats logging get_test_stats_summaries_for_job {summaries}")
     return _parse_master_summaries(summaries, jobs=list())
 
 
@@ -201,12 +204,20 @@ def get_test_stats_summaries_for_pr(
     return _parse_pr_summaries(summaries, job_prefix=job_prefix)
 
 
+def cats_logging_helper(summary: List[Report]) -> List[Any]:
+    d = []
+    for i in summary:
+        for j, val in i["files"].items():
+            d.append({j: val["total_seconds"]})
+    return d
+
+
 # This function returns a list of S3 test time reports. This function can run into errors if HAVE_BOTO3 = False
 # or the S3 bucket is somehow unavailable. Even though this function goes through ten commits' reports to find a
 # non-empty report, it is still conceivable (though highly unlikely) for this function to return no reports.
 def get_previous_reports_for_branch(
     branch: str, ci_job_prefix: str = ""
-) -> List[Report]:
+) -> List[Tuple[str, Report]]:
     commit_date_ts = subprocess.check_output(
         ["git", "show", "-s", "--format=%ct", "HEAD"], encoding="ascii"
     ).strip()
@@ -225,20 +236,23 @@ def get_previous_reports_for_branch(
         encoding="ascii",
     ).splitlines()
 
-    reports: List[Report] = []
+    reports: List[Tuple[str, Report]] = []
     commit_index = 0
+    print(f"cats logging get_previous_reports_for_branch commits {commits}")
     while len(reports) == 0 and commit_index < len(commits):
         commit = commits[commit_index]
-        logger.info(f"Grabbing reports from commit: {commit}")
+        print(f"Grabbing reports from commit: {commit}")
         summaries = get_test_stats_summaries_for_job(
             sha=commit, job_prefix=ci_job_prefix
         )
         for job_name, summary in summaries.items():
-            reports.append(summary[0])
+            reports.append((job_name, summary[0]))
             if len(summary) > 1:
                 logger.warning(
                     f"WARNING: Multiple summary objects found for {commit}/{job_name}"
                 )
+            print("cats logging get_previous_reports_for_branch")
+            print(f"job name: {job_name} \nsummary: {cats_logging_helper(summary)}")
         commit_index += 1
     return reports
 

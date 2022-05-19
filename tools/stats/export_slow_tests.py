@@ -10,7 +10,7 @@ from tools.stats.s3_stat_parser import (
     Report,
     Version2Report,
 )
-from typing import cast, DefaultDict, Dict, List, Any
+from typing import cast, DefaultDict, Dict, List, Any, Tuple
 from urllib.request import urlopen
 
 SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
@@ -20,10 +20,10 @@ IGNORED_JOBS = ["asan", "periodic"]
 
 
 def get_test_case_times() -> Dict[str, float]:
-    reports: List[Report] = get_previous_reports_for_branch("origin/viable/strict", "")
+    reports: List[Tuple[str, Report]] = get_previous_reports_for_branch("origin/viable/strict", "")
     # an entry will be like ("test_doc_examples (__main__.TestTypeHints)" -> [values]))
     test_names_to_times: DefaultDict[str, List[float]] = defaultdict(list)
-    for report in reports:
+    for test_config, report in reports:
         if report.get("format_version", 1) != 2:  # type: ignore[misc]
             raise RuntimeError("S3 format currently handled is version 2 only")
         v2report = cast(Version2Report, report)

@@ -4,6 +4,7 @@ import os
 import subprocess
 
 from tools.stats.s3_stat_parser import (
+    cats_logging_helper,
     get_previous_reports_for_branch,
     get_previous_reports_for_pr,
     Report,
@@ -19,7 +20,14 @@ from typing_extensions import TypedDict
 class JobTimeJSON(TypedDict):
     commit: str
     JOB_BASE_NAME: str
-    job_times: Dict[str, float]
+    job_times: Dict[str, Dict[str, float]]
+
+
+def cats_logging_helper2(reports: List[Tuple[str, Report]]) -> List[Any]:
+    d = []
+    for job_name, report in reports:
+        d.append((job_name, cats_logging_helper([report])))
+    return d
 
 
 def _get_stripped_CI_job() -> str:
@@ -34,7 +42,7 @@ def _get_stripped_CI_job() -> str:
     return job
 
 
-def _get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
+def _get_job_times_json(job_times: Dict[str, Dict[str, float]]) -> JobTimeJSON:
     return {
         "commit": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], encoding="ascii"
@@ -44,27 +52,47 @@ def _get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
     }
 
 
-def _calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
-    """Compute test runtime by filename: ("test_file_name" -> (current_avg, # values))"""
-    jobs_to_times: Dict[str, Tuple[float, int]] = dict()
-    for report in reports:
+def _get_test_config(job_name: str) -> str:
+    job_name_and_shard = job_name.split("-")[-1]
+    if job_name_and_shard[-1].isdigit():
+        return job_name_and_shard[:-1]
+    else:
+        return job_name_and_shard
+
+
+def _calculate_job_times(
+    reports: List[Tuple[str, Report]]
+) -> Dict[str, Dict[str, float]]:
+    """Compute test runtime by filename: test config -> ("test_file_name" -> (current_avg, # values))"""
+    jobs_to_times: Dict[str, Dict[str, Tuple[float, int]]] = dict()
+    print("cats logging _calculate_job_times")
+    print(cats_logging_helper2(reports))
+    for job_name, report in reports:
+        test_config = _get_test_config(job_name)
+        if test_config not in jobs_to_times:
+            jobs_to_times[test_config] = dict()
         v_report = cast(Version2Report, report)
         assert (
             "format_version" in v_report.keys() and v_report.get("format_version") == 2
         ), "S3 format currently handled is version 2 only"
         files: Dict[str, Any] = v_report["files"]
         for name, test_file in files.items():
-            if name not in jobs_to_times:
-                jobs_to_times[name] = (test_file["total_seconds"], 1)
+            if name not in jobs_to_times[test_config]:
+                jobs_to_times[test_config][name] = (test_file["total_seconds"], 1)
             else:
-                curr_avg, curr_count = jobs_to_times[name]
+                curr_avg, curr_count = jobs_to_times[test_config][name]
                 new_count = curr_count + 1
                 new_avg = (
                     curr_avg * curr_count + test_file["total_seconds"]
                 ) / new_count
-                jobs_to_times[name] = (new_avg, new_count)
+                jobs_to_times[test_config][name] = (new_avg, new_count)
 
-    return {job: time for job, (time, _) in jobs_to_times.items()}
+    return {
+        test_config: {
+            job: time for job, (time, _) in jobs_to_times[test_config].items()
+        }
+        for test_config in jobs_to_times.keys()
+    }
 
 
 def calculate_shards(
@@ -92,19 +120,29 @@ def calculate_shards(
             curr_shard_time + filtered_job_times[job],
             curr_shard_jobs,
         )
+    print("cats logging")
+    print(f"job times\n{job_times}")
+    print(f"sorted_jobs\n{sorted_jobs}")
+    for i, (time, jobs) in enumerate(sharded_jobs):
+        print(f"{i} {time} {jobs}")
 
     # Round robin the unknown jobs starting with the smallest shard
     index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
     for job in unknown_jobs:
         sharded_jobs[index][1].append(job)
         index = (index + 1) % num_shards
+    print(f"unknown_jobs \n{unknown_jobs}")
+    for i, (time, jobs) in enumerate(sharded_jobs):
+        print(f"{i} {jobs}")
     return sharded_jobs
 
 
-def _pull_job_times_from_S3() -> Dict[str, float]:
+def _pull_job_times_from_S3() -> Dict[str, Dict[str, float]]:
     if HAVE_BOTO3:
+        print(f"cats logging _pull_job_times_from_S3 {_get_stripped_CI_job()}")
         ci_job_prefix = _get_stripped_CI_job()
-        s3_reports: List["Report"] = get_previous_reports_for_branch(
+        print(f"cats logging {ci_job_prefix}")
+        s3_reports: List[Tuple[str, Report]] = get_previous_reports_for_branch(
             "origin/viable/strict", ci_job_prefix
         )
     else:
@@ -123,7 +161,9 @@ def _pull_job_times_from_S3() -> Dict[str, float]:
     return _calculate_job_times(s3_reports)
 
 
-def _query_past_job_times(test_times_file: Optional[str] = None) -> Dict[str, float]:
+def _query_past_job_times(
+    test_times_file: Optional[str] = None,
+) -> Dict[str, Dict[str, float]]:
     """Read historic test job times from a file.
 
     If the file doesn't exist or isn't matching current commit. It will download data from S3 and exported it.
@@ -209,28 +249,30 @@ def get_shard_based_on_S3(
         print("Gathered no stats from S3. Proceeding with default sharding plan.")
         return tests[which_shard - 1 :: num_shards]
 
-    shards = calculate_shards(num_shards, tests, jobs_to_times)
+    shards = calculate_shards(
+        num_shards, tests, jobs_to_times[os.environ.get("TEST_CONFIG", "default")]
+    )
     _, tests_from_shard = shards[which_shard - 1]
     return tests_from_shard
 
 
-def get_slow_tests_based_on_S3(
-    test_list: List[str], td_list: List[str], slow_test_threshold: int
-) -> List[str]:
-    """Get list of slow tests based on historic S3 data."""
-    jobs_to_times: Dict[str, float] = _query_past_job_times()
+# def get_slow_tests_based_on_S3(
+#     test_list: List[str], td_list: List[str], slow_test_threshold: int
+# ) -> List[str]:
+#     """Get list of slow tests based on historic S3 data."""
+#     jobs_to_times: Dict[str, Dict[str, float]] = _query_past_job_times()
 
-    # Got no stats from S3, returning early to save runtime
-    if len(jobs_to_times) == 0:
-        print("Gathered no stats from S3. No new slow tests calculated.")
-        return []
+#     # Got no stats from S3, returning early to save runtime
+#     if len(jobs_to_times) == 0:
+#         print("Gathered no stats from S3. No new slow tests calculated.")
+#         return []
 
-    slow_tests: List[str] = []
-    for test in test_list:
-        if test in jobs_to_times and test not in td_list:
-            if jobs_to_times[test] > slow_test_threshold:
-                slow_tests.append(test)
-    return slow_tests
+#     slow_tests: List[str] = []
+#     for test in test_list:
+#         if test in jobs_to_times and test not in td_list:
+#             if jobs_to_times[test] > slow_test_threshold:
+#                 slow_tests.append(test)
+#     return slow_tests
 
 
 def get_specified_test_cases(filename: str, tests: List[str]) -> Dict[str, List[str]]:
@@ -321,8 +363,10 @@ def get_reordered_tests(tests: List[str], is_reordering_by_pr: bool) -> List[str
 
 
 # TODO Refactor this and unify with tools.stats.export_slow_tests
-def export_S3_test_times(test_times_filename: Optional[str] = None) -> Dict[str, float]:
-    test_times: Dict[str, float] = _pull_job_times_from_S3()
+def export_S3_test_times(
+    test_times_filename: Optional[str] = None,
+) -> Dict[str, Dict[str, float]]:
+    test_times: Dict[str, Dict[str, float]] = _pull_job_times_from_S3()
     if test_times_filename is not None:
         print(f"Exporting S3 test stats to {test_times_filename}.")
         if os.path.exists(test_times_filename):
