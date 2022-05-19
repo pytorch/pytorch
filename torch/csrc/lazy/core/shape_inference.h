@@ -52,16 +52,10 @@ TORCH_API std::vector<torch::lazy::Shape> compute_shape_native_layer_norm_backwa
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_new_empty_strided(const at::Tensor & self, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_nll_loss2d_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction, int64_t ignore_index, const at::Tensor & total_weight);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_nll_loss2d_forward(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction, int64_t ignore_index);
-<<<<<<< HEAD
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_nonzero(const at::Tensor & self);
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_random_(at::Tensor & self, c10::optional<at::Generator> generator);
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_random_(at::Tensor & self, int64_t to, c10::optional<at::Generator> generator);
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_random_(at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator);
-=======
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_random_functional(const at::Tensor & self, c10::optional<at::Generator> generator);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_random_functional(const at::Tensor & self, int64_t to, c10::optional<at::Generator> generator);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_random_functional(const at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator);
->>>>>>> d96573c54c ([test] attempt to functionalize ops with mutable positional-only args)
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_relu(const at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef repeats);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_smooth_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction, double beta);
