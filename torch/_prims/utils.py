@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
 from enum import Enum
+from functools import reduce, cmp_to_key
+import operator
 
 import torch
 
@@ -59,7 +61,7 @@ class TensorMeta(torch.Tensor):
         shape: Optional[ShapeType] = None,
         strides: Optional[StrideType] = None,
         dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
+        device: Optional[Union[torch.device, str]] = None,
     ):
 
         if isinstance(tensorlike, Number):
@@ -90,6 +92,9 @@ class TensorMeta(torch.Tensor):
         strides = inferred_strides if strides is None else tuple(strides)
         dtype = inferred_dtype if dtype is None else dtype
         device = inferred_device if device is None else device
+
+        if isinstance(device, str):
+            device = torch.device(device)
 
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
@@ -178,18 +183,143 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
         raise AssertionError(msg)
 
     if a.device != b.device:
-        msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
-        raise AssertionError(msg)
+        # Handles special cuda:0 vs cuda case
+        # TODO: we should review why this happens and see about fixing it
+        if (str(a.device) == "cuda:0" or str(a.device) == "cuda") and (
+            str(b.device) == "cuda:0" or str(b.device) == "cuda"
+        ):
+            pass
+        else:
+            msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
+            raise AssertionError(msg)
+
+    same_strides, idx = check_significant_strides(a, b)
+    if not same_strides:
+        msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+            a.stride(), b.stride(), idx
+        )
+        raise RuntimeError(msg)
 
 
-def compare_significant_strides(a: TensorLikeType, b: TensorLikeType):
-    assert a.ndim == b.ndim
+def check_significant_strides(
+    a: TensorLikeType, b: TensorLikeType
+) -> Tuple[bool, Optional[int]]:
+    # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
+    # See https://github.com/pytorch/pytorch/issues/77553
+    # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
+    # and for tensors with more than one element
+    if (a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
+        for idx in range(a.ndim):
+            if a.stride()[idx] != b.stride()[idx] and a.shape[idx] > 1:
+                return False, idx
 
-    for idx in range(a.ndim):
-        assert a.shape[idx] == b.shape[idx]
-        if a.shape[idx] == 0 or a.shape[idx] == 1:
+    return True, None
+
+
+def is_contiguous(a: TensorLikeType) -> bool:
+    """
+    Tests whether a tensor is contiguous or not.
+
+    Tensors are contiguous when they have no elements,
+    or when they have "nested" strides.
+    """
+    if a.numel() == 0:
+        return True
+
+    expected_stride = 1
+    for x, y in reversed(tuple(zip(a.shape, a.stride()))):
+        # Skips checking strides when a dimension has length 1
+        if x == 1:
             continue
-        assert a.stride()[idx] == b.stride()[idx]
+
+        if y != expected_stride:
+            return False
+        expected_stride = expected_stride * x
+
+    return True
+
+
+# NOTE: Based on the implementation in TensorIterator.cpp, but note that
+# the note [Computing output strides] is incorrect, because it
+# says that strides will be preserved even if they are not
+# "non overlapping and dense", but this is incorrect. The
+# output of elementwise operations are always given
+# non overlapping and dense strides.
+# This is also INCORRECT because it does not model TensorIterator's
+# short-circuit, which can cause different strides.
+def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
+    """
+    Computes the output strides for elementwise operations.
+    """
+
+    if len(tensors) == 0:
+        msg = "Can't compute elementwise output strides for zero tensors!"
+        raise ValueError(msg)
+
+    check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
+
+    # Filters the tensors to actual tensors
+    all_tensors = all(isinstance(a, TensorLike) for a in tensors)
+    tensors = tuple(
+        a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
+    )
+
+    # Short-circuits for CPU scalar case
+    if len(tensors) == 0:
+        return ()
+
+    # Short-circuits for shapes with zero or one dimensions
+    # TODO: are these necessary?
+    ndim = tensors[0].ndim
+    if ndim == 0:
+        return ()
+    if ndim == 1:
+        return (1,)
+
+    shape = tensors[0].shape
+
+    def _cmp(idx_a, idx_b):
+        for tensor in tensors:
+            stride_a = tensor.stride()[idx_a]
+            stride_b = tensor.stride()[idx_b]
+
+            if stride_a == 0 or stride_b == 0:
+                continue
+
+            if stride_a < stride_b:
+                return -1
+
+            if stride_a > stride_b:
+                return 1
+
+            # stride_a == stride_b
+            if shape[idx_a] > shape[idx_b]:
+                return 1
+
+            # NOTE: this case is missing in the C++ impl
+            if shape[idx_a] < shape[idx_b]:
+                return -1
+
+        # Note: this case is hit if all strides are zero,
+        # or all strides are equal and all dimensions have the same length
+        return 0
+
+    perm = tuple(range(ndim))
+    perm = tuple(sorted(perm, key=cmp_to_key(_cmp), reverse=True))
+
+    permuted_shape = [-1] * ndim
+    for idx, x in enumerate(perm):
+        permuted_shape[idx] = shape[x]
+
+    new_strides = make_contiguous_strides_for(permuted_shape)
+    # print(f"new_strides is {new_strides}")
+    # print(f"shape is {shape}")
+    # print(f"permuted_shape is {permuted_shape}")
+    permuted_strides = [-1] * ndim
+    for idx, x in enumerate(perm):
+        permuted_strides[x] = new_strides[idx]
+
+    return tuple(permuted_strides)
 
 
 #
@@ -207,7 +337,7 @@ def validate_dim_length(length: int):
     assert length >= 0
 
 
-def validate_shape(shape: Sequence):
+def validate_shape(shape: ShapeType):
     """
     Validates that a sequence represents a valid shape.
     """
@@ -215,6 +345,16 @@ def validate_shape(shape: Sequence):
     assert isinstance(shape, Sequence)
     for l in shape:
         validate_dim_length(l)
+
+
+def validate_strides(strides: StrideType):
+    """
+    Verifies the object specifies valid strides.
+    """
+
+    assert isinstance(strides, Sequence)
+    for stride in strides:
+        assert stride >= 0
 
 
 def validate_idx(rank: int, idx: int):
@@ -665,16 +805,17 @@ def _get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
 
 class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     DEFAULT = (0,)
-    INT_TO_FLOAT = (1,)
-    ALWAYS_BOOL = (2,)
-    OP_MATH = (3,)
+    NO_OPMATH = (1,)
+    INT_TO_FLOAT = (2,)
+    ALWAYS_BOOL = (3,)
     COMPLEX_TO_FLOAT = (4,)
     BOOL_TO_LONG = (5,)
 
 
 # TODO: document type promotion kinds
 def elementwise_dtypes(
-    *_args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+    *_args,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
 ) -> Tuple[torch.dtype, torch.dtype]:
     """
     Computes the computation and result dtypes for elementwise type promotion
@@ -682,7 +823,7 @@ def elementwise_dtypes(
 
     Note that not all inputs to an elementwise operation necessarily participate in type promotion.
     For example, the "alpha" parameter of torch.add does not participate in type promotion,
-    although it is cast to the Python type corresponding to the computation dtype that
+    although it may be cast to the Python type corresponding to the computation dtype that
     the type promotion algorithm determines.
 
     Default elementwise type promotion, which all other type promotion kinds tweak (see below),
@@ -725,37 +866,40 @@ def elementwise_dtypes(
       complex64  -> complex64
       complex128 -> complex128
 
-    The DEFAULT type promotion option computes per above, and uses the result dtype as the computation dtype.
-
-    The OP_MATH, INT_TO_FLOAT, COMPLEX_TO_FLOAT and BOOL_TO_LONG type promotion options tweak the above slightly.
-    OP_MATH determines a "computation dtype" from the result dtype, and the mapping is simple:
+    The DEFAULT type promotion kind computes per above, and then uses the result dtype to pick a computation
+    dtype by mapping low precision floating point and complex dtypes as follows:
 
       float16   -> float32
       bfloat16  -> float32
       complex32 -> complex64
 
-    INT_TO_FLOAT, COMPLEX_TO_FLOAT, and BOOL_TO_LONG compute the computation type in the same way, but INT_TO_FLOAT
-    and BOOL_TO_LONG map the result dtype to another dtype first, and COMPLEX_TO_FLOAT maps its result dtype
-    after the compuation dtype is determined, as follows:
+    This is referred to as "op math", and the NO_OPMATH type promotion kind disables this mapping, making the
+    computation dtype the same as the result dtype when it's selected. NO_OPMATH is appropriate for kernels
+    which perform no mathematical operations on their tensors (see below for examples).
 
-      INT_TO_FLOAT  maps all boolean and integer result dtypes to the default floating point dtype
-      COMPLEX_TO_FLOAT  maps complex result dtypes to their corresponding floating point dtype
-      BOOL_TO_LONG maps the boolean result dtype to long
+    The INT_TO_FLOAT type promotion kind maps boolean and integer maps result dtypes to the default floating point dtype,
+    and computation dtypes to the appropriate op math dtype.
 
-    The "corresponding floating point dtypes" are:
-      complex32  -> float16
-      complex64  -> float32
-      complex128 -> float64
+    The COMPLEX_TO_FLOAT type promotion kind maps complex result dtypes to the corresponding float dtype, following this
+    mapping:
 
-    The ALWAYS_BOOL type promotion option always maps the result dtype to bool.
+        complex32  -> float16
+        complex64  -> float32
+        complex128 -> float64
+
+    Note that COMPLEX_TO_FLOAT derives the computation dtype as the DEFAULT setting does.
+
+    The BOOL_TO_LONG type promotion kind maps boolean computation and result dtypes to long.
+
+    The ALWAYS_BOOL type promotion kind always sets the result dtype to bool.
 
     Example operators for each type promotion option:
-      DEFAULT          : nextafter
-      OP_MATH          : add
-      INT_TO_FLOAT     : sin
-      COMPLEX_TO_FLOAT : abs
-      BOOL_TO_LONG     : pow
-      ALWAYS_BOOL      : eq
+      DEFAULT                 : add
+      NO_OPMATH               : where, nextafter, cat
+      INT_TO_FLOAT            : sin
+      COMPLEX_TO_FLOAT        : abs
+      BOOL_TO_LONG            : pow
+      ALWAYS_BOOL             : eq
 
     """
 
@@ -847,26 +991,25 @@ def elementwise_dtypes(
         result_dtype = torch.bool
 
     if type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
-        return result_dtype, result_dtype
-    elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH:
         return _get_computation_dtype(result_dtype), result_dtype
+    elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH:
+        return result_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
         if is_integer_dtype(result_dtype) or is_boolean_dtype(result_dtype):
             result_dtype = torch.get_default_dtype()
         return _get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
+        # NOTE: computation can still occur in a complex dtype
+        computation_dtype = _get_computation_dtype(result_dtype)
         if is_complex_dtype(result_dtype):
-            # Note: computation still occurs in complex
-            return _get_computation_dtype(result_dtype), corresponding_real_dtype(
-                result_dtype
-            )
-        return _get_computation_dtype(result_dtype), result_dtype
+            result_dtype = corresponding_real_dtype(result_dtype)
+        return computation_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG:
         if is_boolean_dtype(result_dtype):
             return torch.long, torch.long
-        return result_dtype, result_dtype
+        return _get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
-        return result_dtype, torch.bool
+        return _get_computation_dtype(result_dtype), torch.bool
     else:
         raise ValueError(
             "Unknown type promotion kind {0}".format(str(type_promotion_kind))
@@ -887,18 +1030,22 @@ def wrap_device(d: Union[str, torch.device]) -> torch.device:
     return d
 
 
-def make_contiguous_strides_for(shape: Sequence) -> Tuple[int, ...]:
+def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     validate_shape(shape)
     if not shape:
         return ()
 
     multiplier = 1
-    strides = [multiplier]
-    for l in reversed(shape[1:]):
-        multiplier = l * multiplier
-        strides.append(multiplier)
+    strides = []
+    for l in reversed(shape):
+        if l != 0:
+            strides.append(multiplier)
+            multiplier = l * multiplier
+        else:
+            strides.append(multiplier)
 
-    return tuple(reversed(strides))
+    result = tuple(reversed(strides))
+    return result
 
 
 def compute_reduction_output_shape(
@@ -917,10 +1064,41 @@ def compute_reduction_output_shape(
     return tuple(new_shape)
 
 
+def validate_no_repeating_dims(dims: Sequence):
+    if len(dims) != len(set(dims)):
+        raise RuntimeError("duplicate value in the list of dims")
+
+
 def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...]:
     if dims is None:
         return tuple(range(len(shape)))
     dims = tuple(canonicalize_dim(len(shape), idx) for idx in dims)
-    if len(dims) != len(set(dims)):
-        raise RuntimeError("duplicate value in the list of dims")
+    validate_no_repeating_dims(dims)
     return dims
+
+
+def check_in_bounds_for_storage(
+    a: torch._TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
+):
+    """
+    Determines if the given shape, strides, and offset are valid for the given storage.
+    """
+
+    # Short-circuits if the shape has no elements
+    if reduce(operator.mul, shape) == 0:
+        return
+
+    length = a.size() - storage_offset
+    max_offset = 0
+    for x, y in zip(shape, strides):
+        max_offset = max_offset + (x - 1) * y
+
+    if max_offset >= length:
+        required_length = max_offset + storage_offset
+        msg = (
+            "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
+            "which requires a storage of size {4}".format(
+                a.size(), storage_offset, str(shape), str(strides), required_length
+            )
+        )
+        raise ValueError(msg)
