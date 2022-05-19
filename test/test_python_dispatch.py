@@ -5,7 +5,8 @@ import torch
 from copy import deepcopy
 from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
+import unittest
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
@@ -246,6 +247,28 @@ class TestPythonRegistration(TestCase):
 
         del my_lib2
         del my_lib1
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
+    def test_alias_analysis(self):
+        def test_helper(alias_analysis=""):
+            my_lib1 = Library("foo", "DEF")
+
+            called = [0]
+
+            @torch.library.define(my_lib1, "_op() -> None", alias_analysis=alias_analysis)
+            def _op(*args, **kwargs):
+                called[0] += 1
+
+            @torch.jit.script
+            def _test():
+                torch.ops.foo._op()
+
+            assert "foo::_op" in str(_test.graph)
+
+        with self.assertRaises(AssertionError):
+            test_helper("")  # alias_analysis="FROM_SCHEMA"
+
+        test_helper("CONSERVATIVE")
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -894,8 +917,8 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
                 return func(*args, **kwargs)
 
         x = torch.randn(1)
-        with push_torch_dispatch_mode(partial(Logger, "A")):
-            with push_torch_dispatch_mode(partial(Logger, "B")):
+        with Logger.push("A"):
+            with Logger.push("B"):
                 x + x
         self.assertEqual(logs, ["B", "A"])
 
