@@ -56,7 +56,7 @@ jobs:
               head: `${NEW_BRANCH_NAME}`,
               base: 'master',
               body: [
-                'This PR is auto-generated nightly by [this action](https://github.com/clee2000/pytorch/blob/master/.github/workflows/xla-commit-hash.yml).\n',
+                'This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/.github/workflows/update-xla-commit-hash.yml).\n',
                 `Update the pinned xla hash from \`${ORIGINAL_COMMIT}\` to \`${NEW_COMMIT}\`.`
               ].join('')
             });
