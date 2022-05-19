@@ -478,6 +478,8 @@ struct TORCH_API RecordFunction {
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
 
+TORCH_API c10::optional<StepCallbacks> getStepCallbacksUnlessEmpty(RecordScope scope);
+
 namespace detail {
 template <typename Inputs, typename F, typename... Args>
 void record_function_with_scope(RecordFunction& guard, F fn, const Inputs& inputs, Args&&... args) {
