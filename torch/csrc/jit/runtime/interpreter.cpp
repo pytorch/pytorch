@@ -845,8 +845,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
     if (!frame.record_function) {
-      auto step_callbacks =
-          at::getStepCallbacksUnlessEmpty(at::RecordScope::TORCHSCRIPT_FUNCTION);
+      auto step_callbacks = at::getStepCallbacksUnlessEmpty(
+          at::RecordScope::TORCHSCRIPT_FUNCTION);
       if (C10_UNLIKELY(step_callbacks.has_value())) {
         auto rec_fn =
             std::make_unique<at::RecordFunction>(std::move(*step_callbacks));
