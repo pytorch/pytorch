@@ -1896,9 +1896,12 @@ class FullyShardedDataParallel(nn.Module):
         local, and sharded. For the full state dict
         (``StateDictType.FULL_STATE_DICT``), FSDP attempts to unshard the model
         on all ranks, which may result in an OOM error if the full model cannot
-        fit on a single GPU. In that case, users may instead take a local state
-        dict (``StateDictType.LOCAL_STATE_DICT``) that only saves the local
-        shard of the model. The sharded state dict
+        fit on a single GPU. In that case, users may pass in a
+        :class:`FullStateDictConfig` to only save the checkpoint on rank 0 and/
+        or to offload it to CPU memory layer by layer, enabling much larger
+        checkpoints. If the full model cannot fit in CPU memory, then users may
+        instead take a local state dict (``StateDictType.LOCAL_STATE_DICT``)
+        that only saves the local shard of the model. The sharded state dict
         (``StateDictType.SHARDED_STATE_DICT``) saves the model parameters as
         ``ShardedTensor`` s. The ``state_dict`` type can be configured using
         the :meth:`state_dict_type` context manager.
