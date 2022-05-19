@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import \
 
 # To mitigate for ScalarxTensor type promotion
 # for complex scalar and float tensor.
-torch.set_default_dtype(torch.float64)
+torch.set_default_dtype(torch.float32)
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,

@@ -13,6 +13,10 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes
 )
+from torch.testing._creation import (
+    float_to_corresponding_complex_type_map
+)
+
 
 import numpy as np
 
@@ -126,28 +130,80 @@ class TestTypePromotion(TestCase):
         def make_1d_tensor(dtype):
             return make_tensor((3,), dtype=dtype, device=device)
 
-        def scalar_1d_tensor_test(s, t):
+        def complex_scalar_tensor_test(s, t, is_float_tensor):
             # As per type promotion rules,
-            # scalar/0-D tensor of higher kind with 1-D or greater dimensional tensor
-            # of lower kind should result in output with dtype of scalar tensor.
-            self.assertEqual((s * t).dtype, s.dtype)
-            self.assertEqual((t * s).dtype, s.dtype)
-            self.assertEqual(torch.result_type(s, t), s.dtype)
-            self.assertEqual(torch.result_type(t, s), s.dtype)
+            # Complex Scalar and Float Tensor -> Complex Tensor with Value type of Float Tensor
+            # Complex Scalar and Integral Tensor -> Complex Tensor with Value type of Complex Scalar
+
+            # defaults to return complex64 (for bfloat16)
+            if is_float_tensor:
+                expected_dtype = float_to_corresponding_complex_type_map.get(t.dtype, torch.complex64)
+            else:  # integral tensor
+                if isinstance(s, torch.Tensor):
+                    expected_dtype = s.dtype
+                else:
+                    expected_dtype = float_to_corresponding_complex_type_map[torch.get_default_dtype()]
+            self.assertEqual((s * t).dtype, expected_dtype)
+            self.assertEqual((t * s).dtype, expected_dtype)
+            self.assertEqual(torch.result_type(s, t), expected_dtype)
+            self.assertEqual(torch.result_type(t, s), expected_dtype)
 
         if torch.device(device).type != 'xla':
             # chalf is not supported on XLA
             s = make_scalar(dtype=torch.chalf)
-            t = make_1d_tensor(dtype=torch.double)
-            scalar_1d_tensor_test(s, t)
+            # Same Value type
+            t = make_1d_tensor(dtype=torch.half)
+            # 0-D Tensor X 1-D Tensor
+            complex_scalar_tensor_test(s, t, is_float_tensor=True)
+            # Python Scalar X 1-D Tensor
+            complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
 
-            s = make_scalar(dtype=torch.chalf)
+            # Higher Value Type
             t = make_1d_tensor(dtype=torch.float)
-            scalar_1d_tensor_test(s, t)
+            complex_scalar_tensor_test(s, t, is_float_tensor=True)
+            complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
 
+            # Special Case
+            t = make_1d_tensor(dtype=torch.bfloat16)
+            complex_scalar_tensor_test(s, t, is_float_tensor=True)
+            complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+
+            # Integral Tensor
+            t = make_1d_tensor(dtype=torch.long)
+            complex_scalar_tensor_test(s, t, is_float_tensor=False)
+            complex_scalar_tensor_test(s.item(), t, is_float_tensor=False)
+
+        # CFloat Scalar
         s = make_scalar(dtype=torch.cfloat)
+        # Lower Value type than CFloat
+        t = make_1d_tensor(dtype=torch.half)
+        complex_scalar_tensor_test(s, t, is_float_tensor=True)
+        complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+
+        # Higher Value type than CFloat
         t = make_1d_tensor(dtype=torch.double)
-        scalar_1d_tensor_test(s, t)
+        complex_scalar_tensor_test(s, t, is_float_tensor=True)
+        complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+
+        # Integral Tensor
+        t = make_1d_tensor(dtype=torch.long)
+        # 0-D Tensor X 1-D Tensor
+        complex_scalar_tensor_test(s, t, is_float_tensor=False)
+        # Python Scalar X 1-D Tensor
+        complex_scalar_tensor_test(s.item(), t, is_float_tensor=False)
+
+        # CDouble Scalar
+        s = make_scalar(dtype=torch.cdouble)
+
+        # Lower Value type than CDouble
+        t = make_1d_tensor(dtype=torch.float)
+        complex_scalar_tensor_test(s, t, is_float_tensor=True)
+        complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+
+        # Special Case
+        t = make_1d_tensor(dtype=torch.bfloat16)
+        complex_scalar_tensor_test(s, t, is_float_tensor=True)
+        complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
 
     @float_double_default_dtype
     def test_complex_scalar_mult_tensor_promotion(self, device):
