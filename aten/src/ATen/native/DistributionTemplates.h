@@ -164,7 +164,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
       !std.is_complex(), \
       "normal expects standard deviation to be non-complex"); \
     TORCH_CHECK( \
-      std.numel() == 0 || std.min().ge(0).item<bool>(), \
+      std.numel() == 0 || std.is_meta() || std.min().ge(0).item<bool>(), \
       "normal expects all elements of std >= 0.0"); \
   } while (0)
 
