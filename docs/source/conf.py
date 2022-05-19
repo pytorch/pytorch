@@ -497,7 +497,9 @@ autosummary_filename_map = {
     "torch.no_grad": "torch.autograd.no_grad",
     "torch.enable_grad": "torch.autograd.enable_grad",
     "torch.set_grad_enabled": "torch.autograd.set_grad_enabled",
+    "torch.is_grad_enabled": "torch.autograd.is_grad_enabled",
     "torch.inference_mode": "torch.autograd.inference_mode",
+    "torch.is_inference_mode_enabled": "torch.autograd.is_inference_mode_enabled",
 }
 
 class TorchCoreAutosummary(Autosummary):
