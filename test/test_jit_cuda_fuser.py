@@ -4771,9 +4771,9 @@ class TestCudaFuser(JitTestCase):
                      "Requires fusion optimization pass to be effective")
     def test_scheduler_with_polymorphic_broadcast(self):
         device = "cuda"
-        x0 = torch.randn(1024, 204800, device=device)
+        x0 = torch.randn(10, 128, device=device)
         x1 = torch.rand_like(x0)
-        x2 = torch.randn(1024, device=device)
+        x2 = torch.randn(10, device=device)
 
         def t(x0, x1, x2):
             x3 = x2.unsqueeze(-1)
@@ -4785,7 +4785,7 @@ class TestCudaFuser(JitTestCase):
         t_jit = torch.jit.script(t)
         self._run_helper(t_jit, t, x0, x1, x2, check_stride=True)
 
-        x2 = torch.randn(204800, device=device)
+        x2 = torch.randn(128, device=device)
 
         def t2(x0, x1, x2):
             x3 = x2.unsqueeze(0)
