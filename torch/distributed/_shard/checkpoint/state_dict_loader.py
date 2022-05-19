@@ -1,8 +1,8 @@
-
 import io
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional, cast
 
 import torch
+import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
     ShardedTensorMetadata
@@ -24,8 +24,11 @@ from .resharding import (
     _prepare_sharded_tensor_read,
     _shards_get_overlap_region_wrt_saved_tensor
 )
-from .storage import StorageReader
+from .storage import (
+    StorageReader,
+)
 
+from .api import CheckpointException
 
 def _reshard_and_prepare_read_request(
     state_dict: Dict[str, Any], metadata_from_storage: Metadata
@@ -89,6 +92,9 @@ def _reshard_and_prepare_read_request(
 def load_state_dict(
     state_dict: Dict[str, Any],
     storage_reader: StorageReader,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False
 ) -> None:
     """
     Load a distributed state_dict in SPMD style.
@@ -108,10 +114,17 @@ def load_state_dict(
     Users must call `load_state_dict` on the root module to ensure load
     pos-processing and non-tensor data properly propagates.
 
+    This function can be used for local inference and load a checkpoint
+    produced by ``save_state_dict`` without having a process group initialized
+    by passing ``no_dist=True`` and by using Tensors instead of ShardedTensors.
+
     Args:
         state_dict (Dict[str, Any]) : The state_dict to load. Note that this
             state dict will updated in places.
         storage_reader (StorageReader): StorageReader used to load data from.
+        process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
+        coordinator_rank (int): Rank to use to coordinate the checkpoint, rank0 is used by default
+        no_dist (bool): Don't attempt to load in SPMD style. Default to False
 
     Returns:
         None.
@@ -131,26 +144,56 @@ def load_state_dict(
         >>> # to flush the state_dict, must call it to
         >>> # ensure correct behavior.
         >>> my_model.load_state_dict(model_state_dict)
+
+    .. note:: load_state_dict uses collectives to coordinate reads across ranks.
+        For NCCL-based process groups, internal tensor representations of objects
+        must be moved to the GPU device before communication takes place. In this
+        case, the device used is given by ``torch.cuda.current_device()`` and it
+        is the user's responsibility to ensure that this is set so that each rank
+        has an individual GPU, via ``torch.cuda.set_device()``
     """
+    is_coordinator = no_dist or dist.get_rank(process_group) == coordinator_rank
 
-    metadata = storage_reader.read_metadata()
-    bytes_read_requests, tensor_read_requests = _reshard_and_prepare_read_request(
-        state_dict=state_dict, metadata_from_storage=metadata
-    )
-    bytes_futures = storage_reader.read_bytes(bytes_read_requests)
-    tensor_futures = storage_reader.read_tensors(tensor_read_requests)
+    try:
+        metadata = storage_reader.read_metadata()
+        bytes_read_requests, tensor_read_requests = _reshard_and_prepare_read_request(
+            state_dict=state_dict, metadata_from_storage=metadata
+        )
+        bytes_futures = storage_reader.read_bytes(bytes_read_requests)
+        tensor_futures = storage_reader.read_tensors(tensor_read_requests)
 
-    bytes_futures.wait()
+        bytes_futures.wait()
 
-    # Addtional steps are required to convert the bytes to its original type
-    # Note that this is NOT inplace,
-    # it creating a new object and replace what's in the state dict
-    for req in bytes_read_requests:
-        # Ensure the BytesIO is rewound
-        req.bytes.seek(0)
-        state_dict[req.fqn] = torch.load(req.bytes)
+        # Addtional steps are required to convert the bytes to its original type
+        # Note that this is NOT inplace,
+        # it creating a new object and replace what's in the state dict
+        for req in bytes_read_requests:
+            # Ensure the BytesIO is rewound
+            req.bytes.seek(0)
+            state_dict[req.fqn] = torch.load(req.bytes)
 
-    tensor_futures.wait()
+        tensor_futures.wait()
+        result = None
+    except BaseException as e:
+        result = e
+
+    global_result: Optional[CheckpointException] = None
+    if not no_dist:
+        all_errors = [None] * dist.get_world_size(process_group)
+
+        dist.all_gather_object(
+            object_list=all_errors,
+            obj=result,
+            group=process_group)
+
+        node_failures = cast(Dict[int, BaseException], {i: err for i, err in enumerate(all_errors) if err is not None})
+        if len(node_failures) > 0:
+            global_result = CheckpointException("failed to read checkpoint", node_failures)
+    elif result is not None:
+        global_result = CheckpointException("failed to read storage", {coordinator_rank : result})
+
+    if global_result is not None:
+        raise global_result
 
 
 def _validate_sharded_tensor(
