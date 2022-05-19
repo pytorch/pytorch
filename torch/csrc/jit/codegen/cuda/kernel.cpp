@@ -67,11 +67,7 @@ class KernelIrScanner : private IrVisitor {
         summary_.global_allocations.push_back(allocate);
         break;
       case MemoryType::Shared:
-        if (ExpressionEvaluator::isConst(allocate->size())) {
-          summary_.static_smem_allocations.push_back(allocate);
-        } else {
-          summary_.dynamic_smem_allocations.push_back(allocate);
-        }
+        summary_.dynamic_smem_allocations.push_back(allocate);
         break;
       case MemoryType::Local:
         if (!ExpressionEvaluator::isConst(allocate->size())) {
@@ -119,18 +115,22 @@ class KernelIrScanner : private IrVisitor {
   void handle(GridWelford* grid_welford) final {
     summary_.has_welford = true;
     summary_.has_grid_welford = true;
-    const auto dom =
-        grid_welford->welford_op()->out()->as<TensorIndex>()->view()->domain();
-    updateGridReductionInLoop(dom);
+    summary_.has_grid_reductions = true;
+    if (grid_welford->welford_op()->isAllreduce()) {
+      summary_.has_cooperative_grid_reduction = true;
+    }
   }
 
   void handle(GridReduction* grid_reduction) final {
     summary_.has_grid_reductions = true;
-    const auto dom = grid_reduction->reduction_op()
-                         ->out()
-                         ->as<TensorIndex>()
-                         ->view()
-                         ->domain();
+    if (grid_reduction->isAllreduce()) {
+      summary_.has_cooperative_grid_reduction = true;
+    }
+  }
+
+  void handle(GroupedGridReduction* grid_reduction) final {
+    summary_.has_grid_reductions = true;
+    const auto dom = ir_utils::getTvOutput(grid_reduction)->domain();
     updateGridReductionInLoop(dom);
   }
 
@@ -158,11 +158,9 @@ class KernelIrScanner : private IrVisitor {
 
  private:
   void updateGridReductionInLoop(TensorDomain* dom) {
-    summary_.has_grid_reductions = true;
-
     for (const auto i : c10::irange(dom->nDims())) {
-      const auto id = GpuLower::current()->caParallelMap().getConcreteMappedID(
-          dom->domain()[i]);
+      const auto id = GpuLower::current()->caMap()->getConcreteMappedID(
+          dom->domain()[i], IdMappingMode::LOOP);
 
       summary_.has_cooperative_grid_reduction =
           summary_.has_cooperative_grid_reduction ||
@@ -227,7 +225,8 @@ class ValidateAllocation : private OptOutConstDispatch {
           continue;
         }
         for (const auto& axis : tv->domain()->domain()) {
-          if (!GpuLower::current()->caParallelMap().areMapped(loop_id, axis)) {
+          if (!GpuLower::current()->caMap()->areMapped(
+                  loop_id, axis, IdMappingMode::LOOP)) {
             continue;
           }
           if (isParallelTypeThreadDim(loop_id->getParallelType())) {
