@@ -9,6 +9,7 @@ import itertools
 import math
 import os
 import re
+import sys
 import unittest.mock
 from typing import Any, Callable, Iterator, List, Tuple
 
@@ -1777,7 +1778,7 @@ class TestImports(TestCase):
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 8):
-            ignored_modules.append("torch.utils.benchmark.examples.")
+            ignored_modules.append("torch.utils.benchmark")
         if IS_WINDOWS:
             ignored_modules.append("torch.distributed.rpc.")
 
@@ -1791,16 +1792,9 @@ class TestImports(TestCase):
                 # Do not attempt to import executable modules
                 if f == "__main__.py":
                     continue
-                ignored_modules = ["torch.utils.tensorboard",  # deps on tensorboard
-                                   "torch.distributed.elastic.rendezvous",  # depps on etcd
-                                   "torch.backends._coreml",  # depends on pycoreml
-                                   "torch.contrib.",  # something weird
-                                   "torch.testing._internal.common_fx2trt",  # needs fx
-                                   "torch.testing._internal.distributed.",  # just fails
-                                   ]
-
                 if any(mod_name.startswith(x) for x in ignored_modules):
                     continue
+                print(mod_name)
                 mod = importlib.import_module(mod_name)
                 self.assertTrue(inspect.ismodule(mod))
 
