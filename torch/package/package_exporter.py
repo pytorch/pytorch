@@ -931,7 +931,7 @@ class PackageExporter:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        # If __exit__ was called because an exception was raised, we do not attempt to
+        # If __exit__ was called because an exception was raised, we do not
         # attempt to finalize the package. Instead, control is returned to the
         # caller to continue raising the exception.
         if exc_type is not None:
@@ -1013,7 +1013,7 @@ class PackageExporter:
                     )
 
                 if attrs.get("is_pickle") is True:
-                    # This node came from save_source_pickle, we don't need to write any source for it.
+                    # This node came from save_pickle, we don't need to write any source for it.
                     continue
 
                 is_package = attrs["is_package"]
