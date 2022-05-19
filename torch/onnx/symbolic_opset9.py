@@ -2470,7 +2470,7 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
 # explicitly.
 for k, v in symbolic_helper.cast_pytorch_to_onnx.items():
     name = "_cast_{}".format(k)
-    globals()[name] = parse_args("v", "i")(
+    globals()[name] = symbolic_helper.parse_args("v", "i")(
         functools.partial(symbolic_helper._cast_func_template, v)
     )
 
