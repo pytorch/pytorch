@@ -338,6 +338,24 @@ $3 = torch._ops.aten.kl_div.default($0, $1, 2)
 $4 = torch._ops.aten.kl_div.default($0, $1, log_target=True)
 $5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
 
+    def test_produce_real_type(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(2, 2))
+            log_input("x", x)
+            x.to(dtype=torch.double)  # non-optional dtype
+            torch.cumprod(x, 0, dtype=torch.double)  # optional dtype
+            x[:, 1].contiguous(memory_format=torch.contiguous_format)  # optional memory format
+            # There doesn't appear to be any layout signatures which are
+            # triggerable using tensor subclasses (need to use a mode)
+
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
+$2 = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
+$3 = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
+$4 = torch._ops.aten.select.int($3, 1, 1)
+$5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)''')
+
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
@@ -876,8 +894,8 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
                 return func(*args, **kwargs)
 
         x = torch.randn(1)
-        with push_torch_dispatch_mode(partial(Logger, "A")):
-            with push_torch_dispatch_mode(partial(Logger, "B")):
+        with Logger.push("A"):
+            with Logger.push("B"):
                 x + x
         self.assertEqual(logs, ["B", "A"])
 
@@ -1145,6 +1163,72 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
         #    - More steps....
         y.exp()
 
+    def test_is_contiguous_slow_path(self):
+        data = torch.randn(3, 3)
+        contiguous_data = data.clone()
+        not_contiguous_data = torch.as_strided(data.clone(), (2, 2), (1, 2))
+
+        def subclass_helper(cls, data, use_wrapper_subclass):
+            if use_wrapper_subclass:
+                kwargs = {}
+                kwargs["device"] = data.device
+                kwargs["dtype"] = data.dtype
+                kwargs["layout"] = data.layout
+                kwargs["requires_grad"] = True
+                kwargs['dispatch_strides'] = True
+                return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
+            else:
+                return torch.Tensor._make_subclass(cls, data, True, dispatch_strides=True)
+
+        for use_wrapper_subclass in [True, False]:
+            class ExampleTensor1(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return subclass_helper(cls, data, wrapper)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
+
+            class ExampleTensor2(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return subclass_helper(cls, data, wrapper)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.is_contiguous:
+                        return contiguous_data.is_contiguous()
+                    return NotImplemented
+
+            class ExampleTensor3(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return subclass_helper(cls, data, wrapper)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.is_contiguous:
+                        return not_contiguous_data.is_contiguous()
+                    return NotImplemented
+
+
+            err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
+            e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.is_contiguous()
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.contiguous()
+
+            e = ExampleTensor2(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.is_contiguous(), True)
+            e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
+
+            err_msg = "no implementation found for"
+            e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.is_contiguous(), False)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.contiguous()
 
 
 if __name__ == '__main__':
