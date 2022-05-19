@@ -80,7 +80,7 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   // NOLINTNEXTLINE(bugprone-branch-clone)
   if(isComplexType(higher)) {
     return higher;
-  } else if(isComplexType(lower)) {
+  } else if (isComplexType(lower)) {
     // special case for bfloat16
     if (higher == kBFloat16) {
       // BFloat16 corresponds to Float in terms of range,
@@ -94,14 +94,14 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
     // in case of integral input
     // lower complex takes precedence.
     return lower;
-  } else if(isFloatingType(higher)) {
+  } else if (isFloatingType(higher)) {
     return higher;
   }
   if (higher == ScalarType::Bool || isFloatingType(lower)) {
     return promote_skip_undefined(higher, lower);
   }
   if (higher != ScalarType::Undefined) {
-      return higher;
+    return higher;
   }
   return lower;
 }
