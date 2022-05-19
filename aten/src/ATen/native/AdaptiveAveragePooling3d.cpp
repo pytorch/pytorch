@@ -98,7 +98,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 
   TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
-      "adaptive_avg_pool3d(): Expected 3D or 4D tensor, but got ",
+      "adaptive_avg_pool3d(): Expected 4D or 5D tensor, but got ",
       input.sizes());
   TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
