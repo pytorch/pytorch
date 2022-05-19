@@ -61,6 +61,9 @@ class AdamW(Optimizer):
             minimizing (default: False)
         foreach (bool, optional): whether foreach implementation of optimizer
             is used (default: None)
+        capturable (bool, optional): whether this instance is safe to capture in a CUDA graph.
+            Passing True can impair ungraphed performance, so if you don't intend to
+            graph capture this instance, leave it False (default: False)
 
     .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
@@ -70,7 +73,8 @@ class AdamW(Optimizer):
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=1e-2, amsgrad=False, *, maximize: bool = False,
-                 foreach: Optional[bool] = None):
+                 foreach: Optional[bool] = None,
+                 capturable: Optional[bool] = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -83,7 +87,7 @@ class AdamW(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
-                        foreach=foreach, maximize=maximize)
+                        foreach=foreach, maximize=maximize, capturable=capturable)
         super(AdamW, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -92,6 +96,7 @@ class AdamW(Optimizer):
             group.setdefault('amsgrad', False)
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
+            group.setdefault('capturable', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
@@ -163,7 +168,8 @@ class AdamW(Optimizer):
                   weight_decay=group['weight_decay'],
                   eps=group['eps'],
                   maximize=group['maximize'],
-                  foreach=group['foreach'])
+                  foreach=group['foreach'],
+                  capturable=group['capturable'])
 
         return loss
 
@@ -184,7 +190,8 @@ def adamw(params: List[Tensor],
           lr: float,
           weight_decay: float,
           eps: float,
-          maximize: bool):
+          maximize: bool,
+          capturable: bool):
     r"""Functional API that performs AdamW algorithm computation.
 
     See :class:`~torch.optim.AdamW` for details.
@@ -217,7 +224,8 @@ def adamw(params: List[Tensor],
          lr=lr,
          weight_decay=weight_decay,
          eps=eps,
-         maximize=maximize)
+         maximize=maximize,
+         capturable=capturable)
 
 
 def _single_tensor_adamw(params: List[Tensor],
@@ -233,7 +241,8 @@ def _single_tensor_adamw(params: List[Tensor],
                          lr: float,
                          weight_decay: float,
                          eps: float,
-                         maximize: bool):
+                         maximize: bool,
+                         capturable: bool):
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -279,7 +288,8 @@ def _multi_tensor_adamw(params: List[Tensor],
                         lr: float,
                         weight_decay: float,
                         eps: float,
-                        maximize: bool):
+                        maximize: bool,
+                        capturable: bool):
 
     if len(params) == 0:
         return

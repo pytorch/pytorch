@@ -61,6 +61,9 @@ class Adam(Optimizer):
             is used (default: None)
         maximize (bool, optional): maximize the params based on the objective, instead of
             minimizing (default: False)
+        capturable (bool, optional): whether this instance is safe to capture in a CUDA graph..
+            Passing True can impair ungraphed performance, so if you don't intend to
+            graph capture this instance, leave it False (default: False)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
@@ -70,7 +73,7 @@ class Adam(Optimizer):
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=0, amsgrad=False, *, foreach: Optional[bool] = None,
-                 maximize: bool = False):
+                 maximize: bool = False, capturable: Optional[bool] = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -83,7 +86,7 @@ class Adam(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
-                        maximize=maximize, foreach=foreach)
+                        maximize=maximize, foreach=foreach, capturable=capturable)
         super(Adam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -92,6 +95,7 @@ class Adam(Optimizer):
             group.setdefault('amsgrad', False)
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
+            group.setdefault('capturable', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
@@ -106,6 +110,8 @@ class Adam(Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        self._cuda_graph_capture_health_check()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -160,7 +166,8 @@ class Adam(Optimizer):
                  weight_decay=group['weight_decay'],
                  eps=group['eps'],
                  maximize=group['maximize'],
-                 foreach=group['foreach'])
+                 foreach=group['foreach'],
+                 capturable=group['capturable'])
 
         return loss
 
@@ -181,7 +188,8 @@ def adam(params: List[Tensor],
          lr: float,
          weight_decay: float,
          eps: float,
-         maximize: bool):
+         maximize: bool,
+         capturable: bool):
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
@@ -213,7 +221,8 @@ def adam(params: List[Tensor],
          lr=lr,
          weight_decay=weight_decay,
          eps=eps,
-         maximize=maximize)
+         maximize=maximize,
+         capturable=capturable)
 
 
 def _single_tensor_adam(params: List[Tensor],
@@ -229,7 +238,8 @@ def _single_tensor_adam(params: List[Tensor],
                         lr: float,
                         weight_decay: float,
                         eps: float,
-                        maximize: bool):
+                        maximize: bool,
+                        capturable: bool):
 
     for i, param in enumerate(params):
 
@@ -277,7 +287,8 @@ def _multi_tensor_adam(params: List[Tensor],
                        lr: float,
                        weight_decay: float,
                        eps: float,
-                       maximize: bool):
+                       maximize: bool,
+                       capturable: bool):
 
     if len(params) == 0:
         return
