@@ -443,9 +443,10 @@ class FullyShardedDataParallel(nn.Module):
         ``module`` should already be placed on that device, (2) the device
         should be set using ``torch.cuda.set_device(dev_id)``, or (3)
         ``dev_id`` should be passed into the ``device_id`` constructor
-        argument. This FSDP instance's compute device will then be that device.
-        For (1) and (3), the FSDP initialization always occurs on GPU. For (2),
-        the FSDP initialization happens on ``module`` 's current device.
+        argument. This FSDP instance's compute device will be that destination
+        device. For (1) and (3), the FSDP initialization always occurs on GPU.
+        For (2), the FSDP initialization happens on ``module`` 's current
+        device, which may be CPU.
 
     .. warning::
         FSDP currently does not support gradient accumulation outside
