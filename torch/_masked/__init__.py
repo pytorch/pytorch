@@ -1117,6 +1117,8 @@ def logsumexp(input: Tensor,
     mask_input = _combine_input_and_mask(logsumexp, input, mask)
     if input.layout == torch.strided:
         return torch.logsumexp(mask_input, dim_, keepdim=keepdim).to(dtype=dtype)
+    else:
+        raise ValueError(f'masked logsumexp expects strided tensor (got {input.layout} tensor)')
 
 
 # TODO: Add docstring; currently they're only set up for reductions and normalizations
@@ -1134,7 +1136,7 @@ def logaddexp(input: Tensor,
         mask_other = _combine_input_and_mask(logsumexp, input, other_mask)
         return torch.logaddexp(mask_input, mask_other).to(dtype=dtype)
     else:
-        raise ValueError(f'masked logaddexp expects strided tensor (got {input.layout} tensor for input, {other.layout} for other)')
+        raise ValueError(f'masked logaddexp expects strided tensors (got {input.layout} tensor for input, {other.layout} for other)')
 
 
 @_apply_docstring_templates
