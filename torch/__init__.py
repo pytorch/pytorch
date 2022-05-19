@@ -619,10 +619,13 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, _TypedStorage, _LegacyStorage, _UntypedStorage
+from .storage import _StorageBase, _TypedStorage, _LegacyStorage
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage._TypedStorage directly.
+
+class _UntypedStorage(_C.ByteStorageBase, _StorageBase):
+    pass
 
 class ByteStorage(_LegacyStorage):
     @classproperty
@@ -781,8 +784,7 @@ from .functional import *  # noqa: F403
 # Remove unnecessary members
 ################################################################################
 
-del _StorageBase
-del _LegacyStorage
+del ByteStorageBase
 
 ################################################################################
 # Define _assert
