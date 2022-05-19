@@ -2495,7 +2495,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
-    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
+    @precisionOverride({torch.float: 1e-4, torch.cfloat: 2e-4})
     @setLinalgBackendsToDefaultFinally
     @dtypes(*floating_and_complex_types())
     def test_svd(self, device, dtype):
