@@ -5820,6 +5820,32 @@ class TestNN(NNTestCase):
             # output_2d in shape of [T, 1, D]
             self.assertEqual(output_3d[i].unsqueeze(0).transpose(0, 1), output_2d)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_self_attn_TxT_attn_mask(self):
+        embed_dim = 16
+        num_heads = 4
+        batch_size = 10
+        tgt_len = 16
+
+        query = torch.rand(batch_size, tgt_len, embed_dim, device="cuda")  # [N, T, D]
+        attn_mask = torch.randint(0, 2, (tgt_len, tgt_len)).cuda().float()  # [T, T]
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
+
+        attn_mask_4d = attn_mask.expand(batch_size, num_heads, tgt_len, tgt_len)
+
+        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).cuda()
+        mta_model.eval()
+
+        # Generate 3D results
+        with torch.inference_mode():
+            output_mask_4d = mta_model(query, query, query, attn_mask=attn_mask_4d)[0]
+            output_mask_4d = output_mask_4d.transpose(0, 1)  # [N, T, D]
+
+            output_mask_TxT = mta_model(query, query, query, attn_mask=attn_mask)[0]
+            output_mask_TxT = output_mask_TxT.transpose(0, 1)  # [N, T, D]
+
+            self.assertEqual(output_mask_4d, output_mask_TxT)
+
     def test_multihead_attn_no_bias(self):
         embed_dim = 8
         num_heads = 4
@@ -9974,22 +10000,6 @@ class TestNN(NNTestCase):
             output = torch.pdist(x, p=2)
             # just run a single backward, as gradcheck/gradgradcheck is expensive here
             output.sum().backward()
-
-    def test_binary_cross_entropy_grads(self):
-        import torch.nn.functional as F
-        for device in device_():
-            input = torch.rand(3, 3, dtype=torch.double, device=device, requires_grad=True)
-            target = torch.rand(3, 3, dtype=torch.double, device=device)
-
-            gradcheck(F.binary_cross_entropy, [input, target])
-            gradgradcheck(F.binary_cross_entropy, [input, target])
-
-            # now with diffentiable target
-            target.requires_grad_(True)
-            gradcheck(F.binary_cross_entropy, [input, target], check_batched_grad=False)
-            # no double backward for target yet
-            with self.assertRaisesRegex(RuntimeError, "not implemented"):
-                gradgradcheck(F.binary_cross_entropy, [input, target], check_batched_grad=False)
 
     def test_cosine_embedding_loss_with_diff_type(self):
         for device in device_():
@@ -16865,6 +16875,26 @@ class TestNNDeviceType(NNTestCase):
         pt_res = self._slow_masked_softmax(input, mask)
         self.assertEqual(pt_res, native_res, exact_dtype=True)
 
+    @onlyCUDA
+    def test_masked_softmax_TxT_layout(self, device):
+        B = 211
+        num_heads = 16
+        L = 42
+        input = torch.randn((B, num_heads, L, L))
+        dim = input.dim() - 1
+        mask = torch.randint(0, 2, (L, L))
+        if (self.device_type == "cuda"):
+            input = input.cuda()
+            mask = mask.cuda()
+        mask = mask.bool()
+        native_res = torch._masked_softmax(input, mask, dim)
+        mask = mask.expand(B, num_heads, L, L)
+        mask = ~mask
+        mask = mask.float()
+
+        pt_res = self._slow_masked_softmax(input, mask)
+        self.assertEqual(pt_res, native_res, exact_dtype=True)
+
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
     def test_softmax_results(self, device, dtype):
@@ -19702,6 +19732,20 @@ class TestNNDeviceType(NNTestCase):
                 output = m(input, target)
                 output_unit = m_unit(input, target)
                 self.assertEqual(output, output_unit)
+
+    @parametrize_test('reduction', ['none', 'mean', 'sum'])
+    @parametrize_test('weighted', [False, True])
+    def test_cross_entropy_loss_prob_target_no_batch_dim(self, device, reduction, weighted):
+        C = 5
+        input = torch.randn(C, device=device).log_softmax(dim=-1)
+        target = torch.randn(C, device=device).softmax(dim=-1)
+        weight = torch.randn(C, device=device) if weighted else None
+        m = nn.CrossEntropyLoss(reduction=reduction, weight=weight)
+        loss_no_batch = m(input, target)
+        loss_batch = m(input.unsqueeze(0), target.unsqueeze(0))
+        if reduction == 'none':
+            loss_batch = loss_batch.squeeze(0)
+        self.assertEqual(loss_no_batch, loss_batch)
 
     def test_cross_entropy_loss_index_target_unit_weights(self, device):
         # Test with k-dimensional loss.
