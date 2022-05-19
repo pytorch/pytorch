@@ -238,9 +238,7 @@ cc_library(
         ":aten_src_ATen_config",
         ":gen_aten",
     ],
-    includes = [
-        "aten/src",
-    ],
+    strip_include_prefix = "aten/src/",
     deps = [
         ":aten_core_headers",
         "//c10:headers",
