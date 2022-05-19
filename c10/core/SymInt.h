@@ -39,8 +39,9 @@ class C10_API SymInt {
   }
 
   bool is_symbolic() const {
-    return static_cast<uint64_t>(SYM_TAG_MASK) &
-        static_cast<uint64_t>(this->data_);
+    return data_ != -1 &&
+        (static_cast<uint64_t>(SYM_TAG_MASK) &
+         static_cast<uint64_t>(this->data_));
   }
 
   bool operator==(const SymInt& p2) const {

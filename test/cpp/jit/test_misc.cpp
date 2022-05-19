@@ -1416,6 +1416,18 @@ TEST(TestSymInt, AddSymbolicInt) {
   ASSERT_TRUE((a + b).expect_int() == 8);
 }
 
+TEST(TestSymInt, MinusOne) {
+  c10::SymInt a(-1);
+  ASSERT_FALSE(a.is_symbolic());
+  try {
+    (void)a.toSymbolicIntNode();
+    ASSERT_TRUE(false); // Supposed to throw.
+  } catch (const std::exception& e) {
+    std::cerr << e.what() << std::endl;
+    ASSERT_TRUE(strstr(e.what(), "SymInt isn't symbolic") != nullptr);
+  }
+}
+
 TEST(FallbackGraphsTest, Basic) {
   static const auto nestGraphIntoFallbackGraph =
       [](const std::shared_ptr<Graph>& graph) {
