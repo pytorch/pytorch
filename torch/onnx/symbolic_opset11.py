@@ -317,9 +317,7 @@ def masked_select(g, self, mask):
 
 
 def masked_scatter(g, self, mask, source):
-    from torch.onnx.symbolic_opset9 import expand_as, nonzero, size
-
-    index = nonzero(g, expand_as(g, mask, self))
+    index = opset9.nonzero(g, opset9.expand_as(g, mask, self))
     # NOTE: source can have more elements than needed.
     # It could also have arbitrary shape.
     # This is not supported by ONNX::ScatterND, so we need to flatten and slice source tensor.
@@ -329,7 +327,7 @@ def masked_scatter(g, self, mask, source):
         source,
         axes=torch.LongTensor([0]),
         starts=torch.LongTensor([0]),
-        ends=size(g, index, torch.LongTensor([0])),
+        ends=opset9.size(g, index, torch.LongTensor([0])),
         dynamic_slice=True,
     )
     return g.op("ScatterND", self, index, source)

@@ -144,28 +144,31 @@ def cross_entropy_loss(
 
 @symbolic_helper.parse_args("v", "v", "v", "v", "i")
 def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduction):
-    from torch.onnx.symbolic_opset9 import add, log, mul, neg, sigmoid, sub
-
     p = g.op("Constant", value_t=torch.tensor([1]))
-    sig_x = sigmoid(g, input)
-    log_sig_x = log(g, sig_x)
-    sub_1_x = sub(g, p, sig_x)
-    sub_1_y = sub(g, p, target)
-    log_1_x = log(g, sub_1_x)
+    sig_x = opset9.sigmoid(g, input)
+    log_sig_x = opset9.log(g, sig_x)
+    sub_1_x = opset9.sub(g, p, sig_x)
+    sub_1_y = opset9.sub(g, p, target)
+    log_1_x = opset9.log(g, sub_1_x)
     if pos_weight is None or symbolic_helper._is_none(pos_weight):
-        output = neg(g, add(g, mul(g, target, log_sig_x), mul(g, sub_1_y, log_1_x)))
-    else:
-        output = neg(
+        output = opset9.neg(
             g,
-            add(
+            opset9.add(
+                g, opset9.mul(g, target, log_sig_x), opset9.mul(g, sub_1_y, log_1_x)
+            ),
+        )
+    else:
+        output = opset9.neg(
+            g,
+            opset9.add(
                 g,
-                mul(g, mul(g, target, log_sig_x), pos_weight),
-                mul(g, sub_1_y, log_1_x),
+                opset9.mul(g, opset9.mul(g, target, log_sig_x), pos_weight),
+                opset9.mul(g, sub_1_y, log_1_x),
             ),
         )
 
     if weight is not None and not symbolic_helper._is_none(weight):
-        output = mul(g, weight, output)
+        output = opset9.mul(g, weight, output)
 
     reduction = symbolic_helper._maybe_get_const(reduction, "i")
     if reduction == 0:
@@ -242,9 +245,7 @@ def unfold(g, input, dimension, size, step):
     if not symbolic_helper._is_value(const_size) and not symbolic_helper._is_value(
         const_step
     ):
-        from torch.onnx.symbolic_opset9 import unfold as _unfold
-
-        return _unfold(g, input, dimension, const_size, const_step)
+        return opset9.unfold(g, input, dimension, const_size, const_step)
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("unfold", input, dimension_i=dimension, size_i=size, step_i=step)
 
