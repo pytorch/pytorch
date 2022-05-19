@@ -1179,7 +1179,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         continue;
       }
       c10::Device device = storage->device();
-      if (!device.is_cpu() && !device.is_meta()) {
+      if (!device.is_cpu()) {
         TORCH_CHECK_VALUE(
             device.type() == impl.type(),
             "Expected all data ptrs to be on a device of type ",
