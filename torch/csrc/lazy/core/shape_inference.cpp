@@ -49,8 +49,9 @@
 
 #include <torch/csrc/lazy/core/shape_inference.h>
 
-#include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
+#include <torch/csrc/lazy/core/shape.h>
+#include <torch/csrc/lazy/core/util.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/CompositeExplicitAutogradFunctions.h>
@@ -436,19 +437,20 @@ std::vector<Shape> compute_shape_expand(const at::Tensor & self, at::IntArrayRef
   return {Shape(self.scalar_type(), target_size)};
 }
 
-// std::vector<Shape> compute_shape_expand(const at::Tensor & self, c10::SymIntArrayRef size, bool implicit) {
-//   CHECK_GE(size.size(), self.dim());
-//   // NOTE: hm... how can we allow size dimensions to hold -1?
-//   // NOTE: should move this block somewhere better - ref: https://github.com/pytorch/xla/pull/3558/files
-//   std::vector<int64_t> target_size;
-//   for (auto& _size : size) {
-//     const std::shared_ptr<c10::SymbolicIntNode> symbolicIntNode = _size.toSymbolicIntNode();
-//     auto lazySymIntNode = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(symbolicIntNode);
-//     auto size_node = lazySymIntNode->node_;
-//     target_size.push_back(std::dynamic_pointer_cast<DimensionNode>(size_node)->getStaticValue());
-//   }
-//   return {Shape(self.scalar_type(), target_size)};
-// }
+std::vector<Shape> compute_shape_expand(const at::Tensor & self, c10::SymIntArrayRef size, bool implicit) {
+  CHECK_GE(size.size(), self.dim());
+  // NOTE: hm... how can we allow size dimensions to hold -1?
+  // NOTE: should move this block somewhere better - ref: https://github.com/pytorch/xla/pull/3558/files
+  std::vector<int64_t> target_size;
+  std::vector<c10::SymInt> _sizes = ToVector<c10::SymInt>(size);
+  for (auto& _size : _sizes) {
+    std::shared_ptr<c10::SymbolicIntNode> symbolicIntNode = _size.toSymbolicIntNode();
+    auto lazySymIntNode = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(symbolicIntNode);
+    auto size_node = lazySymIntNode->node_;
+    target_size.push_back(std::dynamic_pointer_cast<DimensionNode>(size_node)->getStaticValue());
+  }
+  return {Shape(self.scalar_type(), target_size)};
+}
 
 std::vector<Shape> compute_shape_index_select(
     const at::Tensor& self,
