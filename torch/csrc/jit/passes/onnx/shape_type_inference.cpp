@@ -1936,8 +1936,10 @@ void ONNXShapeTypeInference(
     Node* n,
     const ParamMap& params_dict,
     int opset_version) {
+  std::unordered_map<std::string, std::string> torch_to_onnx_input_name;
   std::unordered_map<std::string, std::string> torch_to_onnx_output_name;
-  auto& inferred_shape_data = ConstantValueMap::GetInferredShapeData();
+  auto& original_shape_data = ConstantValueMap::GetInferredShapeData();
+  auto inferred_shape_data = original_shape_data;
   auto& symbol_dim_map = ConstantValueMap::GetSymbolDimMap();
 
   SetGraphInputTypeReliable(n->owningGraph());
@@ -1954,6 +1956,11 @@ void ONNXShapeTypeInference(
     for (auto output : clone_node->outputs()) {
       n_graph->registerOutput(output);
     }
+    // Mapping original PyTorch graph's input/output name to cloned ONNX model's
+    for (size_t i = 0; i < clone_node->inputs().size(); ++i) {
+      torch_to_onnx_input_name[n->input(i)->debugName()] = clone_node->input(i)->debugName();
+    }
+
     for (size_t i = 0; i < clone_node->outputs().size(); ++i) {
       torch_to_onnx_output_name[n->output(i)->debugName()] = clone_node->output(i)->debugName();
     }
@@ -1961,8 +1968,8 @@ void ONNXShapeTypeInference(
     // Use original_keys for removing original data which is duplicate
     std::vector<string> original_keys;
     for (const auto& gs_data: inferred_shape_data) {
-      const auto onnx_output_name = torch_to_onnx_output_name.find(gs_data.first);
-      if (onnx_output_name != torch_to_onnx_output_name.end()) {
+      const auto onnx_output_name = torch_to_onnx_input_name.find(gs_data.first);
+      if (onnx_output_name != torch_to_onnx_input_name.end()) {
         inferred_shape_data[onnx_output_name->second] = gs_data.second;
         if (gs_data.first != onnx_output_name->second) {
           original_keys.emplace_back(gs_data.first);
@@ -2044,8 +2051,8 @@ void ONNXShapeTypeInference(
       // Store data propagation result into shapeValueMap
       ConstantValueMap::SetShapeValue(output->debugName(), shape_value);
       // Use original name in PyTorch graph instead of temporary name in intermediate ONNX graph
-      inferred_shape_data[output->debugName()] = inferred_shape;
-      inferred_shape_data.erase(inferred_shape_pair);
+      // Add this back to original_shape_data
+      original_shape_data[output->debugName()] = inferred_shape;
     }
   }
 

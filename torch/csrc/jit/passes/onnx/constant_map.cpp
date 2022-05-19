@@ -317,6 +317,34 @@ void ConstantValueMap::PrintMaps() {
       std::cout << std::endl;
     }
   }
+  std::cout << std::endl;
+  std::cout << "InferredShape Map:" << std::endl;
+  count = 0;
+  for (const auto& x : ConstantValueMap::getInstance().inferredShapeData) {
+    std::cout << "(node " << x.first << ": ";
+    for (const auto& dim: x.second.dim()) {
+      if (dim.has_dim_param()) {
+        std::cout << dim.dim_param() << " ";
+      } else {
+        std::cout << dim.dim_value() << " ";
+      }
+    }
+    std::cout << "), ";
+    count++;
+    if (count % 10 == 0) {
+      std::cout << std::endl;
+    }
+  }
+  std::cout << std::endl;
+  std::cout << "SymbolDim Map:" << std::endl;
+  count = 0;
+  for (const auto& x : ConstantValueMap::getInstance().symbolDimMap) {
+    std::cout << "(" << x.first << ": " << x.second << "), ";
+    count++;
+    if (count % 10 == 0) {
+      std::cout << std::endl;
+    }
+  }
 }
 
 } // namespace jit
