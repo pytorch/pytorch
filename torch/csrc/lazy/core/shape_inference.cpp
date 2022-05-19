@@ -49,6 +49,9 @@
 
 #include <torch/csrc/lazy/core/shape_inference.h>
 
+#include <torch/csrc/lazy/core/shape.h>
+#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/CompositeExplicitAutogradFunctions.h>
 #include <ATen/Dispatch.h>
@@ -419,6 +422,33 @@ std::vector<Shape> compute_shape_embedding_dense_backward(
   return {
       Shape(grad_output.scalar_type(), {num_weights, grad_output.size(-1)})};
 }
+
+std::vector<Shape> compute_shape_expand(const at::Tensor & self, at::IntArrayRef size, bool implicit) {
+  CHECK_GE(size.size(), self.dim());
+  int64_t num_new_dimensions = size.size() - self.dim();
+  std::vector<int64_t> padded_self(num_new_dimensions, 0);
+  padded_self.insert(padded_self.end(), self.sizes().begin(),
+                     self.sizes().end());
+  std::vector<int64_t> target_size(size.size());
+  for (const auto idx : c10::irange(size.size())) {
+    target_size[idx] = size[idx] == -1 ? padded_self[idx] : size[idx];
+  }
+  return {Shape(self.scalar_type(), target_size)};
+}
+
+// std::vector<Shape> compute_shape_expand(const at::Tensor & self, c10::SymIntArrayRef size, bool implicit) {
+//   CHECK_GE(size.size(), self.dim());
+//   // NOTE: hm... how can we allow size dimensions to hold -1?
+//   // NOTE: should move this block somewhere better - ref: https://github.com/pytorch/xla/pull/3558/files
+//   std::vector<int64_t> target_size;
+//   for (auto& _size : size) {
+//     const std::shared_ptr<c10::SymbolicIntNode> symbolicIntNode = _size.toSymbolicIntNode();
+//     auto lazySymIntNode = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(symbolicIntNode);
+//     auto size_node = lazySymIntNode->node_;
+//     target_size.push_back(std::dynamic_pointer_cast<DimensionNode>(size_node)->getStaticValue());
+//   }
+//   return {Shape(self.scalar_type(), target_size)};
+// }
 
 std::vector<Shape> compute_shape_index_select(
     const at::Tensor& self,
