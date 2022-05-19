@@ -944,6 +944,29 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                     torch.tensor([(j + 1) * self.world_size]), tensors_list[i - 1][j]
                 )
 
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_send_recv(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        # Generate the same random tensor
+        torch.manual_seed(0)
+        send_tensor = torch.rand(10, 10, device=device)
+        if self.rank == 0:
+            dist.send(send_tensor, 1)
+        if self.rank == 1:
+            recv_tensor = torch.rand(10, 10, device=device)
+            dist.recv(recv_tensor, 0)
+            self.assertEqual(send_tensor, recv_tensor)
+
+        # Test with non-contiguous tensors.
+        send_tensor_view = send_tensor.t()
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, 'Tensors must be contiguous'):
+                dist.send(send_tensor_view, 1)
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
