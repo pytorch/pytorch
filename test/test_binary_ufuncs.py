@@ -746,8 +746,9 @@ class TestBinaryUfuncs(TestCase):
             if _supported((torch.complex128,)):
                 rhs_c128_scalar_tensor = make_rhs_scalar_tensor(dtype=torch.complex128)
                 result = op(lhs_f32, rhs_c128_scalar_tensor)
+                # Value type of 1D+ Tensor (lhs_f32) takes priority over scalar tensor (rhs_c128).
                 expected_dtype = (
-                    torch.complex128 if not op.always_returns_bool else torch.bool
+                    torch.complex64 if not op.always_returns_bool else torch.bool
                 )
                 self.assertEqual(result.dtype, expected_dtype)
 
