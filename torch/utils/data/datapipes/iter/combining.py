@@ -432,19 +432,21 @@ class MultiplexerIterDataPipe(IterDataPipe):
     def __init__(self, *datapipes):
         self.datapipes = datapipes
         self.length: Optional[int] = None
+        self.buffer: List = []  # Store values to be yielded only when every iterator provides one
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]
         while len(iterators):
-            values: List[Any] = []
             for it in iterators:
                 try:
                     value = next(it)
-                    values.append(value)
+                    self.buffer.append(value)
                 except StopIteration:
+                    self.buffer.clear()
                     return
-            for value in values:
+            for value in self.buffer:
                 yield value
+            self.buffer.clear()
 
     def __len__(self):
         if self.length is not None:
@@ -456,6 +458,29 @@ class MultiplexerIterDataPipe(IterDataPipe):
         else:
             self.length = -1
         return len(self)
+
+    def reset(self) -> None:
+        self.buffer = []
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+
+        state = (
+            self.datapipes,
+            self.length,
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.datapipes,
+            self.length,
+        ) = state
+        self.buffer = []
+
+    def __del__(self):
+        self.buffer.clear()
 
 
 @functional_datapipe('zip')
