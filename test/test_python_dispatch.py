@@ -264,8 +264,6 @@ class TestPythonRegistration(TestCase):
                 torch.ops.foo._op()
 
             assert "foo::_op" in str(_test.graph)
-            assert torch.ops.foo._op() is None
-            assert called[0] == 1
 
         with self.assertRaises(AssertionError):
             test_helper("")  # alias_analysis="FROM_SCHEMA"
