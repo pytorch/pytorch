@@ -12795,12 +12795,6 @@ op_db: List[OpInfo] = [
                 'test_variant_consistency_jit',
                 dtypes=(torch.float32,)
             ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                'TestCompositeCompliance',
-                'test_forward_ad',
-                dtypes=(torch.float32,)
-            ),
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_gradgrad", dtypes=(torch.float64,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_fwgrad_bwgrad", dtypes=(torch.float64,)),
         ),
@@ -13978,6 +13972,9 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         gradcheck_fast_mode=False,
+        supports_autograd=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=False,
         decorators=(
             # RuntimeError: expected int at position 0, but got: Tensor
             DecorateInfo(
