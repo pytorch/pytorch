@@ -801,12 +801,12 @@ def elementwise_dtypes(
                 _dtype = x.dtype
                 if float_as_complex and is_float_dtype(_dtype):
                     _dtype = corresponding_complex_dtype(_dtype)
-                if x.ndim == 0 and not all_tensors_equal:
+                if x.ndim == 0:
                     zero_dim_tensor_dtype = get_higher_dtype(
                         zero_dim_tensor_dtype, _dtype
                     )
                 else:
-                    # x.ndim > 0 or all_tensors_equal
+                    # x.ndim > 0
                     one_plus_dim_tensor_dtype = get_higher_dtype(
                         one_plus_dim_tensor_dtype, _dtype
                     )
@@ -825,7 +825,7 @@ def elementwise_dtypes(
     elif highest_type is complex:
         result_dtype = _find_highest_dtype_filtered(
             args,
-            lambda x: is_complex_dtype(x),
+            lambda x: is_float_dtype(x) or is_complex_dtype(x),
             float_as_complex=True,
         )
         if result_dtype is None:
