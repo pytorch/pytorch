@@ -74,8 +74,12 @@ const std::string jit_common_types = R"ESCAPE(
   constexpr int num_threads = 128;
   constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
+  #ifdef __HIPCC__
+  #define ERROR_UNSUPPORTED_CAST ;
+  #else
   //TODO use _assert_fail, because assert is disabled in non-debug builds
   #define ERROR_UNSUPPORTED_CAST assert(false);
+  #endif
 
   ${traits_string}
   ${cmath_string}
