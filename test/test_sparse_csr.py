@@ -2176,11 +2176,12 @@ class TestSparseCSR(TestCase):
             # TODO: Remove this once support has been enabled
             return
 
-        for shape in [(0, 10), (6, 0), (6, 10), (0, 0)]:
+        for shape in [(3, 6, 10), (0, 10), (6, 0), (6, 10), (0, 0)]:
             dense = make_tensor(shape, dtype=torch.float, device=device)
             dense = dense.relu()  # Introduce some sparsity
-            sp_matrix = self._construct_sp_matrix(dense, layout)
+            print("dense: ", dense)
             pt_matrix = self._convert_to_layout(dense, layout)
+            sp_matrix = self._construct_sp_matrix(dense, layout)
 
             compressed_indices_mth = {
                 torch.sparse_csr: torch.Tensor.crow_indices,
@@ -2199,6 +2200,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
             self.assertEqual(dense, pt_matrix.to_dense())
+            import sys; sys.exit(1)
 
     @skipMeta
     @all_sparse_compressed_layouts()

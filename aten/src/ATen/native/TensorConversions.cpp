@@ -536,6 +536,8 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 }
 
 Tensor dense_to_sparse_csr(const Tensor& self) {
+  auto mask = (self == 0);
+  std::cout << "mask: " << mask << std::endl;
   return self.to_sparse().to_sparse_csr();
 }
 
