@@ -22,7 +22,6 @@ RUN bash ./install_user.sh && rm install_user.sh
 ARG KATEX
 ADD ./common/install_katex.sh install_katex.sh
 RUN bash ./install_katex.sh && rm install_katex.sh
-RUN sudo apt-get -y install doxygen
 
 # Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
