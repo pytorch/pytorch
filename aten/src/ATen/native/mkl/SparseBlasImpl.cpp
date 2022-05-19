@@ -125,13 +125,25 @@ void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
   auto col_indices = input.col_indices();
   auto input_values = input.values();
 
-  // MKL Sparse Inspector-Executor doesn't have a way to provide external
-  // buffers So we have to copy the memory allocated by MKL
-  std::memcpy(
-      input_values.data_ptr<scalar_t>(), values, nnz * sizeof(scalar_t));
-  std::memcpy(col_indices.data_ptr<MKL_INT>(), columns, nnz * sizeof(MKL_INT));
-  std::memcpy(
-      crow_indices.data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
+  // NB: When nnz is zero it is possible that input_values.data_ptr<scalar_t> is
+  // a nullptr, if input was created via empty. As such we need to check that
+  // nnz is not zero to avoid passing nullptr to std::memcpy. We will apply
+  // the same precautions to crow_indices.data_ptr<MKL_INT>.
+  //
+  // Otherwise ASAN will complain.
+
+  if (nnz > 0) {
+    // MKL Sparse Inspector-Executor doesn't have a way to provide external
+    // buffers So we have to copy the memory allocated by MKL
+    std::memcpy(
+        input_values.data_ptr<scalar_t>(), values, nnz * sizeof(scalar_t));
+    std::memcpy(
+        col_indices.data_ptr<MKL_INT>(), columns, nnz * sizeof(MKL_INT));
+  }
+  if (rows > 0) {
+    std::memcpy(
+        crow_indices.data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
+  }
   crow_indices.data_ptr<MKL_INT>()[rows] = nnz;
 }
 #endif
