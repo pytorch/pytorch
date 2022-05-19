@@ -577,7 +577,7 @@ class TestMPS(TestCase):
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             # This passes
-            self.assertEqual(x, cpu_x.permute(0, 2, 3, 1))
+            self.assertEqual(x, cpu_x)
 
         helper((2, 2, 2, 2), True)
 
