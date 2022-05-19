@@ -4,7 +4,6 @@ from inspect import getmembers, isfunction
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx import symbolic_registry
-from torch.onnx.symbolic_helper import parse_args
 
 
 def register_quantized_ops(domain: str, version: int):
@@ -66,7 +65,7 @@ def linear_prepack(g, weight, bias):
     return output
 
 
-@parse_args("v", "v", "v", "f", "i")
+@symbolic_helper.parse_args("v", "v", "v", "f", "i")
 def linear(g, input, weight, bias, scale, zero_point):
     kwargs = {
         "Y_scale_f": scale,
@@ -86,7 +85,7 @@ def conv_prepack(g, input, weight, bias, stride, padding, dilation, groups):
     return output
 
 
-@parse_args("v", "v", "v", "is", "is", "is", "i", "f", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "f", "i")
 def conv2d(
     g, input, weight, bias, stride, padding, dilation, groups, scale, zero_point
 ):
@@ -106,7 +105,7 @@ def conv2d(
     return output
 
 
-@parse_args("v", "v", "v", "is", "is", "is", "i", "f", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "f", "i")
 def conv2d_relu(
     g, input, weight, bias, stride, padding, dilation, groups, scale, zero_point
 ):
@@ -126,7 +125,7 @@ def conv2d_relu(
     return output
 
 
-@parse_args("v", "v", "f", "i")
+@symbolic_helper.parse_args("v", "v", "f", "i")
 def add(g, input_a, input_b, scale, zero_point):
     kwargs = {
         "Y_scale_f": scale,
@@ -137,7 +136,7 @@ def add(g, input_a, input_b, scale, zero_point):
     return output
 
 
-@parse_args("v")
+@symbolic_helper.parse_args("v")
 def relu(g, input):
     if input not in symbolic_helper._quantized_ops:
         return opset9.relu(g, input)
@@ -150,7 +149,7 @@ def relu(g, input):
     return output
 
 
-@parse_args("v", "f", "i", "t")
+@symbolic_helper.parse_args("v", "f", "i", "t")
 def quantize_per_tensor(g, input, scale, zero_point, dtype):
     kwargs = {
         "Y_scale_f": scale,
@@ -161,12 +160,12 @@ def quantize_per_tensor(g, input, scale, zero_point, dtype):
     return output
 
 
-@parse_args("v")
+@symbolic_helper.parse_args("v")
 def dequantize(g, input):
     return g.op("_caffe2::Int8Dequantize", input)
 
 
-@parse_args("v", "t", "t", "t", "t", "t", "t", "t")
+@symbolic_helper.parse_args("v", "t", "t", "t", "t", "t", "t", "t")
 def _empty_affine_quantized(
     g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout
 ):
@@ -192,10 +191,12 @@ def upsample_nearest2d(
     return output
 
 
-@parse_args("v", "is", "is", "is", "is", "i")
+@symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if input not in symbolic_helper._quantized_ops:
-        return opset9.max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode)
+        return opset9.max_pool2d(
+            g, input, kernel_size, stride, padding, dilation, ceil_mode
+        )
     kwargs = {
         "strides_i": stride,
         "pads_i": padding + padding,
@@ -211,7 +212,7 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     return output
 
 
-@parse_args("v", "is", "is", "is", "i", "i", "none")
+@symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
 def avg_pool2d(
     g,
     input,
@@ -261,7 +262,7 @@ def reshape(g, input, shape):
     return output
 
 
-@parse_args("v", "v", "v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "v", "v", "i")
 def slice(g, input, dim, start, end, step):
     if input not in symbolic_helper._quantized_ops:
         return opset9.slice(g, input, dim, start, end, step)
@@ -300,7 +301,7 @@ def cat(g, tensor_list, dim, scale=None, zero_point=None):
     return output
 
 
-@parse_args("v")
+@symbolic_helper.parse_args("v")
 def sigmoid(g, input):
     if input not in symbolic_helper._quantized_ops:
         return opset9.sigmoid(g, input)

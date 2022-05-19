@@ -18,34 +18,33 @@ Updated operators:
 import torch
 from torch.onnx import symbolic_helper
 from torch.onnx._globals import GLOBALS
-from torch.onnx.symbolic_helper import parse_args
 
 
-@parse_args("v")
+@symbolic_helper.parse_args("v")
 def hardswish(g, self):
     return g.op("HardSwish", self)
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def tril(g, self, diagonal, out=None):
     k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
     return g.op("Trilu", self, k, upper_i=0)
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def triu(g, self, diagonal, out=None):
     k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
     return g.op("Trilu", self, k, upper_i=1)
 
 
-@parse_args("v", "v")
+@symbolic_helper.parse_args("v", "v")
 def reshape(g, self, shape):
     # NOTE: Due to bug in ORT https://github.com/microsoft/onnxruntime/issues/10664
     #       Reshape export cannot utilize the new allowzero attribute introduced in opset 14.
     return symbolic_helper._reshape_helper(g, self, shape, allowzero=0)
 
 
-@parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
+@symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def batch_norm(
     g,
     input,

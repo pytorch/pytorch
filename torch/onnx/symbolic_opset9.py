@@ -11,7 +11,7 @@ import warnings
 from typing import Optional
 
 import torch
-import torch.nn.modules.utils as modules_utils
+import torch.nn.modules.utils
 import torch.onnx
 from torch import _C
 
@@ -20,7 +20,6 @@ from torch import _C
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx import symbolic_helper
 from torch.onnx._globals import GLOBALS
-from torch.onnx.symbolic_helper import _parse_arg, parse_args, quantized_args
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -113,13 +112,13 @@ def div(g, self, other, *args):
         return _div_rounding_mode(g, self, other, *args)
 
 
-@parse_args("v", "v", "v", "f")
+@symbolic_helper.parse_args("v", "v", "v", "f")
 def addcmul(g, self, tensor1, tensor2, value=1.0):
     value_tens = g.op("Constant", value_t=torch.tensor([value]))
     return add(g, self, mul(g, mul(g, tensor1, tensor2), value_tens))
 
 
-@parse_args("v", "v", "s")
+@symbolic_helper.parse_args("v", "v", "s")
 def _div_rounding_mode(g, self, other, rounding_mode):
     if rounding_mode is None:
         return true_divide(g, self, other)
@@ -232,13 +231,13 @@ def reciprocal(g, self):
     return g.op("Reciprocal", self)
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def cat(g, tensor_list, dim):
     tensors = symbolic_helper._unpack_list(tensor_list)
     return g.op("Concat", *tensors, axis_i=dim)
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def stack(g, tensor_list, dim):
     unsqueezed = [
         symbolic_helper._unsqueeze_helper(g, t, [dim])
@@ -266,7 +265,7 @@ def matmul(g, self, other):
     return g.op("MatMul", self, other)
 
 
-@parse_args("v", "v", "v", "t", "t")
+@symbolic_helper.parse_args("v", "v", "v", "t", "t")
 def addmm(g, self, mat1, mat2, beta, alpha):
     dtype = None
     self_dtype = symbolic_helper._try_get_scalar_type(self)
@@ -425,7 +424,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
 
     @overload_by_arg_count
     def reduce(g, *args, **kwargs):
-        @parse_args("v", "none")
+        @symbolic_helper.parse_args("v", "none")
         def reduce_nodim(g, self, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -438,7 +437,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
 
         dim_desc = "is" if allow_multi_dim_support else "i"
 
-        @parse_args("v", dim_desc, "i", "none")
+        @symbolic_helper.parse_args("v", dim_desc, "i", "none")
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -460,7 +459,7 @@ mean = _reduce_with_dtype("ReduceMean", "mean")
 prod = _reduce_with_dtype("ReduceProd", "prod", allow_multi_dim_support=False)
 
 
-@parse_args("v", "i", "none")
+@symbolic_helper.parse_args("v", "i", "none")
 def cumsum(g, input, dim, dtype):
     if symbolic_helper.is_caffe2_aten_fallback():
         if dtype.node().kind() != "prim::Constant":
@@ -529,7 +528,7 @@ def expand_as(g, self, other):
     return g.op("Expand", self, shape)
 
 
-@parse_args("v", "v", "i", "b", "v")
+@symbolic_helper.parse_args("v", "v", "i", "b", "v")
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     if scale_grad_by_freq and GLOBALS.training_mode:
         raise RuntimeError(
@@ -546,7 +545,7 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
-@parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
+@symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 def embedding_bag(
     g,
     embedding_matrix,
@@ -591,7 +590,7 @@ def size(g, self, dim=None):
     return symbolic_helper._size_helper(g, self, dim)
 
 
-@parse_args("v", "i", "i")
+@symbolic_helper.parse_args("v", "i", "i")
 def transpose(g, self, dim0, dim1):
     if dim0 == dim1:  # micro-optimization
         return self
@@ -615,7 +614,7 @@ def transpose(g, self, dim0, dim1):
             )
 
 
-@parse_args("v", "is")
+@symbolic_helper.parse_args("v", "is")
 def permute(g, self, dims):
     if dims == list(range(0, len(dims))):
         return self
@@ -631,7 +630,7 @@ def view_as(g, self, other):
     return reshape(g, self, shape)
 
 
-@parse_args("v", "i", "i", "i")
+@symbolic_helper.parse_args("v", "i", "i", "i")
 def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     if _outputs is None:
         return symbolic_helper._onnx_opset_unsupported_detailed(
@@ -648,7 +647,7 @@ def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
 
-@parse_args("v", "v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "v", "i")
 def split(g, self, split_size_or_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         return symbolic_helper._onnx_opset_unsupported_detailed(
@@ -679,7 +678,7 @@ def unsafe_split(g, self, split_size_or_sizes, dim, _outputs=None):
     return split(g, self, split_size_or_sizes, dim, _outputs)
 
 
-@parse_args("v", "is", "i", "i")
+@symbolic_helper.parse_args("v", "is", "i", "i")
 def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_sizes, _outputs):
         return symbolic_helper._onnx_opset_unsupported_detailed(
@@ -692,7 +691,7 @@ def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     return split_with_sizes(g, self, split_sizes, dim, _outputs)
 
 
-@parse_args("v", "i", "i")
+@symbolic_helper.parse_args("v", "i", "i")
 def unbind(g, self, dim=0, _outputs=None):
     if _outputs is None:
         return symbolic_helper._onnx_opset_unsupported_detailed(
@@ -707,7 +706,7 @@ def unbind(g, self, dim=0, _outputs=None):
     return squeezed_outputs
 
 
-@parse_args("v", "i", "v")
+@symbolic_helper.parse_args("v", "i", "v")
 def select(g, self, dim, index):
     index = symbolic_helper._maybe_get_scalar(index)
     if (not symbolic_helper._is_value(index)) and (index < 0):
@@ -871,12 +870,12 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     return self
 
 
-@quantized_args(True)
+@symbolic_helper.quantized_args(True)
 def relu(g, input):
     return op_with_optional_float_cast(g, "Relu", input, opset_before=14)
 
 
-@quantized_args(True)
+@symbolic_helper.quantized_args(True)
 def relu6(g, input):
     relu = op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     return clamp_max(g, relu, 6)
@@ -895,7 +894,7 @@ def _len(g, self):
     return symbolic_helper._squeeze_helper(g, sz_0, [0])
 
 
-@parse_args("v", "t", "t")
+@symbolic_helper.parse_args("v", "t", "t")
 def threshold(g, self, threshold, value):
     # See Note [Export inplace]
     if symbolic_helper._scalar(threshold) != 0:
@@ -912,7 +911,7 @@ def leaky_relu(g, input, negative_slope, inplace=False):
     return g.op("LeakyRelu", input, alpha_f=symbolic_helper._scalar(negative_slope))
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def glu(g, input, dim):
     dim_size = symbolic_helper._get_tensor_dim_size(input, dim)
     if dim_size is not None:
@@ -922,7 +921,7 @@ def glu(g, input, dim):
     return g.op("Mul", first, g.op("Sigmoid", second))
 
 
-@parse_args("v", "i", "none")
+@symbolic_helper.parse_args("v", "i", "none")
 def softmax(g, input, dim, dtype=None):
     # Softmax does normalization at vector level.
     # PyTorch and ONNX use different strategies to split the input tensor into vectors.
@@ -1031,7 +1030,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
-    @parse_args("v", "is", "is", "is", "is", "i")
+    @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if set(tuple_fn(dilation)) != {1}:
             return symbolic_helper._unimplemented(name, "dilation")
@@ -1087,22 +1086,37 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
     return symbolic_fn
 
 
-max_pool1d = _max_pool("max_pool1d", modules_utils._single, 1, return_indices=False)
-max_pool2d = _max_pool("max_pool2d", modules_utils._pair, 2, return_indices=False)
-max_pool3d = _max_pool("max_pool3d", modules_utils._triple, 3, return_indices=False)
+max_pool1d = _max_pool(
+    "max_pool1d", torch.nn.modules.utils._single, 1, return_indices=False
+)
+max_pool2d = _max_pool(
+    "max_pool2d", torch.nn.modules.utils._pair, 2, return_indices=False
+)
+max_pool3d = _max_pool(
+    "max_pool3d", torch.nn.modules.utils._triple, 3, return_indices=False
+)
 max_pool1d_with_indices = _max_pool(
-    "max_pool1d_with_indices", modules_utils._single, 1, return_indices=True
+    "max_pool1d_with_indices",
+    torch.nn.modules.utils._single,
+    1,
+    return_indices=True,
 )
 max_pool2d_with_indices = _max_pool(
-    "max_pool2d_with_indices", modules_utils._pair, 2, return_indices=True
+    "max_pool2d_with_indices",
+    torch.nn.modules.utils._pair,
+    2,
+    return_indices=True,
 )
 max_pool3d_with_indices = _max_pool(
-    "max_pool3d_with_indices", modules_utils._triple, 3, return_indices=True
+    "max_pool3d_with_indices",
+    torch.nn.modules.utils._triple,
+    3,
+    return_indices=True,
 )
 
 
 def _avg_pool(name, tuple_fn):
-    @parse_args("v", "is", "is", "is", "i", "i", "none")
+    @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
         input,
@@ -1145,13 +1159,13 @@ def _avg_pool(name, tuple_fn):
     return symbolic_fn
 
 
-avg_pool1d = _avg_pool("avg_pool1d", modules_utils._single)
-avg_pool2d = _avg_pool("avg_pool2d", modules_utils._pair)
-avg_pool3d = _avg_pool("avg_pool3d", modules_utils._triple)
+avg_pool1d = _avg_pool("avg_pool1d", torch.nn.modules.utils._single)
+avg_pool2d = _avg_pool("avg_pool2d", torch.nn.modules.utils._pair)
+avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
 def _adaptive_pool(name, type, tuple_fn, fn=None):
-    @quantized_args(True, False)
+    @symbolic_helper.quantized_args(True, False)
     def symbolic_fn(g, input, output_size):
         # _adaptive_pool is supported for cases where output_size is 1 for all dimensions,
         # by executing a GlobalPool.
@@ -1163,7 +1177,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         # (input is not a complete tensor or output size not factor of input size)
         # then we call GlobalAveragePool and return None for the indices
         try:
-            output_size = _parse_arg(output_size, "is")
+            output_size = symbolic_helper._parse_arg(output_size, "is")
         except Exception:
             return symbolic_helper._onnx_unsupported(
                 "adaptive pooling, since output_size is not constant."
@@ -1198,23 +1212,32 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
 
 
 adaptive_avg_pool1d = _adaptive_pool(
-    "adaptive_avg_pool1d", "AveragePool", modules_utils._single
+    "adaptive_avg_pool1d", "AveragePool", torch.nn.modules.utils._single
 )
 adaptive_avg_pool2d = _adaptive_pool(
-    "adaptive_avg_pool2d", "AveragePool", modules_utils._pair
+    "adaptive_avg_pool2d", "AveragePool", torch.nn.modules.utils._pair
 )
 adaptive_avg_pool3d = _adaptive_pool(
-    "adaptive_avg_pool3d", "AveragePool", modules_utils._triple
+    "adaptive_avg_pool3d", "AveragePool", torch.nn.modules.utils._triple
 )
 
 adaptive_max_pool1d = _adaptive_pool(
-    "adaptive_max_pool1d", "MaxPool", modules_utils._single, max_pool1d_with_indices
+    "adaptive_max_pool1d",
+    "MaxPool",
+    torch.nn.modules.utils._single,
+    max_pool1d_with_indices,
 )
 adaptive_max_pool2d = _adaptive_pool(
-    "adaptive_max_pool2d", "MaxPool", modules_utils._pair, max_pool2d_with_indices
+    "adaptive_max_pool2d",
+    "MaxPool",
+    torch.nn.modules.utils._pair,
+    max_pool2d_with_indices,
 )
 adaptive_max_pool3d = _adaptive_pool(
-    "adaptive_max_pool3d", "MaxPool", modules_utils._triple, max_pool3d_with_indices
+    "adaptive_max_pool3d",
+    "MaxPool",
+    torch.nn.modules.utils._triple,
+    max_pool3d_with_indices,
 )
 
 
@@ -1333,7 +1356,7 @@ replication_pad3d = replication_pad
 
 
 def pad(g, input, pad, mode, value):
-    mode = _parse_arg(mode, "s")
+    mode = symbolic_helper._parse_arg(mode, "s")
     if mode == "replicate":
         return replication_pad(g, input, pad)
     elif mode == "reflect":
@@ -1584,7 +1607,7 @@ def __lshift_(g, self, other):
     return lshift
 
 
-@parse_args("v", "v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "v", "i")
 def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if condition.type().scalarType() != "Bool":
@@ -1599,7 +1622,7 @@ def where(g, condition, self=None, other=None, _outputs=None):
     return g.op("Where", condition, self, other)
 
 
-@parse_args("v", "i", "none")
+@symbolic_helper.parse_args("v", "i", "none")
 def log_softmax(g, input, dim, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
@@ -1631,7 +1654,9 @@ def log_softmax(g, input, dim, dtype=None):
     return return_op
 
 
-@parse_args("v", "v", "v", "is", "is", "is", "i", "is", "i", "i", "i", "i", "i")
+@symbolic_helper.parse_args(
+    "v", "v", "v", "is", "is", "is", "i", "is", "i", "i", "i", "i", "i"
+)
 def _convolution(
     g,
     input,
@@ -1696,7 +1721,7 @@ def _convolution(
         return n
 
 
-@parse_args("v", "v", "v", "is", "is", "is", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
 def conv1d(g, input, weight, bias, stride, padding, dilation, groups):
     return _convolution(
         g,
@@ -1716,7 +1741,7 @@ def conv1d(g, input, weight, bias, stride, padding, dilation, groups):
     )
 
 
-@parse_args("v", "v", "v", "is", "is", "is", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
 def conv2d(g, input, weight, bias, stride, padding, dilation, groups):
     return _convolution(
         g,
@@ -1736,7 +1761,7 @@ def conv2d(g, input, weight, bias, stride, padding, dilation, groups):
     )
 
 
-@parse_args("v", "v", "v", "is", "is", "is", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
 def conv3d(g, input, weight, bias, stride, padding, dilation, groups):
     return _convolution(
         g,
@@ -1756,7 +1781,7 @@ def conv3d(g, input, weight, bias, stride, padding, dilation, groups):
     )
 
 
-@parse_args("v", "v", "v", "is", "is", "is", "i", "is")
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is")
 def conv_transpose1d(
     g, input, weight, bias, stride, padding, output_padding, groups, dilation
 ):
@@ -1778,7 +1803,7 @@ def conv_transpose1d(
     )
 
 
-@parse_args("v", "v", "v", "is", "is", "is", "i", "is")
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is")
 def conv_transpose2d(
     g, input, weight, bias, stride, padding, output_padding, groups, dilation
 ):
@@ -1800,7 +1825,7 @@ def conv_transpose2d(
     )
 
 
-@parse_args("v", "v", "v", "is", "is", "is", "i", "is")
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is")
 def conv_transpose3d(
     g, input, weight, bias, stride, padding, output_padding, groups, dilation
 ):
@@ -1822,7 +1847,7 @@ def conv_transpose3d(
     )
 
 
-@parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
+@symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def batch_norm(
     g,
     input,
@@ -1877,7 +1902,7 @@ def batch_norm(
         return res
 
 
-@parse_args("v", "is", "v", "v", "f", "i")
+@symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
@@ -1911,7 +1936,7 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     return layer_norm
 
 
-@parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
+@symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def instance_norm(
     g,
     input,
@@ -2002,7 +2027,7 @@ def instance_norm(
         return view(g, out, g.op("Constant", value_t=torch.tensor(input_size)))
 
 
-@parse_args("v", "i", "i", "i")
+@symbolic_helper.parse_args("v", "i", "i", "i")
 def unfold(g, input, dimension, size, step):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("unfold", input, dimension_i=dimension, size_i=size, step_i=step)
@@ -2034,7 +2059,7 @@ def unfold(g, input, dimension, size, step):
         return symbolic_helper._unimplemented("Unfold", "input size not accessible")
 
 
-@parse_args("v", "t", "t", "t")
+@symbolic_helper.parse_args("v", "t", "t", "t")
 def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.0:
         return symbolic_helper._unimplemented("scale", "does not support scale in Elu")
@@ -2050,7 +2075,7 @@ def selu(g, input):
     return g.op("Selu", input)
 
 
-@parse_args("v", "i", "v")
+@symbolic_helper.parse_args("v", "i", "v")
 def index_select(g, self, dim, index):
     # In case of a scalar index, index_select returns a tensor with the same rank as the input.
     # To match this behavior in ONNX, we make index a 1D tensor so that the following gather
@@ -2067,7 +2092,7 @@ def index_put(g, self, indices_list_value, values, accumulate):
         args = [self] + indices_list + [values, accumulate]
         return g.at("index_put", *args)
 
-    accumulate = _parse_arg(accumulate, "b")
+    accumulate = symbolic_helper._parse_arg(accumulate, "b")
 
     if len(indices_list) == 0:
         if accumulate:
@@ -2079,7 +2104,7 @@ def index_put(g, self, indices_list_value, values, accumulate):
 
 
 def index_fill(g, self, dim, index, value):
-    dim_value = _parse_arg(dim, "i")
+    dim_value = symbolic_helper._parse_arg(dim, "i")
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "index_fill",
@@ -2101,7 +2126,7 @@ def index_fill(g, self, dim, index, value):
 
 
 def index_copy(g, self, dim, index, source):
-    dim_value = _parse_arg(dim, "i")
+    dim_value = symbolic_helper._parse_arg(dim, "i")
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("index_copy", self, index, source, dim_i=dim_value)
     expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
@@ -2110,7 +2135,7 @@ def index_copy(g, self, dim, index, source):
     return scatter(g, self, dim, expanded_index, source)
 
 
-@parse_args("v", "v", "b", "b")
+@symbolic_helper.parse_args("v", "v", "b", "b")
 def bucketize(g, self, boundaries, out_int32=False, right=False):
     out_type = torch.onnx.TensorProtoDataType.INT64
     if out_int32:
@@ -2163,7 +2188,7 @@ def type_as(g, self, other):
             )
 
 
-@parse_args("v", "v", "i", "f")
+@symbolic_helper.parse_args("v", "v", "i", "f")
 def cosine_similarity(g, x1, x2, dim, eps):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("cosine_similarity", x1, x2, dim_i=dim, eps_f=eps)
@@ -2194,7 +2219,7 @@ def pairwise_distance(g, input1, input2, p, eps, keepdim):
         g,
         pow(g, sub(g, input1, input2), p),
         axes_i=[-1],
-        keepdims_i=_parse_arg(keepdim, "i"),
+        keepdims_i=symbolic_helper._parse_arg(keepdim, "i"),
     )
     return pow(g, summation, inv_p)
 
@@ -2249,19 +2274,19 @@ def clamp(g, self, min, max):
                 g,
                 "Clip",
                 self,
-                min_f=_parse_arg(min, "f"),
-                max_f=_parse_arg(max, "f"),
+                min_f=symbolic_helper._parse_arg(min, "f"),
+                max_f=symbolic_helper._parse_arg(max, "f"),
                 opset_before=12,
             )
         else:
             return clamp_max(g, clamp_min(g, self, min), max)
 
 
-@parse_args("v", "v")
+@symbolic_helper.parse_args("v", "v")
 def clamp_min(g, self, min):
     if symbolic_helper._is_constant(min):
         return op_with_optional_float_cast(
-            g, "Clip", self, min_f=_parse_arg(min, "f"), opset_before=12
+            g, "Clip", self, min_f=symbolic_helper._parse_arg(min, "f"), opset_before=12
         )
     else:
         dtype = self.type().scalarType()
@@ -2269,11 +2294,11 @@ def clamp_min(g, self, min):
         return op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
-@parse_args("v", "v")
+@symbolic_helper.parse_args("v", "v")
 def clamp_max(g, self, max):
     if symbolic_helper._is_constant(max):
         return op_with_optional_float_cast(
-            g, "Clip", self, max_f=_parse_arg(max, "f"), opset_before=12
+            g, "Clip", self, max_f=symbolic_helper._parse_arg(max, "f"), opset_before=12
         )
     else:
         dtype = self.type().scalarType()
@@ -2323,17 +2348,17 @@ def minimum(g, input, other):
     return min(g, input, dim_or_y=other)
 
 
-@parse_args("v", "is", "i")
+@symbolic_helper.parse_args("v", "is", "i")
 def amax(g, self, dim, keepdim):
     return g.op("ReduceMax", self, axes_i=dim, keepdims_i=keepdim)
 
 
-@parse_args("v", "is", "i")
+@symbolic_helper.parse_args("v", "is", "i")
 def amin(g, self, dim, keepdim):
     return g.op("ReduceMin", self, axes_i=dim, keepdims_i=keepdim)
 
 
-@parse_args("v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "i")
 def aminmax(g, self, dim, keepdim):
     reduce_kwargs = {"keepdims_i": keepdim}
     if not symbolic_helper._is_none(dim):
@@ -2349,7 +2374,7 @@ def exp(g, self):
     return g.op("Exp", self)
 
 
-@parse_args("v", "f", "i")
+@symbolic_helper.parse_args("v", "f", "i")
 def dropout(g, input, p, train):
     symbolic_helper.check_training_mode(train, "dropout")
     # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
@@ -2364,7 +2389,7 @@ def dropout(g, input, p, train):
 
 
 def _unsupported_dropout(name):
-    @parse_args("v", "f", "i")
+    @symbolic_helper.parse_args("v", "f", "i")
     def feature_dropout(g, input, p, train):
         # NB: In inference mode, FeatureDropout is exported as an identity op.
         if train:
@@ -2385,7 +2410,7 @@ alpha_dropout_ = alpha_dropout
 feature_alpha_dropout_ = feature_alpha_dropout
 
 
-@parse_args("v", "t", "is", "i")
+@symbolic_helper.parse_args("v", "t", "is", "i")
 def norm(g, self, p, dim, keepdim):
     if p == 1:
         f = _reduce_op_symbolic("ReduceL1")
@@ -2396,7 +2421,7 @@ def norm(g, self, p, dim, keepdim):
     return f(g, self, dim=dim, keepdim=keepdim)
 
 
-@parse_args("v", "v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "v", "i")
 def conv_tbc(g, input, weight, bias, pad):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("conv_tbc", input, weight, bias, pad_i=pad)
@@ -2412,7 +2437,7 @@ def conv_tbc(g, input, weight, bias, pad):
         return g.op("Transpose", conv, perm_i=[2, 0, 1])
 
 
-@parse_args("v", "i", "i")
+@symbolic_helper.parse_args("v", "i", "i")
 def _unique(g, input, sorted, return_inverse):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
@@ -2426,7 +2451,7 @@ def _unique(g, input, sorted, return_inverse):
         return symbolic_helper._onnx_unsupported("_unique")
 
 
-@parse_args("v", "i", "i", "i")
+@symbolic_helper.parse_args("v", "i", "i", "i")
 def _unique2(g, input, sorted, return_inverse, return_counts):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
@@ -2450,12 +2475,12 @@ for k, v in symbolic_helper.cast_pytorch_to_onnx.items():
     )
 
 
-@parse_args("v", "i", "v", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
-@parse_args("v", "i", "v", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty_like(
     g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None
 ):
@@ -2513,7 +2538,7 @@ def as_tensor(g, data, dtype=None, device=None):
     return tensor(g, data, dtype, device)
 
 
-@parse_args("v", "i", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v")
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
     if dtype is None:
@@ -2530,7 +2555,7 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     )
 
 
-@parse_args("v", "i", "v", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def zeros_like(
     g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None
 ):
@@ -2556,7 +2581,7 @@ def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
-@parse_args("v", "i", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v")
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
@@ -2572,7 +2597,7 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
     )
 
 
-@parse_args("v", "i", "v", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def ones_like(
     g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None
 ):
@@ -2686,7 +2711,7 @@ def slice(g, self, *args):
     if len(args) == 4:
         # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
         dim, start, end, step = args
-        step = _parse_arg(step, "i")
+        step = symbolic_helper._parse_arg(step, "i")
         if step != 1:
             raise RuntimeError("step!=1 is currently not supported")
         is_start_none = (
@@ -2721,9 +2746,13 @@ def slice(g, self, *args):
                     dim_unsqueezed,
                 )
         else:
-            start = 0 if is_start_none else _parse_arg(start, "i")
-            end = 9223372036854775807 if is_end_none else _parse_arg(end, "i")
-            dim = _parse_arg(dim, "i")
+            start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
+            end = (
+                9223372036854775807
+                if is_end_none
+                else symbolic_helper._parse_arg(end, "i")
+            )
+            dim = symbolic_helper._parse_arg(dim, "i")
             return symbolic_helper._slice_helper(
                 g, self, axes=[dim], starts=[start], ends=[end]
             )
@@ -2738,8 +2767,10 @@ def slice(g, self, *args):
         is_end_none = (
             end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
         )
-        start = 0 if is_start_none else _parse_arg(start, "i")
-        end = 9223372036854775807 if is_end_none else _parse_arg(end, "i")
+        start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
+        end = (
+            9223372036854775807 if is_end_none else symbolic_helper._parse_arg(end, "i")
+        )
         return symbolic_helper._slice_helper(
             g, self, axes=[dim], starts=[start], ends=[end]
         )
@@ -2747,41 +2778,41 @@ def slice(g, self, *args):
         raise NotImplementedError("Unknown aten::slice signature")
 
 
-@parse_args("v", "f", "f")
+@symbolic_helper.parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
     return op_with_optional_float_cast(
         g, "Clip", self, min_f=min_val, max_f=max_val, opset_before=12
     )
 
 
-@parse_args("v")
+@symbolic_helper.parse_args("v")
 def hardswish(g, self):
     hs = hardsigmoid(g, self)
     return g.op("Mul", self, hs)
 
 
 # Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qhardsigmoid.cpp
-@quantized_args(True, scale=1.0 / 256.0, zero_point=0)
-@parse_args("v")
+@symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
+@symbolic_helper.parse_args("v")
 def hardsigmoid(g, self):
     # Set alpha_f to 1 / 6 to make op equivalent to PyTorch's definition of Hardsigmoid.
     # See https://pytorch.org/docs/stable/generated/torch.nn.Hardsigmoid.html
     return g.op("HardSigmoid", self, alpha_f=1 / 6)
 
 
-@parse_args("v")
+@symbolic_helper.parse_args("v")
 def tanhshrink(g, self):
     return g.op("Sub", self, tanh(g, self))
 
 
-@parse_args("v", "f")
+@symbolic_helper.parse_args("v", "f")
 def hardshrink(g, self, lambd):
     lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
     cond = logical_or(g, gt(g, self, lambd_op), lt(g, self, neg(g, lambd_op)))
     return g.op("Where", cond, self, g.op("Constant", value_t=torch.FloatTensor([0])))
 
 
-@parse_args("v", "f")
+@symbolic_helper.parse_args("v", "f")
 def softshrink(g, self, lambd):
     lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
     gt_cond = gt(g, self, lambd_op)
@@ -2805,7 +2836,7 @@ def alias(g, self):
     return self
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def unsqueeze(g, self, dim):
     # Handle negative dim
     if dim < 0:
@@ -2830,7 +2861,7 @@ def unsqueeze(g, self, dim):
     return symbolic_helper._unsqueeze_helper(g, self, axes_i=[dim])
 
 
-@parse_args("v", "i", "i", "none")
+@symbolic_helper.parse_args("v", "i", "i", "none")
 def sort(g, self, dim, decending, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
@@ -2853,7 +2884,7 @@ def numel(g, self):
     return g.op("ReduceProd", shape, keepdims_i=0)
 
 
-@parse_args("v", "i", "i", "i", "i", "none")
+@symbolic_helper.parse_args("v", "i", "i", "i", "i", "none")
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
@@ -3035,7 +3066,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     return g.op("Concat", *final_splits, axis_i=dim)
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def pixel_shuffle(g, self, upscale_factor):
     dims = symbolic_helper._get_tensor_sizes(self)
     if len(dims) != 4:
@@ -3104,7 +3135,7 @@ def pixel_shuffle(g, self, upscale_factor):
         )
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def pixel_unshuffle(g, self, downscale_factor):
     dims = symbolic_helper._get_tensor_sizes(self)
     if len(dims) != 4:
@@ -3394,7 +3425,7 @@ def _generic_rnn(
         return prev_output, h_outs, c_outs
 
 
-@parse_args("v", "v", "v", "i", "i", "f", "i", "i", "i")
+@symbolic_helper.parse_args("v", "v", "v", "i", "i", "f", "i", "i", "i")
 def _lstm_full(
     g,
     input,
@@ -3425,7 +3456,7 @@ def _lstm_full(
     )
 
 
-@parse_args("v", "v", "v", "v", "i", "i", "f", "i", "i")
+@symbolic_helper.parse_args("v", "v", "v", "v", "i", "i", "f", "i", "i")
 def _lstm_packed(
     g,
     input,
@@ -3490,7 +3521,7 @@ def lstm_cell(g, self, hidden, w_ih, w_hh, b_ih, b_hh):
 
 
 def _one_hidden_rnn(kind):
-    @parse_args("v", "v", "v", "i", "i", "f", "i", "i", "i")
+    @symbolic_helper.parse_args("v", "v", "v", "i", "i", "f", "i", "i", "i")
     def _rnn_full(
         g,
         input,
@@ -3518,7 +3549,7 @@ def _one_hidden_rnn(kind):
             batch_first,
         )
 
-    @parse_args("v", "v", "v", "v", "i", "i", "f", "i", "i")
+    @symbolic_helper.parse_args("v", "v", "v", "v", "i", "i", "f", "i", "i")
     def _rnn_packed(
         g,
         input,
@@ -3560,7 +3591,7 @@ rnn_tanh = _one_hidden_rnn("RNN_TANH")
 rnn_relu = _one_hidden_rnn("RNN_RELU")
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def _dim_arange(g, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op(
@@ -3578,14 +3609,14 @@ def detach(g, input):
     return input
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def contiguous(g, input, memory_format):
     if memory_format > 2:  # allower values are any, preserve and contiguous_format
         raise RuntimeError("onnx memory_format support is not implemented")
     return input
 
 
-@parse_args("v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "i")
 def _pack_padded_sequence(g, input, lengths, batch_first):
     # Currently there is no PackPadded operator in ONNX. We rely on an
     # optimization pass to remove this later. It is an error if all
@@ -3602,7 +3633,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
-@parse_args("v", "v", "i", "t", "v")
+@symbolic_helper.parse_args("v", "v", "i", "t", "v")
 def _pad_packed_sequence(
     g, data, batch_sizes, batch_first, padding_value, total_length
 ):
@@ -3679,7 +3710,7 @@ def rand_like(
     )
 
 
-@parse_args("v", "f", "f", "i", "none")
+@symbolic_helper.parse_args("v", "f", "f", "i", "none")
 def rrelu(g, input, lower, upper, training, generator):
     p = g.op("RandomUniformLike", input, high_f=upper, low_f=lower)
     return g.op("PRelu", input, p)
@@ -3709,19 +3740,19 @@ def bernoulli(g, input, generator=None, out=None):
     return g.op("Cast", output, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
 
 
-@parse_args("v")
+@symbolic_helper.parse_args("v")
 def log_sigmoid(g, input):
     p = g.op("Sigmoid", input)
     return g.op("Log", p)
 
 
-@parse_args("v")
+@symbolic_helper.parse_args("v")
 def erf(g, input):
     return g.op("Erf", input)
 
 
-@quantized_args(True, False, False)
-@parse_args("v", "i", "i")
+@symbolic_helper.quantized_args(True, False, False)
+@symbolic_helper.parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = symbolic_helper._get_tensor_rank(input)
     if dim is None:
@@ -3743,7 +3774,7 @@ def flatten(g, input, start_dim, end_dim):
     return symbolic_helper._flatten_helper(g, input, start_dim, end_dim, dim)
 
 
-@parse_args("v")
+@symbolic_helper.parse_args("v")
 def nonzero(g, input):
     """Emitted from `torch.nonzero(x, as_tuple=False)`"""
     return t(g, g.op("NonZero", input))
@@ -3754,7 +3785,7 @@ def nonzero_numpy(g, input, _outputs=None):
     return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
 
 
-@parse_args("v")
+@symbolic_helper.parse_args("v")
 def isnan(g, input):
     output = g.op("IsNaN", input)
     return output
@@ -3768,8 +3799,8 @@ def _any(g, *args):
     # aten::any(Tensor self, int dim, bool keepdim)
     else:
         input, dim, keepdim = args
-        dim = [_parse_arg(dim, "i")]
-        keepdim = _parse_arg(keepdim, "i")
+        dim = [symbolic_helper._parse_arg(dim, "i")]
+        keepdim = symbolic_helper._parse_arg(keepdim, "i")
     input = _cast_Long(g, input, False)  # type: ignore[name-defined]
     input_sum = symbolic_helper._reducesum_helper(
         g, input, axes_i=dim, keepdims_i=keepdim
@@ -3787,7 +3818,7 @@ def _all(g, *args):
         return g.op("Not", _any(g, input, args[1], args[2]))
 
 
-@parse_args("v", "i", "i", "i")
+@symbolic_helper.parse_args("v", "i", "i", "i")
 def narrow(g, input, dim, start, length):
     return symbolic_helper._slice_helper(
         g, input, axes=[dim], starts=[start], ends=[start + length]
@@ -3801,8 +3832,8 @@ def argmax(g, input, dim, keepdim):
         )
         return g.op("ArgMax", flattened, axis_i=0, keepdims_i=False)
     else:
-        dim = _parse_arg(dim, "i")
-        keepdim = _parse_arg(keepdim, "i")
+        dim = symbolic_helper._parse_arg(dim, "i")
+        keepdim = symbolic_helper._parse_arg(keepdim, "i")
         return g.op("ArgMax", input, axis_i=dim, keepdims_i=keepdim)
 
 
@@ -3813,12 +3844,12 @@ def argmin(g, input, dim, keepdim):
         )
         return g.op("ArgMin", flattened, axis_i=0, keepdims_i=False)
     else:
-        dim = _parse_arg(dim, "i")
-        keepdim = _parse_arg(keepdim, "i")
+        dim = symbolic_helper._parse_arg(dim, "i")
+        keepdim = symbolic_helper._parse_arg(keepdim, "i")
         return g.op("ArgMin", input, axis_i=dim, keepdims_i=keepdim)
 
 
-@parse_args("v", "i", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v")
 def scatter(g, self, dim, index, src):
     src_type = src.type().scalarType()
     src = symbolic_helper._maybe_get_scalar(src)
@@ -3836,7 +3867,7 @@ def scatter(g, self, dim, index, src):
         return g.op("Scatter", self, index, expand_as(g, src, index), axis_i=dim)
 
 
-@parse_args("v", "i", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v")
 def scatter_add(g, self, dim, index, src):
     dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None:
@@ -3891,7 +3922,7 @@ def one_hot(g, self, num_classes):
     return g.op("OneHot", self, num_classes, values, axis_i=-1)
 
 
-@parse_args("v", "i", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v")
 def gather(g, self, dim, index, sparse_grad=False):
     if symbolic_helper._maybe_get_const(sparse_grad, "i"):
         return symbolic_helper._unimplemented("gather", "sparse_grad == True")
@@ -3909,7 +3940,7 @@ def gather(g, self, dim, index, sparse_grad=False):
     return symbolic_helper._reducesum_helper(g, mul, axes_i=[dim], keepdims_i=0)
 
 
-@parse_args("v", "is", "i", "i")
+@symbolic_helper.parse_args("v", "is", "i", "i")
 def _var_mean(g, input, dim, correction, keepdim):
     if dim is None:
         mean = g.op("ReduceMean", input, keepdims_i=0)
@@ -3971,7 +4002,7 @@ def std_mean(g, input, *args):
     return g.op("Sqrt", var), mean
 
 
-@parse_args("v", "is", "i")
+@symbolic_helper.parse_args("v", "is", "i")
 def logsumexp(g, input, dim, keepdim):
     return g.op("ReduceLogSumExp", input, axes_i=dim, keepdims_i=keepdim)
 
@@ -4239,7 +4270,7 @@ def index(g, self, index):
             return symbolic_helper._reshape_helper(g, self, final_shape)
 
 
-@parse_args("v", "v", "is", "i", "v")
+@symbolic_helper.parse_args("v", "v", "is", "i", "v")
 def linalg_norm(g, self, ord, dim, keepdim, dtype):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.norm.html
     ord_value = None
@@ -4253,20 +4284,20 @@ def linalg_norm(g, self, ord, dim, keepdim, dtype):
                 "dim", "Input rank must be known at export time."
             )
         if self_dim == 1:
-            ord_value = _parse_arg(ord, "f")
+            ord_value = symbolic_helper._parse_arg(ord, "f")
         else:
             dim = [0, 1]
     else:
         if len(dim) == 1:
             if symbolic_helper._is_none(ord):
                 ord = g.op("Constant", value_t=torch.LongTensor([2]))
-            ord_value = _parse_arg(ord, "f")
+            ord_value = symbolic_helper._parse_arg(ord, "f")
     if ord_value:
         return linalg_vector_norm(g, self, ord_value, dim, keepdim, dtype)
     return linalg_matrix_norm(g, self, ord, dim, keepdim, dtype)
 
 
-@parse_args("v", "f", "is", "i", "v")
+@symbolic_helper.parse_args("v", "f", "is", "i", "v")
 def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
     if dim is None:
@@ -4294,16 +4325,16 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
     return result
 
 
-@parse_args("v", "v", "is", "i", "v")
+@symbolic_helper.parse_args("v", "v", "is", "i", "v")
 def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.matrix_norm.html
-    ord_value = _parse_arg(ord, "s")
+    ord_value = symbolic_helper._parse_arg(ord, "s")
     if ord_value == "fro":
         return frobenius_norm(g, self, dim, keepdim)
     elif ord_value == "nuc":
         return symbolic_helper._unimplemented("linalg.matrix_norm", "ord==nuc")
     else:
-        ord_value = _parse_arg(ord, "f")
+        ord_value = symbolic_helper._parse_arg(ord, "f")
         if ord_value is None:
             return frobenius_norm(g, self, dim, keepdim)
         if ord_value == 2 or ord_value == -2:
@@ -4347,19 +4378,19 @@ def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
         return result
 
 
-@parse_args("v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "i")
 def linalg_cross(g, input, other, dim=-1):
     return cross(g, input, other, dim)
 
 
-@parse_args("v", "is", "i")
+@symbolic_helper.parse_args("v", "is", "i")
 def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op("Mul", self, self)
     sumsqr = symbolic_helper._reducesum_helper(g, sqr, axes_i=dim, keepdims_i=keepdim)
     return g.op("Sqrt", sumsqr)
 
 
-@parse_args("v", "i", "b", "v")
+@symbolic_helper.parse_args("v", "i", "b", "v")
 def multinomial(g, input, num_samples, replacement=False, generator=None):
     if generator is not None and not symbolic_helper._is_none(generator):
         symbolic_helper._unimplemented(
@@ -4394,7 +4425,7 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
     return add(g, mul_a, mul_b)
 
 
-@parse_args("v", "s")
+@symbolic_helper.parse_args("v", "s")
 def meshgrid(g, tensor_list, indexing: Optional[str] = None):
     if indexing is None:
         indexing = "ij"
@@ -4429,7 +4460,7 @@ def remainder(g, input, other):
     return g.op("Sub", input, quo)
 
 
-@parse_args("v", "s")
+@symbolic_helper.parse_args("v", "s")
 def gelu(g, self: torch._C.Value, approximate: str = "none"):
     if approximate == "tanh":
         kBeta = math.sqrt(2 / math.pi)
@@ -4456,7 +4487,7 @@ def gelu(g, self: torch._C.Value, approximate: str = "none"):
         )
 
 
-@parse_args("v", "i", "v", "v", "f", "i")
+@symbolic_helper.parse_args("v", "i", "v", "v", "f", "i")
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
@@ -4522,7 +4553,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     )
 
 
-@parse_args("v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "i")
 def _weight_norm(g, weight_v, weight_g, dim):
     rank = symbolic_helper._get_tensor_rank(weight_v)
     if rank is not None:
@@ -4589,7 +4620,7 @@ def _kl_div_non_log_target_impl(g, input, target):
     return output
 
 
-@parse_args("v", "v", "i", "b")
+@symbolic_helper.parse_args("v", "v", "i", "b")
 def kl_div(g, input, target, reduction, log_target):
     if log_target:
         output = _kl_div_log_target_impl(g, input, target)
@@ -4608,7 +4639,7 @@ def kl_div(g, input, target, reduction, log_target):
         )
 
 
-@parse_args("v", "v", "is", "i")
+@symbolic_helper.parse_args("v", "v", "is", "i")
 def as_strided(g, self, sizes, strides, offset=None):
     sizes = symbolic_helper._maybe_get_const(sizes, "is")
     rank = len(strides)
@@ -4686,7 +4717,7 @@ def linear(g, input, weight, bias):
     return output
 
 
-@parse_args("v", "b", "i", "v", "v", "v", "v")
+@symbolic_helper.parse_args("v", "b", "i", "v", "v", "v", "v")
 def hann_window(
     g,
     window_length,
@@ -4731,7 +4762,7 @@ def dot(g, self, other):
     return matmul(g, self, other)
 
 
-@parse_args("v", "v")
+@symbolic_helper.parse_args("v", "v")
 def fill(g, self, value):
     dtype = self.type().scalarType()
     if dtype is None:
@@ -4810,7 +4841,7 @@ def index_add(g, self, dim, index, other, alpha=None):
     return scatter_add(g, self, dim, expand_as(g, index, other), other)
 
 
-@parse_args("v", "is", "is")
+@symbolic_helper.parse_args("v", "is", "is")
 def roll(g, self, shifts, dims):
     assert len(shifts) == len(dims)
 
@@ -4830,7 +4861,7 @@ def roll(g, self, shifts, dims):
     return result
 
 
-@parse_args("v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "i")
 def cross(g, input, other, dim=None):
     dim = symbolic_helper._get_dim_for_cross(input, dim)
     # If we have two tensors such that

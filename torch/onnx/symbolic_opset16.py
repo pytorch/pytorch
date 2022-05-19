@@ -30,12 +30,12 @@ from torch.nn.functional import (
     GRID_SAMPLE_INTERPOLATION_MODES,
     GRID_SAMPLE_PADDING_MODES,
 )
-from torch.onnx.symbolic_helper import parse_args
+from torch.onnx import symbolic_helper
 
 
 # note (mkozuki): Why `grid_sampler` instead of `grid_sample`?
 # Because `torch.nn.functional.grid_sample` calls `torch.grid_sampler`.
-@parse_args("v", "v", "i", "i", "b")
+@symbolic_helper.parse_args("v", "v", "i", "i", "b")
 def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
     mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
     padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]

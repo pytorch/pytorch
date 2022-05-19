@@ -10,7 +10,6 @@ from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx._globals import GLOBALS
-from torch.onnx.symbolic_helper import parse_args, quantized_args
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -27,7 +26,7 @@ def div(g, self, other, *args):
         return _div_rounding_mode(g, self, other, *args)
 
 
-@parse_args("v", "v", "s")
+@symbolic_helper.parse_args("v", "v", "s")
 def _div_rounding_mode(g, self, other, rounding_mode):
     if rounding_mode == "floor":
         return _floor_divide(g, self, other)
@@ -55,12 +54,12 @@ def _floor_divide(g, self, other):
         return g.op("Where", fixup_mask, fixup, div)
 
 
-@parse_args("v", "i", "i", "none")
+@symbolic_helper.parse_args("v", "i", "i", "none")
 def sort(g, self, dim, decending, out=None):
     return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
 
 
-@parse_args("v", "v", "i", "i", "i", "none")
+@symbolic_helper.parse_args("v", "v", "i", "i", "i", "none")
 def topk(g, self, k, dim, largest, sorted, out=None):
     return symbolic_helper._topk_helper(
         g, self, k, dim, largest=largest, sorted=sorted, out=out
@@ -68,8 +67,8 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
-    @quantized_args(True, False, False, False, False, False)
-    @parse_args("v", "is", "is", "is", "is", "i")
+    @symbolic_helper.quantized_args(True, False, False, False, False, False)
+    @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if not stride:
             stride = kernel_size
@@ -141,7 +140,7 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
-    @parse_args("v", "is", "is", "is", "i", "i", "none")
+    @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
         input,
@@ -295,7 +294,7 @@ def slice(g, self, *args):
     )
 
 
-@parse_args("v", "is")
+@symbolic_helper.parse_args("v", "is")
 def flip(g, input, dims):
     return symbolic_helper._slice_helper(
         g,
@@ -311,7 +310,7 @@ def fmod(g, input, other):
     return g.op("Mod", input, other, fmod_i=1)
 
 
-@parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
+@symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 def embedding_bag(
     g,
     embedding_matrix,
@@ -396,7 +395,7 @@ def embedding_bag(
         )
 
 
-@parse_args("v", "v", "v", "i", "i")
+@symbolic_helper.parse_args("v", "v", "v", "i", "i")
 def fake_quantize_per_tensor_affine(
     g, inputs, scale, zero_point, quant_min=-128, quant_max=127
 ):
@@ -460,7 +459,7 @@ def dequantize(g, input):
     return symbolic_helper.dequantize_helper(g, input)[0]
 
 
-@parse_args("v", "f", "f", "f")
+@symbolic_helper.parse_args("v", "f", "f", "f")
 def nan_to_num(g, input, nan, posinf, neginf):
     # Cannot create a int type tensor with inf/nan values, so we simply
     # return the original tensor

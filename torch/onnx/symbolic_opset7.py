@@ -12,8 +12,8 @@ Updated operators:
 
 import warnings
 
+from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx.symbolic_helper import _block_list_in_opset
 
 block_listed_operators = [
     "scan",
@@ -55,4 +55,4 @@ def min(g, self, dim_or_y=None, keepdim=None):
 
 
 for block_listed_op in block_listed_operators:
-    vars()[block_listed_op] = _block_list_in_opset(block_listed_op)
+    vars()[block_listed_op] = symbolic_helper._block_list_in_opset(block_listed_op)

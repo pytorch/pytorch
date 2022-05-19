@@ -5,7 +5,6 @@ import torch
 import torch.onnx.utils
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx.symbolic_helper import parse_args
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -31,13 +30,13 @@ def einsum_helper(g, equation, tensors):
         return g.op("Einsum", *tensors, equation_s=equation)
 
 
-@parse_args("s", "v")
+@symbolic_helper.parse_args("s", "v")
 def einsum(g, equation, tensor_list):
     tensors = symbolic_helper._unpack_list(tensor_list)
     return einsum_helper(g, equation, tensors)
 
 
-@parse_args("v", "v")
+@symbolic_helper.parse_args("v", "v")
 def outer(g, input, other):
     # make sure to cast other to self's type
     if other.type().scalarType() != input.type().scalarType():
@@ -49,7 +48,7 @@ def outer(g, input, other):
     return einsum_helper(g, "i,j->ij", [input, other])
 
 
-@parse_args("v", "f", "i")
+@symbolic_helper.parse_args("v", "f", "i")
 def dropout(g, input, p, train):
     symbolic_helper.check_training_mode(train, "dropout")
     # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
@@ -143,7 +142,7 @@ def cross_entropy_loss(
     return celoss
 
 
-@parse_args("v", "v", "v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "v", "v", "i")
 def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduction):
     from torch.onnx.symbolic_opset9 import add, log, mul, neg, sigmoid, sub
 
@@ -236,7 +235,7 @@ def le(g, input, other):
     return g.op("LessOrEqual", input, other)
 
 
-@parse_args("v", "i", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v")
 def unfold(g, input, dimension, size, step):
     const_size = symbolic_helper._maybe_get_const(size, "i")
     const_step = symbolic_helper._maybe_get_const(step, "i")
@@ -306,7 +305,7 @@ def unfold(g, input, dimension, size, step):
         return symbolic_helper._unimplemented("Unfold", "input size not accessible")
 
 
-@parse_args("v", "v", "is", "is", "v")
+@symbolic_helper.parse_args("v", "v", "is", "is", "v")
 def tensordot(g, input_a, input_b, dims_a, dims_b, out=None):
     if out is not None:
         symbolic_helper._unimplemented(

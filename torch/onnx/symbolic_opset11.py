@@ -1,12 +1,10 @@
 import warnings
-from sys import maxsize
 
 import torch
 import torch.onnx.utils
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx._globals import GLOBALS
-from torch.onnx.symbolic_helper import parse_args, quantized_args
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -14,7 +12,7 @@ from torch.onnx.symbolic_helper import parse_args, quantized_args
 # This file exports ONNX ops for opset 11
 
 
-@parse_args("v", "f", "f")
+@symbolic_helper.parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
     dtype = self.type().scalarType()
     if dtype is None:
@@ -71,7 +69,7 @@ def clamp(g, self, min, max):
             return clamp_max(g, clamp_min(g, self, min), max)
 
 
-@parse_args("v", "v")
+@symbolic_helper.parse_args("v", "v")
 def clamp_min(g, self, min):
     dtype = self.type().scalarType()
     min = g.op("Cast", min, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
@@ -84,7 +82,7 @@ def clamp_min(g, self, min):
         return opset9.op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
-@parse_args("v", "v")
+@symbolic_helper.parse_args("v", "v")
 def clamp_max(g, self, max):
     dtype = self.type().scalarType()
     max = g.op("Cast", max, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
@@ -122,7 +120,7 @@ def relu6(g, input):
 
 
 # Opset 11 gather accepts negative indices
-@parse_args("v", "i", "v")
+@symbolic_helper.parse_args("v", "i", "v")
 def select(g, self, dim, index):
     return g.op("Gather", self, index, axis_i=dim)
 
@@ -208,7 +206,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         broadcast_index_shape = g.op("Shape", index)
         index = symbolic_helper._unsqueeze_helper(g, index, [-1])
     sub_data_shape = symbolic_helper._slice_helper(
-        g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize]
+        g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[sys.maxsize]
     )
     values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
     # Check if values is a singular value and expand accordingly
@@ -239,7 +237,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     return result
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def pixel_shuffle(g, self, upscale_factor):
     rank = symbolic_helper._get_tensor_rank(self)
     if rank is not None and rank != 4:
@@ -268,7 +266,7 @@ def __interpolate(
     )
 
 
-@parse_args("v", "i", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v")
 def gather(g, self, dim, index, sparse_grad=False):
     if symbolic_helper._maybe_get_const(sparse_grad, "i"):
         return symbolic_helper._unimplemented("gather", "sparse_grad == True")
@@ -277,7 +275,7 @@ def gather(g, self, dim, index, sparse_grad=False):
     return g.op("GatherElements", self, index, axis_i=dim)
 
 
-@parse_args("v", "i", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v")
 def scatter(g, self, dim, index, src):
     from torch.onnx.symbolic_opset9 import expand_as
 
@@ -301,7 +299,7 @@ def scatter(g, self, dim, index, src):
         )
 
 
-@parse_args("v", "i", "none")
+@symbolic_helper.parse_args("v", "i", "none")
 def cumsum(g, self, dim, dtype=None):
     dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
     if dtype and dtype.node().kind() != "prim::Constant":
@@ -418,7 +416,7 @@ def stack(g, tensor_list, dim):
         return g.op("ConcatFromSequence", tensor_list, axis_i=dim, new_axis_i=1)
 
 
-@parse_args("v", "i", "i", "i")
+@symbolic_helper.parse_args("v", "i", "i", "i")
 def _unique2(g, self, sorted, return_inverse, return_counts):
     u, indices, inverse_indices, counts = g.op(
         "Unique", self, sorted_i=sorted, outputs=4
@@ -427,7 +425,7 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
 
 
 def _avg_pool(name, tuple_fn):
-    @parse_args("v", "is", "is", "is", "i", "i", "none")
+    @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
         input,
@@ -469,7 +467,7 @@ avg_pool2d = _avg_pool("avg_pool2d", torch.nn.modules.utils._pair)
 avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
-@parse_args("v", "i", "i", "i", "i")
+@symbolic_helper.parse_args("v", "i", "i", "i", "i")
 def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
     u, indices, inverse_indices, counts = g.op(
         "Unique", self, axis_i=dim, sorted_i=sorted, outputs=4
@@ -477,14 +475,14 @@ def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
     return u, inverse_indices, counts
 
 
-@parse_args("v", "v", "i", "i", "i", "none")
+@symbolic_helper.parse_args("v", "v", "i", "i", "i", "none")
 def topk(g, self, k, dim, largest, sorted, out=None):
     return symbolic_helper._topk_helper(
         g, self, k, dim, largest=largest, sorted=sorted, out=out
     )
 
 
-@parse_args("v", "i", "i", "none")
+@symbolic_helper.parse_args("v", "i", "i", "none")
 def sort(g, self, dim, decending, out=None):
     return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
 
@@ -501,7 +499,7 @@ def remainder(g, input, other):
     return g.op("Mod", input, other, fmod_i=0)
 
 
-@parse_args("v", "v", "i", "i")
+@symbolic_helper.parse_args("v", "v", "i", "i")
 def split(g, self, split_size_or_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
@@ -540,12 +538,12 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         )
 
 
-@parse_args("v", "v", "i", "i")
+@symbolic_helper.parse_args("v", "v", "i", "i")
 def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     return split(g, self, split_sizes, dim, _outputs)
 
 
-@parse_args("v", "i", "i")
+@symbolic_helper.parse_args("v", "i", "i")
 def unbind(g, self, dim=0, _outputs=None):
     if _outputs is None:
         return g.op(
@@ -731,7 +729,7 @@ def arange(g, *args):
     return arange_tensor
 
 
-@parse_args("v", "i")
+@symbolic_helper.parse_args("v", "i")
 def _dim_arange(g, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op(
@@ -986,7 +984,7 @@ def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
     )
 
 
-@parse_args("v", "is", "is", "is", "is")
+@symbolic_helper.parse_args("v", "is", "is", "is", "is")
 def im2col(g, input, kernel_size, dilation, padding, stride):
     # Input is always 4-D tensor (N, C, H, W)
     # All other args are int[2]
@@ -1045,8 +1043,8 @@ def narrow(g, input, dim, start, length):
     return _slice_helper(g, input, axes=dim, starts=start, ends=end, dynamic_slice=True)
 
 
-@quantized_args(True, False, False)
-@parse_args("v", "i", "i")
+@symbolic_helper.quantized_args(True, False, False)
+@symbolic_helper.parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = symbolic_helper._get_tensor_rank(input)
     if dim == 1:
@@ -1071,7 +1069,7 @@ def flatten(g, input, start_dim, end_dim):
     return symbolic_helper._flatten_helper(g, input, start_dim, end_dim, dim)
 
 
-@parse_args("v", "f", "is", "i", "v")
+@symbolic_helper.parse_args("v", "f", "is", "i", "v")
 def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
     if ord == 0:
         if dim is None:
@@ -1092,7 +1090,7 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
         return opset9.linalg_vector_norm(g, self, ord, dim, keepdim, dtype)
 
 
-@parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
+@symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 def embedding_bag(
     g,
     embedding_matrix,
@@ -1131,10 +1129,10 @@ def embedding_bag(
     # offsets) and gather those indices in indices_row. Then we use this subset of indices to gather from embeddings.
     # The embeddings output is a loop scan output, so we can avoid creating a sequence and inserting elements in.
     offsets_starts = symbolic_helper._slice_helper(
-        g, offsets, axes=[0], starts=[0], ends=[maxsize], steps=[1]
+        g, offsets, axes=[0], starts=[0], ends=[sys.maxsize], steps=[1]
     )
     offsets_ends = symbolic_helper._slice_helper(
-        g, offsets, axes=[0], starts=[1], ends=[maxsize], steps=[1]
+        g, offsets, axes=[0], starts=[1], ends=[sys.maxsize], steps=[1]
     )
 
     loop_len = symbolic_helper._size_helper(
@@ -1179,7 +1177,7 @@ def embedding_bag(
     return loop.node().output(), None, None, None
 
 
-@parse_args("v", "v", "f", "f")
+@symbolic_helper.parse_args("v", "v", "f", "f")
 def embedding_renorm(g, weight, indices, max_norm, norm_type):
     unique_indices = g.op("Unique", indices)
     partial_weight = g.op("Gather", weight, unique_indices)

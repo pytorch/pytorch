@@ -6,7 +6,6 @@ Be very judicious when adding any new global variables. Do not create new global
 variables unless they are absolutely necessary.
 """
 
-import typing
 from typing import Optional
 
 import torch._C._onnx as _C_onnx

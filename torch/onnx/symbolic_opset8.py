@@ -35,7 +35,6 @@ import warnings
 import torch
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx.symbolic_helper import parse_args
 
 block_listed_operators = [
     "nonzero",
@@ -206,7 +205,7 @@ def mm(g, self, other):
         return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
 
-@parse_args("v", "v", "v", "t", "t")
+@symbolic_helper.parse_args("v", "v", "v", "t", "t")
 def addmm(g, self, mat1, mat2, beta, alpha):
     if symbolic_helper._try_get_scalar_type(self):
         old_type, self, mat1, mat2 = _try_cast_integer_to_float(g, self, mat1, mat2)
@@ -285,34 +284,34 @@ def _constant_fill(g, sizes, dtype, const_value):
         )
 
 
-@parse_args("v", "i", "v", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
-@parse_args("v", "i", "v", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
-@parse_args("v", "i", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v")
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return _constant_fill(g, sizes, dtype, 0)
 
 
-@parse_args("v", "i", "v", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 0)
 
 
-@parse_args("v", "i", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v")
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
     return _constant_fill(g, sizes, dtype, 1)
 
 
-@parse_args("v", "i", "v", "v", "v", "v")
+@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 1)
@@ -328,7 +327,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
         return _constant_fill(g, sizes, dtype, const_value)
 
 
-@parse_args("v", "f", "i", "v", "v", "v", "v")
+@symbolic_helper.parse_args("v", "f", "i", "v", "v", "v", "v")
 def full_like(
     g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None
 ):
