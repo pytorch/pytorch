@@ -36,7 +36,8 @@ from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE)
+                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
+                                                  IS_MACOS)
 
 
 try:
@@ -1375,6 +1376,7 @@ except RuntimeError as e:
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
+    @unittest.skipIf(IS_MACOS, "Not working on macos")
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
