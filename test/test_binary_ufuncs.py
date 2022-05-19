@@ -1457,7 +1457,13 @@ class TestBinaryUfuncs(TestCase):
             self._do_pow_for_exponents(m1, exponents + complex_exponents, pow, 10e-4)
         else:
             self._do_pow_for_exponents(m1, exponents, math.pow, None)
-            self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
+            if dtype != torch.half:
+                self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
+            else:
+                # Half Tensor with complex exponents leads to computation dtype
+                # of ComplexHalf for which this ops is not supported yet
+                with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexHalf'"):
+                    self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
 
         # base - number, exponent - tensor
         # contiguous
@@ -1746,8 +1752,17 @@ class TestBinaryUfuncs(TestCase):
         first_exp[0] = first_exp[10] = first_exp[20] = 0
         second_exp[0] = second_exp[10] = second_exp[20] = 0
         for base in complexes:
-            self._test_pow(base, first_exp)
-            self._test_pow(base, second_exp)
+            # Half Tensor with complex base leads to computation dtype
+            # of ComplexHalf for which this ops is not supported yet
+            # NOTE: pow has fast-path when base is 1 which supports
+            # ComplexHalf
+            if dtype is torch.half and base != (1 + 0j):
+                with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexHalf'"):
+                    self._test_pow(base, first_exp)
+                    self._test_pow(base, second_exp)
+            else:
+                self._test_pow(base, first_exp)
+                self._test_pow(base, second_exp)
 
     @onlyNativeDeviceTypes
     @skipMeta
