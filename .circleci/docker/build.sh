@@ -250,6 +250,15 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=5.1.1
     ;;
+  pytorch-linux-focal-py3.7-gcc7)
+    ANACONDA_PYTHON_VERSION=3.7
+    CMAKE_VERSION=3.12.4  # To make sure XNNPACK is enabled for the BACKWARDS_COMPAT_TEST used with this image
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
