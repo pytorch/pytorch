@@ -60,9 +60,11 @@ __all__ = [
     "expm1",
     "floor",
     "is_finite",
+    "is_infinite",
     "lgamma",
     "log",
     "log1p",
+    "log2",
     "neg",
     "reciprocal",
     "round",
@@ -492,6 +494,13 @@ is_finite = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
+is_infinite = _make_elementwise_unary_prim(
+    "is_infinite",
+    impl_aten=torch.isinf,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
 lgamma = _make_elementwise_unary_prim(
     "lgamma",
     impl_aten=torch.lgamma,
@@ -509,6 +518,13 @@ log = _make_elementwise_unary_prim(
 log1p = _make_elementwise_unary_prim(
     "log1p",
     impl_aten=torch.log1p,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+log2 = _make_elementwise_unary_prim(
+    "log2",
+    impl_aten=torch.log2,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )

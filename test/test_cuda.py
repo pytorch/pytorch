@@ -570,7 +570,7 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[3], torch.storage._TypedStorage))
-        self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda._UntypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._storage, torch._UntypedStorage))
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
@@ -3127,6 +3127,18 @@ torch.cuda.synchronize()
     def test_to_numpy(self):
         self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
 
+    def test_graph_is_current_stream_capturing(self):
+        self.assertFalse(torch.cuda.is_current_stream_capturing())
+
+        if (TEST_CUDA and (not TEST_WITH_ROCM) and int(torch.version.cuda.split(".")[0]) >= 11):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                g = torch.cuda.CUDAGraph()
+                self.assertFalse(torch.cuda.is_current_stream_capturing())
+                g.capture_begin()
+                self.assertTrue(torch.cuda.is_current_stream_capturing())
+                g.capture_end()
+
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
@@ -3844,6 +3856,41 @@ torch.cuda.synchronize()
 
         self.assertEqual(matmul_expand_mem, matmul_mem)
         self.assertEqual(bmm_mem, matmul_mem)
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-only test")
+    def test_rocm_backward_pass_guard(self):
+        # The test exercises a ROCm-specific feature.
+
+        class MyFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, tensor, constant):
+                self.assertFalse(torch._C._rocm_is_backward_pass())
+                ctx.constant = constant
+                return tensor * constant
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                self.assertTrue(torch._C._rocm_is_backward_pass())
+                return grad_output * ctx.constant, None
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.randn(()))
+
+            def forward(self, x):
+                return MyFunction.apply(x, self.a)
+
+        model = MyModule()
+        criterion = torch.nn.MSELoss(reduction='sum')
+        optimizer = torch.optim.SGD(model.parameters(), lr=1e-6)
+
+        x = torch.randn(5, 5)
+        result = model(x)
+        loss = criterion(result, x)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
 
 class TestCudaComm(TestCase):

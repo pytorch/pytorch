@@ -53,11 +53,13 @@ __all__ = [
     "expm1",
     "floor",
     "isfinite",
+    "isinf",
     "isnan",
     "i0",
     "lgamma",
     "log",
     "log1p",
+    "log2",
     "neg",
     "reciprocal",
     "round",  # TODO: model kwargs
@@ -155,6 +157,7 @@ __all__ = [
     "full",
     "full_like",
     "ones_like",
+    "zeros_like",
 ]
 
 Tensor = torch.Tensor
@@ -245,7 +248,7 @@ def _make_elementwise_unary_reference(
     *,
     type_promotion_kind,
     aten_op=infer_aten_op,
-    register_meta=False,
+    disable_meta=False,
     extra_meta=None,
 ) -> Callable:
     @out_wrapper
@@ -267,7 +270,7 @@ def _make_elementwise_unary_reference(
     if aten_op is infer_aten_op:
         aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
-        register_decomposition(aten_op, register_meta=register_meta)(_ref)
+        register_decomposition(aten_op, disable_meta=disable_meta)(_ref)
 
     return _ref
 
@@ -374,6 +377,25 @@ isfinite = _make_elementwise_unary_reference(
 )
 
 
+def _isinf(a: TensorLikeType) -> TensorLikeType:
+    # TODO Add complex tensor support to remove is_infinite prim
+    # if utils.is_complex_dtype(a):
+    #     return bitwise_or(_isinf(real(a), _isinf(imag(a))
+    # else:
+    #     return bitwise_not(bitwise_or(isnan(a), isfinite(a)))
+    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
+        return prims.is_infinite(a)
+
+    return zeros_like(a, dtype=torch.bool)
+
+
+isinf = _make_elementwise_unary_reference(
+    _isinf,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.isinf,  # prim/aten name mismatch
+)
+
+
 def _isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
@@ -382,7 +404,6 @@ isnan = _make_elementwise_unary_reference(
     _isnan,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.isnan,  # prim/aten name mismatch
-    register_meta=True,
 )
 
 lgamma = _make_elementwise_unary_reference(
@@ -397,6 +418,11 @@ log = _make_elementwise_unary_reference(
 
 log1p = _make_elementwise_unary_reference(
     prims.log1p,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+log2 = _make_elementwise_unary_reference(
+    prims.log2,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
@@ -465,7 +491,7 @@ def _make_elementwise_binary_reference(
     has_out=True,
     supports_lhs_python_scalar=True,
     supports_rhs_python_scalar=True,
-    register_meta=False,
+    disable_meta=False,
 ) -> Callable:
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"),
@@ -500,7 +526,7 @@ def _make_elementwise_binary_reference(
     if aten_op is infer_aten_op:
         aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
-        register_decomposition(aten_op, register_meta=register_meta)(_ref)
+        register_decomposition(aten_op, disable_meta=disable_meta)(_ref)
 
     return _ref
 
@@ -726,7 +752,6 @@ logical_and = _make_elementwise_binary_reference(
     _logical_and,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_and,
-    register_meta=True,
 )
 
 
@@ -742,7 +767,6 @@ logical_or = _make_elementwise_binary_reference(
     _logical_or,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_or,
-    register_meta=True,
 )
 
 # TODO: add docstring
@@ -873,7 +897,7 @@ xlogy = _make_elementwise_binary_reference(
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
-@register_decomposition(torch.ops.aten.where, register_meta=True)
+@register_decomposition(torch.ops.aten.where)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
@@ -955,7 +979,7 @@ def _reduction(
     # all the math ops (including comparisons) are still defined only for a computation type,
     # so promotion will still happen. We are doing it explicitly here
     inp_dtype = dtype if dtype is not None else a.dtype
-    computation_dtype = utils._get_computation_dtype(inp_dtype)
+    computation_dtype = utils.get_computation_dtype(inp_dtype)
     a_converted = prims.convert_element_type(a, computation_dtype)
     result = prim(a_converted, dims)
 
@@ -1127,7 +1151,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
     return prims.collapse(a, start_dim, end_dim + 1)
 
 
-@register_decomposition(torch.ops.aten.flip, register_meta=True)
+@register_decomposition(torch.ops.aten.flip)
 def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     if not isinstance(dims, tuple) and not isinstance(dims, list):
         raise ValueError("dims has to be a sequence of ints")
@@ -1486,3 +1510,13 @@ def ones_like(
     requires_grad: bool = False,
 ) -> TensorLikeType:
     return full_like(a, 1, dtype=dtype, device=device, requires_grad=requires_grad)
+
+
+def zeros_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    return full_like(a, 0, dtype=dtype, device=device, requires_grad=requires_grad)
