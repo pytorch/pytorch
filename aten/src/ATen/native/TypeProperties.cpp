@@ -89,7 +89,6 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
     }
     // preserve value type of higher if it is floating type.
     if (isFloatingType(higher)) {
-      // assumes that ScalarType enum is ordered correctly!
       return toComplexType(higher);
     }
     // in case of integral input
