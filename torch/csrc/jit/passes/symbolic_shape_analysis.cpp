@@ -757,12 +757,14 @@ std::shared_ptr<Graph> PropagateShapesWithShapeFunction(
 c10::SymbolicShape combine_bounds(
     c10::SymbolicShape& lower_bound,
     c10::SymbolicShape& upper_bound) {
+  // TODO: At some point we might want to add support for dynamic dims
   TORCH_INTERNAL_ASSERT(lower_bound.rank() == upper_bound.rank());
   if (lower_bound.rank() == c10::nullopt) {
     return c10::SymbolicShape();
   }
   std::vector<c10::ShapeSymbol> merged_shapes;
   for (int i = 0; i < lower_bound.rank(); i++) {
+    // TODO: Merge equivalent expressions (not needed for current use case)
     if (lower_bound[i] == upper_bound[i]) {
       merged_shapes.push_back(lower_bound[i]);
     } else {
@@ -1124,9 +1126,11 @@ calculateSymbolicShapesOnOp(
   }
   // Handle bounded shape option
   if (bounded_graphs) {
-    auto lower_bound = SymbolicShapeOpAnalyzer(schema, bounded_graphs->first);
+    auto lower_bound =
+        SymbolicShapeOpAnalyzer(schema, bounded_graphs->lower_bound);
     auto lower_bound_res = lower_bound.run(ssa_args);
-    auto upper_bound = SymbolicShapeOpAnalyzer(schema, bounded_graphs->second);
+    auto upper_bound =
+        SymbolicShapeOpAnalyzer(schema, bounded_graphs->upper_bound);
     auto upper_bound_res = upper_bound.run(ssa_args);
     // Stitch together the values
     if (lower_bound_res.has_value() && upper_bound_res.has_value()) {

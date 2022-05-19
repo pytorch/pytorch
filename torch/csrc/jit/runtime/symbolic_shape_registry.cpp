@@ -72,9 +72,7 @@ static const OperatorMap<std::string>& conditionally_defined_ops() {
 std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     cached_schema_to_graph;
 
-std::unordered_map<
-    const FunctionSchema*,
-    std::pair<std::shared_ptr<Graph>, std::shared_ptr<Graph>>>
+std::unordered_map<const FunctionSchema*, BoundedShapeGraphs>
     cached_bounded_schema_to_graph;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
@@ -242,19 +240,15 @@ void transformShapeFunction(
   }
 }
 
-std::shared_ptr<Graph> addFunctionToCache(
+std::shared_ptr<Graph> genShapeComputeFn(
     const FunctionSchema* schema_string,
     const std::string& shape_compute_function_name,
     std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
     const CompilationUnit& module) {
-  // TODO: When elias edits transformShapeFunction, remove the unnecessary
-  // schema_string arg.
   std::shared_ptr<Graph> graph;
   if (reused_functions.count(shape_compute_function_name)) {
     graph = reused_functions[shape_compute_function_name];
-  } else
-
-  {
+  } else {
     Function& shape_compute_function =
         module.get_function(shape_compute_function_name);
     graph = toGraphFunction(shape_compute_function).graph();
@@ -277,7 +271,7 @@ void registerSchema(
     const std::string& shape_compute_function_name,
     std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
     const CompilationUnit& module) {
-  auto graph = addFunctionToCache(
+  auto graph = genShapeComputeFn(
       schema_string, shape_compute_function_name, reused_functions, module);
 
   cached_schema_to_graph[schema_string] = graph;
@@ -289,9 +283,9 @@ void registerBoundedSchema(
     const std::string& upper_bound_function_name,
     std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
     const CompilationUnit& module) {
-  auto lower_graph = addFunctionToCache(
+  auto lower_graph = genShapeComputeFn(
       schema_string, lower_bound_function_name, reused_functions, module);
-  auto upper_graph = addFunctionToCache(
+  auto upper_graph = genShapeComputeFn(
       schema_string, upper_bound_function_name, reused_functions, module);
   cached_bounded_schema_to_graph[schema_string] = {lower_graph, upper_graph};
 }
@@ -384,9 +378,8 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
   return c10::nullopt;
 }
 
-TORCH_API c10::optional<
-    std::pair<std::shared_ptr<Graph>, std::shared_ptr<Graph>>>
-boundedGraphsForSchema(const FunctionSchema& schema) {
+TORCH_API c10::optional<BoundedShapeGraphs> boundedGraphsForSchema(
+    const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
   if (cached_bounded_schema_to_graph.size() == 0) {
     loadFunctions();
