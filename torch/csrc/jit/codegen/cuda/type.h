@@ -2,6 +2,7 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <c10/macros/Export.h>
 
@@ -14,8 +15,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-
-enum class KernelIndexMode { INT32, INT64 };
 
 // https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
 struct TypeHash {
@@ -70,8 +69,17 @@ enum class DataType {
   BFloat16,
   ComplexFloat,
   ComplexDouble,
+  // Vectorized types, used for reinterpret casting views
+  // TODO: add more vectorized types
+  Double_2,
+  Float_2,
+  // Null
   Null
 };
+
+enum class KernelIndexMode { INT32, INT64 };
+
+DataType indexModeToDtype(KernelIndexMode index_mode);
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
@@ -81,6 +89,16 @@ bool isIntegralType(DataType dtype);
 bool isBooleanType(DataType dtype);
 // Returns if the datatype is a complex type
 bool isComplexType(DataType dtype);
+// Returns if the datatype is a vector type
+bool isVectorType(DataType dtype);
+// Return the corresponding vector type
+DataType getVectorType(DataType dtype, size_t vec_size);
+// Return the vector size for the given vector type
+int getVectorSizeFromType(DataType dtype);
+// Return the corresponding type of a vector type
+DataType getTypeFromVectorType(DataType dtype);
+// Return the corresponding scalar of a complex type
+DataType getTypeFromComplexType(DataType dtype);
 
 enum class ExprType {
   Invalid,
@@ -88,15 +106,16 @@ enum class ExprType {
   BinaryOp,
   TernaryOp,
   ReductionOp,
+  GroupedReductionOp,
   BroadcastOp,
   WelfordOp,
   MmaOp,
   TransposeOp,
   ShiftOp,
   GatherOp,
-  ViewDtypeOp,
   ViewOp,
   Split,
+  ViewAsScalar,
   Merge,
   Allocate,
   BlockSync,
@@ -106,6 +125,7 @@ enum class ExprType {
   ForLoop,
   IfThenElse,
   GridReduction,
+  GroupedGridReduction,
   GridBroadcast,
   GridWelford,
   AllocateFusedReduction
@@ -135,7 +155,7 @@ enum class UnaryOpType {
   Log10,
   Log1p,
   Log2,
-  EraseType,
+  BitCast,
   Neg,
   RandLike,
   Reciprocal,
@@ -152,7 +172,15 @@ enum class UnaryOpType {
   Trunc,
 
   // Might be a bitwise operator or boolean operator.
-  Not
+  Not,
+
+  // Operators returning boolean values
+  IsFinite,
+  IsInf,
+  IsNan,
+  IsNegInf,
+  IsPosInf,
+  IsReal,
 };
 
 // Primarily for Not, which could be Not a boolean, or a bitwise not.
@@ -208,7 +236,7 @@ bool isLogicalOp(const BinaryOpType bopt);
 // on input, for example bitwise_and is also used for boolean and in the jit
 bool alsoBooleanOperator(const BinaryOpType bopt);
 
-enum class TernaryOpType { Clamp, Threshold, Where };
+enum class TernaryOpType { Clamp, Lerp, Threshold, Where };
 
 enum class ParallelType {
   BIDz,
@@ -259,10 +287,19 @@ enum class IterType {
   BroadcastWithStride,
   BroadcastWithoutStride,
   Gather,
-  Stride
+  Stride,
+  VectorComponent
 };
 
 enum class SwizzleType { NoSwizzle, Transpose };
+
+// Used for Iteration Domain mapping modes in ComputeAtMap
+enum class IdMappingMode { PERMISSIVE, EXACT, LOOP };
+
+static constexpr std::array<IdMappingMode, 3> kIdMappingModes = {
+    IdMappingMode::PERMISSIVE,
+    IdMappingMode::EXACT,
+    IdMappingMode::LOOP};
 
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf
@@ -278,6 +315,7 @@ TORCH_CUDA_CU_API DataType aten_to_data_type(const at::ScalarType& scalar_type);
 TORCH_CUDA_CU_API at::ScalarType data_type_to_aten(const DataType& data_type);
 
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ValType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const PredicateType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const DataType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ExprType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
@@ -286,6 +324,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IdMappingMode);
 
 std::string stringifyBooleanOp(const UnaryOpType);
 std::string stringifyBooleanOp(const BinaryOpType);
@@ -313,6 +352,9 @@ TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
 
 TORCH_CUDA_CU_API size_t dataTypeSize(DataType type);
+
+// If the index type is known it will be automatically used here
+TORCH_CUDA_CU_API size_t dataTypeSize(DataType type, DataType index_type);
 
 enum class LaunchConfigType {
   Compatible,
