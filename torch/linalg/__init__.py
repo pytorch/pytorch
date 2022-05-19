@@ -1622,26 +1622,21 @@ The singular values are returned in descending order.
 
 The parameter :attr:`full_matrices` chooses between the full (default) and reduced SVD.
 
+The `driver` kwarg may be used in CUDA with a cuSOLVER backend to choose the algorithm used to compute the SVD.
+The choice of a driver is a trade-off between accuracy and speed.
+
+- If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
+- For a general matrix: `'gesvdj'` (Jacobi method)
+- If :attr:`A` is tall or wide (`m >> n` or `m << n`): `'gesvda'` (Approximate method)
+- If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
+- By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
+
 Differences with `numpy.linalg.svd`:
 
 - Unlike `numpy.linalg.svd`, this function always returns a tuple of three tensors
   and it doesn't support `compute_uv` argument.
   Please use :func:`torch.linalg.svdvals`, which computes only the singular values,
   instead of `compute_uv=False`.
-
-.. note:: Selection of `driver` (this keyword argument only works on CUDA inputs with cuSOLVER backend):
-
-    The `driver` kwarg may be used in CUDA with a cuSOLVER backend to choose the algorithm used to compute the SVD.
-    The choice of a driver is a trade-off between accuracy and speed.
-
-    - If :attr:`A` is well-conditioned (its `condition number` is not too large), or you do not mind some precision loss.
-
-      - For a general matrix: `'gesvdj'` (Jacobi method)
-      - If :attr:`A` is tall or wide (`m >> n` or `m << n`): `'gesvda'` (Approximate method)
-
-    - If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
-
-    By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
 
 .. note:: When :attr:`full_matrices`\ `= True`, the gradients with respect to `U[..., :, min(m, n):]`
           and `Vh[..., min(m, n):, :]` will be ignored, as those vectors can be arbitrary bases
@@ -1730,6 +1725,8 @@ Examples::
     >>> torch.dist(A, U @ torch.diag_embed(S) @ Vh)
     tensor(3.0957e-06)
 
+.. _condition number:
+    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
 .. _the resulting vectors will span the same subspace:
     https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
 """)
@@ -1754,14 +1751,12 @@ The singular values are returned in descending order.
 .. seealso::
 
         :func:`torch.linalg.svd` computes the full singular value decomposition.
-        Also check that documentation for the selection of `driver`.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
     driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
-        If `None`, a default heuristic of algorithms will be used.
         Available options are: `None`, `gesvd`, `gesvdj`, and `gesvda`.
         Check :func:`torch.linalg.svd` for details.
         Default: `None`.
