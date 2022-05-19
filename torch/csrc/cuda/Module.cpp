@@ -591,6 +591,9 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
   if (!m) throw python_error();
 
+  // Register Storage Python objects with DynamicTypes.cpp
+  THCPByteStorage_postInit(m);
+
   bool has_half = true;
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
