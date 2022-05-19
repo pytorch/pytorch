@@ -1,6 +1,7 @@
 #ifndef TH_GENERIC_FILE
 #define TH_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
 #else
+#include <torch/csrc/utils/python_arg_parser.h>
 
 PyObject *THPStorageClass = nullptr;
 
@@ -26,68 +27,84 @@ static void THPStorage_(dealloc)(THPStorage* self)
 static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
+
+  static torch::PythonArgParser parser({
+      THPStorageStr "(*, int64_t allocator=None, Device device=None)",
+      THPStorageStr "(int64_t size, *, int64_t allocator=None, Device device=None)",
+      THPStorageStr "(PyObject* sequence, *, int64_t allocator=None, Device device=None)",
+  });
+  torch::ParsedArgs<3> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  int64_t allocator_arg_idx = 0;
+  int64_t device_arg_idx = 1;
+
+  if (r.idx > 0) {
+    allocator_arg_idx = 1;
+    device_arg_idx = 2;
+  }
+
+  c10::optional<int64_t> allocator_opt = r.toInt64Optional(allocator_arg_idx);
+  c10::optional<at::Device> device_opt = r.deviceOptional(device_arg_idx);
+
+  TORCH_CHECK(!allocator_opt.has_value() || !device_opt.has_value(),
+    THPStorageStr, "(): only one or neither of 'allocator' or 'device' can ",
+    "be given, but not both");
 
   THPStoragePtr self((THPStorage *)type->tp_alloc(type, 0));
   THPUtils_assert(self, "failed to allocate a " THPStorageStr " object");
   c10::Allocator* allocator = nullptr;
+  at::OptionalDeviceGuard device_guard;
 
-  // Internally we allow constructing with a keywoard only argument cdata
-  if (kwargs != nullptr) {
-    PyObject *allocator_ptr = PyDict_GetItemString(kwargs, "allocator");
-    if (allocator_ptr) {
-      THPUtils_assert(THPUtils_checkLong(allocator_ptr), "invalid allocator");
-      allocator = static_cast<c10::Allocator*>(PyLong_AsVoidPtr(allocator_ptr));
-      PyDict_DelItemString(kwargs, "allocator");
-    }
-
-    Py_ssize_t num_kwargs = PyDict_Size(kwargs);
-    if (num_args == 0) {
-      PyObject *cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
-      if (num_kwargs == 1 && cdata_ptr && THPUtils_checkLong(cdata_ptr)) {
-        c10::StorageImpl *ptr = (c10::StorageImpl*)PyLong_AsVoidPtr(cdata_ptr);
-        self->cdata = ptr;
-        return (PyObject*)self.release();
-      }
-    }
-    THPUtils_assert(num_kwargs == 0, THPStorageStr "(): invalid keyword arguments");
-  }
-  if (allocator == nullptr) {
-#if defined(THC_GENERIC_FILE)
-      allocator = c10::cuda::CUDACachingAllocator::get();
-#else
+  if (allocator_opt.has_value()) {
+    allocator = reinterpret_cast<c10::Allocator*>(allocator_opt.value());
+  } else if (device_opt.has_value()) {
+    at::Device device = device_opt.value();
+    if (device.type() == at::kCPU) {
       allocator = c10::GetDefaultCPUAllocator();
+#ifdef USE_CUDA
+    } else if (device.type() == at::kCUDA) {
+      at::globalContext().lazyInitCUDA();
+      allocator = c10::cuda::CUDACachingAllocator::get();
 #endif
+    } else {
+      TORCH_CHECK(false,
+        THPStorageStr, "(): Storage device not recognized: ", device.type());
+    }
+    device_guard.reset_device(device);
+  } else {
+    allocator = c10::GetDefaultCPUAllocator();
   }
 
-  // torch.Storage()
-  if (num_args == 0) {
+  // torch.Storage(*, ...)
+  if (r.idx == 0) {
     self->cdata = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       0,
       allocator,
       /*resizable=*/true).release();
     return (PyObject*)self.release();
-  }
 
-  PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
-
-  // torch.Storage(size)
-  if (num_args == 1 && THPUtils_checkLong(first_arg)) {
-    int64_t size = THPUtils_unpackLong(first_arg);
+  // torch.Storage(size, *, ...)
+  } else if (r.idx == 1) {
+    int64_t size = r.toInt64(0);
     self->cdata = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size,
       allocator,
       /*resizable=*/true).release();
     return (PyObject*)self.release();
-  }
 
-  // torch.Storage(sequence)
-  if (num_args == 1 && PySequence_Check(first_arg)) {
-    Py_ssize_t length = PySequence_Length(first_arg);
-    THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
-        THPUtils_typename(first_arg));
+  // torch.Storage(sequence, *, ...)
+  } else if (r.idx == 2) {
+    PyObject *sequence = r.pyobject(0);
+    Py_ssize_t length = PySequence_Length(sequence);
+    TORCH_CHECK(PySequence_Check(sequence),
+      THPStorageStr, "(): Expected a sequence type, but got ",
+      THPUtils_typename(sequence));
+    TORCH_CHECK(length >= 0,
+      THPStorageStr, "(): Could not obtain the length of sequence of type ",
+      THPUtils_typename(sequence));
     self->cdata = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       length,
@@ -97,35 +114,31 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     THPObjectPtr item;
     try {
       for (Py_ssize_t i = 0; i < length; i++) {
-        item = PySequence_GetItem(first_arg, i);
+        item = PySequence_GetItem(sequence, i);
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         scalar_t value = THPUtils_(unpackReal)(item.get());
-#if !defined(THC_GENERIC_FILE)
-        self->cdata->unsafe_data<scalar_t>()[i] = value;
-#else
-        // TODO: this might be slow - consider batched updates?
-        storage_set(
-          at::unsafeStorageFromTH(self->cdata, /*retain=*/true),
-          i,
-          value);
-#endif
+        if (allocator == c10::GetDefaultCPUAllocator()) {
+          self->cdata->unsafe_data<scalar_t>()[i] = value;
+        } else {
+          // TODO: this might be slow - consider batched updates?
+          storage_set(
+            at::unsafeStorageFromTH(self->cdata, /*retain=*/true),
+            i,
+            value);
+        }
       }
     } catch (const std::exception &e) {
-      THPUtils_setError("tried to construct a storage from a sequence (%s), "
+      THPUtils_setError(THPStorageStr
+          "(): tried to construct a storage from a sequence (%s), "
           "but one of the items was of type %s instead of %s",
-          THPUtils_typename(first_arg),
+          THPUtils_typename(sequence),
           THPUtils_typename(item.get()),
           THPUtils_typeTraits<scalar_t>::python_type_str);
       return nullptr;
     }
     return (PyObject*)self.release();
   }
-
-  THPUtils_invalidArguments(args, kwargs, THPStorageStr " constructor", 6,
-          "no arguments",
-          "(int size)",
-          "(Sequence data)");
-  return nullptr;
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -346,17 +359,6 @@ void THPStorage_(postInit)(PyObject *module)
 {
   THPStorageClass = PyObject_GetAttrString(module, "_UntypedStorage");
   if (!THPStorageClass) throw python_error();
-
-  at::Backend backend = at::Backend::CPU;
-#ifdef THC_GENERIC_FILE
-  backend = at::Backend::CUDA;
-#endif
-
-#ifdef THQUANTIZED
-  backend = at::Backend::QuantizedCPU;
-#endif
-
-  torch::registerStoragePyTypeObject((PyTypeObject*)THPStorageClass, backend, TH_CONCAT_2(at::k, Real));
 }
 
 #endif
