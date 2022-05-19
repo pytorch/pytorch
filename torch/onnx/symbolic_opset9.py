@@ -362,6 +362,10 @@ def atan(g, self):
     return g.op("Atan", self)
 
 
+def atan2(g, input, other):
+    return g.op("Atan", g.op("Div", input, other))
+
+
 def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
