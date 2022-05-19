@@ -1302,7 +1302,7 @@ def _find_symbolic_in_registry(
     """
 
     if not symbolic_registry.is_registered_op(op_name, domain, opset_version):
-        if operator_export_type == torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
+        if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             # Use the original node directly
             return None
     return symbolic_registry.get_registered_op(op_name, domain, opset_version)
@@ -1425,7 +1425,7 @@ def _run_symbolic_function(
         if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
         elif (
-            operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+            operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
             and not symbolic_helper.is_caffe2_aten_fallback()
         ):
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`

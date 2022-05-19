@@ -11,6 +11,7 @@ import warnings
 from typing import Optional
 
 import torch
+import torch._C._onnx as _C_onnx
 import torch.nn.modules.utils
 import torch.onnx
 from torch import _C
@@ -2137,9 +2138,9 @@ def index_copy(g, self, dim, index, source):
 
 @symbolic_helper.parse_args("v", "v", "b", "b")
 def bucketize(g, self, boundaries, out_int32=False, right=False):
-    out_type = torch.onnx.TensorProtoDataType.INT64
+    out_type = _C_onnx.TensorProtoDataType.INT64
     if out_int32:
-        out_type = torch.onnx.TensorProtoDataType.INT32
+        out_type = _C_onnx.TensorProtoDataType.INT32
     # A tensor expanded_boundaries is created such that it
     # contains a copy of boundaries for each element of self.
     new_shape = g.op("Concat", g.op("Shape", boundaries), g.op("Shape", self), axis_i=0)
@@ -2728,7 +2729,7 @@ def slice(g, self, *args):
             or ((not is_end_none) and (not is_end_onnx_const))
             or dim.node().kind() != "onnx::Constant"
         ):
-            if GLOBALS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+            if GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
                 raise RuntimeError(
                     "Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice "
                     "is a deprecated experimental op. Please use statically allocated "

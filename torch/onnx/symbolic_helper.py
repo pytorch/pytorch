@@ -387,7 +387,7 @@ def _is_scalar_list(x):
 def is_caffe2_aten_fallback():
     return (
         GLOBALS.operator_export_type
-        == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+        == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
         and _C_onnx._CAFFE2_ATEN_FALLBACK
     )
 
@@ -437,7 +437,7 @@ def _unimplemented(op, msg):
         warnings.warn(
             "ONNX export failed on " + op + " because " + msg + " not supported"
         )
-    elif GLOBALS.operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+    elif GLOBALS.operator_export_type == _C._onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}")
 
 

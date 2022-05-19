@@ -5,6 +5,7 @@ import torch
 import torch.onnx.utils
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
+from torch.onnx import symbolic_opset10 as opset10
 from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -200,9 +201,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":
             rank = symbolic_helper._get_tensor_rank(values)
             if rank is not None and rank == 0:
-                from torch.onnx.symbolic_opset9 import masked_fill
-
-                return masked_fill(g, self, bool_inp, values)
+                return opset9.masked_fill(g, self, bool_inp, values)
             return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
         index = symbolic_helper._unsqueeze_helper(g, index, [-1])
@@ -278,8 +277,6 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 @symbolic_helper.parse_args("v", "i", "v", "v")
 def scatter(g, self, dim, index, src):
-    from torch.onnx.symbolic_opset9 import expand_as
-
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
     src_type = src.type().scalarType()
@@ -296,7 +293,7 @@ def scatter(g, self, dim, index, src):
                 to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
             )
         return g.op(
-            "ScatterElements", self, index, expand_as(g, src, index), axis_i=dim
+            "ScatterElements", self, index, opset9.expand_as(g, src, index), axis_i=dim
         )
 
 
@@ -315,9 +312,7 @@ def cumsum(g, self, dim, dtype=None):
 
 
 def masked_select(g, self, mask):
-    from torch.onnx.symbolic_opset9 import expand_as, nonzero
-
-    index = nonzero(g, expand_as(g, mask, self))
+    index = opset9.nonzero(g, opset9.expand_as(g, mask, self))
     return g.op("GatherND", self, index)
 
 
@@ -382,7 +377,7 @@ def add(g, self, other, alpha=None):
             l = g.op("SequenceInsert", l, t)
         return l
 
-    return torch.onnx.symbolic_opset9.add(g, self, other, alpha)
+    return opset9.add(g, self, other, alpha)
 
 
 def insert(g, self, pos, tensor):
@@ -399,9 +394,7 @@ def Delete(g, tensor_list, dim):
 
 def cat(g, tensor_list, dim):
     if symbolic_helper._is_packed_list(tensor_list):
-        from torch.onnx.symbolic_opset9 import cat as cat_opset9
-
-        return cat_opset9(g, tensor_list, dim)
+        return opset9.cat(g, tensor_list, dim)
     else:
         dim = symbolic_helper._get_const(dim, "i", "dim")
         return g.op("ConcatFromSequence", tensor_list, axis_i=dim)
@@ -409,9 +402,7 @@ def cat(g, tensor_list, dim):
 
 def stack(g, tensor_list, dim):
     if symbolic_helper._is_packed_list(tensor_list):
-        from torch.onnx.symbolic_opset9 import stack as stack_opset9
-
-        return stack_opset9(g, tensor_list, dim)
+        return opset9.stack(g, tensor_list, dim)
     else:
         dim = symbolic_helper._get_const(dim, "i", "dim")
         return g.op("ConcatFromSequence", tensor_list, axis_i=dim, new_axis_i=1)
@@ -494,9 +485,7 @@ def round(g, self):
 
 def remainder(g, input, other):
     if symbolic_helper._is_fp(input) or symbolic_helper._is_fp(other):
-        from torch.onnx.symbolic_opset9 import remainder as _remainder_9
-
-        return _remainder_9(g, input, other)
+        return opset9.remainder(g, input, other)
     return g.op("Mod", input, other, fmod_i=0)
 
 
@@ -534,9 +523,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
             for i in range(_outputs)
         ]
     else:
-        return torch.onnx.symbolic_opset9.split(
-            g, self, split_size_or_sizes, dim, _outputs
-        )
+        return opset9.split(g, self, split_size_or_sizes, dim, _outputs)
 
 
 @symbolic_helper.parse_args("v", "v", "i", "i")
@@ -555,7 +542,7 @@ def unbind(g, self, dim=0, _outputs=None):
             keepdims_i=0,
         )
     else:
-        return torch.onnx.symbolic_opset9.unbind(g, self, dim, _outputs)
+        return opset9.unbind(g, self, dim, _outputs)
 
 
 # Generate paddings in ONNX order based on pad in pytorch.
@@ -575,9 +562,7 @@ def _prepare_onnx_paddings(g, input, pad):
     # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
     # n is the dimension of input.
     # Assume zero-dimensions in the beginning, pad the "pad" sequence with zeros in the beginning
-    pad_len = torch.onnx.symbolic_opset9.size(
-        g, pad, g.op("Constant", value_t=torch.tensor([0]))
-    )
+    pad_len = opset9.size(g, pad, g.op("Constant", value_t=torch.tensor([0])))
     # Set extension = [0] * (dim * 2 - len(pad))
     rank = symbolic_helper._get_tensor_rank(input)
     if rank is None:
@@ -607,9 +592,7 @@ def _prepare_onnx_paddings(g, input, pad):
     paddings = symbolic_helper._reshape_helper(
         g, paddings, g.op("Constant", value_t=torch.tensor([-1, 2]))
     )
-    paddings = g.op(
-        "Transpose", torch.onnx.symbolic_opset10.flip(g, paddings, [0]), perm_i=[1, 0]
-    )
+    paddings = g.op("Transpose", opset10.flip(g, paddings, [0]), perm_i=[1, 0])
     paddings = symbolic_helper._reshape_helper(
         g, paddings, g.op("Constant", value_t=torch.tensor([-1]))
     )
@@ -666,9 +649,7 @@ def linalg_det(g, self):
 
 
 def logdet(g, input):
-    from torch.onnx.symbolic_opset9 import log
-
-    return log(g, linalg_det(g, input))
+    return opset9.log(g, linalg_det(g, input))
 
 
 def arange(g, *args):
@@ -824,13 +805,9 @@ def index(g, self, index):
         if not symbolic_helper._is_none(index) and (
             index.type().scalarType() == "Bool" or index.type().scalarType() == "Byte"
         ):
-            from torch.onnx.symbolic_opset9 import nonzero
-
-            index = nonzero(g, index)
+            index = opset9.nonzero(g, index)
             return g.op("GatherND", self, index)
-    from torch.onnx.symbolic_opset9 import index as index_opset9
-
-    return index_opset9(g, self, index)
+    return opset9.index(g, self, index)
 
 
 def index_fill(g, self, dim, index, value):
@@ -1038,10 +1015,10 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
 
 
 def narrow(g, input, dim, start, length):
-    from torch.onnx.symbolic_helper import _slice_helper
-
     end = g.op("Add", start, length)
-    return _slice_helper(g, input, axes=dim, starts=start, ends=end, dynamic_slice=True)
+    return symbolic_helper._slice_helper(
+        g, input, axes=dim, starts=start, ends=end, dynamic_slice=True
+    )
 
 
 @symbolic_helper.quantized_args(True, False, False)

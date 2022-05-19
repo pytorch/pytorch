@@ -3,6 +3,7 @@
 
 # This file exports ONNX ops for opset 13
 import torch
+import torch._C._onnx as _C_onnx
 import torch.onnx.utils
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
@@ -162,9 +163,9 @@ def fake_quantize_per_channel_affine(
         )
     # ONNX defines zero_point to be int8 or uint8
     if quant_min == 0:
-        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
+        zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     else:
-        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
+        zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.INT8)
     quantized = g.op("QuantizeLinear", inputs, scale, zero_point, axis_i=axis)
     if (quant_min, quant_max) == (0, 127):
         quantized = g.op(
@@ -188,11 +189,11 @@ def fake_quantize_per_tensor_affine(
             "Got ({}, {})".format(quant_min, quant_max)
         )
     if quant_min == 0:
-        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
+        zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     else:
-        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
+        zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.INT8)
     if scale.type().scalarType() != "Float":
-        scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+        scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     quantized = g.op("QuantizeLinear", inputs, scale, zero_point)
     if (quant_min, quant_max) == (0, 127):
         quantized = g.op(

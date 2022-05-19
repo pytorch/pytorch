@@ -2,6 +2,7 @@ import sys
 import warnings
 
 import torch
+import torch._C._onnx as _C_onnx
 import torch.onnx
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
@@ -423,9 +424,9 @@ def fake_quantize_per_tensor_affine(
         )
     scale = scale.float().data  # Avoid exporter generating double type
     if quant_min == 0:
-        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
+        zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     else:
-        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
+        zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.INT8)
     return g.op(
         "DequantizeLinear",
         g.op("QuantizeLinear", inputs, scale, zero_point),
@@ -451,7 +452,7 @@ def quantize_per_tensor(g, input, scale, zero_point, dtype):
     zero_point = g.op(
         "Cast", zero_point, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
     )
-    scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+    scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return symbolic_helper.quantize_helper(g, input, scale, zero_point)
 
 
