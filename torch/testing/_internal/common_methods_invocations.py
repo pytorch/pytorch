@@ -17928,6 +17928,40 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
+        '_masked.median',
+        ref=reference_reduction_numpy(np.median) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16),
+        method_variant=None,
+        nan_policy='omit',
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_multiple_dims=False,
+        skips=(
+            # initial is not a keyword for argmin
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_duplicate_values'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_extremal_values'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_large_input'),
+            # does not support passing keepdim without dim, and dim must be an int
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
+            # does not support dim = None
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_multi_unsupported'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_ndim_limit'),
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        sample_inputs_func=sample_inputs_masked_softmax,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
         '_masked.norm',
         identity=0,
         method_variant=None,
