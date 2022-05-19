@@ -188,7 +188,7 @@ def _unflatten_communicated_optim_state(
     fsdp_module,
     flat_param: FlatParameter,
     state: _ConsolidatedOptimState,
-    shard_state,
+    shard_state: bool,
 ) -> List[Dict[str, Any]]:
     """
     Unflattens the communicated optimizer state (given by ``tensor_state``,
@@ -1043,24 +1043,6 @@ def _optim_state_dict(
     i.e. with keys ``"state"`` and ``"param_groups"``.
     The flattened parameters in ``FSDP`` modules contained in ``model``
     are mapped back to their unflattened parameters.
-
-    .. warning:: This needs to be called on all ranks since synchronization
-        primitives are used. However, if ``rank0_only=True``, then the
-        state dict is only populated on rank 0, and all other ranks return
-        an empty :class:`dict`.
-
-    .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
-        uses full parameter names as keys instead of parameter IDs.
-
-    .. warning:: If you do not pass ``model.parameters()`` as the first
-        argument to the optimizer, then you should pass that same value to
-        this method as ``optim_input``.
-
-    .. note:: Like in :meth:`torch.optim.Optimizer.state_dict`, the tensors
-        contained in the optimizer state dict are not cloned, so there may
-        be aliasing surprises. For best practices, consider saving the
-        returned optimizer state dict immediately, e.g. using
-        ``torch.save()``.
 
     Args:
         model (torch.nn.Module): Root module (which may or may not be a

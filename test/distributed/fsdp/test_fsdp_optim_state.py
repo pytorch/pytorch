@@ -547,13 +547,12 @@ class TestFSDPOptimState(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("use_multiple_param_groups", [False, True])
-    def test_flatten_sharded_optim_state_dict_nested(
-        self, use_multiple_param_groups: bool
-    ):
+    def test_flatten_sharded_optim_state_dict_nested(self):
+        """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
+        nested model."""
         self._test_load_optim_state(
             _ModelClass.NESTED,
-            use_multiple_param_groups=use_multiple_param_groups,
+            use_multiple_param_groups=False,
             halve_world_size=False,
             osd_comm_method=_OSDCommMethod.FLATTEN_SHARDED_OSD,
             wrap_alt=True,
@@ -678,8 +677,9 @@ class TestFSDPOptimState(FSDPTest):
             check_same_param_keys=check_same_param_keys,
         )
         # As a sanity check, check that we can load and run a few iterations
-        optim2.load_state_dict(sharded_osd1)
-        self._step_model(model2, optim2, num_iters=NUM_ITERS)
+        if osd_comm_method != _OSDCommMethod.FLATTEN_SHARDED_OSD:
+            optim2.load_state_dict(sharded_osd1)
+            self._step_model(model2, optim2, num_iters=NUM_ITERS)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("add_to_fsdp_module", [False, True])
@@ -702,7 +702,7 @@ class TestFSDPOptimState(FSDPTest):
         We do not separately test unmanaged parameters for
         :meth:`scatter_full_optim_state_dict` and `flatten_sharded_optim_state_dict`
         to save CI cost since it call into the same subroutine
-        :meth:`_flatten_full_optim_state_dict`.
+        :meth:`_flatten_optim_state_dict`.
         """
         NUM_ITERS = 1
         # Create a normal wrapped model
@@ -794,8 +794,9 @@ class TestFSDPOptimState(FSDPTest):
             rekeyed_osd, osd, check_same_param_keys=check_same_param_keys,
         )
         # As a sanity check, check that we can load and run a few iterations
-        optim2.load_state_dict(rekeyed_osd)
-        self._step_model(model2, optim2, num_iters=NUM_ITERS)
+        if state_dict_type != StateDictType.SHARDED_STATE_DICT:
+            optim2.load_state_dict(rekeyed_osd)
+            self._step_model(model2, optim2, num_iters=NUM_ITERS)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False])
