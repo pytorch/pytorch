@@ -27,7 +27,6 @@ class SchedulerRuntimeInfo;
 struct ExecutorLog {
   c10::optional<ReductionParams> reduction_params = c10::nullopt;
   c10::optional<PointwiseParams> pointwise_params = c10::nullopt;
-  c10::optional<LaunchParams> launch_constraints = c10::nullopt;
   FusionExecutor* fusion_executor = nullptr;
 };
 
@@ -127,9 +126,8 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
 
  private:
   //! Interface to run a single kernel, either one kernel for single-kernel
-  //! fusions,
-  //!  or a kernel for a segmentedGrouup in a segmented fusion. Returns the
-  //!  kernel outputs.
+  //! fusions, or a kernel for a segmentedGrouup in a segmented fusion. Returns
+  //! the kernel outputs.
   std::vector<at::Tensor> runKernelWithInput(
       const at::ArrayRef<IValue>& inputs,
       size_t input_id,
