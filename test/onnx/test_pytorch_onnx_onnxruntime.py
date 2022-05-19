@@ -1693,6 +1693,17 @@ class _TestONNXRuntime:
         x = torch.tensor(-0.5).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_atan2(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.atan2(x, y)
+
+        model = Model()
+        x = torch.randn(4, 4, dtype=torch.float32)
+        y = torch.randn(4, 4, dtype=torch.float32)
+        self.run_test(model, x, y)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
