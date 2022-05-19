@@ -216,7 +216,7 @@ def _compare_ort_pytorch_model(
 
     Raise:
         AssertionError: if outputs from ONNX model and PyTorch model are not
-            equal.
+            equal up to specified precision.
     """
 
     def compare_ort_pytorch_model_with_input(input_args, input_kwargs):
