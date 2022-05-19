@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
@@ -11,7 +12,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
-#include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAUtils.h>
@@ -51,7 +51,7 @@ __global__ void indexing_backward_kernel(
 //stride_before is the stride of the dimension immediately preceding first indexed dimension
 //if indexing starts from the 0th dimension, stride_before does not matter because blockIdx.z will be 0 in this case
 //outer_dim is number of elements in the first unindexed dimensions
-  using accscalar_t = at::acc_type<scalar_t, true>;
+  using opmath_t = at::opmath_type<scalar_t>;
 
   // Each warp is responsible for an input into the LookupTable.
   // If the preceding input has the same destination index as this input, then the warp
@@ -78,19 +78,19 @@ __global__ void indexing_backward_kernel(
         }
         const int64_t weight_row = ((int64_t) sorted_indices[idx]) * stride + z * stride_before;
         const int64_t grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
-        const accscalar_t scale = (accscalar_t)1.0;
+        const opmath_t scale = (opmath_t)1.0;
 
-        accscalar_t gradient[SZ];
-        accscalar_t weight[SZ];
+        opmath_t gradient[SZ];
+        opmath_t weight[SZ];
 
         while (start_feature < stride) {
           #pragma unroll
           for (int ii = 0; ii < SZ; ii++) {
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
-              gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
+              gradient[ii] = static_cast<opmath_t>(grad_output[grad_row + feature_dim]);
               if (accumulate) {
-                weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
+                weight[ii] = static_cast<opmath_t>(grad_weight[weight_row + feature_dim]);
               }
             }
           }
@@ -131,8 +131,9 @@ namespace {
 class ReduceMultiply {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMul(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMul(self_data_start + index, *src_data);
   }
 };
 static ReduceMultiply reduce_multiply;
@@ -140,8 +141,8 @@ static ReduceMultiply reduce_multiply;
 class ReduceAdd {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicAddNoReturn(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
   }
 };
 static ReduceAdd reduce_add;
@@ -149,8 +150,9 @@ static ReduceAdd reduce_add;
 class ReduceMinimum {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMin(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMin(self_data_start + index, *src_data);
   }
 };
 static ReduceMinimum reduce_minimum;
@@ -158,8 +160,9 @@ static ReduceMinimum reduce_minimum;
 class ReduceMaximum {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMax(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMax(self_data_start + index, *src_data);
   }
 };
 static ReduceMaximum reduce_maximum;
@@ -330,7 +333,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
       expandedValue.scalar_type(), "indexing_backward", [&] {
         indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
           sorted_indices.data_ptr<int64_t>(),
@@ -420,6 +423,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     int srcAddDim,
                                     IndexType innerSize,
                                     int64_t dstAddDimSize,
+                                    int64_t dstNumel,
                                     const func_t& op,
                                     T alpha) {
   // In order to avoid reloading the index that we are copying, load
@@ -447,7 +451,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       srcOffset += srcIndex * src.strides[srcAddDim];
 
       T val = src.data[srcOffset] * alpha;
-      op(&dst.data[dstOffset], &val);
+      op(dst.data, dstOffset, dstNumel, &val);
     }
 
   }
@@ -469,6 +473,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     IndexType totalSize,
                                     IndexType innerSize,
                                     int64_t dstAddDimSize,
+                                    int64_t dstNumel,
                                     const func_t& op,
                                     T alpha) {
   // We stride over the output including the indexed dimension
@@ -500,7 +505,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
     srcOffset += srcIndex * src.strides[srcAddDim];
 
     T val = src.data[srcOffset] * alpha;
-    op(&dst.data[dstOffset], &val);
+    op(dst.data, dstOffset, dstNumel, &val);
   }
 }
 
@@ -570,6 +575,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   ptrdiff_t sourceTotalSize = source.numel();
   int64_t selfAddDimSize = self_.size(dim);
   ptrdiff_t numIndex = index.numel();
+  int64_t selfNumel = self_.numel();
 
   if (sliceSize == 0) {
     return;
@@ -583,7 +589,8 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
       selfInfo, sourceInfo, indexInfo,                                                  \
-      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize, reduce_add, alpha_value);    \
+      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize,                              \
+      selfNumel, reduce_add, alpha_value);                                              \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
@@ -594,7 +601,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       selfInfo, sourceInfo, indexInfo,                                      \
       selfAddDim, sourceAddDim, sourceTotalSize,                            \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
-      selfAddDimSize, reduce_add, alpha_value);                             \
+      selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
@@ -741,6 +748,7 @@ void index_reduce_func_cuda_impl(
   ptrdiff_t sourceTotalSize = source.numel();
   int64_t selfReduceDimSize = self_.size(dim);
   ptrdiff_t numIndex = index.numel();
+  int64_t selfNumel = self_.numel();
 
   if (sliceSize == 0) {
     return;
@@ -754,7 +762,8 @@ void index_reduce_func_cuda_impl(
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>                \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
       selfInfo, sourceInfo, indexInfo,                                                               \
-      selfReduceDim, sourceReduceDim, sliceSize, selfReduceDimSize, reduce_func, alpha_value);       \
+      selfReduceDim, sourceReduceDim, sliceSize, selfReduceDimSize,                                  \
+      selfNumel, reduce_func, alpha_value);                                                          \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                                     \
@@ -765,7 +774,7 @@ void index_reduce_func_cuda_impl(
       selfInfo, sourceInfo, indexInfo,                                                   \
       selfReduceDim, sourceReduceDim, sourceTotalSize,                                   \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                             \
-      selfReduceDimSize, reduce_func, alpha_value);                                      \
+      selfReduceDimSize, selfNumel, reduce_func, alpha_value);                           \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
@@ -1186,8 +1195,8 @@ namespace {
 
 template <typename mask_t>
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kBool, kHalf, kBFloat16, iter.common_dtype(), "masked_fill_", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kBool, kHalf, kBFloat16, kComplexHalf, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
         gpu_kernel(
             iter, [value_] GPU_LAMBDA(scalar_t self, mask_t mask) -> scalar_t {

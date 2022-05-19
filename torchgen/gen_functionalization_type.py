@@ -1,4 +1,4 @@
-from torchgen.api import cpp
+from torchgen.api import cpp, dispatcher
 from torchgen.api.types import (
     DispatcherSignature,
     Binding,
@@ -98,7 +98,9 @@ def modifies_arguments(f: NativeFunction) -> bool:
 # This function constructs the return statement for the kernels that contain mutations
 # It mostly just needs to special case multi-output returns to wrap the result in a tuple
 def return_str(f: NativeFunction) -> str:
-    if len(f.func.arguments.out) != 0:
+    # Need to check both # outs and # returns. Why?
+    # out= ops with a mutable Tensor(a!)[] argument are expected to have a void return type.
+    if len(f.func.arguments.out) != 0 and len(f.func.returns) != 0:
         if len(f.func.arguments.out) > 1:
             return_names = ", ".join(a.name for a in f.func.arguments.out)
             return f"return {DispatcherSignature.from_schema(f.func).returns_type().cpp_type()}({return_names});"
@@ -361,8 +363,6 @@ def emit_inplace_functionalization_body(
 
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-    return_type = dispatcher_sig.returns_type().remove_const_ref().cpp_type()
-
     unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(
         dispatcher_sig, is_view_op=False
     )
@@ -402,6 +402,9 @@ def emit_inplace_functionalization_body(
 
     if functional_op is None:
         # We can't functionalize this inplace op, since we don't know what the corresponding functional op is.
+        return_type = (
+            dispatcher.returns_type(f.func.returns).remove_const_ref().cpp_type()
+        )
         warn_str = f"""Note: the functionalization pass encountered an operator ({str(f.func.name)}) that it could not \
 functionalize, because it couldn't find an out-of-place equivalent of the operator to call. \
 Instead, it's calling the inplace/view operator directly. \
@@ -421,6 +424,11 @@ If this causes problems in your program, consider upstreaming the out-of-place o
 """
     else:
         # call the out-of-place variant of the op
+        return_type = (
+            dispatcher.returns_type(functional_op.func.returns)
+            .remove_const_ref()
+            .cpp_type()
+        )
         functional_sig = DispatcherSignature.from_schema(functional_op.func)
         functional_exprs = [
             e.expr
