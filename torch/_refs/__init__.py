@@ -42,6 +42,7 @@ __all__ = [
     "atan",
     # "bessel_i0e",  # special.i0e
     # "bessel_i1e",  # special.i1e
+    "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
     "cos",
@@ -54,10 +55,12 @@ __all__ = [
     "expm1",
     "floor",
     "isfinite",
+    "isinf",
     "isnan",
     "lgamma",
     "log",
     "log1p",
+    "log2",
     "neg",
     "reciprocal",
     "round",  # TODO: model kwargs
@@ -157,6 +160,7 @@ __all__ = [
     "full",
     "full_like",
     "ones_like",
+    "zeros_like",
 ]
 
 Tensor = torch.Tensor
@@ -299,6 +303,11 @@ atan = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+bitwise_not = _make_elementwise_unary_reference(
+    prims.bitwise_not,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 ceil = _make_elementwise_unary_reference(
     prims.ceil,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -365,6 +374,25 @@ isfinite = _make_elementwise_unary_reference(
 )
 
 
+def _isinf(a: TensorLikeType) -> TensorLikeType:
+    # TODO Add complex tensor support to remove is_infinite prim
+    # if utils.is_complex_dtype(a):
+    #     return bitwise_or(_isinf(real(a), _isinf(imag(a))
+    # else:
+    #     return bitwise_not(bitwise_or(isnan(a), isfinite(a)))
+    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
+        return prims.is_infinite(a)
+
+    return zeros_like(a, dtype=torch.bool)
+
+
+isinf = _make_elementwise_unary_reference(
+    _isinf,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.isinf,  # prim/aten name mismatch
+)
+
+
 def _isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
@@ -387,6 +415,11 @@ log = _make_elementwise_unary_reference(
 
 log1p = _make_elementwise_unary_reference(
     prims.log1p,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+log2 = _make_elementwise_unary_reference(
+    prims.log2,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
@@ -915,7 +948,7 @@ def _reduction(
     # all the math ops (including comparisons) are still defined only for a computation type,
     # so promotion will still happen. We are doing it explicitly here
     inp_dtype = dtype if dtype is not None else a.dtype
-    computation_dtype = utils._get_computation_dtype(inp_dtype)
+    computation_dtype = utils.get_computation_dtype(inp_dtype)
     a_converted = prims.convert_element_type(a, computation_dtype)
     result = prim(a_converted, dims)
 
@@ -1446,3 +1479,13 @@ def ones_like(
     requires_grad: bool = False,
 ) -> TensorLikeType:
     return full_like(a, 1, dtype=dtype, device=device, requires_grad=requires_grad)
+
+
+def zeros_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    return full_like(a, 0, dtype=dtype, device=device, requires_grad=requires_grad)
