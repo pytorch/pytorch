@@ -18,6 +18,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -44,6 +45,7 @@ class TestReshard(ShardedTensorTestBase):
         st.reshard(reshard_spec)
         self.assertEqual(1, len(st.local_shards()))
         self.assertEqual(1, len(st_compare.local_shards()))
+        st_compare._metadata.shards_metadata.sort(key=lambda metadata: metadata.placement.rank())
         self.assertEqual(st._metadata, st_compare._metadata)
         self.assertEqual(st.local_tensor(), st_compare.local_tensor())
         self.assertEqual(
@@ -95,3 +97,7 @@ class TestReshard(ShardedTensorTestBase):
             NotImplementedError, "Only single local shard supported for reshard."
         ):
             st.reshard(reshard_spec)
+
+
+if __name__ == "__main__":
+    run_tests()

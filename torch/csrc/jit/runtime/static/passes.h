@@ -21,9 +21,6 @@ void ReplaceWithMaybeCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 
-TORCH_API void EnableStaticRuntimeLayerNorm(
-    std::shared_ptr<torch::jit::Graph>& graph);
-
 TORCH_API void RemoveImmutableInputDictLookups(
     std::shared_ptr<torch::jit::Graph>& graph);
 
@@ -63,6 +60,25 @@ TORCH_API void CreateOwnedRefsForSpecialValues(Graph& graph);
 TORCH_API void ForceNonEmptyOutputs(Graph& graph);
 
 TORCH_API void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph);
+
+TORCH_API void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph);
+
+TORCH_API void EliminateNoOpSlice(std::shared_ptr<Graph>& graph);
+
+TORCH_API void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph);
+
+// [Remove unnecessary outputs]]
+// Removes outputs to reduce compute when it is not used later in the graph.
+// Currently used to remove the max_indices output of embedding_bag, which
+// isn't necessary to compute the main output.
+TORCH_API void RemoveUnnecessaryOutputs(std::shared_ptr<Graph>& graph);
+
+TORCH_API void RemoveUnnecessaryEmbeddingBagOutputs(
+    std::shared_ptr<Graph>& graph);
+
+TORCH_API void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph);
+
+TORCH_API void FuseClampNaNToNum(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

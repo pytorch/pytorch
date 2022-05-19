@@ -11,15 +11,17 @@ from torch.utils.data.sampler import (
 from torch.utils.data.dataset import (
     ChainDataset,
     ConcatDataset,
-    DFIterDataPipe,
-    DataChunk,
     Dataset,
-    IterDataPipe,
     IterableDataset,
-    MapDataPipe,
     Subset,
     TensorDataset,
     random_split,
+)
+from torch.utils.data.datapipes.datapipe import (
+    DFIterDataPipe,
+    DataChunk,
+    IterDataPipe,
+    MapDataPipe,
 )
 from torch.utils.data.dataloader import (
     DataLoader,
@@ -29,7 +31,7 @@ from torch.utils.data.dataloader import (
     default_convert,
 )
 from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data._decorator import (
+from torch.utils.data.datapipes._decorator import (
     argument_validation,
     functional_datapipe,
     guaranteed_datapipes_determinism,

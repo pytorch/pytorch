@@ -1,10 +1,11 @@
 #pragma once
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/TransposeType.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
@@ -39,6 +40,17 @@ void triangular_solve_cublas(const Tensor& A, const Tensor& B, bool left, bool u
 void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
 void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos);
 void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose);
+void ldl_factor_cusolver(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian);
+void ldl_solve_cusolver(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper);
 
 #ifdef USE_CUSOLVER
 
@@ -64,5 +76,20 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
 void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots, const bool use_magma_);
 
 #endif  // USE_CUSOLVER
+
+#if defined(BUILD_LAZY_CUDA_LINALG)
+namespace cuda { namespace detail {
+// This is only used for an old-style dispatches
+// Please do not add any new entires to it
+struct LinalgDispatch {
+   std::tuple<Tensor, Tensor> (*symeig_helper)(const Tensor& self, bool eigenvectors, bool upper);
+   std::tuple<Tensor, Tensor> (*qr_helper)(const Tensor& input, c10::string_view mode);
+   Tensor (*cholesky_solve_helper)(const Tensor& self, const Tensor& A, bool upper);
+   std::tuple<Tensor, Tensor> (*legacy_lstsq)(const Tensor &B, const Tensor &A);
+   Tensor& (*inv_out_helper)(Tensor &result, Tensor& infos_lu, Tensor& infos_getri);
+};
+C10_EXPORT void registerLinalgDispatch(const LinalgDispatch&);
+}} // namespace cuda::detail
+#endif
 
 }}  // namespace at::native

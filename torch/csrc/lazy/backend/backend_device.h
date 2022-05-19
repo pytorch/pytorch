@@ -18,7 +18,11 @@ namespace lazy {
 
 // Backend should extend it and define their own supported hardware types.
 struct TORCH_API BackendDeviceType {
-  int8_t type {0};
+  int8_t type {(int8_t)at::kCPU};
+  // Note: previous default value was '0', which actually maps to at::kCPU, at least now it is explicit,
+  // we may want to make default/undefined semantics more clear though
+  BackendDeviceType() :type((int8_t)at::kCPU) {}
+  BackendDeviceType(int8_t type) :type(type) {}
 
   virtual ~BackendDeviceType() = default;
   virtual std::string toString() const { return "Unknown"; }
@@ -32,16 +36,13 @@ class TORCH_API BackendDevice {
   BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int64_t ordinal);
 
   int8_t type() const;
-  int64_t ordinal() const { return ordinal_;  }
+  int64_t ordinal() const { return ordinal_; }
 
   bool operator==(const BackendDevice& other) const { return compare(other) == 0; }
   bool operator!=(const BackendDevice& other) const { return compare(other) != 0; }
   bool operator<(const BackendDevice& rhs) const { return compare(rhs) < 0; }
 
   std::string toString() const;
-
-  // The string -> Device conversion should be handled by the backend interface.
-  C10_DEPRECATED explicit BackendDevice(const std::string& device_spec);
 
  private:
   int compare(const BackendDevice& rhs) const;
@@ -59,7 +60,9 @@ TORCH_API c10::Device backendDeviceToAtenDevice(const BackendDevice& device);
 
 // Tries to extract the backend device out of the lazy tensor. Returns nullopt if the
 // input is not a lazy tensor.
+TORCH_API c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors);
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor);
+TORCH_API c10::optional<BackendDevice> GetBackendDevice(const c10::optional<c10::Device> device);
 
 // For variadic template.
 TORCH_API c10::optional<BackendDevice> GetBackendDevice();

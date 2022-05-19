@@ -1,5 +1,6 @@
 #ifndef C10_MACROS_MACROS_H_
 #define C10_MACROS_MACROS_H_
+#include <cassert>
 
 /* Main entry for c10/macros.
  *
@@ -331,15 +332,14 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || defined(__XROS__) || \
-    (defined(USE_ROCM) && ROCM_VERSION < 40100)
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(USE_ROCM)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
 extern "C" {
 C10_IMPORT
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
+#if defined(__CUDA_ARCH__)
 __host__ __device__
 #endif // __CUDA_ARCH__
     void
@@ -360,8 +360,7 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
-    defined(__HIP_ARCH__) || defined(__HIP__)
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
 __host__ __device__
 #endif // __CUDA_ARCH__
     void
@@ -482,8 +481,7 @@ __host__ __device__
 #endif
 
 #ifndef HAS_DEMANGLE
-#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__) || \
-    defined(__XROS__)
+#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__)
 #define HAS_DEMANGLE 0
 #elif defined(__APPLE__) && \
     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)

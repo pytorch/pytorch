@@ -313,7 +313,7 @@ class RNN(RNNBase):
     function:
 
     .. math::
-        h_t = \tanh(W_{ih} x_t + b_{ih} + W_{hh} h_{(t-1)} + b_{hh})
+        h_t = \tanh(x_t W_{ih}^T + b_{ih} + h_{t-1}W_{hh}^T + b_{hh})
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is
     the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
@@ -601,13 +601,16 @@ class LSTM(RNNBase):
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the LSTM, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
-          will also be a packed sequence.
+          will also be a packed sequence. When ``bidirectional=True``, `output` will contain
+          a concatenation of the forward and reverse hidden states at each time step in the sequence.
         * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{out})` containing the
-          final hidden state for each element in the sequence.
+          final hidden state for each element in the sequence. When ``bidirectional=True``,
+          `h_n` will contain a concatenation of the final forward and reverse hidden states, respectively.
         * **c_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{cell})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
-          final cell state for each element in the sequence.
+          final cell state for each element in the sequence. When ``bidirectional=True``,
+          `c_n` will contain a concatenation of the final forward and reverse cell states, respectively.
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
@@ -644,6 +647,11 @@ class LSTM(RNNBase):
         For bidirectional LSTMs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+
+    .. note::
+        For bidirectional LSTMs, `h_n` is not equivalent to the last element of `output`; the
+        former contains the final forward and reverse hidden states, while the latter contains the
+        final forward hidden state and the initial reverse hidden state.
 
     .. note::
         ``batch_first`` argument is ignored for unbatched inputs.
@@ -1145,6 +1153,8 @@ class LSTMCell(RNNCellBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     Examples::
 
         >>> rnn = nn.LSTMCell(10, 20) # (input_size, hidden_size)
@@ -1235,6 +1245,8 @@ class GRUCell(RNNCellBase):
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     Examples::
 

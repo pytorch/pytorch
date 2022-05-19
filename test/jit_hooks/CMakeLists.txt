@@ -2,6 +2,10 @@
 cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
 project(jit_hooks)
 
+if(USE_ROCM)
+include(utils)
+include(LoadHIP)
+endif()
 find_package(Torch REQUIRED)
 
 add_executable(test_jit_hooks test_jit_hooks.cpp)

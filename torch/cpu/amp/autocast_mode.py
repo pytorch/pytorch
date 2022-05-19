@@ -1,7 +1,7 @@
 import torch
 from typing import Any
 
-class autocast(torch.autocast_mode.autocast):
+class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
     ``torch.cpu.amp.autocast(args...)`` is equivalent to ``torch.autocast("cpu", args...)``

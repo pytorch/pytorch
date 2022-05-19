@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
@@ -17,55 +16,49 @@ namespace cuda {
 
 namespace {
 
-kir::Bool* getPredicatePerParallelType(
+Bool* getPredicatePerParallelType(
     ParallelType pt,
     const ThreadPredicateMap::PredicateInfo& pred_info) {
-  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
-
   auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
 
   // If pt is not used or is proven to be one, no need to predicate.
   if (pt_dim == nullptr || pt_dim->isOneInt()) {
-    return ir_builder.trueVal();
+    return GpuLower::current()->kernel()->trueVal();
   }
-
   // When BID needs to be predicated, that means it's an output of a grid
   // reduction and only the last block index in that dimension has the right
   // value from the grid reduce.
   if (isParallelTypeBlockDim(pt) && pred_info.limited_types.get(pt)) {
-    return ir_builder
-        .eqExpr(
-            kir::NamedScalar::getParallelIndex(pt),
-            ir_builder.subExpr(
-                kir::NamedScalar::getParallelDim(pt), ir_builder.oneVal()))
-        ->as<kir::Bool>();
+    return SimplifyingIrBuilder::eqExpr(
+               NamedScalar::getParallelIndex(pt),
+               SimplifyingIrBuilder::subExpr(
+                   NamedScalar::getParallelDim(pt),
+                   GpuLower::current()->kernel()->oneVal()))
+        ->as<Bool>();
   }
 
   // Otherwise, only thread of index 0 executes the computation
-  return ir_builder
-      .eqExpr(kir::NamedScalar::getParallelIndex(pt), ir_builder.zeroVal())
-      ->as<kir::Bool>();
+  return SimplifyingIrBuilder::eqExpr(
+             NamedScalar::getParallelIndex(pt),
+             GpuLower::current()->kernel()->zeroVal())
+      ->as<Bool>();
 }
 
 } // namespace
 
-kir::Bool* ThreadPredicateMap::getPredicateFromPredicateInfo(
+Bool* ThreadPredicateMap::getPredicateFromPredicateInfo(
     const ThreadPredicateMap::PredicateInfo& pred_info) {
-  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
-
   const auto pred_types = pred_info.limited_types | pred_info.redundant_types;
 
   if (pred_types.none()) {
-    return ir_builder.trueVal();
+    return GpuLower::current()->kernel()->trueVal();
   }
 
-  kir::Bool* pred = nullptr;
-
+  Bool* pred = nullptr;
   for (const auto pt : pred_types) {
     const auto tp = getPredicatePerParallelType(pt, pred_info);
-    pred = ir_builder.andExpr(pred, tp)->as<kir::Bool>();
+    pred = SimplifyingIrBuilder::andExpr(pred, tp)->as<Bool>();
   }
-
   TORCH_INTERNAL_ASSERT(pred != nullptr);
 
   return pred;
@@ -79,22 +72,44 @@ ParallelTypeBitmap avoidRedundantWrites(const TensorView* out_tv) {
   // If the memory type is Local, it's fine to write into it always as
   // it's thread local. If it's Global, it's also fine to let each
   // thread do its own write, unless out_tv is an output of a
-  // reduction. Reduction reads from and writes to the tensor, so the
-  // result would be incorrect if the buffer is shared by redundant
-  // threads. Correctness issues here come from smem aliasing or grid reductions
-  // because the reduction itself performs an update to a value, not just a set.
-  const bool is_reduction = out_tv->definition()->isA<ReductionOp>() ||
-      out_tv->definition()->isA<WelfordOp>();
+  // reduction. Standard reductions (forget gridReduce for the sake of this
+  // argument) directly into global memory buffers accumulate into the global
+  // memory buffer. If this is done redundantly then it could lead to incorrect
+  // results. Correctness issues here can come from smem aliasing, smem
+  // reductions or gmem reductions because the reduction itself performs an
+  // update to a value, not just a set. For performance it's safe to ommit the
+  // redundant writes to gmem or smem, this comment is just specifying it's not
+  // always just a performance optimization, but can also be a correctness
+  // requirement.
+  //
+  // For now this is enabled for shared memory buffers, global memory buffers
+  // undergoing a reduction, and global memory buffers with terminating outputs.
+  // This could be extended to all global memory buffer transactions, but in the
+  // test AdvancedIndexing11 there's a case where an intermediate global buffer
+  // is set and used to perform a broadcast. At the moment a grid sync is not
+  // being inserted here, and it's generally safe since it's just a set. We
+  // could enable this more generally for global memory buffers, but would have
+  // to insert a sync or a grid broadcast in that example. For now the
+  // approach is to only do this on a grid buffer (not undergoing a reduction)
+  // if there are no other uses in the kernel.
+  //
+  // TODO: Revisit if something like AdvancedIndexing11 could be happening at
+  // the same time of a global reduction in a way that could produce an
+  // incorrect result.
+  const bool is_reduction = ir_utils::isReductionOp(out_tv->definition());
   if (!(out_tv->getMemoryType() == MemoryType::Shared ||
-        (out_tv->getMemoryType() == MemoryType::Global && is_reduction))) {
+        (out_tv->getMemoryType() == MemoryType::Global && is_reduction) ||
+        (out_tv->getMemoryType() == MemoryType::Global &&
+         out_tv->uses().empty()))) {
     return ParallelTypeBitmap();
   }
+
   ParallelTypeBitmap pred;
   // Track which TID types are not used to find redundant parallel
-  // types. Only TID types are checked as the tensor is on shared
-  // memory.
+  // types. Only TID types are checked if the tensor is on shared
+  // memory otherwise on global memory all TID and BID types are checked.
   ParallelTypeBitmap unused_types;
-  // Initially all types are conservatively assumed to be used.
+  // Initially all types are conservatively assumed to not be used.
   unused_types = ~unused_types;
   for (auto out_tv_id : out_tv->domain()->domain()) {
     auto pt = out_tv_id->getParallelType();
@@ -104,8 +119,22 @@ ParallelTypeBitmap avoidRedundantWrites(const TensorView* out_tv) {
     // If the axis is a broadcast domain and is parallelized by TID,
     // it is sufficient to use just one thread since the tensor is on
     // shared memory.
-    if (out_tv->getMemoryType() == MemoryType::Shared &&
-        out_tv_id->isBroadcast() && isParallelTypeThreadDim(pt)) {
+    if ((out_tv->getMemoryType() == MemoryType::Shared &&
+         out_tv_id->isBroadcast() && isParallelTypeThreadDim(pt)) ||
+        // Protect against global memory and is_reduction as we don't want to
+        // predicate grid dimensions as codegen will complain predication on
+        // block dimensions is not allowed in grid reductions. The old
+        // grid reduction runtime kernel does not differentiate
+        // non-reduction and predicated parallel types, so the sync
+        // integer buffer would need to be expanded even for
+        // predicated parallel types, which is not what
+        // getGridSyncBufferSize does. The right thing here is either:
+        // retire the old grid reduction kernel, or update the kernel
+        // to propertly ignore predicated types. The new kernel is
+        // significantly complex and has not been tested, so the
+        // latter option seems more reasonable for now. See #1671.
+        (!is_reduction && out_tv->getMemoryType() == MemoryType::Global &&
+         out_tv_id->isBroadcast() && isParallelTypeThread(pt))) {
       pred.set(pt);
     }
     unused_types.clear(pt);
@@ -138,7 +167,7 @@ ParallelTypeBitmap getReductionPredicateForUnusedParallelTypes(
     const TensorView* tv,
     const ThreadPredicateMap::PredicateInfo& pred_info) {
   auto tv_def = tv->definition();
-  if (!(tv_def && (tv_def->isA<ReductionOp>() || tv_def->isA<WelfordOp>()) &&
+  if (!(tv_def && ir_utils::isReductionOp(tv_def) &&
         tv->getMemoryType() == MemoryType::Global)) {
     return {};
   }
@@ -152,6 +181,21 @@ ParallelTypeBitmap getReductionPredicateForUnusedParallelTypes(
 // Update the reduction_deps bitset based on provided Expr
 void ThreadPredicateMap::updateBitSet(const Expr* expr) {
   FUSER_PERF_SCOPE("GpuLower::Lower::ThreadPredicateMap::updateBitSet");
+
+  // If all of the inputs are not updated and all of the outputs have
+  // already mappings, don't do anything
+  if (std::all_of(
+          ir_utils::filterByType<TensorView>(expr->inputs()).begin(),
+          ir_utils::filterByType<TensorView>(expr->inputs()).end(),
+          [this](TensorView* tv) {
+            return updated_tvs_.find(tv) == updated_tvs_.end();
+          }) &&
+      std::all_of(
+          ir_utils::filterByType<TensorView>(expr->outputs()).begin(),
+          ir_utils::filterByType<TensorView>(expr->outputs()).end(),
+          [this](TensorView* tv) { return find(tv) != end(); })) {
+    return;
+  }
 
   // Which predicates were set for the inputs
   ParallelTypeBitmap input_preds;
@@ -188,10 +232,13 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
     for (auto id : tv_inp->domain()->domain()) {
       if (id->isThread()) {
         id_ptypes.set(id->getParallelType());
-        if (id->isReduction()) {
+        if (id->isReduction() &&
+            !GpuLower::current()->fusedReductionInfo().isAllreduce(id)) {
           id_reductions.set(id->getParallelType());
         }
-        if (id->isBroadcast()) {
+        if (id->isBroadcast() &&
+            GpuLower::current()->concretizedBroadcastDomains().isConcretized(
+                id)) {
           id_bcasts.set(id->getParallelType());
         }
       }
@@ -233,9 +280,8 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
 
   // Run through outputs and set bitset predicates
   for (auto* out_tv : ir_utils::filterByType<TensorView>(expr->outputs())) {
-    TORCH_INTERNAL_ASSERT(find(out_tv) == end());
     auto redundant_types = avoidRedundantWrites(out_tv);
-    insert(out_tv, output_preds, redundant_types);
+    update(out_tv, output_preds, redundant_types);
   }
 }
 
@@ -245,12 +291,13 @@ void ThreadPredicateMap::build(Fusion* fusion) {
   // Initialize mapping for input tensors
   for (auto inp : fusion->inputs()) {
     if (auto tv = dynamic_cast<const TensorView*>(inp)) {
-      insert(tv, ParallelTypeBitmap(), ParallelTypeBitmap());
+      update(tv, ParallelTypeBitmap(), ParallelTypeBitmap());
     }
   }
   for (auto expr : fusion->exprs()) {
     updateBitSet(expr);
   }
+  updated_tvs_.clear();
 }
 
 ThreadPredicateMap::const_iterator ThreadPredicateMap::find(
@@ -289,20 +336,34 @@ ParallelTypeBitmap ThreadPredicateMap::getPredicatedParallelTypes(
   return pred_info.limited_types | pred_info.redundant_types;
 }
 
-void ThreadPredicateMap::insert(
+bool ThreadPredicateMap::update(
     const TensorView* tv,
-    const ParallelTypeBitmap& valid_types,
+    const ParallelTypeBitmap& limited_types,
     const ParallelTypeBitmap& redundant_types) {
-  insert(tv, {valid_types, redundant_types});
+  return update(tv, {limited_types, redundant_types});
 }
 
-void ThreadPredicateMap::insert(
+bool ThreadPredicateMap::update(
     const TensorView* tv,
     const PredicateInfo& pred_info) {
-  thread_predicates_.insert({tv, pred_info});
+  auto existing_mapping_it = thread_predicates_.find(tv);
+  if (existing_mapping_it != end()) {
+    PredicateInfo& existing_info = existing_mapping_it->second;
+    if (existing_info == pred_info) {
+      return false;
+    } else {
+      existing_info = pred_info;
+      markAsUpdated(tv);
+      return true;
+    }
+  } else {
+    thread_predicates_.insert({tv, pred_info});
+    markAsUpdated(tv);
+    return true;
+  }
 }
 
-kir::Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
+Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
   TORCH_INTERNAL_ASSERT(find(tv) != end(), "Couldn't find ", tv);
   auto pred_info = getPredicateInfo(tv);
   return getPredicateFromPredicateInfo(pred_info);
@@ -326,7 +387,8 @@ ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(
   const bool output_smem = tv->getMemoryType() == MemoryType::Shared;
 
   for (auto id : iter_domains) {
-    if (!id->isBroadcast()) {
+    if (!id->isBroadcast() ||
+        !GpuLower::current()->concretizedBroadcastDomains().isConcretized(id)) {
       continue;
     }
     if (id->isBlockDim() || (!output_smem && id->isThreadDim())) {
@@ -335,6 +397,10 @@ ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(
   }
 
   return parallel_broadcast & at(tv).limited_types;
+}
+
+void ThreadPredicateMap::markAsUpdated(const TensorView* tv) {
+  updated_tvs_.insert(tv);
 }
 
 void ThreadPredicateMap::print() const {

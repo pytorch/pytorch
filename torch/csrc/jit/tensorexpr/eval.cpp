@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/eval.h>
 
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/tensorexpr/external_functions_core.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 #include <c10/util/irange.h>
@@ -897,6 +898,86 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         extra_args.data());
   }
 
+  void visit(ExternalCallWithAllocPtr v) override {
+    auto& func_registry = getNNCFunctionRegistry();
+    if (!func_registry.count(v->func_name())) {
+      throw unimplemented_lowering(v);
+    }
+    GRAPH_DEBUG("EXTERNAL CALL: func=", v->func_name());
+
+    const auto& bufs_out = v->buf_out_args();
+    const auto& bufs_in = v->buf_args();
+    const auto bufs_in_size = bufs_in.size();
+    const auto bufs_out_size = bufs_out.size();
+
+    std::vector<void*> buf_ptrs(bufs_in_size + 2 * bufs_out_size);
+    std::vector<int64_t> buf_ranks;
+    std::vector<int64_t> buf_dims;
+    std::vector<int64_t> buf_strides;
+    std::vector<int8_t> buf_dtypes;
+    std::vector<int64_t> extra_args;
+
+    size_t i = 0;
+    for (const auto& b : bufs_in) {
+      auto iter = buffer_mapping_.find(b);
+      if (iter == buffer_mapping_.end()) {
+        throw malformed_input("could not find buf", v);
+      }
+      buf_ptrs[bufs_out_size + i] = iter->second;
+      // @lint-ignore CLANGTIDY
+      buf_ranks.push_back(b->dims().size());
+      buf_dtypes.push_back((int8_t)b->dtype().scalar_type());
+      for (const auto& dim_expr : b->dims()) {
+        dim_expr->accept(this);
+        buf_dims.push_back(value().intValue());
+      }
+      for (const ExprPtr& stride_expr : b->strides()) {
+        stride_expr->accept(this);
+        buf_strides.push_back(value().intValue());
+      }
+      i++;
+    }
+    for (const auto& a : v->args()) {
+      a->accept(this);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      int64_t val;
+      if (value().dtype() == kLong) {
+        val = value().as<int64_t>();
+      } else if (value().dtype() == kInt) {
+        val = value().intValue();
+      } else if (value().dtype() == kDouble) {
+        auto x = value().as<double>();
+        val = reinterpret_cast<int64_t*>(&x)[0];
+      } else if (value().dtype() == kFloat) {
+        auto x = value().as<float>();
+        val = reinterpret_cast<int64_t*>(&x)[0];
+      } else {
+        throw malformed_input(
+            "extra_args in ExternalCalls must have int64 dtype", v);
+      }
+      extra_args.push_back(val);
+    }
+
+    auto fn_ptr = func_registry.at(v->func_name());
+    (*fn_ptr)(
+        // @lint-ignore CLANGTIDY
+        bufs_in_size,
+        buf_ptrs.data(),
+        buf_ranks.data(),
+        buf_dims.data(),
+        buf_strides.data(),
+        buf_dtypes.data(),
+        // @lint-ignore CLANGTIDY
+        extra_args.size(),
+        extra_args.data());
+
+    for (i = 0; i < bufs_out_size; ++i) {
+      const auto& buf_out = bufs_out[i];
+      buffer_mapping_[buf_out] = buf_ptrs[i];
+      ext_bufs_free_ptr_[buf_out] = buf_ptrs[bufs_in_size + bufs_out_size + i];
+    }
+  }
+
   template <typename TReturn, typename TInput>
   void visit_intrinsics_helper(IntrinsicsPtr v) {
     std::vector<InterpValue> values(v->nparams());
@@ -983,7 +1064,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   void visit(PlacementAllocatePtr v) override {
-    buffer_mapping_[v->buf()] = buffer_mapping_[v->buf_to_reuse()];
+    buffer_mapping_[v->buf()] = buffer_mapping_.at(v->buf_to_reuse());
   }
 
   void visit(FreePtr v) override {
@@ -996,6 +1077,21 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           v->buffer_var()->name_hint());
     }
     buffer_mapping_.erase(b);
+  }
+
+  void visit(FreeExtPtr v) override {
+    const auto& bufs = v->bufs();
+    const auto bufs_num = bufs.size();
+    std::vector<void*> buf_ptrs;
+    for (const auto& buf : bufs) {
+      if (!ext_bufs_free_ptr_.count(buf)) {
+        throw std::runtime_error(
+            "Free an external allocated buffer that does not have corresponding pointer for freeing: " +
+            buf->base_handle()->name_hint());
+      }
+      buf_ptrs.push_back(ext_bufs_free_ptr_[buf]);
+    }
+    nnc_aten_free(bufs_num, buf_ptrs.data());
   }
 
   void visit(LetPtr v) override {
@@ -1141,6 +1237,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   std::unordered_map<BufPtr, void*> buffer_mapping_;
   std::unordered_map<BufPtr, std::unique_ptr<std::vector<int>>>
       internal_buffers_;
+  std::unordered_map<BufPtr, void*> ext_bufs_free_ptr_;
 };
 
 SimpleIREvaluator::SimpleIREvaluator(

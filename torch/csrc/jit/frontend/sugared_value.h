@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/util/Optional.h>
 #include <functional>
 #include <memory>
 #include <string>
@@ -618,6 +619,25 @@ struct TORCH_API SpecialFormValue : public SugaredValue {
   Symbol form_;
 };
 
+struct TORCH_API LegacyTensorConstructor : public SpecialFormValue {
+  LegacyTensorConstructor(Symbol form, at::ScalarType dtype, at::Device device)
+      : SpecialFormValue(form), device_(device), dtype_(dtype) {}
+
+  static std::shared_ptr<LegacyTensorConstructor> create(
+      Symbol form,
+      at::ScalarType dtype,
+      at::Device device) {
+    return std::make_shared<LegacyTensorConstructor>(form, dtype, device);
+  }
+  at::ScalarType dtype() const {
+    return dtype_;
+  }
+
+ private:
+  at::Device device_;
+  at::ScalarType dtype_;
+};
+
 // matched against for special handling of range expressions
 struct TORCH_API RangeValue : SugaredValue {
   RangeValue(
@@ -744,7 +764,10 @@ struct SimpleSelf : public Self {
 // This is not a SimpleValue so it can not pass through the code paths that
 // expect a SimpleValue as a sugared value.
 struct TORCH_API ExceptionMessageValue : public SugaredValue {
-  explicit ExceptionMessageValue(Value* value) : value_(value) {}
+  explicit ExceptionMessageValue(
+      Value* value,
+      Value* qualified_class_name = nullptr)
+      : value_(value), qualified_class_name_(qualified_class_name) {}
 
   std::string kind() const override {
     return "exception message";
@@ -754,7 +777,14 @@ struct TORCH_API ExceptionMessageValue : public SugaredValue {
     return value_;
   }
 
+  // qualified python class name
+  Value* getQualifiedClassName() {
+    return qualified_class_name_;
+  }
+
+ private:
   Value* value_;
+  Value* qualified_class_name_;
 };
 
 struct TORCH_API ExceptionValue : public SugaredValue {

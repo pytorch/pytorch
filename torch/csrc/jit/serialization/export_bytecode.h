@@ -20,6 +20,7 @@ struct TORCH_API CompilationOptions {
   bool incl_interface_call = false;
   bool enable_default_value_for_unspecified_arg = false;
   bool enable_default_args_before_out_args = true;
+  bool enable_emit_promoted_ops = true;
   int model_version = caffe2::serialize::kProducedBytecodeVersion;
 };
 

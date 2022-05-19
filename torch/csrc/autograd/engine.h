@@ -340,8 +340,6 @@ struct TORCH_API Engine {
 
   bool is_checkpoint_valid();
 
-  size_t ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device);
-
   // Should be called after fork to notify that worker threads are gone
   void release_workers();
 
