@@ -5,7 +5,8 @@ import torch
 from copy import deepcopy
 from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
+import unittest
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
@@ -246,6 +247,28 @@ class TestPythonRegistration(TestCase):
 
         del my_lib2
         del my_lib1
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
+    def test_alias_analysis(self):
+        def test_helper(alias_analysis=""):
+            my_lib1 = Library("foo", "DEF")
+
+            called = [0]
+
+            @torch.library.define(my_lib1, "_op() -> None", alias_analysis=alias_analysis)
+            def _op(*args, **kwargs):
+                called[0] += 1
+
+            @torch.jit.script
+            def _test():
+                torch.ops.foo._op()
+
+            assert "foo::_op" in str(_test.graph)
+
+        with self.assertRaises(AssertionError):
+            test_helper("")  # alias_analysis="FROM_SCHEMA"
+
+        test_helper("CONSERVATIVE")
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -894,8 +917,8 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
                 return func(*args, **kwargs)
 
         x = torch.randn(1)
-        with push_torch_dispatch_mode(partial(Logger, "A")):
-            with push_torch_dispatch_mode(partial(Logger, "B")):
+        with Logger.push("A"):
+            with Logger.push("B"):
                 x + x
         self.assertEqual(logs, ["B", "A"])
 
@@ -1163,72 +1186,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
         #    - More steps....
         y.exp()
 
-    def test_is_contiguous_slow_path(self):
-        data = torch.randn(3, 3)
-        contiguous_data = data.clone()
-        not_contiguous_data = torch.as_strided(data.clone(), (2, 2), (1, 2))
-
-        def subclass_helper(cls, data, use_wrapper_subclass):
-            if use_wrapper_subclass:
-                kwargs = {}
-                kwargs["device"] = data.device
-                kwargs["dtype"] = data.dtype
-                kwargs["layout"] = data.layout
-                kwargs["requires_grad"] = True
-                kwargs['dispatch_strides'] = True
-                return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
-            else:
-                return torch.Tensor._make_subclass(cls, data, True, dispatch_strides=True)
-
-        for use_wrapper_subclass in [True, False]:
-            class ExampleTensor1(torch.Tensor):
-                @staticmethod
-                def __new__(cls, data, wrapper):
-                    return subclass_helper(cls, data, wrapper)
-
-                @classmethod
-                def __torch_dispatch__(cls, func, types, args, kwargs):
-                    return NotImplemented
-
-            class ExampleTensor2(torch.Tensor):
-                @staticmethod
-                def __new__(cls, data, wrapper):
-                    return subclass_helper(cls, data, wrapper)
-
-                @classmethod
-                def __torch_dispatch__(cls, func, types, args, kwargs):
-                    if func.overloadpacket == torch.ops.aten.is_contiguous:
-                        return contiguous_data.is_contiguous()
-                    return NotImplemented
-
-            class ExampleTensor3(torch.Tensor):
-                @staticmethod
-                def __new__(cls, data, wrapper):
-                    return subclass_helper(cls, data, wrapper)
-
-                @classmethod
-                def __torch_dispatch__(cls, func, types, args, kwargs):
-                    if func.overloadpacket == torch.ops.aten.is_contiguous:
-                        return not_contiguous_data.is_contiguous()
-                    return NotImplemented
-
-
-            err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
-            e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(TypeError, err_msg):
-                e.is_contiguous()
-            with self.assertRaisesRegex(TypeError, err_msg):
-                e.contiguous()
-
-            e = ExampleTensor2(torch.randn(3, 3), use_wrapper_subclass)
-            self.assertEqual(e.is_contiguous(), True)
-            e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
-
-            err_msg = "no implementation found for"
-            e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
-            self.assertEqual(e.is_contiguous(), False)
-            with self.assertRaisesRegex(TypeError, err_msg):
-                e.contiguous()
 
 
 if __name__ == '__main__':
