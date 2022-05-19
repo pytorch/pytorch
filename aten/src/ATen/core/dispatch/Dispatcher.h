@@ -495,9 +495,9 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   at::RecordFunction guard(std::move(stepCallbacks));
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.operatorDef_->op.isObserved());
   auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
+  auto& schema = op.schema();
+  auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
   if (guard.needsInputs()) {
-    auto& schema = op.schema();
-    auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
     constexpr auto num_boxed_args = impl::boxed_size<Args...>();
     // If we used std::array<IValue, num_boxed_args> here, we would
     // have to spend time default constructing the IValues in
