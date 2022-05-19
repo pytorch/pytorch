@@ -81,10 +81,11 @@ std::vector<int64_t> expand_param_if_needed(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
-std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
+TORCH_API std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
   double size_d = 0;
   // shape inference code copied from RangeFactories.cpp arange_out function
   // Note: AT_DISPATCH_ALL_TYPES_AND is just a macro that defines the correct c++ scalar_t type depending on out tensor
+
   AT_DISPATCH_ALL_TYPES_AND(c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
     // Note: acc_type further defines an accumulataion type depending on the scalar_t and whether its on cuda vs cpu.
     using accscalar_t = at::acc_type<scalar_t, false>;
@@ -129,7 +130,6 @@ std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::
   // If any of start, end, or stop are floating-point, the dtype is inferred to be the default dtype, see get_default_dtype().
   // Otherwise, the dtype is inferred to be torch.int64.
 
-  // Since out tensor is specified, its dtype should always be used?
   return {Shape(out.scalar_type(), {size})};
 }
 
@@ -145,7 +145,7 @@ std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, c10::optiona
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_bernoulli_(at::Tensor & self, double p, c10::optional<at::Generator> generator) {
+std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, double p, c10::optional<at::Generator> generator) {
   return compute_shape_bernoulli(self, generator);
 }
 
@@ -224,11 +224,11 @@ std::vector<Shape> compute_shape_convolution(const at::Tensor & input, const at:
   }
 }
 
-std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
+std::vector<Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_masked_fill_(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
+std::vector<Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -242,6 +242,25 @@ std::vector<Shape> compute_shape_min(const at::Tensor & self){
   TORCH_CHECK(self.numel() > 0,
             "min(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.");
     return {Shape(self.scalar_type(), {})};
+}
+
+std::vector<Shape> compute_shape_nonzero(const at::Tensor& t, bool as_tuple) {
+  if (as_tuple) {
+    auto res = std::vector<Shape>();
+    for (auto dim_size : t.sizes()) {
+      res.emplace_back(Shape(at::kLong, {dim_size}));
+    }
+    return res;
+  }
+  int64_t max_elements = 1;
+  for (auto dim_size : t.sizes()) {
+    max_elements *= dim_size;
+  }
+  return {Shape(at::kLong, {max_elements, (int64_t)t.sizes().size()})};
+}
+
+std::vector<Shape> compute_shape_nonzero(const at::Tensor& self) {
+  return compute_shape_nonzero(self, false);
 }
 
 std::vector<Shape> compute_shape_embedding(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse){
@@ -361,24 +380,20 @@ std::vector<Shape> compute_shape_native_dropout_backward(const at::Tensor & grad
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_(at::Tensor & self, c10::optional<at::Generator> generator) {
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, c10::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_(at::Tensor & self, int64_t to, c10::optional<at::Generator> generator) {
-  return compute_shape_random_(self, generator);
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, int64_t to, c10::optional<at::Generator> generator) {
+  return compute_shape_random_functional(self, generator);
 }
 
-std::vector<Shape> compute_shape_random_(at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator) {
-  return compute_shape_random_(self, generator);
+std::vector<Shape> compute_shape_random_functional(const at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator) {
+  return compute_shape_random_functional(self, generator);
 }
 
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
-std::vector<Shape> compute_shape_relu_(at::Tensor& self) {
-  return compute_shape_relu(self);
 }
 
 std::vector<Shape> compute_shape_bitwise_and(const at::Tensor& self, const at::Scalar& other) {
@@ -398,7 +413,7 @@ std::vector<Shape> compute_shape_sum(
   return {Shape(self.scalar_type(), {})};;
 }
 
-std::vector<Shape> compute_shape_zero_(at::Tensor& self) {
+std::vector<Shape> compute_shape_zero_functional(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 

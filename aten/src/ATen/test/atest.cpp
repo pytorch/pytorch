@@ -185,7 +185,9 @@ TEST_F(atest, ne_operators) {
 
 TEST_F(atest, add_operators) {
   auto exp_tensor = tensor({-10, 1, 0, -1, 10});
-  run_binary_ops_test(add_out, x_tensor, y_tensor, exp_tensor, INTBOOL, 2);
+  run_binary_ops_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&, const at::Scalar&)>(
+      add_out, x_tensor, y_tensor, exp_tensor, INTBOOL, 2);
 }
 
 TEST_F(atest, max_operators) {
