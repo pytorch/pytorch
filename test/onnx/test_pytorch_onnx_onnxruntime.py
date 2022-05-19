@@ -1700,8 +1700,8 @@ class _TestONNXRuntime:
                 return torch.atan2(x, y)
 
         model = Model()
-        x = torch.randn(4, 4, dtype=torch.float32)
-        y = torch.randn(4, 4, dtype=torch.float32)
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
         self.run_test(model, (x, y))
 
     def test_clamp(self):
