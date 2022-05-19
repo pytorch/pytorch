@@ -18,6 +18,7 @@ load(
     "GENERATED_H",
     "GENERATED_H_CORE",
     "GENERATED_H_CUDA",
+    "aten_core_hdrs",
     "define_targets",
 )
 load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
@@ -213,6 +214,13 @@ header_template_rule(
 )
 
 cc_library(
+    name = "aten_core_headers",
+    hdrs = aten_core_hdrs(),
+    strip_include_prefix = "aten/src/",
+    deps = ["//c10:headers"],
+)
+
+cc_library(
     name = "aten_headers",
     hdrs = [
         "torch/csrc/Export.h",
@@ -225,7 +233,7 @@ cc_library(
         "aten/src/TH/**/*.cpp",
         "aten/src/THC/*.cuh",
         "aten/src/THC/generic/*.cu",
-    ],
+    ], exclude = aten_core_hdrs()
     ) + [
         ":aten_src_ATen_config",
         ":gen_aten",
@@ -234,6 +242,7 @@ cc_library(
         "aten/src",
     ],
     deps = [
+        ":aten_core_headers",
         "//c10:headers",
     ],
 )
