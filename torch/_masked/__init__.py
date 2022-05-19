@@ -1065,7 +1065,6 @@ elements, have ``nan`` values.
         raise ValueError(f'masked sum expects strided tensor (got {input.layout} tensor)')
 
 
-
 @_apply_docstring_templates
 def median(input: Tensor,
            dim: int = -1,
@@ -1073,7 +1072,6 @@ def median(input: Tensor,
            keepdim: bool = False,
            dtype: Optional[DType] = None,
            mask: Optional[Tensor] = None) -> Tensor:
-
     """\
 {reduction_signature}
 {reduction_descr}
@@ -1136,7 +1134,8 @@ def logaddexp(input: Tensor,
         mask_other = _combine_input_and_mask(logsumexp, other, other_mask)
         return torch.logaddexp(mask_input, mask_other).to(dtype=dtype)
     else:
-        raise ValueError(f'masked logaddexp expects strided tensors (got {input.layout} tensor for input, {other.layout} for other)')
+        raise ValueError(
+            f'masked logaddexp expects strided tensors (got {input.layout} tensor for input, {other.layout} for other)')
 
 
 @_apply_docstring_templates
