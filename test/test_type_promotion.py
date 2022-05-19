@@ -124,7 +124,7 @@ class TestTypePromotion(TestCase):
         other = torch.tensor(5.5, dtype=torch.double, device=device)
         self.assertEqual((a + other).dtype, torch.complex64)
 
-        def make_scalar(dtype):
+        def make_scalar_tensor(dtype):
             return make_tensor((), dtype=dtype, device=device)
 
         def make_1d_tensor(dtype):
@@ -135,8 +135,8 @@ class TestTypePromotion(TestCase):
             # Complex Scalar and Float Tensor -> Complex Tensor with Value type of Float Tensor
             # Complex Scalar and Integral Tensor -> Complex Tensor with Value type of Complex Scalar
 
-            # defaults to return complex64 (for bfloat16)
             if is_float_tensor:
+                # defaults to return complex64 (for bfloat16)
                 expected_dtype = float_to_corresponding_complex_type_map.get(t.dtype, torch.complex64)
             else:  # integral tensor
                 if isinstance(s, torch.Tensor):
@@ -150,7 +150,7 @@ class TestTypePromotion(TestCase):
 
         if torch.device(device).type != 'xla':
             # chalf is not supported on XLA
-            s = make_scalar(dtype=torch.chalf)
+            s = make_scalar_tensor(dtype=torch.chalf)
             # Same Value type
             t = make_1d_tensor(dtype=torch.half)
             # 0-D Tensor X 1-D Tensor
@@ -174,7 +174,7 @@ class TestTypePromotion(TestCase):
             complex_scalar_tensor_test(s.item(), t, is_float_tensor=False)
 
         # CFloat Scalar
-        s = make_scalar(dtype=torch.cfloat)
+        s = make_scalar_tensor(dtype=torch.cfloat)
         # Lower Value type than CFloat
         t = make_1d_tensor(dtype=torch.half)
         complex_scalar_tensor_test(s, t, is_float_tensor=True)
@@ -193,7 +193,7 @@ class TestTypePromotion(TestCase):
         complex_scalar_tensor_test(s.item(), t, is_float_tensor=False)
 
         # CDouble Scalar
-        s = make_scalar(dtype=torch.cdouble)
+        s = make_scalar_tensor(dtype=torch.cdouble)
 
         # Lower Value type than CDouble
         t = make_1d_tensor(dtype=torch.float)

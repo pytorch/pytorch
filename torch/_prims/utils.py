@@ -924,7 +924,7 @@ def elementwise_dtypes(
     result_dtype = None
 
     def _find_highest_dtype_filtered(
-        args, filter, *, float_as_complex=False, all_tensors_equal=False
+        args, filter, *, float_as_complex=False
     ) -> Optional[torch.dtype]:
         zero_dim_tensor_dtype = None
         one_plus_dim_tensor_dtype = None

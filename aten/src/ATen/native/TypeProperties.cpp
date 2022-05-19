@@ -81,12 +81,6 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   if(isComplexType(higher)) {
     return higher;
   } else if (isComplexType(lower)) {
-    // special case for bfloat16
-    if (higher == kBFloat16) {
-      // BFloat16 corresponds to Float in terms of range,
-      // so we return ComplexFloat
-      return kComplexFloat;
-    }
     // preserve value type of higher if it is floating type.
     if (isFloatingType(higher)) {
       return toComplexType(higher);
