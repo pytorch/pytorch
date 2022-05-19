@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import functools
 from torch.utils._pytree import tree_map, tree_flatten
 import torch._prims.utils as utils
+from torch._prims.wrappers import out_wrapper_multi
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -392,7 +393,7 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss, register_meta=True)
+@register_decomposition(aten.huber_loss)
 @pw_cast_for_opmath
 def huber_loss(
     self: Tensor,
@@ -1125,7 +1126,7 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(aten.detach)
+@register_decomposition(aten.detach, disable_meta=True)
 def detach_decomposition(x):
     return x
 
@@ -1277,7 +1278,8 @@ def trace(self: Tensor) -> Tensor:
 
 
 # nb: Should use acc_t, not op_math
-@register_decomposition(aten.log_sigmoid_forward.default)
+@register_decomposition(aten.log_sigmoid_forward)
+@out_wrapper_multi('output', 'buffer')
 @pw_cast_for_opmath
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
