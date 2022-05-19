@@ -2,11 +2,7 @@
 #define TH_GENERIC_FILE "torch/csrc/generic/serialization.cpp"
 #else
 
-#ifdef THC_GENERIC_FILE
-#include <c10/cuda/CUDAGuard.h>
-#else
 #include <c10/core/CPUAllocator.h>
-#endif
 
 // save_save is necessary since the old eager format saved storages as
 // [size + data], but the v1.5 eager format removes this since size is saved in
@@ -14,26 +10,28 @@
 template <class io>
 void THPStorage_(writeFileRaw)(c10::StorageImpl *self, io fd, bool save_size, uint64_t element_size)
 {
-#ifdef THC_GENERIC_FILE
-  c10::cuda::CUDAGuard guard(self->device());
-#endif
-
+  c10::DeviceGuard guard(self->device());
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t *data;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  std::unique_ptr<char[]> cpu_data;
   int64_t size_bytes = self->nbytes();
   int64_t numel = size_bytes / element_size;
-#ifndef THC_GENERIC_FILE
-  data = self->data<scalar_t>();
-#else
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::unique_ptr<char[]> cpu_data(new char[size_bytes]);
-  data = (scalar_t*)cpu_data.get();
-  C10_CUDA_CHECK(cudaMemcpy(
-      data,
-      self->data<scalar_t>(),
-      size_bytes,
-      cudaMemcpyDeviceToHost));
+  if (self->device_type() == at::kCPU) {
+    data = self->data<scalar_t>();
+#ifdef USE_CUDA
+  } else if (self->device_type() == at::kCUDA) {
+    cpu_data = std::unique_ptr<char[]>(new char[size_bytes]);
+    data = (scalar_t*)cpu_data.get();
+    C10_CUDA_CHECK(cudaMemcpy(
+        data,
+        self->data<scalar_t>(),
+        size_bytes,
+        cudaMemcpyDeviceToHost));
 #endif
+  } else {
+    TORCH_CHECK(false, "writeFileRaw: Device not recognized: ", self->device_type());
+  }
   if (save_size) {
     if (torch::utils::THP_nativeByteOrder() ==
         torch::utils::THPByteOrder::THP_LITTLE_ENDIAN)
@@ -93,13 +91,10 @@ template <class io>
 c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw)(
     io file, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size)
 {
-#ifdef THC_GENERIC_FILE
-  c10::cuda::OptionalCUDAGuard guard;
+  c10::OptionalDeviceGuard guard;
   if (storage.defined()) {
-    guard.set_device(storage->device());
+    guard.reset_device(storage->device());
   }
-#endif
-
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t *data;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -118,11 +113,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw)(
     storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       nbytes,
-#if defined(THC_GENERIC_FILE)
-      c10::cuda::CUDACachingAllocator::get(),
-#else
       c10::GetDefaultCPUAllocator(),
-#endif
       /*resizable=*/true);
   } else {
     int64_t _storage_nbytes = storage->nbytes();
@@ -133,13 +124,15 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw)(
         _storage_nbytes);
   }
 
-#ifndef THC_GENERIC_FILE
-  data = storage->data<scalar_t>();
-#else
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::unique_ptr<char[]> cpu_data(new char[nbytes]);
-  data = (scalar_t*)cpu_data.get();
-#endif
+  std::unique_ptr<char[]> cpu_data;
+
+  if (storage->device_type() == at::kCPU) {
+    data = storage->data<scalar_t>();
+  } else {
+    cpu_data = std::unique_ptr<char[]>(new char[nbytes]);
+    data = (scalar_t*)cpu_data.get();
+  }
 
   // fast track for bytes and little endian
   if (element_size == 1 ||
@@ -179,8 +172,10 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw)(
     }
   }
 
-#ifdef THC_GENERIC_FILE
-  C10_CUDA_CHECK(cudaMemcpy(storage->data<scalar_t>(), data, nbytes, cudaMemcpyHostToDevice));
+#ifdef USE_CUDA
+  if (storage->device_type() == at::kCUDA) {
+    C10_CUDA_CHECK(cudaMemcpy(storage->data<scalar_t>(), data, nbytes, cudaMemcpyHostToDevice));
+  }
 #endif
   return storage;
 }
