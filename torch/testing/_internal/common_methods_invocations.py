@@ -9569,8 +9569,8 @@ def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
 
 
 def gradcheck_wrapper_masked_pointwise_operation(op, input, *args, **kwargs):
-    """Gradcheck wrapper for masked pointwise operations. Assumes that if either
-    tensor is masked at a specific index, then the result will be maxed
+    """Gradcheck wrapper for masked pointwise operations. Assumes that the result
+    will be masked iff both tensors are masked at a specific index
 
     When mask is specified, replaces masked-out elements with zeros.
 
@@ -9580,8 +9580,10 @@ def gradcheck_wrapper_masked_pointwise_operation(op, input, *args, **kwargs):
     output = op(input, *args, **kwargs)
     input_mask = kwargs.get('input_mask')
     other_mask = kwargs.get('other_mask')
-    if input_mask is not None or other_mask is not None:
-        output_mask = torch.logical_or(input_mask, other_mask)
+    if input_mask is not None and other_mask is not None:
+        combined_mask = torch.logical_and(input_mask, other_mask)
+        new_kwargs = dict(mask=combined_mask, **kwargs)
+        output_mask = torch._masked._input_mask(input, *args, **new_kwargs)
         output = torch.where(output_mask, output, output.new_zeros([]))
     return output
 
@@ -18207,13 +18209,14 @@ op_db: List[OpInfo] = [
     OpInfo(
         '_masked.logaddexp',
         dtypes=floating_types_and(torch.bfloat16),
-        supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        check_batched_forward_grad=False,
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
         ),
         sample_inputs_func=sample_inputs_masked_logaddexp,
         gradcheck_wrapper=gradcheck_wrapper_masked_pointwise_operation

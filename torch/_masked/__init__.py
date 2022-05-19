@@ -1133,7 +1133,7 @@ def logaddexp(input: Tensor,
         dtype = input.dtype
     if input.layout == torch.strided and other.layout == torch.strided:
         mask_input = _combine_input_and_mask(logsumexp, input, input_mask)
-        mask_other = _combine_input_and_mask(logsumexp, input, other_mask)
+        mask_other = _combine_input_and_mask(logsumexp, other, other_mask)
         return torch.logaddexp(mask_input, mask_other).to(dtype=dtype)
     else:
         raise ValueError(f'masked logaddexp expects strided tensors (got {input.layout} tensor for input, {other.layout} for other)')
