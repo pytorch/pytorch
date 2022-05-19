@@ -26,10 +26,7 @@ Updated operators:
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
-from torch.nn.functional import (
-    GRID_SAMPLE_INTERPOLATION_MODES,
-    GRID_SAMPLE_PADDING_MODES,
-)
+import torch.nn.functional
 from torch.onnx import symbolic_helper
 
 
@@ -37,8 +34,8 @@ from torch.onnx import symbolic_helper
 # Because `torch.nn.functional.grid_sample` calls `torch.grid_sampler`.
 @symbolic_helper.parse_args("v", "v", "i", "i", "b")
 def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
-    mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
-    padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
+    mode_s = {v: k for k, v in torch.nn.functional.GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
+    padding_mode_s = {v: k for k, v in torch.nn.functional.GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
     return g.op(
         "GridSample",
         input,
