@@ -8,19 +8,27 @@ void mps_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack)
 {
   TORCH_WARN_ONCE("The operator '", op.schema().operator_name(), "' is not currently supported ",
                   "on the MPS backend and will fall back to run on the CPU.",
-                  " This may performance implications.");
+                  " This may have performance implications.");
   native::cpu_fallback(op, stack);
+}
+
+void mps_error_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack)
+{
+  TORCH_CHECK(false, "The operator '", op.schema().operator_name(), "' is not current implemented ",
+              "for the MPS device. If you want this op to be added in priority during the prototype ",
+              "phase of this feature, please comment on https://github.com/pytorch/pytorch/issues/77764. ",
+              "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ",
+              "to use the CPU as a fallback for this op. WARNING: this will be slower than running natively ",
+              "on MPS.")
 }
 
 TORCH_LIBRARY_IMPL(_, MPS, m) {
   static const char *enable_mps_fallback = getenv("PYTORCH_ENABLE_MPS_FALLBACK");
   if (!enable_mps_fallback || std::stoi(enable_mps_fallback) == 0) {
-    TORCH_WARN("The op is currently not supported on MPS. You can use",
-    "`PYTORCH_ENABLE_MPS_FALLBACK=1` environment variable to enable fallback on",
-    " CPU. This may have perf implications.");
-    return;
+    m.fallback(torch::CppFunction::makeFromBoxedFunction<&mps_error_fallback>());
+  } else {
+    m.fallback(torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   }
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
 }
 
 TORCH_LIBRARY_IMPL(aten, MPS, m) {
