@@ -17988,7 +17988,8 @@ op_db: List[OpInfo] = [
     ReductionOpInfo(
         '_masked.median',
         ref=reference_reduction_numpy(np.median) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
-        dtypes=floating_types_and(torch.bfloat16),  # row may be masked out so need floating type for nan's
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16),
         method_variant=None,
         nan_policy='omit',
         supports_out=False,
