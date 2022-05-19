@@ -18209,6 +18209,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         '_masked.logaddexp',
         dtypes=floating_types_and(torch.bfloat16),
+        supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
