@@ -124,13 +124,13 @@ def define_targets(rules):
         tools = ["//tools/setup_helpers:gen_version_header"],
     )
 
-def aten_core_hdrs():
+def aten_core_hdrs(rules):
     """The source files that are part of the aten_core_headers target.
 
     Note that this is a function because globs are not permitted at
     global scope in Starlark.
     """
-    return glob([
+    return rules.glob([
         "aten/src/ATen/core/*.h",
         "aten/src/ATen/ops/*.h",
         "aten/src/ATen/core/boxing/*.h",
