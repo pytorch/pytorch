@@ -628,6 +628,7 @@ meta_function_skips = {
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_xor: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
+    torch.logit: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
     # BEGIN TODO
@@ -726,6 +727,7 @@ meta_function_device_skips['cuda'] = {
     torch.linalg.matrix_power: {f32, f64},
     torch.linalg.matrix_rank: {f32, f64},
     torch.linalg.svd: {f32, f64},
+    torch.logit: {f16},
     torch.nn.functional.cross_entropy: {f16},
     torch.nn.functional.interpolate: {f16},
     torch.nn.functional.nll_loss: {f16},
@@ -829,6 +831,7 @@ meta_dispatch_expected_failures = {
     aten.logical_not.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.logical_not_.default: {bf16, f16, f64, f32},
     aten.logical_xor.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
+    aten.logit.out: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.max_pool3d_with_indices.default: {f64, f32},
@@ -970,6 +973,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.log_sigmoid_forward.output: {f16},  # aten::log_sigmoid_forward.output
     aten.logcumsumexp.default: {bf16, f16},  # aten::_logcumsumexp
     aten.logcumsumexp.out: {bf16, f16},  # aten::_logcumsumexp.out
+    aten.logit.out: {f16},
     aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices
     aten.max_unpool2d.default: {f16},  # aten::max_unpool2d
     aten.max_unpool3d.default: {f16},  # aten::max_unpool3d
