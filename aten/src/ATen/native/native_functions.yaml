@@ -1433,7 +1433,7 @@
     MkldnnCPU: copy_mkldnn_
     SparseCPU, SparseCUDA: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
-    SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
+    SparseCsrCPU, SparseCsrCUDA: copy_sparse_compressed_
   autogen: copy.out
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
@@ -4601,9 +4601,6 @@
   variants: function, method
 
 - func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: square_out
-    MPS: square_out_mps
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5698,7 +5695,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_to_dense
-    SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_dense
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_dense
     MkldnnCPU: mkldnn_to_dense
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
@@ -5859,13 +5856,13 @@
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse
-    SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_sparse
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
 
 - func: to_sparse(Tensor self) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse
-    SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_sparse
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
 
 - func: to_sparse_csr(Tensor self) -> Tensor
   variants: method
