@@ -363,7 +363,15 @@ def atan(g, self):
 
 
 def atan2(g, input, other):
-    return g.op("Atan", g.op("Div", input, other))
+    div_res = div(g, input, other)
+    atan = g.op("Atan", div_res)
+    negpi = torch.tensor(-math.pi, dtype=torch.float32)
+    zero = torch.tensor(0.0, dtype=torch.float32)
+    lessZero = g.op("Less", other, zero)
+    sign = g.op("Sign", atan)
+    mul = g.op("Mul", sign, negpi)
+    where = g.op("Where", lessZero, mul, zero)
+    return g.op("Add", atan, where)
 
 
 def sigmoid(g, self):
