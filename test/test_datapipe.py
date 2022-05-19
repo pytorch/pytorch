@@ -1492,7 +1492,6 @@ class TestFunctionalIterDataPipe(TestCase):
 
             # Test Deterministic
             for num_workers in (0, 1, 2):
-                dl_res = []
                 mp_ctx = "spawn" if num_workers > 0 else None
                 dl = DataLoader(
                     shuffle_dp,
@@ -1501,6 +1500,14 @@ class TestFunctionalIterDataPipe(TestCase):
                     multiprocessing_context=mp_ctx,
                     worker_init_fn=_worker_init_fn
                 )
+
+                # No seed
+                dl_res_ns = list(dl)
+                self.assertEqual(len(dl_res_ns), len(exp))
+                self.assertEqual(sorted(dl_res_ns), sorted(exp))
+
+                # Same seeds
+                dl_res = []
                 for epoch in range(2):
                     torch.manual_seed(123)
                     dl_res.append(list(dl))
