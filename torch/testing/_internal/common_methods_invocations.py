@@ -18709,6 +18709,10 @@ python_ref_db = [
         "_refs.tan",
         torch_opinfo_name="tan",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.tanh",
+        torch_opinfo_name="tanh",
+    ),
     #
     # Elementwise Unary Special OpInfos
     #
@@ -18743,6 +18747,16 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.elu",
         decorators=(
             # https://github.com/pytorch/pytorch/issues/77054
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.mish",
+        torch_opinfo_name="nn.functional.mish",
+        decorators=(
             DecorateInfo(toleranceOverride({
                 torch.bfloat16: tol(atol=1e-2, rtol=0),
                 torch.float16: tol(atol=1e-3, rtol=0),
