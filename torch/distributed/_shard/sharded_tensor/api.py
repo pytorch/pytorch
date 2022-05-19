@@ -42,7 +42,7 @@ from .utils import (
 )
 from torch.overrides import handle_torch_function
 from torch.distributed.remote_device import _remote_device
-
+from torch.utils._pytree import tree_map
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -51,16 +51,6 @@ _sharded_tensor_map: Dict[int, 'weakref.ReferenceType[ShardedTensor]'] = {}
 
 # Custom sharded ops
 _SHARDED_OPS: Dict[Callable, Callable] = {}
-def _register_sharded_op(op, func):
-    from inspect import signature
-    if len(signature(func).parameters) != 4:
-        raise TypeError(
-            f'Custom sharded op function expects signature: '
-            f'(types, args, kwargs, process_group), but received '
-            f'signature: {signature(func)}')
-
-    global _SHARDED_OPS
-    _SHARDED_OPS[op] = func
 
 def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]], rpc_rank: int):
     with _sharded_tensor_lock:
@@ -794,7 +784,14 @@ class ShardedTensor(object):
         def dispatch(st: ShardedTensor, func: Callable):
             # Dispatch to custom sharding spec op if it has one.
             if _has_custom_op(st._sharding_spec, func):
-                return _dispatch_custom_op(st._sharding_spec, func, types, args, kwargs)
+                return _dispatch_custom_op(
+                    st._sharding_spec,
+                    func,
+                    types,
+                    args,
+                    kwargs,
+                    st._process_group
+                )
 
             if func in _SHARDED_OPS:
                 return _SHARDED_OPS[func](types, args, kwargs, st._process_group)
@@ -804,13 +801,18 @@ class ShardedTensor(object):
                 f"kwargs: {kwargs} not supported for ShardedTensor!")
 
         # Find ShardedTensor instance to get process_group and sharding_spec.
-        for arg in args:
-            if isinstance(arg, ShardedTensor):
-                return dispatch(arg, func)
+        st_instance = None
 
-        for kwarg in kwargs.values():
-            if isinstance(kwarg, ShardedTensor):
-                return dispatch(kwarg, func)
+        def find_sharded_tensor(e):
+            nonlocal st_instance
+            if st_instance is None and isinstance(e, ShardedTensor):
+                st_instance = e
+
+        tree_map(find_sharded_tensor, args)
+        tree_map(find_sharded_tensor, kwargs)
+
+        if st_instance is not None:
+            return dispatch(st_instance, func)
 
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
