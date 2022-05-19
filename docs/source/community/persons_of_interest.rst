@@ -1,5 +1,5 @@
-PyTorch Governance | Persons of Interest
-=========================================
+PyTorch Governance | Maintainers
+================================
 
 General Maintainers
 -------------------

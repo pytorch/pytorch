@@ -119,7 +119,7 @@ Features described in this documentation are classified by release status:
    :maxdepth: 1
    :caption: Community
 
-   community/*
+   community/index.rst
 
 Indices and tables
 ==================

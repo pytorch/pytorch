@@ -1,5 +1,5 @@
-PyTorch Governance
-==========================
+PyTorch Governance | Mechanics
+==============================
 
 Governance Philosophy and Guiding Tenets
 -----------------------------------------
