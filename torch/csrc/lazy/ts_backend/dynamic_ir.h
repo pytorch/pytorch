@@ -51,8 +51,11 @@ class TORCH_API DimensionNode : public lazy::TsNode {
   }
 
   std::string ToString() const override;
-
   virtual int64_t getStaticValue() const = 0;
+
+  protected:
+  // Only valid for ops which have DimensionNode operands.
+  const DimensionNode* getOpDimNode(size_t index) const;
 };
 
 // Represents the result of calling `size` on a Tensor
@@ -62,7 +65,7 @@ class TORCH_API SizeNode : public DimensionNode {
   int64_t getStaticValue() const override;
   std::string ToString() const override;
   size_t dim_ = 0;
-  virtual TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+  TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                           TSLoweringContext* loctx) const override;
 };
 
