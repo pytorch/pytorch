@@ -130,12 +130,12 @@ class TestTypePromotion(TestCase):
         def make_1d_tensor(dtype):
             return make_tensor((3,), dtype=dtype, device=device)
 
-        def complex_scalar_tensor_test(s, t, is_float_tensor):
+        def complex_scalar_tensor_test(s, t):
             # As per type promotion rules,
             # Complex Scalar and Float Tensor -> Complex Tensor with Value type of Float Tensor
             # Complex Scalar and Integral Tensor -> Complex Tensor with Value type of Complex Scalar
 
-            if is_float_tensor:
+            if t.dtype.is_floating_point:
                 # defaults to return complex64 (for bfloat16)
                 expected_dtype = float_to_corresponding_complex_type_map.get(t.dtype, torch.complex64)
             else:  # integral tensor
@@ -154,56 +154,56 @@ class TestTypePromotion(TestCase):
             # Same Value type
             t = make_1d_tensor(dtype=torch.half)
             # 0-D Tensor X 1-D Tensor
-            complex_scalar_tensor_test(s, t, is_float_tensor=True)
+            complex_scalar_tensor_test(s, t)
             # Python Scalar X 1-D Tensor
-            complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+            complex_scalar_tensor_test(s.item(), t)
 
             # Higher Value Type
             t = make_1d_tensor(dtype=torch.float)
-            complex_scalar_tensor_test(s, t, is_float_tensor=True)
-            complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+            complex_scalar_tensor_test(s, t)
+            complex_scalar_tensor_test(s.item(), t)
 
             # Special Case
             t = make_1d_tensor(dtype=torch.bfloat16)
-            complex_scalar_tensor_test(s, t, is_float_tensor=True)
-            complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+            complex_scalar_tensor_test(s, t)
+            complex_scalar_tensor_test(s.item(), t)
 
             # Integral Tensor
             t = make_1d_tensor(dtype=torch.long)
-            complex_scalar_tensor_test(s, t, is_float_tensor=False)
-            complex_scalar_tensor_test(s.item(), t, is_float_tensor=False)
+            complex_scalar_tensor_test(s, t)
+            complex_scalar_tensor_test(s.item(), t)
 
         # CFloat Scalar
         s = make_scalar_tensor(dtype=torch.cfloat)
         # Lower Value type than CFloat
         t = make_1d_tensor(dtype=torch.half)
-        complex_scalar_tensor_test(s, t, is_float_tensor=True)
-        complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
 
         # Higher Value type than CFloat
         t = make_1d_tensor(dtype=torch.double)
-        complex_scalar_tensor_test(s, t, is_float_tensor=True)
-        complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
 
         # Integral Tensor
         t = make_1d_tensor(dtype=torch.long)
         # 0-D Tensor X 1-D Tensor
-        complex_scalar_tensor_test(s, t, is_float_tensor=False)
+        complex_scalar_tensor_test(s, t)
         # Python Scalar X 1-D Tensor
-        complex_scalar_tensor_test(s.item(), t, is_float_tensor=False)
+        complex_scalar_tensor_test(s.item(), t)
 
         # CDouble Scalar
         s = make_scalar_tensor(dtype=torch.cdouble)
 
         # Lower Value type than CDouble
         t = make_1d_tensor(dtype=torch.float)
-        complex_scalar_tensor_test(s, t, is_float_tensor=True)
-        complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
 
         # Special Case
         t = make_1d_tensor(dtype=torch.bfloat16)
-        complex_scalar_tensor_test(s, t, is_float_tensor=True)
-        complex_scalar_tensor_test(s.item(), t, is_float_tensor=True)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
 
     @float_double_default_dtype
     def test_complex_scalar_mult_tensor_promotion(self, device):
