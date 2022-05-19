@@ -1975,10 +1975,6 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
     for size, ord_, keepdim in product(sizes, ords, (True, False)):
         for dim in dims:
             yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=dim))
-            if dtype == torch.float32:
-                yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=dim, dtype=torch.float64))
-            if dtype == torch.complex64:
-                yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=dim, dtype=torch.complex128))
 
         # Test several dims
         if len(size) == 2:
