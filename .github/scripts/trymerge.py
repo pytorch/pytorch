@@ -77,6 +77,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
                   nodes {
                     name
                     conclusion
+                    detailsUrl
                   }
                   pageInfo {
                     endCursor
@@ -84,6 +85,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
                   }
                 }
                 conclusion
+                url
               }
               pageInfo {
                 endCursor
@@ -179,6 +181,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
                   nodes {
                     name
                     conclusion
+                    detailsUrl
                   }
                   pageInfo {
                     endCursor
@@ -186,6 +189,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
                   }
                 }
                 conclusion
+                url
               }
               pageInfo {
                 endCursor
@@ -411,7 +415,7 @@ class GitHubPR:
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
-        self.conclusions: Optional[Dict[str, str]] = None
+        self.conclusions: Optional[Dict[str, Tuple[str, str]]] = None
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
         self._reviews: Optional[List[Tuple[str, str]]] = None
@@ -526,8 +530,8 @@ class GitHubPR:
     def get_committer_author(self, num: int = 0) -> str:
         return self._fetch_authors()[num][1]
 
-    def get_checkrun_conclusions(self) -> Dict[str, str]:
-        """ Returns list of checkrun / conclusions """
+    def get_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
+        """ Returns dict of checkrun -> [conclusion, url] """
         if self.conclusions is not None:
             return self.conclusions
         orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
@@ -539,10 +543,10 @@ class GitHubPR:
                 workflow_run = node["workflowRun"]
                 checkruns = node["checkRuns"]
                 if workflow_run is not None:
-                    conclusions[workflow_run["workflow"]["name"]] = node["conclusion"]
+                    conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
                 if checkruns is not None:
                     for checkrun_node in checkruns["nodes"]:
-                        conclusions[checkrun_node["name"]] = checkrun_node["conclusion"]
+                        conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
 
         add_conclusions(checksuites["nodes"])
         while bool(checksuites["pageInfo"]["hasNextPage"]):
@@ -646,7 +650,7 @@ class GitHubPR:
         checks = self.get_checkrun_conclusions()
         if checks is None or checkrun_name not in checks:
             return False
-        return checks[checkrun_name] != "SUCCESS"
+        return checks[checkrun_name][0] != "SUCCESS"
 
     def merge_ghstack_into(self, repo: GitRepo, force: bool, comment_id: Optional[int] = None) -> None:
         assert self.is_ghstack_pr()
@@ -785,25 +789,32 @@ def find_matching_merge_rule(pr: GitHubPR,
                                  f"{','.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
             continue
         if rule.mandatory_checks_name is not None:
-            pending_checks = []
-            failed_checks = []
+            pending_checks: List[Tuple[str, Optional[str]]] = []
+            failed_checks: List[Tuple[str, Optional[str]]] = []
             checks = pr.get_checkrun_conclusions()
             # HACK: We don't want to skip CLA check, even when forced
             for checkname in filter(lambda x: force is False or "CLA Check" in x, rule.mandatory_checks_name):
-                if checkname not in checks or checks[checkname] is None:
-                    pending_checks.append(checkname)
-                elif checks[checkname] != 'SUCCESS':
-                    failed_checks.append(checkname)
+                if checkname not in checks:
+                    pending_checks.append((checkname, None))
+                elif checks[checkname][0] is None:
+                    pending_checks.append((checkname, checks[checkname][1]))
+                elif checks[checkname][0] != 'SUCCESS':
+                    failed_checks.append((checkname, checks[checkname][1]))
+
+        def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
+            return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
+
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
-                reject_reason = f"Refusing to merge as mandatory check(s) {','.join(failed_checks)} failed for rule {rule_name}"
+                reject_reason = ("Refusing to merge as mandatory check(s)" +
+                                 checks_to_str(failed_checks) + f" failed for rule {rule_name}")
             continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
-                reject_reason = f"Refusing to merge as mandatory check(s) {','.join(pending_checks)}"
-                reject_reason += f" are not yet run for rule {rule_name}"
+                reject_reason = f"Refusing to merge as mandatory check(s) {checks_to_str(pending_checks)}"
+                reject_reason += f" are pending/not yet run for rule {rule_name}"
             continue
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
