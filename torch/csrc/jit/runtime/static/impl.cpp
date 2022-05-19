@@ -1201,7 +1201,7 @@ c10::IValue BlockRunner::run_impl_record_functions(
     const KeywordArgs& kwargs) {
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_MODEL);
-  if (C10_UNLIKELY(step_callbacks.has_value() && !step_callbacks->empty())) {
+  if (C10_UNLIKELY(step_callbacks.has_value())) {
     at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     guard.needsInputs()
@@ -1845,7 +1845,7 @@ void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_OP);
-  if (C10_UNLIKELY(step_callbacks.has_value() && !step_callbacks->empty())) {
+  if (C10_UNLIKELY(step_callbacks.has_value())) {
     at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     if (guard.needsInputs()) {
