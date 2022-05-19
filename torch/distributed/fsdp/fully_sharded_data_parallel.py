@@ -439,14 +439,14 @@ class FullyShardedDataParallel(nn.Module):
         previously initialized optimizers.
 
     .. warning::
-        ``module`` should be already placed on the destination device or
-        device is set properly using ``torch.cuda.set_device(device_id)``.
-        Alternatively, if module is input on CPU, ``device_id`` argument can
-        be specified to move module to CUDA device during initialization.
-        FSDP will get compute device from module first, if module device
-        is CPU, FSDP will then get compute device from current device. Note
-        that if ``device_id`` is specified, compute device will always match
-        ``device_id``.
+        If the destination CUDA device has ID ``dev_id``, either (1)
+        ``module`` should already be placed on that device, (2) the device
+        should be set using ``torch.cuda.set_device(dev_id)``, or (3)
+        ``dev_id`` should be passed into the ``device_id`` constructor
+        argument. This FSDP instance's compute device will be that destination
+        device. For (1) and (3), the FSDP initialization always occurs on GPU.
+        For (2), the FSDP initialization happens on ``module`` 's current
+        device, which may be CPU.
 
     .. warning::
         FSDP currently does not support gradient accumulation outside
