@@ -740,6 +740,27 @@ RegisterOperators reg_view_copy({
 });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_flatten_copy({
+    Operator(
+        "prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor",
+        [](const Node* node) -> Operation {
+          return [node](Stack& stack) {
+            TORCH_CHECK(
+                node->s(attr::name) == "CudaFusionGroup",
+                "flatten_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, start_dim, end_dim;
+            pop(stack, self, start_dim, end_dim);
+            push(
+                stack,
+                at::native::flatten(
+                    self.toTensor(), start_dim.toInt(), end_dim.toInt()));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_reshape_copy({
     Operator(
         "prim::reshape_copy(Tensor self, int[] shape) -> Tensor",
