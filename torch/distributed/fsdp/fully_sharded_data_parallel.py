@@ -428,7 +428,7 @@ class FullyShardedDataParallel(nn.Module):
         previously initialized optimizers.
 
     .. warning::
-        Module should be already placed on the destination device or
+        ``module`` should be already placed on the destination device or
         device is set properly using ``torch.cuda.set_device(device_id)``.
         Alternatively, if module is input on CPU, ``device_id`` argument can
         be specified to move module to CUDA device during initialization.
@@ -439,7 +439,7 @@ class FullyShardedDataParallel(nn.Module):
 
     .. warning::
         FSDP currently does not support gradient accumulation outside
-        `no_sync()` when using CPU offloading. Trying to do so yields incorrect
+        ``no_sync()`` when using CPU offloading. Trying to do so yields incorrect
         results since FSDP will use the newly-reduced gradient instead of
         accumulating with any existing gradient.
 
@@ -502,7 +502,7 @@ class FullyShardedDataParallel(nn.Module):
             the near future. It allows users to enable two different backward_prefetch
             algorithms to help backward communication and computation overlapping.
             Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
-        mixed_precision: (Optional[MixedPrecision]): A ``MixedPrecision`` instance
+        mixed_precision (Optional[MixedPrecision]): A ``MixedPrecision`` instance
             describing the mixed precision training config to be used. ``MixedPrecision``
             supports configuring parameter, buffer, and gradient communication dtype. Note
             that only floating point data is cast to the reduced precision. This allows
@@ -527,7 +527,7 @@ class FullyShardedDataParallel(nn.Module):
             avoid sharding specific parameters when using an
             ``auto_wrap_policy`` or if parameters' sharding is not managed by
             FSDP. (Default: ``None``)
-        param_init_fn: (Optional[Callable[[nn.Module], None]]):
+        param_init_fn (Optional[Callable[[nn.Module], None]]):
             A ``Callable[torch.nn.Module] -> None`` that
             specifies how modules that are currently on the meta device should be initialized
             onto an actual device. Note that as of v1.12, we detect modules on the meta
@@ -1841,7 +1841,7 @@ class FullyShardedDataParallel(nn.Module):
         the entire (nested) model into memory and taking the local model's
         ``state_dict`` on every rank, which could result in OOM if the model
         cannot fit on a single GPU. As a result, :func:`state_dict_type` API is
-        available to configure between `state_dict` implementations. User can
+        available to configure between ``state_dict`` implementations. User can
         thus use `with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT)`
         context manager to perform a local checkpoint that will store only local
         shards of the module. Currently, the only supported implementations are
@@ -2096,7 +2096,7 @@ class FullyShardedDataParallel(nn.Module):
         full, unsharded, unflattened original module parameters. This requires
         FSDP to load the full parameter context on each rank which could result
         in GPU OOM. As a result, :func:`state_dict_type` API is available to
-        configure between `load_state_dict` implementations. User can thus use
+        configure between ``load_state_dict`` implementations. User can thus use
         ``with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT)`` context
         manager to load a local state dict checkpoint that will restore only
         local shards of the module. Currently, the only supported
@@ -2119,7 +2119,7 @@ class FullyShardedDataParallel(nn.Module):
         >>> full_dict.keys()
         >>> odict_keys(['weight', 'bias'])
         >>> # using local state dict
-        >>> local_state_dict = checkpoint['local_state_dict]
+        >>> local_state_dict = checkpoint['local_state_dict']
         >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
         >>>     sharded_module.load_state_dict(local_state_dict)
         >>> local_dict.keys()
@@ -2428,7 +2428,7 @@ class FullyShardedDataParallel(nn.Module):
                 as model parameter shapes will be different across ranks
                 within the context, and writing to them can lead to
                 inconsistency across ranks when the context is exited.
-            offload_to_cpu (bool, optional): If ``True``, full parameters are
+            offload_to_cpu (bool, Optional): If ``True``, full parameters are
                 offloaded to CPU. Note that this offloading currently only
                 occurs if the parameter is sharded (which is only not the case
                 for world_size = 1). It is recommended to use ``offload_to_cpu``
@@ -3312,7 +3312,7 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             Total norm of the parameters (viewed as a single vector).
 
-        .. note:: This is analogous to `torch.nn.utils.clip_grad_norm_` but
+        .. note:: This is analogous to ``torch.nn.utils.clip_grad_norm_`` but
             handles the partitioning and multiple devices per rank under the
             hood. The default torch util is not applicable here, because each
             rank only has a partial view of all the grads in the model, so
