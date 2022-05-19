@@ -533,8 +533,8 @@
     CPU: addmv_out_cpu
     CUDA: addmv_out_cuda
     MPS: addmv_out_mps
-    SparseCsrCPU: addmv_out_sparse_csr
-    SparseCsrCUDA: addmv_out_sparse_csr_cuda
+    SparseCsrCPU: addmv_out_sparse_compressed
+    SparseCsrCUDA: addmv_out_sparse_compressed_cuda
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -1419,7 +1419,7 @@
     MkldnnCPU: copy_mkldnn_
     SparseCPU, SparseCUDA: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
-    SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
+    SparseCsrCPU, SparseCsrCUDA: copy_sparse_compressed_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch:
@@ -4567,9 +4567,6 @@
   variants: function, method
 
 - func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: square_out
-    MPS: square_out_mps
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5444,8 +5441,8 @@
     MPS: addmm_out_mps
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
-    SparseCsrCPU: addmm_out_sparse_csr_cpu
-    SparseCsrCUDA: addmm_out_sparse_csr_cuda
+    SparseCsrCPU: addmm_out_sparse_compressed_cpu
+    SparseCsrCUDA: addmm_out_sparse_compressed_cuda
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   structured_delegate: addmm.out
@@ -5453,7 +5450,7 @@
   dispatch:
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
-    SparseCsrCPU, SparseCsrCUDA: addmm_sparse_csr_dense
+    SparseCsrCPU, SparseCsrCUDA: addmm_sparse_compressed_dense
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   structured_delegate: addmm.out

@@ -77,7 +77,7 @@ class TestGitHubPR(TestCase):
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_match_rules(self, mocked_gql: Any) -> None:
         "Tests that PR passes merge rules"
-        pr = GitHubPR("pytorch", "pytorch", 71759)
+        pr = GitHubPR("pytorch", "pytorch", 77078)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
@@ -176,7 +176,9 @@ class TestGitHubPR(TestCase):
         """
         pr = GitHubPR("pytorch", "pytorch", 76118)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.assertRaisesRegex(MandatoryChecksMissingError, ".*are not yet run.*", lambda: find_matching_merge_rule(pr, repo))
+        self.assertRaisesRegex(MandatoryChecksMissingError,
+                               ".*are pending/not yet run.*",
+                               lambda: find_matching_merge_rule(pr, repo))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_get_author_many_reviews(self, mocked_gql: Any) -> None:
