@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <iostream>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
@@ -481,6 +482,59 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
 
 // Sparse layout conversions Start
 
+SparseTensor dense_to_sparse(const Tensor& self) {
+  return dense_to_sparse(self, self.dim());
+}
+
+SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
+  int64_t dims = self.dim();
+  // TODO: it seems like sparse_dim == 0 could be supported even if self.dim() >
+  // 0, but this would take some work and doesn't seem particularly useful.
+  TORCH_CHECK(
+      sparse_dim > 0 || self.dim() == 0,
+      "sparse_dim must be >0 if dimensionality > 0");
+  TORCH_CHECK(
+      sparse_dim <= dims,
+      "sparse_dim must be less than or equal to self.dim()");
+  at::TensorOptions sparse_options = self.options().layout(kSparse);
+  std::vector<int64_t> sizes = self.sizes().vec();
+
+  Tensor nz = self.nonzero().transpose(0, 1);
+  if (nz.size(1) == 0) {
+    return new_with_dims_sparse(
+        sparse_dim,
+        dims - sparse_dim,
+        sizes,
+        optTypeMetaToScalarType(sparse_options.dtype_opt()),
+        sparse_options.layout_opt(),
+        sparse_options.device_opt(),
+        sparse_options.pinned_memory_opt());
+  }
+  Tensor indices;
+  if (sparse_dim == dims) {
+    indices = nz.clone();
+  } else {
+    Tensor i = nz.narrow(0, 0, sparse_dim);
+    std::tie(indices, std::ignore, std::ignore) = unique_dim(i, 1);
+    indices = indices.contiguous(); // many sparse CUDA kernels require
+                                    // contiguity, see issue #12633
+  }
+
+  Tensor values;
+  if (self.dim() > 0) {
+    auto ix = toListOfOptionalTensors(indices.chunk(indices.size(0), 0));
+    values = self.index(ix).squeeze(0).clone(at::MemoryFormat::Preserve);
+  } else {
+    AT_ASSERT(nz.sizes().equals({0, 1}));
+    // In this cases, indices is a clone of nz, which is a tensor of shape (0,
+    // 1). Given sparse tensor invariants, values should be shape (1,)
+    values = self.unsqueeze(0).clone(at::MemoryFormat::Preserve);
+  }
+
+  Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
+  return sparse._coalesced_(true);
+}
+
 Tensor dense_to_sparse_csr(const Tensor& self) {
   return self.to_sparse().to_sparse_csr();
 }
@@ -561,11 +615,9 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
 }
 
 Tensor coo_to_sparse_csr(const Tensor& self) {
-  TORCH_CHECK(
-      self.dim() == 2,
-      "Only 2D tensors can be converted to the SparseCsr layout but got shape: ",
-      self.sizes());
   auto coalesced_self = self.coalesce();
+  std::cout << "coalesced_self.indices().sizes(): " << 
+    coalesced_self.indices().sizes() << std::endl;
   auto row_indices = coalesced_self.indices()[0];
   bool out_int32 = (row_indices.scalar_type() == at::kInt);
   auto crow_indices = at::_convert_indices_from_coo_to_csr(
@@ -614,6 +666,9 @@ void convert_indices_from_coo_to_csr_cpu(
     const Tensor& result,
     const Tensor& input,
     const int64_t size) {
+  std::cout << "result.sizes(): " << result.sizes() << std::endl;
+  std::cout << "input.sizes(): " << input.sizes() << std::endl;
+  std::cout << "size: " << size << std::endl;
   int64_t numel = input.numel();
   const input_t* data_in = input.data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
