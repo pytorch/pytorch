@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/Generator.h>
