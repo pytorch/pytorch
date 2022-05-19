@@ -1255,7 +1255,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
         "set_size() called on tensor with symbolic shape")
-    sizes_and_strides_.size_at(dim) = SymInt(new_size);
+    sizes_and_strides_.size_at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
   }
@@ -1274,7 +1274,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
         "set_stride() called on tensor with symbolic shape")
-    sizes_and_strides_.stride_at_unchecked(dim) = SymInt(new_stride);
+    sizes_and_strides_.stride_at_unchecked(dim) = new_stride;
     refresh_contiguous();
   }
 
@@ -1349,19 +1349,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (new_dim > 0) {
       for (size_t dim = new_dim - 1;; dim--) {
         if (new_stride[dim] >= 0) {
-          sizes_and_strides_.stride_at_unchecked(dim) = SymInt(new_stride[dim]);
+          sizes_and_strides_.stride_at_unchecked(dim) = new_stride[dim];
         } else {
           // XXX: This behavior is surprising and may need to be removed to
           // support negative strides. Some pytorch functions rely on it:
           // for example, torch.cat (run TestTorch.test_cat_empty).
           if (dim == new_dim - 1) {
-            sizes_and_strides_.stride_at_unchecked(dim) = SymInt(1);
+            sizes_and_strides_.stride_at_unchecked(dim) = 1;
           } else {
             // Keep stride monotonically increasing to match NumPy.
-            sizes_and_strides_.stride_at_unchecked(dim) = SymInt(
+            sizes_and_strides_.stride_at_unchecked(dim) =
                 std::max<int64_t>(
                     sizes_and_strides_.size_at_unchecked(dim + 1).data(), 1) *
-                sizes_and_strides_.stride_at_unchecked(dim + 1).data());
+                sizes_and_strides_.stride_at_unchecked(dim + 1).data();
           }
         }
         if (dim == 0)
@@ -1939,12 +1939,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         sizes_and_strides_.resize(dim_);
         if (dim_ > 0) {
           const auto last_idx = dim_ - 1;
-          sizes_and_strides_.stride_at_unchecked(last_idx) = SymInt(1);
+          sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
-            sizes_and_strides_.stride_at_unchecked(i) = SymInt(
+            sizes_and_strides_.stride_at_unchecked(i) =
                 sizes_and_strides_.stride_at_unchecked(i + 1).data() *
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1).data(), 1));
+                    sizes_and_strides_.size_at_unchecked(i + 1).data(), 1);
           }
         }
         break;
@@ -2012,7 +2012,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     int64_t new_numel = 1;
     for (const auto i : c10::irange(src.size())) {
       new_numel *= src[i];
-      sizes_and_strides_.size_at_unchecked(i) = SymInt(src[i]);
+      sizes_and_strides_.size_at_unchecked(i) = src[i];
     }
     numel_ = new_numel;
     empty_tensor_restride(MemoryFormat::Contiguous);

@@ -65,8 +65,8 @@ TEST(SizesAndStridesTest, Resize) {
   checkData(sz, {0, 0, 0, 0, 0}, {1, 0, 0, 0, 0});
 
   for (const auto ii : c10::irange(sz.size())) {
-    sz.size_at_unchecked(ii) = SymInt(ii + 1);
-    sz.stride_at_unchecked(ii) = SymInt(2 * (ii + 1));
+    sz.size_at_unchecked(ii) = ii + 1;
+    sz.stride_at_unchecked(ii) = 2 * (ii + 1);
   }
 
   checkData(sz, {1, 2, 3, 4, 5}, {2, 4, 6, 8, 10});
@@ -89,8 +89,8 @@ TEST(SizesAndStridesTest, Resize) {
 
   checkData(sz, {1, 2, 3, 4, 0, 0}, {2, 4, 6, 8, 0, 0});
 
-  sz.size_at_unchecked(5) = SymInt(6);
-  sz.stride_at_unchecked(5) = SymInt(12);
+  sz.size_at_unchecked(5) = 6;
+  sz.stride_at_unchecked(5) = 12;
 
   checkData(sz, {1, 2, 3, 4, 0, 6}, {2, 4, 6, 8, 0, 12});
 
@@ -104,8 +104,8 @@ TEST(SizesAndStridesTest, Resize) {
 
   checkData(sz, {1, 2, 3, 4, 0, 6, 0}, {2, 4, 6, 8, 0, 12, 0});
 
-  sz.size_at_unchecked(6) = SymInt(11);
-  sz.stride_at_unchecked(6) = SymInt(22);
+  sz.size_at_unchecked(6) = 11;
+  sz.stride_at_unchecked(6) = 22;
 
   checkData(sz, {1, 2, 3, 4, 0, 6, 11}, {2, 4, 6, 8, 0, 12, 22});
 
@@ -123,8 +123,8 @@ TEST(SizesAndStridesTest, Resize) {
   // getting it right by accident (i.e., because of leftover inline
   // storage when going small to big).
   for (const auto ii : c10::irange(sz.size())) {
-    sz.size_at_unchecked(ii) = SymInt(ii + 1);
-    sz.stride_at_unchecked(ii) = SymInt(2 * (ii + 1));
+    sz.size_at_unchecked(ii) = ii + 1;
+    sz.stride_at_unchecked(ii) = 2 * (ii + 1);
   }
 
   checkData(sz, {1, 2, 3, 4, 5, 6, 7}, {2, 4, 6, 8, 10, 12, 14});
@@ -137,14 +137,14 @@ TEST(SizesAndStridesTest, SetAtIndex) {
   SizesAndStrides sz;
 
   sz.resize(5);
-  sz.size_at(4) = SymInt(42);
-  sz.stride_at(4) = SymInt(23);
+  sz.size_at(4) = 42;
+  sz.stride_at(4) = 23;
 
   checkData(sz, {0, 0, 0, 0, 42}, {1, 0, 0, 0, 23});
 
   sz.resize(6);
-  sz.size_at(5) = SymInt(43);
-  sz.stride_at(5) = SymInt(24);
+  sz.size_at(5) = 43;
+  sz.stride_at(5) = 24;
 
   checkData(sz, {0, 0, 0, 0, 42, 43}, {1, 0, 0, 0, 23, 24});
 }
@@ -153,14 +153,14 @@ TEST(SizesAndStridesTest, SetAtIterator) {
   SizesAndStrides sz;
 
   sz.resize(5);
-  *(sz.sizes_begin() + 4) = SymInt(42);
-  *(sz.strides_begin() + 4) = SymInt(23);
+  *(sz.sizes_begin() + 4) = 42;
+  *(sz.strides_begin() + 4) = 23;
 
   checkData(sz, {0, 0, 0, 0, 42}, {1, 0, 0, 0, 23});
 
   sz.resize(6);
-  *(sz.sizes_begin() + 5) = SymInt(43);
-  *(sz.strides_begin() + 5) = SymInt(24);
+  *(sz.sizes_begin() + 5) = 43;
+  *(sz.strides_begin() + 5) = 24;
 
   checkData(sz, {0, 0, 0, 0, 42, 43}, {1, 0, 0, 0, 23, 24});
 }
@@ -169,14 +169,14 @@ TEST(SizesAndStridesTest, SetViaData) {
   SizesAndStrides sz;
 
   sz.resize(5);
-  *(sz.sizes_data() + 4) = SymInt(42);
-  *(sz.strides_data() + 4) = SymInt(23);
+  *(sz.sizes_data() + 4) = 42;
+  *(sz.strides_data() + 4) = 23;
 
   checkData(sz, {0, 0, 0, 0, 42}, {1, 0, 0, 0, 23});
 
   sz.resize(6);
-  *(sz.sizes_data() + 5) = SymInt(43);
-  *(sz.strides_data() + 5) = SymInt(24);
+  *(sz.sizes_data() + 5) = 43;
+  *(sz.strides_data() + 5) = 24;
 
   checkData(sz, {0, 0, 0, 0, 42, 43}, {1, 0, 0, 0, 23, 24});
 }
@@ -185,8 +185,8 @@ static SizesAndStrides makeSmall(int offset = 0) {
   SizesAndStrides small;
   small.resize(3);
   for (const auto ii : c10::irange(small.size())) {
-    small.size_at_unchecked(ii) = SymInt(ii + 1 + offset);
-    small.stride_at_unchecked(ii) = SymInt(2 * (ii + 1 + offset));
+    small.size_at_unchecked(ii) = ii + 1 + offset;
+    small.stride_at_unchecked(ii) = 2 * (ii + 1 + offset);
   }
 
   return small;
@@ -196,8 +196,8 @@ static SizesAndStrides makeBig(int offset = 0) {
   SizesAndStrides big;
   big.resize(8);
   for (const auto ii : c10::irange(big.size())) {
-    big.size_at_unchecked(ii) = SymInt(ii + 1 + offset);
-    big.stride_at_unchecked(ii) = SymInt(2 * (ii + 1 + offset));
+    big.size_at_unchecked(ii) = ii + 1 + offset;
+    big.stride_at_unchecked(ii) = 2 * (ii + 1 + offset);
   }
 
   return big;

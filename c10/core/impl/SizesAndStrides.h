@@ -33,8 +33,8 @@ class C10_API SizesAndStrides {
   using strides_const_iterator = const SymInt*;
 
   SizesAndStrides() : size_(1) {
-    size_at_unchecked(0) = SymInt(0);
-    stride_at_unchecked(0) = SymInt(1);
+    size_at_unchecked(0) = 0;
+    stride_at_unchecked(0) = 1;
   }
 
   ~SizesAndStrides() {

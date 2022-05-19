@@ -304,7 +304,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
     return sizes_and_strides_.stride_at_unchecked(a) <
         sizes_and_strides_.stride_at_unchecked(b);
   });
-  auto require_stride = SymInt(1);
+  SymInt require_stride = 1;
   for (const auto i : c10::irange(dim())) {
     const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
     if (size_perm_i < 2) {

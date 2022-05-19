@@ -140,7 +140,7 @@ void LTCTensorImpl::setup_size_properties() {
     std::vector<int64_t> updated_strides;
     updated_strides = ComputeArrayStrides(shape.Get().sizes());
     for (const auto i : c10::irange(updated_strides.size())) {
-      sizes_and_strides_.stride_at_unchecked(i) = c10::SymInt(updated_strides[i]);
+      sizes_and_strides_.stride_at_unchecked(i) = updated_strides[i];
     }
     generation_ = generation;
   }

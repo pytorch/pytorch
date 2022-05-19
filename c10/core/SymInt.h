@@ -31,7 +31,7 @@ class SymbolicIntNode;
 // a traced operation to represent it in LTC or Fx graphs.
 class C10_API SymInt {
  public:
-  explicit SymInt(int64_t d) : data_(d){};
+  /*implicit*/ SymInt(int64_t d) : data_(d){};
   SymInt() = default;
 
   int64_t expect_int() const {
