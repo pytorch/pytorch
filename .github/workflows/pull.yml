@@ -38,13 +38,20 @@ jobs:
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
+  linux-focal-py3_7-gcc7-build:
+    name: linux-focal-py3.7-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image-name: pytorch-linux-focal-py3.7-gcc7
+
   linux-docs:
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
-    needs: linux-xenial-py3_7-gcc5_4-build
+    needs: linux-focal-py3_7-gcc7-build
     with:
-      build-environment: linux-xenial-py3.7-gcc5.4
-      docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4-build.outputs.docker-image }}
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
 
   linux-xenial-py3_7-gcc7-build:
     name: linux-xenial-py3.7-gcc7
