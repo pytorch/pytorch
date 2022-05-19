@@ -196,10 +196,11 @@ TensorDomain* TransformRFactor::runReplay(
   {
     size_t i = 0;
     for (auto id : orig_td->domain()) {
-      if (axes_set.find(i++) != axes_set.end())
+      if (axes_set.find(i++) != axes_set.end()) {
         rfactor_axes.emplace(id);
-      if (id->isReduction())
+      } else if (id->isReduction()) {
         found_non_rfactor_reduction = true;
+      }
     }
   }
 
