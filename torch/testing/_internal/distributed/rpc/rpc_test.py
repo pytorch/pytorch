@@ -36,9 +36,6 @@ from torch.testing._internal.common_utils import (
     load_tests,
     sandcastle_skip_if,
     get_cycles_per_ms,
-    retry_on_connect_failures,
-    ADDRESS_IN_USE,
-    CONNECT_TIMEOUT,
 )
 
 from torch.testing._internal.dist_utils import (
@@ -56,7 +53,6 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
-    find_free_port,
 )
 
 from torch.autograd.profiler_legacy import profile as _profile

@@ -102,8 +102,8 @@ def _create_store_from_options(backend_options, rank):
         world_size = int(os.environ.get("WORLD_SIZE", world_size))
 
     query_dict = _query_to_dict(result.query)
-    query_dict["rank"] = rank
-    query_dict["world_size"] = world_size
+    query_dict["rank"] = str(rank)
+    query_dict["world_size"] = str(world_size)
 
     result = result._replace(
         query="{}".format(
