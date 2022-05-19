@@ -7,7 +7,10 @@ from torch._prims.utils import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._refs as refs
-from torch._prims.wrappers import elementwise_type_promotion_wrapper
+from torch._prims.wrappers import (
+    elementwise_type_promotion_wrapper,
+    out_wrapper,
+)
 
 from typing import Optional
 
@@ -50,6 +53,7 @@ def celu(
 
     return refs.where(refs.gt(a, 0), a, rhs)
 
+
 # elu is implemented specially because it has an alpha argument
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -81,13 +85,12 @@ def elu(
 
     return refs.where(refs.gt(a, 0), a, rhs)
 
+
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def selu(
-    a: TensorLikeType, inplace: bool = False
-) -> TensorLikeType:
+def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.selu
     """
@@ -102,7 +105,9 @@ def selu(
 
     return refs.mul(scale, refs.where(refs.gt(a, 0), a, rhs))
 
+
 # softplus is implemented specially because it has beta and threshold arguments
+@out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -111,7 +116,7 @@ def softplus(
     a: TensorLikeType,
     beta: Optional[NumberType] = None,
     threshold: NumberType = 20,
-    inplace: bool = False
+    inplace: bool = False,
 ) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.softplus
@@ -124,10 +129,8 @@ def softplus(
     if beta is not None:
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(beta), python_type):
-            msg = (
-                "beta argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(beta), python_type
-                )
+            msg = "beta argument of type {0} cannot be safely cast to type {1}!".format(
+                type(beta), python_type
             )
             raise ValueError(msg)
         scaled_input = refs.mul(a, beta)
