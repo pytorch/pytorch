@@ -151,7 +151,7 @@ class _ForkerIterDataPipe(IterDataPipe):
     def is_every_instance_exhausted(self) -> bool:
         return all(self.end_ptr == ptr for ptr in self.child_pointers)
 
-    def reset(self):
+    def reset(self) -> None:
         self._datapipe_iterator = iter(self.main_datapipe)
         self.buffer = deque()
         self.child_pointers = [0] * self.num_instances
@@ -376,7 +376,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
     def is_every_instance_exhausted(self) -> bool:
         return self.main_datapipe_exhausted and all(not child_buffer for child_buffer in self.child_buffers)
 
-    def reset(self):
+    def reset(self) -> None:
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
