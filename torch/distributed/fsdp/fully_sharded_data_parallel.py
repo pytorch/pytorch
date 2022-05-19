@@ -450,9 +450,9 @@ class FullyShardedDataParallel(nn.Module):
 
     .. warning::
         FSDP currently does not support gradient accumulation outside
-        ``no_sync()`` when using CPU offloading. Trying to do so yields incorrect
-        results since FSDP will use the newly-reduced gradient instead of
-        accumulating with any existing gradient.
+        ``no_sync()`` when using CPU offloading. Trying to do so yields
+        incorrect results since FSDP will use the newly-reduced gradient
+        instead of accumulating with any existing gradient.
 
     .. warning::
         Changing the original parameter variable names after construction will
