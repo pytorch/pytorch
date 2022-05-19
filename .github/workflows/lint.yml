@@ -11,7 +11,7 @@ on:
 
 jobs:
   lintrunner:
-    runs-on: linux.20_04.16x
+    runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -61,7 +61,7 @@ jobs:
 
   quick-checks:
     name: quick-checks
-    runs-on: linux.20_04.4x
+    runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -104,7 +104,7 @@ jobs:
 
   workflow-checks:
     name: workflow-checks
-    runs-on: linux.20_04.4x
+    runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -148,7 +148,7 @@ jobs:
 
   toc:
     name: toc
-    runs-on: linux.20_04.4x
+    runs-on: ubuntu-18.04
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
     env:
       NPM_CONFIG_PREFIX: ~/.npm-global
@@ -190,7 +190,7 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'csarofeen/pytorch' }}
-    runs-on: linux.20_04.4x
+    runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -223,7 +223,7 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'csarofeen/pytorch' }}
     name: Test collect_env
-    runs-on: linux.20_04.4x
+    runs-on: ubuntu-18.04
     strategy:
       matrix:
         with_torch: [with_torch, without_torch]
