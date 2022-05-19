@@ -2,10 +2,10 @@ import sys
 import warnings
 
 import torch
-import torch.onnx.utils
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx import symbolic_opset10 as opset10
+from torch.onnx import utils
 from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -754,12 +754,12 @@ def squeeze(g, self, dim=None):
         # create the "If" node and add the "then" and "else" blocks to it.
         if_node_outputs = g.op("If", cond)
         if_node = if_node_outputs.node()
-        if_block = torch.onnx.utils._add_block(if_node)
+        if_block = utils._add_block(if_node)
         squeeze_ = symbolic_helper._squeeze_helper(if_block, self, [dim])
-        torch.onnx.utils._add_output_to_block(if_block, squeeze_)
-        else_block = torch.onnx.utils._add_block(if_node)
+        utils._add_output_to_block(if_block, squeeze_)
+        else_block = utils._add_block(if_node)
         identity_ = else_block.op("Identity", self)
-        torch.onnx.utils._add_output_to_block(else_block, identity_)
+        utils._add_output_to_block(else_block, identity_)
         return if_node_outputs
 
     # For static input shape
@@ -1118,9 +1118,9 @@ def embedding_bag(
     )
     loop = g.op("Loop", loop_len, loop_condition)
 
-    loop_block = torch.onnx.utils._add_block(loop.node())
-    block_input_iter = torch.onnx.utils._add_input_to_block(loop_block)
-    cond = torch.onnx.utils._add_input_to_block(loop_block)
+    loop_block = utils._add_block(loop.node())
+    block_input_iter = utils._add_input_to_block(loop_block)
+    cond = utils._add_input_to_block(loop_block)
 
     indices_start = loop_block.op("Gather", offsets_starts, block_input_iter, axis_i=0)
     indices_end = loop_block.op("Gather", offsets_ends, block_input_iter, axis_i=0)
@@ -1147,8 +1147,8 @@ def embedding_bag(
         embeddings = loop_block.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
 
     cond_out = loop_block.op("Cast", loop_condition, to_i=9)
-    torch.onnx.utils._add_output_to_block(loop_block, cond_out)
-    torch.onnx.utils._add_output_to_block(loop_block, embeddings)
+    utils._add_output_to_block(loop_block, cond_out)
+    utils._add_output_to_block(loop_block, embeddings)
 
     # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
     # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
