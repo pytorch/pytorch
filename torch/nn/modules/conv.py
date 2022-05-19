@@ -191,6 +191,8 @@ class Conv1d(_ConvNd):
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a one-element tuple.
 
@@ -322,6 +324,8 @@ class Conv2d(_ConvNd):
     """ + r"""
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
@@ -461,6 +465,8 @@ class Conv3d(_ConvNd):
     """ + r"""
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
@@ -663,6 +669,8 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero padding on both
@@ -791,6 +799,8 @@ class ConvTranspose2d(_ConvTransposeNd):
     `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
@@ -946,6 +956,8 @@ class ConvTranspose3d(_ConvTransposeNd):
     `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
