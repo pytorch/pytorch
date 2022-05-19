@@ -215,7 +215,7 @@ header_template_rule(
 
 cc_library(
     name = "aten_core_headers",
-    hdrs = aten_core_hdrs(),
+    hdrs = aten_core_hdrs(rules = rules),
     strip_include_prefix = "aten/src/",
     deps = ["//c10:headers"],
 )
@@ -233,7 +233,7 @@ cc_library(
         "aten/src/TH/**/*.cpp",
         "aten/src/THC/*.cuh",
         "aten/src/THC/generic/*.cu",
-    ], exclude = aten_core_hdrs()
+    ], exclude = aten_core_hdrs(rules = rules)
     ) + [
         ":aten_src_ATen_config",
         ":gen_aten",
