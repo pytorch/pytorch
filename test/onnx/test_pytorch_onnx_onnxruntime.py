@@ -1702,7 +1702,7 @@ class _TestONNXRuntime:
         model = Model()
         x = torch.randn(4, 4, dtype=torch.float32)
         y = torch.randn(4, 4, dtype=torch.float32)
-        self.run_test(model, x, y)
+        self.run_test(model, (x, y))
 
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
