@@ -4686,7 +4686,7 @@ class _TestONNXRuntime:
         ]
 
         for model, input in zip(models, inputs):
-            self.run_test(model, input)  # , batch_size=RNN_BATCH_SIZE)
+            self.run_test(model, input)
 
     def test_gru_no_bias(self):
         class GruNet(torch.nn.Module):
@@ -9368,11 +9368,11 @@ class _TestONNXRuntime:
             return input
 
         input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input)  # , batch_size=RNN_BATCH_SIZE)
+        self.run_test(model, input)
 
         # test that the model still runs with a different batch size
         other_input = make_input(RNN_BATCH_SIZE + 1)
-        self.run_test(model, other_input)  # , batch_size=RNN_BATCH_SIZE + 1)
+        self.run_test(model, other_input)
 
     def _lstm_test(
         self, layers, bidirectional, initial_state, packed_sequence, dropout
@@ -9424,11 +9424,11 @@ class _TestONNXRuntime:
             return input
 
         input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input)  # , batch_size=RNN_BATCH_SIZE)
+        self.run_test(model, input)
 
         # test that the model still runs with a different batch size
         other_input = make_input(RNN_BATCH_SIZE + 1)
-        self.run_test(model, other_input)  # , batch_size=RNN_BATCH_SIZE + 1)
+        self.run_test(model, other_input)
 
     def _gru_test(self, layers, bidirectional, initial_state, packed_sequence, dropout):
         class GRUWithStateModel(torch.nn.Module):
@@ -9552,11 +9552,11 @@ class _TestONNXRuntime:
             return input
 
         input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input)  # , batch_size=RNN_BATCH_SIZE)
+        self.run_test(model, input)
 
         # test that the model still runs with a different batch size
         other_input = make_input(RNN_BATCH_SIZE + 1)
-        self.run_test(model, other_input)  # , batch_size=RNN_BATCH_SIZE + 1)
+        self.run_test(model, other_input)
 
     @skipScriptTest()  # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1253950
     def test_transformer_encoder(self):

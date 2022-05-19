@@ -8,7 +8,7 @@ import copy
 import io
 import os
 import tempfile
-from typing import Optional, Tuple, Union
+from typing import Tuple, Union
 
 import numpy as np
 
@@ -84,23 +84,23 @@ def _run_ort(ort_session, inputs):
 
 
 def _create_ort_session(
-    model: Union[str, io.BytesIO], ort_providers: Optional[Tuple[str, ...]] = None
+    model: Union[str, io.BytesIO], ort_providers: Tuple[str, ...] = _ORT_PROVIDERS
 ):
     try:
         import onnxruntime  # type: ignore[import]
     except ImportError:
-        raise RuntimeError("ONNXRuntime is required for export verification.")
+        raise ImportError("ONNXRuntime is required for export verification.")
 
     if ort_providers is None:
         ort_providers = _ORT_PROVIDERS
 
-    so = onnxruntime.SessionOptions()
+    session_options = onnxruntime.SessionOptions()
     # suppress ort warnings.
     # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
-    so.log_severity_level = 3
+    session_options.log_severity_level = 3
     ort_session = onnxruntime.InferenceSession(
         model if isinstance(model, str) else model.getvalue(),
-        so,
+        session_options,
         providers=ort_providers,
     )
     return ort_session
@@ -116,7 +116,20 @@ def _compare_ort_pytorch_outputs(ort_outs, pt_outs, rtol, atol):
         np.testing.assert_allclose(ort_out, pt_out, rtol=rtol, atol=atol)
 
 
-def _format_input_for_pytorch(args, kwargs):
+def _prepare_input_for_pytorch(args, kwargs):
+    """Prepare input for PyTorch model execution.
+
+    Any future changes/formatting to the input before dispatching to the PyTorch
+    model should be made in this function.
+
+    Args:
+        args: positional arguments for PyTorch model forward method.
+        kwargs: keyword arguments for PyTorch model forward method.
+
+    Returns:
+        args: positional arguments for PyTorch model forward method.
+        kwargs: keyword arguments for PyTorch model forward method.
+    """
     if isinstance(args, (Tensor, dict)):
         args = (args,)
     # In-place operators will update input tensor data as well.
@@ -129,8 +142,21 @@ def _format_input_for_pytorch(args, kwargs):
     return args, kwargs
 
 
-def _format_input_for_export(args, kwargs):
-    args, kwargs = _format_input_for_pytorch(args, kwargs)
+def _prepare_input_for_export(args, kwargs):
+    """Prepare input for ONNX model export.
+
+    Any future changes/formatting to the input before dispatching to the
+    :func:`torch.onnx.export` api should be made in this function.
+
+    Args:
+        args: positional arguments for PyTorch model forward method.
+        kwargs: keyword arguments for PyTorch model forward method.
+
+    Returns:
+        onnx_inputs: positional arguments for ONNX model export, as `args` in
+            :func:`torch.onnx.export`.
+    """
+    args, kwargs = _prepare_input_for_pytorch(args, kwargs)
     if not kwargs and isinstance(args[-1], dict):
         onnx_inputs = args + ({},)
     elif kwargs:
@@ -140,8 +166,20 @@ def _format_input_for_export(args, kwargs):
     return onnx_inputs
 
 
-def _format_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
-    onnx_inputs = _format_input_for_export(args, kwargs)
+def _prepare_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
+    """Prepare input for ONNX model execution in ONNXRuntime.
+
+    Any future changes/formatting to the input before dispatching to the ONNXRuntime
+    InferenceSession run should be made in this function.
+
+    Args:
+        args: positional arguments for PyTorch model forward method.
+        kwargs: keyword arguments for PyTorch model forward method.
+
+    Returns:
+        onnx_inputs: positional arguments for ONNX model execution in ONNXRuntime.
+    """
+    onnx_inputs = _prepare_input_for_export(args, kwargs)
     if flatten:
         onnx_inputs, _ = torch.jit._flatten(onnx_inputs)
     elif onnx_inputs and onnx_inputs[-1] == {}:
@@ -172,13 +210,22 @@ def _compare_ort_pytorch_model(
     rtol,
     atol,
 ):
+    """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
+
+    ONNXRuntime is used for model execution backend for ONNX model.
+
+    Raise:
+        AssertionError: if outputs from ONNX model and PyTorch model are not
+            equal.
+    """
+
     def compare_ort_pytorch_model_with_input(input_args, input_kwargs):
-        pt_args, pt_kwargs = _format_input_for_pytorch(input_args, input_kwargs)
+        pt_args, pt_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
         # TODO: remove this and treat mutating model separately. See #77679
         model_copy = _try_clone_model(model)
         pt_outs = model_copy(*pt_args, **pt_kwargs)
 
-        ort_inputs = _format_input_for_ort(
+        ort_inputs = _prepare_input_for_ort(
             input_args, input_kwargs, remained_onnx_input_idx, flatten
         )
         ort_outs = _run_ort(ort_session, ort_inputs)
@@ -243,6 +290,10 @@ def verify(
         ort_providers (sequence, optional): ONNXRuntime providers to use.
         rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
         atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
+
+    Raises:
+        AssertionError: if outputs from ONNX model and PyTorch model are not
+            equal up to specified precision.
     """
     if training is not None and training == torch.onnx.TrainingMode.TRAINING:
         model.train()
@@ -254,7 +305,7 @@ def verify(
             tmpdirname = stack.enter_context(tempfile.TemporaryDirectory())
             model_f = os.path.join(tmpdirname, "model.onnx")
 
-        inputs_for_export = _format_input_for_export(input_args, input_kwargs)
+        inputs_for_export = _prepare_input_for_export(input_args, input_kwargs)
 
         # TODO: remove this and treat mutating model separately. See #77679
         model_copy = _try_clone_model(model)
