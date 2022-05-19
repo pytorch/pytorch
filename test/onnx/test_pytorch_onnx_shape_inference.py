@@ -6,11 +6,8 @@ import numpy as np
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
 
 import torch
-from torch.onnx.symbolic_helper import (
-    _onnx_main_opset,
-    _set_onnx_shape_inference,
-    _set_opset_version,
-)
+from torch.onnx import _constants
+from torch.onnx.symbolic_helper import _set_onnx_shape_inference, _set_opset_version
 
 
 def expect_tensor(scalar_type, shape=None):
@@ -27,7 +24,7 @@ def expect_tensor(scalar_type, shape=None):
 class TestONNXShapeInference(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
-        self.opset_version = _onnx_main_opset
+        self.opset_version = _constants.onnx_main_opset
         _set_onnx_shape_inference(True)
         _set_opset_version(self.opset_version)
 
@@ -200,6 +197,15 @@ class TestONNXShapeInference(unittest.TestCase):
         shape = g.op("Shape", input)
         expand = g.op("Expand", constant, shape)
         self.run_test(g, expand.node(), expect_tensor("Float", shape=(None, None)))
+
+    def test_pad(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([3, 320, 100]))
+        constant = self.insert_tensor_constant(g, torch.ones(6, dtype=torch.long))
+        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        pad = g.op("Pad", input, constant, none, mode_s="constant")
+        self.run_test(g, pad.node(), expect_tensor("Float", shape=(None, None, None)))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict
 
 import torch._C as _C
 
