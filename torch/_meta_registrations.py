@@ -2,6 +2,10 @@ import torch
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
+def check(b, s):
+    if not b:
+        raise RuntimeError(s)
+
 def toRealValueType(dtype):
     from_complex = {
         torch.complex32: torch.half,
