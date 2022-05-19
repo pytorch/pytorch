@@ -647,7 +647,6 @@ meta_function_skips = {
     torch.normal: {bf16, f16, f32, f64},
     torch.prod: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.tensor_split: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
-    torch.nn.functional.logsigmoid: {bf16, f16, f32, f64},  # logsigmoid.output
     torch.inverse: {f32, f64},
     torch.linalg.matrix_power: {f32, f64},
     torch.linalg.matrix_rank: {f32, f64},
