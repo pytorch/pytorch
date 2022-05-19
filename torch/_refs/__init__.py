@@ -448,8 +448,7 @@ tan = _make_elementwise_unary_reference(
 )
 
 tanh = _make_elementwise_unary_reference(
-    prims.tanh,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.tanh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
 
