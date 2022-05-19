@@ -124,6 +124,27 @@ def define_targets(rules):
         tools = ["//tools/setup_helpers:gen_version_header"],
     )
 
+def aten_core_hdrs():
+    """The source files that are part of the aten_core_headers target.
+
+    Note that this is a function because globs are not permitted at
+    global scope in Starlark.
+    """
+    return glob([
+        "aten/src/ATen/core/*.h",
+        "aten/src/ATen/ops/*.h",
+        "aten/src/ATen/core/boxing/*.h",
+        "aten/src/ATen/core/boxing/impl/*.h",
+        "aten/src/ATen/core/dispatch/*.h",
+        "aten/src/ATen/core/op_registration/*.h",
+    ]) + [
+        "aten/src/ATen/CPUGeneratorImpl.h",
+        "aten/src/ATen/NumericUtils.h",
+        "aten/src/ATen/detail/CUDAHooksInterface.h",
+        "aten/src/ATen/detail/ORTHooksInterface.h",
+        "aten/src/ATen/detail/HIPHooksInterface.h",
+    ]
+
 #
 # ATen generated code
 # You need to keep this is sync with the files written out
