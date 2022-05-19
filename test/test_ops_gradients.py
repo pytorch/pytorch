@@ -10,8 +10,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, OpDTypes)
 
-# To mitigate for ScalarxTensor type promotion
-# for complex scalar and float tensor.
+# TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
 
 # gradcheck requires double precision
