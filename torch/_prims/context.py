@@ -1,6 +1,7 @@
 import string
 from typing import Callable, Sequence, Any, Dict
 from itertools import chain
+import functools
 
 
 import torch
@@ -9,6 +10,11 @@ import torch.overrides
 
 from torch._prims.utils import TensorMeta
 import torch._refs as refs
+
+import torch._refs
+import torch._refs.nn
+import torch._refs.nn.functional
+import torch._refs.special
 
 
 # TODO:  automap torch operations to references
@@ -155,4 +161,43 @@ class PrimContext(torch.overrides.TorchFunctionMode):
             with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
                 return fn(*args, **kwargs)  # type: ignore[operator]
 
+        return func(*args, **kwargs)
+
+
+@functools.lru_cache
+def torch_to_refs_map():
+    modules = [
+        (torch, torch._refs),
+        (torch.nn, torch._refs.nn),
+        (torch.nn.functional, torch._refs.nn.functional),
+        (torch.special, torch._refs.special),
+    ]
+    r = {}
+    for mod_torch, mod_refs in modules:
+        for s in mod_refs.__all__:
+            r[mod_torch.__dict__.get(s)] = mod_refs.__dict__.get(s)
+    return r
+
+class TorchRefsMode(torch.overrides.TorchFunctionMode):
+    """
+    Switches the interpretation of torch.* functions and Tensor methods to
+    use PrimTorch refs in torch._refs.
+    """
+    def __init__(self, strict=False):
+        self.strict = strict
+
+    def __torch_function__(
+        self,
+        func: Callable,
+        types: Sequence,
+        args: Sequence[Any] = (),
+        kwargs: Dict = None,
+    ):
+        if kwargs is None:
+            kwargs = {}
+        mapping = torch_to_refs_map()
+        if self.strict:
+            func = mapping[func]
+        else:
+            func = mapping.get(func, func)
         return func(*args, **kwargs)

@@ -667,18 +667,7 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
 
 
-@register_decomposition(aten.logit)
-@pw_cast_for_int_to_real
-def logit(self: Tensor, eps: Optional[float] = None) -> Tensor:
-    if eps is None:
-        eps = -1.0
-    lo = eps
-    hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
-    return (self / (1 - self)).log()
-
-
-@register_decomposition(aten.logit_backward)
+@register_decomposition(aten.logit_backward.default)
 @pw_cast_for_opmath
 def logit_backward(
     grad_output: Tensor, self: Tensor, eps: Optional[float] = None
@@ -1014,7 +1003,7 @@ def native_batch_norm(
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
-        if input.device.type == "cuda":
+        if input.device.type != "cpu":
             save_mean = running_mean
             save_invstd = invstd
         else:

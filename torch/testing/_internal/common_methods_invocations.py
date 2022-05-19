@@ -18783,6 +18783,16 @@ python_ref_db = [
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.logit",
+        torch_opinfo_name="logit",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',),
+        ),
+    ),
     #
     # Elementwise Unary nn.functional OpInfos
     #
