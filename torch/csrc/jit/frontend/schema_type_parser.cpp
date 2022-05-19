@@ -426,8 +426,8 @@ SchemaTypeParser::parseFakeAndRealType() {
       }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {
-      fake_value = c10::TypeFactory::create<c10::OptionalType>(fake_value);
-      real_value = c10::TypeFactory::create<c10::OptionalType>(real_value);
+      fake_value = c10::OptionalType::get(fake_value);
+      real_value = c10::OptionalType::get(real_value);
     } else {
       break;
     }
