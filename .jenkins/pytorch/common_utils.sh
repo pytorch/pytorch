@@ -99,6 +99,6 @@ function checkout_install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive https://github.com/pytorch/xla.git
+    git clone -b revert-3536-revert-3519-test_xrt_server_new_process --recursive https://github.com/pytorch/xla.git
   fi
 }
