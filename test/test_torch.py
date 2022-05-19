@@ -3755,6 +3755,8 @@ else:
             torch.index_select(w, 1, ind_05)
         w = torch.randn((3, 0), device=device)
         self.assertEqual((2, 0), w.index_select(0, ind_01).shape)
+        ind_01_int32 = torch.tensor([0, 1], dtype=torch.int32, device=device)
+        self.assertEqual((2, 0), w.index_select(0, ind_01_int32).shape)
 
     # FIXME: find a test suite for the pdist operator
     def _brute_pdist(self, inp, p=2):

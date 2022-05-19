@@ -1143,8 +1143,11 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
       return result;
     }
     if (self.numel() == 0) {
-      const auto* idxs = index_contig.data_ptr<int64_t>();
-      check_indexarray_range<int64_t>(idxs, numel, self.size(dim));
+      AT_DISPATCH_INDEX_TYPES(
+      index_contig.scalar_type(), "index_select_empty_self_bound_check", [&]() {
+        const auto* idxs = index_contig.data_ptr<index_t>();
+        check_indexarray_range<index_t>(idxs, numel, self.size(dim));
+      });
       return result;
     }
 
