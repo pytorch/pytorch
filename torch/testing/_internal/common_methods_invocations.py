@@ -17375,7 +17375,6 @@ op_db: List[OpInfo] = [
         aten_backward_name='softplus_backward',
         ref=reference_softplus,
         sample_inputs_func=sample_inputs_softplus,
-        supports_out=False,
         supports_forward_ad=True,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),

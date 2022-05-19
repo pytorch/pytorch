@@ -22,7 +22,7 @@ __all__ = [
 # celu is very similar to elu
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def celu(
     a: TensorLikeType, alpha: Optional[NumberType] = None, inplace: bool = False
@@ -83,7 +83,7 @@ def elu(
 
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def selu(
     a: TensorLikeType, inplace: bool = False
@@ -98,32 +98,14 @@ def selu(
     alpha = 1.6732632423543772848170429916717
     scale = 1.0507009873554804934193349852946
 
-    python_type = utils.dtype_to_type(a.dtype)
-    if not utils.is_weakly_lesser_type(type(alpha), python_type):
-        msg = (
-            "alpha constant of type {0} cannot be safely cast to type {1}!".format(
-                type(alpha), python_type
-            )
-        )
-        raise ValueError(msg)
-    if not utils.is_weakly_lesser_type(type(scale), python_type):
-        msg = (
-            "scale constant of type {0} cannot be safely cast to type {1}!".format(
-                type(scale), python_type
-            )
-        )
-        raise ValueError(msg)
-
     rhs = refs.mul(alpha, refs.expm1(a))
 
-    # FIXME: If I put the mul on the outside, I hide a stride consistency error!
-    # return refs.mul(scale, refs.where(refs.gt(a, 0), a, rhs))
-    return refs.where(refs.gt(a, 0), refs.mul(scale, a), refs.mul(scale, rhs))
+    return refs.mul(scale, refs.where(refs.gt(a, 0), a, rhs))
 
 # softplus is implemented specially because it has beta and threshold arguments
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def softplus(
     a: TensorLikeType,
