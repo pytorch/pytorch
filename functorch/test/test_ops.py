@@ -487,7 +487,6 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool2d'),  # Flaky
         skip('nn.functional.fractional_max_pool2d'), # randomness
         skip('nn.functional.fractional_max_pool3d'), # randomness
-        xfail('nn.functional.binary_cross_entropy'),  # testing problem
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -597,9 +596,6 @@ class TestOperators(TestCase):
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.eigh'),  # needs diag_scatter
         xfail('linalg.householder_product'),  # needs select_scatter
-        xfail('linalg.matrix_norm'),
-        xfail('linalg.norm'),
-        xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('linalg.slogdet'),  # calls .item()
         xfail('logdet'),  # calls .item()
         xfail('matrix_exp'),  # would benefit from narrow_scatter
@@ -759,9 +755,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.hinge_embedding_loss', device_type='cpu'),
 
         xfail('nn.functional.soft_margin_loss', ''),
-        xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
-        xfail('linalg.norm'),
         xfail('linalg.householder_product'),
         xfail('tensor_split'),
         xfail('quantile'),
@@ -875,7 +869,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
-        xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('lu_unpack'),
         xfail('nn.functional.glu'),
@@ -934,8 +927,6 @@ class TestOperators(TestCase):
         xfail('linalg.householder_product'),
         xfail('linalg.lstsq', ''),
         xfail('linalg.lstsq', 'grad_oriented'),
-        xfail('linalg.matrix_norm'),
-        xfail('linalg.norm'),
         xfail('linalg.pinv'),
         xfail('linalg.qr'),
         xfail('linalg.pinv', 'hermitian'),
