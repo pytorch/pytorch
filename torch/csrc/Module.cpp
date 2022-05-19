@@ -133,7 +133,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module) throw python_error();
 
-  THPStorage_postInit(module);
+  THPByteStorage_postInit(module);
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -735,6 +735,7 @@ static PyMethodDef TorchMethods[] = {
   {nullptr, nullptr, 0, nullptr}
 };
 
+bool THCPByteStorage_init(PyObject *module);
 void THCPStream_init(PyObject *module);
 void THCPEvent_init(PyObject *module);
 void THCPGraph_init(PyObject *module);
@@ -747,6 +748,8 @@ void initModule(PyObject *module);
 
 }} // namespace torch::cuda
 #endif
+
+bool THDPByteStorage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
@@ -850,13 +853,14 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
-  ASSERT_TRUE(THPStorage_init(module));
+  ASSERT_TRUE(THPByteStorage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
   // They won't be ready for real usage until importing cuda module, that will
   // complete the process (but it defines Python classes before calling back into
   // C, so these lines have to execute first)..
+  ASSERT_TRUE(THCPByteStorage_init(module));
   THCPStream_init(module);
   THCPEvent_init(module);
   THCPGraph_init(module);
