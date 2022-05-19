@@ -757,7 +757,13 @@ Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor&
   if (input.numel() == 0) {
     return input;
   }
-  auto result = at::zeros(input.sizes(), input.options());
+  auto result = grad.new_zeros(input.sizes(), input.options());
+
+  // for composite compliance, use out-of-place variant of
+  // `scatter_add` if `indices` is a Tensor Subclass.
+  if (areAnyTensorSubclassLike({indices})) {
+    return result.scatter_add(dim, indices, grad);
+  }
   return result.scatter_add_(dim, indices, grad);
 }
 
