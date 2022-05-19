@@ -1,4 +1,5 @@
 import random
+import torch
 
 from torch.utils.data import Sampler, SequentialSampler
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -84,8 +85,10 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
     """
     datapipe: IterDataPipe[T_co]
     buffer_size: int
-    _shuffle_enabled: bool
-    buffer: List[T_co]
+    _buffer: List[T_co]
+    _enabled: bool
+    _seed: Optional[int]
+    _rng: random.Random
 
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
@@ -94,7 +97,9 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
                  unbatch_level: int = 0
                  ) -> None:
         super().__init__()
-        self.buffer: List[T_co] = []
+        # TODO: Performance optimization
+        #       buffer can be a fixed size and remove expensive `append()` and `len()` operations
+        self._buffer: List[T_co] = []
         assert buffer_size > 0, "buffer_size should be larger than 0"
         if unbatch_level == 0:
             self.datapipe = datapipe
@@ -102,31 +107,33 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
         self._enabled = True
-
-    @staticmethod
-    def buffer_replace(buffer, x):
-        idx = random.randint(0, len(buffer) - 1)
-        val = buffer[idx]
-        buffer[idx] = x
-        return val
+        self._seed = None
+        self._rng = random.Random()
 
     def set_shuffle(self, shuffle=True):
         self._enabled = shuffle
         return self
+
+    def set_seed(self, seed: int):
+        self._seed = seed
 
     def __iter__(self) -> Iterator[T_co]:
         if not self._enabled:
             for x in self.datapipe:
                 yield x
         else:
+            self._rng.seed(self._seed)
+            self._seed = None
             for x in self.datapipe:
-                if len(self.buffer) == self.buffer_size:
-                    yield ShufflerIterDataPipe.buffer_replace(self.buffer, x)
+                if len(self._buffer) == self.buffer_size:
+                    idx = self._rng.randint(0, len(self._buffer) - 1)
+                    val, self._buffer[idx] = self._buffer[idx], x
+                    yield val
                 else:
-                    self.buffer.append(x)
-            random.shuffle(self.buffer)
-            while self.buffer:
-                yield self.buffer.pop()
+                    self._buffer.append(x)
+            self._rng.shuffle(self._buffer)
+            while self._buffer:
+                yield self._buffer.pop()
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
@@ -134,7 +141,9 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
     def reset(self) -> None:
-        self.buffer = []
+        self._buffer = []
+        if self._enabled and self._seed is None:
+            self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
 
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
@@ -142,7 +151,9 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         state = (
             self.datapipe,
             self.buffer_size,
-            self._enabled
+            self._enabled,
+            self._seed,
+            self._rng.getstate(),
         )
         return state
 
@@ -150,9 +161,13 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         (
             self.datapipe,
             self.buffer_size,
-            self._enabled
+            self._enabled,
+            self._seed,
+            rng_state,
         ) = state
-        self.buffer = []
+        self._rng = random.Random()
+        self._rng.setstate(rng_state)
+        self._buffer = []
 
     def __del__(self):
-        self.buffer.clear()
+        self._buffer.clear()
