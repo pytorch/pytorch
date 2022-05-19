@@ -232,16 +232,9 @@ jobs:
     runs-on: linux.20_04.4x
     strategy:
       matrix:
-        test_type: [with_torch, without_torch, older_python_version]
+        test_type: [with_torch, without_torch]
     steps:
-      - name: Setup Python 3.5
-        if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.5
-          architecture: x64
       - name: Setup Python 3.8
-        if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
