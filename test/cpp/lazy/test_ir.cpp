@@ -4,20 +4,26 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 #include <memory>
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/lazy/core/dynamic_ir.h>
+#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 
 namespace torch {
 namespace lazy {
 
 class TestLeafNode : public Node {
  public:
+  static OpKind ClassOpKind() {
+    return OpKind();
+  }
+
   explicit TestLeafNode(size_t param)
-      : Node(OpKind(), /* num_outputs */ 1, /* hash_func */[&](bool /*bakeInSizes*/) -> hash_t { return Hash(param); }),
+      : Node(ClassOpKind(), /* num_outputs */ 1),
+        hash_(Hash(param)),
         param_(param) {}
   ~TestLeafNode() override = default;
 
@@ -28,7 +34,11 @@ class TestLeafNode : public Node {
   const Output& operand(size_t i) const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of leaf node");
   }
+
+  hash_t hash() const override { return hash_; }
+  hash_t shapeHash() const override { return hash_; }
  private:
+  hash_t hash_;
   size_t param_;
 };
 
@@ -39,7 +49,7 @@ TEST(IrTest, BasicTest) {
 
   EXPECT_EQ(node1->num_outputs(), 1);
 
-  const TestLeafNode* leafptr = NodeCast<TestLeafNode>(node1.get(), OpKind());
+  const TestLeafNode* leafptr = NodeCast<TestLeafNode>(node1.get());
   EXPECT_TRUE(leafptr != nullptr);
 }
 
@@ -96,7 +106,7 @@ TEST(IrTest, TsNodeTest) {
 
   EXPECT_EQ(node1->num_outputs(), 1);
 
-  const TsNode* leafptr = NodeCast<TsNode>(node1.get(), OpKind(at::aten::view));
+  const TsNode* leafptr = dynamic_cast<const TsNode*>(node1.get());
   EXPECT_TRUE(leafptr != nullptr);
 }
 

@@ -52,8 +52,6 @@ jobs:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          needs-history-and-master: true
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
@@ -67,6 +65,7 @@ jobs:
           auto-update-conda: true
           python-version: 3.8
           activate-environment: build
+          miniconda-version: 4.7.12
 
       - name: Install macOS homebrew dependencies
         run: |

@@ -244,6 +244,25 @@ std::vector<Shape> compute_shape_min(const at::Tensor & self){
     return {Shape(self.scalar_type(), {})};
 }
 
+std::vector<Shape> compute_shape_nonzero(const at::Tensor& t, bool as_tuple) {
+  if (as_tuple) {
+    auto res = std::vector<Shape>();
+    for (auto dim_size : t.sizes()) {
+      res.emplace_back(Shape(at::kLong, {dim_size}));
+    }
+    return res;
+  }
+  int64_t max_elements = 1;
+  for (auto dim_size : t.sizes()) {
+    max_elements *= dim_size;
+  }
+  return {Shape(at::kLong, {max_elements, (int64_t)t.sizes().size()})};
+}
+
+std::vector<Shape> compute_shape_nonzero(const at::Tensor& self) {
+  return compute_shape_nonzero(self, false);
+}
+
 std::vector<Shape> compute_shape_embedding(const at::Tensor & weight, const at::Tensor & indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse){
   // Based on aten/src/ATen/native/Embedding.cpp::embedding.
   std::vector<int64_t> out_sizes = indices.sizes().vec();
@@ -545,6 +564,10 @@ std::vector<Shape> compute_shape_glu_backward(const at::Tensor & grad_output, co
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_glu_jvp(const at::Tensor & glu, const at::Tensor & x, const at::Tensor & dx, int64_t dim) {
+  return {Shape(glu.scalar_type(), glu.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction) {
   TORCH_INTERNAL_ASSERT(grad_output.scalar_type() == self.dtype());
   return {Shape(self.scalar_type(), self.sizes().vec())};
@@ -589,6 +612,10 @@ std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef
     target_size[idx] = padded_size[idx] * repeats[idx];
   }
   return {Shape(self.scalar_type(), target_size)};
+}
+
+std::vector<Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t dim, int64_t start, c10::SymInt length) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 // Restore unused-parameters warnings

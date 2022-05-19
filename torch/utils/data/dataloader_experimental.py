@@ -10,6 +10,10 @@ import torch.utils.data.graph_settings
 from torch.utils.data import DataLoader, IterDataPipe, communication
 from torch.utils.data.datapipes.iter import IterableWrapper
 
+__all__ = [
+    "DataLoader2",
+]
+
 
 class _ThreadingDataLoader2:
 
@@ -60,6 +64,7 @@ def _sharding_worker_init_fn(worker_init_fn, worker_id):
         worker_init_fn(worker_id)
     torch.utils.data.backward_compatibility.worker_init_fn(
         worker_id)
+
 class DataLoader2:
     def __new__(cls,
                 dataset,

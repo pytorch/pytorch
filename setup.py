@@ -1053,6 +1053,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/tensor/*.h',
                 'include/torch/csrc/lazy/backend/*.h',
                 'include/torch/csrc/lazy/core/*.h',
+                'include/torch/csrc/lazy/core/ops/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
                 'include/TH/*.h*',
@@ -1079,6 +1080,7 @@ if __name__ == '__main__':
                 'utils/model_dump/code.js',
                 'utils/model_dump/*.mjs',
             ],
+            'torchgen': [],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
             ],

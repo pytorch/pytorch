@@ -362,7 +362,9 @@ def main() -> None:
             assert len(parts) == 2, f"invalid severity `{severity}`"
             severities[parts[0]] = LintSeverity(parts[1])
 
-    lint_messages = check_files(args.filenames, flake8_plugins_path, severities, args.retries)
+    lint_messages = check_files(
+        args.filenames, flake8_plugins_path, severities, args.retries
+    )
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 
