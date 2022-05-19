@@ -767,11 +767,7 @@ void IrTransformPrinter::handle(Fusion* f) {
 }
 
 void IrTransformPrinter::printTransforms(TensorView* tv) {
-  auto root_domain = tv->getMaybeRFactorDomain();
-  auto all_exp = DependencyCheck::getAllExprsBetween(
-      {root_domain.begin(), root_domain.end()},
-      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
-
+  auto root_domain = tv->domain()->getRootDomain();
   os() << " root domain : (";
   for (const auto root_idx : c10::irange(root_domain.size())) {
     IrPrinter::handle(root_domain[root_idx]);
@@ -780,6 +776,33 @@ void IrTransformPrinter::printTransforms(TensorView* tv) {
     }
   }
   os() << ")\n";
+
+  if (tv->hasRFactor()) {
+    auto rfactor_domain = tv->domain()->getRFactorDomain();
+
+    auto all_exp = DependencyCheck::getAllExprsBetween(
+        {root_domain.begin(), root_domain.end()},
+        {rfactor_domain.begin(), rfactor_domain.end()});
+
+    for (auto exp : all_exp) {
+      os() << "  ";
+      IrPrinter::handle(exp);
+    }
+
+    os() << " rfactor domain : (";
+    for (const auto root_idx : c10::irange(rfactor_domain.size())) {
+      IrPrinter::handle(rfactor_domain[root_idx]);
+      if (root_idx + 1 < rfactor_domain.size()) {
+        os() << ",";
+      }
+    }
+    os() << ")\n";
+  }
+
+  auto from = tv->getMaybeRFactorDomain();
+  auto all_exp = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()},
+      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
 
   for (auto exp : all_exp) {
     os() << "  ";
