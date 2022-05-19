@@ -122,7 +122,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
             shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
-            storage_cls._release_ipc_counter_cuda(ref_counter_handle, ref_counter_offset, device=storage_device)
+            storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset, device=storage_device)
 
     t = torch._utils._rebuild_tensor(
         torch.storage._TypedStorage(wrap_storage=storage._untyped(), dtype=dtype),
@@ -299,7 +299,7 @@ def rebuild_storage_fd(cls, df, size):
         storage = storage_from_cache(cls, fd_id(fd))
         if storage is not None:
             return storage
-        storage = cls._new_shared_fd_cpu(fd, size)
+        storage = cls._new_shared_fd(fd, size)
         shared_cache[fd_id(fd)] = StorageWeakRef(storage)
         return storage
     finally:
@@ -311,10 +311,10 @@ def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
     if storage is not None:
         return storage._shared_decref()
     if dtype is None:
-        storage = torch._UntypedStorage._new_shared_filename_cpu(manager, handle, size)
+        storage = torch._UntypedStorage._new_shared_filename(manager, handle, size)
     else:
         byte_size = size * torch._utils._element_size(dtype)
-        untyped_storage: torch._UntypedStorage = torch._UntypedStorage._new_shared_filename_cpu(manager, handle, byte_size)
+        untyped_storage: torch._UntypedStorage = torch._UntypedStorage._new_shared_filename(manager, handle, byte_size)
         storage = torch._TypedStorage(
             wrap_storage=untyped_storage,
             dtype=dtype)
@@ -344,7 +344,7 @@ def reduce_storage(storage):
     if storage.is_cuda:
         raise RuntimeError("Cannot pickle CUDA storage; try pickling a CUDA tensor instead")
     elif get_sharing_strategy() == 'file_system':
-        metadata = storage._share_filename_cpu_()
+        metadata = storage._share_filename_()
         cache_key = metadata[1]
         rebuild = rebuild_storage_filename
         if isinstance(storage, torch._TypedStorage):
@@ -355,7 +355,7 @@ def reduce_storage(storage):
         # (with size 0) cannot be mmapped.
         return (rebuild_storage_empty, (type(storage),))
     else:
-        fd, size = storage._share_fd_cpu_()
+        fd, size = storage._share_fd_()
         df = multiprocessing.reduction.DupFd(fd)
         cache_key = fd_id(fd)
         metadata = (df, size)
