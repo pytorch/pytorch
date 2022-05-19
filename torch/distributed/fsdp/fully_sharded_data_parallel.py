@@ -1651,8 +1651,7 @@ class FullyShardedDataParallel(nn.Module):
         Example::
 
         >>> model = DDP(FSDP(...))
-        >>> fsdp_root = model.module
-        >>> with FSDP.state_dict_type(fsdp_root, StateDictType.LOCAL_STATE_DICT):
+        >>> with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
         >>>     checkpoint = model.state_dict()
 
         Args:
