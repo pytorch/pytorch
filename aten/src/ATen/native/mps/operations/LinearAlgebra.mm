@@ -338,9 +338,12 @@ Tensor& addmm_out_mps_impl(
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self, nullptr, true);
-    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other, nullptr, true);
-    Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias, nullptr, true);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self,
+    nullptr, true);
+    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other,
+    nullptr, true);
+    Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias,
+    nullptr, false);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{

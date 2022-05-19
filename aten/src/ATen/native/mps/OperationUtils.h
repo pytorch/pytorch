@@ -63,7 +63,7 @@ class Placeholder {
   Placeholder() : _placeholder(nullptr), _value(nullptr) {}
   Placeholder(MPSGraphTensor* mpsGraphTensor) : _placeholder(mpsGraphTensor), _value(nullptr) {}
   Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr,
-              bool check_view = false);
+              bool check_view = true);
   MPSGraphTensor* getMPSGraphTensor() {
     return _placeholder;
   }
