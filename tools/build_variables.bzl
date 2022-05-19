@@ -257,6 +257,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/peephole_non_tensor.cpp",
     "torch/csrc/jit/passes/create_functional_graphs.cpp",
+    "torch/csrc/jit/passes/refine_tuple_types.cpp",
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
@@ -481,6 +482,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/exception.cpp",
     "torch/csrc/distributed/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/logging.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/socket.cpp",
@@ -666,6 +668,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/executor_utils.cpp",
     "torch/csrc/jit/codegen/cuda/fusion.cpp",
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
+    "torch/csrc/jit/codegen/cuda/grouped_reduction.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
     "torch/csrc/jit/codegen/cuda/index_reference_replay.cpp",
     "torch/csrc/jit/codegen/cuda/instrumentation.cpp",
@@ -696,6 +699,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_magic_zero.cpp",
     "torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.cpp",
     "torch/csrc/jit/codegen/cuda/lower_predicate.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_predicate_elimination.cpp",
     "torch/csrc/jit/codegen/cuda/lower_replace_size.cpp",
     "torch/csrc/jit/codegen/cuda/lower_shift.cpp",
     "torch/csrc/jit/codegen/cuda/lower_sync_information.cpp",
@@ -943,7 +947,6 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
-    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
@@ -1030,7 +1033,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Generator.cpp",
     "aten/src/ATen/core/List.cpp",
     "aten/src/ATen/core/NamedTensor.cpp",
-    "aten/src/ATen/core/SymIntArrayRef.cpp",
     "aten/src/ATen/core/Tensor.cpp",
     "aten/src/ATen/core/VariableFallbackKernel.cpp",
     "aten/src/ATen/core/VariableHooksInterface.cpp",
@@ -1079,6 +1081,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/MkldnnTensorMath.cpp",
     "aten/src/ATen/native/mkldnn/Normalization.cpp",
     "aten/src/ATen/native/mkldnn/Pooling.cpp",
+    "aten/src/ATen/native/mkldnn/Prelu.cpp",
     "aten/src/ATen/native/mkldnn/Relu.cpp",
     "aten/src/ATen/native/mkldnn/SoftMax.cpp",
     "aten/src/ATen/native/mkldnn/TensorFactories.cpp",
@@ -1138,6 +1141,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/MaxPoolKernel.cpp",
     "aten/src/ATen/native/cpu/MaxUnpoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
+    "aten/src/ATen/native/cpu/PixelShuffleKernel.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
     "aten/src/ATen/native/cpu/PowKernel.cpp",
     "aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp",
@@ -1158,6 +1162,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/WeightNormKernel.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]
 

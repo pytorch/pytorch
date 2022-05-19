@@ -108,6 +108,12 @@ class TestGitHubPR(TestCase):
         self.assertTrue("@" in author)
         self.assertTrue(pr.get_diff_revision() is None)
 
+        # PR with multiple contributors, but creator id is not among authors
+        pr = GitHubPR("pytorch", "pytorch", 75095)
+        self.assertEqual(pr.get_pr_creator_login(), "mruberry")
+        author = pr.get_author()
+        self.assertTrue(author is not None)
+
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_large_diff(self, mocked_gql: Any) -> None:
         "Tests that PR with 100+ files can be fetched"
@@ -170,7 +176,19 @@ class TestGitHubPR(TestCase):
         """
         pr = GitHubPR("pytorch", "pytorch", 76118)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.assertRaisesRegex(MandatoryChecksMissingError, ".*are not yet run.*", lambda: find_matching_merge_rule(pr, repo))
+        self.assertRaisesRegex(MandatoryChecksMissingError,
+                               ".*are pending/not yet run.*",
+                               lambda: find_matching_merge_rule(pr, repo))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_author_many_reviews(self, mocked_gql: Any) -> None:
+        """ Tests that all reviews can be fetched
+        """
+        pr = GitHubPR("pytorch", "pytorch", 76123)
+        approved_by = pr.get_approved_by()
+        self.assertGreater(len(approved_by), 0)
+        assert pr._reviews is not None  # to pacify mypy
+        self.assertGreater(len(pr._reviews), 100)
 
 
 if __name__ == "__main__":
