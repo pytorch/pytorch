@@ -1630,10 +1630,13 @@ The `driver` kwarg may be used in CUDA with a cuSOLVER backend to choose the alg
 The choice of a driver is a trade-off between accuracy and speed.
 
 - If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
-- For a general matrix: `'gesvdj'` (Jacobi method)
-- If :attr:`A` is tall or wide (`m >> n` or `m << n`): `'gesvda'` (Approximate method)
+
+  - For a general matrix: `'gesvdj'` (Jacobi method)
+  - If :attr:`A` is tall or wide (`m >> n` or `m << n`): `'gesvda'` (Approximate method)
+
 - If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
-- By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
+
+By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
 
 Differences with `numpy.linalg.svd`:
 
