@@ -73,7 +73,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
                     name
                   }
                 }
-                checkRuns(first: 50) {
+                checkRuns(first: 60) {
                   nodes {
                     name
                     conclusion
@@ -177,7 +177,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
                     name
                   }
                 }
-                checkRuns(first: 50) {
+                checkRuns(first: 60) {
                   nodes {
                     name
                     conclusion
