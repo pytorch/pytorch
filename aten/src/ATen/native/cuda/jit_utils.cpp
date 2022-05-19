@@ -53,6 +53,11 @@ const std::string jit_epilogue;
 #endif
 
 const std::string jit_common_types = R"ESCAPE(
+  #ifdef __HIPCC__
+  #define FORCE_INLINE
+  #else
+  #define FORCE_INLINE __forceinline__
+  #endif
   #define POS_INFINITY __int_as_float(0x7f800000)
   #define INFINITY POS_INFINITY
   #define NEG_INFINITY __int_as_float(0xff800000)
@@ -471,7 +476,7 @@ const std::string offset_calc_template = R"ESCAPE(
   template<int NARGS>
   struct OffsetCalculator {
   OffsetCalculator() = default;
-  __device__ __forceinline__ Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
+  __device__ FORCE_INLINE Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
       Array<${index_type}, NARGS> offsets;
       #pragma unroll
       for (int arg = 0; arg < NARGS; ++arg) {
