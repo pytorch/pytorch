@@ -5,6 +5,7 @@
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <c10/util/Optional.h>
 
 namespace torch {
 namespace lazy {
@@ -67,14 +68,11 @@ c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
   return c10::nullopt;
 }
 
-c10::optional<BackendDevice> GetBackendDevice(const c10::optional<at::Device>& device) {
-  if (!device) {
-    return c10::nullopt;
+c10::optional<BackendDevice> GetBackendDevice(const c10::optional<c10::Device> device) {
+  if (device) {
+    return c10::make_optional(atenDeviceToBackendDevice(*device));
   }
-  if (device->type() != at::kLazy) {
-    return c10::nullopt;
-  }
-  return torch::lazy::atenDeviceToBackendDevice(*device);
+  return c10::nullopt;
 }
 
 c10::optional<BackendDevice> GetBackendDevice() {
