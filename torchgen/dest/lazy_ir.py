@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import List, Union, Tuple
+from typing import List, Optional, Union, Tuple
 import itertools
 from dataclasses import dataclass
 from torchgen.context import method_with_native_function
@@ -16,6 +16,7 @@ from torchgen.api.types import (
     OptionalCType,
     VectorCType,
     kernel_signature,
+    deviceT,
 )
 import torchgen.api.dispatcher as dispatcher
 from torchgen.api.translate import translate
@@ -387,11 +388,19 @@ class GenLazyNativeFuncDefinition:
 
     def get_device(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
+        scalar_args = schema.filtered_args(values=False, scalars=True)
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
+        optional_device = OptionalCType(BaseCType(deviceT))
+        optional_devices = [
+            a.name for a in scalar_args if a.lazy_type == optional_device
+        ]
         assert (
-            len(value_types_names) > 0
-        ), "Code below assumes there is at least one tensor arg"
-        return f"""auto common_device = {self.get_device_fn}({', '.join(value_types_names)});
+            len(value_types_names) > 0 or len(optional_devices) > 0
+        ), "Expected at least one Value or Device type"
+        get_device_str = (
+            f"{self.get_device_fn}({', '.join(value_types_names + optional_devices)})"
+        )
+        return f"""auto common_device = {get_device_str};
         TORCH_INTERNAL_ASSERT(common_device);
         """
 
@@ -473,10 +482,13 @@ class GenLazyNativeFuncDefinition:
         }}
         """
 
-    def create_lazy_tensor(self, first_tensor_name: str) -> str:
+    def create_lazy_tensor(self, first_tensor_name: Optional[str] = None) -> str:
         # xla uses an instance method for tensor creation, for the time being
         if self.create_from_first_tensor:
             # TODO(whc) remove this if XLA switches to using static method for creation
+            assert (
+                first_tensor_name is not None
+            ), "Requires first tensor to create lazy tensor"
             return f"{first_tensor_name}.{self.create_tensor}"
         return f"{self.backend_namespace}::{self.create_tensor}"
 
@@ -484,14 +496,14 @@ class GenLazyNativeFuncDefinition:
         returns_length = len(schema.returns)
         value_args = schema.filtered_args(values=True, scalars=False)
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        assert (
-            len(value_types_names) > 0
-        ), "Code below assumes there is at least one tensor arg"
-        first_tensor_name = value_types_names[0]
+        first_tensor_name = value_types_names[0] if len(value_types_names) > 0 else None
         bridge_str = f"""auto result = {self.create_aten_from_ltc_tensor}(
                 {self.create_lazy_tensor(first_tensor_name)}(std::move(node), *common_device));"""
 
         if returns_length > 1:
+            assert (
+                len(value_types_names) > 0
+            ), "Code below assumes there is at least one tensor arg"
             bridge_str = f"""std::vector<{self.lazy_tensor_ptr}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
             lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({getValueT()}(node, i), *common_device));

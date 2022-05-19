@@ -772,6 +772,8 @@ class ops(_TestParametrizer):
                     if dtype in dtype_set:
                         dtypes = {dtype}
                         break
+                else:
+                    dtypes = {}
             elif self.opinfo_dtypes == OpDTypes.none:
                 dtypes = {None}
             else:
