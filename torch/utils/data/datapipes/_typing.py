@@ -345,22 +345,22 @@ class _IterDataPipeMeta(_DataPipeMeta):
 
     def __new__(cls, name, bases, namespace, **kwargs):
 
-        # 'reset' should always be in the namespace of `IterDataPipe`
-        reset_func = namespace['reset']
+        if 'reset' in namespace:
+            reset_func = namespace['reset']
 
-        @functools.wraps(reset_func)
-        def conditional_reset(*args, **kwargs):
-            r"""
-            Only execute DataPipe's `reset()` method if `_restored` is False. This allows recently
-            restored DataPipe to preserve its restored state during the initial `__iter__` call.
-            """
-            datapipe = args[0]
-            if datapipe._restored is True:
-                datapipe._restored = False
-            else:
-                reset_func(*args, **kwargs)
+            @functools.wraps(reset_func)
+            def conditional_reset(*args, **kwargs):
+                r"""
+                Only execute DataPipe's `reset()` method if `_restored` is False. This allows recently
+                restored DataPipe to preserve its restored state during the initial `__iter__` call.
+                """
+                datapipe = args[0]
+                if datapipe._restored is True:
+                    datapipe._restored = False
+                else:
+                    reset_func(*args, **kwargs)
 
-        namespace['reset'] = conditional_reset
+            namespace['reset'] = conditional_reset
 
         if '__setstate__' in namespace:
             setstate_func = namespace['__setstate__']
