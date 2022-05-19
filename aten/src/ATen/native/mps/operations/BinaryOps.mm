@@ -30,10 +30,8 @@ void binaryOpTensor(const Tensor& self_t, const Tensor& other_t, const Tensor& o
 
   const bool is_self_scalar = self_t.dim() == 0;
   const bool is_other_scalar = other_t.dim() == 0;
-  //Tensor self = is_self_scalar ? self_t : self_t.contiguous(at::MemoryFormat::Contiguous);
-  //Tensor other = is_other_scalar ? other_t : other_t.contiguous(at::MemoryFormat::Contiguous);
-  Tensor self = self_t;
-  Tensor other = other_t;
+  Tensor self = is_self_scalar ? self_t : self_t.contiguous(at::MemoryFormat::Contiguous);
+  Tensor other = is_other_scalar ? other_t : other_t.contiguous(at::MemoryFormat::Contiguous);
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
@@ -65,13 +63,11 @@ void binaryOpTensor(const Tensor& self_t, const Tensor& other_t, const Tensor& o
 
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
     if (!is_self_scalar) {
-      Placeholder selfPlaceholder = Placeholder(cachedGraph->primaryTensor,
-      self, nullptr, true);
+      Placeholder selfPlaceholder = Placeholder(cachedGraph->primaryTensor, self);
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
     if (!is_other_scalar) {
-      Placeholder otherPlaceholder = Placeholder(cachedGraph->secondaryTensor,
-      other, nullptr, true);
+      Placeholder otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, other);
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
 

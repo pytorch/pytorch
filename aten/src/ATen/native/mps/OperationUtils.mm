@@ -330,6 +330,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src,
       srcBuf = gatherTensor;
     } else {
       src_ = src.contiguous();
+      srcBuf = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
     }
   }
   const size_t buf_size = [srcBuf length];

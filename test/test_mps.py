@@ -15,7 +15,6 @@ from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
 import torch.backends.mps
 from torch.distributions import (Uniform)
-from scipy import stats
 
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np

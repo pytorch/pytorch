@@ -23,7 +23,9 @@ MPSGraphTensor* chainViewOperation(MPSGraph* mpsGraph, IntArrayRef size,
 
   @autoreleasepool {
       int32_t* sizeArray = new int32_t[shape_size];
+      const int64_t int_max = std::numeric_limits<int32_t>::max();
       for (int i = 0; i < shape_size; i++) {
+        TORCH_CHECK(size[i] <= int_max);
         sizeArray[i] = static_cast<int32_t>(size[i]);
       }
       NSData* shapeData = [NSData dataWithBytes:sizeArray
@@ -206,6 +208,7 @@ void* pageAlignedBlockPtr(
   *alignedBlockSize = alignedLength;
   return (void*)alignedAddress;
 }
+
 static bool copy_requires_temporaries(const Tensor& dst, const Tensor& src) {
   bool same_dtype = src.dtype() == dst.dtype();
   if (same_dtype && src.is_contiguous() && dst.is_contiguous()) {
@@ -236,7 +239,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_,
   dst._set_neg(dst_.is_neg());
   src._set_neg(src_.is_neg());
 
-  // MTLContext* context = static_cast<MTLContext *>(device->device_handle);
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
   id<MTLBuffer> sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
   if (!src_.is_contiguous()) {
@@ -246,6 +248,8 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_,
       storage_byte_offset = 0;
     } else {
       src = src_.expand_as(dst).contiguous();
+      sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src.storage().data());
+      storage_byte_offset = src.storage_offset() * src.itemsize();
     }
   } else {
     src = src_;
@@ -311,7 +315,6 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
 
   if (!src.is_contiguous()) {
     src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
-    //src = src_.contiguous();
   } else {
     src = src_;
   }
@@ -395,6 +398,8 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
       src_byte_offset = 0;
     } else {
       src = src_.expand_as(dst_).contiguous();
+      sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src.storage().data());
+      src_byte_offset = src.storage_offset() * src.itemsize();
     }
   } else {
     src = src_;
