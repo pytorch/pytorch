@@ -61,31 +61,31 @@ class C10_API SymInt {
   bool operator<(SymInt sci) const {
     TORCH_CHECK(
         !this->is_symbolic() && !sci.is_symbolic(),
-        "Symbolic Add isn't supported yet");
+        "Symbolic lt isn't supported yet");
     return data_ < sci.data_;
   }
   void operator*=(SymInt sci) {
     TORCH_CHECK(
         !this->is_symbolic() && !sci.is_symbolic(),
-        "Symbolic Add isn't supported yet");
+        "Symbolic mul_ isn't supported yet");
     data_ = data_ * sci.data_;
   }
 
   bool operator<(int64_t sci) const {
-    TORCH_CHECK(!this->is_symbolic(), "Symbolic Add isn't supported yet");
+    TORCH_CHECK(!this->is_symbolic(), "Symbolic lt isn't supported yet");
     return data_ < sci;
   }
   bool operator==(int64_t sci) const {
-    TORCH_CHECK(!this->is_symbolic(), "Symbolic Add isn't supported yet");
+    TORCH_CHECK(!this->is_symbolic(), "Symbolic eq isn't supported yet");
     return data_ == sci;
   }
   bool operator!=(int64_t sci) const {
-    TORCH_CHECK(!this->is_symbolic(), "Symbolic Add isn't supported yet");
+    TORCH_CHECK(!this->is_symbolic(), "Symbolic neq isn't supported yet");
     return data_ != sci;
   }
 
   SymInt operator*(int64_t sci) const {
-    TORCH_CHECK(!this->is_symbolic(), "Symbolic Add isn't supported yet");
+    TORCH_CHECK(!this->is_symbolic(), "Symbolic mul isn't supported yet");
     return SymInt(data_ * sci);
   }
 
