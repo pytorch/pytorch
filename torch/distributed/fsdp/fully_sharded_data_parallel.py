@@ -1891,17 +1891,16 @@ class FullyShardedDataParallel(nn.Module):
 
     def state_dict(self, *args, **kwargs):
         """
-        The entry point of all three FSDP ``state_dict`` APIs. By default, calling
-        ``state_dict`` on an FSDP module will result in FSDP attempting to bring
-        the entire (nested) model into memory and taking the local model's
-        ``state_dict`` on every rank, which could result in OOM if the model
-        cannot fit on a single GPU. As a result, :func:`state_dict_type` API is
-        available to configure between ``state_dict`` implementations. User can
-        thus use ``with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT)``
-        context manager to perform a local checkpoint that will store only local
-        shards of the module. Currently, the only supported implementations are
-        ``StateDictType.LOCAL_STATE_DICT`` and ``StateDictType.FULL_STATE_DICT``
-        (default).
+        This is the entry point of all three FSDP ``state_dict`` APIs: full,
+        local, and sharded. For the full state dict
+        (``StateDictType.FULL_STATE_DICT``), FSDP attempts to unshard the model
+        on all ranks, which may result in an OOM error if the full model cannot
+        fit on a single GPU. In that case, users may instead take a local state
+        dict (``StateDictType.LOCAL_STATE_DICT``) that only saves the local
+        shard of the model. The sharded state dict
+        (``StateDictType.SHARDED_STATE_DICT``) saves the model parameters as
+        ``ShardedTensor`` s. The ``state_dict`` type can be configured using
+        the :meth:`state_dict_type` context manager.
 
         Example::
 
