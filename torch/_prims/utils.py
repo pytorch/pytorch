@@ -799,7 +799,7 @@ _computation_dtype_map = {
 }
 
 
-def _get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
+def get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
     return _computation_dtype_map.get(dtype, dtype)
 
 
@@ -991,25 +991,25 @@ def elementwise_dtypes(
         result_dtype = torch.bool
 
     if type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
-        return _get_computation_dtype(result_dtype), result_dtype
+        return get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH:
         return result_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
         if is_integer_dtype(result_dtype) or is_boolean_dtype(result_dtype):
             result_dtype = torch.get_default_dtype()
-        return _get_computation_dtype(result_dtype), result_dtype
+        return get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
         # NOTE: computation can still occur in a complex dtype
-        computation_dtype = _get_computation_dtype(result_dtype)
+        computation_dtype = get_computation_dtype(result_dtype)
         if is_complex_dtype(result_dtype):
             result_dtype = corresponding_real_dtype(result_dtype)
         return computation_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG:
         if is_boolean_dtype(result_dtype):
             return torch.long, torch.long
-        return _get_computation_dtype(result_dtype), result_dtype
+        return get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
-        return _get_computation_dtype(result_dtype), torch.bool
+        return get_computation_dtype(result_dtype), torch.bool
     else:
         raise ValueError(
             "Unknown type promotion kind {0}".format(str(type_promotion_kind))
