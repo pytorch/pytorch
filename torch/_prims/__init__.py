@@ -73,6 +73,7 @@ __all__ = [
     "square",
     "tan",
     "tanh",
+    "trunc",
     #
     # Elementwise binary prims
     #
@@ -579,6 +580,13 @@ tan = _make_elementwise_unary_prim(
 tanh = _make_elementwise_unary_prim(
     "tanh",
     impl_aten=torch.tanh,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+trunc = _make_elementwise_unary_prim(
+    "trunc",
+    impl_aten=torch.trunc,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )

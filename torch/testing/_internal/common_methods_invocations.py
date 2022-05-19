@@ -18806,6 +18806,10 @@ python_ref_db = [
         "_refs.tanh",
         torch_opinfo_name="tanh",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.trunc",
+        torch_opinfo_name="trunc",
+    ),
     #
     # Elementwise Unary Special OpInfos
     #
