@@ -3,7 +3,7 @@ from typing import Set
 import traceback
 import torch
 
-__all__ = ['Library', 'impl']
+__all__ = ['Library', 'impl', 'define']
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
