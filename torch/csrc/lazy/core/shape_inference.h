@@ -56,6 +56,7 @@ TORCH_API std::vector<torch::lazy::Shape> compute_shape_random_(at::Tensor & sel
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_relu(const at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_relu_(at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef repeats);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_slogdet(const at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_smooth_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction, double beta);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_sort(const at::Tensor & self, int64_t dim, bool descending);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_stack(at::TensorList tensors, int64_t dim);
