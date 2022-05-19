@@ -11,6 +11,7 @@ from .decompositions import register_decomposition
 from .partitioners import default_partition
 from .named_members_polyfill import _named_parameters, _named_buffers
 from typing import Callable, List, Dict, Any, Tuple, Optional
+from functools import wraps
 
 try:
     from torchdynamo import disable as disable_torchdynamo
@@ -261,6 +262,7 @@ def rearrange(tensor_args, static_args, static_argnums):
         else:
             args.append(tensor_args[tensor_index])
             tensor_index += 1
+        index += 1
 
     while tensor_index < len(tensor_args):
         args.append(tensor_args[tensor_index])
@@ -375,6 +377,7 @@ def aot_function(
         static_argnums = list(static_argnums)
         static_argnums.sort()
 
+    @wraps(fn)
     def returned_function(*args, **kwargs):
         global compile_cache
         nonlocal cached_res
