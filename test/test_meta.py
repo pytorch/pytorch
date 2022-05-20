@@ -165,11 +165,7 @@ class MetaConverter:
                 # don't work
                 t.is_neg(), t.is_conj(),
                 # conjugate fallback does not support meta tensors
-                t.dtype in (torch.complex128, torch.complex64, torch.complex32),
-                t.device.type in ("lazy", "meta"),
-                # We need a way to test if a tensor is batched but there
-                # is no official APi to do it
-                # torch._C._is_batched(t),
+                t.dtype in (torch.complex128, torch.complex64),
             ]):
                 # TODO: sparse should support meta
                 # NB technically to('meta') does work but our logging
@@ -178,6 +174,16 @@ class MetaConverter:
                 # the to conversion isn't really right anyhow.
                 self.miss += 1
                 return t
+            elif any([
+                t.device.type in ("lazy", "meta"), t.is_complex(),
+                # We need a way to test if a tensor is batched but there
+                # is no official APi to do it
+                # torch._C._is_batched(t),
+            ]):
+                # TODO: this stuff should support storage
+                # (well, maybe not batched)
+                self.hit += 1
+                return t.to("meta")
             else:
                 self.hit += 1
                 r = self.meta_tensor(t)
@@ -258,30 +264,18 @@ class TestMetaConverter(TestCase):
         self.assertEqual(m.shape, x.shape)
         self.assertFalse(m.requires_grad)
 
-    # NB: complex stuff is not actually exercised right now because
-    # we have a blanket exclusion for complex conversion
-
     def test_view_as_real(self):
         x = torch.randn(4, dtype=torch.complex64)
         y = torch.view_as_real(x)
         m = MetaConverter()(y)
         self.assertEqual(m.shape, y.shape)
-        self.assertEqual(m.stride(), y.stride())
         self.assertEqual(m.dtype, y.dtype)
-
-    def test_complex_noncontiguous_bug(self):
-        x = torch.randn((2, 2, 4, 9), dtype=torch.complex32)[:,0,:,:]
-        m = MetaConverter()(x)
-        self.assertEqual(m.shape, x.shape)
-        self.assertEqual(m.stride(), x.stride())
-        self.assertEqual(m.dtype, x.dtype)
 
     def test_view_as_complex(self):
         x = torch.randn((4, 2), dtype=torch.float32)
         y = torch.view_as_complex(x)
         m = MetaConverter()(y)
         self.assertEqual(m.shape, y.shape)
-        self.assertEqual(m.stride(), y.stride())
         self.assertEqual(m.dtype, y.dtype)
 
     def test_view_dtype(self):
@@ -289,7 +283,6 @@ class TestMetaConverter(TestCase):
         y = x.view(dtype=torch.int32)
         m = MetaConverter()(y)
         self.assertEqual(m.shape, y.shape)
-        self.assertEqual(m.stride(), y.stride())
         self.assertEqual(m.dtype, y.dtype)
 
     def test_imag(self):
@@ -635,6 +628,7 @@ meta_function_skips = {
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_xor: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
+    torch.logit: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
     # BEGIN TODO
@@ -724,6 +718,7 @@ meta_function_device_expected_failures['cuda'] = {
 }
 
 meta_function_device_skips['cuda'] = {
+    torch.Tensor.__getitem__: {c32},
     torch.cummax: {f16},
     torch.cummin: {f16},
     torch.functional.tensordot: {f16},
@@ -732,6 +727,7 @@ meta_function_device_skips['cuda'] = {
     torch.linalg.matrix_power: {f32, f64},
     torch.linalg.matrix_rank: {f32, f64},
     torch.linalg.svd: {f32, f64},
+    torch.logit: {f16},
     torch.nn.functional.cross_entropy: {f16},
     torch.nn.functional.interpolate: {f16},
     torch.nn.functional.nll_loss: {f16},
@@ -835,6 +831,7 @@ meta_dispatch_expected_failures = {
     aten.logical_not.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.logical_not_.default: {bf16, f16, f64, f32},
     aten.logical_xor.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
+    aten.logit.out: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.max_pool3d_with_indices.default: {f64, f32},
@@ -918,12 +915,16 @@ meta_dispatch_skips = {
     aten.addr.default: {b8},
     aten.addr.out: {b8},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
+    aten.copy_.default: {c32},
     aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.cummin.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
+    aten.index_add.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},  # TODO
+    aten.index_add.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},  # TODO
     aten.isnan.default: {f64, f32},
     aten.native_batch_norm.default: {f64, f32},  # waiting on https://github.com/pytorch/pytorch/pull/77407
     aten.native_layer_norm.default: {bf16, f64, f32},
     aten.mul.Scalar: {i64, bf16, f16, f32, i8, f64, i16, i32},  # test_dispatch_meta_gradient_cpu_bfloat16
+    aten.slice.Tensor: {c32},  # TODO
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
@@ -972,6 +973,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.log_sigmoid_forward.output: {f16},  # aten::log_sigmoid_forward.output
     aten.logcumsumexp.default: {bf16, f16},  # aten::_logcumsumexp
     aten.logcumsumexp.out: {bf16, f16},  # aten::_logcumsumexp.out
+    aten.logit.out: {f16},
     aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices
     aten.max_unpool2d.default: {f16},  # aten::max_unpool2d
     aten.max_unpool3d.default: {f16},  # aten::max_unpool3d
@@ -985,8 +987,9 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.mvlgamma.out: {f16},  # aten::mvlgamma.out
     aten.nanmedian.default: {f16},  # aten::nanmedian
     aten.nanmedian.dim: {f16},  # aten::nanmedian.dim_values
-    aten.native_group_norm.default: {bf16, f16},
+    aten.native_batch_norm.default: {bf16, f16},  # waiting on https://github.com/pytorch/pytorch/pull/77407
     aten.native_dropout.default: {bf16, f16, f32, f64},
+    aten.native_layer_norm.default: {f16},  # aten::var_mean.correction
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
