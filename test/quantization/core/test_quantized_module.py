@@ -29,6 +29,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_onednn,
 )
+from torch.testing._internal.common_utils import TestCase
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -679,8 +680,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             ).eval()
 
         self._test_dropout_serialization(_get_model, data1, data2)
-
-
 
     def test_batch_norm2d(self):
         """Tests the correctness of the batchnorm2d module.
@@ -1459,6 +1458,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 self.check_eager_serialization(cell_dq, cell_dict[rnn_type](**kwargs), [x])
                 self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
 
+
 class TestReferenceQuantizedModule(QuantizationTestCase):
     def _quant_dequant_weight(self, weight, weight_qparams):
         qscheme = weight_qparams["qscheme"]
@@ -1659,3 +1659,112 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
             fp32_res = fp32_embedding(*args)
             ref_res = ref_embedding(*args)
             self.assertEqual(fp32_res, ref_res)
+
+
+class TestInputOutputShapes(TestCase):
+    def _test_conv_output_shapes(self, module, qmodule, d,
+                                 quantize_input=True,
+                                 skips: dict = None,):
+        r"""Tests if the conv produces the right output shape."""
+        def _make_paddings(d):
+            r"""Creates numerical paddings for d-dimensional conv module"""
+            return [
+                0,  # No padding
+                2,  # Even padding
+                3,  # Odd padding
+                tuple(range(1, d + 1))  # Per-dim padding
+            ]
+
+        skips = skips or dict()
+
+        options_dict = {
+            'padding': set(['same', 'valid', *_make_paddings(d)]),
+            'padding_mode': set(['reflect', 'zeros', 'replicate', 'circular']),
+            'kernel_size': set([3, 4]),
+            'dilation': set([1, 2]),
+        }
+        for key, skip in skips.items():
+            options_dict[key] -= set(skip)
+        options = itertools.product(
+            *options_dict.values()
+        )
+
+        N = 2
+        Cin = 3
+        Cout = 5
+        S = [37] * d
+
+        x = torch.ones(N, Cin, *S)
+        qx = x
+        if quantize_input:
+            qx = torch.quantize_per_tensor(x, 1.0, 0, torch.quint8)
+            x = qx.dequantize()
+
+        for padding, padding_mode, kernel_size, dilation in options:
+            fp_module = module(Cin, Cout,
+                               kernel_size=kernel_size,
+                               padding=padding,
+                               padding_mode=padding_mode,
+                               dilation=dilation,
+                               bias=False)
+            q_module = qmodule(Cin, Cout,
+                               kernel_size=kernel_size,
+                               padding=padding,
+                               padding_mode=padding_mode,
+                               dilation=dilation,
+                               bias=False)
+
+            y = fp_module(x)
+            qy = q_module(qx)
+
+            self.assertEqual(y.shape, qy.shape,
+                             msg=f'Failed with '
+                             f'padding={padding}, '
+                             f'padding_mode={padding_mode}, '
+                             f'kernel_size={kernel_size}, '
+                             f'dilation={dilation}')
+
+    def test_conv1d_static_output_shape(self):
+        skips = {
+            'padding': ['same', 'valid'],
+            'padding_mode': ['circular', 'replicate'],
+        }
+        self._test_conv_output_shapes(nn.Conv1d, nnq.Conv1d, d=1, skips=skips)
+
+    def test_conv2d_static_output_shape(self):
+        skips = {
+            'padding': ['same', 'valid'],
+            'padding_mode': ['circular', 'replicate'],
+        }
+        self._test_conv_output_shapes(nn.Conv2d, nnq.Conv2d, d=2, skips=skips)
+
+    def test_conv3d_static_output_shape(self):
+        skips = {
+            'padding': ['same', 'valid'],
+            'padding_mode': ['circular', 'replicate', 'reflect'],
+        }
+        self._test_conv_output_shapes(nn.Conv3d, nnq.Conv3d, d=3, skips=skips)
+
+    def test_conv1d_dynamic_output_shape(self):
+        skips = {
+            'padding': ['same', 'valid'],
+            'padding_mode': ['circular', 'replicate'],
+        }
+        self._test_conv_output_shapes(nn.Conv1d, nnqd.Conv1d, d=1,
+                                      quantize_input=False, skips=skips)
+
+    def test_conv2d_dynamic_output_shape(self):
+        skips = {
+            'padding': ['same', 'valid'],
+            'padding_mode': ['circular', 'replicate'],
+        }
+        self._test_conv_output_shapes(nn.Conv2d, nnqd.Conv2d, d=2,
+                                      quantize_input=False, skips=skips)
+
+    def test_conv3d_dynamic_output_shape(self):
+        skips = {
+            'padding': ['same', 'valid'],
+            'padding_mode': ['circular', 'replicate', 'reflect'],
+        }
+        self._test_conv_output_shapes(nn.Conv3d, nnqd.Conv3d, d=3,
+                                      quantize_input=False, skips=skips)
