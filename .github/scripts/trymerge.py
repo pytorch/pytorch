@@ -587,13 +587,13 @@ class GitHubPR:
                         conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
                     if bool(checkruns["pageInfo"]["hasNextPage"]):
                         rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
-                                name = self.project,
-                                owner = self.org,
-                                number = self.pr_num,
-                                cs_cursor = edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
-                                cr_cursor = checkruns["pageInfo"]["endCursor"])
+                                        name=self.project,
+                                        owner=self.org,
+                                        number=self.pr_num,
+                                        cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
+                                        cr_cursor=checkruns["pageInfo"]["endCursor"])
                         last_commit = rc["data"]["repository"]["pullRequest"]["commits"]["nodes"][-1]["commit"]
-                        checkruns =  last_commit["checkSuites"]["nodes"][-1]["checkRuns"]
+                        checkruns = last_commit["checkSuites"]["nodes"][-1]["checkRuns"]
                     else:
                         checkruns = None
 
