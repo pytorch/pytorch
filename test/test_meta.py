@@ -624,7 +624,6 @@ meta_function_skips = {
     torch.diff: {b8},
     torch.functional.cdist: {f32, f64},
     torch.functional.tensordot: {bf16, f32, f64, i16, i32, i64, i8, u8},
-    torch.index_add: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_xor: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
@@ -987,9 +986,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.mvlgamma.out: {f16},  # aten::mvlgamma.out
     aten.nanmedian.default: {f16},  # aten::nanmedian
     aten.nanmedian.dim: {f16},  # aten::nanmedian.dim_values
-    aten.native_batch_norm.default: {bf16, f16},  # waiting on https://github.com/pytorch/pytorch/pull/77407
-    aten.native_dropout.default: {bf16, f16, f32, f64},
-    aten.native_layer_norm.default: {f16},  # aten::var_mean.correction
+    aten.native_group_norm.default: {bf16, f16},
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
