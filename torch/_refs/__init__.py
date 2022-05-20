@@ -87,8 +87,9 @@ __all__ = [
     "eq",
     "float_power",
     # 'floor_divide', # requires floor
-    # 'fmax', # requires where
-    # 'fmod',
+    "fmax",  # requires where
+    "fmin",  # requires where
+    "fmod",  # requires trunc_divide
     # 'gcd',
     "ge",
     "gt",
@@ -102,7 +103,7 @@ __all__ = [
     "le",
     "logical_and",
     "logical_or",
-    # 'logical_xor',
+    "logical_xor",
     "lt",
     # 'max', # implement with reductions
     "maximum",
@@ -654,6 +655,45 @@ def float_power(
     return prims.pow(a, b)
 
 
+def _fmax(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType],
+) -> Tensor:
+    return where(prims.ge(a, b), a, b)
+
+# TODO: add docstring
+fmax = _make_elementwise_binary_reference(
+    _fmax,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmax,
+)
+
+
+def _fmin(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType],
+) -> Tensor:
+    return where(prims.lt(a, b), a, b)
+
+# TODO: add docstring
+fmin = _make_elementwise_binary_reference(
+    _fmin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmin,
+)
+
+# Replace this with trunc_divide
+def _fmod(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType],
+) -> Tensor:
+    return a - prims.floor(prims.div(a, b)) * b
+
+# TODO: add docstring
+fmod = _make_elementwise_binary_reference(
+    _fmod,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.fmod,
+)
+
+
 # TODO: add docstring
 ge = _make_elementwise_binary_reference(
     prims.ge,
@@ -770,6 +810,22 @@ logical_or = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=torch.ops.aten.logical_or,
 )
+
+
+def _logical_xor(a: TensorLikeType, b: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        a = ne(a, 0)
+    if not utils.is_boolean_dtype(b.dtype):
+        b = ne(b, 0)
+    return ne(a, b)
+
+
+logical_xor = _make_elementwise_binary_reference(
+    _logical_xor,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.logical_xor,
+)
+
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(

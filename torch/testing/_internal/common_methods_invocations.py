@@ -18960,6 +18960,18 @@ python_ref_db = [
         )
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.fmax",
+        torch_opinfo_name="fmax",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.fmin",
+        torch_opinfo_name="fmin",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.fmod",
+        torch_opinfo_name="fmod",
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
         torch_opinfo_name="ge",
     ),
@@ -18994,6 +19006,10 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
         torch_opinfo_name="logical_or",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.logical_xor",
+        torch_opinfo_name="logical_xor",
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.lt",
