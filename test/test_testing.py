@@ -1780,7 +1780,7 @@ class TestImports(TestCase):
         if not sys.version_info >= (3, 8):
             ignored_modules.append("torch.utils.benchmark")
         if IS_WINDOWS:
-            ignored_modules.append("torch.distributed.rpc.")
+            ignored_modules.append("torch.distributed.")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, folders, files in os.walk(torch_dir):
@@ -1794,8 +1794,10 @@ class TestImports(TestCase):
                     continue
                 if any(mod_name.startswith(x) for x in ignored_modules):
                     continue
-                print(mod_name)
-                mod = importlib.import_module(mod_name)
+                try:
+                    mod = importlib.import_module(mod_name)
+                except Exception as e:
+                    raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
 
