@@ -91,6 +91,12 @@ jobs:
         if: always()
         run: |
           (! git --no-pager grep -In '#!.*python$' -- . || (echo "The above lines have versionless Python shebangs; please specify either python2 or python3"; false))
+      - name: Ensure no trailing whitespaces
+        if: always()
+        run: |
+         # Since git apply will fix all the flags raised by the whitespace
+         # errors and this will not raise any warinig or error
+         git apply --whitespace=fix patchname.patch    
       - name: C++ docs check
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
