@@ -170,14 +170,11 @@ void log_sigmoid_backward_kernel(TensorIterator& iter) {
 // prelu forward
 // -----------------------------------
 void launch_prelu_cuda_kernel_share_weights(TensorIteratorBase &iter, const TensorBase &weight) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half,
-                                 iter.input_dtype(), "prelu_cuda", [&] {
-    using opmath_t = at::opmath_type<scalar_t>;
-    const auto *weight_data = weight.data_ptr<opmath_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.input_dtype(), "prelu_cuda", [&] {
+    const auto *weight_data = weight.data_ptr<scalar_t>();
     at::native::gpu_kernel(iter,
         [weight_data] GPU_LAMBDA (scalar_t input_val) {
-          opmath_t input_val_op = static_cast<opmath_t>(input_val);
-          return (input_val_op > 0) ? input_val_op : *weight_data * input_val_op;
+          return (input_val > 0) ? input_val : *weight_data * input_val;
         });
   });
 }
