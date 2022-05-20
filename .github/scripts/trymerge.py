@@ -63,32 +63,34 @@ query ($owner: String!, $name: String!, $number: Int!) {
         nodes {
           commit {
             checkSuites(first: 10) {
-              nodes {
-                app {
-                  name
-                  databaseId
-                }
-                workflowRun {
-                  workflow {
+              edges {
+                node {
+                  app {
                     name
+                    databaseId
                   }
+                  workflowRun {
+                    workflow {
+                      name
+                    }
+                  }
+                  checkRuns(first: 50) {
+                    nodes {
+                      name
+                      conclusion
+                      detailsUrl
+                    }
+                    pageInfo {
+                      endCursor
+                      hasNextPage
+                    }
+                  }
+                  conclusion
+                  url
                 }
-                checkRuns(first: 60) {
-                  nodes {
-                    name
-                    conclusion
-                    detailsUrl
-                  }
-                  pageInfo {
-                    endCursor
-                    hasNextPage
-                  }
-                }
-                conclusion
-                url
+                cursor
               }
               pageInfo {
-                endCursor
                 hasNextPage
               }
             }
@@ -158,7 +160,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
-GH_GET_PR_NEXT_CHECK_RUNS = """
+GH_GET_PR_NEXT_CHECKSUITES = """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   repository(name: $name, owner: $owner) {
     pullRequest(number: $number) {
@@ -167,32 +169,34 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
           commit {
             oid
             checkSuites(first: 10, after: $cursor) {
-              nodes {
-                app {
-                  name
-                  databaseId
-                }
-                workflowRun {
-                  workflow {
+              edges {
+                node {
+                  app {
                     name
+                    databaseId
                   }
+                  workflowRun {
+                    workflow {
+                      name
+                    }
+                  }
+                  checkRuns(first: 50) {
+                    nodes {
+                      name
+                      conclusion
+                      detailsUrl
+                    }
+                    pageInfo {
+                      endCursor
+                      hasNextPage
+                    }
+                  }
+                  conclusion
+                  url
                 }
-                checkRuns(first: 60) {
-                  nodes {
-                    name
-                    conclusion
-                    detailsUrl
-                  }
-                  pageInfo {
-                    endCursor
-                    hasNextPage
-                  }
-                }
-                conclusion
-                url
+                cursor
               }
               pageInfo {
-                endCursor
                 hasNextPage
               }
             }
@@ -203,6 +207,38 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   }
 }
 """
+
+GH_GET_PR_NEXT_CHECK_RUNS = """
+query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            checkSuites(first: 1, after: $cs_cursor) {
+              nodes {
+                checkRuns(first: 100, after: $cr_cursor) {
+                  nodes {
+                    name
+                    conclusion
+                    detailsUrl
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 
 GH_GET_PR_PREV_COMMENTS = """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
@@ -386,6 +422,7 @@ def parse_args() -> Any:
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
+    parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
@@ -538,29 +575,41 @@ class GitHubPR:
         checksuites = orig_last_commit["checkSuites"]
         conclusions = {}
 
-        def add_conclusions(nodes: List[Dict[str, Any]]) -> None:
-            for node in nodes:
+        def add_conclusions(edges: List[Dict[str, Dict[str, Any]]]) -> None:
+            for edge_idx, edge in enumerate(edges):
+                node = edge["node"]
                 workflow_run = node["workflowRun"]
                 checkruns = node["checkRuns"]
                 if workflow_run is not None:
                     conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
-                if checkruns is not None:
+                while checkruns is not None:
                     for checkrun_node in checkruns["nodes"]:
                         conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
+                    if bool(checkruns["pageInfo"]["hasNextPage"]):
+                        rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
+                                        name=self.project,
+                                        owner=self.org,
+                                        number=self.pr_num,
+                                        cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
+                                        cr_cursor=checkruns["pageInfo"]["endCursor"])
+                        last_commit = rc["data"]["repository"]["pullRequest"]["commits"]["nodes"][-1]["commit"]
+                        checkruns = last_commit["checkSuites"]["nodes"][-1]["checkRuns"]
+                    else:
+                        checkruns = None
 
-        add_conclusions(checksuites["nodes"])
+        add_conclusions(checksuites["edges"])
         while bool(checksuites["pageInfo"]["hasNextPage"]):
-            rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
+            rc = gh_graphql(GH_GET_PR_NEXT_CHECKSUITES,
                             name=self.project,
                             owner=self.org,
                             number=self.pr_num,
-                            cursor=checksuites["pageInfo"]["endCursor"])
+                            cursor=checksuites["edges"][-1]["cursor"])
             info = rc["data"]["repository"]["pullRequest"]
             last_commit = info["commits"]["nodes"][-1]["commit"]
             if last_commit["oid"] != orig_last_commit["oid"]:
                 raise RuntimeError("Last commit changed on PR")
             checksuites = last_commit["checkSuites"]
-            add_conclusions(checksuites["nodes"])
+            add_conclusions(checksuites["edges"])
         self.conclusions = conclusions
         return conclusions
 
@@ -824,7 +873,10 @@ def find_matching_merge_rule(pr: GitHubPR,
     raise RuntimeError(reject_reason)
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
+def try_revert(repo: GitRepo, pr: GitHubPR, *,
+               dry_run: bool = False,
+               comment_id: Optional[int] = None,
+               reason: Optional[str] = None) -> None:
     def post_comment(msg: str) -> None:
         gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
@@ -858,7 +910,8 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
     msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
-    msg += f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}\n"
+    msg += f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
+    msg += f" due to {reason}\n" if reason is not None else "\n"
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
     if not dry_run:
@@ -911,7 +964,7 @@ def main() -> None:
 
     if args.revert:
         try:
-            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id)
+            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id, reason=args.reason)
         except Exception as e:
             handle_exception(e, f"Reverting PR {args.pr_num} failed")
         return
