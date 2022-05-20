@@ -19057,6 +19057,17 @@ python_ref_db = [
         "_refs.amax",
         torch_opinfo_name="amax",
     ),
+    ReductionPythonRefInfo(
+        "_refs.var",
+        torch_opinfo_name="var",
+        supports_out=True
+    ),
+    ReductionPythonRefInfo(
+        "_refs.std",
+        torch_opinfo_name="std",
+        supports_out=True
+    ),
+
     #
     # Tensor Creation Reference OpInfos
     #
