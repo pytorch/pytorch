@@ -377,7 +377,7 @@ Tensor sparse_compressed_to_dense(
                indices, values, expanded_size).coalesce();
     auto dense = self_coo.to_dense();
     dense = dense.transpose(1, 2);
-    dense = dense.reshape({dense.size(0) * blocksize[0], dense.size(1) * blocksize[1]});
+    dense = dense.reshape({self.size(0), self.size(1)});
     return dense;
   }
   return self.to_sparse().to_dense();
