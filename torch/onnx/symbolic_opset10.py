@@ -188,7 +188,7 @@ avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
 def _interpolate(name, dim, interpolate_mode):
-    @quantized_args(True, False, False)
+    @symbolic_helper.quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
             g, interpolate_mode, args
@@ -547,13 +547,13 @@ class Quantized:
 
     @staticmethod
     def add_relu(g, x, y, op_scale, op_zero_point):
-        x, _, _, _ = sym_help.dequantize_helper(g, x)
-        y, _, _, _ = sym_help.dequantize_helper(g, y)
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+        y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
 
         output = add(g, x, y)
         output = relu(g, output)
 
-        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
     def mul(g, x, y, op_scale, op_zero_point):
