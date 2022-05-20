@@ -17,7 +17,7 @@ TEST(SymIntTest, ConcreteInts) {
   check(0);
   check(-1);
   // This is 2^62, which is the most negative number we can support.
-  check(-4611686018427387904);
+  check(-4611686018427387904LL);
 }
 
 TEST(SymIntTest, AddNode) {

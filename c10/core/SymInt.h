@@ -80,19 +80,19 @@ class C10_API SymInt {
   // - We reserve some values to act as indices into our sym int table.
   //
   // So, the scheme is to reserve large negative numbers:
+  // - 0b0.... means we are a positive int (following two's complement)
   // - 0b11... means we are a negative int (following two's complement)
-  // - 0b00... means we are a positive int (following two's complement)
   // - 0b10... means we are index into the sym table. This means that
   //           [-2^63, -2^62-1] are not representable as ints.
-  static constexpr uint64_t MASK = 1LL << 63 | 1LL << 62;
-  static constexpr uint64_t IS_SYM = 1LL << 63;
+  static constexpr uint64_t MASK = 1ULL << 63 | 1ULL << 62;
+  static constexpr uint64_t IS_SYM = 1ULL << 63;
   // Since we use the top two bits to determine whether something is symbolic,
   // we cannot represent symbolic indices that are large enough to use those
   // bits. This will probably never happen.
-  static constexpr uint64_t MAX_SYM_IDX = 1LL << 62;
+  static constexpr uint64_t MAX_SYM_IDX = 1ULL << 62;
   // Since 0b10... is reserved for symbolic indices, any integers lower than
   // this value would collide with our representation.
-  static constexpr int64_t MIN_INT = -1LL & ~(1LL << 62);
+  static constexpr int64_t MIN_INT = -1LL & ~(1ULL << 62);
   int64_t data_;
 };
 
