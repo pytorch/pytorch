@@ -443,6 +443,17 @@ std::vector<Shape> compute_shape_smooth_l1_loss(
   }
 }
 
+std::vector<Shape> compute_shape_slogdet(const at::Tensor & self) {
+  // assumes self.shape is {*, n, n} and returns shape *
+  TORCH_INTERNAL_ASSERT(self.dim() >= 2);
+  std::vector<int64_t> out_sizes(self.sizes().begin(), self.sizes().end() - 2);
+  // Doesn't check input dtype, but output dtype either matches it,
+  // or the actual slogdet operation will throw if it's an unsupported type.
+  // Sign and det outputs hold the same shape, dtype.
+  return {Shape(self.scalar_type(), out_sizes),
+          Shape(self.scalar_type(), out_sizes)};
+}
+
 std::vector<Shape> compute_shape_smooth_l1_loss_backward(
     const at::Tensor& grad_output, const at::Tensor& self,
     const at::Tensor& target, int64_t reduction, double beta) {
