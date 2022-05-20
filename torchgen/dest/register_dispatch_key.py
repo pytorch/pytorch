@@ -335,7 +335,10 @@ class RegisterDispatchKey:
                 "Do not explicitly specify Meta dispatch key on structured "
                 "functions, they will be automatically generated for you"
             )
-        elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutogradNonFunctional:
+        elif (
+            self.backend_index.dispatch_key
+            == DispatchKey.CompositeExplicitAutogradNonFunctional
+        ):
             assert not self.backend_index.has_kernel(g.out), (
                 "Do not explicitly specify CompositeExplicitAutograd dispatch key on structured "
                 "functions, they will be automatically generated for you"
@@ -669,7 +672,10 @@ resize_out(out, sizes, strides, options);
                 guard_field = "c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;"
             else:
                 guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutogradNonFunctional:
+        elif (
+            self.backend_index.dispatch_key
+            == DispatchKey.CompositeExplicitAutogradNonFunctional
+        ):
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.MPS:
             # TODO: Move to OptionalMPSGuard.
@@ -715,7 +721,8 @@ resize_out(out, sizes, strides, options);
         # of work to not register one of these "weak" definitions unless there
         # is a strong definition somewhere in the DAG!  So it's not implemented yet.
         if (
-            self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutogradNonFunctional
+            self.backend_index.dispatch_key
+            == DispatchKey.CompositeExplicitAutogradNonFunctional
             and f.func.kind() is SchemaKind.out
         ):
             # Never generate a default implementation for out, that's what you
@@ -771,7 +778,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
                 parent_class = f"at::meta::structured_{meta.name(self.g)}"
             elif (
-                self.backend_index.dispatch_key is DispatchKey.CompositeExplicitAutogradNonFunctional
+                self.backend_index.dispatch_key
+                is DispatchKey.CompositeExplicitAutogradNonFunctional
             ):
                 # TODO: dedup this branch
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
@@ -863,7 +871,10 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             # With the expanded context, do the impl call (if not a meta
             # function)
-            if self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutogradNonFunctional:
+            if (
+                self.backend_index.dispatch_key
+                == DispatchKey.CompositeExplicitAutogradNonFunctional
+            ):
                 # TODO: https://github.com/pytorch/pytorch/issues/53023
                 out_sig_group = CppSignatureGroup.from_native_function(
                     self.g.out, method=False, fallback_binding=f.manual_cpp_binding

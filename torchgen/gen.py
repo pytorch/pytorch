@@ -408,9 +408,9 @@ def generate_static_dispatch_fallback_call(
     name = DispatcherSignature.from_schema(f.func).name()
     exprs = translate_args_dispatcher_to_cpp(f)
     if f.has_composite_explicit_autograd_kernel:
-        return f'return at::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});'
+        return f"return at::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
     elif f.has_composite_explicit_autograd_non_functional_kernel:
-        return f'return at::{DispatchKey.CompositeExplicitAutogradNonFunctional.lower()}::{name}({exprs});'
+        return f"return at::{DispatchKey.CompositeExplicitAutogradNonFunctional.lower()}::{name}({exprs});"
     elif f.has_composite_implicit_autograd_kernel:
         return f"return at::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs});"
     else:
@@ -1898,7 +1898,10 @@ def gen_source_files(
                         continue
 
                     headers.append(f"#include <ATen/ops/{g.root_name}_native.h>")
-                    if dispatch_key == DispatchKey.CompositeExplicitAutogradNonFunctional:
+                    if (
+                        dispatch_key
+                        == DispatchKey.CompositeExplicitAutogradNonFunctional
+                    ):
                         headers.append(f"#include <ATen/ops/{g.root_name}.h>")
                     if dispatch_key in functions_keys:
                         headers.append(
