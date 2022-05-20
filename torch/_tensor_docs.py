@@ -5078,7 +5078,7 @@ are like normal tensors, but they carry no data.
 
 add_docstr_all('is_mps',
                r"""
-Is ``True`` if the Tensor is stored MPS, ``False`` otherwise.
+Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
 """)
 
 add_docstr_all('is_sparse',
