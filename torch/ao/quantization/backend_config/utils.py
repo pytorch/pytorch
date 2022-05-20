@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Callable, Union, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from ..quantization_types import Pattern
 
 def get_pattern_to_dtype_configs(
@@ -115,3 +116,87 @@ def get_fusion_pattern_to_extra_inputs_getter(
             extra_inputs_getter_mapping[pattern] = extra_inputs_getter
 
     return extra_inputs_getter_mapping
+
+def remove_boolean_dispatch_from_name(p) -> Any:
+    """
+    Some ops have a default string representation such as
+    '<function boolean_dispatch.<locals>.fn at 0x7ff1106bf280>',
+    this function replaces them with the hardcoded function names.
+    """
+    if p is F.fractional_max_pool2d:
+        return "torch.nn.functional.fractional_max_pool2d"
+    elif p is F.fractional_max_pool3d:
+        return "torch.nn.functional.fractional_max_pool3d"
+    elif p is F.max_pool1d:
+        return "torch.nn.functional.max_pool1d"
+    elif p is F.max_pool2d:
+        return "torch.nn.functional.max_pool2d"
+    elif p is F.max_pool3d:
+        return "torch.nn.functional.max_pool3d"
+    elif p is F.adaptive_max_pool1d:
+        return "torch.nn.functional.adaptive_max_pool1d"
+    elif p is F.adaptive_max_pool2d:
+        return "torch.nn.functional.adaptive_max_pool2d"
+    elif p is F.adaptive_max_pool3d:
+        return "torch.nn.functional.adaptive_max_pool3d"
+    assert "boolean_dispatch" not in str(p), \
+        f"{p} does not have a human readable representation in " + \
+        "quantization documentation"
+    return p
+
+def pattern_to_human_readable(p) -> Any:
+    if isinstance(p, tuple):
+        # nested patterns, recurse
+        return tuple(pattern_to_human_readable(inner_p) for inner_p in p)
+    elif isinstance(p, str):
+        # method names are already human readable
+        return p
+    else:
+        p = remove_boolean_dispatch_from_name(p)
+        return p
+
+# TODO(future PR): move backend_config_dict to use dataclass and move this logic to
+# the corresponding __str__ function
+def entry_to_pretty_str(entry) -> str:
+    """
+    Given a backend_config_dict entry, returns a string with the human readable
+    representation of it.
+    """
+    s = "{\n"
+
+    # always output the pattern first
+    if "pattern" in entry:
+        pattern_str = pattern_to_human_readable(entry["pattern"])
+
+        s += f"  'pattern': {pattern_str},\n"
+
+    # custom output for dtype_configs to make it look nice
+    if "dtype_configs" in entry:
+        s += "  'dtype_configs': [\n"
+        for dtype_config in entry["dtype_configs"]:
+            s += "    {\n"
+            for k, v in dtype_config.items():
+                s += f"      '{k}': {v},\n"
+            s += "    },\n"
+        s += "  ],\n"
+
+    # custom output for num_tensor_args_to_observation_type to make it look nice
+    if "num_tensor_args_to_observation_type" in entry:
+        s += "  'num_tensor_args_to_observation_type': {\n"
+        for k, v in entry["num_tensor_args_to_observation_type"].items():
+            s += f"    {k}: {v},\n"
+        s += "  },\n"
+
+    # output all the other fields
+    custom_handled_fields = [
+        "pattern",
+        "dtype_configs",
+        "num_tensor_args_to_observation_type",
+    ]
+    for field_name in entry:
+        if field_name in custom_handled_fields:
+            continue
+        s += f"  '{field_name}': {entry[field_name]},\n"
+
+    s += "}"
+    return s
