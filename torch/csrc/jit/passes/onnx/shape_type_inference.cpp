@@ -1956,7 +1956,7 @@ void ONNXShapeTypeInference(
     for (auto output : clone_node->outputs()) {
       n_graph->registerOutput(output);
     }
-    // Mapping original PyTorch graph's input/output name to cloned ONNX model's
+    // Map original original PyTorch graph's i/o name to temporal ONNX graph's i/o name for shape inference
     for (size_t i = 0; i < clone_node->inputs().size(); ++i) {
       torch_to_onnx_input_name[n->input(i)->debugName()] = clone_node->input(i)->debugName();
     }
@@ -1964,7 +1964,7 @@ void ONNXShapeTypeInference(
     for (size_t i = 0; i < clone_node->outputs().size(); ++i) {
       torch_to_onnx_output_name[n->output(i)->debugName()] = clone_node->output(i)->debugName();
     }
-    // Make inferred_shape_data use name from ONNX graph instead of original PyTorch graph
+    // Make inferred_shape_data use name from temporal ONNX graph instead of original PyTorch graph
     // Use original_keys for removing original data which is duplicate
     std::vector<string> original_keys;
     for (const auto& gs_data: inferred_shape_data) {
