@@ -20,7 +20,6 @@ jobs:
         with:
           fetch-depth: 1
           submodules: false
-          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout xla
         shell: bash
         run: |
