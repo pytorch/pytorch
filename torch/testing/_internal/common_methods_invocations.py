@@ -19171,6 +19171,8 @@ python_ref_db = [
         skips=(
             # TensorMeta doesn't support tolist
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
+            # RuntimeError: no _refs support for torch.Tensor.tolist
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency'),
         )
     ),
     PythonRefInfo(

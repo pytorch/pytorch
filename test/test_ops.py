@@ -6,6 +6,7 @@ import warnings
 import unittest
 import itertools
 import torch
+import contextlib
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -371,8 +372,9 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_reference_consistency(self, device, dtype, op):
-        def go(sample):
-            actual = op(sample.input, *sample.args, **sample.kwargs)
+        def go(sample, ctx=contextlib.nullcontext):
+            with ctx():
+                actual = op(sample.input, *sample.args, **sample.kwargs)
             expected = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
             self.assertEqual(
@@ -401,8 +403,7 @@ class TestCommon(TestCase):
             go(sample)
             # ...and once rerouting all torch.* function calls to torch._refs.*
             # instead (testing PrimTorch end-to-end)
-            with TorchRefsMode.push(strict=True):
-                go(sample)
+            go(sample, lambda: TorchRefsMode.push(strict=True))
             # TODO: xfail'ing one of these will xfail both, there is no finer
             # granularity at the moment
 
