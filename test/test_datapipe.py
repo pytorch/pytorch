@@ -2197,7 +2197,7 @@ class TestSerialization(TestCase):
         dl = DataLoader(idp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
-        self.assertEquals([1, 1, 2, 2, 3, 3], sorted(result))
+        self.assertEqual([1, 1, 2, 2, 3, 3], sorted(result))
 
     @skipIfNoDill
     def test_spawn_lambdas_map(self):
@@ -2205,7 +2205,7 @@ class TestSerialization(TestCase):
         dl = DataLoader(mdp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
-        self.assertEquals([1, 2, 3, 4, 5, 6], sorted(result))
+        self.assertEqual([1, 2, 3, 4, 5, 6], sorted(result))
 
 
 class TestCircularSerialization(TestCase):
