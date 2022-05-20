@@ -4,10 +4,10 @@ import itertools
 import warnings
 from typing import Any, Callable, Dict, Tuple, Union
 
-import torch._C
+from torch import _C
 from torch.onnx import _constants
 
-_SymbolicFunction = Callable[..., Union[torch._C.Value, Tuple[torch._C.Value]]]
+_SymbolicFunction = Callable[..., Union[_C.Value, Tuple[_C.Value]]]
 
 """
 The symbolic registry "_registry" is a dictionary that maps operators
