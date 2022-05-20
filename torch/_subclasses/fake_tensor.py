@@ -60,6 +60,17 @@ class FakeTensor(BaseTensor):
         # Run the original computation
         kwargs = kwargs if kwargs else {}
 
+        # _to_copy fails when run with FakeTensors to cuda device
+        # TODO: debug
+        if func == torch.ops.aten._to_copy.default:
+            _, new_kwargs = normalize_function(
+                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+            )
+            out_device = new_kwargs.pop("device", new_kwargs["input"].device)
+            with no_dispatch():
+                input = new_kwargs.pop("input").to("meta")
+                return FakeTensor(torch.ops.aten._to_copy(input, **new_kwargs), out_device)
+
         r = super().__torch_dispatch__(func, types, args, kwargs)
 
         def wrap(e, device):
