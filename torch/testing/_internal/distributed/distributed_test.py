@@ -3724,7 +3724,7 @@ class DistributedTest:
         def _assert_equal_param(self, param_gpu, param_DDP):
             self.assertEqual(len(param_gpu), len(param_DDP))
             for p_gpu, p_DDP in zip(param_gpu, param_DDP):
-                self.assertEqual(p_gpu, p_DDP)
+                self.assertEqual(p_gpu, p_DDP, atol=2e-5, rtol=1e-4)
 
         def _test_DDP_niter(
             self,
@@ -4745,15 +4745,20 @@ class DistributedTest:
             # cpu training setup
             model = BN_NET if affine else BN_NET_NO_AFFINE
 
-            # single gpu training setup
-            model_gpu = copy.deepcopy(model)
-            model_gpu.cuda(gpu_subset[0])
+            # single base training setup
+            if torch.cuda.is_available():
+                device = torch.device(f"cuda:{gpu_subset[0]}")
+                device_ids=gpu_subset
+            else:
+                device = torch.device('cpu')
+                device_ids=None
+            model_base = copy.deepcopy(model).to(device)
 
             # DDP training setup
             model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
-            model_DDP.cuda(gpu_subset[0])
+            model_DDP.to(device)
             model_DDP = nn.parallel.DistributedDataParallel(
-                model_DDP, device_ids=gpu_subset
+                model_DDP, device_ids=device_ids
             )
 
             # test serializable/unserializable
@@ -4767,16 +4772,16 @@ class DistributedTest:
                     model_DDP = torch.load(tmp.name)
 
             # data initialization
-            input_cpu = torch.randn(global_bs, 2)
+            input_base = torch.randn(global_bs, 2)
             target = torch.randn(global_bs, 4)
             loss = nn.MSELoss()
 
             # check two model parameters over 5 iterations
             self._test_DDP_niter(
-                model_gpu,
+                model_base,
                 model_DDP,
-                input_cpu.cuda(gpu_subset[0]),
-                target.cuda(gpu_subset[0]),
+                input_base,
+                target,
                 loss,
                 local_bs,
                 rank,
@@ -4898,7 +4903,6 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
-        @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_Channels_Last(self):
             group, group_id, rank = self._init_global_test()
             num_processes = dist.get_world_size()
@@ -4907,30 +4911,36 @@ class DistributedTest:
             global_bs = int(num_processes * 2)
 
             model = ONLY_SBN_NET
-            model_gpu = copy.deepcopy(model).cuda(rank)
+            if torch.cuda.is_available():
+                device = torch.device(f"cuda:{rank}")
+                device_ids=[rank]
+            else:
+                device = torch.device('cpu')
+                device_ids=None
+            model_base = copy.deepcopy(model).to(device)
             model_DDP = nn.parallel.DistributedDataParallel(
-                model_gpu, device_ids=[rank]
+                model_base, device_ids=device_ids
             )
 
             memory_format = torch.channels_last
-            input_gpu = (
+            input_base = (
                 torch.randn(global_bs, 2, 4, 4, dtype=torch.float)
-                .cuda(rank)
+                .to(device)
                 .to(memory_format=memory_format)
             )
-            target_gpu = (
+            target_base = (
                 torch.randn(global_bs, 2, 4, 4, dtype=torch.float)
-                .cuda(rank)
+                .to(device)
                 .to(memory_format=memory_format)
             )
             loss = nn.MSELoss()
 
             # check two model parameters over 5 iterations
             self._test_DDP_niter(
-                model_gpu,
+                model_base,
                 model_DDP,
-                input_gpu,
-                target_gpu,
+                input_base,
+                target_base,
                 loss,
                 local_bs,
                 rank,
@@ -4946,7 +4956,6 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
-        @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm(self):
             group, group_id, rank = self._init_global_test()
             world_size = dist.get_world_size()
@@ -4991,7 +5000,6 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
-        @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_No_Affine(self):
             group, group_id, rank = self._init_global_test()
             world_size = dist.get_world_size()
@@ -5016,7 +5024,6 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
-        @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
             group, group_id, rank = self._init_global_test()
             # DDP does not support replicating BN layers within a process, hence
@@ -5025,14 +5032,19 @@ class DistributedTest:
 
             model = nn.BatchNorm1d(2)
 
-            # single gpu training setup
-            model_gpu = copy.deepcopy(model)
-            model_gpu.cuda(gpus[0])
+            if torch.cuda.is_available():
+                device = torch.device(f"cuda:{gpus[0]}")
+                device_ids=gpus
+            else:
+                device = torch.device('cpu')
+                device_ids=None
+            # single base training setup
+            model_base = copy.deepcopy(model).to(device)
 
             # DDP training setup
             model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
-            model_DDP.cuda(gpus[0])
-            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=gpus)
+            model_DDP.to(device)
+            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=device_ids)
 
             local_bs = len(gpus) * 2
             global_bs = dist.get_world_size() * local_bs
@@ -5046,10 +5058,10 @@ class DistributedTest:
             with torch.backends.cudnn.flags(False):
                 # check two model parameters over 5 iterations
                 self._test_DDP_niter(
-                    model_gpu,
+                    model_base,
                     model_DDP,
-                    input_cpu.cuda(gpus[0]),
-                    target.cuda(gpus[0]),
+                    input_cpu,
+                    target,
                     loss,
                     local_bs,
                     rank,
@@ -5062,7 +5074,6 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
-        @skip_if_no_gpu
         @require_world_size(2)
         def test_DistributedDataParallel_SyncBatchNorm_Single_Input_Per_Process(self):
             group, group_id, rank = self._init_global_test()
@@ -5072,14 +5083,20 @@ class DistributedTest:
 
             model = nn.BatchNorm1d(2)
 
-            # single gpu training setup
-            model_gpu = copy.deepcopy(model)
-            model_gpu.cuda(gpus[0])
+            if torch.cuda.is_available():
+                device = torch.device(f"cuda:{gpus[0]}")
+                device_ids=gpus
+            else:
+                device = torch.device('cpu')
+                device_ids=None
+
+            # single base training setup
+            model_base = copy.deepcopy(model).to(device)
 
             # DDP training setup
             model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
-            model_DDP.cuda(gpus[0])
-            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=gpus)
+            model_DDP.to(device)
+            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=device_ids)
 
             local_bs = 1
             global_bs = dist.get_world_size()
@@ -5093,10 +5110,10 @@ class DistributedTest:
             with torch.backends.cudnn.flags(False):
                 # check two model parameters over 5 iterations
                 self._test_DDP_niter(
-                    model_gpu,
+                    model_base,
                     model_DDP,
-                    input_cpu.cuda(gpus[0]),
-                    target.cuda(gpus[0]),
+                    input_cpu,
+                    target,
                     loss,
                     local_bs,
                     rank,
@@ -5109,13 +5126,18 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
-        @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(
             self,
         ):
             group, group_id, rank = self._init_global_test()
+            if torch.cuda.is_available():
+                device = torch.device(f"cuda:{rank}")
+                device_ids=[rank]
+            else:
+                device = torch.device('cpu')
+                device_ids=None
             model = nn.parallel.DistributedDataParallel(
-                ONLY_SBN_NET.cuda(rank), device_ids=[rank]
+                ONLY_SBN_NET.to(device), device_ids=device_ids
             )
 
             input_var = []
@@ -5135,10 +5157,10 @@ class DistributedTest:
                     for x in input_var
                 ],
                 dim=1,
-            ).cuda(rank)
+            ).to(device)
 
             for i in range(100):
-                y = model(input_var[rank].cuda(rank))
+                y = model(input_var[rank].to(device))
                 y.mean().backward()
 
             running_mean, running_var = (
@@ -5152,7 +5174,6 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
-        @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_gradient(self):
             group, group_id, rank = self._init_global_test()
             # only do single GPU per process
@@ -8559,7 +8580,6 @@ class DistributedTest:
                 for buf in bufs[1:]:
                     self.assertEqual(rank_0_buf, buf)
 
-        @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
@@ -8567,19 +8587,25 @@ class DistributedTest:
         def test_sync_bn_logged(self):
             model = BN_NET
             rank = self.rank
-            # single gpu training setup
-            model_gpu = model.cuda(rank)
+            if torch.cuda.is_available():
+                device = torch.device(f"cuda:{rank}")
+                device_ids=[self.rank]
+            else:
+                device = torch.device('cpu')
+                device_ids=None
+            # single base training setup
+            model_base = model.to(device)
             no_sync_bn = torch.nn.parallel.DistributedDataParallel(
-                copy.deepcopy(model_gpu),
-                device_ids=[self.rank],
+                copy.deepcopy(model_base),
+                device_ids=device_ids,
             )
             ddp_logging_data = no_sync_bn._get_ddp_logging_data()
             sync_bn_logged = ddp_logging_data.get("has_sync_bn", True)
             self.assertFalse(sync_bn_logged)
-            model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(model_gpu)
+            model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(model_base)
             model_DDP = torch.nn.parallel.DistributedDataParallel(
                 model_DDP,
-                device_ids=[self.rank],
+                device_ids=device_ids,
             )
             ddp_logging_data = model_DDP._get_ddp_logging_data()
             sync_bn_logged = ddp_logging_data.get("has_sync_bn", False)

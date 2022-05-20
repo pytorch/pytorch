@@ -11398,19 +11398,22 @@ class TestNN(NNTestCase):
         input_2 = torch.rand([5, 0], dtype=torch.float32)
         torch.nn.CrossEntropyLoss()(input_1, input_2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
         module = torch.nn.Sequential(
             torch.nn.BatchNorm1d(100),
             torch.nn.InstanceNorm1d(100)
-        ).cuda()
+        ).to(device)
 
         # necessary to have an anchor point for comparison, in case the
         # convert_sync_batchnorm updates in place
         comp_module = torch.nn.Sequential(
             torch.nn.BatchNorm1d(100),
             torch.nn.InstanceNorm1d(100)
-        ).cuda()
+        ).to(device)
         comp_module.load_state_dict(module.state_dict())
 
         sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
@@ -11423,9 +11426,11 @@ class TestNN(NNTestCase):
                 self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
                 self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_sync_batchnorm_backward_elemt(self):
-        device = 'cuda'
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
         saved_input = torch.rand(2, 3, 2, 1, device=device)
         grad_output = torch.rand(2, 3, 2, 1, device=device)
         mean = torch.rand(3, device=device)
@@ -11465,7 +11470,6 @@ class TestNN(NNTestCase):
             )
             self.assertEqual(gI_actual, gI_contiguous)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_sync_batchnorm_accuracy_cuda(self):
         # The target of this test is to test the functionality and accuracy of
         #   those single-GPU cuda kernels used in SyncBatchNorm
@@ -11474,14 +11478,21 @@ class TestNN(NNTestCase):
         #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
 
         def _batch_norm_stats(data):
-            mean1, _ = torch.batch_norm_stats(data, 1e-5)
-            mean2, _ = torch.batch_norm_stats(data.to(memory_format=torch.channels_last), 1e-5)
+            mean1, std1 = torch.batch_norm_stats(data, 1e-5)
+            mean2, std2 = torch.batch_norm_stats(data.to(memory_format=torch.channels_last), 1e-5)
             mean_ref = torch.mean(data, (0, 2, 3), keepdim=False)
+            std_ref = torch.var(data, (0, 2, 3), keepdim=False, unbiased=False)
 
             self.assertEqual(mean_ref, mean1)
             self.assertEqual(mean_ref, mean2)
+            self.assertEqual(std_ref, std1)
+            self.assertEqual(std_ref, std2)
 
-        data = torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda')
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+        data = torch.randn(1, 96, 112, 112, dtype=torch.float, device=device)
         _batch_norm_stats(data)
 
     def test_functional_grad_conv(self):

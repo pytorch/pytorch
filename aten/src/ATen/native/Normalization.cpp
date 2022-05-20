@@ -930,7 +930,7 @@ std::tuple<Tensor, Tensor> batch_norm_cpu_gather_stats_template(
     for (int j = 0; j < world_size; j++) {
       scalar_t count = counts_a[j];
       accscalar_t m = mean_a[j][i];
-      accscalar_t v = accscalar_t(1.0) / (invstd_a[j][i]);
+      accscalar_t v = accscalar_t(invstd_a[j][i]);
       v = (v - epsilon) * count;
       accscalar_t factor = 1.0 / (n + count);
       var_n += v + (avg - m) * (avg - m) * n * count * factor;
