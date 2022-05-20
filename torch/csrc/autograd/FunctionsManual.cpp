@@ -174,6 +174,11 @@ Tensor scale_grad_by_count(const Tensor &grad, const Tensor &mask, IntArrayRef d
   return (grad / mask.sum(dims, true)) * mask;
 }
 
+Tensor amaxamin_jvp(const Tensor& x, const Tensor& dx, const Tensor& result, IntArrayRef dim, bool keepdim) {
+  auto mask = x == restore_reduced_dims(result, dim, keepdim);
+  return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
+}
+
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
@@ -207,25 +212,17 @@ Tensor norm_backward(
   }
 
   if (p == 0.0) {
-    return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    return {};
   } else if (p == 1.0) {
     return self.sgn() * grad;
   } else if (p == 2.0) {
-    return self * (grad / norm).masked_fill_(norm == 0, 0);
+    return grad * (self / norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
-    const auto self_isnan = self.isnan();
-    const auto norm_isnan = norm.isnan();
-    const auto& self_and_norm_isnan = areAnyTensorSubclassLike({self, norm}) ?
-      self_isnan.logical_and(norm_isnan) :
-      self_isnan.logical_and_(norm_isnan);
-    auto is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
-    self_scaled = self.sgn() * is_eq_max;
-    auto nb_max = is_eq_max.count_nonzero(dim);
-    if (self.dim() != 0) {
-      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
-    }
-    scale_v = grad / nb_max;
-    return self_scaled * scale_v;
+    // Derivative of amax(abs(self), dim, keepdim) but respecting nans
+    // We create a mask of `argmax`: it's argmax if self.abs() == norm or it's NaN
+    auto self_abs = self.abs();
+    auto mask = self_abs.eq(norm).logical_or(self_abs.isnan());
+    return self.sgn() * ((grad / mask.sum(dim, true)) * mask);
   } else if (p < 1.0) {
     self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self == 0, 0);
     return self_scaled * grad * norm.pow(1 - p);
@@ -385,14 +382,22 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   return grad * args.digamma_().sum(-1);
 }
 
-Tensor sgn_backward(Tensor result, Tensor grad, Tensor self) {
-  if (self.is_complex()) {
-    auto abs = at::abs(self);
-    // C -> C
-    // https://arxiv.org/pdf/1701.00392.pdf Section 4.20
-    return at::where(abs == 0.0, at::zeros({}, grad.options()), (grad/abs - (at::real(grad/self) * result)));
+Tensor sgn_jvp(const Tensor& x, const Tensor& dx, const Tensor& sgn) {
+  if (x.is_complex()) {
+    auto abs = x.abs();
+    return ((dx - sgn * sgn * dx.conj()) / (2 * abs)).masked_fill_(abs == 0., 0.);
+
   } else {
-    return at::zeros_like(self, at::MemoryFormat::Preserve);
+    return at::_efficientzerotensor(sgn.sizes(), sgn.options());
+  }
+}
+
+Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn) {
+  if (x.is_complex()) {
+    auto abs = x.abs();
+    return ((gx - (sgn * sgn) * gx.conj()) / (2. * abs)).masked_fill_(abs == 0., 0.);
+  } else {
+    return {};
   }
 }
 

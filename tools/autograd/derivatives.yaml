@@ -325,7 +325,7 @@
 
 - name: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
   self: zeros_like(grad)
-  result: auto_element_wise
+  result: zeros_like(self_t)
 
 - name: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
@@ -524,7 +524,7 @@
 - name: div.Tensor(Tensor self, Tensor other) -> Tensor
   self: div_tensor_self_backward(grad, other, self.scalar_type())
   other: div_tensor_other_backward(grad, self, other)
-  result: self_t / other_p - other_t * (self_p / other_p) / other_p
+  result: (self_t - other_t * result) / other_p
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
@@ -1077,9 +1077,11 @@
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
+  result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
 - name: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
+  result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
   self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), self.layout(), 1)
@@ -1374,8 +1376,11 @@
   result: auto_element_wise
 
 - name: sgn(Tensor self) -> Tensor
-  self: sgn_backward(result, grad, self)
-  result: auto_element_wise
+  self: sgn_backward(self, grad, result)
+  # Cannot use auto_element_wise here because the Jacobian is *not* Hermitian
+  # The function is not holomorphic, so there's no reason for its Jacobian to be Hermitian
+  # auto_element_wise has a name that's a bit deceiving in the complex case
+  result: sgn_jvp(self_p, self_t, result)
 
 - name: sin(Tensor self) -> Tensor
   self: grad * self.cos().conj()
@@ -1506,6 +1511,7 @@
 
 - name: nansum(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
+  result: at::where(self_p.isnan(), 0, self_t).sum(dim, keepdim, dtype)
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
 - name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor Vh)
