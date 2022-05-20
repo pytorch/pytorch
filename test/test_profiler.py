@@ -191,10 +191,10 @@ class TestRecordFunction(TestCase):
             def get_value(self, idx):
                 return self.data[idx]
 
-        dp1 = IDPIterator()
+        dp1 = IDPIterator()  # The object itself is an iterator
         self.assertEqual(5, dp1.get_value(5))
-        it_dp1 = iter(dp1)
-        self.assertEqual(5, it_dp1.get_value(5))
+        it_dp1 = iter(dp1)  # This creates the 1st iterator
+        self.assertEqual(5, it_dp1.get_value(5))  # type: ignore[attr-defined]
         self.assertEqual(list(range(10)), list(it_dp1))
 
         class IDPDelegator(torch.utils.data.IterDataPipe):

@@ -25,8 +25,19 @@ void ConcretizedBroadcastDomains::build(Fusion* fusion) {
 }
 
 bool ConcretizedBroadcastDomains::isConcretized(IterDomain* id) const {
-  auto it = concretized_domains_.find(id);
-  return it != concretized_domains_.end();
+  auto it = broadcast_to_concrete_map_.find(id);
+  return it != broadcast_to_concrete_map_.end();
+}
+
+bool ConcretizedBroadcastDomains::isUniquelyConcretized(IterDomain* id) const {
+  auto it = broadcast_to_concrete_map_.find(id);
+  return it != broadcast_to_concrete_map_.end() && it->second.size() == 1;
+}
+
+bool ConcretizedBroadcastDomains::maybeNonUniquelyConcretized(
+    IterDomain* id) const {
+  auto it = broadcast_to_concrete_map_.find(id);
+  return it != broadcast_to_concrete_map_.end() && it->second.size() > 1;
 }
 
 void ConcretizedBroadcastDomains::handle(BroadcastOp* bop) {
@@ -67,7 +78,10 @@ void ConcretizedBroadcastDomains::handle(Expr* expr) {
       for (const auto& kv : p2c_map) {
         auto p_id = kv.first;
         auto c_id = kv.second;
-        const bool is_concretized = !c_id->isBroadcast();
+        // If the consumer ID is a reduction (i.e., a trivial
+        // reduction), do not consider it's concretized.
+        const bool is_concretized =
+            !c_id->isBroadcast() && !c_id->isReduction();
         auto it = broadcast_origin_map_.find(p_id);
         TORCH_INTERNAL_ASSERT(
             it != broadcast_origin_map_.end(),
@@ -79,8 +93,7 @@ void ConcretizedBroadcastDomains::handle(Expr* expr) {
         if (is_concretized) {
           // Keep track of all the origin domains as concretized
           for (auto origin : producer_origins) {
-            // concretized_root_domains_.insert(origin);
-            markAsConcretized(origin);
+            markAsConcretized(origin, c_id);
           }
         } else {
           // Not concretized yet. Propagate forward the origin info.
@@ -95,12 +108,15 @@ void ConcretizedBroadcastDomains::handle(Expr* expr) {
   }
 }
 
-void ConcretizedBroadcastDomains::markAsConcretized(IterDomain* root_domain) {
-  std::deque<IterDomain*> child_domains({root_domain});
+void ConcretizedBroadcastDomains::markAsConcretized(
+    IterDomain* broadcast_root_domain,
+    IterDomain* concrete_root_domain) {
+  std::deque<IterDomain*> child_domains({broadcast_root_domain});
   while (!child_domains.empty()) {
     auto child = child_domains.front();
     child_domains.pop_front();
-    if (!concretized_domains_.emplace(child).second) {
+    auto& concrete_ids = broadcast_to_concrete_map_[child];
+    if (!concrete_ids.emplace(concrete_root_domain).second) {
       continue;
     }
     const auto& child_uses = child->uses();
