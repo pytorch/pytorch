@@ -163,20 +163,12 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     buffers.tensors = cloneSparseTensors(rpcMessage->tensors()).vec();
   }
 
-  // The corresponding unpickler in `tensorpipeDeserialize` uses tensor id as an index in `buffers.tensors`
-  // (see tensorReadFunc). Meta tensors don't have data and are not present in buffers.tensors, so to skip
-  // meta tensors `non_meta_idx` is used to generate consecutive indices for non-meta tensors in `buffers.tensors`.
-  // The `meta_idx` is used to generate unique ids for the remaining meta tensors, but they are unused.
-  int non_meta_idx = 0;
-  int meta_idx = std::count_if(buffers.tensors.begin(), buffers.tensors.end(), [](auto& t) { return !t.is_meta(); });
   torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
     buffers.pickle.insert(
         buffers.pickle.end(),
         static_cast<const char*>(buf),
         static_cast<const char*>(buf) + sz);
     return sz;
-  }, nullptr, nullptr, nullptr, [&](const at::Tensor& t) -> std::string {
-    return std::to_string(!t.is_meta() ? non_meta_idx++ : meta_idx++);
   });
   pickler.protocol();
   pickler.pushIValue(buffers.tensors);
@@ -185,18 +177,9 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
   const std::vector<torch::Tensor>& tensorDataVec = pickler.tensorData();
-  // meta tensors don't have data and are not serialized to tpMessage.tensors
-  int nonMetaTensorsSize = std::count_if(tensorDataVec.begin(), tensorDataVec.end(),
-                                        [](auto& t) { return !t.is_meta(); });
-  tpMessage.tensors.reserve(nonMetaTensorsSize);
-  int metaTensorsCounter = 0;
+  tpMessage.tensors.reserve(tensorDataVec.size());
   for (const auto i : c10::irange(tensorDataVec.size())) {
     const torch::Tensor& tensor = tensorDataVec[i];
-
-    if (tensor.is_meta()) {
-      metaTensorsCounter++;
-      continue;
-    }
 
     const TensorpipeDeviceTypeConverter* converter =
         getDeviceTypeConverter(tensor.device().type());
@@ -205,11 +188,11 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         "Attempting to send a Tensor with unexpected device type ",
         tensor.device());
 
-    TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i - metaTensorsCounter);
+    TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i);
     c10::optional<std::vector<char>> maybeCopiedTensor =
         converter->prepareTensorForSending(
             tensor.storage(), streams, tpMessage);
-    TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i + 1 - metaTensorsCounter);
+    TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i + 1);
 
     tensorpipe::Device targetDevice = devices.empty() || devices[i].is_cpu()
         ? tensorpipe::Device{tensorpipe::kCpuDeviceType, 0}
@@ -328,13 +311,8 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
     tensors.emplace_back(std::move(t));
   }
 
-  int metaTensorsCounter = 0;
-  for (const auto i : c10::irange(tensors.size())) {
-    if (tensors[i].is_meta()) {
-      metaTensorsCounter++;
-      continue;
-    }
-    auto& tensor = tpDescriptor.tensors[i - metaTensorsCounter];
+  for (const auto i : c10::irange(tpDescriptor.tensors.size())) {
+    auto& tensor = tpDescriptor.tensors[i];
     if (tensor.targetDevice.has_value() &&
         tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
       TORCH_INTERNAL_ASSERT(
