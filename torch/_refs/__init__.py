@@ -70,6 +70,7 @@ __all__ = [
     "sqrt",
     "square",
     "tan",
+    "tanh",
     #
     # Elementwise Binary References
     #
@@ -477,6 +478,10 @@ square = _make_elementwise_unary_reference(
 tan = _make_elementwise_unary_reference(
     prims.tan,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+tanh = _make_elementwise_unary_reference(
+    prims.tanh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
 
