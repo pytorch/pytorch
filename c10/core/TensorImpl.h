@@ -1731,6 +1731,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_;
   }
 
+  impl::PyInterpreter* load_pyobj_interpreter() const;
+
  public:
   /**
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.

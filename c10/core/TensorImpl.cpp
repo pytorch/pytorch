@@ -4,6 +4,7 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
@@ -349,16 +350,20 @@ void TensorImpl::throw_storage_access_error() const {
       false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
+impl::PyInterpreter* TensorImpl::load_pyobj_interpreter() const {
+  auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+  if (interpreter) {
+    return interpreter;
+  }
+  TORCH_CHECK(
+      false,
+      "cannot access PyObject for Tensor on interpreter ",
+      pyobj_interpreter_.load()->name());
+}
+
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   if (is_python_dispatch()) {
-    auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
-    if (interpreter) {
-      return interpreter->is_contiguous(this);
-    }
-    TORCH_CHECK(
-        false,
-        "cannot access PyObject for Tensor on interpreter ",
-        pyobj_interpreter_.load()->name());
+    return load_pyobj_interpreter()->is_contiguous(this);
   }
   TORCH_CHECK(
       false,
@@ -374,14 +379,7 @@ IntArrayRef TensorImpl::sizes_custom() const {
 
 c10::Device TensorImpl::device_custom() const {
   if (is_python_dispatch()) {
-    auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
-    if (interpreter) {
-      return interpreter->device(this);
-    }
-    TORCH_CHECK(
-        false,
-        "cannot access PyObject for Tensor on interpreter ",
-        pyobj_interpreter_.load()->name());
+    return load_pyobj_interpreter()->device(this);
   }
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have device");
