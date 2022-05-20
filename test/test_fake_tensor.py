@@ -1,9 +1,12 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch.testing._internal.jit_utils import RUN_CUDA
+from torch._ops import OpOverload
 import unittest
+
 
 class FakeTensorTest(TestCase):
     def test_basic(self):
@@ -39,10 +42,29 @@ class FakeTensorTest(TestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_type_as(self):
-        x = FakeTensor.from_tensor(torch.rand([16, 1], device='cpu'))
-        y = FakeTensor.from_tensor(torch.rand([4, 4], device='cuda'))
+        x = FakeTensor.from_tensor(torch.rand([16, 1], device="cpu"))
+        y = FakeTensor.from_tensor(torch.rand([4, 4], device="cuda"))
         out = x.type_as(y)
         self.assertEqual(out.device.type, "cuda")
+
+    def test_constructor(self):
+        with enable_torch_dispatch_mode(FakeTensorMode):
+            x = torch.rand([4, 4], device="cpu")
+
+        self.assertTrue(isinstance(x, FakeTensor))
+        self.assertTrue(x.device.type == "cpu")
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_fake_mode_non_fake_inputs(self):
+        x = torch.tensor(0.1)
+        y = torch.rand([4, 4], device="cuda")
+
+        with enable_torch_dispatch_mode(FakeTensorMode):
+            out = x + y
+
+        self.assertTrue(isinstance(out, FakeTensor))
+        self.assertTrue(out.device.type == "cuda")
+
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
@@ -51,12 +73,14 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
 
 
 class FakeTensorOperatorInvariants(TestCase):
+    @staticmethod
+    def get_aten_op(schema):
+        namespace, name = schema.name.split("::")
+        overload = schema.overload_name if schema.overload_name else "default"
+        assert namespace == "aten"
+        return getattr(getattr(torch.ops.aten, name), overload)
+
     def test_non_kwarg_only_device(self):
-        def get_op(schema):
-            namespace, name = schema.name.split("::")
-            overload = schema.overload_name if schema.overload_name else "default"
-            assert namespace == "aten"
-            return getattr(getattr(torch.ops.aten, name), overload)
 
         for schema in torch._C._jit_get_all_schemas():
             namespace = schema.name.split("::")[0]
@@ -77,8 +101,48 @@ class FakeTensorOperatorInvariants(TestCase):
             )
             if has_non_kwarg_device:
                 self.assertTrue(
-                    get_op(schema) in torch.subclasses.fake_tensor._device_not_kwarg_ops
+                    self.get_aten_op(schema)
+                    in torch.subclasses.fake_tensor._device_not_kwarg_ops
                 )
+
+    def test_tensor_constructors_all_have_kwarg_device(self):
+        def contains_tensor_types(type: torch._C.Type):
+            tensor_type = torch._C.TensorType.get()
+            return type.isSubtypeOf(tensor_type) or any(
+                contains_tensor_types(e) for e in type.containedTypes()
+            )
+
+        # TODO: wouldn't show up as torch.subclasses.fake_tensor._is_tensor_constructor when
+        # added to __all__
+        def _is_tensor_constructor(func: OpOverload):
+            assert isinstance(func, OpOverload)
+            schema = func._schema
+            if any(contains_tensor_types(arg.type) for arg in schema.arguments):
+                return False
+            # TODO: no real reason to restrict multiple outputs
+            return (
+                len(schema.returns) == 1
+                and schema.returns[0].type is torch._C.TensorType.get()
+            )
+
+        for schema in torch._C._jit_get_all_schemas():
+            namespace = schema.name.split("::")[0]
+            if namespace != "aten":
+                continue
+
+            op = self.get_aten_op(schema)
+            if not _is_tensor_constructor(op):
+                continue
+
+            opt_device = torch._C.OptionalType(torch._C.DeviceObjType.get())
+            has_kwarg_device = any(
+                arg.kwarg_only and arg.type.isSubtypeOf(opt_device)
+                for arg in schema.arguments
+            )
+
+            self.assertTrue(
+                has_kwarg_device or op == torch.ops.aten._list_to_tensor.default
+            )
 
 
 if __name__ == "__main__":

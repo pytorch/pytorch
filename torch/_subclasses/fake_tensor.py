@@ -4,7 +4,10 @@ from torch._subclasses import BaseTensor
 from torch.utils._pytree import tree_map
 from functools import partial
 from torch.fx.operator_schemas import normalize_function
+from torch.utils._mode_utils import no_dispatch
 from typing import Union
+from torch._ops import OpOverload
+import functools
 
 aten = torch.ops.aten
 
@@ -17,6 +20,29 @@ _device_not_kwarg_ops = (
     aten.to.prim_Device,
     aten._pin_memory.default,
 )
+
+# this op is never actually used
+_non_kwarg_device_constructors = (torch.ops.aten._list_to_tensor,)
+
+
+def contains_tensor_types(type: torch._C.Type):
+    tensor_type = torch._C.TensorType.get()
+    return type.isSubtypeOf(tensor_type) or any(
+        contains_tensor_types(e) for e in type.containedTypes()
+    )
+
+
+@functools.lru_cache(None)
+def is_tensor_constructor(func: OpOverload):
+    assert isinstance(func, OpOverload)
+    schema = func._schema
+    if any(contains_tensor_types(arg.type) for arg in schema.arguments):
+        return False
+    # TODO: no real reason to restrict multiple outputs
+    return (
+        len(schema.returns) == 1 and schema.returns[0].type is torch._C.TensorType.get()
+    )
+
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
@@ -50,6 +76,7 @@ class FakeTensor(BaseTensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        kwargs = kwargs if kwargs else {}
 
         # This classes virtualizes .device() calls, need to short-circuit
         # it insteead of calling device again or we would keep on recurring
@@ -57,8 +84,20 @@ class FakeTensor(BaseTensor):
             assert len(args) == 1 and isinstance(args[0], FakeTensor)
             return args[0].fake_device
 
-        # Run the original computation
-        kwargs = kwargs if kwargs else {}
+        def wrap(e, device=None):
+            if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
+                if device:
+                    return FakeTensor(e, device)
+                else:
+                    return FakeTensor.from_tensor(e)
+            else:
+                return e
+
+        # if we are in the dispatch mode, we will enter this function even if the inputs
+        # are not FakeTensors, and they need to be wrapped
+        if cls == FakeTensorMode:
+            args = tree_map(wrap, args)
+            kwargs = tree_map(wrap, kwargs)
 
         # _to_copy fails when run with FakeTensors to cuda device
         # TODO: debug
@@ -69,22 +108,25 @@ class FakeTensor(BaseTensor):
             out_device = new_kwargs.pop("device", new_kwargs["input"].device)
             with no_dispatch():
                 input = new_kwargs.pop("input").to("meta")
-                return FakeTensor(torch.ops.aten._to_copy(input, **new_kwargs), out_device)
+                return FakeTensor(
+                    torch.ops.aten._to_copy(input, **new_kwargs), out_device
+                )
+
+        if is_tensor_constructor(func):
+            assert not func in _non_kwarg_device_constructors
+            _, new_kwargs = normalize_function(
+                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+            )
+            # cpu is default device if none is specified
+            out_device = new_kwargs.pop("device", torch.device("cpu"))
+            new_kwargs["device"] = torch.device("meta")
+            r = super().__torch_dispatch__(func, types, (), new_kwargs)
+            return FakeTensor(r, out_device)
 
         r = super().__torch_dispatch__(func, types, args, kwargs)
 
-        def wrap(e, device):
-            # inplace ops can return fake tensors
-            if isinstance(e, torch.Tensor) and not isinstance(e, cls):
-                return FakeTensor(e, device)
-            else:
-                return e
-
         # TODO: handle non-kwarg devices
         assert func not in _device_not_kwarg_ops, f"NYI: {func}"
-        assert (
-            func != aten._pin_memory.default and func != aten.pin_memory.default
-        ), f"NYI: {func}"
 
         # if device is specified, use that
         if kwargs.get("device", None):
@@ -112,7 +154,7 @@ class FakeTensor(BaseTensor):
         def find_common_device(t):
             nonlocal common_device
             nonlocal is_cpu_zero_dim
-            if not isinstance(t, cls):
+            if not isinstance(t, FakeTensor):
                 return
 
             if common_device is None:
@@ -150,4 +192,10 @@ class FakeTensor(BaseTensor):
 
         return tree_map(partial(wrap, device=common_device), r)
 
-__all__ = ["FakeTensor", "_device_not_kwarg_ops"]
+
+class FakeTensorMode(FakeTensor):
+    context = no_dispatch
+
+
+# TODO: __all__ doesn't seem to be working
+__all__ = ["FakeTensor", "FakeTensorMode", "_device_not_kwarg_ops"]
