@@ -5,7 +5,8 @@ import torch
 from copy import deepcopy
 from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
+import unittest
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
@@ -247,6 +248,28 @@ class TestPythonRegistration(TestCase):
         del my_lib2
         del my_lib1
 
+    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
+    def test_alias_analysis(self):
+        def test_helper(alias_analysis=""):
+            my_lib1 = Library("foo", "DEF")
+
+            called = [0]
+
+            @torch.library.define(my_lib1, "_op() -> None", alias_analysis=alias_analysis)
+            def _op(*args, **kwargs):
+                called[0] += 1
+
+            @torch.jit.script
+            def _test():
+                torch.ops.foo._op()
+
+            assert "foo::_op" in str(_test.graph)
+
+        with self.assertRaises(AssertionError):
+            test_helper("")  # alias_analysis="FROM_SCHEMA"
+
+        test_helper("CONSERVATIVE")
+
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
@@ -337,6 +360,24 @@ $2 = torch._ops.aten.kl_div.default($0, $1)
 $3 = torch._ops.aten.kl_div.default($0, $1, 2)
 $4 = torch._ops.aten.kl_div.default($0, $1, log_target=True)
 $5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
+
+    def test_produce_real_type(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(2, 2))
+            log_input("x", x)
+            x.to(dtype=torch.double)  # non-optional dtype
+            torch.cumprod(x, 0, dtype=torch.double)  # optional dtype
+            x[:, 1].contiguous(memory_format=torch.contiguous_format)  # optional memory format
+            # There doesn't appear to be any layout signatures which are
+            # triggerable using tensor subclasses (need to use a mode)
+
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
+$2 = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
+$3 = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
+$4 = torch._ops.aten.select.int($3, 1, 1)
+$5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)''')
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
@@ -876,8 +917,8 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
                 return func(*args, **kwargs)
 
         x = torch.randn(1)
-        with push_torch_dispatch_mode(partial(Logger, "A")):
-            with push_torch_dispatch_mode(partial(Logger, "B")):
+        with Logger.push("A"):
+            with Logger.push("B"):
                 x + x
         self.assertEqual(logs, ["B", "A"])
 
@@ -1194,16 +1235,23 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
                         return not_contiguous_data.is_contiguous()
                     return NotImplemented
 
+
             err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
+            e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
-                e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
                 e.is_contiguous()
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.contiguous()
 
             e = ExampleTensor2(torch.randn(3, 3), use_wrapper_subclass)
             self.assertEqual(e.is_contiguous(), True)
+            e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
 
+            err_msg = "no implementation found for"
             e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
             self.assertEqual(e.is_contiguous(), False)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.contiguous()
 
 
 if __name__ == '__main__':
