@@ -1413,8 +1413,9 @@
   result: auto_linear
 
 - name: as_strided_scatter(Tensor self, Tensor src, int[] size, int[] stride, int? storage_offset=None) -> Tensor
-  self: as_strided_scatter(grad, zeros_like(src), size, stride, storage_offset)
-  src: grad.as_strided(size, stride, storage_offset)
+  self: as_strided_scatter_backward(grad, TensorGeometry(self), TensorGeometry(src), size, stride, storage_offset)
+  # See Note [as_strided_scatter backward support]
+  src: grad.contiguous().as_strided(size, stride, storage_offset)
   result: auto_linear
 
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
