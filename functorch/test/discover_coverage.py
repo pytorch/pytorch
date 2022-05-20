@@ -237,6 +237,27 @@ def get_top_ops(torch_threshold, nn_fn_threshold):
     return ops
 
 
+def get_ops_percentage(torch_threshold, nn_fn_threshold):
+    data = top_ops.top_torch + top_ops.get_nn_functional_top_list()
+
+    def get_num_usages(opname):
+        # Ignore this, this is heavily inflated
+        if opname == 't':
+            return 0
+        result = [op[1] for op in data if op[0] == opname]
+        assert len(result) == 1
+        return result[0]
+
+    # get all operators that are not in the denylist
+    all_ops = get_top_ops(999999, 999999)
+    total_op_usages = sum([get_num_usages(op) for op in all_ops])
+
+    # get subset of all operators
+    subset_ops = get_top_ops(torch_threshold, nn_fn_threshold)
+    subset_op_usages = sum([get_num_usages(op) for op in subset_ops])
+    return subset_op_usages / total_op_usages
+
+
 def get_top_ops_not_covered_by_opinfo(torch_threshold=0, nn_fn_threshold=0):
     ops = get_top_ops(torch_threshold, nn_fn_threshold)
 
@@ -811,6 +832,7 @@ opset = OperatorSet.all()
 has_no_opinfo = opset.query(Operator.has_opinfo, (False,))
 
 print("=" * 30 + " Summary " + "=" * 30)
+print(f'% of usages on github: {get_ops_percentage(99999, 99999)}')
 print(opset.summary())
 
 # sanity checks
@@ -818,6 +840,7 @@ result = opset.query(Operator.supports_vjp, (Support.NO, Support.UNKNOWN))
 # pprint.pprint(result)
 
 print("=" * 30 + " Top 60 Summary " + "=" * 30)
+print(f'% of usages on github: {get_ops_percentage(35, 25)}')
 opset = OperatorSet.from_top_ops_threshold(35, 25)
 # result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
 # pprint.pprint(result)
@@ -833,6 +856,7 @@ opset = OperatorSet.from_top_ops_threshold(35, 25)
 print(opset.summary())
 
 print("=" * 30 + " Top 125 Summary " + "=" * 30)
+print(f'% of usages on github: {get_ops_percentage(100, 25)}')
 opset = OperatorSet.from_top125()
 # result = opset.query(Operator.supports_vmap, (Support.NO, Support.UNKNOWN))
 # pprint.pprint(result)
