@@ -589,10 +589,12 @@ class NativeFunction:
             )
 
         composites_in_dispatch = [
-            d for d in dispatch if
-            d == DispatchKey.CompositeExplicitAutograd
+            d
+            for d in dispatch
+            if d == DispatchKey.CompositeExplicitAutograd
             or d == DispatchKey.CompositeExplicitAutogradNonFunctional
-            or d == DispatchKey.CompositeImplicitAutograd]
+            or d == DispatchKey.CompositeImplicitAutograd
+        ]
 
         assert len(composites_in_dispatch) <= 1, (
             "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradNonFunctional, "
