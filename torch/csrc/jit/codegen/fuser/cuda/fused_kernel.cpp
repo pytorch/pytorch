@@ -36,8 +36,7 @@ void codegenOutputQuery(
     int& minor,
     bool& compile_to_sass) {
 #ifdef USE_ROCM
-  AT_CUDA_NVRTC_CHECK(
-      nvrtc().nvrtcVersion(&major, &minor));
+  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&major, &minor));
   compile_to_sass = false;
 #else
   using CudaVersion = std::pair<int, int>;
