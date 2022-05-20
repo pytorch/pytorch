@@ -213,8 +213,12 @@ mobile::Module FlatbufferLoader::parseModule(
   }
 
   module_parsed_ = true;
-  return mobile::Module(module_ivalue.toObject(), mcu_);
+  auto m = mobile::Module(module_ivalue.toObject(), mcu_);
+  m.set_min_operator_version(module->operator_version());
+  m.set_bytecode_version(module->bytecode_version());
+  return m;
 }
+
 namespace {
 void appendUpgraderFunctions(mobile::Function* function) {
 #ifndef DISABLE_UPGRADER

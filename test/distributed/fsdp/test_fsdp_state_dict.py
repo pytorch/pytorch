@@ -313,9 +313,6 @@ class TestFSDPStateDict(FSDPTest):
                     model, cpu_offload.offload_params, fp16
                 )
 
-            # if self.rank == 0:
-            #     print(f"FSDP keys {fsdp_state_dict.keys()}")
-
             ignore_keys = [k for k in fsdp_state_dict.keys() if NON_ROOT_FSDP_PREFIX in k]
 
             self._validate_state_dict_contents(
