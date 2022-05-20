@@ -60,6 +60,8 @@ from torchgen.api.types import (
 
 options_ctype = NamedCType("options", ConstRefCType(BaseCType(tensorOptionsT)))
 
+out_tensor_ctype = NamedCType("out", ConstRefCType(BaseCType(tensorT)))
+
 longVec_ctype = VectorCType(BaseCType(longT))
 optionalLongVec_ctype = OptionalCType(VectorCType(BaseCType(longT)))
 optionalScalar_ctype = OptionalCType(BaseCType(scalarT))
@@ -287,20 +289,38 @@ Check this module for more information.
             return f"TensorOptions().dtype({dtype}).layout({layout}).device({device}).pinned_memory({pin_memory})"
 
         elif goal == NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT))):
-            options = direct_solve(options_ctype)
-            return f"optTypeMetaToScalarType({options}.dtype_opt())"
+            try:
+                options = direct_solve(options_ctype)
+                return f"optTypeMetaToScalarType({options}.dtype_opt())"
+            except UnsatError:
+                out_tensor = direct_solve(out_tensor_ctype)
+                return f"{out_tensor}.scalar_type()"
 
         elif goal == NamedCType("layout", OptionalCType(BaseCType(layoutT))):
-            options = direct_solve(options_ctype)
-            return f"{options}.layout_opt()"
+            try:
+                options = direct_solve(options_ctype)
+                return f"{options}.layout_opt()"
+            except UnsatError:
+                out_tensor = direct_solve(out_tensor_ctype)
+                return f"{out_tensor}.layout()"
 
         elif goal == NamedCType("device", OptionalCType(BaseCType(deviceT))):
-            options = direct_solve(options_ctype)
-            return f"{options}.device_opt()"
+            try:
+                options = direct_solve(options_ctype)
+                return f"{options}.device_opt()"
+            except UnsatError:
+                out_tensor = direct_solve(out_tensor_ctype)
+                return f"{out_tensor}.device()"
 
         elif goal == NamedCType("pin_memory", OptionalCType(BaseCType(boolT))):
-            options = direct_solve(options_ctype)
-            return f"{options}.pinned_memory_opt()"
+            try:
+                options = direct_solve(options_ctype)
+                return f"{options}.pinned_memory_opt()"
+            except UnsatError:
+                # If we're calling a factory op from its out= variant,
+                # We don't actually care about the value of pin_memory.
+                out_tensor = direct_solve(out_tensor_ctype)
+                return "c10::nullopt"
 
         # We can always do translations from value types to reference types, like vector<int> -> IntArrayRef
         elif goal.type == BaseCType(intArrayRefT):
@@ -347,6 +367,15 @@ Check this module for more information.
             # But there currently aren't any ops that require lambda capture codegen
             # With arguments like std::vector<IntArrayRef>.
             # If that changes, we'll have to add the translation here.
+
+        # We allow const casting on tensors, since const-correctness is a bit broken for at::Tensor.
+        # We could probably generalize this to non-tensor types too.
+        if goal.type == MutRefCType(BaseCType(tensorT)):
+            const_ref_tensor_ctype = NamedCType(
+                goal.name, ConstRefCType(BaseCType(tensorT))
+            )
+            argname = direct_solve(const_ref_tensor_ctype)
+            return f"const_cast<Tensor&>({argname})"
 
         unsat(goal)
 

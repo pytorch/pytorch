@@ -30,7 +30,8 @@ std::tuple<Tensor, Tensor> gru_input(
   bool train,
   bool bidirectional,
   bool batch_first) {
-  TORCH_CHECK(params_cpu.size() == 4 * num_layers, "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
+  TORCH_CHECK(static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
+              "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
   TORCH_INTERNAL_ASSERT(input_vk.sizes().size() == 3, "Vulkan gru expects 'input_vk' dims to be 3.");
   TORCH_INTERNAL_ASSERT(hx_vk.sizes().size() == 3, "Vulkan gru expects 'hx_vk' dims to be 3.");
   TORCH_INTERNAL_ASSERT(has_biases, "Vulkan gru expects 'has_biases' to be true.");
@@ -99,7 +100,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 std::vector<LinearOpContext> pack_linear_op_contexts(
     const std::vector<Tensor>& params_cpu,
     int64_t num_layers) {
-  TORCH_CHECK(params_cpu.size() == 4 * num_layers, "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
+  TORCH_CHECK(static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
+              "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
   std::vector<LinearOpContext> linear_op_contexts;
   for (int64_t i = 0; i < num_layers; ++i) {
     const auto& w_ih = params_cpu.at(i * 4);
