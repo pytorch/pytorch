@@ -985,9 +985,8 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.mvlgamma.out: {f16},  # aten::mvlgamma.out
     aten.nanmedian.default: {f16},  # aten::nanmedian
     aten.nanmedian.dim: {f16},  # aten::nanmedian.dim_values
-    aten.native_batch_norm.default: {bf16, f16},  # waiting on https://github.com/pytorch/pytorch/pull/77407
+    aten.native_group_norm.default: {bf16, f16},
     aten.native_dropout.default: {bf16, f16, f32, f64},
-    aten.native_layer_norm.default: {f16},  # aten::var_mean.correction
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
