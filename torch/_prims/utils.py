@@ -42,12 +42,15 @@ Number = (bool, int, float, complex)
 
 
 torch_function_passthrough = {
-            torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.numel,
-            torch.Tensor.stride,
-            torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.numel,
+    torch.Tensor.stride,
+    torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+    # For TorchRefsMode only
+    torch.Tensor.__format__,
+    torch.Tensor.__repr__,
 }
 
 
