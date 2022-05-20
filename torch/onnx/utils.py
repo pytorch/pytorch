@@ -488,7 +488,7 @@ def _decide_input_format(model, args):
     except IndexError:
         warnings.warn("No input args, skipping _decide_input_format")
     except Exception as e:
-        warnings.warn("Skipping _decide_input_format\n {}".format(e.args[0]))
+        warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}")
 
     return args
 
@@ -546,12 +546,10 @@ def _check_flatten_did_not_remove(original, jit_flattened):
     def flatten(x):
         if isinstance(x, (list, tuple)):
             for inner in x:
-                for y in flatten(inner):
-                    yield y
+                yield from flatten(inner)
         elif isinstance(x, dict):
             for inner in x.values():
-                for y in flatten(inner):
-                    yield y
+                yield from flatten(inner)
         else:
             yield x
 
@@ -1065,7 +1063,7 @@ def _export(
             if isinstance(f, str):
                 model_file_location = f
             else:
-                model_file_location = str()
+                model_file_location = ""
             args = _decide_input_format(model, args)
             if dynamic_axes is None:
                 dynamic_axes = {}
@@ -1257,7 +1255,7 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
         # you need.
-        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name),)
+        e.args = (f"{e.args[0]} (occurred when translating {op_name})",)
         raise
 
 

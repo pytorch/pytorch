@@ -25,7 +25,7 @@ def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
 
 
 TestModels = type(
-    str("TestModels"),
+    "TestModels",
     (unittest.TestCase,),
     dict(TestModels.__dict__, is_script_test_enabled=False, exportTest=exportTest),
 )
@@ -33,7 +33,7 @@ TestModels = type(
 
 # model tests for scripting with new JIT APIs and shape inference
 TestModels_new_jit_API = type(
-    str("TestModels_new_jit_API"),
+    "TestModels_new_jit_API",
     (unittest.TestCase,),
     dict(
         TestModels.__dict__,

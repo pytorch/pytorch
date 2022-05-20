@@ -106,14 +106,13 @@ def _parse_arg(value, desc, arg_name=None, node_name=None):
 
     if arg_name is None or node_name is None:
         raise RuntimeError(
-            "Expected node type 'onnx::Constant', got '{}'.".format(value.node().kind())
+            f"Expected node type 'onnx::Constant', got '{value.node().kind()}'."
         )
     else:
         raise RuntimeError(
             "Expected node type 'onnx::Constant' "
-            "for argument '{}' of node '{}', got '{}'.".format(
-                arg_name, node_name, value.node().kind()
-            )
+            f"for argument '{arg_name}' of node '{node_name}', "
+            f"got '{value.node().kind()}'."
         )
 
 
@@ -876,7 +875,7 @@ def __interpolate_helper(
         # and if not assume that it is not a scalar.
         try:
             is_scalar = not _is_packed_list(size) and (
-                (_maybe_get_const(size, "t").dim() == 0)
+                _maybe_get_const(size, "t").dim() == 0
             )
         except AttributeError:
             is_scalar = not _is_packed_list(size)
