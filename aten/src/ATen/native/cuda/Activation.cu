@@ -322,38 +322,52 @@ void launch_prelu_cuda_backward_kernel_multi_weights(
 // hardshrink
 // -----------------------------------
 void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardshrink_cuda", [&]() {
-    auto lambd = value.to<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                                  iter.dtype(), "hardshrink_cuda", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto lambd = value.to<opmath_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return (a >= -lambd && a <= lambd) ? scalar_t(0) : a;
+      opmath_t aop = static_cast<opmath_t>(a);
+      return (aop >= -lambd && aop <= lambd) ? opmath_t(0) : aop;
     });
   });
 }
 
 void softshrink_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softshrink_cuda", [&]() {
-    auto lambd = value.to<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                                  iter.dtype(), "softshrink_cuda", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto lambd = value.to<opmath_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return a > lambd ? a - lambd : (a < -lambd ? a + lambd : scalar_t(0));
+      opmath_t aop = static_cast<opmath_t>(a);
+      return aop > lambd ? aop - lambd : (aop < -lambd ? aop + lambd : opmath_t(0));
     });
   });
 }
 
 void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "shrink_backward_cuda", [&]() {
-    auto lambd = value.to<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                                  iter.dtype(), "shrink_backward_cuda", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto lambd = value.to<opmath_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
-      return (self_val >= -lambd && self_val <= lambd) ? scalar_t(0) : grad_val;
+      opmath_t self_val_op = static_cast<opmath_t>(grad_val);
+      opmath_t grad_val_op = static_cast<opmath_t>(grad_val);
+      return (self_val_op >= -lambd && self_val_op <= lambd) ? opmath_t(0) : grad_val_op;
     });
   });
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.dtype(), "hardtanh_backward_cuda", [&]() {
-    auto min_val = min.to<scalar_t>();
-    auto max_val = max.to<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half,
+                                 iter.dtype(), "hardtanh_backward_cuda", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto min_val = min.to<opmath_t>();
+    auto max_val = max.to<opmath_t>();
     gpu_kernel(iter, [min_val, max_val]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return (b <= min_val) || (b >= max_val) ? scalar_t(0) : a;
+      opmath_t aop = static_cast<opmath_t>(a);
+      opmath_t bop = static_cast<opmath_t>(b);
+      return (bop <= min_val) || (bop >= max_val) ? opmath_t(0) : aop;
     });
   });
 }
