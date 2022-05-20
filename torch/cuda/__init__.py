@@ -668,8 +668,8 @@ class _CudaLegacyStorage(_LegacyStorage):
         raise RuntimeError('_new_with_weak_ptr: Not available for CUDA storage')
 
     @classmethod
-    def _new_shared_filename_cpu(cls, manager, obj, size, *, device=None, dtype=None):
-        raise RuntimeError('_new_shared_filename_cpu: Not available for CUDA storage')
+    def _new_shared_filename(cls, manager, obj, size, *, device=None, dtype=None):
+        raise RuntimeError('_new_shared_filename: Not available for CUDA storage')
 
 class ByteStorage(_CudaLegacyStorage):
     @classproperty

@@ -781,7 +781,7 @@ class _TypedStorage:
         return self
 
     @classmethod
-    def _release_ipc_counter_cuda(cls, *args, device=None, **kwargs):
+    def _release_ipc_counter(cls, *args, device=None, **kwargs):
         return torch._UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
 
     def _shared_incref(self, *args, **kwargs):
@@ -823,18 +823,17 @@ class _LegacyStorage(_TypedStorage, metaclass=_LegacyStorageMeta):
     @classmethod
     def _new_shared(cls, size):
         """Creates a new storage in shared memory with the same data type"""
-        module = eval(cls.__module__)
-        untyped_storage = module._UntypedStorage._new_shared(size * cls().element_size())
+        untyped_storage = torch._UntypedStorage._new_shared(size * cls().element_size())
         return cls(wrap_storage=untyped_storage)
 
     @classmethod
-    def _release_ipc_counter_cuda(cls, *args, **kwargs):
-        return eval(cls.__module__)._UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
+    def _release_ipc_counter(cls, *args, **kwargs):
+        return torch._UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
 
     @classmethod
-    def _new_shared_filename_cpu(cls, manager, obj, size):
+    def _new_shared_filename(cls, manager, obj, size):
         bytes_size = size * torch._utils._element_size(cls.dtype)
-        return cls(wrap_storage=eval(cls.__module__)._UntypedStorage._new_shared_filename_cpu(manager, obj, bytes_size))
+        return cls(wrap_storage=torch._UntypedStorage._new_shared_filename_cpu(manager, obj, bytes_size))
 
 def _get_dtype_from_pickle_storage_type(pickle_storage_type: str):
     try:
