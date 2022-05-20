@@ -18487,12 +18487,12 @@ op_db: List[OpInfo] = [
 #   construction arguments. These arguments can be overridden
 #   by adding kwargs to the constructor.
 
-def _find_referenced_opinfo(referenced_name):
+def _find_referenced_opinfo(referenced_name, variant_name):
     '''
     Finds the OpInfo with the given name that has no variant name.
     '''
     for opinfo in op_db:
-        if opinfo.name == referenced_name and opinfo.variant_test_name == '':
+        if opinfo.name == referenced_name and opinfo.variant_test_name == variant_name:
             return opinfo
 
 def _inherit_constructor_args(name, op, inherited, overrides):
@@ -18538,10 +18538,12 @@ class PythonRefInfo(OpInfo):
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant_name='',  # the variant name for corresponding torch opinfo
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         self.torch_opinfo_name = torch_opinfo_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        self.torch_opinfo_variant_name = torch_opinfo_variant_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant_name)
         assert isinstance(self.torch_opinfo, OpInfo)
 
         inherited = self.torch_opinfo._original_opinfo_args
@@ -18558,10 +18560,12 @@ class ReductionPythonRefInfo(ReductionOpInfo):
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant_name='',  # the variant name for corresponding torch opinfo
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         self.torch_opinfo_name = torch_opinfo_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        self.torch_opinfo_variant_name = torch_opinfo_variant_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant_name)
         assert isinstance(self.torch_opinfo, ReductionOpInfo)
 
         inherited = self.torch_opinfo._original_reduction_args
@@ -18582,10 +18586,12 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant_name='',  # the variant name for corresponding torch opinfo
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         self.torch_opinfo_name = torch_opinfo_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        self.torch_opinfo_variant_name = torch_opinfo_variant_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant_name)
         assert isinstance(self.torch_opinfo, UnaryUfuncInfo)
 
         inherited = self.torch_opinfo._original_unary_ufunc_args
@@ -18603,10 +18609,12 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant_name='',  # the variant name for corresponding torch opinfo
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         self.torch_opinfo_name = torch_opinfo_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        self.torch_opinfo_variant_name = torch_opinfo_variant_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant_name)
         assert isinstance(self.torch_opinfo, BinaryUfuncInfo)
 
         inherited = self.torch_opinfo._original_binary_ufunc_args
@@ -18930,6 +18938,40 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_xor",
         torch_opinfo_name="bitwise_xor",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.div",
+        torch_opinfo_name="div",
+        torch_opinfo_variant_name="no_rounding_mode",
+        # https://github.com/pytorch/pytorch/issues/76944
+        supports_two_python_scalars=False,
+        supports_one_python_scalar=True,
+        skips=(
+            # complex("-501.-501.j")/complex("-501.-infj")
+            # PyTorch jiterated Path : 0
+            # Python : 0
+            # PyTorch non-jiterated path : nan + nanj
+            # See also: https://github.com/pytorch/pytorch/issues/52332
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,), device_type='cuda',
+                         active_if=not TEST_WITH_ROCM),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.div",
+        torch_opinfo_name="div",
+        torch_opinfo_variant_name="trunc_rounding",
+        # https://github.com/pytorch/pytorch/issues/76944
+        supports_two_python_scalars=False,
+        supports_one_python_scalar=True,
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.div",
+        torch_opinfo_name="div",
+        torch_opinfo_variant_name="floor_rounding",
+        # https://github.com/pytorch/pytorch/issues/76944
+        supports_two_python_scalars=False,
+        supports_one_python_scalar=True,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.eq",

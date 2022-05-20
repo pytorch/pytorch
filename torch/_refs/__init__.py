@@ -84,7 +84,7 @@ __all__ = [
     "bitwise_xor",
     # "complex",
     # 'copysign', # where
-    # 'div', # need to implement all rounding modes first
+    "div",
     "eq",
     "float_power",
     "floor_divide",
@@ -620,6 +620,43 @@ bitwise_xor = _make_elementwise_binary_reference(
 # TODO: add docstring
 # complex =  _make_elementwise_binary_reference(prims.complex, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 
+
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a", "b"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def _floor_divide(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    return floor(true_divide(a, b))
+
+
+@register_decomposition(torch.ops.aten.div)
+@out_wrapper
+def div(
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+    *,
+    rounding_mode: Optional[str] = None,
+):
+    """
+    Reference implementation of torch.div
+    """
+    if rounding_mode is None:
+        return true_divide(a, b)
+    elif rounding_mode == "trunc":
+        return floor_divide(a, b)
+    elif rounding_mode == "floor":
+        a, b = _maybe_broadcast(a, b)
+        return _floor_divide(a, b)
+    else:
+        msg = (
+            "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
+            "but found {0}.".format(rounding_mode)
+        )
+        raise ValueError(msg)
+
+
 # TODO: add docstring
 eq = _make_elementwise_binary_reference(
     prims.eq,
@@ -660,17 +697,19 @@ def float_power(
     return prims.pow(a, b)
 
 
-def _floor_divide(
+def _trunc_divide(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ):
     return trunc(true_divide(a, b))
 
 
 # TODO: add docstring
+# Currently torch.floor_divide rounds its quotient to zero.
+# output = trunc(input / other)
 floor_divide = _make_elementwise_binary_reference(
-    _floor_divide,
+    _trunc_divide,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
-    aten_op=None,  # Defined in torch/_decomp/decompositions.py
+    aten_op=None,  # CompositeImplicitAutograd
 )
 
 
