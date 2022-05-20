@@ -1777,7 +1777,7 @@ class TestImports(TestCase):
                            "torch.testing._internal.distributed.",  # just fails
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
-        if not sys.version_info >= (3, 8):
+        if not sys.version_info >= (3, 9):
             ignored_modules.append("torch.utils.benchmark")
         if IS_WINDOWS:
             # Distributed does not work on Windows
