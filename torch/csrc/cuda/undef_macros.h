@@ -11,6 +11,13 @@
 #undef THPTensorStateless
 #undef THPTensorType
 
+#undef THPStorage_
+#undef THPStorageBaseStr
+#undef THPStorageStr
+#undef THPStorageClass
+#undef THPStorageType
+
+#undef THPStoragePtr
 #undef THPTensorPtr
 
 #undef THWTensor

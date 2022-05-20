@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
+#include <ATen/core/Macros.h>
 
 namespace torch {
 namespace jit {

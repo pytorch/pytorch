@@ -226,6 +226,12 @@ bool IsValidONNXNode(const Node* n) {
     }
   }
 
+  for (auto inp : n->inputs()) {
+    if (inp->type() == NoneType::get()) {
+      return false;
+    }
+  }
+
   return true;
 }
 

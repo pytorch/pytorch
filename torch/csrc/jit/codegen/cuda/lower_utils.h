@@ -66,33 +66,24 @@ std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
 // Returns if Val is a TensorView or TensorIndex
 bool isTV(const Val* const);
 
-// Returns if Expr is a TensorView or TensorIndex Expr.
+// Returns is Expr is a TensorView or TensorIndex Expr.
 TORCH_CUDA_CU_API bool isTvOp(const Expr*);
 
 // Returns the first output of Expr that is a TensorView
 TensorView* getTvOutput(const Expr*);
 
-// Returns if Expr is a reduction op
-TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
-
-// Returns if Expr is a reduction op with TensorView or TensorIndex
-TORCH_CUDA_CU_API bool isReductionTvOp(const Expr*);
-
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
 
-//! Returns the iterdomain that maps to the thread dimension grouped
+//! Returns the Fuser iterdomain that maps to the thread dimension grouped
 //!  to warps. Returns nullopt if the reduction is not to be lowered to
 //!  a warp reduction.
-c10::optional<IterDomain*> getMaybeWarpReductionDim(
-    const Val* output,
-    const Val* input);
+c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node);
 
 bool isScalarOp(const Expr*);
 
 //! Get TensorView potentially via kir::TensorIndex. Returns nullptr if
 //! cast fails.
 TensorView* getTv(Val*);
-const TensorView* getTv(const Val*);
 
 //! Get only TensorView potentially via kir::TensorIndex.
 std::vector<TensorView*> getTvs(const std::vector<Val*>& vals);
@@ -102,14 +93,7 @@ std::vector<TensorView*> getTvs(const std::vector<Val*>& vals);
 bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis);
 
 std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
-    const Val* val);
-
-// Allocate global buffer for a grid communication calls, i.e. grid reduce, grid
-// welford reduce, grid broadcast.
-kir::Allocate* allocGlobalBufferForGridComm(
-    Val* buffer_size,
-    DataType dtype,
-    bool zero_init);
+    Val* val);
 
 } // namespace ir_utils
 
@@ -186,17 +170,15 @@ struct TORCH_CUDA_CU_API IterDomainDependencySorter {
   IterDomainDependencySorter(
       const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
           concrete_id_dependencies,
-      const std::unique_ptr<ComputeAtMap>& compute_at_map)
+      const ComputeAtMap& compute_at_map)
       : concrete_id_dependencies_(concrete_id_dependencies),
         compute_at_map_(compute_at_map) {}
 
   // Return true if id0 should be before id1
   // Orders such that if x maps to {y}, x comes before y in final ordering.
   inline bool operator()(IterDomain* id0, IterDomain* id1) {
-    auto concrete_id_0 =
-        compute_at_map_->getConcreteMappedID(id0, IdMappingMode::LOOP);
-    auto concrete_id_1 =
-        compute_at_map_->getConcreteMappedID(id1, IdMappingMode::LOOP);
+    auto concrete_id_0 = compute_at_map_.getConcreteMappedID(id0);
+    auto concrete_id_1 = compute_at_map_.getConcreteMappedID(id1);
 
     if (concrete_id_dependencies_.find(concrete_id_0) !=
         concrete_id_dependencies_.end()) {
@@ -212,7 +194,7 @@ struct TORCH_CUDA_CU_API IterDomainDependencySorter {
 
   const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
       concrete_id_dependencies_;
-  const std::unique_ptr<ComputeAtMap>& compute_at_map_;
+  const ComputeAtMap& compute_at_map_;
 };
 
 } // namespace cuda

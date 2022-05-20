@@ -34,8 +34,7 @@ bool isOutputLocal(const Expr* expr) {
 } // namespace
 
 bool ParallelizedDomainPredicate::PredicateInfo::addDomain(IterDomain* id) {
-  auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
-      id, IdMappingMode::EXACT);
+  auto concrete_id = GpuLower::current()->caIndexMap().getConcreteMappedID(id);
   if (std::find(ids_.begin(), ids_.end(), concrete_id) == ids_.end()) {
     ids_.push_back(concrete_id);
     return true;
@@ -54,8 +53,7 @@ Bool* ParallelizedDomainPredicate::PredicateInfo::getPredicate() const {
     // Just sanity check that pred_id is concrete
     TORCH_INTERNAL_ASSERT(
         pred_id ==
-        GpuLower::current()->caMap()->getConcreteMappedID(
-            pred_id, IdMappingMode::EXACT));
+        GpuLower::current()->caIndexMap().getConcreteMappedID(pred_id));
     auto new_pred = SimplifyingIrBuilder::ltExpr(index, pred_id->extent());
     pred = SimplifyingIrBuilder::andExpr(pred, new_pred)->as<Bool>();
   }
@@ -90,8 +88,7 @@ std::unordered_set<Val*> getNonUnswitchedRootDomains(
           non_unswitched_concrete_root_domains,
           non_unswitched_concrete_root_domains.end()),
       [&](auto root_dom) {
-        return GpuLower::current()->caMap()->getConcreteMappedID(
-            root_dom, IdMappingMode::EXACT);
+        return GpuLower::current()->caIndexMap().getConcreteMappedID(root_dom);
       });
 
   return non_unswitched_concrete_root_domains;
@@ -107,8 +104,7 @@ bool isFullyUnswitched(
   return std::none_of(
       root_domains.begin(), root_domains.end(), [&](auto root_dom) {
         auto concrete_root_dom =
-            GpuLower::current()->caMap()->getConcreteMappedID(
-                root_dom, IdMappingMode::EXACT);
+            GpuLower::current()->caIndexMap().getConcreteMappedID(root_dom);
         return non_unswitched_root_domains.count(concrete_root_dom) > 0;
       });
 }
@@ -174,8 +170,7 @@ ParallelizedDomainPredicate::getPredicateMap(
           tv->domain()->domain().begin(),
           tv->domain()->domain().end(),
           [&](auto tv_id) {
-            return gpu_lower->caMap()->areMapped(
-                loop_id, tv_id, IdMappingMode::EXACT);
+            return gpu_lower->caIndexMap().areMapped(loop_id, tv_id);
           });
       if (it == tv->domain()->domain().end()) {
         continue;
@@ -222,8 +217,11 @@ Bool* ParallelizedDomainPredicate::getPredicate(
     }
   }
 
-  TORCH_INTERNAL_ASSERT(pred != nullptr);
-  return pred->as<Bool>();
+  if (pred) {
+    return pred->as<Bool>();
+  } else {
+    return nullptr;
+  }
 }
 
 UnswitchPredicateKey::UnswitchPredicateKey()
@@ -286,8 +284,8 @@ UnswitchPredicateKey::UnswitchPredicateKey(
   // Find the corresponding concrete id for each parallel type
   for (auto consumer_leaf : parallelized_consumer_leaf_ids) {
     auto pt = consumer_leaf->getParallelType();
-    auto concrete_leaf = GpuLower::current()->caMap()->getConcreteMappedID(
-        consumer_leaf, IdMappingMode::EXACT);
+    auto concrete_leaf =
+        GpuLower::current()->caIndexMap().getConcreteMappedID(consumer_leaf);
     parallel_concrete_ids_.at(pt) = concrete_leaf;
   }
 }
@@ -343,15 +341,8 @@ Bool* PredicateCompute::getInlinePredicate(
   auto out_tv = ir_utils::getTvOutput(expr);
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing TensorView output");
 
-  // Predicates for non-exact parallel dimensions must be used even
-  // when PredicateElimination::canOmitPredicate is true.
-  auto parallel_dom_pred =
-      ParallelizedDomainPredicate::getPredicate(expr, loops);
-  TORCH_INTERNAL_ASSERT(parallel_dom_pred != nullptr);
-
   if (gpu_lower->predicateElimination().canOmitPredicate(expr)) {
-    return SimplifyingIrBuilder::andExpr(thread_pred, parallel_dom_pred)
-        ->as<Bool>();
+    return thread_pred;
   }
 
   auto pred_info_vec =
@@ -399,7 +390,11 @@ Bool* PredicateCompute::getInlinePredicate(
     return nullptr;
   }
 
-  preds.push_back(parallel_dom_pred);
+  auto parallel_dom_pred =
+      ParallelizedDomainPredicate::getPredicate(expr, loops);
+  if (parallel_dom_pred) {
+    preds.push_back(parallel_dom_pred);
+  }
 
   if (thread_pred != nullptr) {
     preds.push_back(thread_pred);
@@ -441,7 +436,6 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
 
   const auto gpu_lower = GpuLower::current();
   if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
-    addParallelizedDomainPredicates(tv_expr);
     return;
   }
 
@@ -472,8 +466,8 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
     bool first_key_set = false;
 
     for (auto root_id : root_ids) {
-      auto concrete_root_id = gpu_lower->caMap()->getConcreteMappedID(
-          root_id, IdMappingMode::EXACT);
+      auto concrete_root_id =
+          gpu_lower->caIndexMap().getConcreteMappedID(root_id);
 
       if (root_id->isBroadcast()) {
         continue;
@@ -554,10 +548,7 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
     }
   }
 
-  addParallelizedDomainPredicates(tv_expr);
-}
-
-void UnswitchPredicate::addParallelizedDomainPredicates(Expr* tv_expr) {
+  // Adds new predicates for parallelized domains
   auto pred_map = ParallelizedDomainPredicate::getPredicateMap(
       tv_expr, for_loops_, unrolled_loop_);
   for (auto pt : kParallelTypeThreads) {

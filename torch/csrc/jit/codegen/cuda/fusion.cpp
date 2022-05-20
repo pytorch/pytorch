@@ -66,12 +66,6 @@ IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
 
   to->inputs_ = ir_cloner.clone(from->inputs_);
   to->outputs_ = ir_cloner.clone(from->outputs_);
-  for (auto inp : to->inputs_) {
-    inp->setIsFusionInput(true);
-  }
-  for (auto out : to->outputs_) {
-    out->setIsFusionOutput(true);
-  }
 
   // TODO: put this into ir_cloner instead
   for (const auto& entry : from->io_alias_) {
@@ -261,11 +255,7 @@ void Fusion::replaceOutput(Val* output, Val* replacement) {
   TORCH_CHECK(find_output != outputs_.end(), "Unable to find output in Fusion");
 
   if (find_output != outputs_.end()) {
-    std::replace_if(
-        outputs_.begin(),
-        outputs_.end(),
-        [&output](Val* v) { return v == output; },
-        replacement);
+    *find_output = replacement;
 
     if (replacement->getValType().value() == ValType::TensorView) {
       replacement->setIsFusionOutput(true);

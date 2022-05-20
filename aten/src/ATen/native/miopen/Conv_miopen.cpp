@@ -135,6 +135,52 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
   return t.narrow(dim, group_idx * group_size, group_size);
 }
 
+// ---------------------------------------------------------------------
+//
+// Checking
+//
+// ---------------------------------------------------------------------
+
+// Used on pad, stride and dilation
+static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, const char* arg_name)
+{
+  TORCH_CHECK(args.size() <= expected_size,
+           "Too many ", arg_name, " values (", args.size(), ") supplied, expecting ",
+           expected_size, " (while checking arguments for ", c, ")");
+  TORCH_CHECK(args.size() >= expected_size,
+           "Not enough ", arg_name, " values (", args.size(), ") supplied, expecting ",
+           expected_size, " (while checking arguments for ", c, ")");
+
+  auto num_negative_values = std::count_if(args.begin(), args.end(), [](int x){return x < 0;});
+  if (num_negative_values > 0){
+    std::stringstream ss;
+    ss << arg_name << " should be greater than zero but got (";
+    std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
+    ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
+    AT_ERROR(ss.str());
+  }
+}
+
+// see NOTE [ Convolution checks] in src/Aten/native/cudnn/Conv.cpp
+static void convolution_shape_check(
+    CheckedFrom c,
+    const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
+{
+  check_args(c, padding, input->dim() - 2, "padding");
+  check_args(c, stride, padding.size(), "stride");
+  check_args(c, dilation, padding.size(), "dilation");
+
+  // Input
+  checkDimRange(c, input, 3, 6 /* exclusive */);
+  checkSize(c, input, input_channels_dim, weight->size(1) * groups);
+
+  // Weight
+  checkSameDim(c, input, weight);
+
+  checkSameDim(c, input, output);
+}
+
 // This POD struct is used to let us easily compute hashes of the
 // parameters
 struct ConvolutionParams

@@ -6,6 +6,9 @@ from setuptools import distutils  # type: ignore[import]
 from typing import Optional, Union
 
 
+UNKNOWN = "Unknown"
+
+
 def get_sha(pytorch_root: Union[str, Path]) -> str:
     try:
         return (
@@ -14,7 +17,20 @@ def get_sha(pytorch_root: Union[str, Path]) -> str:
             .strip()
         )
     except Exception:
-        return "Unknown"
+        return UNKNOWN
+
+
+def get_tag(pytorch_root: Union[str, Path]) -> str:
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "describe", "--tags", "--exact"], cwd=pytorch_root
+            )
+            .decode("ascii")
+            .strip()
+        )
+    except Exception:
+        return UNKNOWN
 
 
 def get_torch_version(sha: Optional[str] = None) -> str:
@@ -27,7 +43,7 @@ def get_torch_version(sha: Optional[str] = None) -> str:
         version = os.getenv("PYTORCH_BUILD_VERSION", "")
         if build_number > 1:
             version += ".post" + str(build_number)
-    elif sha != "Unknown":
+    elif sha != UNKNOWN:
         if sha is None:
             sha = get_sha(pytorch_root)
         version += "+git" + sha[:7]
@@ -54,8 +70,13 @@ if __name__ == "__main__":
 
     pytorch_root = Path(__file__).parent.parent
     version_path = pytorch_root / "torch" / "version.py"
+    # Attempt to get tag first, fall back to sha if a tag was not found
+    tagged_version = get_tag(pytorch_root)
     sha = get_sha(pytorch_root)
-    version = get_torch_version(sha)
+    if tagged_version == UNKNOWN:
+        version = get_torch_version(sha)
+    else:
+        version = tagged_version
 
     with open(version_path, "w") as f:
         f.write("__version__ = '{}'\n".format(version))

@@ -8,7 +8,7 @@
 
 namespace at { namespace vec {
 
-// slow path
+// TODO: Make this more efficient
 template <typename scalar_t, typename Op>
 inline scalar_t vec_reduce_all(
     const Op& vec_fun,
@@ -28,62 +28,6 @@ inline scalar_t vec_reduce_all(
 }
 
 template <typename scalar_t, typename Op>
-struct VecReduceAllSIMD {
-  static inline scalar_t apply(const Op& vec_fun, Vectorized<scalar_t> acc_vec) {
-    return vec_reduce_all(vec_fun, acc_vec, Vectorized<scalar_t>::size());
-  }
-};
-
-#if defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
-#if defined(CPU_CAPABILITY_AVX2)
-template <typename Op>
-struct VecReduceAllSIMD<float, Op> {
-  static inline float apply(const Op& vec_fun, Vectorized<float> acc_vec) {
-    using Vec = Vectorized<float>;
-    Vec v = acc_vec;
-    // 128-bit shuffle
-    Vec v1 = _mm256_permute2f128_ps(v, v, 0x1);
-    v = vec_fun(v, v1);
-    // 64-bit shuffle
-    v1 = _mm256_shuffle_ps(v, v, 0x4E);
-    v = vec_fun(v, v1);
-    // 32-bit shuffle
-    v1 = _mm256_shuffle_ps(v, v, 0xB1);
-    v = vec_fun(v, v1);
-    return _mm256_cvtss_f32(v);
-  }
-};
-#endif // defined(CPU_CAPABILITY_AVX2)
-#if defined(CPU_CAPABILITY_AVX512)
-template <typename Op>
-struct VecReduceAllSIMD<float, Op> {
-  static inline float apply(const Op& vec_fun, Vectorized<float> acc_vec) {
-    using Vec = Vectorized<float>;
-    Vec v = acc_vec;
-    // 256-bit shuffle
-    Vec v1 = _mm512_shuffle_f32x4(v, v, 0x4E);
-    v = vec_fun(v, v1);
-    // 128-bit shuffle
-    v1 = _mm512_shuffle_f32x4(v, v, 0xB1);
-    v = vec_fun(v, v1);
-    // 64-bit shuffle
-    v1 = _mm512_shuffle_ps(v, v, 0x4E);
-    v = vec_fun(v, v1);
-    // 32-bit shuffle
-    v1 = _mm512_shuffle_ps(v, v, 0xB1);
-    v = vec_fun(v, v1);
-    return _mm512_cvtss_f32(v);
-  }
-};
-#endif // defined(CPU_CAPABILITY_AVX512)
-#endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
-
-template <typename scalar_t, typename Op>
-inline scalar_t vec_reduce_all(const Op& vec_fun, Vectorized<scalar_t> acc_vec) {
-  return VecReduceAllSIMD<scalar_t, Op>::apply(vec_fun, acc_vec);
-}
-
-template <typename scalar_t, typename Op>
 inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
   using Vec = vec::Vectorized<scalar_t>;
   if (size < Vec::size())
@@ -98,7 +42,7 @@ inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size
     Vec data_vec = Vec::loadu(data + d, size - d);
     acc_vec = Vec::set(acc_vec, vec_fun(acc_vec, data_vec), size - d);
   }
-  return vec_reduce_all(vec_fun, acc_vec);
+  return vec_reduce_all(vec_fun, acc_vec, Vec::size());
 }
 
 // similar to reduce_all, but reduces into two outputs
@@ -126,8 +70,8 @@ inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2&
     acc_vec2 = Vec::set(acc_vec2, vec_fun2(acc_vec2, data_vec), size - d);
   }
   return std::pair<scalar_t, scalar_t>(
-    vec_reduce_all(vec_fun1, acc_vec1),
-    vec_reduce_all(vec_fun2, acc_vec2));
+    vec_reduce_all(vec_fun1, acc_vec1, Vec::size()),
+    vec_reduce_all(vec_fun2, acc_vec2, Vec::size()));
 }
 
 template <typename scalar_t, typename MapOp, typename ReduceOp>
@@ -151,7 +95,7 @@ inline scalar_t map_reduce_all(
     data_vec = map_fun(data_vec);
     acc_vec = Vec::set(acc_vec, red_fun(acc_vec, data_vec), size - d);
   }
-  return vec_reduce_all(red_fun, acc_vec);
+  return vec_reduce_all(red_fun, acc_vec, Vec::size());
 }
 
 template <typename scalar_t, typename MapOp, typename ReduceOp>
@@ -182,7 +126,7 @@ inline scalar_t map2_reduce_all(
     data_vec = map_fun(data_vec, data2_vec);
     acc_vec = Vec::set(acc_vec, red_fun(acc_vec, data_vec), size - d);
   }
-  return vec_reduce_all(red_fun, acc_vec);
+  return vec_reduce_all(red_fun, acc_vec, Vec::size());
 }
 
 template <typename scalar_t, typename MapOp, typename ReduceOp>
@@ -218,7 +162,7 @@ inline scalar_t map3_reduce_all(
     data_vec = map_fun(data_vec, data2_vec, data3_vec);
     acc_vec = Vec::set(acc_vec, red_fun(acc_vec, data_vec), size - d);
   }
-  return vec_reduce_all(red_fun, acc_vec);
+  return vec_reduce_all(red_fun, acc_vec, Vec::size());
 }
 
 template <typename scalar_t, typename Op>

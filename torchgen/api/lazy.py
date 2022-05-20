@@ -170,11 +170,10 @@ class LazyArgument:
     def __init__(self, arg: Argument):
         self.name = arg.name
         self.orig_type = arg.type
-        self.is_optional = isinstance(arg.type, OptionalType)
         self.is_generator = isGeneratorType(arg.type)
         if self.is_generator:
-            assert (
-                self.is_optional
+            assert isinstance(
+                arg.type, OptionalType
             ), "We expect all generators are optional since currently they are"
             # there is no handling for generators in TorchScript IR (or XLA)
             # so we fall back to eager if the (optional)generator has value, and otherwise

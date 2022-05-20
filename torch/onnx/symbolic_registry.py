@@ -1,13 +1,12 @@
 import importlib
 import inspect
-import itertools
 import warnings
 from typing import Any, Callable, Dict, Tuple, Union
 
-from torch import _C
-from torch.onnx import _constants
+import torch._C
+from torch.onnx.symbolic_helper import _onnx_main_opset, _onnx_stable_opsets
 
-_SymbolicFunction = Callable[..., Union[_C.Value, Tuple[_C.Value]]]
+SymbolicFunction = Callable[..., Union[torch._C.Value, Tuple[torch._C.Value]]]
 
 """
 The symbolic registry "_registry" is a dictionary that maps operators
@@ -19,21 +18,16 @@ The map's entries are as follows : _registry[(domain, version)][op_name] = op_sy
 """
 _registry: Dict[
     Tuple[str, int],
-    Dict[str, _SymbolicFunction],
+    Dict[str, SymbolicFunction],
 ] = {}
 
 _symbolic_versions: Dict[Union[int, str], Any] = {}
 
-
-def _import_symbolic_opsets():
-    for opset_version in itertools.chain(
-        _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
-    ):
-        module = importlib.import_module(
-            "torch.onnx.symbolic_opset{}".format(opset_version)
-        )
-        global _symbolic_versions
-        _symbolic_versions[opset_version] = module
+for opset_version in _onnx_stable_opsets + [_onnx_main_opset]:
+    module = importlib.import_module(
+        "torch.onnx.symbolic_opset{}".format(opset_version)
+    )
+    _symbolic_versions[opset_version] = module
 
 
 def register_version(domain: str, version: int):
@@ -79,8 +73,6 @@ def register_ops_in_version(domain: str, version: int):
 
 
 def get_ops_in_version(version: int):
-    if not _symbolic_versions:
-        _import_symbolic_opsets()
     members = inspect.getmembers(_symbolic_versions[version])
     domain_opname_ops = []
     for obj in members:
@@ -137,7 +129,7 @@ def unregister_op(opname: str, domain: str, version: int):
 
 def get_op_supported_version(opname: str, domain: str, version: int):
     iter_version = version
-    while iter_version <= _constants.onnx_main_opset:
+    while iter_version <= _onnx_main_opset:
         ops = [(op[0], op[1]) for op in get_ops_in_version(iter_version)]
         if (domain, opname) in ops:
             return iter_version
@@ -145,7 +137,7 @@ def get_op_supported_version(opname: str, domain: str, version: int):
     return None
 
 
-def get_registered_op(opname: str, domain: str, version: int) -> _SymbolicFunction:
+def get_registered_op(opname: str, domain: str, version: int) -> SymbolicFunction:
     if domain is None or version is None:
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
@@ -157,7 +149,7 @@ def get_registered_op(opname: str, domain: str, version: int) -> _SymbolicFuncti
 class UnsupportedOperatorError(RuntimeError):
     def __init__(self, domain: str, opname: str, version: int):
         supported_version = get_op_supported_version(opname, domain, version)
-        if domain in {"", "aten", "prim", "quantized"}:
+        if domain in ["", "aten", "prim", "quantized"]:
             msg = f"Exporting the operator {domain}::{opname} to ONNX opset version {version} is not supported. "
             if supported_version is not None:
                 msg += (

@@ -472,10 +472,7 @@ unsigned int ComputeAt::backwardComputeAt_impl(
   }
 
   auto replay_producer_pair = TransformReplay::replayPasC(
-      producer,
-      consumer,
-      (int)consumer_compute_at_pos,
-      PairwiseRootDomainMap(producer, consumer));
+      producer, consumer, (int)consumer_compute_at_pos, root_map_);
 
   if (replay_producer_pair.second == 0) {
     return 0;
@@ -547,10 +544,7 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   }
 
   auto replay_consumer_pair = TransformReplay::replayCasP(
-      consumer,
-      producer,
-      (int)producer_compute_at_pos,
-      PairwiseRootDomainMap(producer, consumer));
+      consumer, producer, (int)producer_compute_at_pos, root_map_);
 
   if (producer_compute_at_pos > producer->getComputeAtPosition()) {
     if (!producer->isFusionInput()) {
@@ -658,6 +652,7 @@ void ComputeAt::traverseBackward() {
       running_consumer = running_producer;
       running_producer = tv_chain.back();
       tv_chain.pop_back();
+
       running_consumer_pos = backwardComputeAt_impl(
           running_producer, running_consumer, running_consumer_pos);
     }
@@ -870,13 +865,11 @@ void ComputeAt::buildUnmappableDims() {
     for (auto consumer : consumers) {
       // Grab dimensions in producer and consumer that are mappable to eachother
       // based on the computeAtRootDomainMap. This will tell us which dimensions
-      // can be inlined based on avoiding trying to inline non-trivial
-      // reduction structures.
+      // can be inlined based on avoiding trying to inline reduction structures.
       auto mappable_roots =
           root_map_.getMappableDims(tv->domain(), consumer->domain());
       for (auto tv_root_id : tv->getMaybeRFactorDomain()) {
-        if (mappable_roots.find(tv_root_id) == mappable_roots.end() &&
-            !tv_root_id->isTrivialReduction()) {
+        if (mappable_roots.find(tv_root_id) == mappable_roots.end()) {
           unmappable_dims_.emplace(tv_root_id);
         }
       }

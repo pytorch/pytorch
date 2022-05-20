@@ -12,14 +12,15 @@
 namespace torch {
 namespace utils {
 
-namespace {
-// Intentionally leaked
-std::array<PyObject*, static_cast<int>(at::MemoryFormat::NumOptions)>  memory_format_registry = {};
-} // anonymous namespace
-
-py::object getTHPMemoryFormat(at::MemoryFormat memory_format) {
-  return py::reinterpret_borrow<py::object>(memory_format_registry[static_cast<size_t>(memory_format)]);
-}
+#define _ADD_MEMORY_FORMAT(format, name)                                       \
+  {                                                                            \
+    std::string module_name = "torch.";                                        \
+    PyObject* memory_format = THPMemoryFormat_New(format, module_name + name); \
+    Py_INCREF(memory_format);                                                  \
+    if (PyModule_AddObject(torch_module, name, memory_format) != 0) {          \
+      throw python_error();                                                    \
+    }                                                                          \
+  }
 
 void initializeMemoryFormats() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
@@ -27,22 +28,10 @@ void initializeMemoryFormats() {
     throw python_error();
   }
 
-  auto add_memory_format = [&](at::MemoryFormat format, const char* name) {
-    std::string module_name = "torch.";
-    PyObject* memory_format = THPMemoryFormat_New(format, module_name + name);
-    Py_INCREF(memory_format);
-    if (PyModule_AddObject(torch_module, name, memory_format) != 0) {
-      Py_DECREF(memory_format);
-      throw python_error();
-    }
-    Py_INCREF(memory_format);
-    memory_format_registry[static_cast<size_t>(format)] = memory_format;
-  };
-
-  add_memory_format(at::MemoryFormat::Preserve, "preserve_format");
-  add_memory_format(at::MemoryFormat::Contiguous, "contiguous_format");
-  add_memory_format(at::MemoryFormat::ChannelsLast, "channels_last");
-  add_memory_format(at::MemoryFormat::ChannelsLast3d, "channels_last_3d");
+  _ADD_MEMORY_FORMAT(at::MemoryFormat::Preserve, "preserve_format");
+  _ADD_MEMORY_FORMAT(at::MemoryFormat::Contiguous, "contiguous_format");
+  _ADD_MEMORY_FORMAT(at::MemoryFormat::ChannelsLast, "channels_last");
+  _ADD_MEMORY_FORMAT(at::MemoryFormat::ChannelsLast3d, "channels_last_3d");
 
 }
 

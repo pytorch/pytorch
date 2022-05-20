@@ -131,12 +131,8 @@ std::string Result::name() const {
   return c10::visit([](auto& e){ return e.name_; }, event_);
 }
 
-torch::profiler::impl::kineto::KinetoActivityType Result::kinetoType() const {
-  auto record_function_scope = static_cast<at::RecordScope>(
-      c10::visit([](auto& e) { return e.record_function_scope_; }, event_));
-  return record_function_scope == at::RecordScope::USER_SCOPE
-      ? torch::profiler::impl::kineto::KinetoActivityType::USER_ANNOTATION
-      : torch::profiler::impl::kineto::KinetoActivityType::CPU_OP;
+uint8_t Result::record_function_scope() const {
+  return c10::visit([](auto& e){ return e.record_function_scope_; }, event_);
 }
 
 uint64_t Result::correlation_id() const {

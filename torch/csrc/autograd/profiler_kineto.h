@@ -344,14 +344,10 @@ TORCH_API void enableProfiler(
  * callback, via enableProfilerWithEventPostProcess, that takes these debug handles
  * and generates stack trace and module hierarchy information, once profiling is done.
  */
-using post_process_t = std::function<void(
-    /*debug_handle */ int64_t,
-    /*jit_stack    */ std::vector<std::string>&,
-    /*jit_modules  */ std::vector<std::string>&)>;
 TORCH_API void enableProfilerWithEventPostProcess(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities,
-    post_process_t&& cb,
+    std::function<void(std::vector<KinetoEvent>&)>&& cb,
     const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();

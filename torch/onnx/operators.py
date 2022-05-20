@@ -9,6 +9,7 @@ file is kept purely for backward-compatibility.
 
 import torch
 import torch.onnx
+import torch.onnx.utils
 
 
 def shape_as_tensor(x):

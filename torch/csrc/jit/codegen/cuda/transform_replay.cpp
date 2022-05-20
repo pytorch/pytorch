@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -57,10 +56,7 @@ class ReplaySelf : public ReplayTransformations {
         s->innerSplit() ? remainder->as<Int>() : s->factor(),
         s->outer()->getParallelType(),
         s->outer()->getIterType(),
-        s->outer()->isRFactorProduct(),
-        s->outer()->hasPaddingToMultipleOfWarp(),
-        s->outer()->getMaybeSizeAfterPadding(),
-        s->outer()->isMmaSwizzled());
+        s->outer()->isRFactorProduct());
 
     // inner IterDomain
     IterDomain* idi = IrBuilder::create<IterDomain>(
@@ -69,10 +65,7 @@ class ReplaySelf : public ReplayTransformations {
         s->innerSplit() ? s->factor() : remainder->as<Int>(),
         s->inner()->getParallelType(),
         s->inner()->getIterType(),
-        s->inner()->isRFactorProduct(),
-        s->outer()->hasPaddingToMultipleOfWarp(),
-        s->outer()->getMaybeSizeAfterPadding(),
-        s->outer()->isMmaSwizzled());
+        s->inner()->isRFactorProduct());
 
     // Generate the split node
     IrBuilder::create<Split>(
@@ -129,10 +122,7 @@ class ReplaySelf : public ReplayTransformations {
         merged_id_size->as<Int>(),
         m->out()->getParallelType(),
         m->outer()->getIterType(),
-        m->out()->isRFactorProduct(),
-        m->out()->hasPaddingToMultipleOfWarp(),
-        m->out()->getMaybeSizeAfterPadding(),
-        m->out()->isMmaSwizzled());
+        m->out()->isRFactorProduct());
 
     IrBuilder::create<Merge>(
         m->container(), merged_id, id_outer_mapped, id_inner_mapped);
@@ -266,13 +256,10 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
 
   // Make a new map based on all the leaves resulting from best effort replay
   id_map forwarded_replay_map;
-  auto forward_dangling_leaves = forward_replay.getUnorderedLeafIDs();
   for (auto entry : forward_replay.getReplay()) {
-    if (forward_dangling_leaves.find(entry.second) !=
-        forward_dangling_leaves.end()) {
+    if (forward_replay.getUnorderedLeafIDs().find(entry.second) !=
+        forward_replay.getUnorderedLeafIDs().end())
       forwarded_replay_map[entry.first] = entry.second;
-      forward_dangling_leaves.erase(entry.second);
-    }
   }
 
   // Replay producer dimensions.
@@ -288,7 +275,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
     auto it = replay_PasC.getReplay().find(c_id);
     if (it == replay_PasC.getReplay().end()) {
       TORCH_INTERNAL_ASSERT(
-          c_id->isBroadcast() || c_id->isGather() || c_id->isVectorComponent(),
+          c_id->isBroadcast() || c_id->isGather(),
           "Could not find axis, ",
           c_id,
           ", requested in replay.");
@@ -308,10 +295,6 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   // (if possible):
   id_map producer_self_replay_map;
   for (auto entry : leaf_ids) {
-    producer_self_replay_map[entry.first] = entry.first;
-  }
-
-  for (auto entry : forward_dangling_leaves) {
     producer_self_replay_map[entry.first] = entry.first;
   }
 
@@ -387,7 +370,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
     auto it = replay_PasC.getReplay().find(c_id);
     if (it == replay_PasC.getReplay().end()) {
       TORCH_INTERNAL_ASSERT(
-          c_id->isBroadcast() || c_id->isGather() || c_id->isVectorComponent(),
+          c_id->isBroadcast() || c_id->isGather(),
           "Could not find axis, ",
           c_id,
           ", requested in replay.");
@@ -718,38 +701,17 @@ bool TransformPropagator::replayPasC(
   }
 
   auto pairwiseMap = PairwiseRootDomainMap(producer_tv, consumer_tv);
-  auto replayed_producer = TransformReplay::replayPasC(
+  auto producerAsC = TransformReplay::replayPasC(
       producer_tv, consumer_tv, consumer_pos_it->second, pairwiseMap);
 
-  auto producer_root = producer_tv->getMaybeRFactorDomain();
-  auto replayed_domain = replayed_producer.first->domain();
-
-  // Find the number of root IDs involved in the transformation
-  auto dep_vals = DependencyCheck::getAllValsBetween(
-      {producer_root.begin(), producer_root.end()},
-      {replayed_domain.begin(),
-       replayed_domain.begin() + replayed_producer.second});
-
-  std::unordered_set<Val*> dep_vals_set{dep_vals.begin(), dep_vals.end()};
-
-  auto n_transformed_root_dims = std::count_if(
-      producer_root.begin(),
-      producer_root.end(),
-      [&dep_vals_set](IterDomain* root_id) {
-        return dep_vals_set.find(root_id) != dep_vals_set.end();
-      });
-
   if (replayed_pos.find(producer_tv) != replayed_pos.end()) {
-    if (n_transformed_root_dims < n_replayed_root_dims.at(producer_tv) ||
-        (n_transformed_root_dims == n_replayed_root_dims.at(producer_tv) &&
-         replayed_producer.second <= replayed_pos.at(producer_tv))) {
+    if (producerAsC.second <= replayed_pos.at(producer_tv)) {
       return false; // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     }
   }
 
-  producer_tv->setDomain(replayed_producer.first);
-  replayed_pos[producer_tv] = replayed_producer.second;
-  n_replayed_root_dims[producer_tv] = n_transformed_root_dims;
+  producer_tv->setDomain(producerAsC.first);
+  replayed_pos[producer_tv] = producerAsC.second;
 
   return true;
 }
@@ -767,44 +729,27 @@ bool TransformPropagator::replayCasP(
   }
 
   auto pairwiseMap = PairwiseRootDomainMap(producer_tv, consumer_tv);
-  auto replayed_consumer = TransformReplay::replayCasP(
+  auto consumerAsP = TransformReplay::replayCasP(
       consumer_tv, producer_tv, producer_pos_it->second, pairwiseMap);
 
-  auto consumer_root = consumer_tv->getRootDomain();
-  auto replayed_domain = replayed_consumer.first->domain();
-
-  // Find the number of root IDs involved in the transformation
-  auto dep_vals = DependencyCheck::getAllValsBetween(
-      {consumer_root.begin(), consumer_root.end()},
-      {replayed_domain.begin(),
-       replayed_domain.begin() + replayed_consumer.second});
-
-  std::unordered_set<Val*> dep_vals_set{dep_vals.begin(), dep_vals.end()};
-
-  auto n_transformed_root_dims = std::count_if(
-      consumer_root.begin(),
-      consumer_root.end(),
-      [&dep_vals_set](IterDomain* root_id) {
-        return dep_vals_set.find(root_id) != dep_vals_set.end();
-      });
-
   if (replayed_pos.find(consumer_tv) != replayed_pos.end()) {
-    if (n_transformed_root_dims < n_replayed_root_dims.at(consumer_tv) ||
-        (n_transformed_root_dims == n_replayed_root_dims.at(consumer_tv) &&
-         replayed_consumer.second <= replayed_pos.at(consumer_tv))) {
+    if (consumerAsP.second <= replayed_pos.at(consumer_tv)) {
       return false; // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     }
   }
 
-  consumer_tv->setDomain(replayed_consumer.first);
-  replayed_pos[consumer_tv] = replayed_consumer.second;
-  n_replayed_root_dims[consumer_tv] = n_transformed_root_dims;
+  consumer_tv->setDomain(consumerAsP.first);
+  replayed_pos[consumer_tv] = consumerAsP.second;
 
   return true;
 }
 
 TransformPropagator::TransformPropagator(TensorView* from) : starting_tv(from) {
-  VectorOfUniqueEntries<TensorView*> propagation{starting_tv};
+  // Tensors we should try to propagate in the consumer direction
+  std::deque<TensorView*> consumer_propagation{starting_tv};
+
+  // Tensors we should try to propagate in the producer direction
+  std::deque<TensorView*> producer_propagation{starting_tv};
 
   // Seed position with local tv
   replayed_pos[from] = from->nDims();
@@ -812,24 +757,38 @@ TransformPropagator::TransformPropagator(TensorView* from) : starting_tv(from) {
   // While tensor views are being replayed, if they're modified, make sure we
   // propagate back to all producers as well as consumers. This is definitely
   // not the most efficient implementation as what we do is any time a tv is
-  // changed we propagate both forward and backward.
-  while (!propagation.empty()) {
-    auto tv = propagation.popBack();
+  // changed we propagate both forward and backward. If a forward pass touches
+  // every node, the backward pass will try to replay every node, potentially
+  // multiple times.
+  while (!consumer_propagation.empty() || !producer_propagation.empty()) {
+    while (!consumer_propagation.empty()) {
+      // Tensor view we will replay onto consumers
+      auto tv = consumer_propagation.front();
+      consumer_propagation.pop_front();
 
-    // Replay tv forward to its consumers.
-    for (auto consumer_tv : consumersOf(tv)) {
-      auto replayed = replayCasP(consumer_tv, tv);
-      // If consumer has changed, mark we should propagate
-      if (replayed) {
-        propagation.pushBack(consumer_tv);
+      // Replay tv forward to its consumers.
+      for (auto consumer_tv : consumersOf(tv)) {
+        auto replayed = replayCasP(consumer_tv, tv);
+        // If consumer has changed, mark we should propagate its consumers
+
+        if (replayed) {
+          consumer_propagation.emplace_back(consumer_tv);
+          producer_propagation.emplace_back(consumer_tv);
+        }
       }
     }
 
-    for (auto producer_tv : producersFor(tv)) {
-      // If producer has changed, mark we should propagate
-      auto replayed = replayPasC(producer_tv, tv);
-      if (replayed) {
-        propagation.pushBack(producer_tv);
+    while (!producer_propagation.empty()) {
+      // Tensor view we will replay onto producers
+      auto tv = producer_propagation.front();
+      producer_propagation.pop_front();
+      // Replay tv backward to its producers
+      for (auto producer_tv : producersFor(tv)) {
+        auto replayed = replayPasC(producer_tv, tv);
+        if (replayed) {
+          producer_propagation.emplace_back(producer_tv);
+          consumer_propagation.emplace_back(producer_tv);
+        }
       }
     }
   }

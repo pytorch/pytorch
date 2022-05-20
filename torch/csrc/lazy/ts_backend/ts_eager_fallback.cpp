@@ -153,12 +153,6 @@ bool force_eager_fallback(c10::Symbol op) {
       return true;
     }
   }
-  if(op == at::aten::nonzero){
-    // When symbolic shape mode is not enabled, the nonzero shape function
-    // returns an incorrect result.
-    return !symbolicShapeEnabled();
-  }
-
   return false;
 }
 

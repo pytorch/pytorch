@@ -74,12 +74,8 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
     return Stream(Stream::DEFAULT, Device(DeviceType::MPS, 0));
   }
   DeviceIndex deviceCount() const noexcept override {
-    if (at::hasMPS()) {
-      //TODO: extend it for multi-device case
-      return 1;
-    } else {
-      return 0;
-    }
+    //TODO: extend it for multi-device case
+    return 1;
   }
 
   // Event-related functions

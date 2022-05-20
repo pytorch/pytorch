@@ -3,6 +3,7 @@
 #include <ATen/native/cuda/TensorModeKernel.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/NonEmptyUtils.h>
+#include <ATen/native/TensorCompare.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <c10/core/DeviceArray.h>

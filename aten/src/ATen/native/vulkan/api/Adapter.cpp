@@ -1,5 +1,4 @@
 #include <ATen/native/vulkan/api/Adapter.h>
-#include <c10/util/irange.h>
 #include <iomanip>
 #include <sstream>
 
@@ -356,14 +355,14 @@ std::string Adapter::stringize() const {
   const VkPhysicalDeviceMemoryProperties& mem_props = memory_properties_;
   ss << "  Memory Info {" << std::endl;
   ss << "    Memory Types [" << std::endl;
-  for (const auto i : c10::irange(mem_props.memoryTypeCount)) {
+  for (int i = 0; i < mem_props.memoryTypeCount; ++i) {
   ss << "      " << " [Heap " << mem_props.memoryTypes[i].heapIndex << "] "
                << get_memory_properties_str(mem_props.memoryTypes[i].propertyFlags)
                << std::endl;
   }
   ss << "    ]" << std::endl;
   ss << "    Memory Heaps [" << std::endl;
-  for (const auto i : c10::irange(mem_props.memoryHeapCount)) {
+  for (int i = 0; i < mem_props.memoryHeapCount; ++i) {
   ss << "      " << mem_props.memoryHeaps[i].size << std::endl;
   }
   ss << "    ]" << std::endl;

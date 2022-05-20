@@ -2,6 +2,7 @@
 
 import copy
 import io
+import unittest
 
 import onnx
 import torchvision
@@ -32,6 +33,8 @@ from torch.onnx.symbolic_helper import (
     _unpack_list,
     parse_args,
 )
+
+skip = unittest.skip
 
 
 class _BaseTestCase(TestCase):

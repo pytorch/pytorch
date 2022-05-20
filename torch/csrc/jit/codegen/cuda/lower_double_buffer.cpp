@@ -456,8 +456,8 @@ kir::ForLoop* DoubleBufferInfo::getDoubleBufferLoop(
     const std::vector<kir::ForLoop*>& loops,
     bool ignore_prologue) {
   auto loop_it = std::find_if(loops.begin(), loops.end(), [&](const auto loop) {
-    return GpuLower::current()->caMap()->areMapped(
-               loop->iter_domain(), axis, IdMappingMode::EXACT) &&
+    return GpuLower::current()->caIndexMap().areMapped(
+               loop->iter_domain(), axis) &&
         (!ignore_prologue || !loop->stop()->isOneInt());
   });
 

@@ -22,7 +22,7 @@ inline c10::optional<Device> device_of(const Tensor& t) {
   }
 }
 
-inline c10::optional<Device> device_of(const c10::optional<Tensor>& t) {
+inline optional<Device> device_of(const optional<Tensor>& t) {
   return t.has_value() ? device_of(t.value()) : nullopt;
 }
 

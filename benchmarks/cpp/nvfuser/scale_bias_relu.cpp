@@ -8,7 +8,7 @@
 
 #include <cuda_runtime.h>
 
-#include <benchmarks/cpp/nvfuser/utils.h>
+#include "utils.h"
 
 using namespace torch::jit::fuser::cuda;
 
@@ -136,8 +136,9 @@ static void NvFuserScheduler_SBR(
   auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
   auto executor_instance = compile_log.fusion_executor;
   TORCH_INTERNAL_ASSERT(compile_log.pointwise_params.has_value());
+  TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
   auto params = toString(compile_log.pointwise_params.value());
-  auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
+  auto lparams = toString(compile_log.launch_constraints.value());
 
   benchmark_state.SetLabel(params + lparams);
   benchmark_state.SetLabel(lparams);
@@ -239,8 +240,9 @@ static void NvFuserScheduler_SBR_Norm(
   auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
   auto executor_instance = compile_log.fusion_executor;
   TORCH_INTERNAL_ASSERT(compile_log.pointwise_params.has_value());
+  TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
   auto params = toString(compile_log.pointwise_params.value());
-  auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
+  auto lparams = toString(compile_log.launch_constraints.value());
 
   benchmark_state.SetLabel(params + lparams);
 

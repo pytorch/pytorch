@@ -8,7 +8,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
 #include <c10/util/TypeSafeSignMath.h>
-#include <ATen/OpMathType.h>
 
 #include <type_traits>
 
@@ -103,7 +102,7 @@ void sgn_kernel_cuda(TensorIteratorBase& iter){
           }
         }
       ); // sgn_string
-    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "sgn_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES(dtype, "sgn_cuda", [&]() {
       jitted_gpu_kernel<
         /*name=*/ sgn_name,
         /*return_dtype=*/ scalar_t,
@@ -111,10 +110,9 @@ void sgn_kernel_cuda(TensorIteratorBase& iter){
         /*arity=*/ 1>(iter, sgn_string);
       });
   #else
-    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "sgn_cuda", [&]() {
-      using opmath_t = at::opmath_type<scalar_t>;
+    AT_DISPATCH_COMPLEX_TYPES(dtype, "sgn_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return sgn_wrapper(opmath_t{a});
+        return sgn_wrapper(a);
       });
   });
   #endif

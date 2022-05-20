@@ -26,7 +26,6 @@ F = TypeVar(
 F2 = TypeVar(
     "F2",
     NativeFunction,
-    NativeFunctionsGroup,
     Optional[NativeFunction],
     bool,
 )

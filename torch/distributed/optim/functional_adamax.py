@@ -23,7 +23,6 @@ class _FunctionalAdamax(object):
         eps: float = 1e-8,
         weight_decay: float = 0.0,
         foreach: bool = False,
-        maximize: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         if not 0.0 <= lr:
@@ -45,7 +44,6 @@ class _FunctionalAdamax(object):
             "weight_decay": weight_decay,
         }
         self.foreach = foreach
-        self.maximize = maximize
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
@@ -101,5 +99,4 @@ class _FunctionalAdamax(object):
                      beta2=self.defaults['beta2'],
                      lr=self.defaults['lr'],
                      weight_decay=self.defaults['weight_decay'],
-                     foreach=self.foreach,
-                     maximize=self.maximize)
+                     foreach=self.foreach)
