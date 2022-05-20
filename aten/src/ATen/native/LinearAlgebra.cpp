@@ -2677,12 +2677,8 @@ Tensor &nuclear_norm_out(const Tensor& self, bool keepdim, Tensor& result) {
   return at::native::nuclear_norm_out(self, IntArrayRef({0, 1}), keepdim, result);
 }
 
-Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options().dtype(toRealValueType(self.scalar_type())));
-  return at::native::nuclear_norm_out(self, dim, keepdim, result);
-}
-
-Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
+namespace {
+Tensor nuclear_norm_impl(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
   auto dim_ = dim.vec();
   maybe_wrap_dims(dim_, self.dim());
@@ -2695,6 +2691,16 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
     auto permutation_reverse = create_reverse_permutation(permutation);
     result_ = result_.permute(permutation_reverse);
   }
+  return result_;
+}
+} // anonymous namespace
+
+Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  return nuclear_norm_impl(self, dim, keepdim).to(toRealValueType(self.scalar_type()));
+}
+
+Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
+  auto result_ = nuclear_norm_impl(self, dim, keepdim);
   at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
