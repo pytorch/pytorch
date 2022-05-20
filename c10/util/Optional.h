@@ -194,12 +194,13 @@ union constexpr_storage_t {
   T value_;
 
 #if __cplusplus >= 202002L
-  // C++20 lifted the requirement to initialize a union member in order to be constexpr.
+  // C++20 lifted the requirement to initialize a union member in order to be
+  // constexpr.
   constexpr constexpr_storage_t(trivial_init_t) noexcept {
     new (&dummy_) unsigned char;
   }
 #else
-  constexpr constexpr_storage_t(trivial_init_t) noexcept : dummy_(){}
+  constexpr constexpr_storage_t(trivial_init_t) noexcept : dummy_() {}
 #endif
 
   template <class... Args>
