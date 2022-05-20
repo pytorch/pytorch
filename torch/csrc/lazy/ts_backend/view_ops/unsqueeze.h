@@ -7,6 +7,10 @@ namespace lazy {
 
 class TORCH_API Unsqueeze : public TsNode {
  public:
+  static OpKind ClassOpKind() {
+    return OpKind(at::aten::unsqueeze);
+  }
+
   Unsqueeze(const torch::lazy::Value& input, int dim);
 
   std::string ToString() const override;

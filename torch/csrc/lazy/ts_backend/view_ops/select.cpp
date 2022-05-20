@@ -13,7 +13,7 @@ Select::Select(
     int64_t end,
     int64_t stride)
     : TsNode(
-          OpKind(at::aten::select),
+          ClassOpKind(),
           {input},
           [&]() {
             return MakeSelectShape(input.shape(), dim, start, end, stride);

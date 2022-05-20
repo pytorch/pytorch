@@ -28,6 +28,10 @@ class Laplace(Distribution):
         return self.loc
 
     @property
+    def mode(self):
+        return self.loc
+
+    @property
     def variance(self):
         return 2 * self.scale.pow(2)
 

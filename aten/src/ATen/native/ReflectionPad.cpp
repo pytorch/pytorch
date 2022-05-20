@@ -966,7 +966,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
 
   if (batch_mode) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-        kHalf, input.scalar_type(), "replication_pad3d_cpu", [&] {
+        kHalf, input.scalar_type(), "reflection_pad3d_cpu", [&] {
           auto input_data = input.data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           auto nbatch = input.size(0);
@@ -987,7 +987,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
         });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-        kHalf, input.scalar_type(), "replication_pad3d_cpu", [&] {
+        kHalf, input.scalar_type(), "reflection_pad3d_cpu", [&] {
           auto input_data = input.data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           reflection_pad3d_out_frame(
@@ -1044,7 +1044,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
 
   if (batch_mode) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-        kHalf, input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
+        kHalf, input.scalar_type(), "reflection_pad3d_backward_cpu", [&] {
           reflection_pad3d_backward_out_loop<scalar_t>(
               grad_input.data_ptr<scalar_t>(),
               grad_output_.data_ptr<scalar_t>(),
@@ -1062,7 +1062,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
         });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-        kHalf, input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
+        kHalf, input.scalar_type(), "reflection_pad3d_backward_cpu", [&] {
           reflection_pad3d_backward_out_frame<scalar_t>(
               grad_input.data_ptr<scalar_t>(),
               grad_output_.data_ptr<scalar_t>(),

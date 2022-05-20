@@ -127,10 +127,6 @@ if(@USE_KINETO@)
   append_torchlib_if_found(kineto)
 endif()
 
-if(@USE_DEPLOY@)
-  append_torchlib_if_found(torch_deploy)
-endif()
-
 if(@USE_CUDA@)
   if(MSVC)
     if(NOT NVTOOLEXT_HOME)

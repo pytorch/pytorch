@@ -81,7 +81,7 @@ fi
 
 if [[ "${SHARD_NUMBER}" == "2" ]]; then
   # Update the loop for new opsets
-  for i in $(seq 10 15); do
+  for i in $(seq 10 16); do
     pytest "${args[@]}" \
       "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
   done
