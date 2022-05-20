@@ -119,6 +119,7 @@ def aten_symbol(schema: LazyIrSchema) -> str:
         return f'c10::Symbol::fromQualString("aten::{schema.aten_name}")'
     return f"at::aten::{schema.aten_name}"
 
+
 # converts  all tensor-like arguments to meta tensors. Returns:
 # (1) a string containing all of the logic that does the conversions.
 # (2) a context, to be used by translate(), with all of the relevant bindings.
@@ -419,7 +420,7 @@ class GenLazyNativeFuncDefinition:
         # We don't currently have a way of knowing at codegen time which ops are implemented that way.
         # This is the case for all view and view_copy operators however, so we're going to
         # use them specifically for al of the view_copy ops (instead of manually writing shape rules for all of them).
-        is_view_copy_op = 'view_copy' in func.tags
+        is_view_copy_op = "view_copy" in func.tags
         is_structured = func.structured or func.structured_delegate is not None
         if is_structured or is_view_copy_op:
             meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
@@ -584,7 +585,7 @@ class GenLazyShapeInferenceDefinition:
         assert metadata is not None
 
         # See Note [Generated LTC Shape Functions]
-        is_view_copy_op = 'view_copy' in f.tags
+        is_view_copy_op = "view_copy" in f.tags
         is_structured = f.structured or f.structured_delegate is not None
         if is_structured or is_view_copy_op:
             return []
