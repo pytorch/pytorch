@@ -692,8 +692,8 @@ meta_function_device_expected_failures['cuda'] = {
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {f16},  # aten::_local_scalar_dense, aten::mvlgamma.out
     torch.nanmedian: {f16},  # aten::nanmedian, aten::nanmedian.dim_values
-    torch.nn.functional.conv1d: {f16, c32},
-    torch.nn.functional.conv2d: {f16, c32},
+    torch.nn.functional.conv1d: {f16},
+    torch.nn.functional.conv2d: {f16},
     torch.nn.functional.conv_transpose1d: {bf16, f16},
     torch.nn.functional.conv_transpose2d: {bf16, f16},
     torch.nn.functional.conv_transpose3d: {bf16, f16},
@@ -935,7 +935,7 @@ meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cuda'] = {
     aten._conj_physical.default: {f16},  # aten::conj_physical.out
-    aten._convolution.default: {f16, c32},
+    aten._convolution.default: {f16},
     aten._embedding_bag_forward_only.default: {bf16},  # aten::_embedding_bag_forward_only
     aten._fft_c2c.default: {c32, f16},  # aten::_fft_c2c
     aten._fft_c2c.out: {c32, f16},  # aten::_fft_c2c.out
@@ -948,7 +948,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
     aten.addbmm.default: {f16},  # aten::addbmm
     aten.addbmm.out: {f16},  # aten::addbmm.out
-    aten.convolution.default: {f16, c32},
+    aten.convolution.default: {f16},
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.diag.default: {f16},  # aten::diag.out
     aten.diag.out: {bf16, f16},  # aten::diag.out
