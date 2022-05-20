@@ -241,7 +241,22 @@ cc_library(
     strip_include_prefix = "aten/src/",
     deps = [
         ":aten_core_headers",
+        ":torch_base_headers",
         "//c10:headers",
+    ],
+)
+
+# Temporary library to enable us to use strip_include_prefix =
+# "aten/src/" in aten_headers above. Only use this in aten_headers.
+cc_library(
+    name = "torch_base_headers",
+    hdrs = [
+        "torch/csrc/Export.h",
+        "torch/csrc/jit/frontend/function_schema_parser.h",
+    ],
+    deps = [
+        "//c10/macros",
+        "//c10/util:base",
     ],
 )
 
