@@ -3,7 +3,7 @@ import torch.distributed as dist
 import torch.distributed.distributed_c10d as distributed_c10d
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
-    _sharded_op_impl
+    sharded_op_impl
 )
 
 def _communicate_result(result, pg):
@@ -59,10 +59,10 @@ def binary_cmp(cmp_fun, types, args, kwargs=None, process_group=None):
 
     return _communicate_result(True, st1._process_group)
 
-@_sharded_op_impl(torch.equal)
+@sharded_op_impl(torch.equal)
 def equal(types, args, kwargs, process_group):
     return binary_cmp(torch.equal, types, args, kwargs, process_group)
 
-@_sharded_op_impl(torch.allclose)
+@sharded_op_impl(torch.allclose)
 def allclose(types, args, kwargs, process_group):
     return binary_cmp(torch.allclose, types, args, kwargs, process_group)
