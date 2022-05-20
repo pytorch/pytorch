@@ -880,21 +880,19 @@ class PackageExporter:
             if isinstance(obj, torch.storage._TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
-                untyped_storage = obj._storage
+                storage = obj._storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
                 dtype = obj.dtype
                 storage_numel = obj.size()
 
-            elif isinstance(obj, torch._UntypedStorage):
-                untyped_storage = obj
+            else:
+                storage = obj
                 storage_type = normalize_storage_type(type(storage))
                 dtype = torch.uint8
                 storage_numel = storage.nbytes()
-            else:
-                raise RuntimeError(f"storage type not recognized: {type(obj)}")
 
-            storage: Storage = cast(Storage, untyped_storage)
+            storage = cast(Storage, storage)
             location = location_tag(storage)
 
             # serialize storage if not already written
@@ -933,7 +931,7 @@ class PackageExporter:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        # If __exit__ was called because an exception was raised, we do not
+        # If __exit__ was called because an exception was raised, we do not attempt to
         # attempt to finalize the package. Instead, control is returned to the
         # caller to continue raising the exception.
         if exc_type is not None:
@@ -1015,7 +1013,7 @@ class PackageExporter:
                     )
 
                 if attrs.get("is_pickle") is True:
-                    # This node came from save_pickle, we don't need to write any source for it.
+                    # This node came from save_source_pickle, we don't need to write any source for it.
                     continue
 
                 is_package = attrs["is_package"]

@@ -30,20 +30,13 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
 
   void pushBack(Expr*);
 
-  // Return the most recently inserted
-  //  expression in the current active
-  //  scope or global scope.
-  Expr* back() const;
-
   // Insert an expression before the current top-level expression.
   void insertAtTopLevel(Expr* expr);
 
-  void handle(const ViewAsScalar*) final;
   void handle(const UnaryOp*) final;
   void handle(const BinaryOp*) final;
   void handle(const TernaryOp*) final;
   void handle(const ReductionOp*) final;
-  void handle(const GroupedReductionOp*) final;
   void handle(const WelfordOp*) final;
   void handle(const MmaOp*) final;
   void handle(const BroadcastOp*) final;
@@ -60,18 +53,7 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
 
   Val* lowerDstIndex(Val* dst) const;
 
-  void handleBlockReduction(const ReductionOp* rop, Val* out, Val* in);
-  void handleGridReduction(const ReductionOp* rop, Val* out, Val* in);
-
-  void handleBlockReduction(
-      const GroupedReductionOp* rop,
-      const std::vector<Val*>& outputs,
-      const std::vector<Val*>& inputs);
-  void handleGridReduction(
-      const GroupedReductionOp* rop,
-      const std::vector<Val*>& outputs,
-      const std::vector<Val*>& inputs);
-
+  void handleGridReduction(ReductionOp* new_rop);
   void handleGridWelford(WelfordOp* new_wop);
 
  private:

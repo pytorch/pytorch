@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/debug_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
@@ -367,27 +366,27 @@ bool isConnectedFusionGraph(Fusion* fusion) {
   }
 
   // A set of connected components on the fusion graph
-  DisjointSets<Val*> component_sets;
+  DisjointSet<Val*> component_sets;
 
   // Iterate through all used exprs
   for (auto expr : fusion->exprs()) {
     TORCH_INTERNAL_ASSERT(
         !expr->inputs().empty(), "unknown expr with zero input");
 
-    // Each expr maps all its inputs and
+    // Each expr joins all its inputs and
     //  outputs to the same component
     auto input0 = expr->inputs()[0];
     for (auto input : expr->inputs()) {
-      component_sets.mapEntries(input0, input);
+      component_sets.join(input0, input);
     }
     for (auto output : expr->outputs()) {
-      component_sets.mapEntries(input0, output);
+      component_sets.join(input0, output);
     }
   }
 
-  // Map aliased outputs
+  // Join aliased outputs
   for (auto alias_it : fusion->ioAlias()) {
-    component_sets.mapEntries(alias_it.first, alias_it.second);
+    component_sets.join(alias_it.first, alias_it.second);
   }
 
   // Check connected-ness:
@@ -396,7 +395,7 @@ bool isConnectedFusionGraph(Fusion* fusion) {
   // equivalent/connected to the first output.
   auto output0 = fusion->outputs()[0];
   for (auto output : fusion->outputs()) {
-    if (!component_sets.strictAreMapped(output0, output)) {
+    if (!component_sets.areEquivalent(output0, output)) {
       return false;
     }
   }
@@ -410,19 +409,7 @@ SchedulerRuntimeInfo::SchedulerRuntimeInfo(
     const at::ArrayRef<IValue>& inputs,
     bool create_expr_evaluator)
     : complete_fusion_(complete_fusion) {
-  TORCH_INTERNAL_ASSERT(
-      complete_fusion_->inputs().size() == inputs.size(),
-      "Invalid number of arguments passed in for provided fusion group.");
-
-  for (auto inp_i : c10::irange(inputs.size())) {
-    auto aten_inp = inputs[inp_i];
-    if (aten_inp.isTensor()) {
-      auto fusion_inp = complete_fusion_->inputs()[inp_i];
-      auto data_ptr = aten_inp.toTensor().data_ptr();
-      input_ptrs_[fusion_inp] = (size_t)data_ptr;
-    }
-  }
-
+  collectVectorizationInfo(inputs);
   expression_evaluator_ =
       std::make_unique<ExpressionEvaluator>(complete_fusion_);
   if (create_expr_evaluator) {
@@ -431,13 +418,22 @@ SchedulerRuntimeInfo::SchedulerRuntimeInfo(
   collectIndexModeInfo(inputs);
 }
 
-// TODO: Output tensors could have an alignment that is not 16 Bytes passed in
-// from user.
-size_t SchedulerRuntimeInfo::ptrOf(TensorView* tv) {
-  if (input_ptrs_.find(tv) != input_ptrs_.end()) {
-    return input_ptrs_.at(tv);
+SchedulerRuntimeInfo::SchedulerRuntimeInfo(
+    const SchedulerRuntimeInfo& copy_from)
+    : complete_fusion_(copy_from.complete_fusion_),
+      alignment_map_(copy_from.alignment_map_),
+      common_alignment_size_(copy_from.common_alignment_size_) {
+  expression_evaluator_ =
+      std::make_unique<ExpressionEvaluator>(complete_fusion_);
+}
+
+size_t SchedulerRuntimeInfo::getAlignmentSize(TensorView* tv) {
+  auto alignment_entry = alignment_map_.find(tv);
+  if (alignment_entry == alignment_map_.end()) {
+    return max_alignment_size_in_byte;
+  } else {
+    return alignment_entry->second;
   }
-  return max_alignment_size_in_byte;
 }
 
 void SchedulerRuntimeInfo::initializeExpressionEvaluator(
@@ -448,161 +444,120 @@ void SchedulerRuntimeInfo::initializeExpressionEvaluator(
       executor_utils::bindFusionInputs(inputs, complete_fusion_);
 }
 
-size_t SchedulerRuntimeInfo::computeAlignmentSize(size_t ptr_address) {
+size_t SchedulerRuntimeInfo::collectAlignmentSize(
+    const at::Tensor& tensor) const {
+  const size_t address = reinterpret_cast<size_t>(tensor.data_ptr());
   size_t alignment_size = 1;
   size_t next_alignment_size = 2;
 
-  while (next_alignment_size <= max_alignment_size_in_byte &&
-         ptr_address % next_alignment_size == 0) {
+  while (alignment_size <= max_alignment_size_in_byte &&
+         address % next_alignment_size == 0) {
     alignment_size = next_alignment_size;
     next_alignment_size *= 2;
   }
+
   return alignment_size;
 }
 
-size_t SchedulerRuntimeInfo::getAlignmentSize(TensorView* tv) {
-  auto alignment_entry = alignment_map_.find(tv);
-  if (alignment_entry != alignment_map_.end()) {
-    return alignment_entry->second;
-  }
+void SchedulerRuntimeInfo::collectVectorizationInfo(
+    const at::ArrayRef<IValue>& inputs) {
+  common_alignment_size_ = max_alignment_size_in_byte;
+  size_t number_of_inputs = complete_fusion_->inputs().size();
+  std::unordered_map<TensorView*, size_t> cg_tensor_to_at_tensor_index;
 
-  auto alignment_size = SchedulerRuntimeInfo::computeAlignmentSize(ptrOf(tv));
-  alignment_map_[tv] = alignment_size;
-  return alignment_size;
-}
-
-// Gets maximum vectorizable width of tv, assumes we can merge across all
-// iteration domains if contiguous. Cannot permute the dimensions to fix
-// contiguity.
-size_t SchedulerRuntimeInfo::getMaxVectorizableWidth(TensorView* tv) {
-  // Gets the vectorizable width of the tv starting from the inner most
-  // dimension, working its way towards the outer most dimension, if they're
-  // contiguous. Ignores broadcast and reduction domains.
-  auto max_vectorword_map_it_ = max_vectorword_map_.find(tv);
-  if (max_vectorword_map_it_ != max_vectorword_map_.end()) {
-    return max_vectorword_map_it_->second;
-  }
-
-  // If we don't have an record, either it is a tv with innermost broadcast,
-  // or it is an intermediate tensor allocated by fuser. Logic copied to get
-  // root according to scheduler_utils::innerMostRootDim.
-  auto tv_root = tv->hasReduction() && tv->hasRFactor()
-      ? tv->getRootDomain()
-      : tv->getMaybeRFactorDomain();
-
-  auto tv_root_no_reductions = TensorDomain::noReductions(tv_root);
-
-  auto contiguity = tv->domain()->contiguity();
-  // Appears after reductions the reduction domain often has a contiguity entry.
-  // This only matters if the result of the reduction is an output
-  if (contiguity.size() == tv_root.size() &&
-      contiguity.size() != tv_root_no_reductions.size()) {
-    std::vector<bool> new_contiguity;
-    for (auto i : c10::irange(tv_root.size())) {
-      if (!tv_root[i]->isReduction()) {
-        new_contiguity.push_back(contiguity[i]);
+  for (auto input_index : c10::irange(number_of_inputs)) {
+    if (auto input_tensor = dynamic_cast<TensorView*>(
+            complete_fusion_->inputs()[input_index])) {
+      if (input_tensor->nDims() == 0) {
+        // A 0-dim tensor input would not need vectorization
+        continue;
       }
+      if (input_tensor->domain()
+              ->domain()[input_tensor->nDims() - 1]
+              ->isBroadcast()) {
+        // skip the tensors with innermost iterdomain broadcasted,
+        //  as we will not vectorize these.
+        continue;
+      }
+
+      // Collect strides of the input tensor
+      TORCH_INTERNAL_ASSERT(inputs[input_index].isTensor());
+      const auto& at_tensor = inputs[input_index].toTensor();
+
+      cg_tensor_to_at_tensor_index.emplace(
+          std::make_pair(input_tensor, input_index));
+
+      // Collect alignment of the input tensor
+      auto alignment_size = collectAlignmentSize(at_tensor);
+      common_alignment_size_ = std::min(alignment_size, common_alignment_size_);
+      alignment_map_[input_tensor] = alignment_size;
     }
-    contiguity = new_contiguity;
-  }
-  tv_root = tv_root_no_reductions;
-
-  auto tv_root_size = tv_root.size();
-
-  // Filter out 0-dim tensors
-  if (tv_root_size < 1) {
-    return 1;
   }
 
-  // Filter out mismatched contiguity info
-  if (tv_root_size != contiguity.size()) {
-    return 1;
+  // Compute max vector word size for each input,
+  //  tensors with inner most broadcast already
+  //  filtered out.  common_alignment_size_ is
+  //  computed up to this point.
+  for (auto it : cg_tensor_to_at_tensor_index) {
+    vectorword_map_[it.first] = collectMaxVectorizeSize(
+        inputs[it.second].toTensor(), common_alignment_size_);
   }
+}
 
-  size_t item_size =
-      dataTypeSize(tv->dtype(), indexModeToDtype(getIndexMode()));
-
-  // Alignment should always at least be the data type size
-  TORCH_INTERNAL_ASSERT(getAlignmentSize(tv) % item_size == 0);
-  size_t max_vector_size = getAlignmentSize(tv) / item_size;
-
-  if (max_vector_size == 1) {
-    return 1;
-  }
-
-  auto numel = 1;
-  for (auto i : c10::irange(tv_root_size)) {
-    auto root_i = tv_root_size - i - 1;
-    auto root_id = tv_root[root_i];
-
-    if (root_id->extent()->isOneInt() || root_id->isBroadcast()) {
-      continue;
-    }
-
-    // Not contiguous
-    if (!contiguity[root_i]) {
-      break;
-    }
-
-    auto dim_size = expression_evaluator_->evaluate(root_id->extent());
-    // Inference failed for some reason, assume not-contiguous at this point
-    if (!dim_size.has_value()) {
-      break;
-    }
-
-    // Still contiguous
-    numel *= dim_size.value();
-  }
-
-  // Assuming intermediate tensors have friendly alignment, and
-  //  all contiguity true. Determine the largest power of 2 below
-  //  innermost dimension size for the word size of vectorizaiton
+size_t SchedulerRuntimeInfo::collectMaxVectorizeSize(
+    const at::Tensor& tensor,
+    size_t max_vector_size_in_byte) {
   size_t vector_size = 1;
   size_t next_vector_size = 2;
-  while (next_vector_size <= max_vector_size && next_vector_size <= numel &&
-         numel % next_vector_size == 0) {
-    vector_size = next_vector_size;
-    next_vector_size *= 2;
-  }
+  bool next_size_compatible = true;
 
-  // save output to avoid re-compute
-  max_vectorword_map_[tv] = vector_size;
+  while (next_size_compatible &&
+         next_vector_size * tensor.itemsize() <= max_vector_size_in_byte) {
+    // If inner most dimension size is not divisible by new word size
+    //  then we cannot vectorize with this width. But we do not
+    //  care if all dimensions of this tensor is 1, i.e.
+    //  input is actually a un-squeezed 0-dim tensor.
+    for (size_t i = tensor.ndimension(); i > 0; i--) {
+      if (tensor.size(i - 1) != 1) {
+        if (tensor.size(tensor.ndimension() - 1) % next_vector_size != 0 ||
+            tensor.stride(tensor.ndimension() - 1) != 1) {
+          next_size_compatible = false;
+        }
+        break;
+      }
+    }
+
+    if (!next_size_compatible) {
+      break;
+    }
+
+    // If any stride is not divisible by the next word size,
+    //  we cannot vectorize with this width.
+    for (auto stride : tensor.strides()) {
+      if (stride != 1 && stride % next_vector_size != 0) {
+        next_size_compatible = false;
+        break;
+      }
+    }
+
+    if (next_size_compatible) {
+      vector_size = next_vector_size;
+      next_vector_size *= 2;
+    }
+  }
 
   return vector_size;
 }
 
-// Gets the vectorizable width of the inner most dimension of tv if it's
-// contiguous. Ignores inner most dimensions that are broadcast or reduction.
-size_t SchedulerRuntimeInfo::getInnerDimVectorizableWidth(TensorView* tv) {
-  auto inner_vectorword_map_it_ = inner_vectorword_map_.find(tv);
-  if (inner_vectorword_map_it_ != inner_vectorword_map_.end()) {
-    return inner_vectorword_map_it_->second;
+size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
+  auto recorded_size_it = vectorword_map_.find(tv);
+  if (recorded_size_it != vectorword_map_.end()) {
+    return recorded_size_it->second;
   }
 
-  // If we don't have an record, either it is a tv with innermost broadcast,
-  // or it is an intermediate tensor allocated by fuser. Logic copied to get
-  // root according to scheduler_utils::innerMostRootDim.
-  auto tv_root = tv->hasReduction() && tv->hasRFactor()
-      ? tv->getRootDomain()
-      : tv->getMaybeRFactorDomain();
-
-  auto tv_root_no_reductions = TensorDomain::noReductions(tv_root);
-
-  auto contiguity = tv->domain()->contiguity();
-  // Appears after reductions the reduction domain often has a contiguity entry.
-  // This only matters if the result of the reduction is an output
-  if (contiguity.size() == tv_root.size() &&
-      contiguity.size() != tv_root_no_reductions.size()) {
-    std::vector<bool> new_contiguity;
-    for (auto i : c10::irange(tv_root.size())) {
-      if (!tv_root[i]->isReduction()) {
-        new_contiguity.push_back(contiguity[i]);
-      }
-    }
-    contiguity = new_contiguity;
-  }
-  tv_root = tv_root_no_reductions;
-
+  // If we don't have an record, either it is a tv with innermost
+  //  broadcast, or it is an intermediate tensor allocated by fuser
+  auto tv_root = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
   auto tv_root_size = tv_root.size();
 
   // Filter out 0-dim tensors
@@ -611,37 +566,29 @@ size_t SchedulerRuntimeInfo::getInnerDimVectorizableWidth(TensorView* tv) {
   }
 
   // Filter out mismatched contiguity info
-  if (tv_root_size != contiguity.size()) {
+  if (tv_root_size != tv->domain()->contiguity().size()) {
     return 1;
   }
 
-  auto inner_most_dim = scheduler_utils::innerMostRootDim(tv);
-
-  int id_pos = -1;
-  for (auto root_i : c10::irange(tv_root_size)) {
-    if (tv_root[root_i] == inner_most_dim) {
-      id_pos = root_i;
-      break;
-    }
-  }
-
-  // Something went wrong with finding the inner most dimension, just
-  // return 1.
-  if (id_pos == -1) {
+  // Filter out innermost broadcast tensors
+  auto inner_dimension = tv_root[tv_root_size - 1];
+  if (inner_dimension->isBroadcast()) {
     return 1;
   }
 
-  // If the inner most dimension is not contiguous return 1
-  if (!contiguity[id_pos]) {
+  // Handle intermediate or output tensors that
+  //  will be allocated by fuser
+  auto maybe_data_type = tv->getDataType();
+
+  // Do not vectorize on data with unknown type
+  if (!maybe_data_type.has_value()) {
     return 1;
   }
 
-  size_t item_size =
-      dataTypeSize(tv->dtype(), indexModeToDtype(getIndexMode()));
-
-  // Alignment should always at least be the data type size
-  TORCH_INTERNAL_ASSERT(getAlignmentSize(tv) % item_size == 0);
-  size_t max_vector_size = getAlignmentSize(tv) / item_size;
+  size_t item_size = dataTypeSize(maybe_data_type.value());
+  // Assume we don't have non-divisible types for now.
+  TORCH_INTERNAL_ASSERT(max_alignment_size_in_byte % item_size == 0);
+  size_t max_vector_size = max_alignment_size_in_byte / item_size;
 
   // Assuming intermediate tensors have friendly alignment, and
   //  all contiguity true. Determine the largest power of 2 below
@@ -649,7 +596,7 @@ size_t SchedulerRuntimeInfo::getInnerDimVectorizableWidth(TensorView* tv) {
   size_t vector_size = 1;
   size_t next_vector_size = 2;
   auto maybe_inner_dimension_size =
-      expression_evaluator_->evaluate(inner_most_dim->extent());
+      expression_evaluator_->evaluate(inner_dimension->extent());
   TORCH_INTERNAL_ASSERT(maybe_inner_dimension_size.has_value());
   size_t inner_dimension_size = maybe_inner_dimension_size.value();
 
@@ -661,7 +608,7 @@ size_t SchedulerRuntimeInfo::getInnerDimVectorizableWidth(TensorView* tv) {
   }
 
   // save output to avoid re-compute
-  inner_vectorword_map_[tv] = vector_size;
+  vectorword_map_[tv] = vector_size;
 
   return vector_size;
 }
@@ -779,26 +726,6 @@ static bool checkPatternEquivalence(
   return it0 == out_root0.end() && it1 == out_root1.end();
 }
 
-// Reusing some code from lowering specifically in lower_trivial_broadcast.cpp
-// ConcretizedBroadcastDomains::maybeNonUniquelyConcretized this checks if
-// there's a broadcast iteration domain that's being broadcasted to seemingly
-// different extents, meaning we don't know in the kernel if the dimension is
-// being broadcasted to one size multiple times or different sizes. This is a
-// hard to optimize problem and likely indicates we shouldn't be fusing.
-bool hasNonUniqueBcast(Fusion* fusion) {
-  ConcretizedBroadcastDomains concretize_info;
-  concretize_info.build(fusion);
-
-  for (auto tv : ir_utils::allTvs(fusion)) {
-    for (auto id : tv->getRootDomain()) {
-      if (concretize_info.maybeNonUniquelyConcretized(id)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 //! Scheduler interface:
 //!    Each of the scheduler needs to provide 3 interface functions:
 //!
@@ -844,15 +771,11 @@ class ReductionScheduler : public SchedulerEntry {
     // TODO Add more testing before enabling
     auto view_tvs = scheduler_utils::getViewTVs(fusion);
     if (view_tvs.size() > 0) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Reduction, "No support for view op");
       return false;
     }
 
     // Needs at least one non-trivial reduction to consider.
     if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Reduction, "No reduction op to schedule");
       return false;
     }
 
@@ -866,15 +789,6 @@ class ReductionScheduler : public SchedulerEntry {
 
     if (findTransposeOps(fusion).size() > 0) {
       // Use pointwise logic
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Reduction, "No support for transpose op");
-      return false;
-    }
-
-    if (hasNonUniqueBcast(fusion)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Reduction,
-          "Broadcasting dimension might be broadcasting to multiple sizes.");
       return false;
     }
 
@@ -903,12 +817,6 @@ class ReductionScheduler : public SchedulerEntry {
           axis_count = reduction_root_size(red);
         } else {
           if (reduction_root_size(red) != axis_count) {
-            scheduler_debug_utils::canScheduleRejectReason(
-                ScheduleHeuristic::Reduction,
-                "Inconsistent reduction axes ",
-                red,
-                "is not ",
-                axis_count);
             return false;
           }
         }
@@ -923,12 +831,6 @@ class ReductionScheduler : public SchedulerEntry {
       for (size_t it = 1; it < reduction_tvs.size(); it++) {
         if (!checkPatternEquivalence(
                 reduction_tvs[it - 1], reduction_tvs[it], root_map)) {
-          scheduler_debug_utils::canScheduleRejectReason(
-              ScheduleHeuristic::Reduction,
-              "Un-mapped multi-reduction: ",
-              reduction_tvs[it - 1],
-              " ",
-              reduction_tvs[it]);
           return false;
         }
       }
@@ -937,18 +839,12 @@ class ReductionScheduler : public SchedulerEntry {
     // Doesn't allow persistent kernels in this scheduler
     auto persistent_buffer_info = scheduler_utils::persistentBuffers(fusion);
     if (persistent_buffer_info.persistent_buffers.size() > 0) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Reduction,
-          "need persistent buffers that reduction scheduler doesn't handle");
       return false;
     }
 
     if (!SchedulerTopologyChecker::supportedPostReductionFusion(
             fusion, reduction_tvs) ||
         SchedulerTopologyChecker::hasPostReductionBCast(fusion)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Reduction,
-          "has unsupported post reduction fusion");
       return false;
     }
 
@@ -993,29 +889,13 @@ class PointWiseScheduler : public SchedulerEntry {
     // to eliminate mismatch between canSchedule and
     // schedule pointwise.
     if (!hasReferenceTensorView(fusion)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::PointWise, "cannot find reference tensor");
       return false;
     }
 
     auto reduction_ops =
         ir_utils::getReductionOps(fusion, true /* ignore_trivial */);
     auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
-
-    if (!reduction_ops.empty() || !welford_ops.empty()) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::PointWise, "no support for reduction ops");
-      return false;
-    }
-
-    if (hasNonUniqueBcast(fusion)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::PointWise,
-          "Broadcasting dimension might be broadcasting to multiple sizes.");
-      return false;
-    }
-
-    return true;
+    return reduction_ops.empty() && welford_ops.empty();
   }
 
   static bool canScheduleRunTime(
@@ -1058,8 +938,6 @@ class PersistentKernelScheduler : public SchedulerEntry {
   static bool canScheduleCompileTime(Fusion* fusion) {
     // Needs at least one non-trivial reduction to consider.
     if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent, "needs a reduction op");
       return false;
     }
 
@@ -1069,23 +947,11 @@ class PersistentKernelScheduler : public SchedulerEntry {
     // For persistent schedule we want welford translated to average and
     // standard deviation reductions.
     if (welford_ops.begin() != welford_ops.end()) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent,
-          "no support for un-translated welford");
       return false;
     }
 
     auto view_tvs = scheduler_utils::getViewTVs(fusion);
     if (view_tvs.size() > 0) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent, "no support for view");
-      return false;
-    }
-
-    if (hasNonUniqueBcast(fusion)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent,
-          "Broadcasting dimension might be broadcasting to multiple sizes.");
       return false;
     }
 
@@ -1094,15 +960,11 @@ class PersistentKernelScheduler : public SchedulerEntry {
 
     if (reduction_tvs.size() == 0) {
       // Use pointwise logic
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent, "no reduction tv");
       return false;
     }
 
     if (findTransposeOps(fusion).size() > 0) {
       // Use pointwise logic
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent, "no support for transpose");
       return false;
     }
 
@@ -1127,9 +989,6 @@ class PersistentKernelScheduler : public SchedulerEntry {
         axis_count = reduction_root_size(red);
       } else {
         if (reduction_root_size(red) != axis_count) {
-          scheduler_debug_utils::canScheduleRejectReason(
-              ScheduleHeuristic::Persistent,
-              "inconsistent reduction root size");
           return false;
         }
       }
@@ -1144,12 +1003,6 @@ class PersistentKernelScheduler : public SchedulerEntry {
     for (const auto it : c10::irange(1, reduction_tvs.size())) {
       if (!checkPatternEquivalence(
               reduction_tvs[it - 1], reduction_tvs[it], root_map)) {
-        scheduler_debug_utils::canScheduleRejectReason(
-            ScheduleHeuristic::Persistent,
-            "unmapped reduction ",
-            reduction_tvs[it - 1],
-            " and ",
-            reduction_tvs[it]);
         return false;
       }
     }
@@ -1157,15 +1010,10 @@ class PersistentKernelScheduler : public SchedulerEntry {
     // Only accept persistent kernels
     auto persistent_buffer_info = scheduler_utils::persistentBuffers(fusion);
     if (persistent_buffer_info.persistent_buffers.size() == 0) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent, "no persistent buffer identified");
       return false;
     }
 
     if (SchedulerTopologyChecker::hasNonNormalizePostReductionBCast(fusion)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent,
-          "unsupported post reduction normalization");
       return false;
     }
 
@@ -1205,9 +1053,6 @@ class PersistentKernelScheduler : public SchedulerEntry {
         persistent_buffer_size_info.projected_persistent_buffer_size);
 
     if (persistent_buffer_size > scheduler_utils::register_file_size) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent,
-          "not enough registers for persistence");
       return false;
     }
 
@@ -1249,9 +1094,6 @@ class PersistentKernelScheduler : public SchedulerEntry {
             // Reduction count is larger than max thread count * 4
             properties.total_reduction_numel >=
                 device_max_threads_per_multiprocessor * 4)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent, "unsupported cross grid persistence");
-
       return false;
     }
 
@@ -1359,7 +1201,6 @@ c10::optional<ScheduleHeuristic> SchedulerEntry::proposeHeuristics(
     SchedulerRuntimeInfo& runtime_info) {
   for (auto sh : all_heuristics()) {
     if (canSchedule(sh, fusion, runtime_info)) {
-      scheduler_debug_utils::canScheduleMessage("***Accepted*** as: ", sh);
       return sh;
     }
   }
@@ -1386,11 +1227,6 @@ std::string toString(ScheduleHeuristic sh) {
       TORCH_INTERNAL_ASSERT(false, "undefined schedule");
   }
   return "";
-}
-
-std::ostream& operator<<(std::ostream& os, ScheduleHeuristic sh) {
-  os << toString(sh);
-  return os;
 }
 
 namespace {

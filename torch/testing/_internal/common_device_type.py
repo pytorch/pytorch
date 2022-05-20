@@ -511,10 +511,8 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
-        # Disable MPS testing in generic device testing temporarily while we're
-        # ramping up support.
-        # elif torch.backends.mps.is_available():
-        #   test_bases.append(MPSTestBase)
+        elif torch.backends.mps.is_available():
+            test_bases.append(MPSTestBase)
 
     return test_bases
 
@@ -706,7 +704,7 @@ class OpDTypes(Enum):
 class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
-        self.op_list = list(op_list)
+        self.op_list = op_list
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
@@ -756,8 +754,6 @@ class ops(_TestParametrizer):
                     if dtype in dtype_set:
                         dtypes = {dtype}
                         break
-                else:
-                    dtypes = {}
             elif self.opinfo_dtypes == OpDTypes.none:
                 dtypes = {None}
             else:

@@ -53,7 +53,6 @@ enum class Backend {
   MPS,
   HPU,
   Lazy,
-  PrivateUse1,
   NumOptions
 };
 
@@ -108,8 +107,6 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedXPU;
   } else if (t == DispatchKey::HPU || t == DispatchKey::AutogradHPU) {
     return Backend::HPU;
-  } else if (t == DispatchKey::PrivateUse1) {
-    return Backend::PrivateUse1;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {
@@ -169,8 +166,6 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MPS;
     case Backend::HPU:
       return DispatchKey::HPU;
-    case Backend::PrivateUse1:
-      return DispatchKey::PrivateUse1;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -225,8 +220,6 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::MPS;
     case Backend::HPU:
       return DeviceType::HPU;
-    case Backend::PrivateUse1:
-      return DeviceType::PrivateUse1;
     case Backend::Undefined:
       TORCH_CHECK(false, "Undefined backend is not a valid device type");
     default:
@@ -287,8 +280,6 @@ static inline const char* toString(Backend b) {
       return "QuantizedXPU";
     case Backend::HPU:
       return "HPU";
-    case Backend::PrivateUse1:
-      return "PrivateUseOne";
     default:
       return "UNKNOWN_BACKEND";
   }

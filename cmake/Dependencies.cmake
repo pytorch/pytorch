@@ -1075,16 +1075,23 @@ if(BUILD_PYTHON)
 
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
     add_library(python::python INTERFACE IMPORTED)
-    target_include_directories(python::python SYSTEM INTERFACE ${PYTHON_INCLUDE_DIRS})
+    set_property(TARGET python::python PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES ${PYTHON_INCLUDE_DIRS})
+    set_property(TARGET python::python PROPERTY
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${PYTHON_INCLUDE_DIRS})
     if(WIN32)
-      target_link_libraries(python::python INTERFACE ${PYTHON_LIBRARIES})
+      set_property(TARGET python::python PROPERTY
+          INTERFACE_LINK_LIBRARIES ${PYTHON_LIBRARIES})
     endif()
 
     caffe2_update_option(USE_NUMPY OFF)
     if(NUMPY_FOUND)
       caffe2_update_option(USE_NUMPY ON)
       add_library(numpy::numpy INTERFACE IMPORTED)
-      target_include_directories(numpy::numpy SYSTEM INTERFACE ${NUMPY_INCLUDE_DIR})
+      set_property(TARGET numpy::numpy PROPERTY
+          INTERFACE_INCLUDE_DIRECTORIES ${NUMPY_INCLUDE_DIR})
+      set_property(TARGET numpy::numpy PROPERTY
+          INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${NUMPY_INCLUDE_DIR})
     endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
@@ -1112,8 +1119,12 @@ else()
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 add_library(pybind::pybind11 INTERFACE IMPORTED)
-target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
-target_link_libraries(pybind::pybind11 INTERFACE python::python)
+set_property(TARGET pybind::pybind11 PROPERTY
+    INTERFACE_INCLUDE_DIRECTORIES ${pybind11_INCLUDE_DIRS})
+set_property(TARGET pybind::pybind11 PROPERTY
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${pybind11_INCLUDE_DIRS})
+set_property(TARGET pybind::pybind11 PROPERTY
+    INTERFACE_LINK_LIBRARIES python::python)
 
 # ---[ MPI
 if(USE_MPI)
@@ -1362,39 +1373,18 @@ if(USE_CUDA)
   endif()
 endif()
 
-if(USE_DISTRIBUTED AND USE_TENSORPIPE)
-  if(MSVC)
-    message(WARNING "Tensorpipe cannot be used on Windows.")
-  else()
-    if(USE_CUDA)
-      set(TP_USE_CUDA ON CACHE BOOL "" FORCE)
-      set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
-    endif()
-    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
-
-    # Tensorpipe uses cuda_add_library
-    torch_update_find_cuda_flags()
-    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-
-    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
-    if(USE_CUDA)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
-    elseif(USE_ROCM)
-      message(WARNING "TensorPipe doesn't yet support ROCm")
-      # Not yet...
-      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
-    endif()
-  endif()
-endif()
-
 if(USE_GLOO)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    # Don't install gloo
-    set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
+    if(MSVC)
+      # Don't install gloo on Windows
+      # It is already handled in builder scripts
+      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
+    else()
+      set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    endif()
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Temporarily override variables to avoid building Gloo tests/benchmarks
@@ -1406,10 +1396,6 @@ if(USE_GLOO)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
     if(NOT USE_SYSTEM_GLOO)
-      if(USE_DISTRIBUED AND USE_TENSORPIPE)
-        get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
-        set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
-      endif()
       # gloo uses cuda_add_library
       torch_update_find_cuda_flags()
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
@@ -1444,6 +1430,32 @@ if(USE_GLOO)
       list(APPEND Caffe2_HIP_DEPENDENCY_LIBS gloo_hip)
     endif()
     add_compile_options(-DCAFFE2_USE_GLOO)
+  endif()
+endif()
+
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
+  if(MSVC)
+    message(WARNING "Tensorpipe cannot be used on Windows.")
+  else()
+    if(USE_CUDA)
+      set(TP_USE_CUDA ON CACHE BOOL "" FORCE)
+      set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
+    endif()
+    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
+    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
+
+    # Tensorpipe uses cuda_add_library
+    torch_update_find_cuda_flags()
+    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+    if(USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
+    elseif(USE_ROCM)
+      message(WARNING "TensorPipe doesn't yet support ROCm")
+      # Not yet...
+      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
+    endif()
   endif()
 endif()
 

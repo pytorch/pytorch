@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <thrust/execution_policy.h>
 #include <thrust/sort.h>
 
 namespace at { namespace native {

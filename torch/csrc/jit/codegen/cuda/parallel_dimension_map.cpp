@@ -253,8 +253,9 @@ bool ParallelDimensionMap::isExact(ParallelType pt) const {
 }
 
 IterDomain* ParallelDimensionMap::getCAMappedConcreteDomain(IterDomain* id) {
-  return GpuLower::current()->caMap()->getConcreteMappedID(
-      id, IdMappingMode::EXACT);
+  const auto gpu_lower = GpuLower::current();
+  const auto& ca_map = gpu_lower->caIndexMap();
+  return ca_map.getConcreteMappedID(id);
 }
 
 // Symbolically compares equality of two KIR vals. Comparison is done

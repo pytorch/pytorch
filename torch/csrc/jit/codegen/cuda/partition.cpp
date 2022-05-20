@@ -177,10 +177,6 @@ bool compatibleType(const torch::jit::Value* val) {
         return false;
       }
     }
-    // magic number 8 here since our kernel argument only supports rank <= 8
-    if (tensor_type->dim().has_value() && (tensor_type->dim().value() > 8)) {
-      return false;
-    }
   }
   return true;
 }

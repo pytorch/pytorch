@@ -184,42 +184,7 @@ void OptOutMutator::mutate(ReductionOp* rop) {
   auto rop_type = rop->getReductionOpType();
   container->removeExpr(rop);
   IrBuilder::create<ReductionOp>(
-      container, rop_type, init, out, in, rop->isAllreduce());
-}
-
-void OptOutMutator::mutate(GroupedReductionOp* rop) {
-  bool is_same = true;
-
-  std::vector<Val*> outputs;
-  for (auto out : rop->outputs()) {
-    auto maybe_mutated = maybeMutated(out);
-    is_same = is_same && maybe_mutated->sameAs(out);
-    outputs.push_back(maybe_mutated);
-  }
-
-  std::vector<Val*> inputs;
-  for (auto in : rop->inputs()) {
-    auto maybe_mutated = maybeMutated(in);
-    is_same = is_same && maybe_mutated->sameAs(in);
-    inputs.push_back(maybe_mutated);
-  }
-
-  std::vector<Val*> init_vals;
-  for (auto init : rop->initVals()) {
-    auto maybe_mutated = maybeMutated(init);
-    is_same = is_same && maybe_mutated->sameAs(init);
-    init_vals.push_back(maybe_mutated);
-  }
-
-  if (is_same) {
-    return;
-  }
-
-  auto container = rop->container();
-  const auto& rop_types = rop->getReductionOpTypes();
-  container->removeExpr(rop);
-  IrBuilder::create<GroupedReductionOp>(
-      container, rop_types, init_vals, outputs, inputs, rop->isAllreduce());
+      container, rop_type, init, out, in, rop->isFused());
 }
 
 namespace {
@@ -269,7 +234,7 @@ void OptOutMutator::mutate(WelfordOp* wop) {
       in_avg,
       in_var,
       in_N,
-      wop->isAllreduce());
+      wop->isFused());
 }
 
 void OptOutMutator::mutate(MmaOp* mma) {
@@ -348,7 +313,7 @@ void OptOutMutator::mutate(GatherOp* op) {
   IrBuilder::create<GatherOp>(container, out, in, window_shape, pad_width);
 }
 
-void OptOutMutator::mutate(ViewAsScalar* vop) {
+void OptOutMutator::mutate(ViewDtypeOp* vop) {
   TensorView* out = maybeMutated(vop->out())->as<TensorView>();
   TensorView* in = maybeMutated(vop->in())->as<TensorView>();
 
@@ -358,8 +323,7 @@ void OptOutMutator::mutate(ViewAsScalar* vop) {
 
   auto container = vop->container();
   container->removeExpr(vop);
-  IrBuilder::create<ViewAsScalar>(
-      container, out, in, vop->vector_id(), vop->index());
+  IrBuilder::create<ViewDtypeOp>(container, out, in, vop->dtype());
 }
 
 void OptOutMutator::mutate(ViewOp* vop) {
@@ -434,9 +398,6 @@ void OptOutMutator::mutate(kir::IfThenElse*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridReduction*) {
-  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-}
-void OptOutMutator::mutate(kir::GroupedGridReduction*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridBroadcast*) {

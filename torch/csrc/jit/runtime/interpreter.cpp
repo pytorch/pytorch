@@ -828,8 +828,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     if (future_) {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
-      // save the original exception's message when creating a new JITException
-      throw JITException(ss.str(), python_class_name, e.what());
+      throw JITException(ss.str(), python_class_name);
     } else if (not_implemented_error) {
       throw c10::NotImplementedError(
           ss.str(),

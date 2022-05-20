@@ -2015,7 +2015,7 @@ TEST(StaticRuntime, Transpose) {
 }
 
 TEST(StaticRuntime, Permute) {
-  auto permute_script = R"JIT(
+  const auto permute_script = R"JIT(
     def forward(self, a: Tensor, dims: List[int]):
         return torch.permute(a, dims).clone()
   )JIT";
@@ -2030,16 +2030,6 @@ TEST(StaticRuntime, Permute) {
 
   testStaticRuntime(permute_script, args_a);
   testStaticRuntime(permute_script, args_a, args_b);
-
-  permute_script = R"JIT(
-    def forward(self, a: Tensor, dims: List[int], shape: List[int]):
-        return torch.permute(a, dims).reshape(shape).clone()
-  )JIT";
-
-  a = at::randn({8, 16, 4});
-  dims_a = {0, 2, 1};
-  dims_b = {-1, 16};
-  testStaticRuntime(permute_script, {a, dims_a, dims_b});
 }
 
 TEST(StaticRuntime, Slice) {

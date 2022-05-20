@@ -115,13 +115,13 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
 
 
 def _cpu_tag(obj):
-    if obj.device.type == 'cpu':
+    if type(obj).__module__ == 'torch':
         return 'cpu'
 
 
 def _cuda_tag(obj):
-    if obj.device.type == 'cuda':
-        return 'cuda:' + str(obj.device.index)
+    if type(obj).__module__ == 'torch.cuda':
+        return 'cuda:' + str(obj.get_device())
 
 
 def _cpu_deserialize(obj, location):
@@ -151,8 +151,9 @@ def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
         device = validate_cuda_device(location)
         if getattr(obj, "_torch_load_uninitialized", False):
+            storage_type = getattr(torch.cuda, type(obj).__name__)
             with torch.cuda.device(device):
-                return torch._UntypedStorage(obj.nbytes(), device=torch.device(location))
+                return storage_type(obj.nbytes())
         else:
             return obj.cuda(device)
 
@@ -161,7 +162,7 @@ register_package(10, _cpu_tag, _cpu_deserialize)
 register_package(20, _cuda_tag, _cuda_deserialize)
 
 
-def location_tag(storage: Union[Storage, torch.storage._TypedStorage, torch._UntypedStorage]):
+def location_tag(storage: Union[Storage, torch.storage._TypedStorage]):
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
         if location:
@@ -413,8 +414,6 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             return ('module', obj, source_file, source)
 
         if isinstance(obj, torch.storage._TypedStorage) or torch.is_storage(obj):
-            storage: torch._UntypedStorage
-
             if isinstance(obj, torch.storage._TypedStorage):
                 # TODO: Once we decide to break serialization FC, this case
                 # can be deleted
@@ -425,14 +424,12 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 dtype = obj.dtype
                 storage_numel = obj.size()
 
-            elif isinstance(obj, torch._UntypedStorage):
+            else:
                 storage = obj
-                storage_dtype = torch.uint8
+                storage_dtype = storage.dtype
                 storage_type = normalize_storage_type(type(obj))
                 dtype = torch.uint8
-                storage_numel = storage.nbytes()
-            else:
-                raise TypeError(f'type not recognized: {type(obj)}')
+                storage_numel = cast(Storage, storage).nbytes()
 
             # If storage is allocated, ensure that any other saved storages
             # pointing to the same data all have the same dtype. If storage is
@@ -447,6 +444,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                     storage_dtypes[storage.data_ptr()] = storage_dtype
 
             view_metadata: Optional[Tuple[str, int, int]]
+            storage = cast(Storage, storage)
 
             # Offset is always 0, but we keep it for backwards compatibility
             # with the old serialization format (which supported storage views)
@@ -554,9 +552,11 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
             else:
                 storage = obj
-                storage_dtype = torch.uint8
+                storage_dtype = storage.dtype
                 storage_type = normalize_storage_type(type(obj))
                 storage_numel = storage.nbytes()
+
+            storage = cast(Storage, storage)
 
             # If storage is allocated, ensure that any other saved storages
             # pointing to the same data all have the same dtype. If storage is
@@ -1009,10 +1009,7 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         assert typename == 'storage', \
             f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
         storage_type, key, location, numel = data
-        if storage_type is torch._UntypedStorage:
-            dtype = torch.uint8
-        else:
-            dtype = storage_type.dtype
+        dtype = storage_type.dtype
 
         if key not in loaded_storages:
             nbytes = numel * torch._utils._element_size(dtype)

@@ -25,7 +25,7 @@ from ._common import (
 
 
 @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.linear)
-def sharded_linear(types, args, kwargs, pg):
+def sharded_linear(types, args, kwargs):
     """
     Handles ``__torch_function__`` dispatch for ``torch.nn.functional.linear``.
     This method computes a sharded linear and has the following limitations:
@@ -99,6 +99,7 @@ def sharded_linear(types, args, kwargs, pg):
     weight = args[1]
     bias = args[2]
 
+    pg = weight._process_group
     local_shard = weight.local_tensor()
     local_shard_t = local_shard.t().contiguous()
     sharding_dim = weight._sharding_spec.dim

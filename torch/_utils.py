@@ -75,7 +75,8 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
             values = torch.Tensor._values(self).cuda(device, non_blocking)
             return new_type(indices, values, self.size())
         else:
-            return torch._UntypedStorage(self.size(), device=torch.device('cuda')).copy_(self, non_blocking)
+            new_type = getattr(torch.cuda, self.__class__.__name__)
+            return new_type(self.size()).copy_(self, non_blocking)
 
 
 def _get_async_or_non_blocking(function_name, non_blocking, kwargs):

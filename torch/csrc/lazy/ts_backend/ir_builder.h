@@ -35,7 +35,7 @@ namespace lazy {
 
 
 struct TorchScriptIrBuilder: IrBuilder {
-  NodePtr MakeDeviceData(const std::shared_ptr<BackendData>& data) const override { return DeviceData::Create(data); }
+  NodePtr MakeDeviceData(const std::shared_ptr<BackendData>& data) const override { return MakeNode<DeviceData>(data); }
   NodePtr MakeScalar(const at::Scalar& value, const at::ScalarType& type) const override { return MakeNode<Scalar>(value, type); }
   NodePtr MakeExpand(const Value& input0, const std::vector<int64_t>& size, const bool& is_scalar_expand) const override { return MakeNode<Expand>(input0, size, is_scalar_expand); }
   NodePtr MakeView(const Value& input0, const std::vector<int64_t>& output_size) const override { return MakeNode<View>(input0, output_size); }

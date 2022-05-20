@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 
-#include <c10/util/BFloat16.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Half.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
@@ -201,14 +199,6 @@ Val* getMinimumValue(DataType v) {
     case (DataType::Float):
       return IrBuilder::create<Double>(-std::numeric_limits<float>::infinity());
       break;
-    case (DataType::Half):
-      return IrBuilder::create<Double>(
-          static_cast<double>(-std::numeric_limits<c10::Half>::infinity()));
-      break;
-    case DataType::BFloat16:
-      return IrBuilder::create<Double>(
-          static_cast<double>(-std::numeric_limits<c10::BFloat16>::infinity()));
-      break;
     case (DataType::Int):
       return IrBuilder::create<Int>(std::numeric_limits<int64_t>::lowest());
       break;
@@ -220,7 +210,7 @@ Val* getMinimumValue(DataType v) {
       break;
     default:
       TORCH_CHECK(
-          false, "Could not generate a min op for tensor with type: ", v);
+          false, "Could not generate a max op for tensor with type: ", v);
   }
   return nullptr;
 }
@@ -237,14 +227,6 @@ Val* getMaximumValue(DataType v) {
     case (DataType::Float):
       return IrBuilder::create<Double>(std::numeric_limits<float>::infinity());
       break;
-    case (DataType::Half):
-      return IrBuilder::create<Double>(
-          static_cast<double>(std::numeric_limits<c10::Half>::infinity()));
-      break;
-    case DataType::BFloat16:
-      return IrBuilder::create<Double>(
-          static_cast<double>(std::numeric_limits<c10::BFloat16>::infinity()));
-      break;
     case (DataType::Int):
       return IrBuilder::create<Int>(std::numeric_limits<int64_t>::max());
       break;
@@ -256,7 +238,7 @@ Val* getMaximumValue(DataType v) {
       break;
     default:
       TORCH_CHECK(
-          false, "Could not generate a max op for tensor with type: ", v);
+          false, "Could not generate a min op for tensor with type: ", v);
   }
   return nullptr;
 }
@@ -285,24 +267,6 @@ Val* castOp(DataType dtype, Val* v1) {
 
 TensorView* castOp(DataType dtype, TensorView* v1) {
   return castOp(dtype, v1->as<Val>())->as<TensorView>();
-}
-
-Val* bitCastOp(DataType dtype, Val* v1) {
-  if (v1->getDataType().value() == dtype) {
-    return v1;
-  }
-
-  TORCH_CHECK(
-      dataTypeSize(v1->getDataType().value()) == dataTypeSize(dtype),
-      "BitCast only works for types of the same size");
-
-  Val* out = newValLike(v1, dtype);
-  IrBuilder::create<UnaryOp>(UnaryOpType::BitCast, out, v1);
-  return out;
-}
-
-TensorView* bitCastOp(DataType dtype, TensorView* v1) {
-  return bitCastOp(dtype, v1->as<Val>())->as<TensorView>();
 }
 
 Val* unaryOp(UnaryOpType type, Val* v1) {
@@ -364,6 +328,7 @@ TensorView* unaryOp(
 
 NVFUSER_DEFINE_UNARY_OP(set, Set)
 NVFUSER_DEFINE_UNARY_OP(randlike, RandLike)
+NVFUSER_DEFINE_UNARY_OP(notOp, Not)
 NVFUSER_DEFINE_UNARY_OP(ceil, Ceil)
 NVFUSER_DEFINE_UNARY_OP(floor, Floor)
 NVFUSER_DEFINE_UNARY_OP(frac, Frac)
@@ -373,22 +338,6 @@ NVFUSER_DEFINE_UNARY_OP(round, Round)
 NVFUSER_DEFINE_UNARY_OP(silu, Silu)
 NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
 #undef NVFUSER_DEFINE_UNARY_OP
-
-Val* bitwise_not(Val* v) {
-  TORCH_CHECK(
-      isIntegralType(v->dtype()) || v->dtype() == DataType::Bool,
-      "input must have integral or boolean type, but got ",
-      v->dtype());
-  return unaryOp(UnaryOpType::Not, v);
-}
-
-TensorView* bitwise_not(TensorView* tv) {
-  TORCH_CHECK(
-      isIntegralType(tv->dtype()) || tv->dtype() == DataType::Bool,
-      "input must have integral or boolean type, but got ",
-      tv->dtype());
-  return unaryOp(UnaryOpType::Not, tv);
-}
 
 // The output of abs(complex_tensor) are real numbers
 Val* abs(Val* v) {
@@ -666,110 +615,19 @@ NVFUSER_DEFINE_BINARY_FLOAT_OP(atan2, Atan2)
 // Integer binary ops
 NVFUSER_DEFINE_BINARY_CAST_OP(mod, Mod)
 NVFUSER_DEFINE_BINARY_CAST_OP(ceilDiv, CeilDiv)
+
 NVFUSER_DEFINE_BINARY_CAST_OP(add, Add)
 NVFUSER_DEFINE_BINARY_CAST_OP(fmod, Fmod)
 NVFUSER_DEFINE_BINARY_CAST_OP(mul, Mul)
 NVFUSER_DEFINE_BINARY_CAST_OP(pow, Pow)
 NVFUSER_DEFINE_BINARY_CAST_OP(remainder, Remainder)
 NVFUSER_DEFINE_BINARY_CAST_OP(sub, Sub)
+NVFUSER_DEFINE_BINARY_CAST_OP(lshift, Lshift)
+NVFUSER_DEFINE_BINARY_CAST_OP(rshift, Rshift)
+NVFUSER_DEFINE_BINARY_CAST_OP(andOp, And)
+NVFUSER_DEFINE_BINARY_CAST_OP(orOp, Or)
+NVFUSER_DEFINE_BINARY_CAST_OP(xorOp, Xor)
 #undef NVFUSER_DEFINE_BINARY_CAST_OP
-
-#define NVFUSER_DEFINE_BITWISE_OP(op_name, op_type)                         \
-  Val* op_name(Val* v1, Val* v2) {                                          \
-    TORCH_CHECK(                                                            \
-        (isIntegralType(v1->dtype()) || v1->dtype() == DataType::Bool) &&   \
-            (isIntegralType(v2->dtype()) || v2->dtype() == DataType::Bool), \
-        "input must have integral or boolean type, but got ",               \
-        v1->dtype(),                                                        \
-        " and ",                                                            \
-        v2->dtype());                                                       \
-    return binaryOp(                                                        \
-        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config);   \
-  }                                                                         \
-  TensorView* op_name(TensorView* v1, Val* v2) {                            \
-    TORCH_CHECK(                                                            \
-        (isIntegralType(v1->dtype()) || v1->dtype() == DataType::Bool) &&   \
-            (isIntegralType(v2->dtype()) || v2->dtype() == DataType::Bool), \
-        "input must have integral or boolean type, but got ",               \
-        v1->dtype(),                                                        \
-        " and ",                                                            \
-        v2->dtype());                                                       \
-    return binaryOp(                                                        \
-        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config);   \
-  }                                                                         \
-  TensorView* op_name(Val* v1, TensorView* v2) {                            \
-    TORCH_CHECK(                                                            \
-        (isIntegralType(v1->dtype()) || v1->dtype() == DataType::Bool) &&   \
-            (isIntegralType(v2->dtype()) || v2->dtype() == DataType::Bool), \
-        "input must have integral or boolean type, but got ",               \
-        v1->dtype(),                                                        \
-        " and ",                                                            \
-        v2->dtype());                                                       \
-    return binaryOp(                                                        \
-        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config);   \
-  }                                                                         \
-  TensorView* op_name(TensorView* v1, TensorView* v2) {                     \
-    TORCH_CHECK(                                                            \
-        (isIntegralType(v1->dtype()) || v1->dtype() == DataType::Bool) &&   \
-            (isIntegralType(v2->dtype()) || v2->dtype() == DataType::Bool), \
-        "input must have integral or boolean type, but got ",               \
-        v1->dtype(),                                                        \
-        " and ",                                                            \
-        v2->dtype());                                                       \
-    return binaryOp(                                                        \
-        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config);   \
-  }
-
-NVFUSER_DEFINE_BITWISE_OP(bitwise_and, And)
-NVFUSER_DEFINE_BITWISE_OP(bitwise_or, Or)
-NVFUSER_DEFINE_BITWISE_OP(bitwise_xor, Xor)
-#undef NVFUSER_DEFINE_BITWISE_OP
-
-#define NVFUSER_DEFINE_BITWISE_SHIFT_OP(op_name, op_type)                 \
-  Val* op_name(Val* v1, Val* v2) {                                        \
-    TORCH_CHECK(                                                          \
-        isIntegralType(v1->dtype()) && isIntegralType(v2->dtype()),       \
-        "input must have integral type, but got ",                        \
-        v1->dtype(),                                                      \
-        " and ",                                                          \
-        v2->dtype());                                                     \
-    return binaryOp(                                                      \
-        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
-  }                                                                       \
-  TensorView* op_name(TensorView* v1, Val* v2) {                          \
-    TORCH_CHECK(                                                          \
-        isIntegralType(v1->dtype()) && isIntegralType(v2->dtype()),       \
-        "input must have integral type, but got ",                        \
-        v1->dtype(),                                                      \
-        " and ",                                                          \
-        v2->dtype());                                                     \
-    return binaryOp(                                                      \
-        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
-  }                                                                       \
-  TensorView* op_name(Val* v1, TensorView* v2) {                          \
-    TORCH_CHECK(                                                          \
-        isIntegralType(v2->dtype()) && isIntegralType(v2->dtype()),       \
-        "input must have integral type, but got ",                        \
-        v1->dtype(),                                                      \
-        " and ",                                                          \
-        v2->dtype());                                                     \
-    return binaryOp(                                                      \
-        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
-  }                                                                       \
-  TensorView* op_name(TensorView* v1, TensorView* v2) {                   \
-    TORCH_CHECK(                                                          \
-        isIntegralType(v1->dtype()) && isIntegralType(v2->dtype()),       \
-        "input must have integral type, but got ",                        \
-        v1->dtype(),                                                      \
-        " and ",                                                          \
-        v2->dtype());                                                     \
-    return binaryOp(                                                      \
-        BinaryOpType::op_type, v1, v2, TypePromotion::default_op_config); \
-  }
-
-NVFUSER_DEFINE_BITWISE_SHIFT_OP(bitwise_left_shift, Lshift)
-NVFUSER_DEFINE_BITWISE_SHIFT_OP(bitwise_right_shift, Rshift)
-#undef NVFUSER_DEFINE_BITWISE_SHIFT_OP
 
 #define NVFUSER_DEFINE_BINARY_COMPARE_OP(op_name, op_type)                   \
   Val* op_name(Val* v1, Val* v2) {                                           \
@@ -977,12 +835,9 @@ TensorView* broadcast(
   auto nBCastDims = is_broadcast_dim.size();
   // Validate is_broadcast_dim
   unsigned int n_broadcasts = 0;
-  for (auto ent : is_broadcast_dim) {
-    if (ent) {
+  for (auto ent : is_broadcast_dim)
+    if (ent)
       n_broadcasts++;
-    }
-  }
-
   TORCH_CHECK(
       nBCastDims - n_broadcasts ==
           TensorDomain::noReductions(inp->getMaybeRFactorDomain()).size(),
@@ -1103,7 +958,7 @@ WelfordResult Welford(
       init_var_val,
       init_N, /*init var/avg/count */
       tv,
-      FusionGuard::getCurFusion()->zeroVal(),
+      nullptr,
       FusionGuard::getCurFusion()->oneVal()); /*in var/avg/count */
 
   return WelfordResult(out_avg, out_var, out_N);
@@ -1120,8 +975,7 @@ WelfordResult::WelfordResult(
 
 WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
   auto o_tv = avg->definition()->as<WelfordOp>()->out()->as<TensorView>();
-  auto rf_tvs = o_tv->rFactor(axes, std::vector<TensorView*>{avg, var_sum, n});
-  return WelfordResult{rf_tvs.at(0), rf_tvs.at(1), rf_tvs.at(2)};
+  return o_tv->rFactor(axes, avg, var_sum, n);
 }
 
 TensorView* transpose(
@@ -1134,7 +988,7 @@ TensorView* transpose(
 
   for (const auto i : c10::irange(out_domain.size())) {
     auto in_id = inp_domain[new2old[i]];
-    out_domain[i] = in_id->cloneWithoutRFactor();
+    out_domain[i] = in_id->clone();
   }
 
   TensorView* out_tensor = IrBuilder::create<TensorView>(
@@ -1156,8 +1010,8 @@ Val* add_alpha(Val* v1, Val* v2, Val* s) {
 
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
-  auto cast_values = promoteValues({v1, v2, s}, common_dtype);
-  auto vals = maybeBroadcast(cast_values);
+  auto casted_values = promoteValues({v1, v2, s}, common_dtype);
+  auto vals = maybeBroadcast(casted_values);
   Val* intrm = mul(vals[1], vals[2]);
   return add(vals[0], intrm);
 }
@@ -1179,8 +1033,8 @@ Val* sub_alpha(Val* v1, Val* v2, Val* s) {
 
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
-  auto cast_values = promoteValues({v1, v2, s}, common_dtype);
-  auto vals = maybeBroadcast(cast_values);
+  auto casted_values = promoteValues({v1, v2, s}, common_dtype);
+  auto vals = maybeBroadcast(casted_values);
   Val* intrm = mul(vals[1], vals[2]);
   return sub(vals[0], intrm);
 }
@@ -1248,8 +1102,8 @@ Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s) {
 
   std::vector<Val*> operands = {v1, v2, v3};
   auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
-  auto cast_values = promoteValues({v1, v2, v3, s}, common_dtype);
-  auto vals = maybeBroadcast(cast_values);
+  auto casted_values = promoteValues({v1, v2, v3, s}, common_dtype);
+  auto vals = maybeBroadcast(casted_values);
   Val* intrm1 = mul(vals[2], vals[3]);
   Val* intrm2 = mul(vals[1], intrm1);
   return add(vals[0], intrm2);
@@ -1527,7 +1381,7 @@ TensorView* shift(
     const auto pad = pad_width[i];
 
     if (offset == 0) {
-      out_dom.push_back(inp_axis->cloneWithoutRFactor());
+      out_dom.push_back(inp_axis->clone());
       continue;
     }
 
@@ -1753,43 +1607,6 @@ TensorView* gather(
 
   IrBuilder::create<GatherOp>(out_tv, inp, window_shape, pad_width);
   return out_tv;
-}
-
-TORCH_CUDA_CU_API TensorView* viewAsScalar(TensorView* inp) {
-  auto inp_type = inp->getDataType().value();
-  TORCH_CHECK(
-      isVectorType(inp_type),
-      "Invalid type to viewAsScalar. A vector type is expected but ",
-      inp_type,
-      " is given.");
-  int vec_size = getVectorSizeFromType(inp_type);
-  auto out_type = getTypeFromVectorType(inp_type);
-
-  std::vector<IterDomain*> out_domain;
-  auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
-  out_domain.reserve(inp_domain.size());
-  for (auto d : inp_domain) {
-    out_domain.push_back(d->cloneWithoutRFactor());
-  }
-
-  IterDomain* id = IrBuilder::create<IterDomain>(
-      inp_domain[0]->container(),
-      inp_domain[0]->container()->zeroVal(),
-      IrBuilder::create<Int>(vec_size),
-      ParallelType::Serial,
-      IterType::VectorComponent,
-      false);
-  out_domain.push_back(id);
-
-  auto out = IrBuilder::create<TensorView>(
-      inp->container(),
-      IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
-      out_type);
-
-  IrBuilder::create<ViewAsScalar>(inp->container(), out, inp, id);
-
-  return out;
 }
 
 namespace {

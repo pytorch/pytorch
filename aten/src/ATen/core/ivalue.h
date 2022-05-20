@@ -750,17 +750,15 @@ public:
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
   IValue(const at::Scalar& s) : IValue() {
     if (s.isFloatingPoint()) {
-      tag = Tag::Double;
-      payload.u.as_double = s.toDouble();
+      *this = s.toDouble();
     } else if (s.isComplex()) {
       *this = s.toComplexDouble();
     } else if (s.isBoolean()) {
-      tag = Tag::Bool;
-      payload.u.as_bool = s.toBool();
+      *this = s.toBool();
+    } else if (s.isIntegral(false)) {
+      *this = s.toLong();
     } else {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(s.isIntegral(false), "Unknown type in Scalar");
-      tag  = Tag::Int;
-      payload.u.as_int = s.toLong();
+      TORCH_CHECK(false, "Unknown type in Scalar");
     }
   }
 

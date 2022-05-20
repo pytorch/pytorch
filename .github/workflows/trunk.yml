@@ -128,6 +128,7 @@ jobs:
         ]}
 
   ios-12-5-1-x86-64:
+    if: ${{ false }}
     name: ios-12-5-1-x86-64
     uses: ./.github/workflows/_ios-build-test.yml
     with:
@@ -158,8 +159,8 @@ jobs:
     uses: ./.github/workflows/_mac-build.yml
     with:
       build-environment: macos-11-py3-x86-64
-      xcode-version: "13.3.1"
-      runner-type: macos-12
+      xcode-version: "12.4"
+      runner-type: macos-11
       build-generates-artifacts: true
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
@@ -173,8 +174,8 @@ jobs:
       build-environment: macos-11-py3-x86-64
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "macos-12", xcode-version: "13.3.1" },
-          { config: "default", shard: 2, num_shards: 2, runner: "macos-12", xcode-version: "13.3.1" },
+          { config: "default", shard: 1, num_shards: 2, runner: "macos-11" },
+          { config: "default", shard: 2, num_shards: 2, runner: "macos-11" },
         ]}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
@@ -197,8 +198,7 @@ jobs:
     uses: ./.github/workflows/_mac-build.yml
     with:
       build-environment: macos-10-15-py3-arm64
-      xcode-version: "13.3.1"
-      runner-type: macos-12
+      runner-type: macos-10.15
       build-generates-artifacts: false
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}

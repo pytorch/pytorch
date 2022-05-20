@@ -9,18 +9,16 @@ from test_pytorch_common import (
     skipIfUnsupportedMinOpsetVersion,
     skipScriptTest,
 )
-
-# TODO(justinchuby): Remove reference to other unit tests.
 from test_pytorch_onnx_onnxruntime import TestONNXRuntime
 
 import torch
 from torch.cuda.amp import autocast
-from torch.onnx._globals import GLOBALS
 
 
 class TestONNXRuntime_cuda(unittest.TestCase):
+    from torch.onnx.symbolic_helper import _export_onnx_opset_version
 
-    opset_version = GLOBALS.export_onnx_opset_version
+    opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True
     onnx_shape_inference = True
 

@@ -9,7 +9,7 @@
 
 #include <cuda_runtime.h>
 
-#include <benchmarks/cpp/nvfuser/utils.h>
+#include "utils.h"
 
 using namespace torch::jit::fuser::cuda;
 

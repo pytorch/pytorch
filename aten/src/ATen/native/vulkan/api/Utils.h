@@ -1,5 +1,4 @@
 #pragma once
-#include <c10/util/Half.h>  // For c10::overflows
 
 #ifdef USE_VULKAN_API
 
@@ -42,7 +41,10 @@ namespace detail {
 
 template <typename To, typename From>
 inline constexpr To safe_downcast(const From v) {
-  TORCH_CHECK(!c10::overflows<To>(v), "Cast failed: out of range!");
+  typedef std::common_type_t<From, To> Type;
+  constexpr Type min{static_cast<Type>(std::numeric_limits<To>::lowest())};
+  constexpr Type max{static_cast<Type>(std::numeric_limits<To>::max())};
+  TORCH_CHECK(min <= v && v <= max, "Cast failed: out of range!");
   return static_cast<To>(v);
 }
 

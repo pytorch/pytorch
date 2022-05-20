@@ -10,8 +10,5 @@ TORCH_API const std::string& GetSerializedShapeFunctions();
 
 TORCH_API const OperatorMap<std::string>& GetShapeFunctionMappings();
 
-TORCH_API const OperatorMap<std::pair<std::string, std::string>>&
-GetBoundedShapeMappings();
-
 } // namespace jit
 } // namespace torch

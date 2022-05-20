@@ -1,9 +1,7 @@
 if(USE_CUDA)
   add_executable(nvfuser_bench
-    batch_norm_channels_first.cpp
-    batch_norm_channels_first_backward.cpp
-    batch_norm_channels_last.cpp
-    batch_norm_channels_last_backward.cpp
+    batch_norm.cpp
+    batch_norm_backward.cpp
     bert.cpp
     broadcast.cpp
     gelu_backward.cpp
@@ -19,8 +17,6 @@ if(USE_CUDA)
     softmax.cpp
     softmax_backward.cpp
     scale_bias_relu.cpp
-    transpose.cpp
-    timm.cpp
     utils.cpp
     main.cpp)
 

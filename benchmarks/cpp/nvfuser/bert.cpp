@@ -15,7 +15,7 @@
 
 #include <sstream>
 
-#include <benchmarks/cpp/nvfuser/utils.h>
+#include "utils.h"
 
 using namespace torch::jit::fuser::cuda;
 

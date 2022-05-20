@@ -201,26 +201,16 @@ TORCH_META_FUNC2(prod, dim_int)
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
+void check_floating_or_complex_dtype(const char* name, ScalarType dtype) {
+  TORCH_CHECK(
+      at::isFloatingType(dtype) || at::isComplexType(dtype),
+      name, "(): input dtype should be either floating point or complex dtypes. "
+      "Got ", toString(dtype), " instead.");
+}
+
 TORCH_META_FUNC2(mean, dim)
 (const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto in_dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
-
-  if (!at::isFloatingType(in_dtype) && !at::isComplexType(in_dtype)) {
-    std::string what = "Input";
-    std::string dtype = toString(self.scalar_type());
-
-    if (opt_dtype.has_value()) {
-      what = "Optional";
-      dtype = toString(opt_dtype.value());
-    }
-
-    TORCH_CHECK(
-        false,
-        "mean(): could not infer output dtype. ",
-        what, " dtype must be either a floating point or complex dtype. ",
-        "Got: ", dtype);
-  }
-
+  check_floating_or_complex_dtype("mean", self.scalar_type());
   auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
@@ -236,13 +226,11 @@ ScalarType get_result_or_self_value_dtype(
   }
 }
 
+
+
 TORCH_META_FUNC2(norm, ScalarOpt_dim)
 (const Tensor& self, const OptionalScalarRef p, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(
-      at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-      "norm(): input dtype should be either floating point or complex. "
-      "Got ", self.scalar_type(), " instead.");
-
+  check_floating_or_complex_dtype("norm", self.scalar_type());
   auto out_dtype = get_result_or_self_value_dtype(self, maybe_get_output(), c10::nullopt);
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
@@ -253,11 +241,7 @@ TORCH_META_FUNC2(norm, ScalarOpt_dim_dtype)
  IntArrayRef dim,
  bool keepdim,
  ScalarType dtype) {
-  TORCH_CHECK(
-      at::isFloatingType(dtype) || at::isComplexType(dtype),
-      "norm(): the desired output dtype should be either floating point or complex. "
-      "Got ", dtype, " instead.");
-
+  check_floating_or_complex_dtype("norm", dtype);
   auto out_dtype = get_result_or_self_value_dtype(self, maybe_get_output(), dtype);
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
@@ -1303,29 +1287,22 @@ Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor
               result.scalar_type());
   {
     NoNamesGuard guard;
-    if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-      // for integral inputs, promote input to default floating type.
-      auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
-      logsumexp_out_impl(result, self.to(default_dtype), dims, keepdim);
-    } else {
-      logsumexp_out_impl(result, self, dims, keepdim);
-    }
+    logsumexp_out_impl(result, self, dims, keepdim);
   }
   namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
   return result;
 }
 
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  TensorOptions result_options;
+  Tensor result;
+  auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
   if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    // even for integral inputs, result is floating dtype
-    auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
-    result_options = self.options().dtype(default_dtype);
+    result = at::empty({0}, self.options().dtype(default_dtype));
+    return at::native::logsumexp_out(self.to(default_dtype), dims, keepdim, result);
   } else {
-    result_options = self.options();
+    result = at::empty({0}, self.options());
+    return at::native::logsumexp_out(self, dims, keepdim, result);
   }
-  auto result = at::empty({0}, result_options);
-  return at::native::logsumexp_out(self, dims, keepdim, result);
 }
 
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {

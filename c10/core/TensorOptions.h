@@ -683,9 +683,6 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::Meta;
         case DeviceType::HPU:
           return DispatchKey::HPU;
-        case DeviceType::PrivateUse1: {
-          return DispatchKey::PrivateUse1;
-        }
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
@@ -812,8 +809,6 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
       return DeviceType::HPU;
     case DispatchKey::ORT:
       return DeviceType::ORT;
-    case DispatchKey::PrivateUse1:
-      return DeviceType::PrivateUse1;
     default:
       TORCH_CHECK(
           false,

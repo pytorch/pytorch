@@ -96,7 +96,6 @@ Indexing, Slicing, Joining, Mutating Ops
     hstack
     index_add
     index_copy
-    index_reduce
     index_select
     masked_select
     movedim

@@ -708,9 +708,8 @@ TensorDomain* createViewDomain(
   TORCH_INTERNAL_ASSERT(!view_transforms.empty());
 
   std::vector<IterDomain*> new_root_domain;
-  for (auto id :
-       TensorDomain::noReductions(original_domain->getMaybeRFactorDomain())) {
-    new_root_domain.push_back(id->cloneWithoutRFactor());
+  for (auto id : TensorDomain::noReductions(original_domain->getRootDomain())) {
+    new_root_domain.push_back(id->clone());
   }
 
   std::vector<IterDomain*> rfactor_domain;

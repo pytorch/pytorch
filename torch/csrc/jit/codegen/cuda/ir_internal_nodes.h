@@ -152,8 +152,7 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
       Val* init,
       Val* out,
       Val* in,
-      bool is_allreduce = false,
-      ExprType expr_type = ExprType::ReductionOp);
+      bool is_fused = false);
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
 
@@ -171,8 +170,8 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
     return reduction_op_type_;
   }
 
-  bool isAllreduce() const {
-    return is_allreduce_;
+  bool isFused() const {
+    return is_fused_;
   }
 
   bool sameAs(const Statement* other) const override;
@@ -182,60 +181,8 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
   Val* const init_ = nullptr;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
-  //! True if broadcast is fused
-  bool is_allreduce_ = false;
-};
-
-//! Grouped reduction operation for horizontal fusions. It works like
-//! batched GEMMs in the sense that multiple independent reductions are
-//! performed together. The main benefit is when reducing tensors across thread
-//! blocks, a single grid sync can be done for all individual
-//! reductions. As grid sync is very expensive, this can be a
-//! significant performance impact.
-class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
- public:
-  GroupedReductionOp(
-      IrBuilderPasskey,
-      std::vector<BinaryOpType> reduction_op_type,
-      std::vector<Val*> init,
-      std::vector<Val*> out,
-      std::vector<Val*> in,
-      bool is_allreduce = false,
-      ExprType expr_type = ExprType::GroupedReductionOp);
-
-  GroupedReductionOp(const GroupedReductionOp* src, IrCloner* ir_cloner);
-
-  size_t numReductions() const {
-    return reduction_op_types_.size();
-  }
-
-  const std::vector<Val*>& initVals() const {
-    return init_vals_;
-  }
-
-  Val* initVal(size_t index) const {
-    return init_vals_.at(index);
-  }
-
-  const std::vector<BinaryOpType>& getReductionOpTypes() const {
-    return reduction_op_types_;
-  }
-
-  BinaryOpType getReductionOpType(size_t index) const {
-    return reduction_op_types_.at(index);
-  }
-
-  bool isAllreduce() const {
-    return is_allreduce_;
-  }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  const std::vector<BinaryOpType> reduction_op_types_;
-  const std::vector<Val*> init_vals_;
   //! True if using the fused reduction kernel
-  bool is_allreduce_ = false;
+  bool is_fused_ = false;
 };
 
 //! Welford Scan operation.
@@ -312,11 +259,9 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
     return !init_N_->isZeroInt();
   }
 
-  bool isAllreduce() const {
-    return is_allreduce_;
+  bool isFused() const {
+    return is_fused_;
   }
-
-  std::vector<Val*> getInitVals() const;
 
  private:
   Val* const out_avg_;
@@ -329,7 +274,7 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
   Val* const in_var_;
   Val* const in_N_;
   //! True if using the fused reduction kernel (not implemented yet)
-  bool is_allreduce_ = false;
+  bool is_fused_ = false;
 };
 
 //! Fused Matmul operation
@@ -554,42 +499,32 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
   std::vector<std::vector<int>> pad_width_;
 };
 
-class TORCH_CUDA_CU_API ViewAsScalar : public Expr {
+class TORCH_CUDA_CU_API ViewDtypeOp : public Expr {
  public:
-  ViewAsScalar(
+  ViewDtypeOp(
       IrBuilderPasskey,
-      Val* out,
-      Val* in,
-      IterDomain* vector_id,
-      Val* index = nullptr);
+      TensorView* out,
+      TensorView* in,
+      DataType dtype);
 
-  ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner);
+  ViewDtypeOp(const ViewDtypeOp* src, IrCloner* ir_cloner);
 
-  Val* out() const {
+  TensorView* out() const {
     return out_;
   }
 
-  Val* in() const {
+  TensorView* in() const {
     return in_;
   }
 
-  IterDomain* vector_id() const {
-    return vector_id_;
-  }
-
-  Val* index() const {
-    return index_;
+  DataType dtype() const {
+    return dtype_;
   }
 
  private:
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
-
-  // The IterDomain of type VectorComponent newly appended to the output
-  IterDomain* vector_id_ = nullptr;
-
-  // The index that vector_id_ is lowered into
-  Val* index_ = nullptr;
+  TensorView* const out_ = nullptr;
+  TensorView* const in_ = nullptr;
+  DataType dtype_;
 };
 
 class TORCH_CUDA_CU_API ViewOp : public Expr {
@@ -627,12 +562,8 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       Val* extent,
       ParallelType parallel_type = ParallelType::Serial,
       IterType iter_type = IterType::Iteration,
-      bool is_rfactor_domain = false,
-      bool is_padded_dimension = false,
-      c10::optional<int64_t> padded_to_size_ = c10::nullopt,
-      bool is_mma_swizzled = false);
+      bool is_rfactor_domain = false);
 
-  // Same as the above but can set the offset of the stop point
   IterDomain(
       IrBuilderPasskey,
       Val* start,
@@ -640,19 +571,14 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       Val* stop_offset,
       ParallelType parallel_type = ParallelType::Serial,
       IterType iter_type = IterType::Iteration,
-      bool is_rfactor_domain = false,
-      bool is_padded_dimension = false,
-      c10::optional<int64_t> padded_to_size_ = c10::nullopt,
-      bool is_mma_swizzled = false);
+      bool is_rfactor_domain = false);
 
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
   bool sameAs(const Statement* other) const override;
 
-  //! Returns a new IterDomain matching properties of this
-  //!
-  //! This does NOT copy the is_rfactor_domain flag.
-  IterDomain* cloneWithoutRFactor() const;
+  // Returns a new IterDomain matching properties of this
+  IterDomain* clone() const;
 
   //! Clone a vector domains
   static std::vector<IterDomain*> clone(
@@ -700,10 +626,6 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 
   bool isStride() const {
     return getIterType() == IterType::Stride;
-  }
-
-  bool isVectorComponent() const {
-    return getIterType() == IterType::VectorComponent;
   }
 
   bool isParallelized() const {
@@ -985,10 +907,6 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   bool hasGridBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
-
-  // Returns if rfactor domain only consists of id's of iter type.
-  bool hasViewLikeRFactor() const;
-
   bool hasVectorize() const;
 
   c10::optional<unsigned int> getReductionAxis() const;
@@ -1054,8 +972,6 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   // Transform TensorView according to merge and split transformations
   TensorDomain* view(
       const std::vector<std::shared_ptr<ViewTransform>>& transforms);
-
-  TensorDomain* flatten(int64_t start_dim, int64_t end_dim);
 
   static std::vector<IterDomain*> orderedAs(
       const std::vector<IterDomain*>& td,

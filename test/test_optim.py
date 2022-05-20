@@ -746,20 +746,15 @@ class TestOptim(TestCase):
     def test_adamax(self):
         for optimizer in [optim.Adamax, optim_mt.Adamax]:
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
-                    [weight, bias], lr=1e-1, maximize=maximize),
-                constructor_accepts_maximize=True
+                lambda weight, bias: optimizer([weight, bias], lr=1e-1)
             )
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
+                lambda weight, bias: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1, maximize=maximize),
-                constructor_accepts_maximize=True
+                    lr=1e-1)
             )
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
-                    [weight, bias], lr=1e-1, weight_decay=1, maximize=maximize),
-                constructor_accepts_maximize=True
+                lambda weight, bias: optimizer([weight, bias], lr=1e-1, weight_decay=1)
             )
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))

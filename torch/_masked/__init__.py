@@ -25,7 +25,6 @@ __all__ = []
 # to docstrings of reduction/normalization functions via
 # _apply_docstring_templates decorator.
 
-
 def _apply_docstring_templates(func):
     """Decorator that applies docstring templates to function docstring
     and returns the function instance.
@@ -162,14 +161,11 @@ Example::
         # be removed in the final documentation string.
         sum=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         prod=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
-        cumsum=(('dim__as_int',), ('dtype=None', 'mask=None')),
-        cumprod=(('dim__as_int',), ('dtype=None', 'mask=None')),
         amin=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         amax=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         argmin=(('dim__as_int',), ('keepdim=False', 'dtype=None', 'mask=None')),
         argmax=(('dim__as_int',), ('keepdim=False', 'dtype=None', 'mask=None')),
         mean=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
-        median=(('dim__as_int',), ('keepdim=False', 'dtype=None', 'mask=None')),
         norm=(('ord', 'dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         var=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
         std=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
@@ -226,15 +222,7 @@ defined as ``exp(-x[i])/sum(exp(-x))``.''',
         normalize='''\
 Let ``x`` be a sequence of unmasked elements of one-dimensional slice
 of the :attr:`input` tensor. Normalize of i-th element in ``x`` is
-defined as ``x[i]/max(norm(x, p), eps)``.''',
-        cumsum='''\
-Let ``x`` be a sequence of unmasked elements of one-dimensional slice
-of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
-defined as ``sum(x[:i])``.''',
-        cumprod='''\
-Let ``x`` be a sequence of unmasked elements of one-dimensional slice
-of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
-defined as ``prod(x[:i])``.''')
+defined as ``x[i]/max(norm(x, p), eps)``.''')
 
     reduction_names = dict(
         sum='sum',
@@ -244,7 +232,6 @@ defined as ``prod(x[:i])``.''')
         argmax='argmax',
         argmin='argmin',
         mean='mean',
-        median='median',
         norm='norm',
         var='variance',
         std='standard_deviation')
@@ -253,9 +240,7 @@ defined as ``prod(x[:i])``.''')
         softmax='softmax',
         log_softmax='log_softmax',
         softmin='softmin',
-        normalize='normalize',
-        cumsum='cumulative_sum',
-        cumprod='cumulative_prod')
+        normalize='normalize')
 
     operation_names = dict()
     operation_names.update(reduction_names)
@@ -271,9 +256,6 @@ defined as ``prod(x[:i])``.''')
         example_input = example_input.to(dtype=torch.float32)
     elif func.__name__ in {'var', 'std'}:
         example_args = (example_dim, False)
-    elif func.__name__ == 'median':
-        example_args = (example_dim,)
-        example_input = example_input.to(dtype=torch.float32)
     else:
         example_args = (example_dim,)
 
@@ -363,9 +345,9 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
     dtype: DType = input.dtype
     device = input.device
     op_name = op_name.rsplit('.', 1)[-1]  # lstrip module name when present
-    if op_name in {'sum', 'cumsum'}:
+    if op_name == 'sum':
         return torch.tensor(0, dtype=dtype, device=device)
-    elif op_name in {'prod', 'cumprod'}:
+    elif op_name == 'prod':
         return torch.tensor(1, dtype=dtype, device=device)
     elif op_name in {'amax', 'argmax'}:
         if torch.is_floating_point(input):
@@ -390,11 +372,6 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
             assert torch.is_floating_point(input), input.dtype
             return torch.tensor(torch.inf, dtype=dtype, device=device)
         return torch.tensor(0, dtype=dtype, device=device)
-    elif op_name == 'median':
-        # We use NaN for now because the implementation is currently using torch.nanmedian
-        # and NaN is the identity for that function since it gets ignored
-        dtype = input.dtype if torch.is_floating_point(input) else torch.float
-        return torch.tensor(torch.nan, dtype=dtype, device=device)
     elif op_name in {'var', 'std'}:
         return None
     raise NotImplementedError(f'identity of {op_name} on {dtype} input')
@@ -762,9 +739,8 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """Return output mask of masked operation applied to given arguments.
     """
     if callable(op):
-        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin',
-                                       'argmax', 'argmin', 'mean', 'median', 'norm', 'var', 'std'}
-        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize', 'cumsum', 'cumprod'}
+        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'argmax', 'argmin', 'mean', 'norm', 'var', 'std'}
+        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
         if is_reduction:
             if op.__name__ == 'norm':
                 if args:
@@ -879,38 +855,6 @@ def prod(input: Tensor,
         return torch._sparse_csr_prod(mask_input, dim=list(dim_), keepdim=bool(keepdim), dtype=dtype)
     else:
         raise ValueError(f'masked prod expects strided, sparse_coo or sparse_csr tensor (got {input.layout} tensor)')
-
-
-@_apply_docstring_templates
-def cumsum(input: Tensor,
-           dim: int,
-           *,
-           dtype: Optional[DType] = None,
-           mask: Optional[Tensor] = None) -> Tensor:
-    if dtype is None:
-        dtype = input.dtype
-    dim_ = _canonical_dim(dim, input.ndim)[0]
-    mask_input = _combine_input_and_mask(sum, input, mask)
-    if input.layout == torch.strided:
-        return torch.cumsum(mask_input, dim_, dtype=dtype).to(dtype=dtype)
-    else:
-        raise ValueError(f'masked cumsum expects strided tensor (got {input.layout} tensor)')
-
-
-@_apply_docstring_templates
-def cumprod(input: Tensor,
-            dim: int,
-            *,
-            dtype: Optional[DType] = None,
-            mask: Optional[Tensor] = None) -> Tensor:
-    if dtype is None:
-        dtype = input.dtype
-    dim_ = _canonical_dim(dim, input.ndim)[0]
-    mask_input = _combine_input_and_mask(prod, input, mask)
-    if input.layout == torch.strided:
-        return torch.cumprod(mask_input, dim_, dtype=dtype).to(dtype=dtype)
-    else:
-        raise ValueError(f'masked cumprod expects strided tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
@@ -1061,45 +1005,6 @@ elements, have ``nan`` values.
         return total / count
     else:
         raise ValueError(f'masked sum expects strided tensor (got {input.layout} tensor)')
-
-
-
-@_apply_docstring_templates
-def median(input: Tensor,
-           dim: int = -1,
-           *,
-           keepdim: bool = False,
-           dtype: Optional[DType] = None,
-           mask: Optional[Tensor] = None) -> Tensor:
-
-    """\
-{reduction_signature}
-{reduction_descr}
-By definition, the identity value of a median operation is the median
-value of the tensor. If all elements of the input tensor along given
-dimension(s) :attr:`dim` are masked-out, the identity value of the
-median is undefined.  Due to this ambiguity, the elements of output
-tensor with strided layout, that correspond to fully masked-out
-elements, have ``nan`` values.
-{reduction_args}
-{reduction_example}"""
-    if dtype is None:
-        dtype = input.dtype
-    dim_ = _canonical_dim(dim, input.ndim)[0]
-    is_float = torch.is_floating_point(input)
-    if not is_float:
-        input = input.to(dtype=torch.float)
-    mask_input = _combine_input_and_mask(median, input, mask)
-    if input.layout == torch.strided:
-        output = torch.nanmedian(mask_input, dim_, keepdim).values
-        if is_float:
-            return output
-        elif not is_float and not torch.isnan(output).any():
-            return output.to(dtype=dtype)
-        else:
-            raise ValueError("masked median expects no fully masked out rows if dtype is not floating point")
-    else:
-        raise ValueError(f'masked median expects strided tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates

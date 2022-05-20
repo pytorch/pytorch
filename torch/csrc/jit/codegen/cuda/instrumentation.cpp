@@ -32,7 +32,7 @@ Trace::Trace() {
     logEvent('I', "TRACE_START");
   }
 
-  if (isDisabled(DisableOption::Nvtx)) {
+  if (getenv("PYTORCH_NVFUSER_DISABLE_NVTX")) {
     record_nvtx_range_ = false;
   }
 }

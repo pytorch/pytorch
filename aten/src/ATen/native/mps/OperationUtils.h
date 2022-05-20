@@ -62,8 +62,7 @@ class Placeholder {
  public:
   Placeholder() : _placeholder(nullptr), _value(nullptr) {}
   Placeholder(MPSGraphTensor* mpsGraphTensor) : _placeholder(mpsGraphTensor), _value(nullptr) {}
-  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr,
-              bool check_view = true);
+  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr);
   MPSGraphTensor* getMPSGraphTensor() {
     return _placeholder;
   }
@@ -92,7 +91,6 @@ MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType data
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor);
 MPSGraphTensor* mpsGraphConstantFloatPlaceHolder(MPSGraph *mpsGraph, const double value, MPSShape* mpsShape);
-MPSGraphTensor* mpsGraphConstantPlaceHolder(MPSGraph *mpsGraph, const double value, MPSShape* mpsShape, MPSDataType dataType);
 
 string get_mem_format_string(c10::MemoryFormat memory_format);
 

@@ -189,6 +189,7 @@ Tensor quantized_max_pool2d_cudnn(
       stride[0], // vertical stride
       stride[1])); // horizontal stride
 
+  auto dataType = getCudnnDataType(input);
   float one{1};
   float zero{0.0};
   TensorDescriptor xDesc;

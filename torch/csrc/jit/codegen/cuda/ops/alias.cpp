@@ -58,15 +58,25 @@ TensorView* view(TensorView* x, DataType dtype) {
     return x;
   }
 
-  auto input_type = x->getDataType().value();
-  auto input_size = dataTypeSize(input_type);
-  auto newsize = dataTypeSize(dtype);
+  // TODO: support view(dtype) for dtypes of different size.
+  TORCH_INTERNAL_ASSERT(
+      dataTypeSize(x->getDataType().value()) == dataTypeSize(dtype),
+      "Currently, aten::view only supports viewing the data as a type with the same size.");
 
-  if (input_size == newsize) {
-    return bitCastOp(dtype, x);
+  std::vector<IterDomain*> out_domain;
+  auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
+  out_domain.reserve(inp_domain.size());
+  for (auto d : inp_domain) {
+    out_domain.push_back(d->clone());
   }
-  // TODO: support view(dtype) for dtypes where input_size != newsize
-  TORCH_INTERNAL_ASSERT(false, "Unsupported reinterpret casting view");
+  auto out = IrBuilder::create<TensorView>(
+      x->container(),
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
+      dtype);
+
+  IrBuilder::create<ViewDtypeOp>(x->container(), out, x, dtype);
+  return out;
 }
 
 TensorView* view(
@@ -95,43 +105,8 @@ TensorView* view(
       : view;
 }
 
-TensorView* flatten(TensorView* x, int64_t start_dim, int64_t end_dim) {
-  if (start_dim < 0) {
-    start_dim += x->nDims();
-  }
-  if (end_dim < 0) {
-    end_dim += x->nDims();
-  }
-  TORCH_CHECK(
-      start_dim >= 0 && start_dim < x->nDims(),
-      "Invalid start_dim ",
-      start_dim);
-  TORCH_CHECK(
-      end_dim >= 0 && end_dim < x->nDims(), "Invalid end_dim ", end_dim);
-  TORCH_CHECK(start_dim <= end_dim, "start_dim must be <= end_dim");
-
-  if (start_dim == end_dim) {
-    return x;
-  }
-
-  auto out = IrBuilder::create<TensorView>(
-      x->container(),
-      x->domain()->flatten(start_dim, end_dim),
-      x->getDataType().value());
-
-  IrBuilder::create<ViewOp>(out, x);
-  return out;
-}
-
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
-  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
-
-  TORCH_INTERNAL_ASSERT(
-      ndims == sizes.size(),
-      "Invalid sizes for squeeze: ",
-      sizes,
-      ". Input tensor: ",
-      x->toString());
+  TORCH_INTERNAL_ASSERT(x->nDims() == sizes.size());
 
   std::vector<int> trivial_reduction_axes;
   for (const auto idx : c10::irange(sizes.size())) {
@@ -147,27 +122,11 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
-  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
-
-  TORCH_INTERNAL_ASSERT(
-      ndims == sizes.size(),
-      "Invalid sizes for squeeze: ",
-      sizes,
-      ". Input tensor: ",
-      x->toString());
-
+  TORCH_INTERNAL_ASSERT(x->nDims() == sizes.size());
   if (dim < 0) {
-    dim = ndims + dim;
+    dim = (int)(x->nDims()) + dim;
   }
-
-  TORCH_INTERNAL_ASSERT(
-      dim >= 0 && dim < ndims,
-      "Invalid position to squeeze: ",
-      dim,
-      ". Input tensor: ",
-      x->toString());
-
-  if (sizes[dim] == 1) {
+  if (dim >= 0 && dim < x->nDims() && sizes[dim] == 1) {
     return sum(x, {dim}, false /* keep_dim */, x->getDataType().value());
   } else {
     return set(x);
@@ -175,20 +134,12 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
 }
 
 TensorView* unsqueeze(TensorView* x, int dim) {
-  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
-
   if (dim < 0) {
-    dim = ndims + dim + 1;
+    dim = (int)(x->nDims()) + dim + 1;
   }
+  TORCH_INTERNAL_ASSERT(dim >= 0 && dim <= x->nDims());
 
-  TORCH_INTERNAL_ASSERT(
-      dim >= 0 && dim <= ndims,
-      "Invalid position to unsqueeze: ",
-      dim,
-      ". Input tensor: ",
-      x->toString());
-
-  std::vector<bool> broadcast_axes(ndims + 1, false);
+  std::vector<bool> broadcast_axes(x->nDims() + 1, false);
   broadcast_axes[dim] = true;
   return broadcast(x, broadcast_axes);
 }

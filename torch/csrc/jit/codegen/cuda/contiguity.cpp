@@ -11,16 +11,8 @@ namespace cuda {
 ContigIDs::ContigIDs(
     const std::vector<IterDomain*>& ids,
     const std::vector<IterDomain*>& root_domain,
-    const std::vector<bool>& root_contiguity,
-    std::unordered_map<IterDomain*, IterDomain*> concrete_to_ref,
-    std::unordered_map<IterDomain*, IterDomain*> p2c_id_map,
-    bool ignore_halo_constraint,
-    bool ignore_indexability)
-    : root_domain_(root_domain),
-      root_contiguity_(root_contiguity),
-      concrete_to_ref_(std::move(concrete_to_ref)),
-      p2c_id_map_(std::move(p2c_id_map)),
-      ignore_indexability_(ignore_indexability) {
+    const std::vector<bool>& root_contiguity)
+    : root_domain_(root_domain), root_contiguity_(root_contiguity) {
   if (ids.empty()) {
     return;
   }
@@ -32,38 +24,34 @@ ContigIDs::ContigIDs(
       " != ",
       root_contiguity_.size());
 
-  // GpuLower is required to honor halo constraints
-  if (!ignore_halo_constraint) {
-    TORCH_INTERNAL_ASSERT(GpuLower::hasCurrent(), "GpuLower not found");
-  }
+  TORCH_INTERNAL_ASSERT(
+      GpuLower::current() != nullptr, "GpuLower is not found");
 
   for (const auto i : c10::irange(root_domain_.size())) {
     auto root_domain_i = root_domain_[i]->as<IterDomain>();
-    root_to_indexed_id_[root_domain_i] = root_domain_i;
-    // Initialize to false
-    is_contig_root_[root_domain_i] = false;
     // If a root domain has halo, can't use merged domain even if
     // both inputs are contiguous. HaloInfo is also initialized for
     // rfactor root domains, which should just return "zero"
     // RootAxisInfo. This should be safe as no rfactor tensor should
     // need halo.
     if (root_contiguity_[i] &&
-        (ignore_halo_constraint ||
-         !GpuLower::current()
-              ->haloInfo()
-              .getRootAxisInfo(root_domain_i)
-              .hasHalo())) {
+        !GpuLower::current()
+             ->haloInfo()
+             .getRootAxisInfo(root_domain_i)
+             .hasHalo()) {
       contig_ids_.emplace(root_domain_i);
       is_contig_root_[root_domain_i] = true;
       within_contig_ids_[root_domain_i] = std::unordered_set<IterDomain*>();
+    } else {
+      is_contig_root_[root_domain_i] = false;
     }
+    root_to_indexed_id_[root_domain_i] = root_domain_i;
   }
 
-  if (!contig_ids_.empty()) {
-    auto exprs = StmtSort::getExprs(ids[0]->fusion(), {ids.begin(), ids.end()});
-    for (auto expr : exprs) {
-      handle(expr);
-    }
+  auto exprs = StmtSort::getExprs(ids[0]->fusion(), {ids.begin(), ids.end()});
+
+  for (auto expr : exprs) {
+    handle(expr);
   }
 }
 
@@ -71,14 +59,8 @@ void ContigIDs::handle(Merge* merge) {
   // If either input is non-contiguous so is output.
   const auto inner = merge->inner();
   const auto outer = merge->outer();
-  const auto out = merge->out();
 
   if (!isContig(inner) || !isContig(outer)) {
-    return;
-  }
-
-  // Stop contig merging if the merge output is not indexable.
-  if (!ignore_indexability_ && !isIndexable(out)) {
     return;
   }
 
@@ -101,12 +83,8 @@ void ContigIDs::handle(Merge* merge) {
   // If any root input is not contig, output is not contig
   if (!(std::all_of(
           ordered_inputs.begin(), ordered_inputs.end(), [this](IterDomain* id) {
-            // Allow reduction tensors in contiguity check since we're using
-            // this to check contiguous vectors of reference tensors in
-            // schedulers (to set vectorization sizes), those reference tensors
-            // may have reduction dims, don't bail on contiguity just because
-            // it's a reduction dimension.
-            return is_contig_root_.at(id);
+            return is_contig_root_.at(id) && !id->isBroadcast() &&
+                !id->isReduction();
           }))) {
     return;
   }
@@ -127,12 +105,13 @@ void ContigIDs::handle(Merge* merge) {
     if (root_copy.front() == ordered_inputs.front()) {
       root_copy.pop_front();
       ordered_inputs.pop_front();
-    } else if (
-        root_copy.front()->isReduction() || root_copy.front()->isBroadcast()) {
-      // This was a cause of an error with
-      // ReductionSchedulerMultiDimNonFastest. The test no longer
-      // fails.
-      root_copy.pop_front();
+      // This is no longer causing an error in:
+      // ReductionSchedulerMultiDimNonFastest TODO: test reenablement to make
+      // sure it does what's expected
+      //  } else if (
+      //     root_copy.front()->isReduction() ||
+      //     root_copy.front()->isBroadcast()) {
+      //   root_copy.pop_front();
     } else {
       break;
     }
@@ -141,6 +120,7 @@ void ContigIDs::handle(Merge* merge) {
   // If we matched all inputs, the output is contiguous. Only want to keep the
   // top contig ID, lower ids should be placed in the "within_contig_ids" map
   // of top id.
+  auto out = merge->out()->as<IterDomain>();
   if (ordered_inputs.empty()) {
     if (contig_ids_.find(inner) != contig_ids_.end()) {
       contig_ids_.erase(inner);
@@ -176,29 +156,6 @@ void ContigIDs::handle(Merge* merge) {
       root_to_indexed_id_[root] = out;
     }
   }
-}
-
-IterDomain* ContigIDs::getMappedId(IterDomain* id) const {
-  auto it = p2c_id_map_.find(id);
-  if (it != p2c_id_map_.end()) {
-    return it->second;
-  } else {
-    return id;
-  }
-}
-
-IterDomain* ContigIDs::getCAIndexConcreteId(IterDomain* id) const {
-  TORCH_INTERNAL_ASSERT(
-      GpuLower::current() != nullptr, "GpuLower is not found");
-
-  auto c_id = GpuLower::current()->caMap()->getConcreteMappedID(
-      getMappedId(id), IdMappingMode::EXACT);
-  return c_id;
-}
-
-bool ContigIDs::isIndexable(IterDomain* id) const {
-  auto c_id = getCAIndexConcreteId(id);
-  return concrete_to_ref_.find(c_id) != concrete_to_ref_.end();
 }
 
 } // namespace cuda

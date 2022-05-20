@@ -25,12 +25,6 @@ std::string Output::ToString() const {
   return ss.str();
 }
 
-bool Output::operator==(const Value& rhs) const {
-  // Either side could be kNullValue which has node as nullptr
-  return (!node == !rhs.node) && (!node ||
-      (node->hash() == rhs.node->hash() && index == rhs.index));
-}
-
 hash_t Value::hash() const {
   return HashCombine(node->hash(), Hash(index));
 }
