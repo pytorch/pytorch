@@ -20,7 +20,7 @@ class C10_API SymbolicIntNode
 
 class C10_API SymIntTable {
  public:
-  int64_t addNode(std::shared_ptr<SymbolicIntNode> sin);
+  uint64_t addNode(std::shared_ptr<SymbolicIntNode> sin);
   std::shared_ptr<SymbolicIntNode> getNode(size_t index);
 
  private:
