@@ -1744,7 +1744,6 @@ class TestInputOutputShapes(TestCase):
 
     def test_conv1d_dynamic_output_shape(self):
         skips = {
-            'padding': ['same', 'valid'],
             'padding_mode': ['circular', 'replicate'],
         }
         self._test_conv_output_shapes(nn.Conv1d, nnqd.Conv1d, d=1,
@@ -1752,7 +1751,6 @@ class TestInputOutputShapes(TestCase):
 
     def test_conv2d_dynamic_output_shape(self):
         skips = {
-            'padding': ['same', 'valid'],
             'padding_mode': ['circular', 'replicate'],
         }
         self._test_conv_output_shapes(nn.Conv2d, nnqd.Conv2d, d=2,
@@ -1760,7 +1758,6 @@ class TestInputOutputShapes(TestCase):
 
     def test_conv3d_dynamic_output_shape(self):
         skips = {
-            'padding': ['same', 'valid'],
             'padding_mode': ['circular', 'replicate', 'reflect'],
         }
         self._test_conv_output_shapes(nn.Conv3d, nnqd.Conv3d, d=3,

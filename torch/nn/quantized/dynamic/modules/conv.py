@@ -9,7 +9,6 @@ from torch import Tensor
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.quantized.modules.conv import _reverse_repeat_padding
 import torch.nn.quantized.modules as nnq
 import warnings
 
@@ -76,11 +75,9 @@ class Conv1d(nnq.Conv1d):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 3:
             raise ValueError("Input shape must be `(N, C, L)`!")
-        if self.padding_mode != 'zeros':
-            # Padding in Conv1d is stored as (p, p), need to get (p,)
-            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding[:1])
-            input = F.pad(input, _reversed_padding_repeated_twice,
-                          mode=self.padding_mode)
+        if isinstance(self.padding, str) or self.padding_mode != 'zeros':
+            input = F.pad(input, self._reversed_padding_repeated_twice,
+                          mode=self._functional_padding_mode, value=0.0)
         return ops.quantized.conv1d_dynamic(input, self._packed_params, reduce_range)
 
 
@@ -125,7 +122,7 @@ class Conv2d(nnq.Conv2d):
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
-        padding = _pair(padding)
+        padding = padding if isinstance(padding, str) else _pair(padding)
         dilation = _pair(dilation)
 
         super(Conv2d, self).__init__(
@@ -140,10 +137,9 @@ class Conv2d(nnq.Conv2d):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
-        if self.padding_mode != 'zeros':
-            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding)
-            input = F.pad(input, _reversed_padding_repeated_twice,
-                          mode=self.padding_mode)
+        if isinstance(self.padding, str) or self.padding_mode != 'zeros':
+            input = F.pad(input, self._reversed_padding_repeated_twice,
+                          mode=self._functional_padding_mode, value=0.0)
         return ops.quantized.conv2d_dynamic(
             input, self._packed_params, reduce_range)
 
@@ -190,7 +186,7 @@ class Conv3d(nnq.Conv3d):
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
-        padding = _triple(padding)
+        padding = padding if isinstance(padding, str) else _triple(padding)
         dilation = _triple(dilation)
         super(Conv3d, self)._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -204,10 +200,9 @@ class Conv3d(nnq.Conv3d):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, D, H, W)`!")
-        if self.padding_mode != 'zeros':
-            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding)
-            input = F.pad(input, _reversed_padding_repeated_twice,
-                          mode=self.padding_mode)
+        if isinstance(self.padding, str) or self.padding_mode != 'zeros':
+            input = F.pad(input, self._reversed_padding_repeated_twice,
+                          mode=self._functional_padding_mode, value=0.0)
         return ops.quantized.conv3d_dynamic(
             input, self._packed_params, reduce_range)
 
