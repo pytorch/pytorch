@@ -6288,7 +6288,7 @@ class TestTorch(TestCase):
             torch.storage._LegacyStorage()
 
         for storage_class in torch._storage_classes:
-            if storage_class in [torch._UntypedStorage, torch.cuda._UntypedStorage, torch._TypedStorage]:
+            if storage_class in [torch._UntypedStorage, torch._TypedStorage]:
                 continue
 
             device = 'cuda' if storage_class.__module__ == 'torch.cuda' else 'cpu'
@@ -6373,22 +6373,16 @@ class TestTorch(TestCase):
         storage_classes = [
             torch.cuda.ByteStorage,
             torch.cuda.FloatStorage,
-            torch.cuda._UntypedStorage,
         ]
         for storage_class in storage_classes:
             with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
                 storage_class.from_buffer()
 
-            if storage_class == torch.cuda._UntypedStorage:
-                with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
-                    storage_class._new_with_weak_ptr()
-
-            else:
-                with self.assertRaisesRegex(AttributeError, r'has no attribute'):
-                    storage_class._new_with_weak_ptr()
+            with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
+                storage_class._new_with_weak_ptr()
 
             with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
-                storage_class._new_shared_filename(0, 0, 0)
+                storage_class._new_shared_filename_cpu(0, 0, 0)
 
     def test_storage_casts(self):
         storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
