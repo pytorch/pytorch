@@ -668,6 +668,7 @@ def gen_pyi(
             "is_sparse_csr": ["is_sparse_csr: _bool"],
             "is_quantized": ["is_quantized: _bool"],
             "is_meta": ["is_meta: _bool"],
+            "is_mps": ["is_mps: _bool"],
             "is_ort": ["is_ort: _bool"],
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],

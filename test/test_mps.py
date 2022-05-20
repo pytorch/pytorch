@@ -16,7 +16,7 @@ from torch._six import inf
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
 import torch.backends.mps
-from torch.distributions import (Uniform)
+from torch.distributions import Uniform
 
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
@@ -4097,6 +4097,34 @@ if len(w) != 1:
                                 "PYTORCH_ENABLE_MPS_FALLBACK set.")
             else:
                 self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set.")
+
+class TestNoRegression(TestCase):
+    def test_assert_close(self):
+        a = torch.ones(1, device="mps")
+        b = torch.zeros(1, device="mps")
+        inf = a / b
+        nan = b / b
+
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
+            torch.testing.assert_close(a, inf)
+
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
+            torch.testing.assert_close(a, nan)
+
+    def test_double_error(self):
+        with self.assertRaisesRegex(TypeError, "the MPS framework doesn't support float64"):
+            a = torch.ones(2, dtype=torch.float64, device="mps")
+
+        a = torch.ones(2, device="mps")
+        with self.assertRaisesRegex(TypeError, "the MPS framework doesn't support float64"):
+            a = a.double()
+
+    def test_legacy_constructor(self):
+        a = torch.ones(2, device="mps")
+
+        b = a.new(1)
+
+
 
 if __name__ == "__main__":
     run_tests()

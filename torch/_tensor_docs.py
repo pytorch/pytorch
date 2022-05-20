@@ -5076,6 +5076,11 @@ Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
 are like normal tensors, but they carry no data.
 """)
 
+add_docstr_all('is_mps',
+               r"""
+Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
+""")
+
 add_docstr_all('is_sparse',
                r"""
 Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.

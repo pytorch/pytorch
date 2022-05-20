@@ -117,8 +117,11 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
       return MPSDataTypeInt8;
     case ScalarType::Bool:
       return MPSDataTypeBool;
+    case ScalarType::Double:
+      TORCH_CHECK_TYPE(false, "Cannot convert a float64 Tensor to MPS as the MPS framework doesn't support float64. "
+                       "Please use float32 instead.")
     default:
-      TORCH_CHECK_TYPE(false, "Trying to convert ", scalar_type, " to the MPS backend but there is no mapping for it.")
+      TORCH_CHECK_TYPE(false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
   }
 }
 
@@ -142,7 +145,7 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
     case ScalarType::Bool:
       return MPSDataTypeBool;
     default:
-      TORCH_INTERNAL_ASSERT(false, "Trying to convert ", scalar_type, " to the MPS backend but there is no mapping for it.")
+      TORCH_CHECK_TYPE(false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
   }
 }
 
@@ -249,11 +252,7 @@ MPSShape* getMPSShape(IntArrayRef sizes) {
 
 void printTensorNDArray(const Tensor& t) {
   if (!t.is_mps()) return;
-  if(t.numel() == 0)
-  {
-      std::cout << "Empty tensor" << std::endl;
-      return;
-  }
+  if(t.numel() == 0) return;
   // Get shape and data type
   auto selfShape = getMPSShape(t);
   auto selfDType = getMPSDataType(t.scalar_type());
