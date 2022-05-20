@@ -4098,5 +4098,30 @@ if len(w) != 1:
             else:
                 self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set.")
 
+class TestNoRegression(TestCase):
+    def test_assert_close(self):
+        a = torch.ones(1, device="mps")
+        b = torch.zeros(1, device="mps")
+        inf = a/b
+        nan = b/b
+
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
+            torch.testing.assert_close(a, inf)
+
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
+            torch.testing.assert_close(a, nan)
+
+    def test_double_error(self):
+
+        with self.assertRaisesRegex(TypeError, "the MPS framework doesn't support float64"):
+            a = torch.ones(2, dtype=torch.float64, device="mps")
+            print(a)
+
+        a = torch.ones(2, device="mps")
+        # TODO: This should fail!
+        a = a.double()
+
+
+
 if __name__ == "__main__":
     run_tests()
