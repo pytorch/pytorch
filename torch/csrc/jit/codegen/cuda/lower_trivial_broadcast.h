@@ -24,7 +24,14 @@ class TORCH_CUDA_CU_API ConcretizedBroadcastDomains : private IterVisitor {
  public:
   void build(Fusion* fusion);
 
+  //! Is a domain concretized?
   bool isConcretized(IterDomain* id) const;
+
+  //! Is a domain concretized to a unique concrete domain?
+  bool isUniquelyConcretized(IterDomain* id) const;
+
+  //! Is a domain concretized to multiple concrete domains?
+  bool maybeNonUniquelyConcretized(IterDomain* id) const;
 
  private:
   using IterVisitor::handle;
@@ -33,16 +40,19 @@ class TORCH_CUDA_CU_API ConcretizedBroadcastDomains : private IterVisitor {
 
   void handle(Expr* expr) final;
 
-  void markAsConcretized(IterDomain* root_domain);
+  void markAsConcretized(
+      IterDomain* broadcast_root_domain,
+      IterDomain* concrete_root_domain);
 
  private:
-  //! Maps each broadcast domain to its original broadcast
+  //! Maps each root broadcast domain to its original root broadcast
   //! domains. Their can be multiple original domains due to, e.g.,
   //! binary ops with broadcast domains in both inputs.
   std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
       broadcast_origin_map_;
-  //! Set of all concretized original domains
-  std::unordered_set<IterDomain*> concretized_domains_;
+  //! Map all broadcast domains to concrete root domains
+  std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
+      broadcast_to_concrete_map_;
 };
 
 } // namespace cuda

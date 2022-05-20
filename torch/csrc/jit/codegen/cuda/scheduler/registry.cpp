@@ -779,6 +779,26 @@ static bool checkPatternEquivalence(
   return it0 == out_root0.end() && it1 == out_root1.end();
 }
 
+// Reusing some code from lowering specifically in lower_trivial_broadcast.cpp
+// ConcretizedBroadcastDomains::maybeNonUniquelyConcretized this checks if
+// there's a broadcast iteration domain that's being broadcasted to seemingly
+// different extents, meaning we don't know in the kernel if the dimension is
+// being broadcasted to one size multiple times or different sizes. This is a
+// hard to optimize problem and likely indicates we shouldn't be fusing.
+bool hasNonUniqueBcast(Fusion* fusion) {
+  ConcretizedBroadcastDomains concretize_info;
+  concretize_info.build(fusion);
+
+  for (auto tv : ir_utils::allTvs(fusion)) {
+    for (auto id : tv->getRootDomain()) {
+      if (concretize_info.maybeNonUniquelyConcretized(id)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 //! Scheduler interface:
 //!    Each of the scheduler needs to provide 3 interface functions:
 //!
@@ -848,6 +868,13 @@ class ReductionScheduler : public SchedulerEntry {
       // Use pointwise logic
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Reduction, "No support for transpose op");
+      return false;
+    }
+
+    if (hasNonUniqueBcast(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Reduction,
+          "Broadcasting dimension might be broadcasting to multiple sizes.");
       return false;
     }
 
@@ -981,6 +1008,13 @@ class PointWiseScheduler : public SchedulerEntry {
       return false;
     }
 
+    if (hasNonUniqueBcast(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::PointWise,
+          "Broadcasting dimension might be broadcasting to multiple sizes.");
+      return false;
+    }
+
     return true;
   }
 
@@ -1045,6 +1079,13 @@ class PersistentKernelScheduler : public SchedulerEntry {
     if (view_tvs.size() > 0) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Persistent, "no support for view");
+      return false;
+    }
+
+    if (hasNonUniqueBcast(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent,
+          "Broadcasting dimension might be broadcasting to multiple sizes.");
       return false;
     }
 
