@@ -153,7 +153,7 @@ def make_tensor(
         elif dtype in _floating_types:
             replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
         else:  # dtype in _complex_types:
-            float_dtype = torch.float if dtype is torch.cfloat else torch.double
+            float_dtype = complex_to_corresponding_float_type_map[dtype]
             float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
         result[result == 0] = replace_with

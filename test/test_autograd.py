@@ -4328,7 +4328,7 @@ for shape in [(1,), ()]:
         # The autograd engine creates worker threads only when GPU devices are present.
         # So make sure that we do shutdown threads when we're testing cuda and make sure
         # that there is no thread to shutdown when we're not using cuda.
-        if TEST_CUDA:
+        if TEST_CUDA or torch.backends.mps.is_available():
             self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
         else:
             self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
@@ -7079,20 +7079,33 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
-    def test_scatter_reduce_prod_gradgrad_error(self, device):
+    def test_scatter_index_reduce_amin_amax_backprops_to_all_values(self, device):
+        # tests that gradients are evenly distributed when there are multiple max/min values
+        # tested here instead of adding a SampleInput as the backward for this case is non-differentiable for gradgrad
+        # as is the case for test_min_max_median_backprops_to_all_values above
+        fns = (torch.scatter_reduce, torch.index_reduce)
+        reduces = ('amin', 'amax')
+        for fn, reduction in product(fns, reduces):
+            input = torch.randn((2, 3), device=device, dtype=torch.float64, requires_grad=True)
+            src = input.clone().detach_().requires_grad_(True)
+            idx = torch.arange(2).to(dtype=torch.long, device=device)
+            if fn == torch.scatter_reduce:
+                idx = idx.unsqueeze(-1).expand((2, 3))
+
+            gradcheck(fn, (input, 0, idx, src, reduction), check_batched_grad=False)
+
+    def test_scatter_index_reduce_prod_gradgrad_error(self, device):
         # test that double backward raises an error for the case where 2 zeros in src
         # are scattered to the same position in self
         input = torch.tensor([1.], device=device, dtype=torch.float64, requires_grad=True)
         src = torch.tensor([0., 0.], device=device, dtype=torch.float64, requires_grad=True)
         idx = torch.tensor([0, 0], device=device, dtype=torch.long)
 
-        def fn(input, src):
-            return input.scatter_reduce(0, idx, src, 'prod')
-
-        # check that this case passes on gradcheck
-        gradcheck(fn, [input, src], check_batched_grad=False)
-        with self.assertRaisesRegex(RuntimeError, "Double backward is unsupported for src when"):
-            gradgradcheck(fn, [input, src])
+        for fn in (torch.scatter_reduce, torch.index_reduce):
+            # check that this case passes on gradcheck
+            gradcheck(fn, (input, 0, idx, src, 'prod'), check_batched_grad=False)
+            with self.assertRaisesRegex(RuntimeError, "Double backward is unsupported for"):
+                gradgradcheck(fn, (input, 0, idx, src, 'prod'))
 
     @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_parameter_resize(self, device):
