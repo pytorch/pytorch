@@ -35,7 +35,10 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   out << ") -> ";
 
   const auto& returns = schema.returns();
-  out << "(";
+  bool need_paren = returns.size() != 1 && !schema.is_varret();
+  if (need_paren) {
+    out << "(";
+  }
   for (const auto i : c10::irange(returns.size())) {
     if (i > 0) {
       out << ", ";
@@ -48,7 +51,9 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
     }
     out << "...";
   }
-  out << ")";
+  if (need_paren) {
+    out << ")";
+  }
   return out;
 }
 
