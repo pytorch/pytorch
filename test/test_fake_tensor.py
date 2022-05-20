@@ -1,3 +1,5 @@
+# Owner(s): ["module: unknown"]
+
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
@@ -38,7 +40,7 @@ class FakeTensorTest(TestCase):
 
     def test_dispatch_device(self):
         x = FakeTensor.from_tensor(torch.rand([4, 4]))
-        self.assertEqual(x.device.type == "cpu")
+        self.assertEqual(x.device.type, "cpu")
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_type_as(self):
@@ -101,37 +103,17 @@ class FakeTensorOperatorInvariants(TestCase):
             )
             if has_non_kwarg_device:
                 self.assertTrue(
-                    self.get_aten_op(schema)
-                    in torch.subclasses.fake_tensor._device_not_kwarg_ops
+                    self.get_aten_op(schema) in torch._subclasses.fake_tensor._device_not_kwarg_ops
                 )
 
     def test_tensor_constructors_all_have_kwarg_device(self):
-        def contains_tensor_types(type: torch._C.Type):
-            tensor_type = torch._C.TensorType.get()
-            return type.isSubtypeOf(tensor_type) or any(
-                contains_tensor_types(e) for e in type.containedTypes()
-            )
-
-        # TODO: wouldn't show up as torch.subclasses.fake_tensor._is_tensor_constructor when
-        # added to __all__
-        def _is_tensor_constructor(func: OpOverload):
-            assert isinstance(func, OpOverload)
-            schema = func._schema
-            if any(contains_tensor_types(arg.type) for arg in schema.arguments):
-                return False
-            # TODO: no real reason to restrict multiple outputs
-            return (
-                len(schema.returns) == 1
-                and schema.returns[0].type is torch._C.TensorType.get()
-            )
-
         for schema in torch._C._jit_get_all_schemas():
             namespace = schema.name.split("::")[0]
             if namespace != "aten":
                 continue
 
             op = self.get_aten_op(schema)
-            if not _is_tensor_constructor(op):
+            if not torch._subclasses.fake_tensor._is_tensor_constructor(op):
                 continue
 
             opt_device = torch._C.OptionalType(torch._C.DeviceObjType.get())

@@ -1,5 +1,3 @@
-# Owner(s): ["module: unknown"]
-
 import torch
 
 from torch._subclasses import BaseTensor
@@ -35,7 +33,7 @@ def contains_tensor_types(type: torch._C.Type):
 
 
 @functools.lru_cache(None)
-def is_tensor_constructor(func: OpOverload):
+def _is_tensor_constructor(func: OpOverload):
     assert isinstance(func, OpOverload)
     schema = func._schema
     if any(contains_tensor_types(arg.type) for arg in schema.arguments):
@@ -114,7 +112,7 @@ class FakeTensor(BaseTensor):
                     torch.ops.aten._to_copy(input, **new_kwargs), out_device
                 )
 
-        if is_tensor_constructor(func):
+        if _is_tensor_constructor(func):
             assert not func in _non_kwarg_device_constructors
             _, new_kwargs = normalize_function(
                 func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -200,10 +198,5 @@ class FakeTensor(BaseTensor):
 
         return common_device
 
-
 class FakeTensorMode(FakeTensor):
     context = no_dispatch
-
-
-# TODO: __all__ doesn't seem to be working
-__all__ = ["FakeTensor", "FakeTensorMode", "_device_not_kwarg_ops"]
