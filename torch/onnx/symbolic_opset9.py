@@ -362,7 +362,7 @@ def atan(g, self):
 
 
 # Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
-@quantized_args(True, scale=1.0 / 256.0, zero_point=0)
+@symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
