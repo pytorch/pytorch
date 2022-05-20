@@ -3170,8 +3170,6 @@ class FullyShardedDataParallel(nn.Module):
                 curr_iter_param_names = [
                     eod.get_unflat_param_names(index) for index in curr_param_order
                 ]
-                print(first_iter_param_names, type(first_iter_param_names))
-                print(curr_iter_param_names, type(curr_iter_param_names))
                 warnings.warn(
                     "Forward order differs from that of the first iteration "
                     f"on rank {self.rank} -- collectives are unchecked and may "
