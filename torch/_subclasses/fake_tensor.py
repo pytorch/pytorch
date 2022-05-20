@@ -1,3 +1,5 @@
+# Owner(s): ["module: unknown"]
+
 import torch
 
 from torch._subclasses import BaseTensor
@@ -142,16 +144,22 @@ class FakeTensor(BaseTensor):
             # device of the input is returned
             return tree_map(partial(wrap, device=new_kwargs["input"].device), r)
 
-        def cpu_zero_dim(t):
-            return t.device.type == "cpu" and t.dim() == 0
+        common_device = self._find_common_device(func, args, kwargs)
 
+        return tree_map(partial(wrap, device=common_device), r)
+
+    @staticmethod
+    def _find_common_device(func, args, kwargs):
         # cpu - zero-dim tensors can be called in cuda kernels,
         # so overwrite the common_device if it the only existing
         # device comes from a cpu zero-dim tensor
         common_device = None
         is_cpu_zero_dim = None
 
-        def find_common_device(t):
+        def cpu_zero_dim(t):
+            return t.device.type == "cpu" and t.dim() == 0
+
+        def merge_devices(t):
             nonlocal common_device
             nonlocal is_cpu_zero_dim
             if not isinstance(t, FakeTensor):
@@ -185,12 +193,12 @@ class FakeTensor(BaseTensor):
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
             )
 
-        tree_map(find_common_device, args)
-        tree_map(find_common_device, kwargs)
+        tree_map(merge_devices, args)
+        tree_map(merge_devices, kwargs)
 
         assert common_device is not None, f"Could not find common device for {func}"
 
-        return tree_map(partial(wrap, device=common_device), r)
+        return common_device
 
 
 class FakeTensorMode(FakeTensor):
