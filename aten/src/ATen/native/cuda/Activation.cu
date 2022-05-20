@@ -170,11 +170,14 @@ void log_sigmoid_backward_kernel(TensorIterator& iter) {
 // prelu forward
 // -----------------------------------
 void launch_prelu_cuda_kernel_share_weights(TensorIteratorBase &iter, const TensorBase &weight) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.input_dtype(), "prelu_cuda", [&] {
-    const auto *weight_data = weight.data_ptr<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half,
+                                 iter.input_dtype(), "prelu_cuda", [&] {
+    using opmath_t = at::opmath_type<scalar_t>;
+    const auto *weight_data = weight.data_ptr<opmath_t>();
     at::native::gpu_kernel(iter,
         [weight_data] GPU_LAMBDA (scalar_t input_val) {
-          return (input_val > 0) ? input_val : *weight_data * input_val;
+          opmath_t = input_val_op = static_cast<opmath_t>(input_val);
+          return (input_val_op > 0) ? input_val_op : *weight_data * input_val_op;
         });
   });
 }
@@ -515,19 +518,26 @@ void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate) {
 namespace {
 
 void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "leaky_relu_cuda", [&]() {
-    auto negval = negval_.to<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                                  iter.dtype(), "leaky_relu_cuda", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto negval = negval_.to<opmath_t>();
     gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return a > scalar_t(0) ? a : a * negval;
+      opmath_t aop = static_cast<opmath_t>(a);
+      return aop > opmath_t(0) ? aop : aop * negval;
     });
   });
 }
 
 void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "leaky_relu_backward_cuda", [&]() {
-    auto negval = negval_.to<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                                  iter.dtype(), "leaky_relu_backward_cuda", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto negval = negval_.to<opmath_t>();
     gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return a > scalar_t(0) ? b : b * negval;
+      opmath_t aop = static_cast<opmath_t>(a);
+      opmath_t bop = sstatic_cast<opmath_t>(b);
+      return aop > opmath_t(0) ? bop : bop * negval;
     });
   });
 }

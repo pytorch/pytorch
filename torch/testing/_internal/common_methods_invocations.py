@@ -18874,7 +18874,7 @@ python_ref_db = [
                 torch.bfloat16: tol(atol=1e-2, rtol=0),
                 torch.float16: tol(atol=1e-3, rtol=0),
             }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
-        )
+        ),
     ),
     #
     # Elementwise Binary OpInfos
