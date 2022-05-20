@@ -47,6 +47,7 @@ __all__ = [
     "cosh",
     "bessel_i0e",
     "bessel_i1e",
+    "bitwise_not",
     "cbrt",
     "ceil",
     "digamma",
@@ -57,9 +58,11 @@ __all__ = [
     "expm1",
     "floor",
     "is_finite",
+    "is_infinite",
     "lgamma",
     "log",
     "log1p",
+    "log2",
     "neg",
     "reciprocal",
     "round",
@@ -69,13 +72,13 @@ __all__ = [
     "sqrt",
     "square",
     "tan",
+    "tanh",
     #
     # Elementwise binary prims
     #
     "add",
     "atan2",
     "bitwise_and",
-    "bitwise_not",
     "bitwise_or",
     "bitwise_xor",
     # 'complex',  # needs custom meta
@@ -393,6 +396,13 @@ bessel_i1e = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+bitwise_not = _make_elementwise_unary_prim(
+    "bitwise_not",
+    impl_aten=torch.bitwise_not,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 
 def _cbrt_aten(a: torch.Tensor):
     return pow(a, (1 / 3))
@@ -468,6 +478,13 @@ is_finite = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
+is_infinite = _make_elementwise_unary_prim(
+    "is_infinite",
+    impl_aten=torch.isinf,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
 lgamma = _make_elementwise_unary_prim(
     "lgamma",
     impl_aten=torch.lgamma,
@@ -485,6 +502,13 @@ log = _make_elementwise_unary_prim(
 log1p = _make_elementwise_unary_prim(
     "log1p",
     impl_aten=torch.log1p,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+log2 = _make_elementwise_unary_prim(
+    "log2",
+    impl_aten=torch.log2,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -552,6 +576,13 @@ tan = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+tanh = _make_elementwise_unary_prim(
+    "tanh",
+    impl_aten=torch.tanh,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 #
 # Elementwise binary operations
 #
@@ -578,13 +609,6 @@ atan2 = _make_elementwise_binary_prim(
 bitwise_and = _make_elementwise_binary_prim(
     "bitwise_and",
     impl_aten=torch.bitwise_and,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-bitwise_not = _make_elementwise_binary_prim(
-    "bitwise_not",
-    impl_aten=torch.bitwise_not,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1075,7 +1099,7 @@ def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeTy
 
 
 # Note: saves the Python slice object because we're about to clobber its name with the slice prim
-pyslice: Type[slice] = slice
+pyslice: Type[slice] = slice  # type: ignore[has-type]
 
 
 def _slice_meta(
