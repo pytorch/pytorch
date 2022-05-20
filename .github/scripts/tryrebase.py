@@ -40,7 +40,8 @@ def rebase_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False) -> None:
 
 
 def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False) -> None:
-    subprocess.run([sys.executable, "-m", "pip", "install", "ghstack"])
+    if subprocess.run([sys.executable, "-m", "ghstack", "--help"], capture_output=True).returncode != 0:
+        subprocess.run([sys.executable, "-m", "pip", "install", "ghstack"])
     orig_ref = f"{re.sub(r'/head$', '/orig', pr.head_ref())}"
     onto_branch = pr.default_branch()
 
