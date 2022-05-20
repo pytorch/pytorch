@@ -451,9 +451,9 @@ const std::string jit_code_template = R"ESCAPE(
   extern "C" __global__
   void ${name}_kernel(
       const int numel,
-      Array<char*, ${nInputs}+1> data, //[${nInputs}+1],
+      Array<char*, ${nInputs}+${nOutputs}> data, //[${nInputs}+${nOutputs}],
       ${offset_calculator}<${nInputs}> input_calculator,
-      ${offset_calculator}<1> output_calculator,
+      ${offset_calculator}<${nOutputs}> output_calculator,
       ${loader} l,
       ${storer} s,
       ${compute_type} scalar_val${extra_params}) {
@@ -482,7 +482,7 @@ const std::string jit_code_template = R"ESCAPE(
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++) {
       if ((threadIdx.x  + j*num_threads) < remaining) {
-        out[j] = ${name}<${compute_type}>(${args}${extra_args});
+        ${call_functor}
       }
     }
 
@@ -529,8 +529,8 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   extern "C" __global__
   void ${name}_vectorized${vec_size}_kernel(
       const int N,
-      Array<char*, ${nInputs}+1> data,
-      ${compute_type} scalar_val${extra_params}) //[${nInputs}+1],
+      Array<char*, ${nInputs}+${nOutputs}> data,
+      ${compute_type} scalar_val${extra_params}) //[${nInputs}+${nOutputs}],
       {
       constexpr int vec_size = ${vec_size};
       int remaining = N - block_work_size * blockIdx.x;
@@ -552,7 +552,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
           if ((threadIdx.x  + j*num_threads) < remaining) {
-            out[j] = ${name}<${compute_type}>(${args} ${extra_args});
+            ${call_functor}
           }
         }
         thread_idx = threadIdx.x;
@@ -562,14 +562,14 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
               break;
           }
           int linear_idx = thread_idx + block_work_size * idx;
-          store<${result_type}>(out[j], data[0], linear_idx);
+          ${store_unrolled_outputs}
           thread_idx += num_threads;
         }
       } else {
         static constexpr int loop_size = thread_work_size / vec_size;
   //actual loading
         using vec_t_input = aligned_vector<${scalar_type}, vec_size>;
-        ${vector_pointers}
+        ${vector_inputs}
         #pragma unroll
         for (int i = 0; i<loop_size; i++){
           vec_t_input v;
@@ -577,22 +577,18 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
           thread_idx += num_threads;
         }
 
-
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
-          out[j] = ${name}<${compute_type}>(${args}${extra_args});
+          ${call_functor}
         }
+
         using vec_t_output = aligned_vector<${result_type}, vec_size>;
-        vec_t_output * to_ = reinterpret_cast<vec_t_output *>(data[0]) + block_work_size / vec_size * idx;
+        ${vector_outputs}
         int thread_idx = threadIdx.x;
         #pragma unroll
         for (int i = 0; i<loop_size; i++){
           vec_t_output v;
-          #pragma unroll
-          for (int j=0; j<vec_size; j++){
-            v.val[j] = out[vec_size * i + j];
-          }
-          to_[thread_idx] = v;
+          ${store_vectorized_outputs}
           thread_idx += num_threads;
         }
       }
@@ -680,7 +676,8 @@ void __inline__ initializeCudaContext() {
 constexpr int thread_work_size = THREAD_WORK_SIZE;
 
 std::string generate_code(
-    int nTensors,
+    int nInputs,
+    int nOutputs,
     const std::string& func,
     const std::string& name,
     const std::string& f_inputs_type,
@@ -695,8 +692,8 @@ std::string generate_code(
   at::jit::TemplateEnv env;
 
   env.s("index_type", "unsigned int");
-  const int nInputs = nTensors - 1;
   env.s("nInputs", std::to_string(nInputs));
+  env.s("nOutputs", std::to_string(nOutputs));
   env.s("scalar_type", f_inputs_type);
   env.s("compute_type", compute_type);
   env.s("functor", func);
@@ -726,11 +723,14 @@ std::string generate_code(
                         << "[" << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_load_arrays", declare_load_arrays.str());
+
   std::stringstream declare_store_arrays;
-  declare_store_arrays << result_type << " out"
-                       << "[" << std::to_string(thread_work_size) << "];\n";
+  for (int i = 0; i < nOutputs; i++) {
+    declare_store_arrays << result_type << " out" << std::to_string(i)
+                        << "[" << std::to_string(thread_work_size) << "];\n";
+  }
   env.s("declare_store_arrays", declare_store_arrays.str());
-  const int nOutputs = 1; // FIXME
+
   std::stringstream functor_args;
   if (scalar_pos == BinaryFuncVariant::NoScalar) {
     for (int i = 0; i < nInputs - 1; i++) {
@@ -745,6 +745,24 @@ std::string generate_code(
     functor_args << "arg0[j], scalar_val";
   }
   env.s("args", functor_args.str());
+
+  std::string call_functor_template;
+  if (nOutputs == 1) {
+    // retunr by value for single output functor
+    call_functor_template = "out0[j] = ${name}<${compute_type}>(${args} ${extra_args});";
+  } else {
+    // return by reference for multi-output functor
+    std::stringstream functor_outs;
+    for (int i = 0; i < nOutputs - 1; i++) {
+      functor_outs << "out" << std::to_string(i) << "[j], ";
+    }
+    functor_outs << "out" << std::to_string(nOutputs - 1) << "[j]";
+    env.s("outs", functor_outs.str());
+
+    call_functor_template = "${name}<${compute_type}>(${args} ${extra_args}, ${outs});";
+  }
+  env.s("call_functor", at::jit::CodeTemplate(call_functor_template).format(env));
+
   if (f_inputs_type == "at::Half" || result_type == "at::Half" ||
       f_inputs_type == "std::complex<at::Half>" ||
       result_type == "std::complex<at::Half>" || dynamic_casting) {
@@ -812,11 +830,14 @@ std::string generate_code(
                   << "], input_offsets[" << i_string << "], " << i_string
                   << ");\n";
     }
-
     env.s("load_inputs", load_inputs.str());
+
     std::stringstream store_outputs;
-    store_outputs << "s.store<" << result_type
-                  << ">(out[j], data[0], output_offsets[0]);\n";
+    for (int i = 0; i < nOutputs; i++) {
+      auto i_string = std::to_string(i);
+      store_outputs << "s.store<" << result_type
+                    << ">(out" << i_string << "[j], data[" << i_string << "], output_offsets[" << i_string << "]);\n";
+    }
     env.s("store_outputs", store_outputs.str());
 
     static auto cuda_template = at::jit::CodeTemplate(jit_common_types + offset_calc_template + jit_code_template);
@@ -827,14 +848,25 @@ std::string generate_code(
   // vectorized case
   env.s("vec_size", std::to_string(vec_size));
   env.s("result_type", result_type);
-  std::stringstream vector_pointers;
+
+  std::stringstream vector_inputs;
   for (const auto i : c10::irange(nInputs)){
     auto i_string = std::to_string(i);
-    vector_pointers << "vec_t_input * vec" << i_string <<
-    " = reinterpret_cast<vec_t_input *>(data[" << i_string << "+1])" <<
+    vector_inputs << "vec_t_input * vec" << i_string <<
+    " = reinterpret_cast<vec_t_input *>(data[" << i_string << "+" << nOutputs << "])" <<
     " + block_work_size / vec_size * idx;\n";
   }
-  env.s("vector_pointers", vector_pointers.str());
+  env.s("vector_inputs", vector_inputs.str());
+
+  std::stringstream vector_outputs;
+  for (const auto i : c10::irange(nOutputs)){
+    auto i_string = std::to_string(i);
+    vector_outputs << "vec_t_output* to_" << i_string <<
+    " = reinterpret_cast<vec_t_output*>(data[" << i_string << "])" <<
+    " + block_work_size / vec_size * idx;\n";
+  }
+  env.s("vector_outputs", vector_outputs.str());
+
   std::stringstream load_vectorized_inputs;
   for (const auto i : c10::irange(nInputs)) {
     auto i_string = std::to_string(i);
@@ -845,6 +877,18 @@ std::string generate_code(
     load_vectorized_inputs << "}\n";
   }
   env.s("load_vectorized_inputs", load_vectorized_inputs.str());
+
+  std::stringstream store_vectorized_outputs;
+  for (const auto i : c10::irange(nOutputs)) {
+    auto i_string = std::to_string(i);
+    store_vectorized_outputs << "#pragma unroll\n";
+    store_vectorized_outputs << "for (int j=0; j<vec_size; j++){\n";
+    store_vectorized_outputs <<   "v.val[j] = out" << i_string << "[vec_size * i + j];\n";
+    store_vectorized_outputs << "}\n";
+    store_vectorized_outputs << "to_"<< i_string << "[thread_idx] = v;\n";
+  }
+  env.s("store_vectorized_outputs", store_vectorized_outputs.str());
+
   std::stringstream load_unrolled_inputs;
   for (const auto i: c10::irange(nInputs)){
     auto i_string = std::to_string(i);
@@ -852,6 +896,14 @@ std::string generate_code(
       << ">(data[" << std::to_string(i + nOutputs) << "], linear_idx);\n";
   }
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
+
+  std::stringstream store_unrolled_outputs;
+  for (const auto i : c10::irange(nOutputs)) {
+    auto i_string = std::to_string(i);
+    store_unrolled_outputs << "store<" << result_type << ">(out" << i_string
+      << "[j], data[" << i_string << "], linear_idx);\n";
+  }
+  env.s("store_unrolled_outputs", store_unrolled_outputs.str());
 
   static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_vectorized_code_template);
   const auto code = cuda_template.format(env);
