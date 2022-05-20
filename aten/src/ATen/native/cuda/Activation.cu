@@ -378,8 +378,10 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
     auto beta = beta_.to<opmath_t>();
     auto threshold = threshold_.to<opmath_t>();
     gpu_kernel(iter, [beta, threshold]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      scalar_t z = std::exp(b * beta);
-      return (b * beta) > threshold ? a : a * z / (z + scalar_t(1.));
+      opmath_t aop = static_cast<opmath_t>(a);
+      opmath_t bop = static_cast<opmath_t>(b);
+      opmath_t z = std::exp(bop * beta);
+      return (bop * beta) > threshold ? aop : aop * z / (z + opmath_t(1.));
     });
   });
 }
