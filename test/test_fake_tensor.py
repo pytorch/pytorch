@@ -1,3 +1,5 @@
+# Owner(s): ["module: unknown"]
+
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
@@ -35,7 +37,7 @@ class FakeTensorTest(TestCase):
 
     def test_dispatch_device(self):
         x = FakeTensor.from_tensor(torch.rand([4, 4]))
-        self.assertEqual(x.device.type == "cpu")
+        self.assertEqual(x.device.type, "cpu")
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_type_as(self):
@@ -77,7 +79,7 @@ class FakeTensorOperatorInvariants(TestCase):
             )
             if has_non_kwarg_device:
                 self.assertTrue(
-                    get_op(schema) in torch.subclasses.fake_tensor._device_not_kwarg_ops
+                    get_op(schema) in torch._subclasses.fake_tensor._device_not_kwarg_ops
                 )
 
 

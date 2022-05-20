@@ -1,11 +1,10 @@
-# Owner(s): ["module: unknown"]
-
 import torch
 
 from torch._subclasses import BaseTensor
 from torch.utils._pytree import tree_map
 from functools import partial
 from torch.fx.operator_schemas import normalize_function
+from torch.utils._mode_utils import no_dispatch
 from typing import Union
 
 aten = torch.ops.aten
@@ -120,7 +119,7 @@ class FakeTensor(BaseTensor):
         def merge_devices(t):
             nonlocal common_device
             nonlocal is_cpu_zero_dim
-            if not isinstance(t, cls):
+            if not isinstance(t, FakeTensor):
                 return
 
             if common_device is None:
@@ -157,5 +156,3 @@ class FakeTensor(BaseTensor):
         assert common_device is not None, f"Could not find common device for {func}"
 
         return common_device
-
-__all__ = ["FakeTensor", "_device_not_kwarg_ops"]
