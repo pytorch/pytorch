@@ -190,6 +190,14 @@ class TestGitHubPR(TestCase):
         assert pr._reviews is not None  # to pacify mypy
         self.assertGreater(len(pr._reviews), 100)
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_checkruns_many_runs(self, mocked_gql: Any) -> None:
+        """ Tests that all checkruns can be fetched
+        """
+        pr = GitHubPR("pytorch", "pytorch", 77700)
+        conclusions = pr.get_checkrun_conclusions()
+        self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
+
 
 if __name__ == "__main__":
     main()
