@@ -536,21 +536,50 @@ Tensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
   return sparse._coalesced_(true);
 }
 
+std::pair<Tensor, Tensor> _not_mask_to_col_row_indices(Tensor not_mask) {
+  auto col_indices = (not_mask *
+                      at::native::arange(not_mask.size(-1))
+                          .view({1, not_mask.size(-1)})
+                          .expand_as(not_mask))
+                         .masked_select(not_mask);
+  auto row_indices = (not_mask *
+                      at::native::arange(not_mask.size(-2))
+                          .view({not_mask.size(-2), 1})
+                          .expand_as(not_mask))
+                         .masked_select(not_mask);
+  return std::pair<Tensor, Tensor>(col_indices, row_indices);
+}
+
 Tensor dense_to_sparse_csr(const Tensor& self) {
-  TORCH_CHECK(self.dim() == 3 || self.dim() == 2, "Can only covert 2D or 3D Tensor to CSR.");
-  auto mask = (self == 0);
-  if (mask.dim() == 3) {
-    mask = mask.all(0);
+  TORCH_CHECK(
+      self.dim() == 3 || self.dim() == 2,
+      "Can only covert 2D or 3D Tensor to CSR.");
+  auto not_mask = (self != 0);
+  if (not_mask.dim() == 3) {
+    not_mask = not_mask.any(0);
   }
-  auto not_mask = mask.logical_not();
   auto values = self.masked_select(not_mask);
-  std::cout << "mask: " << mask << std::endl;
-  std::cout << "values: " << values << std::endl;
-  auto column_indices = (not_mask * at::native::arange(self.size(-1)).view({1, self.size(-1)}).expand_as(mask)); //.masked_select(not_mask);
-  auto row_indices = (not_mask * at::native::arange(self.size(-2)).view({self.size(-2), 1}).expand_as(mask)); //.masked_select(not_mask);
-  std::cout << "column_indices: " << column_indices << std::endl;
-  std::cout << "row_indices: " << row_indices << std::endl;
-  return self.to_sparse().to_sparse_csr();
+  Tensor col_indices;
+  Tensor row_indices;
+  std::tie(col_indices, row_indices) = _not_mask_to_col_row_indices(not_mask);
+  Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices.view({-1}), self.size(-2), false /* out_int32 */);
+  if (self.dim() == 3) {
+    // Batching simply repeats the sparsity pattern across batch entries
+    values = values.reshape({self.size(0), -1});
+    col_indices = col_indices.view({1, col_indices.size(0)})
+                         .repeat({self.size(0), 1});
+    crow_indices =
+        crow_indices.view({1, crow_indices.size(0)}).repeat({self.size(0), 1});
+  }
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      col_indices,
+      values,
+      self.sizes(),
+      self.scalar_type(),
+      c10::kSparseCsr,
+      self.device());
 }
 
 Tensor dense_to_sparse_csc(const Tensor& self) {
@@ -558,8 +587,7 @@ Tensor dense_to_sparse_csc(const Tensor& self) {
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
-  AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseBsr is currently not supported.");
+  TORCH_CHECK(self.dim() == 2, "Can only covert 2D Tensor to BSR.");
   return self;
 }
 
