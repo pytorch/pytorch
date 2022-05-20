@@ -6,6 +6,8 @@ import math
 import random
 import unittest
 import warnings
+import subprocess
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -4027,6 +4029,74 @@ class TestRNNMPS(TestCase):
             print(rnn.weight_ih_l0.grad)
             # Gradient on GPU is 2x the CPU gradient???
 
+class TestFallbackWarning(TestCase):
+    def test_no_warning_on_import(self):
+        script = """
+import warnings
+
+with warnings.catch_warnings(record=True) as w:
+    import torch
+
+exit(len(w))
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, '-W', 'all', '-c', script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),)
+        except subprocess.CalledProcessError as e:
+            self.assertTrue(False, "There was a warning when importing torch.")
+
+    def _get_not_implemented_op(self):
+        # This can be changed once we actually implement `torch.eye`
+        # Should return fn, args, kwargs, string_version
+        return torch.eye, (2,), {"device": "mps"}, "torch.eye(2, device='mps')"
+
+    def test_error_on_not_implemented(self):
+        fn, args, kwargs, _ = self._get_not_implemented_op()
+
+        with self.assertRaisesRegex(NotImplementedError, "not current implemented for the MPS device"):
+            fn(*args, **kwargs)
+
+    def test_warn_on_not_implemented_with_fallback(self):
+        _, _, _, op = self._get_not_implemented_op()
+        script = f"""
+import os
+# MUST happen before pytorch's import
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+import warnings
+
+with warnings.catch_warnings(record=True) as w:
+    import torch
+
+if len(w) > 0:
+    exit(1)
+
+# This should run just fine and raise warning about perf
+with warnings.catch_warnings(record=True) as w:
+    {op}
+
+if len(w) != 1:
+    exit(2)
+
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, '-W', 'all', '-c', script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),)
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:
+                self.assertTrue(False, "There was a warning when importing torch when PYTORCH_ENABLE_MPS_FALLBACK is set.")
+            elif e.returncode == 2:
+                self.assertTrue(False, "There wasn't exactly one warning when running not implemented op with "
+                                "PYTORCH_ENABLE_MPS_FALLBACK set.")
+            else:
+                self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set.")
 
 if __name__ == "__main__":
     run_tests()

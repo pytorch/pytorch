@@ -14,12 +14,12 @@ void mps_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack)
 
 void mps_error_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack)
 {
-  TORCH_CHECK(false, "The operator '", op.schema().operator_name(), "' is not current implemented ",
-              "for the MPS device. If you want this op to be added in priority during the prototype ",
-              "phase of this feature, please comment on https://github.com/pytorch/pytorch/issues/77764. ",
-              "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ",
-              "to use the CPU as a fallback for this op. WARNING: this will be slower than running natively ",
-              "on MPS.")
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "The operator '", op.schema().operator_name(), "' is not current implemented ",
+    "for the MPS device. If you want this op to be added in priority during the prototype ",
+    "phase of this feature, please comment on https://github.com/pytorch/pytorch/issues/77764. ",
+    "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ",
+    "to use the CPU as a fallback for this op. WARNING: this will be slower than running natively ",
+    "on MPS.")
 }
 
 TORCH_LIBRARY_IMPL(_, MPS, m) {
