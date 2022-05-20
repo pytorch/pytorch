@@ -980,6 +980,14 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
 
+    def test_conv_invalid_groups(self):
+        with self.assertRaisesRegex(ValueError, 'groups must be a positive integer'):   
+            torch.nn.Conv1d(1, 1, kernel_size=3, dilation=2, stride=2, groups=0)
+        with self.assertRaisesRegex(ValueError, 'groups must be a positive integer'):   
+            torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-1)
+        with self.assertRaisesRegex(ValueError, 'groups must be a positive integer'):   
+            torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-2)          
+
     def test_Conv1d_module_same_padding(self):
         # Compare module against functional: without strides/dilation, asymmetric padding
         x = torch.rand(1, 1, 20)
