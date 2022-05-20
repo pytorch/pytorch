@@ -144,7 +144,7 @@ class FakeTensor(BaseTensor):
             # device of the input is returned
             return tree_map(partial(wrap, device=new_kwargs["input"].device), r)
 
-        common_device = self._find_common_device(func, args, kwargs)
+        common_device = FakeTensor._find_common_device(func, args, kwargs)
 
         return tree_map(partial(wrap, device=common_device), r)
 
