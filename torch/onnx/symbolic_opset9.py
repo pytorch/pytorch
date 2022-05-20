@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Optional
+from typing import List, Optional
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -4966,11 +4966,12 @@ class Prim:
         return None
 
     @staticmethod
-    def ListUnpack(g, *inputs, **kwargs):
+    def ListUnpack(g, *inputs, **kwargs) -> Optional[List[_C.Value]]:
         # Need to get the nodes and condition on the input node
-        first_node = inputs[0].node()
-        if first_node.kind() == "prim::ListConstruct":
-            return first_node.outputs()
+        first_input = inputs[0]
+        if first_input.node().kind() == "prim::ListConstruct":
+            # TODO(justinchuby): Use a public method in the helper module
+            return symbolic_helper._unpack_list(first_input)
 
         return None
 
