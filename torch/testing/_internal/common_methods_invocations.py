@@ -9260,11 +9260,23 @@ foreach_binary_op_db: List[OpInfo] = [
         "mul",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        skips=(
+            # Ref: https://github.com/pytorch/pytorch/issues/77946
+            DecorateInfo(unittest.skip("Unable to reproduce failure locally"), "TestForeach",
+                         "test_binary_op_scalarlist_fastpath",
+                         device_type='cuda', dtypes=(torch.float16,)),
+        )
     ),
     ForeachFuncInfo(
         "div",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        skips=(
+            # Ref: https://github.com/pytorch/pytorch/issues/77946
+            DecorateInfo(unittest.skip("Unable to reproduce failure locally"), "TestForeach",
+                         "test_binary_op_scalarlist_fastpath",
+                         device_type='cuda', dtypes=(torch.float16,)),
+        )
     ),
 ]
 
@@ -17986,6 +17998,44 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
+        '_masked.argmax',
+        supports_out=False,
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
+        skips=(
+            # FIXME (from torch.argmax): keepdim parameter is ignored when dim=None
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            # initial is not a keyword for argmax
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_reference_masked'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
+        '_masked.argmin',
+        supports_out=False,
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
+        skips=(
+            # FIXME (from torch.argmin): keepdim parameter is ignored when dim=None
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+            # initial is not a keyword for argmin
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_reference_masked'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
         '_masked.mean',
         ref=reference_reduction_numpy(np.mean) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
         method_variant=None,
@@ -18231,16 +18281,16 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
             # Identity can't be -torch.inf without overflow
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_empty_tensor_empty_slice'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_empty_tensor_empty_slice'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # all the values are the same except for -inf vs nan
-            DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive'),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
@@ -18878,6 +18928,10 @@ python_ref_db = [
         "_refs.tan",
         torch_opinfo_name="tan",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.tanh",
+        torch_opinfo_name="tanh",
+    ),
     #
     # Elementwise Unary Special OpInfos
     #
@@ -18898,10 +18952,50 @@ python_ref_db = [
     # Elementwise Unary nn.functional OpInfos
     #
     ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.celu",
+        torch_opinfo_name="nn.functional.celu",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
         decorators=(
             # https://github.com/pytorch/pytorch/issues/77054
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.mish",
+        torch_opinfo_name="nn.functional.mish",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.selu",
+        torch_opinfo_name="nn.functional.selu",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.softplus",
+        torch_opinfo_name="nn.functional.softplus",
+        decorators=(
             DecorateInfo(toleranceOverride({
                 torch.bfloat16: tol(atol=1e-2, rtol=0),
                 torch.float16: tol(atol=1e-3, rtol=0),
