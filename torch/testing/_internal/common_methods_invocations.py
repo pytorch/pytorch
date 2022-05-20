@@ -12224,7 +12224,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),)),
     OpInfo('std_mean',
@@ -17152,6 +17151,8 @@ op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        # fast gradcheck produces NaNs
+        gradcheck_fast_mode=False,
         skips=(
             # https://github.com/pytorch/pytorch/issues/67517
             DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_noncontiguous_samples"),
@@ -17713,6 +17714,8 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_nan_reduction(supports_multiple_dims=True),
         ref=reference_reduction_numpy(np.nansum),
         skips=(
+            # please report a bug to PyTorch.
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # FIXME: nansum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
