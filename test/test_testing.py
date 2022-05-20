@@ -1780,7 +1780,9 @@ class TestImports(TestCase):
         if not sys.version_info >= (3, 8):
             ignored_modules.append("torch.utils.benchmark")
         if IS_WINDOWS:
+            # Distributed does not work on Windows
             ignored_modules.append("torch.distributed.")
+            ignored_modules.append("torch.testing._internal.dist_utils")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, folders, files in os.walk(torch_dir):
