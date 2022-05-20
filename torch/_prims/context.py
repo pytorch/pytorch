@@ -184,12 +184,14 @@ def torch_to_refs_map():
             r[mod_torch.__dict__.get(s)] = mod_refs.__dict__.get(s)
     return r
 
+
 @functools.lru_cache(None)
 def all_prims():
     """
     Set of all prim functions, e.g., torch._prims.add in all_prims()
     """
     return {torch._prims.__dict__.get(s) for s in torch._prims.__all__}
+
 
 class TorchRefsMode(torch.overrides.TorchFunctionMode):
     """
@@ -202,6 +204,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
     By default, this context manager will fall back on the torch.* if the
     ref does not exist; set strict=True to error if this occurs.
     """
+
     def __init__(self, strict=False):
         self.strict = strict
 
@@ -222,5 +225,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         if func is not None:
             return func(*args, **kwargs)
         if self.strict:
-            raise RuntimeError(f"no _refs support for {torch.overrides.resolve_name(orig_func)}")
+            raise RuntimeError(
+                f"no _refs support for {torch.overrides.resolve_name(orig_func)}"
+            )
         return orig_func(*args, **kwargs)
