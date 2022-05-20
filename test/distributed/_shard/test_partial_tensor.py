@@ -120,6 +120,7 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
                 spec, [12, 22], 4, dist.ReduceOp.MAX, dtype=torch.cfloat
             )
 
+class TestPartialTensorOps(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
