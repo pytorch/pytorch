@@ -117,31 +117,30 @@ class TestPythonJiterator(TestCase):
 
         self.assertEqual(expected, result)
 
-    # @skipCUDAIfRocm
-    # @parametrize("num_outputs", list(range(2, 9)))
-    # def test_various_num_outputs(self, num_outputs):
-    #     input = torch.rand(3, device='cuda')
+    @skipCUDAIfRocm
+    @parametrize("num_outputs", list(range(2, 8)))
+    def test_various_num_outputs(self, num_outputs):
+        input = torch.rand(3, device='cuda')
 
-    #     output_string = ", ".join([f"T& out{i}" for i in range(num_outputs)])
-    #     function_body = ""
-    #     for i in range(num_outputs):
-    #         function_body += f"out{i} = input + {i};\n"
-    #     code_string = f"template <typename T> T my_kernel(T input, {output_string}) {{ {function_body} }}"
+        output_string = ", ".join([f"T& out{i}" for i in range(num_outputs)])
+        function_body = ""
+        for i in range(num_outputs):
+            function_body += f"out{i} = input + {i};\n"
+        code_string = f"template <typename T> T my_kernel(T input, {output_string}) {{ {function_body} }}"
 
-    #     print(code_string)
+        jitted_fn = create_multi_output_jit_fn(code_string, num_outputs)
 
-    #     jitted_fn = create_multi_output_jit_fn(code_string, num_outputs)
+        def ref_fn(input):
+            outputs = []
+            for i in range(num_outputs):
+                outputs.append(input + i)
+            return tuple(outputs)
 
-    #     def ref_fn(input):
-    #         outputs = []
-    #         for i in range(num_outputs):
-    #             outputs.append(input + i)
-    #         return tuple(outputs)
+        expected = ref_fn(input)
+        result = jitted_fn(input)
 
-    #     expected = ref_fn(input)
-    #     result = jitted_fn(input)
-
-    #     self.assertEqual(expected[0], result[0])
+        for i in range(num_outputs):
+            self.assertEqual(expected[i], result[i])
 
     @skipCUDAIfRocm
     @parametrize("code_string", [

@@ -113,29 +113,27 @@ struct OffsetCalculatorVariant {
 };
 
 struct ArrayVariant {
-  // notice: This would produce c10::variant<at::detail::Array<char*, 2...9>>
-#define DEFINE_CASE(index) at::detail::Array<char*, index + 1>,
+#define DEFINE_CASE(index) at::detail::Array<char*, index>,
   using ArrayTypes = c10::variant<
     AT_FOR_8_CASES(DEFINE_CASE)
   >;
 #undef DEFINE_CASE
 
   ArrayVariant(const TensorIteratorBase& iter) {
-    int arity = iter.ninputs();
-    // This assumes that jiterator kernels only have 1 output
-    switch(arity) {
+    int ntensors = iter.ntensors();
+    switch(ntensors) {
 #define DEFINE_CASE(index)                              \
-      case index: array = at::detail::Array<char*, index + 1>{}; break;
+      case index: array = at::detail::Array<char*, index>{}; break;
 
       AT_FOR_8_CASES(DEFINE_CASE)
 #undef DEFINE_CASE
 
       default:
-        TORCH_CHECK(false, "ArrayVariant is not implemented for ninputs = ", arity);
+        TORCH_CHECK(false, "ArrayVariant is not implemented for ntensors = ", ntensors);
     }
 
     c10::visit([&](auto& a) {
-      for (auto i = 0; i < arity + 1; ++i) {
+      for (auto i = 0; i < ntensors; ++i) {
         a[i] = (char*)iter.data_ptr(i);
       }
     }, array);
