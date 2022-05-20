@@ -19,7 +19,7 @@ from torch.distributed._shard.api import (
     _reshard_output,
 )
 from torch.distributed._shard.sharded_tensor import (
-    custom_sharded_op_impl,
+    sharded_op_impl,
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
@@ -174,7 +174,7 @@ class TestShardParameter(ShardedTensorTestBase):
         with self.assertRaisesRegex(ValueError, 'does not match with src_rank'):
             shard_parameter(fc, 'weight', spec, src_rank=self.rank)
 
-        with self.assertRaisesRegex(AttributeError, 'has no attribute'):
+        with self.assertRaisesRegex(AttributeError, 'Linear have no attribute'):
             shard_parameter(fc, 'foo', spec)
 
         with self.assertRaisesRegex(ValueError, 'Expected Linear.bias to be a Tensor, but found str'):
@@ -2463,7 +2463,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     @requires_nccl()
     def test_custom_op(self):
 
-        @custom_sharded_op_impl(torch.asin)
+        @sharded_op_impl(torch.asin)
         def my_sharded_asin(types, args, kwargs, process_group):
             return torch.asin(args[0].local_shards()[0].tensor)
 
@@ -2491,7 +2491,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
         from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
 
         @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.linear)
-        def my_sharded_linear(types, args, kwargs, process_group):
+        def my_sharded_linear(types, args, kwargs):
             return t
 
         spec = ChunkShardingSpec(
@@ -2515,12 +2515,12 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     def test_custom_op_errors(self):
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @custom_sharded_op_impl(torch.nn.functional.linear)
+            @sharded_op_impl(torch.nn.functional.linear)
             def my_op1(types, args, kwargs, process_group, random_param):
                 pass
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @custom_sharded_op_impl(torch.nn.functional.linear)
+            @sharded_op_impl(torch.nn.functional.linear)
             def my_op2(types):
                 pass
 
