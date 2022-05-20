@@ -282,14 +282,14 @@ struct alignas(2) Half {
   Half() = default;
   inline __host__ __device__ Half(float value){
 #ifdef __HIPCC__
-    x = __float2half(value);
+    x = __half_as_short(__float2half(value));
 #else
     asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
 #endif
   }
   inline __host__ __device__ operator float() const{
 #ifdef __HIPCC__
-      return __half2float(x);
+      return __half2float(*reinterpret_cast<const __half*>(&x));
 #else
       float val;
       asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x)); // do we need const cast here?
@@ -297,7 +297,6 @@ struct alignas(2) Half {
       return val;
 #endif
   }
-
 };
 }
 )ESCAPE";
