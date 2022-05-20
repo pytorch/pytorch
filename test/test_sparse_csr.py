@@ -2181,7 +2181,11 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(layout, pt_matrix.layout)
             self.assertEqual(sp_matrix.shape, pt_matrix.shape)
+            print("compressed_indices_mth(pt_matrix): ", compressed_indices_mth(pt_matrix))
+            print("sp_matrix.indptr: ", sp_matrix.indptr)
             self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
+            print("plain_indices_mth(pt_matrix): ", plain_indices_mth(pt_matrix))
+            print("sp_matrix.indices: ", sp_matrix.indices)
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 

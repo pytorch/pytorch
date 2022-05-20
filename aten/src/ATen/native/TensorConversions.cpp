@@ -587,9 +587,6 @@ Tensor dense_to_sparse_csc(const Tensor& self) {
 }
 
 Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
-  TORCH_CHECK(self.dim() == 2, "Can only tile 2D Tensors.");
-  TORCH_CHECK(self.size(0) % blocksize[0] == 0, "Tensor size(0) ", self.size(0), " needs to be divisible by blocksize[0] ", blocksize[0]);
-  TORCH_CHECK(self.size(1) % blocksize[1] == 0, "Tensor size(1) ", self.size(1), " needs to be divisible by blocksize[1] ", blocksize[1]);
   auto block_size_0 = self.size(0) / blocksize[0];
   auto block_size_1 = self.size(1) / blocksize[1];
   auto values = self.reshape({self.size(0) / blocksize[0], blocksize[0], self.size(1) / blocksize[1], blocksize[1]});
@@ -600,6 +597,9 @@ Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   TORCH_CHECK(self.dim() == 2, "Can only covert 2D Tensor to BSR.");
+  TORCH_CHECK(self.size(0) % blocksize[0] == 0, "Tensor size(0) ", self.size(0), " needs to be divisible by blocksize[0] ", blocksize[0]);
+  TORCH_CHECK(self.size(1) % blocksize[1] == 0, "Tensor size(1) ", self.size(1), " needs to be divisible by blocksize[1] ", blocksize[1]);
+  auto block_size_0 = self.size(0) / blocksize[0];
 
   auto values = _tile_tensor(self, blocksize);
   auto not_mask = _tile_tensor((self != 0), blocksize);
@@ -610,7 +610,7 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   Tensor row_indices;
   std::tie(col_indices, row_indices) = _not_mask_to_col_row_indices(not_mask);
   Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
-      row_indices.view({-1}), self.size(-2), false /* out_int32 */);
+      row_indices.view({-1}), block_size_0, false /* out_int32 */);
   values = values.reshape({-1, values.size(-2), values.size(-1)});
   not_mask = not_mask.reshape({-1});
   values = values.index_select(0, at::native::arange(not_mask.numel()).masked_select(not_mask));
