@@ -100,8 +100,8 @@ Value* createConditionalConstant(Node* profile_ivalue) {
     // ival
     val = IValue(profile_ivalue->ival(Symbol::attr("profiled_ival")));
   } else {
-    GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
-    TORCH_WARN(
+    GRAPH_DEBUG("no profile info in profile_ivalue node: ", *profile_ivalue);
+    TORCH_WARN_ONCE(
         __func__,
         " profile_node ",
         *profile_ivalue,
