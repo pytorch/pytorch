@@ -74,7 +74,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
         dtype(),
         device(),
         opaque_handle_,
-        expectIntArrayRef(sizes_and_strides_.sizes_arrayref()));
+        asIntArrayRefSlow(sizes_and_strides_.sizes_arrayref()));
     copy_tensor_metadata(
         /*src_opaque_impl=*/this,
         /*dest_opaque_impl=*/impl.get(),
@@ -98,7 +98,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
         dtype(),
         device(),
         opaque_handle_,
-        expectIntArrayRef(sizes_and_strides_.sizes_arrayref()));
+        asIntArrayRefSlow(sizes_and_strides_.sizes_arrayref()));
     copy_tensor_metadata(
         /*src_opaque_impl=*/this,
         /*dest_opaque_impl=*/impl.get(),

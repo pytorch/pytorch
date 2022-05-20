@@ -575,7 +575,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
       return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
     }
-    return sizes_and_strides_.size_at_unchecked(d).data();
+    return sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
   }
 
   /**
@@ -592,7 +592,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
       return strides_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
     }
-    return sizes_and_strides_.stride_at_unchecked(d).data();
+    return sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked();
   }
 
   /**
@@ -1360,8 +1360,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             // Keep stride monotonically increasing to match NumPy.
             sizes_and_strides_.stride_at_unchecked(dim) =
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(dim + 1).data(), 1) *
-                sizes_and_strides_.stride_at_unchecked(dim + 1).data();
+                    sizes_and_strides_.size_at_unchecked(dim + 1).as_int_unchecked(), 1) *
+                sizes_and_strides_.stride_at_unchecked(dim + 1).as_int_unchecked();
           }
         }
         if (dim == 0)
@@ -1942,9 +1942,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
             sizes_and_strides_.stride_at_unchecked(i) =
-                sizes_and_strides_.stride_at_unchecked(i + 1).data() *
+                sizes_and_strides_.stride_at_unchecked(i + 1).as_int_unchecked() *
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1).data(), 1);
+                    sizes_and_strides_.size_at_unchecked(i + 1).as_int_unchecked(), 1);
           }
         }
         break;

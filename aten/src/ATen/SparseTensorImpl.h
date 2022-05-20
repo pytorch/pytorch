@@ -142,7 +142,7 @@ public:
         "shrinking the size of dense dimensions (from ", dense_size_original, " to ", dense_size_new, ") on a non-empty sparse tensor is not supported.\n", alt_options_msg);
     }
 
-    IntArrayRef sizes_and_strides = expectIntArrayRef(sizes_and_strides_.sizes_arrayref());
+    IntArrayRef sizes_and_strides = asIntArrayRefSlow(sizes_and_strides_.sizes_arrayref());
     const bool size_equals_sizes = std::equal(size.begin(), size.end(), sizes_and_strides.begin(), sizes_and_strides.end());
     if ((!size_equals_sizes) || (sparse_dim != sparse_dim_) || (dense_dim != dense_dim_)) {
       auto nnz = values().size(0);

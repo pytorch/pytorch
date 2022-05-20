@@ -76,8 +76,9 @@ class SymIntArrayRef final {
   static SymIntArrayRef fromIntArrayRef(IntArrayRef array_ref) {
     for (size_t i = 0; i < array_ref.size(); ++i) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          array_ref[i] >= 0,
-          "Expected all elements in array to be non-negative");
+          SymInt::check_range(array_ref[i]),
+          "IntArrayRef contains int that cannot be representative as a SymInt",
+          array_ref[i]);
     }
     return SymIntArrayRef(
         reinterpret_cast<const SymInt*>(array_ref.data()), array_ref.size());
@@ -186,7 +187,8 @@ class SymIntArrayRef final {
   /// @}
 };
 
-TORCH_API at::IntArrayRef expectIntArrayRef(c10::SymIntArrayRef ar);
+TORCH_API at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar);
+TORCH_API at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar);
 
 std::ostream& operator<<(std::ostream& out, const c10::SymIntArrayRef& list);
 

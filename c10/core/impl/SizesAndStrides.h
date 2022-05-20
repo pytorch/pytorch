@@ -121,7 +121,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  bool has_sym() const noexcept {
+  bool has_sym_slow() const noexcept {
     if (std::any_of(sizes_begin(), sizes_end(), [](const auto i) {
           return i.is_symbolic();
         })) {
