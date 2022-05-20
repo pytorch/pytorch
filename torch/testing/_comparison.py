@@ -1047,6 +1047,15 @@ def assert_equal(
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
+    # TODO: the Tensor compare uses bunch of operations which is currently not
+    # supported by MPS. We will remove this move to CPU after all the
+    # support is added. https://github.com/pytorch/pytorch/issues/77144
+    if isinstance(actual, torch.Tensor) and (actual.is_mps):
+        actual = actual.to('cpu')
+
+    if isinstance(expected, torch.Tensor) and (expected.is_mps):
+        expected = expected.to('cpu')
+
     try:
         pairs = originate_pairs(
             actual,
