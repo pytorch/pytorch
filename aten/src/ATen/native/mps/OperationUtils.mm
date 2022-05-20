@@ -347,7 +347,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src,
   if (!mpsShape)
     mpsShape = getMPSShape(src_);
 
-  _value = [[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
+  _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
                                                    shape:mpsShape
                                                 dataType:mpsDataType];
   TORCH_INTERNAL_ASSERT(_value);
