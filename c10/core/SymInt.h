@@ -57,6 +57,11 @@ class C10_API SymInt {
     return data_;
   }
 
+  // Return whether the integer is representable as a SymInt.
+  static bool check_range(int64_t i) {
+    return i > MIN_INT;
+  }
+
  private:
   // Constraints on the internal representation:
   // - Should represent positive and negative ints
@@ -74,6 +79,9 @@ class C10_API SymInt {
   // we cannot represent symbolic indices that are large enough to use those
   // bits. This will probably never happen.
   static constexpr uint64_t MAX_SYM_IDX = 1LL << 62;
+  // Since 0b10... is reserved for symbolic indices, any integers lower than
+  // this value would collide with our representation.
+  static constexpr int64_t MIN_INT = -1LL & ~(1LL << 62);
   int64_t data_;
 };
 
