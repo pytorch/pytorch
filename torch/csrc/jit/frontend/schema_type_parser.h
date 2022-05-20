@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/core/Macros.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/jit_type.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/FunctionRef.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 

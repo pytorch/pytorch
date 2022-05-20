@@ -2,7 +2,7 @@
 // https://github.com/JuliaLang/julia/blob/v1.1.0/src/support/strtod.c
 #include <torch/csrc/jit/frontend/strtod.h>
 
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 #include <clocale>
 #include <cstdlib>
 
