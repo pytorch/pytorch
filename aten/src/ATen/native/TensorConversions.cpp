@@ -7,6 +7,7 @@
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/native/IndexingUtils.h>
 
 namespace at {
 namespace native {
@@ -482,11 +483,11 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
 
 // Sparse layout conversions Start
 
-SparseTensor dense_to_sparse(const Tensor& self) {
+Tensor dense_to_sparse(const Tensor& self) {
   return dense_to_sparse(self, self.dim());
 }
 
-SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
+Tensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
   int64_t dims = self.dim();
   // TODO: it seems like sparse_dim == 0 could be supported even if self.dim() >
   // 0, but this would take some work and doesn't seem particularly useful.
@@ -536,8 +537,19 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 }
 
 Tensor dense_to_sparse_csr(const Tensor& self) {
+  TORCH_CHECK(self.dim() == 3 || self.dim() == 2, "Can only covert 2D or 3D Tensor to CSR.");
   auto mask = (self == 0);
+  if (mask.dim() == 3) {
+    mask = mask.all(0);
+  }
+  auto not_mask = mask.logical_not();
+  auto values = self.masked_select(not_mask);
   std::cout << "mask: " << mask << std::endl;
+  std::cout << "values: " << values << std::endl;
+  auto column_indices = (not_mask * at::native::arange(self.size(-1)).view({1, self.size(-1)}).expand_as(mask)); //.masked_select(not_mask);
+  auto row_indices = (not_mask * at::native::arange(self.size(-2)).view({self.size(-2), 1}).expand_as(mask)); //.masked_select(not_mask);
+  std::cout << "column_indices: " << column_indices << std::endl;
+  std::cout << "row_indices: " << row_indices << std::endl;
   return self.to_sparse().to_sparse_csr();
 }
 
