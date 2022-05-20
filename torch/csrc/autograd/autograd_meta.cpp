@@ -90,7 +90,7 @@ namespace {
       if (base.sizes()[i] != other.sizes()[i]) {
         return false;
       }
-      if (base.strides()[i] != other.strides()[i] && base.sizes()[i] != 1) {
+      if (base.strides()[i] != other.strides()[i] && base.sizes()[i] != 1 && base.sizes()[i] != 0) {
         return false;
       }
     }
