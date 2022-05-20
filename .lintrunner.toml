@@ -144,6 +144,10 @@ include_patterns = [
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/**/*.py',
 ]
+exclude_patterns = [
+    # (linbinyu) copied from internal repo
+    'tools/code_analyzer/gen_operators_yaml.py',
+]
 command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
