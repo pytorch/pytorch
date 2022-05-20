@@ -4102,8 +4102,8 @@ class TestNoRegression(TestCase):
     def test_assert_close(self):
         a = torch.ones(1, device="mps")
         b = torch.zeros(1, device="mps")
-        inf = a/b
-        nan = b/b
+        inf = a / b
+        nan = b / b
 
         with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
             torch.testing.assert_close(a, inf)
