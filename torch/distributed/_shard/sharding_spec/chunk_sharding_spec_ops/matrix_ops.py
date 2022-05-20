@@ -226,6 +226,14 @@ def sharded_view(args, kwargs, pg):
         return st.local_tensor(), st.sharding_spec(), shape
 
     sharding_dim = st.sharding_spec().dim
+    sharding_spec = st.sharding_spec()
+    # When the sharding dim is negative, we need to ensure the new
+    # sharded tensor is still sharded by the original dimension.
+    if sharding_dim < 0:
+        sharding_spec = copy.deepcopy(sharding_spec)
+        sharding_dim = st.dim() + sharding_dim
+        sharding_spec.dim = sharding_dim
+
     world_size = dist.get_world_size(pg)
     if shape[sharding_dim] % world_size:
         raise NotImplementedError(
@@ -238,7 +246,7 @@ def sharded_view(args, kwargs, pg):
         *shape[sharding_dim + 1 :],
     )
     new_local_tensor = st.local_tensor().view(*new_local_tensor_size)
-    return new_local_tensor, st.sharding_spec(), shape
+    return new_local_tensor, sharding_spec, shape
 
 
 _register_sharded_op_on_local_tensor(

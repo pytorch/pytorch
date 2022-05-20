@@ -24,7 +24,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from ._utils import _replace_by_prefix
+from torch.distributed.utils import _replace_by_prefix
 
 
 ParamOffset = Tuple[int, int]

@@ -1,11 +1,14 @@
 // This file defines `SymIntArrayRef` which serves as the view onto
-// std::vector<SymInt> This class is conceptually and mostly functionally
-// equivalent to ArrayRef<SymInt> However, ArrayRef<SymInt> can't be used
-// directly as it introduces ambiguity in the following cases: a.expand({1, 2,
-// 3}) matches two overloads: `at::Tensor Tensor::expand(c10::SymIntArrayRef
-// size, bool implicit)` `at::Tensor Tensor::expand(at::IntArrayRef size, bool
-// implicit)` Introducing `SymIntArrayRef` allows to have a finer-grained
-// control over which overload will be used
+// std::vector<SymInt>. This class is conceptually and mostly functionally
+// equivalent to ArrayRef<SymInt>.
+//
+// However, ArrayRef<SymInt> can't be used directly as it introduces ambiguity
+// in the following cases:
+//   - a.expand({1, 2, 3}) matches two overloads:
+//       1. `at::Tensor Tensor::expand(c10::SymIntArrayRef size, bool implicit)`
+//       2. `at::Tensor Tensor::expand(at::IntArrayRef size, bool implicit)`
+// Introducing `SymIntArrayRef` allows to have a finer-grained control over
+// which overload will be used.
 
 #pragma once
 
@@ -69,6 +72,17 @@ class SymIntArrayRef final {
   template <size_t N>
   /* implicit */ constexpr SymIntArrayRef(const c10::SymInt (&Arr)[N])
       : wrapped_symint_array_ref(Arr) {}
+
+  static SymIntArrayRef fromIntArrayRef(IntArrayRef array_ref) {
+    for (size_t i = 0; i < array_ref.size(); ++i) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          SymInt::check_range(array_ref[i]),
+          "IntArrayRef contains int that cannot be representative as a SymInt",
+          array_ref[i]);
+    }
+    return SymIntArrayRef(
+        reinterpret_cast<const SymInt*>(array_ref.data()), array_ref.size());
+  }
 
   /// @}
   /// @name Simple Operations
@@ -173,7 +187,8 @@ class SymIntArrayRef final {
   /// @}
 };
 
-TORCH_API at::IntArrayRef expectIntArrayRef(c10::SymIntArrayRef ar);
+TORCH_API at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar);
+TORCH_API at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar);
 
 std::ostream& operator<<(std::ostream& out, const c10::SymIntArrayRef& list);
 
