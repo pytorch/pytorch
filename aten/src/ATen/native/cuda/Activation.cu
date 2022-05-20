@@ -322,25 +322,19 @@ void launch_prelu_cuda_backward_kernel_multi_weights(
 // hardshrink
 // -----------------------------------
 void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-                                  iter.dtype(), "hardshrink_cuda", [&]() {
-    using opmath_t = at::opmath_type<scalar_t>;
-    auto lambd = value.to<opmath_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardshrink_cuda", [&]() {
+    auto lambd = value.to<scalar_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      opmath_t aop = static_cast<opmath_t>(a);
-      return (aop >= -lambd && aop <= lambd) ? opmath_t(0) : aop;
+      return (a >= -lambd && a <= lambd) ? scalar_t(0) : a;
     });
   });
 }
 
 void softshrink_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-                                  iter.dtype(), "softshrink_cuda", [&]() {
-    using opmath_t = at::opmath_type<scalar_t>;
-    auto lambd = value.to<opmath_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softshrink_cuda", [&]() {
+    auto lambd = value.to<scalar_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      opmath_t aop = static_cast<opmath_t>(a);
-      return aop > lambd ? aop - lambd : (aop < -lambd ? aop + lambd : opmath_t(0));
+      return a > lambd ? a - lambd : (a < -lambd ? a + lambd : scalar_t(0));
     });
   });
 }
