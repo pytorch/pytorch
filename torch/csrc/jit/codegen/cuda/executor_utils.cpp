@@ -522,6 +522,13 @@ std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo
 void validateAlignedVectorizeExtents(
     const VectorizedSetInfo& info,
     kir::ExpressionEvaluator& expr_eval) {
+  TORCH_INTERNAL_ASSERT(
+      !info.contig_root_ids.empty(),
+      "No root ID found for vectorization with ",
+      info.consumer_tv->toString(),
+      " and ",
+      info.producer_tv->toString());
+
   int64_t vectorized_merged_domain_extent = 1;
   for (auto id : info.contig_root_ids) {
     auto extent_val = expr_eval.evaluate(id->extent());
@@ -875,13 +882,15 @@ void initializeCudaContext() {
   }
 }
 
-NvrtcFunction nvrtcCompile(
+std::pair<NvrtcFunction, std::string> nvrtcCompile(
     const std::string& code,
     const std::string& func_name,
     int id,
     c10::optional<int> opt_block_size) {
   FUSER_PERF_SCOPE("executor_utils::NVRTC");
   initializeCudaContext();
+
+  std::stringstream ptxas_log;
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
 
@@ -928,14 +937,14 @@ NvrtcFunction nvrtcCompile(
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
 
-  const char* disable_fma = getenv("PYTORCH_NVFUSER_DISABLE_FMA");
+  const bool disable_fma = isDisabled(DisableOption::Fma);
 #ifdef __HIP_PLATFORM_HCC__
-  if (disable_fma && atoi(disable_fma)) {
+  if (disable_fma) {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
   }
 #else
-  if (disable_fma && atoi(disable_fma)) {
+  if (disable_fma) {
     args.push_back("--fmad=false");
   } else {
     args.push_back("--fmad=true");
@@ -960,7 +969,8 @@ NvrtcFunction nvrtcCompile(
   std::vector<char> info_log;
   unsigned int log_size = 8196;
 
-  if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
+  if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog) ||
+      isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
     // show register usage in compilation log
     if (compile_to_sass) {
       args.push_back("--ptxas-options");
@@ -1022,7 +1032,6 @@ NvrtcFunction nvrtcCompile(
     // The maximum possible count allowed by ptxas is 255
     max_register = static_cast<uint32_t>(
         std::min(effective_max_reg_per_warp / warp_size, 255));
-
     if (compile_to_sass) {
       max_register_usage += std::to_string(max_register);
       args.push_back("--ptxas-options");
@@ -1031,6 +1040,12 @@ NvrtcFunction nvrtcCompile(
       options.push_back(CU_JIT_MAX_REGISTERS);
       option_vals.push_back((void*)(intptr_t)max_register);
     }
+
+    ptxas_log << "\nCompile options: ";
+    for (auto arg : args) {
+      ptxas_log << arg << " ";
+    }
+    ptxas_log << " ; block size=" << opt_block_size.value() << "\n";
   }
 #endif
 
@@ -1043,26 +1058,21 @@ NvrtcFunction nvrtcCompile(
     const auto result = at::globalContext().getNVRTC().nvrtcCompileProgram(
         program, args.size(), args.data());
 
-    if (result != NVRTC_SUCCESS) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t logsize;
-      at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      std::vector<char> log(logsize);
-      at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+    size_t logsize = 0;
+    at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
 
+    std::vector<char> log(logsize);
+    at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+
+    if (result != NVRTC_SUCCESS) {
       TORCH_INTERNAL_ASSERT(
           false, code.c_str(), "\nCUDA NVRTC compile error: ", log.data());
-    } else if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t logsize;
-      at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
-      std::vector<char> log(logsize);
-      at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
-
-      std::cout << log.data() << std::endl;
     }
 
+    ptxas_log << log.data() << std::endl;
+    if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
+      std::cout << log.data() << std::endl;
+    }
     AT_CUDA_NVRTC_CHECK(result);
   }
 
@@ -1203,7 +1213,7 @@ NvrtcFunction nvrtcCompile(
       compiled_kernel_.module,
       lowered_kernel_name));
 
-  return compiled_kernel_;
+  return {compiled_kernel_, ptxas_log.str()};
 }
 
 namespace caching {
@@ -1274,8 +1284,8 @@ std::vector<IterDomain*> getParallelBindingsIterDomains(
           // Want to keep the broadcast dimensions if they are not resolved
           // TODO: piping down the parallel dimension map here would
           //  be helpful
-          auto& parallel_map = lower->caParallelMap();
-          if (parallel_map.getConcreteMappedID(id) == id) {
+          if (lower->caMap()->getConcreteMappedID(id, IdMappingMode::LOOP) ==
+              id) {
             parallel_ids.push_back(id);
           }
         } else {
@@ -1321,16 +1331,14 @@ std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
     GpuLower* lower,
     std::vector<IterDomain*>& parallel_binding_ids) {
   auto parallel_iter_extents_ptr = std::make_unique<ParallelExtentMap>();
-  auto& parallel_map = lower->caParallelMap();
+  const auto& ca_map = lower->caMap();
   std::vector<IterDomain*> mapped;
   bool is_tidx_warp_padded = lower->getWarpPaddedParallelInfo().is_tidx_padded;
 
   for (auto id : parallel_binding_ids) {
     if (std::any_of(
-            mapped.begin(),
-            mapped.end(),
-            [id, &parallel_map](IterDomain* mapped_id) {
-              return parallel_map.areMapped(mapped_id, id);
+            mapped.begin(), mapped.end(), [id, &ca_map](IterDomain* mapped_id) {
+              return ca_map->areMapped(mapped_id, id, IdMappingMode::LOOP);
             })) {
       if (id->getParallelType() != ParallelType::TIDx || !is_tidx_warp_padded) {
         continue;
@@ -1338,7 +1346,8 @@ std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
     }
 
     insertParallelExtent(
-        parallel_map.getConcreteMappedID(id), parallel_iter_extents_ptr);
+        ca_map->getConcreteMappedID(id, IdMappingMode::LOOP),
+        parallel_iter_extents_ptr);
     mapped.push_back(id);
   }
 
