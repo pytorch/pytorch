@@ -3,9 +3,9 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
+from torch.testing._internal.jit_utils RUN_CUDA
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
-from torch.testing._internal.jit_utils import RUN_CUDA
 from torch._ops import OpOverload
 import unittest
 
@@ -18,6 +18,7 @@ class FakeTensorTest(TestCase):
         self.assertEqual(y.shape, (4, 2, 2))
         self.assertEqual(y.device, torch.device("cpu"))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
         x = FakeTensor.from_tensor(torch.empty(1, device="cpu"))
         y = FakeTensor.from_tensor(torch.empty(8, 8, device="cuda"))
@@ -25,6 +26,7 @@ class FakeTensorTest(TestCase):
         self.assertEqual(out.shape, (8, 8))
         self.assertEqual(out.device.type, "cpu")
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         x = FakeTensor.from_tensor(torch.tensor(0.0))
         y = FakeTensor.from_tensor(torch.rand([4, 4], device="cuda"))
@@ -32,6 +34,7 @@ class FakeTensorTest(TestCase):
         self.assertEqual(out.shape, (4, 4))
         self.assertEqual(out.device, y.device)
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_throw(self):
         x = FakeTensor.from_tensor(torch.tensor(0.0))
         y = FakeTensor.from_tensor(torch.rand([4, 4], device="cuda"))
