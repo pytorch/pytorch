@@ -337,9 +337,13 @@ Tensor& addmm_out_mps_impl(
       });
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
-    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
-    Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias);
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self,
+    nullptr, true);
+    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other,
+    nullptr, true);
+    Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias,
+    nullptr, false);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -452,11 +456,6 @@ Tensor& addbmm_or_baddbmm_out_mps_impl(
       "Incompatible matrix sizes for bmm (",
       batch1.size(1), "x", batch1.size(2), " and ",
       batch2.size(1), "x", batch2.size(2), ")");
-
-  const int64_t dim1 = batch1.size(1);
-  const int64_t dim2 = batch2.size(2);
-  TORCH_CHECK(input.size(0) == dim1 && input.size(1) == dim2,
-      "input tensor does not match matmul output shape");
 
   if (opType == ADDBMM_OP_TYPE)
   {
