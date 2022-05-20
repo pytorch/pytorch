@@ -3,7 +3,7 @@ from typing import Set
 import traceback
 import torch
 
-__all__ = ['Library', 'impl']
+__all__ = ['Library', 'impl', 'define']
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -39,8 +39,6 @@ class Library:
 
     def impl(self, op_name, fn, dispatch_key=''):
         if dispatch_key == '':
-            if self.dispatch_key == '':
-                raise RuntimeError("Please specify the dispatch key that you want to register the kernel for.")
             dispatch_key = self.dispatch_key
 
         if isinstance(op_name, str):
@@ -65,8 +63,19 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
-    def define(self, schema):
-        self.m.define(schema)
+    def define(self, schema, alias_analysis=""):
+        '''
+        Takes a schema to define a new operator.
+        Also, optionally takes `alias_analysis` argument to indicate if the aliasing properties of the arguments
+        can be inferred from the schema (default behavior) or not ("CONSERVATIVE").
+
+        Returns the name of the operator as inferred from the schema.
+        '''
+        # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
+        # AliasAnalysis type in C++
+        if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
+            raise RuntimeError("Invalid alias_analysis type")
+        return self.m.define(schema, alias_analysis)
 
     def __del__(self):
         for key in self._op_impls:
@@ -75,7 +84,13 @@ class Library:
 
 # decorator to register python functions for library ops
 # Note: this decorator API should remain consistent with `Library.impl` API
-def impl(lib, name, dispatch_key=''):
+def impl(lib, name, dispatch_key=""):
     def wrap(f):
         lib.impl(name, f, dispatch_key)
+    return wrap
+
+def define(lib, schema, alias_analysis=""):
+    def wrap(f):
+        name = lib.define(schema, alias_analysis)
+        lib.impl(name, f)
     return wrap
