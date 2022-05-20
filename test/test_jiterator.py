@@ -23,7 +23,6 @@ def ref_fn(x, y, alpha=1, beta=1):
     return alpha * x + beta * y
 
 class TestPythonJiterator(TestCase):
-    @skipCUDAIfRocm
     @parametrize("shape_strides", [
         (([3, 3], [3, 1]), ([3, 3], [3, 1])),  # contiguous
     ])
@@ -62,7 +61,6 @@ class TestPythonJiterator(TestCase):
 
         self.assertEqual(expected, result)
 
-    @skipCUDAIfRocm
     @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
     @parametrize("alpha", [-1, 2.0, None])
     @parametrize("beta", [3, -4.2, None])
@@ -82,7 +80,6 @@ class TestPythonJiterator(TestCase):
 
         self.assertEqual(expected, result)
 
-    @skipCUDAIfRocm
     @parametrize("is_train", [True, False])
     def test_bool_extra_args(self, device, is_train):
         code_string = "template <typename T> T conditional(T x, T mask, bool is_train) { return is_train ? x * mask : x; }"
@@ -117,7 +114,6 @@ class TestPythonJiterator(TestCase):
         result = jitted_fn(a, b, c)
         self.assertEqual(expected, result)
 
-    @skipCUDAIfRocm
     @parametrize("num_inputs", [1, 5, 8])
     def test_various_num_inputs(self, num_inputs):
         inputs = []
