@@ -82,7 +82,7 @@ class Placeholder {
 void resize_tensor(Tensor* output);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor);
-MPSGraphTensorData* newMPSTensorFromScalar(MPSStream* mpsStream, const Scalar& scalar, MPSDataType dataType);
+MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, const Scalar& scalar, MPSDataType dataType);
 
 MPSGraph* make_mps_graph();
 void printTensorNDArray(const Tensor& t);

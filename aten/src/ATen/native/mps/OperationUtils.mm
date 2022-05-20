@@ -378,7 +378,7 @@ MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph,
   return result;
 }
 
-MPSGraphTensorData* newMPSTensorFromScalar(MPSStream* mpsStream, const Scalar& scalar, MPSDataType dataType) {
+MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, const Scalar& scalar, MPSDataType dataType) {
   union v_t {
     float f; // MPS doesn't support 'double'
     int64_t i;
