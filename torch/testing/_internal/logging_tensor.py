@@ -1,19 +1,10 @@
 import torch
 from torch.utils._pytree import tree_map
-
+from torch.utils._mode_utils import no_dispatch
 from typing import Iterator, List
 import logging
 import contextlib
 import itertools
-
-# TODO: move this into library proper
-@contextlib.contextmanager
-def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
 
 
 # How the chain of calls works for LoggingTensor:

@@ -925,3 +925,5 @@ from . import return_types
 if sys.executable != 'torch_deploy':
     from . import library
     from . import _meta_registrations
+
+from .subclasses import *
