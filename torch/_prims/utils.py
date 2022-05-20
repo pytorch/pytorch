@@ -799,7 +799,7 @@ _computation_dtype_map = {
 }
 
 
-def get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
+def _get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
     return _computation_dtype_map.get(dtype, dtype)
 
 
@@ -924,7 +924,7 @@ def elementwise_dtypes(
     result_dtype = None
 
     def _find_highest_dtype_filtered(
-        args, filter, *, float_as_complex=False, all_tensors_equal=False
+        args, filter, *, float_as_complex=False
     ) -> Optional[torch.dtype]:
         zero_dim_tensor_dtype = None
         one_plus_dim_tensor_dtype = None
@@ -933,12 +933,12 @@ def elementwise_dtypes(
                 _dtype = x.dtype
                 if float_as_complex and is_float_dtype(_dtype):
                     _dtype = corresponding_complex_dtype(_dtype)
-                if x.ndim == 0 and not all_tensors_equal:
+                if x.ndim == 0:
                     zero_dim_tensor_dtype = get_higher_dtype(
                         zero_dim_tensor_dtype, _dtype
                     )
                 else:
-                    # x.ndim > 0 or all_tensors_equal
+                    # x.ndim > 0
                     one_plus_dim_tensor_dtype = get_higher_dtype(
                         one_plus_dim_tensor_dtype, _dtype
                     )
@@ -955,32 +955,11 @@ def elementwise_dtypes(
             torch.get_default_dtype() if result_dtype is None else result_dtype
         )
     elif highest_type is complex:
-        # NOTE: complex x float type promotion is incorrectly implemented in PyTorch today
-        # it will treat zero dim and non-zero-dim float and complex tensors equally
-        # unless there's a non-zero-dim complex tensor
-        # the following captures this oddity
-        has_one_plus_dim_complex_tensor = False
-        for x in args:
-            if isinstance(x, TensorLike) and x.ndim > 0 and is_complex_dtype(x.dtype):
-                has_one_plus_dim_complex_tensor = True
-                break
-
-        if has_one_plus_dim_complex_tensor:
-            result_dtype = _find_highest_dtype_filtered(
-                args,
-                lambda x: is_float_dtype(x) or is_complex_dtype(x),
-                float_as_complex=True,
-            )
-        else:
-            # no complex tensors of rank 1+
-            # NOTE: bugged case where all tensors are equal
-            result_dtype = _find_highest_dtype_filtered(
-                args,
-                lambda x: is_float_dtype(x) or is_complex_dtype(x),
-                float_as_complex=True,
-                all_tensors_equal=True,
-            )
-
+        result_dtype = _find_highest_dtype_filtered(
+            args,
+            lambda x: is_float_dtype(x) or is_complex_dtype(x),
+            float_as_complex=True,
+        )
         if result_dtype is None:
             result_dtype = corresponding_complex_dtype(torch.get_default_dtype())
     elif highest_type is int:
@@ -991,25 +970,25 @@ def elementwise_dtypes(
         result_dtype = torch.bool
 
     if type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
-        return get_computation_dtype(result_dtype), result_dtype
+        return _get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH:
         return result_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
         if is_integer_dtype(result_dtype) or is_boolean_dtype(result_dtype):
             result_dtype = torch.get_default_dtype()
-        return get_computation_dtype(result_dtype), result_dtype
+        return _get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
         # NOTE: computation can still occur in a complex dtype
-        computation_dtype = get_computation_dtype(result_dtype)
+        computation_dtype = _get_computation_dtype(result_dtype)
         if is_complex_dtype(result_dtype):
             result_dtype = corresponding_real_dtype(result_dtype)
         return computation_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG:
         if is_boolean_dtype(result_dtype):
             return torch.long, torch.long
-        return get_computation_dtype(result_dtype), result_dtype
+        return _get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
-        return get_computation_dtype(result_dtype), torch.bool
+        return _get_computation_dtype(result_dtype), torch.bool
     else:
         raise ValueError(
             "Unknown type promotion kind {0}".format(str(type_promotion_kind))
