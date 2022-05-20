@@ -1,14 +1,7 @@
-load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
-load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load(
     "//tools:build_variables.bzl",
-    "aten_cpu_source_list",
     "aten_native_source_list",
-    "core_sources_common",
-    "jit_core_headers",
-    "jit_core_sources",
-    "libtorch_profiler_sources",
 )
 load(
     "//tools:ufunc_defs.bzl",
@@ -16,6 +9,8 @@ load(
     "aten_ufunc_generated_cpu_sources",
     "aten_ufunc_generated_cuda_sources",
 )
+load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
+load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 
 USED_PT_BACKENDS = [
     "CPU",
@@ -167,7 +162,6 @@ PT_COMPILER_FLAGS = [
     "-std=gnu++17",  # to accommodate Eigen
 ]
 
-
 def get_template_source_dict():
     ret = {}
     for file_path in TEMPLATE_SOURCE_LIST:
@@ -216,8 +210,9 @@ def get_aten_preprocessor_flags():
         "-DUSE_LAPACK_FBXPLAT=0",
         "-DAT_BLAS_F2C_FBXPLAT=0",
         "-DAT_BLAS_USE_CBLAS_DOT_FBXPLAT=0",
-        "-DUSE_RUY_QMATMUL", # need third_party:ruy
+        "-DUSE_RUY_QMATMUL",  # need third_party:ruy
     ]
+
     # if get_disable_per_op_profiling():
     ATEN_PREPROCESSOR_FLAGS.append("-DPYTORCH_DISABLE_PER_OP_PROFILING")
     return ATEN_PREPROCESSOR_FLAGS
@@ -398,7 +393,7 @@ def get_template_registration_file_rules(rule_name):
 # tests that may require both native and non-native codes. This rule is used to generate
 # both aten_cpu and aten_native_cpu. They are using the same compilation setups.
 def build_aten_cpu(name, srcs, deps = []):
-    native.cxx_library(
+    cxx_library(
         name = name,
         srcs = srcs,
         header_namespace = "",
@@ -430,7 +425,6 @@ def build_aten_cpu(name, srcs, deps = []):
     )
 
 ######### selective build #########
-
 
 def get_pt_ops_deps(name, deps, train = False, enforce_traced_op_list = False, enable_flatbuffer = False, **kwargs):
     if not get_build_from_deps_query():
@@ -501,7 +495,7 @@ def pt_operator_registry(
         # operator list, it's suggested to turn this option off.
         exported_preprocessor_flags.append("-DTEMPLATE_SELECTIVE_BUILD")
     kwargs.pop("exported_headers", [])
-    native.cxx_library(
+    cxx_library(
         name = name,
         srcs = code_gen_srcs,
         linker_flags = [
@@ -522,7 +516,6 @@ def pt_operator_registry(
         ],
         **kwargs
     )
-
 
 def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
     return [
@@ -646,19 +639,18 @@ def pt_operator_query_codegen(name, deps = [], train = False, enforce_traced_op_
     #     headers["UnboxingFunctions.h"] = ":{}[UnboxingFunctions.h]".format(unboxing_genrule)
     return {"headers": headers, "srcs": srcs}
 
-
 def gen_aten_libtorch_files(name, extra_params = [], compatible_with = []):
     fb_xplat_genrule(
         name = name,
         outs = get_generate_code_bin_outs(),
         default_outs = ["."],
         cmd = "mkdir -p tools && " +
-               "$(exe //tools/setup_helpers:generate_code_bin) " + " ".join(
+              "$(exe //tools/setup_helpers:generate_code_bin) " + " ".join(
             # Mobile build only needs libtorch - skip python bindings for now, except
             # for ovrsource, which needs Python bindings.
             (["--subset libtorch"] if not is_arvr_mode() else []) + [
                 "--native-functions-path $(location :aten_src_path)/aten/src/ATen/native/native_functions.yaml",
-                "--tags-path $(location :aten_src_path)/aten/src/ATen/native/tags.yaml", # todo D35992309
+                "--tags-path $(location :aten_src_path)/aten/src/ATen/native/tags.yaml",  # todo D35992309
                 "--install_dir $OUT",
             ] + extra_params,
         ),
@@ -675,21 +667,11 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = []):
         compatible_with = compatible_with,
     )
 
-
 def copy_template_registration_files(name):
     cmd = []
     cmd_exe = []
 
     template_source_dict = get_template_source_dict()
-
-    native.filegroup(
-        name = "templated_selective_build_srcs",
-        # NB: no glob here, there are generated targets in this list!
-        srcs = glob(TEMPLATE_SOURCE_LIST) + aten_ufunc_generated_all_cpu_sources(":gen_aten[{}]"),
-        visibility = [
-            "PUBLIC",
-        ],
-    )
 
     # Ideally, we would run one copy command for a single source directory along
     # with all its child directories, but it's somewhat hard to know if a directory
@@ -773,7 +755,7 @@ def pt_operator_library(
                 #optionally_model_traced_backends = "--model_traced_backends " + (",".join(model_traced_backends)) if model_traced_backends != None else "",
                 optionally_include_all_operators = "--include_all_operators " if include_all_operators else "",
             ),
-            labels = ["pt_operator_library"], # for pt_operator_query_codegen query
+            labels = ["pt_operator_library"],  # for pt_operator_query_codegen query
             visibility = visibility,
             **kwargs
         )
@@ -782,7 +764,7 @@ def pt_operator_library(
             pass
             # ensure_ops_are_declared(ops)
 
-        native.cxx_library(
+        cxx_library(
             name = name,
             compiler_flags = get_pt_compiler_flags(),
             cxx_platform_compiler_flags = get_cpukernel_avx2_flags(),
@@ -799,7 +781,7 @@ def compose_platform_setting_list(settings):
     for setting in settings:
         result = result.append([
             "^{}-{}$".format(setting["os"], setting["cpu"]),
-            setting["flags"]
+            setting["flags"],
         ])
     return result
 
