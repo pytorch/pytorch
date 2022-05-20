@@ -335,7 +335,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             graph_in.setType(graph_in.type().with_sizes(inp.size()))
 
         out_sizes = [out.size() for out in expected_res]
-        print("out_sizes", out_sizes)
         self.checkShapeAnalysis(out_sizes, g, assert_propagation=True)
 
     def test_convolution_backward(self):
