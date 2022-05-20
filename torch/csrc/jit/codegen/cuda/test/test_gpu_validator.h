@@ -371,9 +371,9 @@ inline void testValidate(
 
       TORCH_INTERNAL_ASSERT(
           at_tensor.dim() ==
-              TensorDomain::noReductions(
-                  fusion_input_tv->getMaybeRFactorDomain())
-                  .size(),
+              static_cast<int64_t>(TensorDomain::noReductions(
+                                       fusion_input_tv->getMaybeRFactorDomain())
+                                       .size()),
           "Dimensionality mismatch in inputs.");
     }
   }
@@ -400,9 +400,10 @@ inline void testValidate(
     TORCH_INTERNAL_ASSERT(
         aten_output_tensor.dim() == fusion_output_tensor.dim() &&
             fusion_outputs[j].dim() ==
-                TensorDomain::noReductions(
-                    fusion_output_tv->getMaybeRFactorDomain())
-                    .size(),
+                static_cast<int64_t>(
+                    TensorDomain::noReductions(
+                        fusion_output_tv->getMaybeRFactorDomain())
+                        .size()),
         "Dimensionality mismatch in outputs.");
 
     auto tolerance_values = getTolerance(

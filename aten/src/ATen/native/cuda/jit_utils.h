@@ -20,7 +20,8 @@ struct NvrtcFunction {
 };
 
 std::string generate_code(
-    int nTensors,
+    int nInputs,
+    int nOutputs,
     const std::string& func,
     const std::string& name,
     const std::string& f_input_type,
