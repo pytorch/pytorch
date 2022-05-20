@@ -4112,7 +4112,6 @@ class TestNoRegression(TestCase):
             torch.testing.assert_close(a, nan)
 
     def test_double_error(self):
-
         with self.assertRaisesRegex(TypeError, "the MPS framework doesn't support float64"):
             a = torch.ones(2, dtype=torch.float64, device="mps")
             print(a)
@@ -4120,6 +4119,11 @@ class TestNoRegression(TestCase):
         a = torch.ones(2, device="mps")
         # TODO: This should fail!
         a = a.double()
+
+    def test_legacy_constructor(self):
+        a = torch.ones(2, device="mps")
+
+        b = a.new(1)
 
 
 
