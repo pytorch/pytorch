@@ -3319,6 +3319,8 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     return output;
 }
 at::Tensor as_strided_scatter(const at::Tensor& self, const at::Tensor& src, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
+    // See Note [as_strided_scatter backward support]
+    TORCH_INTERNAL_ASSERT(!self.requires_grad() || self.is_contiguous(), "as_strided_scatter is currently only supported for contiguous inputs");
     auto output = self.clone();
     auto slice = output.as_strided(size, stride, storage_offset);
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());

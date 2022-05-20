@@ -73,7 +73,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
                     name
                   }
                 }
-                checkRuns(first: 50) {
+                checkRuns(first: 60) {
                   nodes {
                     name
                     conclusion
@@ -177,7 +177,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
                     name
                   }
                 }
-                checkRuns(first: 50) {
+                checkRuns(first: 60) {
                   nodes {
                     name
                     conclusion
@@ -386,6 +386,7 @@ def parse_args() -> Any:
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
+    parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
@@ -824,7 +825,10 @@ def find_matching_merge_rule(pr: GitHubPR,
     raise RuntimeError(reject_reason)
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
+def try_revert(repo: GitRepo, pr: GitHubPR, *,
+               dry_run: bool = False,
+               comment_id: Optional[int] = None,
+               reason: Optional[str] = None) -> None:
     def post_comment(msg: str) -> None:
         gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
@@ -858,7 +862,8 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
     msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
-    msg += f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}\n"
+    msg += f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
+    msg += f" due to {reason}\n" if reason is not None else "\n"
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
     if not dry_run:
@@ -911,7 +916,7 @@ def main() -> None:
 
     if args.revert:
         try:
-            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id)
+            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id, reason=args.reason)
         except Exception as e:
             handle_exception(e, f"Reverting PR {args.pr_num} failed")
         return
