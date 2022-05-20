@@ -119,7 +119,6 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
-CREATE_MPS_UNARY_TORCH_IMPL_FUNC(square_out_mps, square)
 CREATE_MPS_UNARY_TORCH_IMPL_FUNC(abs_out_mps, absolute)
 
 TORCH_IMPL_FUNC(log1p_out_mps) (const Tensor& self, const Tensor& output)

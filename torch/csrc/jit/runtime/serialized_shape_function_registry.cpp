@@ -2662,6 +2662,24 @@ def native_batch_norm(input: List[int],
     _6 = torch.append(out, elem)
   return out
 
+def nonzero_lower_bound(input: List[int]) -> List[int]:
+  if torch.ge(torch.len(input), 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  return [0, torch.len(input)]
+
+def nonzero_upper_bound(input: List[int]) -> List[int]:
+  if torch.ge(torch.len(input), 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  numel = 1
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    numel = torch.mul(numel, elem)
+  return [numel, torch.len(input)]
+
 )=====")
 ;
 
@@ -2669,6 +2687,7 @@ def native_batch_norm(input: List[int],
 const std::string& GetSerializedShapeFunctions() {
   return shape_funcs;
 }
+
 
 const OperatorMap<std::string>& GetShapeFunctionMappings() {
  static const OperatorMap<std::string> shape_mappings {
@@ -2734,6 +2753,14 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},
+  };
+
+  return shape_mappings;
+}
+
+const OperatorMap<std::pair<std::string, std::string>>& GetBoundedShapeMappings() {
+ static const OperatorMap<std::pair<std::string, std::string>> shape_mappings {
+    {"aten::nonzero(Tensor self) -> (Tensor)", {"nonzero_lower_bound", "nonzero_upper_bound"}},
   };
 
   return shape_mappings;

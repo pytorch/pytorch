@@ -2,6 +2,7 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
@@ -350,6 +351,16 @@ void TensorImpl::throw_storage_access_error() const {
 }
 
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
+  if (is_python_dispatch()) {
+    auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+    if (interpreter) {
+      return interpreter->is_contiguous(this);
+    }
+    TORCH_CHECK(
+        false,
+        "cannot access PyObject for Tensor on interpreter ",
+        pyobj_interpreter_.load()->name());
+  }
   TORCH_CHECK(
       false,
       "Tensors of type ",
@@ -360,6 +371,13 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
 IntArrayRef TensorImpl::sizes_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
+}
+c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have sym sizes");
 }
 IntArrayRef TensorImpl::strides_custom() const {
   TORCH_CHECK(

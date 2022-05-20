@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 import itertools
 from typing_extensions import Literal
 from dataclasses import dataclass
@@ -71,11 +71,11 @@ def gen_registration_headers(
     return headers
 
 
-def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
-    if backend_index.dispatch_key == DispatchKey.Meta:
-        empty_options = "options.device(at::kMeta)"
-    else:
-        empty_options = "options"
+def gen_empty_impl_names(
+    backend_index: BackendIndex,
+) -> Tuple[Optional[str], Optional[str]]:
+    empty_impl = None
+    empty_strided_impl = None
 
     if backend_index.dispatch_key in (
         DispatchKey.Meta,
@@ -93,7 +93,18 @@ def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     ):
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
+
+    return empty_impl, empty_strided_impl
+
+
+def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
+    if backend_index.dispatch_key == DispatchKey.Meta:
+        empty_options = "options.device(at::kMeta)"
     else:
+        empty_options = "options"
+
+    empty_impl, empty_strided_impl = gen_empty_impl_names(backend_index)
+    if empty_impl is None:
         return []
 
     return [
@@ -107,6 +118,24 @@ Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &o
 }}
 """
     ]
+
+
+def gen_maybe_create_proxy_helper(backend_index: BackendIndex) -> List[str]:
+    _, empty_strided_impl = gen_empty_impl_names(backend_index)
+    return (
+        []
+        if empty_strided_impl is None
+        else [
+            f"""
+c10::optional<Tensor> maybe_create_proxy(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
+  if (out.strides() != strides) {{
+    return {empty_strided_impl}(sizes, strides, options);
+  }}
+  return c10::nullopt;
+}}
+"""
+        ]
+    )
 
 
 def gen_resize_out_helper(backend_index: BackendIndex) -> List[str]:
@@ -162,6 +191,7 @@ def gen_registration_helpers(backend_index: BackendIndex) -> List[str]:
         *gen_create_out_helper(backend_index),
         *gen_resize_out_helper(backend_index),
         *gen_check_inplace_helper(backend_index),
+        *gen_maybe_create_proxy_helper(backend_index),
     ]
 
 
@@ -507,18 +537,22 @@ namespace {{
 class StructuredRegisterDispatchKey(RegisterDispatchKey):
     g: NativeFunctionsGroup
 
-    def gen_class_set_output(
+    def gen_class_set_output_functions(
         self, k: SchemaKind, parent_class: str, generate_super: bool
     ) -> str:
         if generate_super:
-            set_output_super = f"{parent_class}::set_output(output_idx, sizes, strides, options, names);"
+            set_output_super = f"{parent_class}::set_output_raw_strided(output_idx, sizes, strides, options, names);"
         else:
             set_output_super = ""
-        maybe_star = "*" if k is SchemaKind.functional else ""
-        return f"""
-void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
-                TensorOptions options, DimnameList names) override {{
-{textwrap.indent(self.gen_class_set_output_body(k), "    ")}
+
+        def gen_set_output_function(name: str, maybe_create_proxy: bool) -> str:
+            maybe_star = "*" if k is SchemaKind.functional else ""
+            return f"""
+void set_output_{name}(
+    int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
+    TensorOptions options, DimnameList names
+) override {{
+{textwrap.indent(self.gen_class_set_output_body(k, maybe_create_proxy), "    ")}
     if (!names.empty()) {{
       namedinference::propagate_names({maybe_star}outputs_[output_idx], names);
     }}
@@ -528,7 +562,12 @@ void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
 }}
 """
 
-    def gen_class_set_output_body(self, k: SchemaKind) -> str:
+        return f"""
+{gen_set_output_function("strided", maybe_create_proxy=True)}
+{gen_set_output_function("raw_strided", maybe_create_proxy=False)}
+"""
+
+    def gen_class_set_output_body(self, k: SchemaKind, maybe_create_proxy: bool) -> str:
         if self.backend_index.dispatch_key in [
             DispatchKey.CUDA,
             DispatchKey.MPS,
@@ -547,6 +586,16 @@ if (C10_UNLIKELY(current_device.has_value())) {
         else:
             maybe_set_guard_line = maybe_set_guard = ""
 
+        if maybe_create_proxy:
+            create_proxy = """
+auto maybe_proxy = maybe_create_proxy(out, sizes, strides, options);
+if (C10_UNLIKELY(maybe_proxy.has_value())) {
+    proxy_outputs_[output_idx] = c10::ExclusivelyOwned<Tensor>(std::move(maybe_proxy).value());
+}
+"""
+        else:
+            create_proxy = ""
+
         if k is SchemaKind.functional:
             assert self.backend_index.dispatch_key in (
                 DispatchKey.Meta,
@@ -560,11 +609,17 @@ outputs_[output_idx] = create_out(sizes, strides, options);"""
         elif k is SchemaKind.inplace:
             return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();
-check_inplace(out, sizes, options);"""
+check_inplace(out, sizes, options);
+{create_proxy}"""
         elif k is SchemaKind.out:
             return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();
-resize_out(out, sizes, strides, options);"""
+resize_out(out, sizes, strides, options);
+{create_proxy}"""
+        elif k is SchemaKind.mutable:
+            raise AssertionError(
+                "SchemaKind.mutable structured operators are currently not supported"
+            )
         else:
             assert_never(k)
 
@@ -580,6 +635,10 @@ resize_out(out, sizes, strides, options);"""
             out_args = ", ".join(f"Tensor& out{i}" for i in range(returns))
             out_refs = ", ".join(f"std::ref(out{i})" for i in range(returns))
             return f"{class_name}({out_args}) : outputs_{{ {out_refs} }} {{}}"
+        elif k is SchemaKind.mutable:
+            raise AssertionError(
+                "SchemaKind.mutable structured operators are currently not supported"
+            )
         else:
             assert_never(k)
 
@@ -592,14 +651,18 @@ resize_out(out, sizes, strides, options);"""
         parent_class: str,
         generate_super: bool,
     ) -> str:
-        maybe_star = ""
         if k is SchemaKind.functional:
             output_type = "c10::ExclusivelyOwned<Tensor>"
-            maybe_star = "*"
+            output_value = "*outputs_[output_idx]"
+            proxy_field = ""
         elif k is SchemaKind.inplace:
             output_type = "std::reference_wrapper<Tensor>"
+            output_value = "proxy_outputs_[output_idx].has_value() ? **proxy_outputs_[output_idx] : outputs_[output_idx].get()"
+            proxy_field = f"std::array<c10::optional<c10::ExclusivelyOwned<Tensor>>, {len(f.func.returns)}> proxy_outputs_;"
         elif k is SchemaKind.out:
             output_type = "std::reference_wrapper<Tensor>"
+            output_value = "proxy_outputs_[output_idx].has_value() ? **proxy_outputs_[output_idx] : outputs_[output_idx].get()"
+            proxy_field = f"std::array<c10::optional<c10::ExclusivelyOwned<Tensor>>, {len(f.func.returns)}> proxy_outputs_;"
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
             if self.rocm:
@@ -619,11 +682,12 @@ resize_out(out, sizes, strides, options);"""
         lines = (
             f"struct {class_name} final : public {parent_class} {{",
             f"{textwrap.indent(class_ctor_str, indent)}",
-            f"{textwrap.indent(self.gen_class_set_output(k, parent_class, generate_super), indent)}",
+            f"{textwrap.indent(self.gen_class_set_output_functions(k, parent_class, generate_super), indent)}",
             "    const Tensor& maybe_get_output(int64_t output_idx) override {",
-            f"        return {maybe_star}outputs_[output_idx];",
+            f"      return {output_value};\n",
             "    }",
             f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
+            f"{textwrap.indent(proxy_field, indent)}",
             f"{textwrap.indent(guard_field, indent)}",
             "};",
         )
@@ -776,12 +840,18 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # After running meta, op.outputs_ is guaranteed to be valid;
             # add it to the context
             out_args = structured.out_arguments(self.g)
-            maybe_star = "*" if k is SchemaKind.functional else ""
             for i, out_arg in enumerate(out_args):
                 assert ConstRefCType(BaseCType(tensorT)) == out_arg.nctype.type
+
+                if k is SchemaKind.out:
+                    expr = f"op.maybe_get_output({i})"
+                else:
+                    maybe_star = "*" if k is SchemaKind.functional else ""
+                    expr = f"{maybe_star}op.outputs_[{i}]"
+
                 context.append(
                     Expr(
-                        expr=f"{maybe_star}op.outputs_[{i}]",
+                        expr=expr,
                         # TODO: Stop hardcoding that the output type is a Tensor.  Note
                         # that for the codegen here this is fine because outputs_ is
                         # hardcoded to be tensor already
@@ -823,6 +893,14 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     )
                 )
                 sig_body.append(f"op.impl({impl_exprs});")
+
+            # Go over each output, and check if there is a proxy created for it.
+            # If so, copy it over to the original output.
+            if k is SchemaKind.out or k is SchemaKind.inplace:
+                for i in range(len(f.func.returns)):
+                    sig_body.append(
+                        f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(**op.proxy_outputs_[{i}]);"
+                    )
 
             # Destructively return the final tensors
             # TODO: Do this in translate instead
