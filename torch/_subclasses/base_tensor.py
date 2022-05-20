@@ -9,7 +9,7 @@ class BaseTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, *, requires_grad=None):
         if requires_grad is None:
-            return super().__new__(cls, elem)
+            return super().__new__(cls, elem)  # type: ignore
         else:
             return cls._make_subclass(cls, elem, requires_grad)
 
