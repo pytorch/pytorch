@@ -100,7 +100,6 @@ __all__ = [
     "shift_left",
     "shift_right_arithmetic",
     "shift_right_logical",  # not implemented
-    "sub",
     #
     # View prims
     #
