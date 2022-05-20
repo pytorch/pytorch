@@ -2433,6 +2433,22 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayR
   return storage.as_strided(inp_sizes, inp_strides, inp_effective_offset);
 }
 
+Tensor as_strided_scatter_backward(Tensor grad, TensorGeometry input_geometry, TensorGeometry src_geometry, IntArrayRef sizes, IntArrayRef strides, optional<int64_t> storage_offset) {
+  // Note [as_strided_scatter backward support]
+  // as_strided_scatter handling for autograd is a beast, and is non-trivial to implement for arbitrarily strided inputs.
+  // Most uses for as_strided with functionalization only care about the contiguous case anyway,
+  // So for now this is not implemented.
+  // When autograd is being used, we ban non-contiguous inputs.
+  // We can assume that the input was a contiguous tensor.
+  // Also, we'll take the perf hit and contiguify grad for now.
+  auto grad_ = grad.contiguous();
+  auto grad_slice = grad_.as_strided(sizes, strides, storage_offset);
+  auto result = grad_.new_empty_strided(input_geometry.sizes(), input_geometry.strides());
+  auto result_slice = result.as_strided(sizes, strides, storage_offset);
+  result_slice.copy_(grad_slice);
+  return result;
+}
+
 std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask) {
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>{Tensor(), Tensor()};
