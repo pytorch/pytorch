@@ -21,10 +21,6 @@ struct Storage;
 }
 
 namespace torch {
-// Register a PyTypeObject* with the given attributes
-void registerStoragePyTypeObject(
-    PyTypeObject *pytype, at::Backend backend, at::ScalarType scalarType);
-
 void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType);
 void registerLayoutObject(THPLayout *thp_layout, at::Layout layout);
 
