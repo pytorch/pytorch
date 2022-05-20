@@ -73,11 +73,10 @@ def select_model_mode_for_export(model, mode):
 
             if GLOBALS.export_onnx_opset_version < 12:
                 warnings.warn(
-                    "You are exporting the model in training mode with onnx opset version {}. "
-                    "Opset versions lower than opset 12 will not be able to export nodes such as "
-                    "Dropout and BatchNorm correctly.".format(
-                        GLOBALS.export_onnx_opset_version
-                    )
+                    "You are exporting the model in training mode with onnx opset "
+                    f"version {GLOBALS.export_onnx_opset_version}. "
+                    "Opset versions lower than opset 12 will not be able to export "
+                    "nodes such as Dropout and BatchNorm correctly."
                 )
             is_export_training = True
 
@@ -372,9 +371,9 @@ def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
     ):
         if arg_value is True:
             warnings.warn(
-                "`{}' can be set to True only when 'operator_export_type' is "
+                f"'{arg_name}' can be set to True only when 'operator_export_type' is "
                 "`ONNX`. Since 'operator_export_type' is not set to 'ONNX', "
-                "`{}` argument will be ignored.".format(arg_name, arg_name)
+                f"'{arg_name}' argument will be ignored."
             )
         arg_value = False
     return arg_value
@@ -458,7 +457,7 @@ def _decide_input_format(model, args):
     try:
         sig = _signature(model)
     except ValueError as e:
-        warnings.warn("%s, skipping _decide_input_format" % e)
+        warnings.warn(f"{e}, skipping _decide_input_format")
         return args
     try:
         ordered_list_keys = list(sig.parameters.keys())
@@ -1510,16 +1509,12 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
     for key, value in dynamic_axes.items():
         if key not in valid_names:
             warnings.warn(
-                "Provided key {} for dynamic axes is not a valid input/output name".format(
-                    key
-                )
+                f"Provided key {key} for dynamic axes is not a valid input/output name"
             )
         if isinstance(value, list):
             warnings.warn(
                 "No names were found for specified dynamic axes of provided input."
-                "Automatically generated names will be applied to each dynamic axes of input {}".format(
-                    key
-                )
+                f"Automatically generated names will be applied to each dynamic axes of input {key}"
             )
 
             value_dict = {}
@@ -1530,9 +1525,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                     )
                 if x in value_dict:
                     warnings.warn(
-                        "Duplicate dynamic axis index {} was provided for input {}.".format(
-                            x, key
-                        )
+                        f"Duplicate dynamic axis index {x} was provided for input {key}."
                     )
                 else:
                     value_dict[x] = str(key) + "_dynamic_axes_" + str(i + 1)

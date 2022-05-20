@@ -411,8 +411,8 @@ def fake_quantize_per_tensor_affine(
         )
     if (quant_min, quant_max) not in [(0, 255), (-128, 127)]:
         raise RuntimeError(
-            "For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
-            "Got ({}, {})".format(quant_min, quant_max)
+            f"For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
+            f"Got ({quant_min}, {quant_max})"
         )
     scale = symbolic_helper._maybe_get_scalar(scale)
     if scale is None:

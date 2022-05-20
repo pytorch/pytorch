@@ -808,9 +808,7 @@ def prelu(g, self, weight):
     if self_rank is not None and weight_rank is not None:
         assert (
             self_rank >= weight_rank
-        ), "rank(x) should be >= rank(slope) but got {} < {}".format(
-            self_rank, weight_rank
-        )
+        ), f"rank(x) should be >= rank(slope) but got {self_rank} < {weight_rank}"
     return g.op("PRelu", self, weight)
 
 
@@ -5119,8 +5117,7 @@ class Prim:
             for idx in range(len(if_output_list)):
                 if current_b_list[idx] not in env:
                     raise RuntimeError(
-                        "The sub block ATen output {}"
-                        " is not in env.".format(current_b_list[idx])
+                        f"The sub block ATen output {current_b_list[idx]} is not in env."
                     )  # type:ignore[operator]
                 onnx_b = env[current_b_list[idx]]
                 final_b_list.append(onnx_b)
@@ -5172,9 +5169,7 @@ class Prim:
             return g.op("Constant", value_t=torch.tensor(n["value"]))
         else:
             raise RuntimeError(
-                "Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
-                    n.kindOf("value")
-                )
+                f"Unsupported prim::Constant kind: `{n.kindOf('value')}`. Send a bug report."
             )
 
 

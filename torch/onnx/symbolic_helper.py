@@ -132,9 +132,8 @@ def _maybe_get_scalar(value):
 def _get_const(value, desc, arg_name):
     if not _is_constant(value):
         raise RuntimeError(
-            "ONNX symbolic expected a constant value of the {} argument, got `{}`".format(
-                arg_name, value
-            )
+            f"ONNX symbolic expected a constant value of the {arg_name} argument, "
+            f"got `{value}`"
         )
     return _parse_arg(value, desc)
 
@@ -149,9 +148,8 @@ def _unpack_tuple(tuple_value):
     tuple_node = tuple_value.node()
     if tuple_node.kind() != "prim::TupleConstruct":
         raise RuntimeError(
-            "ONNX symbolic expected node type `prim::TupleConstruct`, got `{}`".format(
-                tuple_node
-            )
+            f"ONNX symbolic expected node type `prim::TupleConstruct`, "
+            f"got `{tuple_node}`"
         )
     return list(tuple_node.inputs())
 
@@ -219,13 +217,15 @@ def parse_args(*arg_descriptors):
             ]
             # only support _outputs in kwargs
             assert len(kwargs) <= 1, (
-                f"Symbolic function {fn.__name__}'s '**kwargs' can contain a single key/value entry. "
+                f"Symbolic function {fn.__name__}'s '**kwargs' can contain a single "
+                f"key/value entry. "
                 f"{FILE_BUG_MSG}"
             )
 
             if len(kwargs) == 1:
                 assert "_outputs" in kwargs, (
-                    f"Symbolic function {fn.__name__}'s '**kwargs' can only contain '_outputs' key at '**kwargs'. "
+                    f"Symbolic function {fn.__name__}'s '**kwargs' can only contain "
+                    f"'_outputs' key at '**kwargs'. "
                     f"{FILE_BUG_MSG}"
                 )
             return fn(g, *args, **kwargs)
@@ -441,38 +441,31 @@ def _unimplemented(op, msg):
 
 def _onnx_unsupported(op_name):
     raise RuntimeError(
-        "Unsupported: ONNX export of operator {}. "
-        "Please feel free to request support or submit a pull request on PyTorch GitHub.".format(
-            op_name
-        )
+        f"Unsupported: ONNX export of operator {op_name}. "
+        "Please feel free to request support or submit a pull request on PyTorch GitHub."
     )
 
 
 def _onnx_opset_unsupported(op_name, current_opset, supported_opset):
     raise RuntimeError(
-        "Unsupported: ONNX export of {} in "
-        "opset {}. Please try opset version {}.".format(
-            op_name, current_opset, supported_opset
-        )
+        f"Unsupported: ONNX export of {op_name} in opset {current_opset}. "
+        f"Please try opset version {supported_opset}."
     )
 
 
 def _onnx_opset_unsupported_detailed(op_name, current_opset, supported_opset, reason):
     raise RuntimeError(
-        "Unsupported: ONNX export of {} in "
-        "opset {}. {}. Please try opset version {}.".format(
-            op_name, current_opset, reason, supported_opset
-        )
+        f"Unsupported: ONNX export of {op_name} in "
+        f"opset {current_opset}. {reason}. Please try opset version {supported_opset}."
     )
 
 
 def _block_list_in_opset(name):
     def symbolic_fn(*args, **kwargs):
         raise RuntimeError(
-            "ONNX export failed on {}, which is not implemented for opset {}. "
-            "Try exporting with other opset versions.".format(
-                name, GLOBALS.export_onnx_opset_version
-            )
+            f"ONNX export failed on {name}, which is not implemented for opset "
+            f"{GLOBALS.export_onnx_opset_version}. "
+            "Try exporting with other opset versions."
         )
 
     return symbolic_fn
