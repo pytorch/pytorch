@@ -352,7 +352,6 @@ class TestCommon(TestCase):
         # TODO: iterate over requires_grad true/false
         inps = tuple(op.reference_inputs(device, dtype, requires_grad=False))
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
-
             result = op(sample.input, *sample.args, **sample.kwargs)
 
             meta_sample = sample.transform(_to_tensormeta)
@@ -371,7 +370,6 @@ class TestCommon(TestCase):
     @ops(python_ref_db)
     def test_python_reference_consistency(self, device, dtype, op):
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
-
             actual = op(sample.input, *sample.args, **sample.kwargs)
             expected = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
