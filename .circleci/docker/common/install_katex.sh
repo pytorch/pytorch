@@ -3,6 +3,9 @@
 set -ex
 
 if [ -n "$KATEX" ]; then
+  apt-get update
+  # Ignore error if gpg-agent doesn't exist (for Ubuntu 16.04)
+  apt-get install -y gpg-agent || :
 
   curl -sL https://deb.nodesource.com/setup_12.x | sudo -E bash -
   sudo apt-get install -y nodejs

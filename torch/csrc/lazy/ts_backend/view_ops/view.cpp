@@ -6,7 +6,6 @@ namespace torch {
 namespace lazy {
 
 namespace {
-
 Shape NodeOutputShape(const Value& input, c10::ArrayRef<int64_t> output_sizes) {
   const Shape& input_shape = input.shape();
   const auto complete_output_sizes =
@@ -18,7 +17,7 @@ Shape NodeOutputShape(const Value& input, c10::ArrayRef<int64_t> output_sizes) {
 
 View::View(const Value& input, std::vector<int64_t> output_size)
     : TsNode(
-          OpKind(at::aten::view),
+          ClassOpKind(),
           {input},
           {NodeOutputShape(input, output_size)},
           /*num_outputs=*/1,
