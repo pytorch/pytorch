@@ -87,6 +87,7 @@ class finfo:
     max: _float
     eps: _float
     tiny: _float
+    smallest_normal: _float
     resolution: _float
     dtype: str
 
@@ -1025,6 +1026,8 @@ class _CUDAGraph:
     def replay(self) -> None: ...
     def reset(self) -> None: ...
     def pool(self) -> Tuple[_int, _int]: ...
+
+def _cuda_isCurrentStreamCapturing() -> _bool: ...
 
 def _graph_pool_handle() -> Tuple[_int, _int]: ...
 
