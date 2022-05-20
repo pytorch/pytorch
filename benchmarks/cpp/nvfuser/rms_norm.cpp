@@ -11,7 +11,7 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -140,32 +140,33 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_fp16)
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_RMSNorm_bf16,
-    setupRMSNorm,
-    NvFuserScheduler_RMSNorm,
-    DataType::BFloat16);
+// TODO: Automatically disable/enable if bf16 is supported
+// NVFUSER_BENCHMARK_DEFINE(
+//     NvFuserScheduler_RMSNorm_bf16,
+//     setupRMSNorm,
+//     NvFuserScheduler_RMSNorm,
+//     DataType::BFloat16);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_bf16)
-    ->RangeMultiplier(2)
-    ->Ranges({{16, 64}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
+// NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_bf16)
+//     ->RangeMultiplier(2)
+//     ->Ranges({{16, 64}})
+//     ->Unit(benchmark::kMicrosecond)
+//     ->UseManualTime();
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_bf16)
-    ->RangeMultiplier(2)
-    ->Ranges({{18, 56}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
+// NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_bf16)
+//     ->RangeMultiplier(2)
+//     ->Ranges({{18, 56}})
+//     ->Unit(benchmark::kMicrosecond)
+//     ->UseManualTime();
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_bf16)
-    ->RangeMultiplier(2)
-    ->Ranges({{22, 44}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
+// NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_bf16)
+//     ->RangeMultiplier(2)
+//     ->Ranges({{22, 44}})
+//     ->Unit(benchmark::kMicrosecond)
+//     ->UseManualTime();
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_bf16)
-    ->RangeMultiplier(2)
-    ->Ranges({{24, 48}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
+// NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_bf16)
+//     ->RangeMultiplier(2)
+//     ->Ranges({{24, 48}})
+//     ->Unit(benchmark::kMicrosecond)
+//     ->UseManualTime();

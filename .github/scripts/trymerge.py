@@ -63,30 +63,34 @@ query ($owner: String!, $name: String!, $number: Int!) {
         nodes {
           commit {
             checkSuites(first: 10) {
-              nodes {
-                app {
-                  name
-                  databaseId
-                }
-                workflowRun {
-                  workflow {
+              edges {
+                node {
+                  app {
                     name
+                    databaseId
                   }
+                  workflowRun {
+                    workflow {
+                      name
+                    }
+                  }
+                  checkRuns(first: 50) {
+                    nodes {
+                      name
+                      conclusion
+                      detailsUrl
+                    }
+                    pageInfo {
+                      endCursor
+                      hasNextPage
+                    }
+                  }
+                  conclusion
+                  url
                 }
-                checkRuns(first: 50) {
-                  nodes {
-                    name
-                    conclusion
-                  }
-                  pageInfo {
-                    endCursor
-                    hasNextPage
-                  }
-                }
-                conclusion
+                cursor
               }
               pageInfo {
-                endCursor
                 hasNextPage
               }
             }
@@ -156,7 +160,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
-GH_GET_PR_NEXT_CHECK_RUNS = """
+GH_GET_PR_NEXT_CHECKSUITES = """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   repository(name: $name, owner: $owner) {
     pullRequest(number: $number) {
@@ -165,30 +169,34 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
           commit {
             oid
             checkSuites(first: 10, after: $cursor) {
-              nodes {
-                app {
-                  name
-                  databaseId
-                }
-                workflowRun {
-                  workflow {
+              edges {
+                node {
+                  app {
                     name
+                    databaseId
                   }
+                  workflowRun {
+                    workflow {
+                      name
+                    }
+                  }
+                  checkRuns(first: 50) {
+                    nodes {
+                      name
+                      conclusion
+                      detailsUrl
+                    }
+                    pageInfo {
+                      endCursor
+                      hasNextPage
+                    }
+                  }
+                  conclusion
+                  url
                 }
-                checkRuns(first: 50) {
-                  nodes {
-                    name
-                    conclusion
-                  }
-                  pageInfo {
-                    endCursor
-                    hasNextPage
-                  }
-                }
-                conclusion
+                cursor
               }
               pageInfo {
-                endCursor
                 hasNextPage
               }
             }
@@ -199,6 +207,38 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   }
 }
 """
+
+GH_GET_PR_NEXT_CHECK_RUNS = """
+query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            checkSuites(first: 1, after: $cs_cursor) {
+              nodes {
+                checkRuns(first: 100, after: $cr_cursor) {
+                  nodes {
+                    name
+                    conclusion
+                    detailsUrl
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 
 GH_GET_PR_PREV_COMMENTS = """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
@@ -301,6 +341,7 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
     re.MULTILINE
 )
 RE_REVERT_CMD = re.compile(r"@pytorch(merge|)bot\s+revert\s+this")
+RE_REVERT_CMD_CLI = re.compile(r"@pytorch(merge|)bot\s+revert\s+(-m.*-c.*|-c.*-m.*)")
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 
 
@@ -381,6 +422,7 @@ def parse_args() -> Any:
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
+    parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
@@ -410,7 +452,7 @@ class GitHubPR:
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
-        self.conclusions: Optional[Dict[str, str]] = None
+        self.conclusions: Optional[Dict[str, Tuple[str, str]]] = None
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
         self._reviews: Optional[List[Tuple[str, str]]] = None
@@ -525,38 +567,49 @@ class GitHubPR:
     def get_committer_author(self, num: int = 0) -> str:
         return self._fetch_authors()[num][1]
 
-    def get_checkrun_conclusions(self) -> Dict[str, str]:
-        """ Returns list of checkrun / conclusions """
+    def get_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
+        """ Returns dict of checkrun -> [conclusion, url] """
         if self.conclusions is not None:
             return self.conclusions
         orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
         checksuites = orig_last_commit["checkSuites"]
         conclusions = {}
 
-        def add_conclusions(nodes: List[Dict[str, Any]]) -> None:
-            for node in nodes:
+        def add_conclusions(edges: List[Dict[str, Dict[str, Any]]]) -> None:
+            for edge_idx, edge in enumerate(edges):
+                node = edge["node"]
                 workflow_run = node["workflowRun"]
                 checkruns = node["checkRuns"]
                 if workflow_run is not None:
-                    conclusions[workflow_run["workflow"]["name"]] = node["conclusion"]
-                    continue
-                if checkruns is not None:
+                    conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
+                while checkruns is not None:
                     for checkrun_node in checkruns["nodes"]:
-                        conclusions[checkrun_node["name"]] = checkrun_node["conclusion"]
+                        conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
+                    if bool(checkruns["pageInfo"]["hasNextPage"]):
+                        rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
+                                        name=self.project,
+                                        owner=self.org,
+                                        number=self.pr_num,
+                                        cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
+                                        cr_cursor=checkruns["pageInfo"]["endCursor"])
+                        last_commit = rc["data"]["repository"]["pullRequest"]["commits"]["nodes"][-1]["commit"]
+                        checkruns = last_commit["checkSuites"]["nodes"][-1]["checkRuns"]
+                    else:
+                        checkruns = None
 
-        add_conclusions(checksuites["nodes"])
+        add_conclusions(checksuites["edges"])
         while bool(checksuites["pageInfo"]["hasNextPage"]):
-            rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
+            rc = gh_graphql(GH_GET_PR_NEXT_CHECKSUITES,
                             name=self.project,
                             owner=self.org,
                             number=self.pr_num,
-                            cursor=checksuites["pageInfo"]["endCursor"])
+                            cursor=checksuites["edges"][-1]["cursor"])
             info = rc["data"]["repository"]["pullRequest"]
             last_commit = info["commits"]["nodes"][-1]["commit"]
             if last_commit["oid"] != orig_last_commit["oid"]:
                 raise RuntimeError("Last commit changed on PR")
             checksuites = last_commit["checkSuites"]
-            add_conclusions(checksuites["nodes"])
+            add_conclusions(checksuites["edges"])
         self.conclusions = conclusions
         return conclusions
 
@@ -646,7 +699,7 @@ class GitHubPR:
         checks = self.get_checkrun_conclusions()
         if checks is None or checkrun_name not in checks:
             return False
-        return checks[checkrun_name] != "SUCCESS"
+        return checks[checkrun_name][0] != "SUCCESS"
 
     def merge_ghstack_into(self, repo: GitRepo, force: bool, comment_id: Optional[int] = None) -> None:
         assert self.is_ghstack_pr()
@@ -785,25 +838,32 @@ def find_matching_merge_rule(pr: GitHubPR,
                                  f"{','.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
             continue
         if rule.mandatory_checks_name is not None:
-            pending_checks = []
-            failed_checks = []
+            pending_checks: List[Tuple[str, Optional[str]]] = []
+            failed_checks: List[Tuple[str, Optional[str]]] = []
             checks = pr.get_checkrun_conclusions()
             # HACK: We don't want to skip CLA check, even when forced
             for checkname in filter(lambda x: force is False or "CLA Check" in x, rule.mandatory_checks_name):
-                if checkname not in checks or checks[checkname] is None:
-                    pending_checks.append(checkname)
-                elif checks[checkname] != 'SUCCESS':
-                    failed_checks.append(checkname)
+                if checkname not in checks:
+                    pending_checks.append((checkname, None))
+                elif checks[checkname][0] is None:
+                    pending_checks.append((checkname, checks[checkname][1]))
+                elif checks[checkname][0] != 'SUCCESS':
+                    failed_checks.append((checkname, checks[checkname][1]))
+
+        def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
+            return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
+
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
-                reject_reason = f"Refusing to merge as mandatory check(s) {','.join(failed_checks)} failed for rule {rule_name}"
+                reject_reason = ("Refusing to merge as mandatory check(s)" +
+                                 checks_to_str(failed_checks) + f" failed for rule {rule_name}")
             continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
-                reject_reason = f"Refusing to merge as mandatory check(s) {','.join(pending_checks)}"
-                reject_reason += f" are not yet run for rule {rule_name}"
+                reject_reason = f"Refusing to merge as mandatory check(s) {checks_to_str(pending_checks)}"
+                reject_reason += f" are pending/not yet run for rule {rule_name}"
             continue
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
@@ -813,13 +873,16 @@ def find_matching_merge_rule(pr: GitHubPR,
     raise RuntimeError(reject_reason)
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
+def try_revert(repo: GitRepo, pr: GitHubPR, *,
+               dry_run: bool = False,
+               comment_id: Optional[int] = None,
+               reason: Optional[str] = None) -> None:
     def post_comment(msg: str) -> None:
         gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
         return post_comment(f"Can't revert open PR #{pr.pr_num}")
     comment = pr.get_last_comment() if comment_id is None else pr.get_comment_by_id(comment_id)
-    if not RE_REVERT_CMD.match(comment.body_text):
+    if not RE_REVERT_CMD.match(comment.body_text) and not RE_REVERT_CMD_CLI.match(comment.body_text):
         raise RuntimeError(f"Comment {comment.body_text} does not seem to be a valid revert command")
     if comment.editor_login is not None:
         return post_comment("Don't want to revert based on edited command")
@@ -847,7 +910,8 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
     msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
-    msg += f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}\n"
+    msg += f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
+    msg += f" due to {reason}\n" if reason is not None else "\n"
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
     if not dry_run:
@@ -858,13 +922,13 @@ def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
 
-def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
+def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_minutes: int = 400) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
-    while elapsed_time < 400 * 60:
+    while elapsed_time < timeout_minutes * 60:
         current_time = time.time()
         elapsed_time = current_time - start_time
 
@@ -877,7 +941,7 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
             print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
             time.sleep(60)
     # Finally report timeout back
-    msg = "Merged timed out after 6 hours. Please contact the pytorch_dev_infra team."
+    msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
     if not dry_run:
         gh_add_labels(org, project, pr_num, ["land-failed"])
@@ -900,7 +964,7 @@ def main() -> None:
 
     if args.revert:
         try:
-            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id)
+            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id, reason=args.reason)
         except Exception as e:
             handle_exception(e, f"Reverting PR {args.pr_num} failed")
         return
