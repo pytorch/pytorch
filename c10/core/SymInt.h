@@ -31,7 +31,7 @@ class SymbolicIntNode;
 // a traced operation to represent it in LTC or Fx graphs.
 class C10_API SymInt {
  public:
-  SymInt(int64_t d) : data_(d){};
+  explicit SymInt(int64_t d) : data_(d){};
 
   int64_t expect_int() const {
     TORCH_CHECK(!is_symbolic());
@@ -51,7 +51,7 @@ class C10_API SymInt {
     TORCH_CHECK(
         !this->is_symbolic() && !sci.is_symbolic(),
         "Symbolic Add isn't supported yet");
-    return data_ + sci.data_;
+    return SymInt(data_ + sci.data_);
   }
 
   std::shared_ptr<SymbolicIntNode> toSymbolicIntNode();
