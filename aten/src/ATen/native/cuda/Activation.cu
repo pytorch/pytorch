@@ -24,12 +24,12 @@ namespace native {
 // -----------------------------------
 void glu_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "glu_cuda", [&]() {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using opmath_t = at::opmath_type<scalar_t>;
     gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
-      const acc_t a = a_;
-      const acc_t b = b_;
-      const acc_t one = acc_t(1);
-      const acc_t sigmoid = one / (one + std::exp(-b));
+      const opmath_t a = a_;
+      const opmath_t b = b_;
+      const opmath_t one = opmath_t(1);
+      const opmath_t sigmoid = one / (one + std::exp(-b));
       return a * sigmoid;
     });
   });
@@ -176,7 +176,7 @@ void launch_prelu_cuda_kernel_share_weights(TensorIteratorBase &iter, const Tens
     const auto *weight_data = weight.data_ptr<opmath_t>();
     at::native::gpu_kernel(iter,
         [weight_data] GPU_LAMBDA (scalar_t input_val) {
-          opmath_t = input_val_op = static_cast<opmath_t>(input_val);
+          opmath_t input_val_op = static_cast<opmath_t>(input_val);
           return (input_val_op > 0) ? input_val_op : *weight_data * input_val_op;
         });
   });
@@ -536,7 +536,7 @@ void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_)
     auto negval = negval_.to<opmath_t>();
     gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       opmath_t aop = static_cast<opmath_t>(a);
-      opmath_t bop = sstatic_cast<opmath_t>(b);
+      opmath_t bop = static_cast<opmath_t>(b);
       return aop > opmath_t(0) ? bop : bop * negval;
     });
   });
