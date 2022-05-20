@@ -921,12 +921,11 @@ class TestOperators(TestCase):
 
     def test_bitshift(self):
         class BitshiftModel(torch.nn.Module):
-            def forward(self, input, input2):
-                return input >> 1, input2 >> 2
+            def forward(self, input):
+                return input >> 1, input >> 2
 
-        input = torch.arange(24, dtype=torch.float32).reshape(3, 4, 2)
-        input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
-        self.assertONNX(BitshiftModel(), (input, input2), opset_version=11)
+        input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
+        self.assertONNX(BitshiftModel(), input, opset_version=11)
 
     @skipIfCaffe2
     def test_layer_norm_aten(self):

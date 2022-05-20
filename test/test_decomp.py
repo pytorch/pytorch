@@ -229,12 +229,6 @@ def normalize_op_input_output2(
 
 
 def upcast_tensor(func, x, dtype=torch.float32):
-    # TODO: stop hardcoding integer values to pass in
-    # dtype in torch.ops
-    FLOAT16_DTYPE = 5
-    BFLOAT16_DTYPE = 15
-    FLOAT64_DTYPE = 7
-
     # Some functions take a dtype as argument, so we need to
     # manually change that dtype in order to run it with a
     # higher precision
@@ -246,11 +240,11 @@ def upcast_tensor(func, x, dtype=torch.float32):
     if isinstance(x, Tensor) and x.dtype.is_floating_point:
         return x.to(dtype=dtype)
     elif (
-        isinstance(x, int)
+        isinstance(x, torch.dtype)
         and func in dtype_arg_table
-        and x in [FLOAT16_DTYPE, BFLOAT16_DTYPE]
+        and x in [torch.float16, torch.bfloat16]
     ):
-        return FLOAT64_DTYPE
+        return torch.float64
     else:
         return x
 

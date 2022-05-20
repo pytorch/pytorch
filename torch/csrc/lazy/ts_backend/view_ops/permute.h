@@ -7,6 +7,10 @@ namespace lazy {
 
 class TORCH_API Permute : public TsNode {
  public:
+  static OpKind ClassOpKind() {
+    return OpKind(at::aten::permute);
+  }
+
   Permute(const Value& input, std::vector<int64_t> dims);
 
   std::string ToString() const override;

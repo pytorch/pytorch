@@ -746,8 +746,9 @@ class TestBinaryUfuncs(TestCase):
             if _supported((torch.complex128,)):
                 rhs_c128_scalar_tensor = make_rhs_scalar_tensor(dtype=torch.complex128)
                 result = op(lhs_f32, rhs_c128_scalar_tensor)
+                # Value type of 1D+ Tensor (lhs_f32) takes priority over scalar tensor (rhs_c128).
                 expected_dtype = (
-                    torch.complex128 if not op.always_returns_bool else torch.bool
+                    torch.complex64 if not op.always_returns_bool else torch.bool
                 )
                 self.assertEqual(result.dtype, expected_dtype)
 
@@ -1259,6 +1260,7 @@ class TestBinaryUfuncs(TestCase):
         t -= 1
         t *= 1
         t /= 1
+        t **= 1
         with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
             t //= 1
         t %= 1
@@ -1455,7 +1457,13 @@ class TestBinaryUfuncs(TestCase):
             self._do_pow_for_exponents(m1, exponents + complex_exponents, pow, 10e-4)
         else:
             self._do_pow_for_exponents(m1, exponents, math.pow, None)
-            self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
+            if dtype != torch.half:
+                self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
+            else:
+                # Half Tensor with complex exponents leads to computation dtype
+                # of ComplexHalf for which this ops is not supported yet
+                with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexHalf'"):
+                    self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
 
         # base - number, exponent - tensor
         # contiguous
@@ -1744,8 +1752,17 @@ class TestBinaryUfuncs(TestCase):
         first_exp[0] = first_exp[10] = first_exp[20] = 0
         second_exp[0] = second_exp[10] = second_exp[20] = 0
         for base in complexes:
-            self._test_pow(base, first_exp)
-            self._test_pow(base, second_exp)
+            # Half Tensor with complex base leads to computation dtype
+            # of ComplexHalf for which this ops is not supported yet
+            # NOTE: pow has fast-path when base is 1 which supports
+            # ComplexHalf
+            if dtype is torch.half and base != (1 + 0j):
+                with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexHalf'"):
+                    self._test_pow(base, first_exp)
+                    self._test_pow(base, second_exp)
+            else:
+                self._test_pow(base, first_exp)
+                self._test_pow(base, second_exp)
 
     @onlyNativeDeviceTypes
     @skipMeta
@@ -3253,152 +3270,6 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(a >> 1, expected_r)
         self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_bitwise_and(self, device, dtype):
-        a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
-        b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
-
-        a_np = a.cpu().numpy()
-        b_np = b.cpu().numpy()
-
-        # Tensor x Tensor
-        self.assertEqual(
-            torch.bitwise_and(a, b),
-            torch.tensor(np.bitwise_and(a_np, b_np), device=device),
-        )
-        # Tensor x int scaler
-        self.assertEqual(
-            torch.bitwise_and(a, 2),
-            torch.tensor(np.bitwise_and(a_np, 2), device=device),
-        )
-
-        self.assertEqual(
-            torch.tensor([False, True, False], device=device),
-            torch.bitwise_and(
-                torch.tensor([True, True, False], device=device),
-                torch.tensor([False, True, False], device=device),
-            ),
-        )
-
-        # type promotion
-        c = torch.zeros(2) >= 1
-        self.assertEqual(torch.bitwise_and(c, c.byte()), torch.bitwise_and(c.byte(), c))
-
-    def test_bitwise_or(self, device):
-        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
-            b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
-            expected_res = torch.tensor([3, -1, 3], dtype=dtype, device=device)
-            b_scalar = 2
-            expected_res_scalar = torch.tensor([3, -2, 3], dtype=dtype, device=device)
-
-            # standard version
-            self.assertEqual(torch.bitwise_or(a, b), expected_res)
-            self.assertEqual(torch.bitwise_or(a, b_scalar), expected_res_scalar)
-
-            # out
-            c = torch.empty(0, dtype=dtype, device=device)
-            torch.bitwise_or(a, b, out=c)
-            self.assertEqual(c, expected_res)
-            torch.bitwise_or(a, b_scalar, out=c)
-            self.assertEqual(c, expected_res_scalar)
-
-            # in-place
-            a1 = a.clone()
-            a1.bitwise_or_(b)
-            self.assertEqual(a1, expected_res)
-            a.bitwise_or_(b_scalar)
-            self.assertEqual(a, expected_res_scalar)
-
-        self.assertEqual(
-            torch.tensor([True, True, False], device=device),
-            torch.bitwise_or(
-                torch.tensor([True, True, False], device=device),
-                torch.tensor([False, True, False], device=device),
-            ),
-        )
-
-    def test_bitwise_xor(self, device):
-        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
-            b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
-            expected_res = torch.tensor([3, -1, 0], dtype=dtype, device=device)
-            b_scalar = 2
-            expected_res_scalar = torch.tensor([3, -4, 1], dtype=dtype, device=device)
-
-            # standard version
-            self.assertEqual(torch.bitwise_xor(a, b), expected_res)
-            self.assertEqual(torch.bitwise_xor(a, b_scalar), expected_res_scalar)
-
-            # out
-            c = torch.empty(0, dtype=dtype, device=device)
-            torch.bitwise_xor(a, b, out=c)
-            self.assertEqual(c, expected_res)
-            torch.bitwise_xor(a, b_scalar, out=c)
-            self.assertEqual(c, expected_res_scalar)
-
-            # in-place
-            a1 = a.clone()
-            a1.bitwise_xor_(b)
-            self.assertEqual(a1, expected_res)
-            a.bitwise_xor_(b_scalar)
-            self.assertEqual(a, expected_res_scalar)
-
-        self.assertEqual(
-            torch.tensor([True, False, False], device=device),
-            torch.bitwise_xor(
-                torch.tensor([True, True, False], device=device),
-                torch.tensor([False, True, False], device=device),
-            ),
-        )
-
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_bitwise_shift(self, device, dtype):
-        ops = [
-            (torch.bitwise_left_shift, np.left_shift),
-            (operator.lshift, operator.lshift),
-            (torch.bitwise_right_shift, np.right_shift),
-            (operator.rshift, operator.rshift),
-        ]
-        for torch_op, numpy_op in ops:
-            a = torch.tensor([19, -20, -21, 22], dtype=dtype, device=device)
-            b = torch.tensor([2, 1, 3, 1], dtype=dtype, device=device)
-            a_np = a.cpu().numpy()
-            b_np = b.cpu().numpy()
-
-            # Tensor x Tensor
-            self.assertEqual(
-                torch_op(a, b), torch.tensor(numpy_op(a_np, b_np), device=device)
-            )
-            # Tensor x int scalar
-            self.assertEqual(
-                torch_op(a, 2), torch.tensor(numpy_op(a_np, 2), device=device)
-            )
-
-    def test_bitwise_shift_float(self, device):
-        ops = [
-            (torch.bitwise_left_shift, lambda x, y: x * 2.0**y),
-            (operator.lshift, lambda x, y: x * 2.0**y),
-            (torch.bitwise_right_shift, lambda x, y: x / 2.0**y),
-            (operator.rshift, lambda x, y: x / 2.0**y),
-        ]
-        for torch_op, expected_op in ops:
-            # int tensor x float
-            a = torch.tensor([19, -20, -21, 22], dtype=torch.int64, device=device)
-            self.assertEqual(
-                torch_op(a, 1.8), torch.floor(expected_op(a, 1)).to(a.dtype)
-            )
-            # float tensor x int scalar
-            a = torch.tensor(
-                [19.1, -20.2, -21.3, 22.4], dtype=torch.float32, device=device
-            )
-            self.assertEqual(torch_op(a, 2), expected_op(a, 2))
-            # float tensor x float scalar
-            a = torch.tensor(
-                [19.1, -20.2, -21.3, 22.4], dtype=torch.float32, device=device
-            )
-            self.assertEqual(torch_op(a, 2.2), expected_op(a, 2.2))
-
     @onlyNativeDeviceTypes
     @dtypes(
         *list(
@@ -4011,6 +3882,13 @@ class TestBinaryUfuncs(TestCase):
                 dtype=torch.double,
             )
             self.assertEqual(expected, actual.view(-1), rtol=0, atol=0.02)
+
+            # bfloat16
+            a_bf16 = a.bfloat16()
+            b_bf16 = b.bfloat16()
+            actual_bf16 = a_bf16.atan2(b_bf16)
+            self.assertEqual(actual_bf16, actual.bfloat16())
+            self.assertEqual(expected, actual_bf16.view(-1), exact_dtype=False, rtol=0, atol=0.02)
 
         _test_atan2_with_size((2, 2), device)
         _test_atan2_with_size((3, 3), device)

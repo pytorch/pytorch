@@ -23,6 +23,8 @@ def _maybe_convert_to_dtype(
 ) -> Union[TensorLikeType, NumberType, Sequence]:
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
+            # NOTE: this is incorrect on the CPU
+            # See https://github.com/pytorch/pytorch/issues/77553
             return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
@@ -98,14 +100,13 @@ class elementwise_type_promotion_wrapper(object):
             )
 
             flattened_type_promoting_args = tree_flatten(type_promoting_args)[0]
-
             compute_dtype, result_dtype = utils.elementwise_dtypes(
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,
             )
 
             promoted_args = {
-                x: _maybe_convert_to_dtype(bound.arguments[x], dtype=compute_dtype)
+                x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
                 if x in bound.arguments.keys()
             }
@@ -160,7 +161,7 @@ def _safe_copy_out(*, copy_from: TensorLikeType, copy_to: TensorLikeType):
     return prims.copy_to(copy_to, copy_from)
 
 
-# FIXME: only supports single tensor out
+# FIXME: only supports out parameter that is literally called "out"
 def out_wrapper(fn: Callable) -> Callable:
     """
     Adds the out parameter to a Python reference.
@@ -192,3 +193,51 @@ def out_wrapper(fn: Callable) -> Callable:
     _fn.__annotations__ = fn.__annotations__
     _fn.__annotations__["out"] = TensorLikeType
     return _fn
+
+
+def out_wrapper_multi(*out_names):
+    def go(fn: Callable) -> Callable:
+        @wraps(fn)
+        def _fn(*args, **kwargs):
+            out_kwargs = {}
+            has_out_kwargs = None
+            for o in out_names:
+                out_kwargs[o] = kwargs.pop(o, None)
+                # Either all of the out kwargs are set or none of them
+                if has_out_kwargs is None:
+                    has_out_kwargs = out_kwargs[o] is not None
+                else:
+                    assert has_out_kwargs == (out_kwargs[o] is not None)
+            result = fn(*args, **kwargs)
+            assert isinstance(result, tuple)
+            if has_out_kwargs:
+                final_result = []
+                for i, o in enumerate(out_names):
+                    out = out_kwargs[o]
+                    assert isinstance(out, TensorLike)
+                    out = _maybe_resize_out(out, result[i].shape)
+                    final_result.append(_safe_copy_out(copy_from=result[i], copy_to=out))  # type: ignore[arg-type]
+                return tuple(final_result)
+            return result
+
+        sig = inspect.signature(fn)
+        out_params = []
+        for o in out_names:
+            out_params.append(
+                inspect.Parameter(
+                    o,
+                    kind=inspect.Parameter.KEYWORD_ONLY,
+                    default=None,
+                    annotation=TensorLikeType,
+                )
+            )
+        params = chain(sig.parameters.values(), out_params)
+        _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+            parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
+        )
+        _fn.__annotations__ = fn.__annotations__
+        for o in out_names:
+            _fn.__annotations__[o] = TensorLikeType
+        return _fn
+
+    return go
