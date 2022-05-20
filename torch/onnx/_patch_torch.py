@@ -4,6 +4,7 @@ import re
 from typing import Iterable, Tuple, Union
 
 import torch
+import torch._C._onnx as _C_onnx
 from torch.onnx._globals import GLOBALS
 
 
@@ -134,9 +135,8 @@ def _scalar(x):
 
 def _is_caffe2_aten_fallback():
     return (
-        GLOBALS.operator_export_type
-        == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        and torch.onnx._CAFFE2_ATEN_FALLBACK
+        GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+        and _C_onnx._CAFFE2_ATEN_FALLBACK
     )
 
 

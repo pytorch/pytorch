@@ -14,7 +14,7 @@ producer_version = _C._onnx.PRODUCER_VERSION
 
 
 class ExportTypes:
-    r""" "Specifies how the ONNX model is stored."""
+    r"""Specifies how the ONNX model is stored."""
 
     PROTOBUF_FILE = "Saves model in the specified protobuf file."
     ZIP_ARCHIVE = "Saves model in the specified ZIP file (uncompressed)."
