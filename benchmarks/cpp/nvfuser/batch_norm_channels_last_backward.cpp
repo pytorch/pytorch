@@ -13,13 +13,13 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
 //------------------------------------------------------------------------------
 
-static void setupBatchNorm_BWD(Fusion* fusion, DataType dtype) {
+static void setupBatchNorm_nhwc_BWD(Fusion* fusion, DataType dtype) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
   FusionGuard fg(fusion);
@@ -62,7 +62,8 @@ static void setupBatchNorm_BWD(Fusion* fusion, DataType dtype) {
       save_var,
       kTraining,
       eps_ptr,
-      std::vector<bool>(3, true));
+      std::vector<bool>(3, true),
+      true);
 
   auto grad_input = result.grad_input;
   auto grad_weight = result.grad_weight;
@@ -79,7 +80,7 @@ static void setupBatchNorm_BWD(Fusion* fusion, DataType dtype) {
   fusion->addOutput(grad_bias);
 }
 
-static void NvFuserScheduler_BatchNorm_BWD(
+static void NvFuserScheduler_BatchNorm_nhwc_BWD(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
     DataType dtype) {
@@ -90,9 +91,9 @@ static void NvFuserScheduler_BatchNorm_BWD(
 
   std::vector<int64_t> input_shape{
       benchmark_state.range(0),
-      benchmark_state.range(1),
       benchmark_state.range(2),
-      benchmark_state.range(2)};
+      benchmark_state.range(2),
+      benchmark_state.range(1)};
 
   at::manual_seed(0);
   auto options =
@@ -101,11 +102,11 @@ static void NvFuserScheduler_BatchNorm_BWD(
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor input = at::randn(input_shape, options);
   at::Tensor grad_out = at::randn(input_shape, options);
-  at::Tensor weight = at::ones({input_shape[1]}, fp32_options);
-  at::Tensor run_mean = at::zeros({input_shape[1]}, fp32_options);
-  at::Tensor run_var = at::ones({input_shape[1]}, fp32_options);
-  at::Tensor save_mean = at::zeros({input_shape[1]}, fp32_options);
-  at::Tensor save_var = at::ones({input_shape[1]}, fp32_options);
+  at::Tensor weight = at::ones({input_shape[3]}, fp32_options);
+  at::Tensor run_mean = at::zeros({input_shape[3]}, fp32_options);
+  at::Tensor run_var = at::ones({input_shape[3]}, fp32_options);
+  at::Tensor save_mean = at::zeros({input_shape[3]}, fp32_options);
+  at::Tensor save_var = at::ones({input_shape[3]}, fp32_options);
 
   std::vector<c10::IValue> aten_inputs(
       {input, grad_out, weight, run_mean, run_var, save_mean, save_var});
@@ -122,7 +123,7 @@ static void NvFuserScheduler_BatchNorm_BWD(
 
 //------------------------------------------------------------------------------
 
-static void Baseline_BatchNorm_BWD(
+static void Baseline_BatchNorm_nhwc_BWD(
     benchmark::State& benchmark_state,
     DataType dtype) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
@@ -140,8 +141,10 @@ static void Baseline_BatchNorm_BWD(
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
   auto fp32_options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::randn(input_shape, options);
-  at::Tensor grad_out = at::randn(input_shape, options);
+  at::Tensor input = at::randn(input_shape, options)
+                         .contiguous(c10::MemoryFormat::ChannelsLast);
+  at::Tensor grad_out = at::randn(input_shape, options)
+                            .contiguous(c10::MemoryFormat::ChannelsLast);
   at::Tensor weight = at::ones({input_shape[1]}, fp32_options);
   at::Tensor bias = at::zeros({input_shape[1]}, fp32_options);
   at::Tensor run_mean = at::zeros({input_shape[1]}, fp32_options);
@@ -201,77 +204,184 @@ static void Baseline_BatchNorm_BWD(
 
 //------------------------------------------------------------------------------
 
-static void Baseline_BatchNorm_BWD_cuDNN_fp32(
+static void Baseline_BatchNorm_nhwc_BWD_cuDNN_fp32(
     benchmark::State& benchmark_state) {
-  Baseline_BatchNorm_BWD(benchmark_state, DataType::Float);
+  Baseline_BatchNorm_nhwc_BWD(benchmark_state, DataType::Float);
 }
 
-static void Baseline_BatchNorm_BWD_cuDNN_fp16(
+static void Baseline_BatchNorm_nhwc_BWD_cuDNN_fp16(
     benchmark::State& benchmark_state) {
-  Baseline_BatchNorm_BWD(benchmark_state, DataType::Half);
+  Baseline_BatchNorm_nhwc_BWD(benchmark_state, DataType::Half);
+}
+
+// Simple aliases just for names in the printed output
+static void Baseline_ResNet_BatchNorm_nhwc_BWD_cuDNN_fp16(benchmark::State& benchmark_state) {
+  Baseline_BatchNorm_nhwc_BWD(benchmark_state, DataType::Half);
+}
+
+static void Baseline_ResNext_BatchNorm_nhwc_BWD_cuDNN_fp16(benchmark::State& benchmark_state) {
+  Baseline_BatchNorm_nhwc_BWD(benchmark_state, DataType::Half);
 }
 
 //------------------------------------------------------------------------------
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_BatchNorm_BWD_fp32,
-    setupBatchNorm_BWD,
-    NvFuserScheduler_BatchNorm_BWD,
+    NvFuserScheduler_BatchNorm_nhwc_BWD_fp32,
+    setupBatchNorm_nhwc_BWD,
+    NvFuserScheduler_BatchNorm_nhwc_BWD,
     DataType::Float);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_BWD_fp32)
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_nhwc_BWD_fp32)
     // ->RangeMultiplier(2)
     ->Ranges({{64, 512}, {32, 128}, {2, 64}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_BWD_fp32)
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_nhwc_BWD_fp32)
     // ->RangeMultiplier(2)
     ->Ranges({{2, 64}, {2, 32}, {2, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_BatchNorm_BWD_fp16,
-    setupBatchNorm_BWD,
-    NvFuserScheduler_BatchNorm_BWD,
+    NvFuserScheduler_BatchNorm_nhwc_BWD_fp16,
+    setupBatchNorm_nhwc_BWD,
+    NvFuserScheduler_BatchNorm_nhwc_BWD,
     DataType::Half);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_BWD_fp16)
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_nhwc_BWD_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{64, 512}, {32, 128}, {2, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_BWD_fp16)
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_nhwc_BWD_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 64}, {2, 32}, {2, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+//------------------------------------------------------------------------------
+
+BENCHMARK(Baseline_BatchNorm_nhwc_BWD_cuDNN_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{64, 512}, {32, 128}, {2, 64}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_BatchNorm_nhwc_BWD_cuDNN_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 64}, {2, 32}, {2, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_BatchNorm_nhwc_BWD_cuDNN_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{64, 512}, {32, 128}, {2, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_BatchNorm_nhwc_BWD_cuDNN_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{2, 64}, {2, 32}, {2, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 //------------------------------------------------------------------------------
+// RESNET and REXNEXT benchmarks
 
-BENCHMARK(Baseline_BatchNorm_BWD_cuDNN_fp32)
-    // ->RangeMultiplier(2)
-    // cuDNN didn't make it to 1024
-    ->Ranges({{64, 512}, {32, 128}, {2, 64}})
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_ResNet_BatchNorm_nhwc_BWD_fp16,
+    setupBatchNorm_nhwc_BWD,
+    NvFuserScheduler_BatchNorm_nhwc_BWD,
+    DataType::Half);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_ResNet_BatchNorm_nhwc_BWD_fp16)
+    ->Args({256, 64, 112})
+    ->Args({256, 64, 56})
+    ->Args({256, 256, 56})
+    ->Args({256, 128, 56})
+    ->Args({256, 128, 28})
+    ->Args({256, 512, 28})
+    ->Args({256, 256, 28})
+    ->Args({256, 256, 14})
+    ->Args({256, 1024, 14})
+    ->Args({256, 512, 14})
+    ->Args({256, 512, 7})
+    ->Args({256, 2048, 7})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_BatchNorm_BWD_cuDNN_fp32)
-    // ->RangeMultiplier(2)
-    ->Ranges({{2, 64}, {2, 32}, {2, 256}})
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_ResNext_BatchNorm_nhwc_BWD_fp16,
+    setupBatchNorm_nhwc_BWD,
+    NvFuserScheduler_BatchNorm_nhwc_BWD,
+    DataType::Half);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_ResNext_BatchNorm_nhwc_BWD_fp16)
+    ->Args({128, 64, 112})
+    ->Args({128, 128, 56})
+    ->Args({128, 256, 56})
+    ->Args({128, 128, 56})
+    ->Args({128, 256, 28})
+    ->Args({128, 512, 28})
+    ->Args({128, 512, 14})
+    ->Args({128, 1024, 14})
+    ->Args({128, 1024, 7})
+    ->Args({128, 2048, 7})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_BatchNorm_BWD_cuDNN_fp16)
-    // ->RangeMultiplier(2)
-    ->Ranges({{64, 512}, {32, 128}, {2, 128}})
+// Permutation of TIMM sizes
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_TIMM_BatchNorm_nhwc_BWD_fp16,
+    setupBatchNorm_nhwc_BWD,
+    NvFuserScheduler_BatchNorm_nhwc_BWD,
+    DataType::Half);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_BatchNorm_nhwc_BWD_fp16)
+    ->ArgsProduct(
+        {{8, 16, 32, 64, 128, 256},
+         {24, 40, 48, 56, 72, 152, 184, 200, 368},
+         {7, 14, 28, 56, 112}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_BatchNorm_BWD_cuDNN_fp16)
-    // ->RangeMultiplier(2)
-    ->Ranges({{2, 64}, {2, 32}, {2, 256}})
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_TIMM_BatchNorm_nhwc_BWD_fp16)
+    ->ArgsProduct(
+        {{128, 256, 512, 1024, 2048},
+         {24, 40, 48, 56, 72, 152},
+         {7, 14, 28, 56}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+//------------------------------------------------------------------------------
+
+BENCHMARK(Baseline_ResNet_BatchNorm_nhwc_BWD_cuDNN_fp16)
+    ->Args({256, 64, 112})
+    ->Args({256, 64, 56})
+    ->Args({256, 256, 56})
+    ->Args({256, 128, 56})
+    ->Args({256, 128, 28})
+    ->Args({256, 512, 28})
+    ->Args({256, 256, 28})
+    ->Args({256, 256, 14})
+    ->Args({256, 1024, 14})
+    ->Args({256, 512, 14})
+    ->Args({256, 512, 7})
+    ->Args({256, 2048, 7})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_ResNext_BatchNorm_nhwc_BWD_cuDNN_fp16)
+    ->Args({128, 64, 112})
+    ->Args({128, 128, 56})
+    ->Args({128, 256, 56})
+    ->Args({128, 128, 56})
+    ->Args({128, 256, 28})
+    ->Args({128, 512, 28})
+    ->Args({128, 512, 14})
+    ->Args({128, 1024, 14})
+    ->Args({128, 1024, 7})
+    ->Args({128, 2048, 7})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();

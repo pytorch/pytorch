@@ -62,6 +62,7 @@ TORCH_API c10::Device backendDeviceToAtenDevice(const BackendDevice& device);
 // input is not a lazy tensor.
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors);
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor);
+TORCH_API c10::optional<BackendDevice> GetBackendDevice(const c10::optional<c10::Device> device);
 
 // For variadic template.
 TORCH_API c10::optional<BackendDevice> GetBackendDevice();
