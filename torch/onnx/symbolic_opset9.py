@@ -4967,7 +4967,11 @@ class Prim:
 
     @staticmethod
     def ListUnpack(g, *inputs, **kwargs):
-        # Need to get the nodes and condition
+        # Need to get the nodes and condition on the input node
+        first_node = inputs[0].node()
+        if first_node.kind() == "prim::ListConstruct":
+            return first_node.outputs()
+
         return None
 
     @staticmethod
