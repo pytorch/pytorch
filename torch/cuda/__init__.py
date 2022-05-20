@@ -635,25 +635,6 @@ from .random import *  # noqa: F403
 # Define Storage and Tensor classes
 ################################################################################
 
-
-from ..storage import _StorageBase
-
-
-if not hasattr(torch._C, 'CudaByteStorageBase'):
-    # Define dummy base classes
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool', 'BFloat16',
-              'ComplexDouble', 'ComplexFloat']:
-        tensor_name = 'Cuda{0}TensorBase'.format(t)
-
-        torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
-
-    storage_name = 'CudaByteStorageBase'
-    torch._C.__dict__[storage_name] = _dummy_type(storage_name)
-
-    torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
-    torch._C.__dict__['_CudaEventBase'] = _dummy_type('CudaEventBase')
-
-
 @staticmethod  # type: ignore[misc]
 def _lazy_new(cls, *args, **kwargs):
     _lazy_init()
@@ -675,9 +656,9 @@ class _CudaBase(object):
 
     __new__ = _lazy_new
 
-from torch.storage import _TypedStorage, _LegacyStorage
+from torch.storage import _LegacyStorage
 
-class _UntypedStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
+class _CudaLegacyStorage(_LegacyStorage):
     @classmethod
     def from_buffer(cls, *args, **kwargs):
         raise RuntimeError('from_buffer: Not available for CUDA storage')
@@ -690,67 +671,69 @@ class _UntypedStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
     def _new_shared_filename(cls, manager, obj, size, *, device=None, dtype=None):
         raise RuntimeError('_new_shared_filename: Not available for CUDA storage')
 
-class ByteStorage(_LegacyStorage):
+class ByteStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.uint8
 
-class DoubleStorage(_LegacyStorage):
+class DoubleStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.double
 
-class FloatStorage(_LegacyStorage):
+class FloatStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.float
 
-class HalfStorage(_LegacyStorage):
+class HalfStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-class LongStorage(_LegacyStorage):
+class LongStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.long
 
-class IntStorage(_LegacyStorage):
+class IntStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-class ShortStorage(_LegacyStorage):
+class ShortStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.short
 
-class CharStorage(_LegacyStorage):
+class CharStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-class BoolStorage(_LegacyStorage):
+class BoolStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.bool
 
-class BFloat16Storage(_LegacyStorage):
+class BFloat16Storage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-class ComplexDoubleStorage(_LegacyStorage):
+class ComplexDoubleStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
 
-class ComplexFloatStorage(_LegacyStorage):
+class ComplexFloatStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat
 
-torch._storage_classes.add(_UntypedStorage)
+del _LegacyStorage
+del _CudaLegacyStorage
+
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
