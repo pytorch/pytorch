@@ -13,6 +13,7 @@ from torch._prims.utils import (
     Number,
     NumberType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    REDUCTION_OUTPUT_TYPE_KIND,
 )
 from torch._prims.wrappers import (
     elementwise_type_promotion_wrapper,
@@ -160,13 +161,6 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
-
-
-class REDUCTION_OUTPUT_TYPE_KIND(Enum):
-    SAME = (0,)
-    SAME_OR_REAL = (1,)  # for complex types outputs corresponding real type
-    OP_MATH = (2,)  # keep output in opmath type, needed for mean
-    ALWAYS_BOOL = (3,)
 
 
 def _broadcast_shapes(*_shapes):
@@ -918,11 +912,9 @@ def _reduction(
             raise RuntimeError(
                 "reducing over zero-size dimension for reduction operation without identity"
             )
-    # even though some reductions, like amin or amax, don't strictly require type promotion,
-    # all the math ops (including comparisons) are still defined only for a computation type,
-    # so promotion will still happen. We are doing it explicitly here
-    inp_dtype = dtype if dtype is not None else a.dtype
-    computation_dtype = utils._get_computation_dtype(inp_dtype)
+    computation_dtype, result_dtype = utils.reduction_dtypes(
+        a, output_dtype_kind, dtype
+    )
     a_converted = prims.convert_element_type(a, computation_dtype)
     result = prim(a_converted, dims)
 
@@ -931,36 +923,16 @@ def _reduction(
         broadcast_dims = [i for i in range(a.ndim) if i not in dims]
         result = prims.broadcast_in_dim(result, output_shape, broadcast_dims)
     if out is not None:
-        if dtype is None:
-            if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
-                if out.dtype != a.dtype:
-                    raise RuntimeError("Expected the dtype for input and out to match")
-            elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME_OR_REAL:
-                expected_dtype = (
-                    a.dtype
-                    if not utils.is_complex_dtype(a.dtype)
-                    else utils.corresponding_real_dtype(a.dtype)
-                )
-                if out.dtype != expected_dtype:
-                    raise RuntimeError("Expected the dtype for input and out to match")
-            elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.ALWAYS_BOOL:
-                if out.dtype != torch.bool:
-                    raise RuntimeError("Expected the dtype for input and out to match")
+        assert result_dtype is not None
+        if result_dtype != out.dtype:
+            raise RuntimeError(
+                "Expected the dtype of reduction result and out to match"
+            )
         out = _maybe_resize_out(out, result.shape)
         return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
-    if (
-        output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME
-        or output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME_OR_REAL
-    ):
-        result_dtype = dtype if dtype else a.dtype
-        if (
-            output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME_OR_REAL
-            and utils.is_complex_dtype(result_dtype)
-        ):
-            result_dtype = utils.corresponding_real_dtype(result_dtype)
-        if result.dtype != result_dtype:
-            result = prims.convert_element_type(result, result_dtype)
+    if result.dtype != result_dtype and result_dtype is not None:
+        result = prims.convert_element_type(result, result_dtype)
     return result
 
 
@@ -1077,7 +1049,7 @@ def var(
         dtype=None,
         out=None,
         has_identity=True,
-        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME_OR_REAL,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
     )
     return result
 
@@ -1104,7 +1076,7 @@ def std(
         dtype=None,
         out=None,
         has_identity=True,
-        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME_OR_REAL,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
     )
     result = sqrt(result)
     return result
