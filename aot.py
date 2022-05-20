@@ -17,10 +17,19 @@ def cleanup():
     dist.destroy_process_group()
 
 def broadcast(x):
-    # torch.add(x, 1) # Just to see if __torch_dispatch__ functions.
     dist.broadcast(x, 0)
     print(f"{os.getpid()} broadcast: {x}")
     return x
+
+def all_reduce(x):
+    dist.all_reduce(x)
+    print(f"{os.getpid()} all_reduce: {x}")
+    return x
+
+def all_gather(xs, x):
+    dist.all_gather(xs, x)
+    print(f"{os.getpid()} all_gather: {xs}")
+    return xs
 
 # The compiler_fn is called after the forward and backward graphs are extracted.
 # Here, we just print the code in the compiler_fn. Return of this function is a callable.
@@ -34,16 +43,26 @@ def demo_basic(rank, world_size):
     print(f"Running basic DDP example on rank {rank}, and process id: {os.getpid()}", flush=True)
     setup(rank, world_size)
 
-    # Pass on the compiler_fn to the aot_function API
-    aot_print_fn = aot_function(broadcast, fw_compiler=compiler_fn, bw_compiler=compiler_fn)
-
-    # Run the aot_print_fn once to trigger the compilation and print the graphs
     device = torch.device("cuda", dist.get_rank())
-    x = torch.zeros(2, 3).to(device)
-    if device.index == 0:
-        x = torch.ones(2, 3).to(device)
+    x = torch.full((2, 3), dist.get_rank() + 1).to(device)
+
+    # broadcast
+    aot_print_fn = aot_function(broadcast, fw_compiler=compiler_fn, bw_compiler=compiler_fn)
     res = aot_print_fn(x)
     ref = broadcast(x)
+    assert torch.allclose(ref, res)
+
+    #all_reduce
+    aot_print_fn = aot_function(all_reduce, fw_compiler=compiler_fn, bw_compiler=compiler_fn)
+    res = aot_print_fn(x)
+    ref = all_reduce(x)
+    assert torch.allclose(ref, res)
+
+    #all_gather
+    xs = [torch.zeros(2,3).to(device) for _ in range(dist.get_world_size())]
+    aot_print_fn = aot_function(all_gather, fw_compiler=compiler_fn, bw_compiler=compiler_fn)
+    res = aot_print_fn(xs, x)
+    ref = all_gather(xs, x)
     assert torch.allclose(ref, res)
 
     clear_compile_cache()
