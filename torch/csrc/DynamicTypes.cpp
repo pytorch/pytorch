@@ -123,18 +123,18 @@ at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, boo
   PyObject* untyped_storage_obj;
 
   if (is_typed_storage) {
+    // NOTE: `PyObject_GetAttrString` increments the refcounts to `dtype` and
+    // `_storage`, so we must decrement them. The refcounts will still stay
+    // nonzero since the `_TypedStorage` maintains a reference.
     PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
-    TORCH_INTERNAL_ASSERT(dtype_obj && THPDtype_Check(dtype_obj));
+    TORCH_INTERNAL_ASSERT(dtype_obj);
+    Py_DECREF(dtype_obj);
+
+    TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_obj));
     scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
 
     untyped_storage_obj = PyObject_GetAttrString(obj, "_storage");
     TORCH_INTERNAL_ASSERT(untyped_storage_obj);
-
-    // `PyObject_GetAttrString` increments the refcount to the
-    // `_UntypedStorage`, so we must decrement it. The refcount will stay
-    // positive for as long as we need it, since the `_TypedStorage` will
-    // retain its reference to the `_UntypedStorage`, so decrementing it
-    // immediately like this is fine.
     Py_DECREF(untyped_storage_obj);
 
   } else {
