@@ -49,7 +49,11 @@
 - [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
   - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+<<<<<<< HEAD
 - [Further questions - Dev Infra office hours](#dev-infra-office-hours)
+=======
+- [Dev Infra Office Hours](#dev-infra-office-hours)
+>>>>>>> updated-contributing
 
 <!-- tocstop -->
 
@@ -195,6 +199,7 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     ```
     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
 * If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
+* For help with any part of the contributing process, please don’t hesitate to utilize our Zoom office hours! See details [here](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
 ## Nightly Checkout & Pull
 
