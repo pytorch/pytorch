@@ -1026,50 +1026,6 @@ def argmin(input: Tensor,
 
 
 @_apply_docstring_templates
-def argmax(input: Tensor,
-           dim: int = None,
-           *,
-           keepdim: Optional[bool] = False,
-           dtype: Optional[DType] = None,
-           mask: Optional[Tensor] = None) -> Tensor:
-    """\
-{reduction_signature}
-{reduction_descr}
-{reduction_identity_dtype}
-{reduction_args}
-{reduction_example}"""
-    if dtype is None:
-        dtype = input.dtype
-    mask_input = _combine_input_and_mask(argmax, input, mask)
-    if input.layout == torch.strided:
-        return torch.argmax(mask_input, dim, bool(keepdim)).to(dtype=dtype)
-    else:
-        raise ValueError(f'masked argmax expects strided tensor (got {input.layout} tensor)')
-
-
-@_apply_docstring_templates
-def argmin(input: Tensor,
-           dim: int = None,
-           *,
-           keepdim: Optional[bool] = False,
-           dtype: Optional[DType] = None,
-           mask: Optional[Tensor] = None) -> Tensor:
-    """\
-{reduction_signature}
-{reduction_descr}
-{reduction_identity_dtype}
-{reduction_args}
-{reduction_example}"""
-    if dtype is None:
-        dtype = input.dtype
-    mask_input = _combine_input_and_mask(argmin, input, mask)
-    if input.layout == torch.strided:
-        return torch.argmin(mask_input, dim, bool(keepdim)).to(dtype=dtype)
-    else:
-        raise ValueError(f'masked argmin expects strided tensor (got {input.layout} tensor)')
-
-
-@_apply_docstring_templates
 def mean(input: Tensor,
          dim: DimOrDims = None,
          *,
