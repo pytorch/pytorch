@@ -570,7 +570,7 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[3], torch.storage._TypedStorage))
-        self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda._UntypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._storage, torch._UntypedStorage))
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
@@ -3126,6 +3126,18 @@ torch.cuda.synchronize()
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_to_numpy(self):
         self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
+
+    def test_graph_is_current_stream_capturing(self):
+        self.assertFalse(torch.cuda.is_current_stream_capturing())
+
+        if (TEST_CUDA and (not TEST_WITH_ROCM) and int(torch.version.cuda.split(".")[0]) >= 11):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                g = torch.cuda.CUDAGraph()
+                self.assertFalse(torch.cuda.is_current_stream_capturing())
+                g.capture_begin()
+                self.assertTrue(torch.cuda.is_current_stream_capturing())
+                g.capture_end()
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
