@@ -19,7 +19,7 @@ full_codegen:
   - avg_pool2d_backward
   - baddbmm
   - bernoulli
-  - bernoulli_.float
+  - bernoulli.p
   - binary_cross_entropy
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
@@ -72,8 +72,8 @@ full_codegen:
   - log_sigmoid_forward
   - lt.Scalar
   - lt.Tensor
-  - masked_fill_.Scalar
-  - masked_fill_.Tensor
+  - masked_fill.Scalar
+  - masked_fill.Tensor
   - max
   - max.dim
   - max_pool2d_with_indices
@@ -97,15 +97,15 @@ full_codegen:
   - nll_loss_forward
   - nll_loss2d_backward
   - nll_loss2d_forward
+  - nonzero
   - norm.ScalarOpt_dim
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
-  - random_
-  - random_.from
-  - random_.to
+  - random.functional
+  - random.from_functional
+  - random.to_functional
   - reciprocal
   - relu
-  - relu_
   - remainder.Tensor
   - repeat
   - rsqrt
@@ -140,7 +140,7 @@ full_codegen:
   - upsample_bilinear2d_backward
   - upsample_nearest2d
   - upsample_nearest2d_backward
-  - zero_
+  - zero.functional
   - narrow_copy.SymInt
 supported:
   - as_strided
