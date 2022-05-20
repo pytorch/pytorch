@@ -96,6 +96,7 @@ jobs:
         run: |
          # Since git apply will fix all the flags raised by the whitespace
          # errors and this will not raise any warinig or error
+         git diff > patchname.patch
          git apply --whitespace=fix patchname.patch    
       - name: C++ docs check
         if: ${{ always() && steps.requirements.outcome == 'success' }}
