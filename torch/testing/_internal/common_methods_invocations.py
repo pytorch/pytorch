@@ -9243,11 +9243,23 @@ foreach_binary_op_db: List[OpInfo] = [
         "mul",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        skips=(
+            # Ref: https://github.com/pytorch/pytorch/issues/77946
+            DecorateInfo(unittest.skip("Unable to reproduce failure locally"), "TestForeach",
+                         "test_binary_op_scalarlist_fastpath",
+                         device_type='cuda', dtypes=(torch.float16,)),
+        )
     ),
     ForeachFuncInfo(
         "div",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        skips=(
+            # Ref: https://github.com/pytorch/pytorch/issues/77946
+            DecorateInfo(unittest.skip("Unable to reproduce failure locally"), "TestForeach",
+                         "test_binary_op_scalarlist_fastpath",
+                         device_type='cuda', dtypes=(torch.float16,)),
+        )
     ),
 ]
 
@@ -18802,6 +18814,10 @@ python_ref_db = [
         "_refs.tan",
         torch_opinfo_name="tan",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.tanh",
+        torch_opinfo_name="tanh",
+    ),
     #
     # Elementwise Unary Special OpInfos
     #
@@ -18822,10 +18838,50 @@ python_ref_db = [
     # Elementwise Unary nn.functional OpInfos
     #
     ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.celu",
+        torch_opinfo_name="nn.functional.celu",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
         decorators=(
             # https://github.com/pytorch/pytorch/issues/77054
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.mish",
+        torch_opinfo_name="nn.functional.mish",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.selu",
+        torch_opinfo_name="nn.functional.selu",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.softplus",
+        torch_opinfo_name="nn.functional.softplus",
+        decorators=(
             DecorateInfo(toleranceOverride({
                 torch.bfloat16: tol(atol=1e-2, rtol=0),
                 torch.float16: tol(atol=1e-3, rtol=0),

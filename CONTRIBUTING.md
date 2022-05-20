@@ -1314,4 +1314,4 @@ your PRs, but it will still be present for the select CircleCI jobs listed
 above.
 
 ## Dev Infra Office Hours
-[Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any further questions regarding developer experience, green HUD, and CI.
+[Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any questions regarding developer experience, Green HUD, and CI.

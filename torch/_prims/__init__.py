@@ -72,6 +72,7 @@ __all__ = [
     "sqrt",
     "square",
     "tan",
+    "tanh",
     #
     # Elementwise binary prims
     #
@@ -571,6 +572,13 @@ square = _make_elementwise_unary_prim(
 tan = _make_elementwise_unary_prim(
     "tan",
     impl_aten=torch.tan,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+tanh = _make_elementwise_unary_prim(
+    "tanh",
+    impl_aten=torch.tanh,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1091,7 +1099,7 @@ def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeTy
 
 
 # Note: saves the Python slice object because we're about to clobber its name with the slice prim
-pyslice: Type[slice] = slice
+pyslice: Type[slice] = slice  # type: ignore[has-type]
 
 
 def _slice_meta(
