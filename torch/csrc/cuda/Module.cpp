@@ -260,14 +260,16 @@ PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyO
 
   PyObject* code_string_o = nullptr;
   PyObject* kernel_name_o = nullptr;
+  PyObject* num_outputs_o = nullptr;
   PyObject* tensors_o = nullptr;
   PyObject* kwargs_o = nullptr;
-  if(!PyArg_ParseTuple(args, "OOO|O", &code_string_o, &kernel_name_o, &tensors_o, &kwargs_o)) {
+  if(!PyArg_ParseTuple(args, "OOOO|O", &code_string_o, &kernel_name_o, &num_outputs_o, &tensors_o, &kwargs_o)) {
     return nullptr;
   }
 
-  std::string code_string = THPUtils_unpackString(code_string_o);
-  std::string kernel_name = THPUtils_unpackString(kernel_name_o);
+  const std::string code_string = THPUtils_unpackString(code_string_o);
+  const std::string kernel_name = THPUtils_unpackString(kernel_name_o);
+  const int num_outputs = static_cast<int>(THPUtils_unpackLong(num_outputs_o));
 
   THPUtils_assert(PyTuple_Check(tensors_o), "tensors argument is expected to "
       "be a tuple, but got %s", THPUtils_typename(tensors_o));
@@ -290,9 +292,19 @@ PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyO
     extra_args.emplace_back(as_scalar(value));
   }
 
-  at::Tensor output = at::cuda::CompileAndLaunchKernel(code_string, kernel_name, tensors, extra_args);
+  std::vector<at::Tensor> outputs =
+      at::cuda::CompileAndLaunchKernel(code_string, kernel_name, num_outputs, tensors, extra_args);
 
-  return THPVariable_Wrap(output);
+  if (num_outputs == 1) {
+    return THPVariable_Wrap(outputs[0]);
+  } else{
+    PyObject* output_tuple = PyTuple_New(num_outputs);
+    for (int i = 0; i < num_outputs; ++i) {
+      PyTuple_SetItem(output_tuple, i, THPVariable_Wrap(outputs[i]));
+    }
+    return output_tuple;
+  }
+
   END_HANDLE_TH_ERRORS
 }
 

@@ -37,6 +37,38 @@ class _CodeParser:
         self.function_params = result["function_params"]
         self.function_body = result["function_body"]
 
+class _JittedFunction:
+    def __init__(self, code_string: str, num_outputs: int, **kwargs):
+        self.code_string = code_string
+        self.num_outputs = num_outputs
+
+        parsed_code = _CodeParser(code_string)
+        self.kernel_name = parsed_code.function_name
+
+        self.kwargs_dict = kwargs
+        self.is_cuda_available = torch.cuda.is_available()
+
+    def __call__(self, *tensors: Tensor, **kwargs):
+        # Jiterator follow torch.cuda's lazy initialization behavior
+        # Defer checking cuda's availability at the function invocation time
+        assert self.is_cuda_available, "Jiterator is only supported on CUDA GPUs, no CUDA GPUs are available."
+
+        assert len(tensors) <= 8, "jiterator only supports up to 8 tensor inputs."
+
+        expanded_kwargs = self.kwargs_dict.copy()
+        for key, value in kwargs.items():
+            if key in self.kwargs_dict:
+                expanded_kwargs[key] = value
+            else:
+                raise KeyError(f"{key} is not declared in function definition")
+
+        return torch._C._cuda_jiterator_compile_and_launch_kernel(
+            self.code_string,
+            self.kernel_name,
+            self.num_outputs,
+            tensors,
+            expanded_kwargs)
+
 
 def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     """
@@ -84,34 +116,9 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
         All input tensors must live in CUDA device
 
     """
-    class JittedFunction:
-        def __init__(self, code_string: str, **kwargs):
-            self.code_string = code_string
 
-            parsed_code = _CodeParser(code_string)
-            self.kernel_name = parsed_code.function_name
+    return _JittedFunction(code_string, num_outputs = 1, **kwargs)
 
-            self.kwargs_dict = kwargs
-            self.is_cuda_available = torch.cuda.is_available()
+def _create_multi_output_jit_fn(code_string: str, num_outputs: int, **kwargs) -> Callable:
 
-        def __call__(self, *tensors: Tensor, **kwargs):
-            # Jiterator follow torch.cuda's lazy initialization behavior
-            # Defer checking cuda's availability at the function invocation time
-            assert self.is_cuda_available, "Jiterator is only supported on CUDA GPUs, no CUDA GPUs are available."
-
-            assert len(tensors) <= 8, "jiterator only supports up to 8 tensor inputs."
-
-            expanded_kwargs = self.kwargs_dict.copy()
-            for key, value in kwargs.items():
-                if key in self.kwargs_dict:
-                    expanded_kwargs[key] = value
-                else:
-                    raise KeyError(f"{key} is not declared in function definition")
-
-            return torch._C._cuda_jiterator_compile_and_launch_kernel(
-                self.code_string,
-                self.kernel_name,
-                tensors,
-                expanded_kwargs)
-
-    return JittedFunction(code_string, **kwargs)
+    return _JittedFunction(code_string, num_outputs, **kwargs)

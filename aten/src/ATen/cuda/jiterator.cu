@@ -315,13 +315,14 @@ void jitted_gpu_kernel_dynamic(
 
 namespace cuda {
 
-at::Tensor CompileAndLaunchKernel(
+std::vector<at::Tensor> CompileAndLaunchKernel(
   const std::string& code_string,
   const std::string& kernel_name,
+  const int num_outputs,
   const std::vector<at::Tensor>& tensors,
   const std::vector<at::Scalar>& extra_args) {
 
-  Tensor output;
+  std::vector<Tensor> outs(num_outputs);
   TensorIteratorConfig config;
   config
     .set_check_mem_overlap(true)
@@ -329,9 +330,11 @@ at::Tensor CompileAndLaunchKernel(
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
     .enforce_safe_casting_to_output(true)
-    .check_all_same_device(true)
-    .add_owned_output(output);
-  for (const auto& t: tensors){
+    .check_all_same_device(true);
+  for (int i = 0; i < num_outputs; ++i) {
+    config.add_owned_output(outs[i]);
+  }
+  for (const auto& t: tensors) {
     config.add_input(t);
   }
   TensorIterator iter = config.build();
@@ -339,7 +342,12 @@ at::Tensor CompileAndLaunchKernel(
   CUDAGuard guard(iter.device());
   at::native::jitted_gpu_kernel_dynamic(kernel_name, iter, code_string, extra_args);
 
-  return iter.output();
+  std::vector<Tensor> outputs;
+  for (int i = 0; i < num_outputs; ++i) {
+    outputs.emplace_back(iter.output(i));
+  }
+
+  return outputs;
 }
 
 }} // namespace at::cuda
