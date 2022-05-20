@@ -49,7 +49,7 @@
 - [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
   - [Which commit is used in CI?](#which-commit-is-used-in-ci)
-- [Further questions - Dev Infra office hours](#dev-infra-office-hours)
+- [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
 
