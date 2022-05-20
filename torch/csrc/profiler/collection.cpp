@@ -408,6 +408,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
       frame = frame->parent_.lock();
     }
 
+    event->finished_ = true;
     stacks.erase(start_tid);
     auto new_frame = event->parent_.lock();
     if (new_frame != nullptr) {
