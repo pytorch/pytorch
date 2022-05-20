@@ -1726,21 +1726,18 @@ class TestInputOutputShapes(TestCase):
 
     def test_conv1d_static_output_shape(self):
         skips = {
-            'padding': ['same', 'valid'],
             'padding_mode': ['circular', 'replicate'],
         }
         self._test_conv_output_shapes(nn.Conv1d, nnq.Conv1d, d=1, skips=skips)
 
     def test_conv2d_static_output_shape(self):
         skips = {
-            'padding': ['same', 'valid'],
             'padding_mode': ['circular', 'replicate'],
         }
         self._test_conv_output_shapes(nn.Conv2d, nnq.Conv2d, d=2, skips=skips)
 
     def test_conv3d_static_output_shape(self):
         skips = {
-            'padding': ['same', 'valid'],
             'padding_mode': ['circular', 'replicate', 'reflect'],
         }
         self._test_conv_output_shapes(nn.Conv3d, nnq.Conv3d, d=3, skips=skips)

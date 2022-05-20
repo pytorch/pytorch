@@ -1,7 +1,7 @@
 # coding=utf-8
 r"""Quantized convolution modules."""
 
-from typing import Optional, List, TypeVar
+from typing import Optional, List, TypeVar, Union
 
 import torch
 import torch.nn as nn
@@ -17,7 +17,9 @@ from torch.nn.utils import fuse_conv_bn_weights
 
 _SUPPORTED_PADDING = {
     'zeros',
-    'reflect'
+    'reflect',
+    # 'circular',
+    # 'replicate',
 }
 
 
@@ -62,6 +64,11 @@ class _ConvNd(WeightedQuantizedModule):
         if padding_mode not in _SUPPORTED_PADDING:
             raise ValueError("'padding_mode' {} is not supported by quantized convolution".format(padding_mode))
         self.padding_mode = padding_mode
+        self._adjust_padding()
+        self._functional_padding_mode = self.padding_mode
+        if self._functional_padding_mode == 'zeros':
+            self._functional_padding_mode = 'constant'
+
         # Initialize as NCHW. set_weight will internally transpose to NHWC.
         if self.transposed:
             weight_shape = [in_channels, out_channels // self.groups]
@@ -78,6 +85,23 @@ class _ConvNd(WeightedQuantizedModule):
         self.set_weight_bias(qweight, bias_float)
         self.scale = 1.0
         self.zero_point = 0
+
+    def _adjust_padding(self):
+        # See `nn._ConvNd` for more details for the implementation.
+        # We have to reimplement it here, to support `torch.jit`
+        # TODO(z-a-f): Factor out common code
+        self._reversed_padding_repeated_twice = [0, 0] * len(self.kernel_size)  # 'valid' padding
+        if isinstance(self.padding, str):
+            if self.padding == 'same':
+                for d, k, i in zip(self.dilation, self.kernel_size,
+                                   range(len(self.kernel_size) - 1, -1, -1)):
+                    total_padding = d * (k - 1)
+                    left_pad = total_padding // 2
+                    self._reversed_padding_repeated_twice[2 * i] = left_pad
+                    self._reversed_padding_repeated_twice[2 * i + 1] = (total_padding - left_pad)
+        else:
+            # Conv modules have symmetric padding, so repeat it twice for F.pad
+            self._reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding)
 
     def set_weight_bias(self, qweight, bias_float):
         raise NotImplementedError
@@ -177,6 +201,10 @@ class _ConvNd(WeightedQuantizedModule):
         self.scale = state[12]
         self.zero_point = state[13]
         self.training = state[14]
+        self._adjust_padding()
+        self._functional_padding_mode = self.padding_mode
+        if self._functional_padding_mode == 'zeros':
+            self._functional_padding_mode = 'constant'
 
     def __deepcopy__(self, memo):
         new_instance = type(self).__new__(type(self))
@@ -306,7 +334,7 @@ class Conv1d(_ConvNd):
                  out_channels: int,
                  kernel_size: _size_1_t,
                  stride: _size_1_t = 1,
-                 padding: _size_1_t = 0,
+                 padding: Union[str, _size_1_t] = 0,
                  dilation: _size_1_t = 1,
                  groups: int = 1,
                  bias: bool = True,
@@ -329,10 +357,11 @@ class Conv1d(_ConvNd):
         return 'QuantizedConv1d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-        if self.padding_mode == 'zeros':
+        if self.padding_mode == 'zeros' and not isinstance(self.padding, str):
             self._packed_params = torch.ops.quantized.conv1d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups)
         else:
+            # We manually call F.pad, so don't use padding in the conv
             self._packed_params = torch.ops.quantized.conv1d_prepack(
                 w, b, self.stride, _pair(0), self.dilation,
                 self.groups)
@@ -352,11 +381,9 @@ class Conv1d(_ConvNd):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 3:
             raise ValueError("Input shape must be `(N, C, L)`!")
-        if self.padding_mode != 'zeros':
-            # Padding in Conv1d is stored as (p, p), need to get (p,)
-            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding[:1])
-            input = F.pad(input, _reversed_padding_repeated_twice,
-                          mode=self.padding_mode)
+        if isinstance(self.padding, str) or self.padding_mode != 'zeros':
+            input = F.pad(input, self._reversed_padding_repeated_twice,
+                          mode=self._functional_padding_mode, value=0.0)
         return ops.quantized.conv1d(input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
@@ -416,7 +443,7 @@ class Conv2d(_ConvNd):
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
-        padding = _pair(padding)
+        padding = padding = padding if isinstance(padding, str) else _pair(padding)
         dilation = _pair(dilation)
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
@@ -428,10 +455,11 @@ class Conv2d(_ConvNd):
         return 'QuantizedConv2d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-        if self.padding_mode == 'zeros':
+        if self.padding_mode == 'zeros' and not isinstance(self.padding, str):
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups)
         else:
+            # We manually call F.pad, so don't use padding in the conv
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, _pair(0), self.dilation, self.groups)
 
@@ -449,10 +477,9 @@ class Conv2d(_ConvNd):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
-        if self.padding_mode != 'zeros':
-            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding)
-            input = F.pad(input, _reversed_padding_repeated_twice,
-                          mode=self.padding_mode)
+        if isinstance(self.padding, str) or self.padding_mode != 'zeros':
+            input = F.pad(input, self._reversed_padding_repeated_twice,
+                          mode=self._functional_padding_mode, value=0.0)
         return ops.quantized.conv2d(
             input, self._packed_params, self.scale, self.zero_point)
 
@@ -514,7 +541,7 @@ class Conv3d(_ConvNd):
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
-        padding = _triple(padding)
+        padding = padding = padding if isinstance(padding, str) else _triple(padding)
         dilation = _triple(dilation)
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
@@ -526,10 +553,11 @@ class Conv3d(_ConvNd):
         return 'QuantizedConv3d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-        if self.padding_mode == 'zeros':
+        if self.padding_mode == 'zeros' and not isinstance(self.padding, str):
             self._packed_params = torch.ops.quantized.conv3d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups)
         else:
+            # We manually call F.pad, so don't use padding in the conv
             self._packed_params = torch.ops.quantized.conv3d_prepack(
                 w, b, self.stride, _triple(0), self.dilation, self.groups)
 
@@ -547,10 +575,9 @@ class Conv3d(_ConvNd):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, D, H, W)`!")
-        if self.padding_mode != 'zeros':
-            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding)
-            input = F.pad(input, _reversed_padding_repeated_twice,
-                          mode=self.padding_mode)
+        if isinstance(self.padding, str) or self.padding_mode != 'zeros':
+            input = F.pad(input, self._reversed_padding_repeated_twice,
+                          mode=self._functional_padding_mode, value=0.0)
         return ops.quantized.conv3d(
             input, self._packed_params, self.scale, self.zero_point)
 
