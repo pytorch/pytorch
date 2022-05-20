@@ -12242,7 +12242,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.skip("Fails on ASAN!"), 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # Division by zero, may be related to above?
@@ -12268,7 +12268,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.skip("Fails on ASAN!"), 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # Division by zero, may be related to above?
@@ -12793,12 +12793,6 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 'TestJit',
                 'test_variant_consistency_jit',
-                dtypes=(torch.float32,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                'TestCompositeCompliance',
-                'test_forward_ad',
                 dtypes=(torch.float32,)
             ),
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_gradgrad", dtypes=(torch.float64,)),
@@ -13978,6 +13972,9 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         gradcheck_fast_mode=False,
+        supports_autograd=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=False,
         decorators=(
             # RuntimeError: expected int at position 0, but got: Tensor
             DecorateInfo(
@@ -18633,6 +18630,10 @@ python_ref_db = [
         torch_opinfo_name="atan",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.bitwise_not",
+        torch_opinfo_name="bitwise_not",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.ceil",
         torch_opinfo_name="ceil",
     ),
@@ -18695,6 +18696,20 @@ python_ref_db = [
         )
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.isinf",
+        torch_opinfo_name="isinf",
+        supports_out=True,
+        skips=(
+            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
+            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,)),
+            # Same reason as `test_python_reference_consistency`
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                         dtypes=(torch.chalf,)),
+        )
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.isnan",
         torch_opinfo_name="isnan",
         supports_out=True,
@@ -18718,6 +18733,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.log1p",
         torch_opinfo_name="log1p",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.log2",
+        torch_opinfo_name="log2",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
@@ -18787,10 +18806,14 @@ python_ref_db = [
         "_refs.special.logit",
         torch_opinfo_name="logit",
         decorators=(
+            # ATen CPU implementation computes at lower precision
             DecorateInfo(toleranceOverride({
                 torch.bfloat16: tol(atol=1e-2, rtol=0),
             }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+            # No meta support for clamp or arithmetic
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',),
+            # RuntimeError: no _refs support for torch.clamp
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',),
         ),
     ),
     #

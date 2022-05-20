@@ -41,6 +41,16 @@ NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
 
 
+torch_function_passthrough = {
+            torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
+            torch.Tensor.numel,
+            torch.Tensor.stride,
+            torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
+            torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
+            torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+}
+
+
 class TensorMeta(torch.Tensor):
     """
     Model tensor metadata.  Not a stock meta tensor because device is modeled
@@ -121,14 +131,7 @@ class TensorMeta(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
-        if func in {
-            torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.numel,
-            torch.Tensor.stride,
-            torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.device.__get__,  # type: ignore[attr-defined]
-        }:
+        if func in torch_function_passthrough:
             return super().__torch_function__(func, types, args, kwargs)
 
         if not hasattr(func, "meta"):

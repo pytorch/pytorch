@@ -397,9 +397,14 @@ class TestCommon(TestCase):
                         self.assertEqual(a._is_view(), b._is_view())
 
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
+            # Run the test twice: once directly as written...
             go(sample)
-            with TorchRefsMode.push():
+            # ...and once rerouting all torch.* function calls to torch._refs.*
+            # instead (testing PrimTorch end-to-end)
+            with TorchRefsMode.push(strict=True):
                 go(sample)
+            # TODO: xfail'ing one of these will xfail both, there is no finer
+            # granularity at the moment
 
 
     @skipMeta
