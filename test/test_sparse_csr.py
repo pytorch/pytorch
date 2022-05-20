@@ -2123,7 +2123,7 @@ class TestSparseCSR(TestCase):
         if layout is torch.sparse_csc:
             return sp.csc_matrix(tensor.cpu().numpy())
         if layout is torch.sparse_bsr:
-            return sp.bsr_matrix(tensor.cpu().numpy(), blocksize=blocksize)
+            return sp.bsr_matrix(tensor.cpu().numpy(), blocksize=blocksize).sorted_indices()
         # No native scipy BSC support?
         raise NotImplementedError(repr(tensor))
 
@@ -2185,7 +2185,7 @@ class TestSparseCSR(TestCase):
             print("sp_matrix.indptr: ", sp_matrix.indptr)
             self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
             print("plain_indices_mth(pt_matrix): ", plain_indices_mth(pt_matrix))
-            print("sp_matrix.indices: ", sp_matrix.indices)
+            print("sp_matrix.indices: ", torch.tensor(sp_matrix.indices, dtype=torch.int64))
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
@@ -2195,6 +2195,7 @@ class TestSparseCSR(TestCase):
             pt_matrix = self._convert_to_layout(dense, layout)
             _test_matrix(dense, layout, pt_matrix)
 
+            print("dense: ", dense, " pt_matrix: ", pt_matrix, " pt_matrix.to_dense(): ", pt_matrix.to_dense())
             self.assertEqual(dense, pt_matrix.to_dense())
             import sys; sys.exit(1)
 

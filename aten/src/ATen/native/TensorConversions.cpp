@@ -328,7 +328,13 @@ Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
   if (tensor.layout() == c10::kSparse) {
     return tensor._to_dense(dtype);
   }
-  if (tensor.layout() == c10::kSparseCsr || tensor.layout() == c10::kSparseCsc) {
+  if (tensor.layout() == c10::kSparseCsr) {
+    return tensor._to_dense(dtype);
+  }
+  if (tensor.layout() == c10::kSparseCsc) {
+    return tensor._to_dense(dtype);
+  }
+  if (tensor.layout() == c10::kSparseBsr) {
     return tensor._to_dense(dtype);
   }
   if (tensor.layout() == c10::kMkldnn) {
@@ -358,6 +364,21 @@ Tensor sparse_compressed_to_dense(
   if (self.layout() == kSparseCsr) {
     Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
     return dst.add_(self);
+  }
+  if (self.layout() == kSparseBsr) {
+    TORCH_CHECK(self.dim() == 2, "Can only convert 2D SparseBsr to dense.");
+    Tensor indices = at::_convert_indices_from_csr_to_coo(
+        self.crow_indices(), self.col_indices(), false, false);
+    auto values = self.values();
+    int64_t blocksize[2] = {values.size(-2), values.size(-1)};
+    IntArrayRef expanded_size({self.size(0) / blocksize[0], self.size(1) / blocksize[1], blocksize[0], blocksize[1]});
+    // We make use of COO dense dimensions here to use the COO to dense format conversion.
+    auto self_coo = at::native::_sparse_coo_tensor_unsafe(
+               indices, values, expanded_size).coalesce();
+    auto dense = self_coo.to_dense();
+    dense = dense.transpose(1, 2);
+    dense = dense.reshape({dense.size(0) * blocksize[0], dense.size(1) * blocksize[1]});
+    return dense;
   }
   return self.to_sparse().to_dense();
 }
