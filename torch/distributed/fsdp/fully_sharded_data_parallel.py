@@ -439,20 +439,20 @@ class FullyShardedDataParallel(nn.Module):
         previously initialized optimizers.
 
     .. warning::
-        Module should be already placed on the destination device or
-        device is set properly using ``torch.cuda.set_device(device_id)``.
-        Alternatively, if module is input on CPU, ``device_id`` argument can
-        be specified to move module to CUDA device during initialization.
-        FSDP will get compute device from module first, if module device
-        is CPU, FSDP will then get compute device from current device. Note
-        that if ``device_id`` is specified, compute device will always match
-        ``device_id``.
+        If the destination CUDA device has ID ``dev_id``, either (1)
+        ``module`` should already be placed on that device, (2) the device
+        should be set using ``torch.cuda.set_device(dev_id)``, or (3)
+        ``dev_id`` should be passed into the ``device_id`` constructor
+        argument. This FSDP instance's compute device will be that destination
+        device. For (1) and (3), the FSDP initialization always occurs on GPU.
+        For (2), the FSDP initialization happens on ``module`` 's current
+        device, which may be CPU.
 
     .. warning::
         FSDP currently does not support gradient accumulation outside
-        `no_sync()` when using CPU offloading. Trying to do so yields incorrect
-        results since FSDP will use the newly-reduced gradient instead of
-        accumulating with any existing gradient.
+        ``no_sync()`` when using CPU offloading. Trying to do so yields
+        incorrect results since FSDP will use the newly-reduced gradient
+        instead of accumulating with any existing gradient.
 
     .. warning::
         Changing the original parameter variable names after construction will
@@ -526,7 +526,7 @@ class FullyShardedDataParallel(nn.Module):
             the near future. It allows users to enable two different backward_prefetch
             algorithms to help backward communication and computation overlapping.
             Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
-        mixed_precision: (Optional[MixedPrecision]): A ``MixedPrecision`` instance
+        mixed_precision (Optional[MixedPrecision]): A ``MixedPrecision`` instance
             describing the mixed precision training config to be used. ``MixedPrecision``
             supports configuring parameter, buffer, and gradient communication dtype. Note
             that only floating point data is cast to the reduced precision. This allows
@@ -551,7 +551,7 @@ class FullyShardedDataParallel(nn.Module):
             avoid sharding specific parameters when using an
             ``auto_wrap_policy`` or if parameters' sharding is not managed by
             FSDP. (Default: ``None``)
-        param_init_fn: (Optional[Callable[[nn.Module], None]]):
+        param_init_fn (Optional[Callable[[nn.Module], None]]):
             A ``Callable[torch.nn.Module] -> None`` that
             specifies how modules that are currently on the meta device should be initialized
             onto an actual device. Note that as of v1.12, we detect modules on the meta
@@ -1708,8 +1708,7 @@ class FullyShardedDataParallel(nn.Module):
         Example::
 
         >>> model = DDP(FSDP(...))
-        >>> fsdp_root = model.module
-        >>> with FSDP.state_dict_type(fsdp_root, StateDictType.LOCAL_STATE_DICT):
+        >>> with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
         >>>     checkpoint = model.state_dict()
 
         Args:
@@ -1893,17 +1892,19 @@ class FullyShardedDataParallel(nn.Module):
 
     def state_dict(self, *args, **kwargs):
         """
-        The entry point of all three FSDP ``state_dict`` APIs. By default, calling
-        ``state_dict`` on an FSDP module will result in FSDP attempting to bring
-        the entire (nested) model into memory and taking the local model's
-        ``state_dict`` on every rank, which could result in OOM if the model
-        cannot fit on a single GPU. As a result, :func:`state_dict_type` API is
-        available to configure between `state_dict` implementations. User can
-        thus use `with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT)`
-        context manager to perform a local checkpoint that will store only local
-        shards of the module. Currently, the only supported implementations are
-        ``StateDictType.LOCAL_STATE_DICT`` and ``StateDictType.FULL_STATE_DICT``
-        (default).
+        This is the entry point of all three FSDP ``state_dict`` APIs: full,
+        local, and sharded. For the full state dict
+        (``StateDictType.FULL_STATE_DICT``), FSDP attempts to unshard the model
+        on all ranks, which may result in an OOM error if the full model cannot
+        fit on a single GPU. In that case, users may pass in a
+        :class:`FullStateDictConfig` to only save the checkpoint on rank 0 and/
+        or to offload it to CPU memory layer by layer, enabling much larger
+        checkpoints. If the full model cannot fit in CPU memory, then users may
+        instead take a local state dict (``StateDictType.LOCAL_STATE_DICT``)
+        that only saves the local shard of the model. The sharded state dict
+        (``StateDictType.SHARDED_STATE_DICT``) saves the model parameters as
+        ``ShardedTensor`` s. The ``state_dict`` type can be configured using
+        the :meth:`state_dict_type` context manager.
 
         Example::
 
@@ -2182,7 +2183,7 @@ class FullyShardedDataParallel(nn.Module):
         full, unsharded, unflattened original module parameters. This requires
         FSDP to load the full parameter context on each rank which could result
         in GPU OOM. As a result, :func:`state_dict_type` API is available to
-        configure between `load_state_dict` implementations. User can thus use
+        configure between ``load_state_dict`` implementations. User can thus use
         ``with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT)`` context
         manager to load a local state dict checkpoint that will restore only
         local shards of the module. Currently, the only supported
@@ -2205,7 +2206,7 @@ class FullyShardedDataParallel(nn.Module):
         >>> full_dict.keys()
         >>> odict_keys(['weight', 'bias'])
         >>> # using local state dict
-        >>> local_state_dict = checkpoint['local_state_dict]
+        >>> local_state_dict = checkpoint['local_state_dict']
         >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
         >>>     sharded_module.load_state_dict(local_state_dict)
         >>> local_dict.keys()
@@ -2505,7 +2506,7 @@ class FullyShardedDataParallel(nn.Module):
                 as model parameter shapes will be different across ranks
                 within the context, and writing to them can lead to
                 inconsistency across ranks when the context is exited.
-            offload_to_cpu (bool, optional): If ``True``, full parameters are
+            offload_to_cpu (bool, Optional): If ``True``, full parameters are
                 offloaded to CPU. Note that this offloading currently only
                 occurs if the parameter is sharded (which is only not the case
                 for world_size = 1 or ``NO_SHARD`` config). It is recommended
@@ -3389,7 +3390,7 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             Total norm of the parameters (viewed as a single vector).
 
-        .. note:: This is analogous to `torch.nn.utils.clip_grad_norm_` but
+        .. note:: This is analogous to ``torch.nn.utils.clip_grad_norm_`` but
             handles the partitioning and multiple devices per rank under the
             hood. The default torch util is not applicable here, because each
             rank only has a partial view of all the grads in the model, so

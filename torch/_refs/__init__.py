@@ -70,6 +70,7 @@ __all__ = [
     "sqrt",
     "square",
     "tan",
+    "tanh",
     #
     # Elementwise Binary References
     #
@@ -477,6 +478,10 @@ square = _make_elementwise_unary_reference(
 tan = _make_elementwise_unary_reference(
     prims.tan,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+tanh = _make_elementwise_unary_reference(
+    prims.tanh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
 
@@ -948,7 +953,7 @@ def _reduction(
     # all the math ops (including comparisons) are still defined only for a computation type,
     # so promotion will still happen. We are doing it explicitly here
     inp_dtype = dtype if dtype is not None else a.dtype
-    computation_dtype = utils._get_computation_dtype(inp_dtype)
+    computation_dtype = utils.get_computation_dtype(inp_dtype)
     a_converted = prims.convert_element_type(a, computation_dtype)
     result = prim(a_converted, dims)
 
