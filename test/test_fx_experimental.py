@@ -714,7 +714,9 @@ class TestFXExperimental(JitTestCase):
         for f in [f_grad, f_backward]:
             traced_graph = make_fx(f)(torch.randn(3, requires_grad=True))
             inp = torch.randn(3, requires_grad=True)
-            torch.testing.assert_close(traced_graph(inp), f(inp))
+            traced_graph_out = traced_graph(inp)
+            assert inp.grad is None
+            torch.testing.assert_close(traced_graph_out, f(inp))
 
     def test_mode_tracing_factory_function(self):
         def f(x):
