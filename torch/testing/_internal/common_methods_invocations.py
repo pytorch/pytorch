@@ -10702,6 +10702,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='no_rounding_mode',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -10740,6 +10741,7 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -10817,7 +10819,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
     BinaryUfuncInfo('eq',
-                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                     always_returns_bool=True,
                     supports_autograd=False,
                     sample_inputs_func=sample_inputs_comparison_ops,
@@ -11877,7 +11879,7 @@ op_db: List[OpInfo] = [
                    domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.chalf),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -11886,15 +11888,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
-                       # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=(torch.chalf,)),
-                       # RuntimeError: "abs_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    dtypes=(torch.chalf,))
                    ),
                    # log(z)->-inf for |z|->0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
@@ -12088,12 +12081,20 @@ op_db: List[OpInfo] = [
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
            ),
     OpInfo('masked_fill',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_masked_fill,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # RuntimeError: "where_cpu" not implemented for 'ComplexHalf'
+               # RuntimeError: "where_cuda" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive', dtypes=(torch.chalf,)),
+               # RuntimeError: "where_cpu" not implemented for 'ComplexHalf'
+               # RuntimeError: "where_cuda" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick', dtypes=(torch.chalf,)),
+           )),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_scatter,
@@ -15771,7 +15772,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),),
            sample_inputs_func=sample_inputs_getitem),
     OpInfo('index_put',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_inplace_autograd=True,
            supports_forward_ad=True,
@@ -16803,15 +16804,10 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/56012
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    dtypes=(torch.chalf,)),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=[torch.complex64, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=[torch.chalf, torch.complex64, torch.cdouble]),
-                       # RuntimeError: "div_true_cuda" not implemented for 'ComplexHalf'
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=(torch.complex32,)),
                        # alias, nn.functional.sigmoid, will produce (because of warning string saved):
                        # "RuntimeError: Expected to not find "sigmoid" but found it"
                        DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping')),
@@ -18940,6 +18936,16 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        skips=(
+            # complex("-501.-501.j")/complex("-501.-infj")
+            # PyTorch jiterated Path : 0
+            # Python : 0
+            # PyTorch non-jiterated path : nan + nanj
+            # See also: https://github.com/pytorch/pytorch/issues/52332
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,), device_type='cuda',
+                         active_if=not TEST_WITH_ROCM),
+        ),
     ),
     #
     # Data Conversion & Data Movement Opinfos
