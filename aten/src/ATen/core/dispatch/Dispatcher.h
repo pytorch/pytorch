@@ -503,7 +503,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
     // have to spend time default constructing the IValues in
     // boxedArgs. aligned_storage has no such requirement.
     // Max to avoid zero-size array.`
-    std::aligned_storage_t<sizeof(IValue), alignof(IValue)> boxedArgs[std::max(num_boxed_args, 1UL)];
+    std::aligned_storage_t<sizeof(IValue), alignof(IValue)> boxedArgs[std::max(num_boxed_args, static_cast<size_t>(1))];
     // For debugging only; could be removed (but the compiler will do
     // that for us and it's nice to have the extra assurance of
     // correctness from our debug builds).
