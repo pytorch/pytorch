@@ -892,7 +892,7 @@ class PackageExporter:
                 dtype = torch.uint8
                 storage_numel = storage.nbytes()
             else:
-                raise RuntimeError(f'storage type not recognized: {type(obj)}')
+                raise RuntimeError(f"storage type not recognized: {type(obj)}")
 
             storage: Storage = cast(Storage, untyped_storage)
             location = location_tag(storage)
