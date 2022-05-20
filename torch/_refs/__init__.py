@@ -87,7 +87,7 @@ __all__ = [
     # 'div', # need to implement all rounding modes first
     "eq",
     "float_power",
-    # 'floor_divide', # requires floor
+    "floor_divide",
     # 'fmax', # requires where
     # 'fmod',
     # 'gcd',
@@ -658,6 +658,20 @@ def float_power(
 
     a, b = _maybe_broadcast(a, b)
     return prims.pow(a, b)
+
+
+def _floor_divide(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    return trunc(true_divide(a, b))
+
+
+# TODO: add docstring
+floor_divide = _make_elementwise_binary_reference(
+    _floor_divide,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    aten_op=None,  # Defined in torch/_decomp/decompositions.py
+)
 
 
 # TODO: add docstring

@@ -1996,7 +1996,7 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 # Each iterable will include an a tensor with no elements,
 #   zero dim (scalar) tensors, small 1D tensors, a medium 1D tensor, and
 #   a large 2D tensor.
-def generate_elementwise_binary_tensors(op, *, device, dtype, requires_grad=False):
+def generate_elementwise_binary_tensors(op, *, device, dtype, requires_grad=False, exclude_zero=False):
     shapes = (
         # tensors with no elements
         (0,),
@@ -2012,14 +2012,14 @@ def generate_elementwise_binary_tensors(op, *, device, dtype, requires_grad=Fals
     )
 
     make_arg = partial(
-        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
     )
     for shape in shapes:
         lhs = make_arg(shape, **op.lhs_make_tensor_kwargs)
         rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
         yield SampleInput(lhs, args=(rhs,))
 
-def generate_elementwise_binary_arbitrarily_strided_tensors(op, *, device, dtype, requires_grad=False):
+def generate_elementwise_binary_arbitrarily_strided_tensors(op, *, device, dtype, requires_grad=False, exclude_zero=False):
     # shape, strides, offset
     strided_cases = (
         ((5, 6, 2), (1, 1, 7), 2),
@@ -2030,8 +2030,9 @@ def generate_elementwise_binary_arbitrarily_strided_tensors(op, *, device, dtype
         ((9, 5, 2), (0, 1, 7), 3),
     )
 
+
     make_arg = partial(
-        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
     )
     for shape, strides, offset in strided_cases:
         a = make_arg(500,).as_strided(shape, strides, offset)
@@ -2176,7 +2177,7 @@ def generate_elementwise_binary_extremal_value_tensors(
 # Returns a generator of pairs of contiguous and noncontiguous tensors that
 #   require broadcasting
 def generate_elementwise_binary_broadcasting_tensors(
-    op, *, device, dtype, requires_grad=False
+    op, *, device, dtype, requires_grad=False, exclude_zero=False
 ):
     shapes = (
         ((1,), ()),
@@ -2193,7 +2194,7 @@ def generate_elementwise_binary_broadcasting_tensors(
     )
 
     make_arg = partial(
-        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
     )
     for shape, noncontiguous in product(shapes, [True, False]):
         shape_lhs, shape_rhs = shape
@@ -2238,10 +2239,10 @@ def generate_elementwise_binary_with_scalar_samples(
 
 # Returns a generator of pairs of noncontiguous tensors
 def generate_elementwise_binary_noncontiguous_tensors(
-    op, *, device, dtype, requires_grad=False
+    op, *, device, dtype, requires_grad=False, exclude_zero=False
 ):
     make_arg = partial(
-        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
     )
 
     # Generic noncontiguity
@@ -2299,8 +2300,11 @@ def generate_elementwise_binary_noncontiguous_tensors(
 
 # Sample inputs for elementwise binary operators, like add
 def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+    if hasattr(op, "rhs_make_tensor_kwargs"):
+        exclude_zero = op.rhs_make_tensor_kwargs.get("exclude_zero", False)
+
     make_arg = partial(
-        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
     )
 
     shapes = (
@@ -2356,10 +2360,10 @@ def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=tuple(args), kwargs=sample_kwargs, broadcasts_input=broadcasts_input)
 
 # The base reference input generation for elementwise binary operations
-def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, exclude_zero, **kwargs):
     yield from op.sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
     yield from generate_elementwise_binary_tensors(
-        op, device=device, dtype=dtype, requires_grad=requires_grad
+        op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
     )
     if dtype is not torch.bool:
         yield from generate_elementwise_binary_small_value_tensors(
@@ -2372,7 +2376,7 @@ def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwa
     # TODO: FIXME: RuntimeError: "index_select" not implemented for 'ComplexHalf'
     if dtype not in (torch.chalf,):
         yield from generate_elementwise_binary_broadcasting_tensors(
-            op, device=device, dtype=dtype, requires_grad=requires_grad
+            op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
         )
     yield from generate_elementwise_binary_with_scalar_samples(
         op, device=device, dtype=dtype, requires_grad=requires_grad
@@ -2387,8 +2391,11 @@ def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwa
 # Note that these references inputs use scalars for the SampleInput.input value,
 #   and many tests require SampleInput.input be a tensor or a list of tensors
 def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+    if hasattr(op, "rhs_make_tensor_kwargs"):
+        exclude_zero = op.rhs_make_tensor_kwargs.get("exclude_zero", False)
+
     gen = partial(
-        _reference_inputs_elementwise_binary, op, device, dtype, requires_grad, **kwargs
+        _reference_inputs_elementwise_binary, op, device, dtype, requires_grad, exclude_zero, **kwargs
     )
 
     # yields "normal" samples
@@ -2403,11 +2410,11 @@ def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwar
         yield sample.noncontiguous()
 
     yield from generate_elementwise_binary_noncontiguous_tensors(
-        op, device=device, dtype=dtype, requires_grad=requires_grad
+        op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
     )
 
     yield from generate_elementwise_binary_arbitrarily_strided_tensors(
-        op, device=device, dtype=dtype, requires_grad=requires_grad
+        op, device=device, dtype=dtype, requires_grad=requires_grad, exclude_zero=exclude_zero
     )
 
 
@@ -18938,6 +18945,14 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_reference_meta_functions',
                          device_type='cuda'),
         )
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.floor_divide",
+        torch_opinfo_name="floor_divide",
+        rhs_make_tensor_kwargs=dict(exclude_zero=True),
+        # https://github.com/pytorch/pytorch/issues/76944
+        supports_two_python_scalars=False,
+        supports_one_python_scalar=True,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
