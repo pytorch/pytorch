@@ -945,7 +945,7 @@ class TestAssertCloseErrorMessage(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape(f"(up to {atol} allowed)")):
                 fn(rtol=0.0, atol=atol)
 
-    def test_msg(self):
+    def test_msg_str(self):
         msg = "Custom error message!"
 
         actual = torch.tensor(1)
@@ -954,6 +954,16 @@ class TestAssertCloseErrorMessage(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=msg)
+
+    def test_msg_callable(self):
+        msg = "Custom error message"
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=lambda _: msg)
 
 
 class TestAssertCloseContainer(TestCase):
