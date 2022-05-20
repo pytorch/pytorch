@@ -447,6 +447,7 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+lazy_ts_backend_init = False
 class LazyTestBase(DeviceTypeTestBase):
     device_type = 'lazy'
 
@@ -458,9 +459,11 @@ class LazyTestBase(DeviceTypeTestBase):
         import torch._lazy
         import torch._lazy.metrics
         import torch._lazy.ts_backend
-
-        # Nead to connect the TS backend to lazy key before running tests
-        torch._lazy.ts_backend.init()
+        global lazy_ts_backend_init
+        if not lazy_ts_backend_init:
+            # Nead to connect the TS backend to lazy key before running tests
+            torch._lazy.ts_backend.init()
+            lazy_ts_backend_init = True
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'

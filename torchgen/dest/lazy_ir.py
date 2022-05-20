@@ -305,7 +305,7 @@ class GenTSLazyIR(GenLazyIR):
         for arg in itertools.chain(schema.positional_scalars, schema.keyword_scalars):
             if isinstance(arg.lazy_type, OptionalCType):
                 value_comparsion.append(
-                    f"(!this->{arg.name} && !{arg.name}) || (this->{arg.name} && {arg.name} && *(this->{arg.name}) == *{arg.name})"
+                    f"((!this->{arg.name}&&!{arg.name}) || (this->{arg.name}&&{arg.name} && *(this->{arg.name}) == *{arg.name}))"
                 )
             else:
                 value_comparsion.append(f"this->{arg.name} == {arg.name}")
