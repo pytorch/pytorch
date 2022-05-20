@@ -1122,7 +1122,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     supports_multiple_dims: bool = kwargs.get('supports_multiple_dims', True)
 
     # TODO(@heitorschueroff) Once all reduction operators are using ReductionOpInfo
-    # use op_info.genearte_args_kwargs directly.
+    # use op_info.generate_args_kwargs directly.
     generate_args_kwargs = kwargs.get('generate_args_kwargs', lambda *args, **kwargs: (yield tuple(), {}))
 
     inputs: List[SampleInput] = []
@@ -7228,6 +7228,30 @@ def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dty
                                       args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
 
+def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for masked cumsum and cumprod.
+    """
+    inputs: List[SampleInput] = []
+    for sample_input in sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, **kwargs):
+        for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
+            if type(mask) != torch.Tensor:
+                continue
+            sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
+            if 'keepdim' in sample_input_kwargs:
+                sample_input_kwargs.pop('keepdim')
+            # dimension is required
+            if sample_input_args:
+                dim = sample_input.args[0]
+            else:
+                if 'dim' not in sample_input_kwargs:
+                    continue
+                dim = sample_input_kwargs.pop('dim')
+                sample_input_args = (dim,)
+            inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
+                                      args=sample_input_args, kwargs=sample_input_kwargs))
+
+    return inputs
+
 def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked normalize.
     """
@@ -12218,7 +12242,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.skip("Fails on ASAN!"), 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # Division by zero, may be related to above?
@@ -12244,7 +12268,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.skip("Fails on ASAN!"), 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # Division by zero, may be related to above?
@@ -12769,12 +12793,6 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 'TestJit',
                 'test_variant_consistency_jit',
-                dtypes=(torch.float32,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                'TestCompositeCompliance',
-                'test_forward_ad',
                 dtypes=(torch.float32,)
             ),
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_gradgrad", dtypes=(torch.float64,)),
@@ -13954,6 +13972,9 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         gradcheck_fast_mode=False,
+        supports_autograd=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=False,
         decorators=(
             # RuntimeError: expected int at position 0, but got: Tensor
             DecorateInfo(
@@ -17811,6 +17832,40 @@ op_db: List[OpInfo] = [
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
         sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
     ),
+    OpInfo(
+        '_masked.cumsum',
+        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        method_variant=None,
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        # Can reuse the same inputs; dim is required in both
+        sample_inputs_func=sample_inputs_masked_cumops,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+    ),
+    OpInfo(
+        '_masked.cumprod',
+        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        method_variant=None,
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        # Can reuse the same inputs; dim is required in both
+        sample_inputs_func=sample_inputs_masked_cumops,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+    ),
     ReductionOpInfo(
         '_masked.amax',
         nan_policy='propagate',
@@ -17925,6 +17980,22 @@ op_db: List[OpInfo] = [
                          'TestReductions', 'test_reference_masked'),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    OpInfo(
+        '_masked.median',
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16),
+        method_variant=None,
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        sample_inputs_func=sample_inputs_masked_softmax,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
@@ -18575,6 +18646,10 @@ python_ref_db = [
         torch_opinfo_name="atan",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.bitwise_not",
+        torch_opinfo_name="bitwise_not",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.ceil",
         torch_opinfo_name="ceil",
     ),
@@ -18637,6 +18712,20 @@ python_ref_db = [
         )
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.isinf",
+        torch_opinfo_name="isinf",
+        supports_out=True,
+        skips=(
+            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
+            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,)),
+            # Same reason as `test_python_reference_consistency`
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                         dtypes=(torch.chalf,)),
+        )
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.isnan",
         torch_opinfo_name="isnan",
         supports_out=True,
@@ -18660,6 +18749,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.log1p",
         torch_opinfo_name="log1p",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.log2",
+        torch_opinfo_name="log2",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
@@ -18709,6 +18802,10 @@ python_ref_db = [
         "_refs.tan",
         torch_opinfo_name="tan",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.tanh",
+        torch_opinfo_name="tanh",
+    ),
     #
     # Elementwise Unary Special OpInfos
     #
@@ -18729,10 +18826,50 @@ python_ref_db = [
     # Elementwise Unary nn.functional OpInfos
     #
     ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.celu",
+        torch_opinfo_name="nn.functional.celu",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
         decorators=(
             # https://github.com/pytorch/pytorch/issues/77054
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.mish",
+        torch_opinfo_name="nn.functional.mish",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.selu",
+        torch_opinfo_name="nn.functional.selu",
+        decorators=(
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+                torch.float16: tol(atol=1e-3, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.softplus",
+        torch_opinfo_name="nn.functional.softplus",
+        decorators=(
             DecorateInfo(toleranceOverride({
                 torch.bfloat16: tol(atol=1e-2, rtol=0),
                 torch.float16: tol(atol=1e-3, rtol=0),
