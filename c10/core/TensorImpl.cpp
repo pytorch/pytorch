@@ -233,7 +233,8 @@ bool TensorImpl::compute_channels_last_contiguous_2d() const {
         const auto size_d =
             sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() != expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() !=
+              expected) {
             return false;
           }
           expected *= size_d;
@@ -257,9 +258,11 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
     case 5: {
       int64_t expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
+        const auto size_d =
+            sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() != expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() !=
+              expected) {
             return false;
           }
           expected *= size_d;
