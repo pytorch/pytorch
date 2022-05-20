@@ -119,6 +119,15 @@ class Node:
     - ``output`` contains the output of the traced function in its ``args[0]`` attribute. This corresponds to the "return" statement
       in the Graph printout.
     """
+    graph: 'Graph'
+    name: str
+    op: str
+    target: 'Target'
+    args: Tuple['Argument']
+    kwargs: Dict[str, 'Argument']
+    users: Dict['Node', None]
+    type: Optional[Any]
+    meta: Dict[str, Any]
 
     @compatibility(is_backward_compatible=True)
     def __init__(self, graph: 'Graph', name: str, op: str, target: 'Target',
