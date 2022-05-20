@@ -83,6 +83,9 @@ __all__ = [
     "bitwise_xor",
     # 'complex',  # needs custom meta
     "div",
+    "fmax",
+    "fmin",
+    "fmod",
     "eq",
     "ge",
     "gt",
@@ -97,6 +100,7 @@ __all__ = [
     "nextafter",
     "pow",
     "rsqrt",
+    "remainder",
     "shift_left",
     "shift_right_arithmetic",
     "shift_right_logical",  # not implemented
@@ -653,11 +657,63 @@ div = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 eq = _make_elementwise_binary_prim(
     "eq",
     impl_aten=torch.eq,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
+
+def _fmax_aten(a, b):
+    return torch.fmax(a, b)
+
+
+def _fmax_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmax(a, b)  # type: ignore[attr-defined]
+
+
+fmax = _make_elementwise_binary_prim(
+    "fmax",
+    impl_aten=_fmax_aten,
+    impl_nvfuser=_fmax_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _fmin_aten(a, b):
+    return torch.fmin(a, b)
+
+
+def _fmin_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmin(a, b)  # type: ignore[attr-defined]
+
+
+fmin = _make_elementwise_binary_prim(
+    "fmin",
+    impl_aten=_fmin_aten,
+    impl_nvfuser=_fmin_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _fmod_aten(a, b):
+    return torch.fmod(a, b)
+
+
+def _fmod_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.fmod(a, b)  # type: ignore[attr-defined]
+
+
+fmod = _make_elementwise_binary_prim(
+    "fmod",
+    impl_aten=_fmod_aten,
+    impl_nvfuser=_fmod_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 
@@ -813,6 +869,21 @@ pow = _make_elementwise_binary_prim(
 rsqrt = _make_elementwise_binary_prim(
     "rsqrt",
     impl_aten=torch.rsqrt,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+def _remainder_aten(a, b):
+    return torch.remainder(a, b)
+
+
+def _remainder_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.remainder(a, b)  # type: ignore[attr-defined]
+
+remainder = _make_elementwise_binary_prim(
+    "remainder",
+    impl_aten=_remainder_aten,
+    impl_nvfuser=_remainder_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )

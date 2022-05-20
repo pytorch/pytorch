@@ -18962,14 +18962,21 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmax",
         torch_opinfo_name="fmax",
+        supports_rhs_python_scalar=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmin",
         torch_opinfo_name="fmin",
+        supports_rhs_python_scalar=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmod",
         torch_opinfo_name="fmod",
+        rhs_make_tensor_kwargs={'exclude_zero': True},
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.bfloat16,), device_type='cpu', active_if=(not TEST_WITH_ROCM)),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
@@ -19053,6 +19060,16 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.pow",
         torch_opinfo_name="pow",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.remainder",
+        torch_opinfo_name="remainder",
+        supports_one_python_scalar=True,
+        rhs_make_tensor_kwargs={'exclude_zero': True},
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.bfloat16,), device_type='cpu', active_if=(not TEST_WITH_ROCM)),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.sub",

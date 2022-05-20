@@ -114,7 +114,7 @@ __all__ = [
     "nextafter",
     # 'polar',  # abs, cos, sin
     "pow",
-    # 'remainder',
+    "remainder",
     # 'rsub', # unblocked
     # # special.xlog1py
     # # special.zeta
@@ -655,44 +655,26 @@ def float_power(
     return prims.pow(a, b)
 
 
-def _fmax(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType],
-) -> Tensor:
-    return where(prims.ge(a, b), a, b)
-
 # TODO: add docstring
 fmax = _make_elementwise_binary_reference(
-    _fmax,
+    prims.fmax,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmax,
 )
 
-
-def _fmin(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType],
-) -> Tensor:
-    return where(prims.lt(a, b), a, b)
-
 # TODO: add docstring
 fmin = _make_elementwise_binary_reference(
-    _fmin,
+    prims.fmin,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmin,
 )
 
-# Replace this with trunc_divide
-def _fmod(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType],
-) -> Tensor:
-    return a - prims.floor(prims.div(a, b)) * b
-
 # TODO: add docstring
 fmod = _make_elementwise_binary_reference(
-    _fmod,
+    prims.fmod,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmod,
 )
-
 
 # TODO: add docstring
 ge = _make_elementwise_binary_reference(
@@ -871,6 +853,13 @@ nextafter = _make_elementwise_binary_reference(
 pow = _make_elementwise_binary_reference(
     prims.pow,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+)
+
+# TODO: add docstring
+remainder = _make_elementwise_binary_reference(
+    prims.remainder,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.remainder,
 )
 
 # TODO: add docstring
