@@ -50,8 +50,25 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False) -> N
     if dry_run:
         print("Don't know how to dry-run ghstack")
     else:
-        push_result = subprocess.run(["ghstack"], capture_output=True).stdout.decode("utf-8")
+        ghstack_result = subprocess.run(["ghstack"], capture_output=True)
+        push_result = ghstack_result.stdout.decode("utf-8")
         print(push_result)
+        if ghstack_result.returncode != 0:
+            raise Exception(f"\n```{push_result}```")
+        # The contents of a successful push result should look like:
+        # Summary of changes (ghstack 0.6.0)
+
+        #  - Updated https://github.com/clee2000/random-testing/pull/2
+        #  - Updated https://github.com/clee2000/random-testing/pull/1
+
+        # Facebook employees can import your changes by running
+        # (on a Facebook machine):
+
+        #     ghimport -s https://github.com/clee2000/random-testing/pull/2
+
+        # If you want to work on this diff stack on another machine:
+
+        #     ghstack checkout https://github.com/clee2000/random-testing/pull/2
         org, project = repo.gh_owner_and_name()
         for line in push_result.splitlines():
             if "Updated" in line:
