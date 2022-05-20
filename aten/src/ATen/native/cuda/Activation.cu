@@ -333,19 +333,24 @@ void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Sca
 }
 
 void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softplus_cuda", [&]() {
-    auto beta = beta_.to<scalar_t>();
-    auto threshold = threshold_.to<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                                  iter.dtype(), "softplus_cuda", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto beta = beta_.to<opmath_t>();
+    auto threshold = threshold_.to<opmath_t>();
     gpu_kernel(iter, [beta, threshold]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return (a * beta) > threshold ? a : static_cast<scalar_t>(::log1p(std::exp(a * beta))) / beta;
+      opmath_t aop = static_cast<opmath_t>(a);
+      return (aop * beta) > threshold ? aop : (::log1p(std::exp(aop * beta))) / beta;
     });
   });
 }
 
 void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar& threshold_) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softplus_backward_cuda", [&]() {
-    auto beta = beta_.to<scalar_t>();
-    auto threshold = threshold_.to<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                                  iter.dtype(), "softplus_backward_cuda", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto beta = beta_.to<opmath_t>();
+    auto threshold = threshold_.to<opmath_t>();
     gpu_kernel(iter, [beta, threshold]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       scalar_t z = std::exp(b * beta);
       return (b * beta) > threshold ? a : a * z / (z + scalar_t(1.));
