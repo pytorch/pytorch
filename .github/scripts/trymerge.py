@@ -14,7 +14,78 @@ from functools import lru_cache
 from warnings import warn
 
 
-GH_GET_PR_INFO_QUERY = """
+GH_PR_REVIEWS_FRAGMENT = """
+fragment PRReviews on PullRequestReviewConnection {
+  nodes {
+    author {
+      login
+    }
+    state
+  }
+  pageInfo {
+    startCursor
+    hasPreviousPage
+  }
+}
+"""
+
+GH_CHECKSUITES_FRAGMENT = """
+fragment PRCheckSuites on CheckSuiteConnection {
+  edges {
+    node {
+      app {
+        name
+        databaseId
+      }
+      workflowRun {
+        workflow {
+          name
+        }
+      }
+      checkRuns(first: 50) {
+        nodes {
+          name
+          conclusion
+          detailsUrl
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+      }
+      conclusion
+      url
+    }
+    cursor
+  }
+  pageInfo {
+    hasNextPage
+  }
+}
+"""
+
+GH_COMMIT_AUTHORS_FRAGMENT = """
+fragment CommitAuthors on PullRequestCommitConnection {
+  nodes {
+    commit {
+      author {
+        user {
+          login
+        }
+        email
+        name
+      }
+      oid
+    }
+  }
+  pageInfo {
+    endCursor
+    hasNextPage
+  }
+}
+"""
+
+GH_GET_PR_INFO_QUERY = GH_PR_REVIEWS_FRAGMENT + GH_CHECKSUITES_FRAGMENT + GH_COMMIT_AUTHORS_FRAGMENT + """
 query ($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
@@ -41,58 +112,14 @@ query ($owner: String!, $name: String!, $number: Int!) {
         oid
       }
       commits_with_authors:commits(first: 100) {
-        nodes {
-          commit {
-            author {
-              user {
-                login
-              }
-              email
-              name
-            }
-            oid
-          }
-        }
-        pageInfo {
-          endCursor
-          hasNextPage
-        }
+        ...CommitAuthors
         totalCount
       }
       commits(last: 1) {
         nodes {
           commit {
             checkSuites(first: 10) {
-              edges {
-                node {
-                  app {
-                    name
-                    databaseId
-                  }
-                  workflowRun {
-                    workflow {
-                      name
-                    }
-                  }
-                  checkRuns(first: 50) {
-                    nodes {
-                      name
-                      conclusion
-                      detailsUrl
-                    }
-                    pageInfo {
-                      endCursor
-                      hasNextPage
-                    }
-                  }
-                  conclusion
-                  url
-                }
-                cursor
-              }
-              pageInfo {
-                hasNextPage
-              }
+              ...PRCheckSuites
             }
             oid
           }
@@ -109,16 +136,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         }
       }
       reviews(last: 100) {
-        nodes {
-          author {
-            login
-          }
-          state
-        }
-        pageInfo {
-          startCursor
-          hasPreviousPage
-        }
+       ...PRReviews
       }
       comments(last: 5) {
         nodes {
@@ -160,7 +178,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
-GH_GET_PR_NEXT_CHECKSUITES = """
+GH_GET_PR_NEXT_CHECKSUITES = GH_CHECKSUITES_FRAGMENT + """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   repository(name: $name, owner: $owner) {
     pullRequest(number: $number) {
@@ -169,36 +187,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
           commit {
             oid
             checkSuites(first: 10, after: $cursor) {
-              edges {
-                node {
-                  app {
-                    name
-                    databaseId
-                  }
-                  workflowRun {
-                    workflow {
-                      name
-                    }
-                  }
-                  checkRuns(first: 50) {
-                    nodes {
-                      name
-                      conclusion
-                      detailsUrl
-                    }
-                    pageInfo {
-                      endCursor
-                      hasNextPage
-                    }
-                  }
-                  conclusion
-                  url
-                }
-                cursor
-              }
-              pageInfo {
-                hasNextPage
-              }
+              ...PRCheckSuites
             }
           }
         }
@@ -285,48 +274,24 @@ query($org: String!, $name: String!, $cursor: String) {
 }
 """
 
-GH_GET_PR_NEXT_AUTHORS_QUERY = """
+GH_GET_PR_NEXT_AUTHORS_QUERY = GH_COMMIT_AUTHORS_FRAGMENT + """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(name: $name, owner: $owner) {
     pullRequest(number: $number) {
       commits_with_authors: commits(first: 100, after: $cursor) {
-        nodes {
-          commit {
-            author {
-              user {
-                login
-              }
-              email
-              name
-            }
-            oid
-          }
-        }
-        pageInfo {
-          endCursor
-          hasNextPage
-        }
+        ...CommitAuthors
       }
     }
   }
 }
 """
 
-GH_GET_PR_PREV_REVIEWS_QUERY = """
+GH_GET_PR_PREV_REVIEWS_QUERY = GH_PR_REVIEWS_FRAGMENT + """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   repository(name: $name, owner: $owner) {
     pullRequest(number: $number) {
       reviews(last: 100, before: $cursor) {
-        nodes {
-          author {
-            login
-          }
-          state
-        }
-        pageInfo {
-          startCursor
-          hasPreviousPage
-        }
+        ...PRReviews
       }
     }
   }
