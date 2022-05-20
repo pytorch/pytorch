@@ -1,6 +1,5 @@
 PyTorch Community and Governance
 ================================
-
 .. more icons here: https://fontawesome.com/v4/icon/cogs
 .. about Sphinx Panels extensions and how to make cards, see here:
 .. https://sphinx-panels.readthedocs.io/en/latest/#inline-icons
@@ -18,8 +17,7 @@ to PyTorch.
     ^^^
     This guide will guide you through the various ways
     you can contribute to the PyTorch code, documentation,
-    and other community efforts.
-    
+    and other community efforts.    
     * `PyTorch Contributor Guide <./contribution_guide.html>`__
 
     ---
@@ -41,10 +39,9 @@ to PyTorch.
     :header: text-secondary font-weight-bold
 
     :fa:`users,mr-1` `PyTorch Governance | Maintainers`_
- 
+
     ^^^
     In this section you can learn about PyTorch maintainers.
-    
     * `Lead Core Maintainer (BDFL) <TBA>`__
     * `Core Maintainers <TBA>`__
     * `Module Maintainers <TBA>`__
@@ -57,15 +54,14 @@ to PyTorch.
 
     ^^^
     Every PyTorch contributor and maintainer must read and
-    understand our design principles. 
+    understand our design principles.
 
     * `PyTorch Design Philosophy <https://pytorch.org/docs/master/community/design.html>`_
-
 
 .. toctree::
    :maxdepth: 2
    :hidden: 
-   
+
    contribution_guide.rst
    persons_of_interest.rst
    governance.rst
