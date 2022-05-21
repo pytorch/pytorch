@@ -9243,11 +9243,23 @@ foreach_binary_op_db: List[OpInfo] = [
         "mul",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        skips=(
+            # Ref: https://github.com/pytorch/pytorch/issues/77946
+            DecorateInfo(unittest.skip("Unable to reproduce failure locally"), "TestForeach",
+                         "test_binary_op_scalarlist_fastpath",
+                         device_type='cuda', dtypes=(torch.float16,)),
+        )
     ),
     ForeachFuncInfo(
         "div",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        skips=(
+            # Ref: https://github.com/pytorch/pytorch/issues/77946
+            DecorateInfo(unittest.skip("Unable to reproduce failure locally"), "TestForeach",
+                         "test_binary_op_scalarlist_fastpath",
+                         device_type='cuda', dtypes=(torch.float16,)),
+        )
     ),
 ]
 

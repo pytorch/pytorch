@@ -270,7 +270,7 @@ class TestMetaConverter(TestCase):
         self.assertEqual(m.dtype, y.dtype)
 
     def test_complex_noncontiguous_bug(self):
-        x = torch.randn((2, 2, 4, 9), dtype=torch.complex32)[:,0,:,:]
+        x = torch.randn((2, 2, 4, 9), dtype=torch.complex32)[:, 0, :, :]
         m = MetaConverter()(x)
         self.assertEqual(m.shape, x.shape)
         self.assertEqual(m.stride(), x.stride())
