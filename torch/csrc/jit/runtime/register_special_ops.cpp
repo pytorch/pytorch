@@ -1,8 +1,8 @@
 #include <ATen/Context.h>
 #include <torch/library.h>
 
-#include <ATen/core/jit_type.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/core/jit_type.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/utils.h>
