@@ -117,14 +117,18 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
       return MPSDataTypeInt8;
     case ScalarType::Bool:
       return MPSDataTypeBool;
+    case ScalarType::Double:
+      TORCH_CHECK_TYPE(false, "Cannot convert a float64 Tensor to MPS as the MPS framework doesn't support float64. "
+                       "Please use float32 instead.")
     default:
-      TORCH_CHECK_TYPE(false, "Unsupported data type '", scalar_type, "' on MPS backend");
+      TORCH_CHECK_TYPE(false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
   }
 }
 
 MPSDataType getMPSScalarType(ScalarType scalar_type) {
   switch (scalar_type) {
-    // Intentional fall-through as we can support Scalars with Double type
+    // This is an intentional fallthrough supporting Double for Scalar
+    // types as they are casted to Float32 currently.
     case ScalarType::Double:
     case ScalarType::Float:
       return MPSDataTypeFloat32;
@@ -141,7 +145,7 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
     case ScalarType::Bool:
       return MPSDataTypeBool;
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported data type '", scalar_type, "' on MPS backend");
+      TORCH_CHECK_TYPE(false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
   }
 }
 
@@ -248,20 +252,16 @@ MPSShape* getMPSShape(IntArrayRef sizes) {
 
 void printTensorNDArray(const Tensor& t) {
   if (!t.is_mps()) return;
-  if(t.numel() == 0)
-  {
-      std::cout << "Empty tensor" << std::endl;
-      return;
-  }
+  if(t.numel() == 0) return;
   // Get shape and data type
   auto selfShape = getMPSShape(t);
   auto selfDType = getMPSDataType(t.scalar_type());
 
   // Initialize data
   id<MTLBuffer> selfBuf = __builtin_bit_cast(id<MTLBuffer>, t.storage().data());
-  MPSGraphTensorData* tdata = [[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
+  MPSGraphTensorData* tdata = [[[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
                                                             shape:selfShape
-                                                         dataType:selfDType];
+                                                         dataType:selfDType] autorelease];
   [tdata printNDArray];
 }
 
@@ -293,13 +293,13 @@ id<MTLBuffer> gatherViewTensor(const at::Tensor& src, id<MTLBuffer> sourceBuffer
                         kMPS,
                         c10::nullopt,
                         c10::nullopt);
-        MPSGraphTensorData* inputTensorData = [[MPSGraphTensorData alloc] initWithMTLBuffer: sourceBuffer
+        MPSGraphTensorData* inputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: sourceBuffer
                                                                             shape: [inputTensor shape]
-                                                                            dataType: [inputTensor dataType]];
+                                                                            dataType: [inputTensor dataType]] autorelease];
         id<MTLBuffer> resultBuffer = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
-        MPSGraphTensorData* outputTensorData = [[MPSGraphTensorData alloc] initWithMTLBuffer: resultBuffer
+        MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: resultBuffer
                                                                             shape: getMPSShape(src.sizes())
-                                                                            dataType: getMPSDataType(src.scalar_type())];
+                                                                            dataType: getMPSDataType(src.scalar_type())] autorelease];
         NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
           inputTensor : inputTensorData
         };
@@ -309,46 +309,46 @@ id<MTLBuffer> gatherViewTensor(const at::Tensor& src, id<MTLBuffer> sourceBuffer
         };
 
         runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-#if _DEBUG
-        NSLog(@"%@", [cachedGraph->graph() debugDescription]);
-        TORCH_WARN("We have a non-contiguous tensor in copy_from_mps with key ", key);
-
-        //// Update the Blit sourceBuffer to the result of this operation
-        printTensorNDArray(output);
-#endif
         return resultBuffer;
       }
-    } else {
-      TORCH_WARN("We have a non-contiguous tensor in copy_from_mps with no cached graph with key ", key);
     }
   }
   return nil;
 }
 
-
-
-Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape)
+Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src,
+                         MPSShape *mpsShape, bool check_view)
 {
-  TORCH_CHECK(self.is_mps(), "Placeholder storage has not been allocated on MPS device!");
-  // extract the pointer to MTLBuffer from the Tensor's storage
-  id<MTLBuffer> selfBuf = __builtin_bit_cast(id<MTLBuffer>, self.storage().data());
-  const size_t buf_size = [selfBuf length];
+  Tensor src_ = src;
+  TORCH_CHECK(src_.is_mps(), "Placeholder storage has not been allocated on MPS device!");
+    // extract the pointer to MTLBuffer from the Tensor's storage
+  id<MTLBuffer> srcBuf = __builtin_bit_cast(id<MTLBuffer>, src.storage().data());
+  if (check_view && !src.is_contiguous()) {
+    id<MTLBuffer> gatherTensor = gatherViewTensor(src, srcBuf);
+    if (gatherTensor) {
+      srcBuf = gatherTensor;
+    } else {
+      src_ = src.contiguous();
+      srcBuf = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
+    }
+  }
+  const size_t buf_size = [srcBuf length];
 
   // tensor.numel() could be zero, but tensor is valid as long as the buffer size is non-zero.
   // if buf_size is zero in here, it's not a user error. It could be a missing check for
   // tensor.numel() == 0 in our internal implementations of ops.
   TORCH_INTERNAL_ASSERT(buf_size > 0, "Placeholder tensor is empty!");
 
-  TORCH_CHECK(self.storage().nbytes() <= buf_size, "Placeholder buffer size (", buf_size,
-      ") is not large enough to contain the Tensor storage of size ", self.storage().nbytes());
+  TORCH_CHECK(src_.storage().nbytes() <= buf_size, "Placeholder buffer size (", buf_size,
+      ") is not large enough to contain the Tensor storage of size ", src_.storage().nbytes());
 
-  const MPSDataType mpsDataType = getMPSDataType(self.scalar_type());
+  const MPSDataType mpsDataType = getMPSDataType(src_.scalar_type());
   if (!mpsShape)
-    mpsShape = getMPSShape(self);
+    mpsShape = getMPSShape(src_);
 
-  _value = [[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
+  _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
                                                    shape:mpsShape
-                                                dataType:mpsDataType];
+                                                dataType:mpsDataType] autorelease];
   TORCH_INTERNAL_ASSERT(_value);
   _placeholder = mpsGraphTensor;
 }
@@ -393,6 +393,17 @@ MPSGraphTensor* mpsGraphConstantFloatPlaceHolder(MPSGraph *mpsGraph, const doubl
   return [mpsGraph constantWithScalar:value
                                 shape:mpsShape
                              dataType:MPSDataTypeFloat32];
+}
+
+MPSGraphTensor* mpsGraphConstantPlaceHolder(MPSGraph *mpsGraph, const double value, MPSShape* mpsShape, MPSDataType dataType) {
+  // Bool is not handled by constantWithScalar
+  MPSGraphTensor* constPlaceHolder = [mpsGraph constantWithScalar:value
+                                                            shape:mpsShape
+                                                         dataType:(dataType == MPSDataTypeBool ? MPSDataTypeFloat32 : dataType)];
+  if (dataType == MPSDataTypeBool)
+    return [mpsGraph castTensor:constPlaceHolder toType:MPSDataTypeBool name:@"ConstantBoolTensor"];
+
+  return constPlaceHolder;
 }
 
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType) {
