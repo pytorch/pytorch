@@ -210,17 +210,17 @@ message Argument {
 // line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc
 // and update c10/core/DeviceType.h
 enum DeviceTypeProto {
-  PROTO_CPU = 0;                    // In default, we will use CPU.
-  PROTO_CUDA = 1;                   // CUDA.
-  PROTO_MKLDNN = 2;                 // Reserved for explicit MKLDNN
-  PROTO_OPENGL = 3;                 // OpenGL
-  PROTO_OPENCL = 4;                 // OpenCL
-  PROTO_IDEEP = 5;                  // IDEEP.
-  PROTO_HIP = 6;                    // AMD HIP
-  PROTO_FPGA = 7;                   // FPGA
-  PROTO_ORT = 8;                    // ONNX Runtime
-  PROTO_XLA = 9;                    // XLA / TPU
-  PROTO_MPS = 10;                   // MPS
+  PROTO_CPU = 0; // In default, we will use CPU.
+  PROTO_CUDA = 1; // CUDA.
+  PROTO_MKLDNN = 2; // Reserved for explicit MKLDNN
+  PROTO_OPENGL = 3; // OpenGL
+  PROTO_OPENCL = 4; // OpenCL
+  PROTO_IDEEP = 5; // IDEEP.
+  PROTO_HIP = 6; // AMD HIP
+  PROTO_FPGA = 7; // FPGA
+  PROTO_ORT = 8; // ONNX Runtime
+  PROTO_XLA = 9; // XLA / TPU
+  PROTO_MPS = 10; // MPS
   // Change the following number if you add more devices in the code.
   PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 11;
 }

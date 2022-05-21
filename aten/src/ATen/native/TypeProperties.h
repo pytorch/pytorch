@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
-#include <ATen/core/ITensorListRef.h>
+#include <ATen/core/IListRef.h>
 
 namespace at { namespace native {
 
@@ -12,6 +12,7 @@ struct ResultTypeState {
 };
 
 TORCH_API ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeState& in_state);
+TORCH_API ResultTypeState update_result_type_state(const Scalar& scalar, const ResultTypeState& in_state);
 TORCH_API ScalarType result_type(const ResultTypeState& state);
 
 TORCH_API ScalarType result_type(ITensorListRef tensors);
