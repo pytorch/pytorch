@@ -723,7 +723,7 @@ class TestQuantizedTensor(TestCase):
             data = data.view(-1, dims[axis], np.prod(dims[axis + 1:]))
             qtensor_size = math.ceil(data.numel() / 2)
             res = torch.empty(qtensor_size, dtype=torch.uint8)
-            elem_per_byte = 8 / bit_width
+            elem_per_byte = 8 // bit_width
             quant_min, quant_max = _get_qranges(bit_width)
             for i in range(data.size()[0]):
                 for j in range(data.size()[1]):

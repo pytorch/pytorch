@@ -473,6 +473,8 @@ void LazyGraphExecutor::MarkStep(const BackendDevice& device) {
   DeviceContextArena::Get()->MarkStep(device);
   ScopePusher::ResetScopes();
   g_tls_data.Reset();
+  // Move TrieCache's current pointer back to its root
+  TrieCache::Get()->ResetCurrent();
 }
 
 void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<BackendDevice> devices) {
@@ -805,6 +807,10 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
   }
 
   ComputationPtr computation = lowering_ctx->Build();
+  // If force_ltc_data is true it means that we did a proper sync and are
+  // inside a mark step. If GetTensors was called, force_ltc_data will
+  // be false meaning we are prematurely evaluating some value.
+  computation->in_mark_step = coll.config.force_ltc_data;
 
   VLOG(3) << "Compiling IR graph hash " << HashToString(coll.hash)
           << " on device " << coll.device << " ...";
