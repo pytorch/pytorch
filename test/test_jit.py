@@ -1688,6 +1688,23 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
+    def test_permute_inputs_binding(self):
+        @torch.jit.script
+        def foo(i, j, k):
+            pass
+
+        g = foo.graph
+
+        idxs = []
+        for i, inp in enumerate(g.inputs()):
+            inp.setDebugName(f"inp{i}")
+            idxs.append(i)
+
+        permuted_idxs = list(np.random.permutation(idxs))
+        g.permuteInputs(permuted_idxs)
+        for i, inp in enumerate(g.inputs()):
+            self.assertEqual(f"inp{permuted_idxs[i]}", inp.debugName())
+
     @unittest.skipIf(IS_MACOS, "Failing on MacOS only")
     def test_python_ir_utils(self):
         @torch.jit.script
@@ -11251,6 +11268,21 @@ dedent """
         FileCheck().check("int = prim::Constant").check("aten::add_").run(str(graph))
         self.run_pass("erase_number_types", graph)
         FileCheck().check_not("int = prim::Constant").run(str(graph))
+
+    def test_refine_tuple_types(self):
+        # TupleConstruct output type is not correct here.
+        graph_str = """
+        graph(%a : Float(123), %b : Float(4, 5, 6)):
+          %c : (Tensor, Tensor) = prim::TupleConstruct(%a, %b)
+          return (%c)
+        """
+        graph = parse_ir(graph_str)
+        torch._C._jit_pass_refine_tuple_types(graph)
+
+        # After the pass, the output type should've been updated.
+        self.assertTrue('(Float(123), Float(4, 5, 6))' in str(graph.findNode('prim::TupleConstruct').output()))
+
+    # TODO(henrytu): Add test for RefineTypes for NamedTuple when it's supported by IR parser.
 
     def test_remove_dropout(self):
         weight_0_shape = (20, 5)

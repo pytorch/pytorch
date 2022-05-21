@@ -14,7 +14,7 @@ AsStrided::AsStrided(
     std::vector<int64_t> stride,
     int64_t storage_offset)
     : TsNode(
-          OpKind(at::aten::as_strided),
+          ClassOpKind(),
           {input},
           [&]() {
             return Shape(input.shape().scalar_type(), size);

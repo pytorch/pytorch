@@ -8,14 +8,17 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
+    skipCUDAIfRocm,
     dtypes,
 )
+from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
 from torch._prims.executor import make_traced
 
 
 class TestPrims(TestCase):
     @onlyCUDA
+    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
         # nvfuser is not currently capable of realizing a broadcasted tensor
@@ -80,6 +83,23 @@ class TestPrims(TestCase):
             a.unsqueeze_(0)
             self.assertEqual(a.expand_as(result), result)
             """
+
+
+class TestPrimsBasic(TestCase):
+    def test_torch_ops(self):
+        r = make_tensor((2,), device='cpu', dtype=torch.float)
+        self.assertEqual(torch.ops.prims.sin(r), torch.sin(r))
+
+        r = LoggingTensor(r)
+        with capture_logs() as logs:
+            log_input("input", r)
+            prims.sin(r)
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.prims.sin.default($0)""")
+
+    def test_mul_complex(self):
+        prims.mul(torch.randn(2), 1 + 1j)
 
 
 instantiate_device_type_tests(TestPrims, globals())

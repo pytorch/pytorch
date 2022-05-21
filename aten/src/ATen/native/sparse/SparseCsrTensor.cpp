@@ -28,6 +28,7 @@
 #include <ATen/ops/_validate_sparse_csc_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsr_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsc_tensor_args_native.h>
+#include <ATen/ops/ccol_indices_native.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/col_indices_native.h>
 #include <ATen/ops/copy_native.h>
@@ -37,6 +38,7 @@
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
+#include <ATen/ops/row_indices_native.h>
 #include <ATen/ops/select_native.h>
 #include <ATen/ops/sparse_compressed_tensor_native.h>
 #include <ATen/ops/sparse_csr_tensor_native.h>
@@ -168,7 +170,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
         Tensor compressed_indices_cpu = compressed_indices.to(kCPU);
         auto compressed_indices_data_ptr = compressed_indices_cpu.data_ptr<index_t>();
         auto batch_stride = compressed_indices_cpu.dim() >= 2 ? compressed_indices_cpu.stride(-2) : 0;
-
+        auto compressed_dims = size[compressedDimension(layout, size)];
         for (const auto batch_id : c10::irange(batchCount(compressed_indices_cpu))) {
           TORCH_CHECK(
                       compressed_indices_data_ptr[batch_id*batch_stride] == 0,
@@ -178,7 +180,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
                       compressed_indices_data_ptr[batch_id*batch_stride + compressed_indices.size(-1) - 1] == plain_indices.size(-1),
                       "(Batch element ", batch_id, ") ",
                       "last value of ", compressed_indices_name, " should be equal to the length of ", plain_indices_name, ".");
-          for (int i =  1; i <= size[size.size() - 2]; i++) {
+          for (int i =  1; i <= compressed_dims; i++) {
             TORCH_CHECK(
                         compressed_indices_data_ptr[batch_id*batch_stride + i - 1] <= compressed_indices_data_ptr[batch_id*batch_stride + i],
                         "(Batch element ", batch_id, ") ",
@@ -457,7 +459,7 @@ SPARSE_COMPRESSED_TENSOR(csc, kSparseCsc)
 SPARSE_COMPRESSED_TENSOR(bsr, kSparseBsr)
 SPARSE_COMPRESSED_TENSOR(bsc, kSparseBsc)
 
-Tensor empty_sparse_csr(
+Tensor empty_sparse_compressed(
     IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
@@ -465,32 +467,34 @@ Tensor empty_sparse_csr(
     c10::optional<bool> pin_memory,
     c10::optional<MemoryFormat> optional_memory_format) {
   check_size_nonnegative(size);
+  TORCH_CHECK(size.size() >= 2, "torch.empty: Only batched sparse compressed (non-block) tensors are supported, but got size ", size);
 
-  TORCH_CHECK(size.size() >= 2, "torch.empty: Only batched sparse CSR matrices are supported, but got size ", size);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout == Layout::SparseCsr);
+  // Strided is the default layout for torch.empty.
+  Layout layout_ = layout.value_or(Layout::Strided);
 
-  auto rows = size[size.size() - 2];
+  // torch.empty cannot be used to create blocked tensors because its
+  // API lacks a method to specify the block size.
+  AT_DISPATCH_SPARSE_COMPRESSED_NONBLOCK_LAYOUTS(layout_, "empty_sparse_compressed", [&]{});
+
   int64_t nnz = 0;
-
-  auto crow_indices_size = DimVector(size.slice(0, size.size() - 2));
-  crow_indices_size.push_back(rows + 1);
-  auto col_indices_values_size = DimVector(size.slice(0, size.size() - 2));
-  col_indices_values_size.push_back(nnz);
+  auto compressed_indices_size = DimVector(size.slice(0, size.size() - 2));
+  auto plain_indices_and_values_size = DimVector(size.slice(0, size.size() - 2));
+  compressed_indices_size.push_back(size[compressedDimension(layout_, size)] + 1);
+  plain_indices_and_values_size.push_back(nnz);
 
   TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(Layout::Strided).device(device).pinned_memory(pin_memory);
-  auto crow_indices = at::empty(crow_indices_size, options);
-  auto col_indices = at::empty(col_indices_values_size, options);
-  auto values = at::empty(col_indices_values_size, options.dtype(dtype));
+  auto compressed_indices = at::empty(compressed_indices_size, options);
+  auto plain_indices = at::empty(plain_indices_and_values_size, options);
+  auto values = at::empty(plain_indices_and_values_size, options.dtype(dtype));
 
-  return at::native::_sparse_csr_tensor_unsafe(
-      crow_indices,
-      col_indices,
-      values,
-      size,
-      dtype,
-      layout,
-      device,
-      pin_memory);
+  return at::native::_sparse_compressed_tensor_unsafe(compressed_indices,
+                                                      plain_indices,
+                                                      values,
+                                                      size,
+                                                      dtype,
+                                                      layout,
+                                                      device,
+                                                      pin_memory);
 }
 
 const Tensor& resize_sparse_csr_(
@@ -509,21 +513,52 @@ const Tensor& resize_sparse_csr_(
   return self;
 }
 
-Tensor& copy_sparse_csr_(Tensor& self, const Tensor& src, bool non_blocking) {
+Tensor& copy_sparse_compressed_(Tensor& self, const Tensor& src, bool non_blocking) {
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "copy_sparse_compressed_", [&]{});
   TORCH_CHECK(
-      self.sizes() == src.sizes(),
-      "copy_sparse_csr_: only same size tensors are supported.");
+      self.layout() == src.layout(),
+      "torch.copy_: copy of sparse compressed tensors having different layouts is not supported.",
+      " self layout is ", self.layout(), " and src layout is ", src.layout());
   TORCH_CHECK(
-      self.is_sparse_csr() && src.is_sparse_csr(),
-      "copy_sparse_csr_: copy between different layouts is not supported. Found self type = ",
-      self.toString(),
-      " and src type = ",
-      src.toString());
-  TORCH_CHECK(
-      self._nnz() == src._nnz(),
-      "copy_sparse_csr_: only tensors with the same number of specified elements are supported.");
-  self.crow_indices().copy_(src.crow_indices(), non_blocking);
-  self.col_indices().copy_(src.col_indices(), non_blocking);
+      self._nnz() == src._nnz(),  // actually, values copy allows different shapes as long as operands are broadcastable
+      "torch.copy_: only sparse compressed tensors with the same number of specified elements are supported.");
+  auto self_compressed_dim = compressedDimension(self.layout(), self.sizes());
+  auto src_compressed_dim = compressedDimension(src.layout(), src.sizes());
+  auto self_compressed_dims = self.size(self_compressed_dim);
+  auto src_compressed_dims = src.size(compressedDimension(src.layout(), src.sizes()));
+  if (self_compressed_dim == src_compressed_dim) {
+    TORCH_CHECK(self_compressed_dims == src_compressed_dims,
+                "torch.copy_: expected shapes of self and src to match along dimension ",
+                self_compressed_dim, " for ",
+                self.layout(), " layout but the corresponding dimensions of self and src are ",
+                self_compressed_dims, " and ", src_compressed_dims, ", respecitvely.");
+  } else {
+    TORCH_CHECK(self_compressed_dims == src_compressed_dims,
+                "torch.copy_: expected shapes of self and src to match along dimensions ",
+                self_compressed_dim, " and ", src_compressed_dim, ", respectively, for ",
+                self.layout(), " layout but the corresponding dimensions of self and src are ",
+                self_compressed_dims, " and ", src_compressed_dims, ", respecitvely.");
+  }
+  AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "copy_sparse_compressed_",
+                                              [&]{},
+                                              [&]{
+                                                auto self_values = self.values();
+                                                auto src_values = src.values();
+                                                auto self_block_size = DimVector(self_values.sizes().slice(self_values.dim()-2, 2));
+                                                auto src_block_size = DimVector(src_values.sizes().slice(src_values.dim()-2, 2));
+                                                TORCH_CHECK(self_block_size == src_block_size,
+                                                            "torch.copy_: copy of sparse compressed tensors having different block sizes is not supported.",
+                                                            " self and src block sizes are ", self_block_size, " and ", src_block_size, ", respectivly.");
+                                              });
+  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "copy_sparse_compressed_",
+                                            [&]{
+                                              self.crow_indices().copy_(src.crow_indices(), non_blocking);
+                                              self.col_indices().copy_(src.col_indices(), non_blocking);
+                                            },
+                                            [&]{
+                                              self.ccol_indices().copy_(src.ccol_indices(), non_blocking);
+                                              self.row_indices().copy_(src.row_indices(), non_blocking);
+                                            });
   self.values().copy_(src.values(), non_blocking);
   return self;
 }
@@ -538,11 +573,27 @@ Tensor values_sparse_csr(const Tensor& self) {
 }
 
 Tensor crow_indices_sparse_csr(const Tensor& self) {
-  return get_sparse_csr_impl(self)->crow_indices().alias();
+  return AT_DISPATCH_SPARSE_ROW_COMPRESSED_LAYOUTS(self.layout(),
+                                                   "crow_indices",
+                                                   [&]{ return get_sparse_csr_impl(self)->compressed_indices().alias(); });
 }
 
 Tensor col_indices_sparse_csr(const Tensor& self) {
-  return get_sparse_csr_impl(self)->col_indices().alias();
+  return AT_DISPATCH_SPARSE_ROW_COMPRESSED_LAYOUTS(self.layout(),
+                                                   "col_indices",
+                                                   [&]{ return get_sparse_csr_impl(self)->plain_indices().alias(); });
+}
+
+Tensor ccol_indices_sparse_csr(const Tensor& self) {
+  return AT_DISPATCH_SPARSE_COL_COMPRESSED_LAYOUTS(self.layout(),
+                                                   "ccol_indices",
+                                                   [&]{ return get_sparse_csr_impl(self)->compressed_indices().alias(); });
+}
+
+Tensor row_indices_sparse_csr(const Tensor& self) {
+  return AT_DISPATCH_SPARSE_COL_COMPRESSED_LAYOUTS(self.layout(),
+                                                   "row_indices",
+                                                   [&]{ return get_sparse_csr_impl(self)->plain_indices().alias(); });
 }
 
 bool _is_same_size_as_sparse_csr(
@@ -567,23 +618,31 @@ const SparseCsrTensor& resize_as_sparse_csr_(
   return self;
 }
 
-SparseCsrTensor clone_sparse_csr(
-    const SparseCsrTensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+SparseCsrTensor clone_sparse_compressed(
+                                        const SparseCsrTensor& self,
+                                        c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !optional_memory_format.has_value(),
       "unsupported memory format option ",
       optional_memory_format.value());
   TensorOptions options = self.options();
-  return at::native::_sparse_csr_tensor_unsafe(
-                                               self.crow_indices().clone(),
-                                               self.col_indices().clone(),
-                                               self.values().clone(),
-                                               self.sizes(),
-                                               optTypeMetaToScalarType(options.dtype_opt()),
-                                               options.layout_opt(),
-                                               options.device_opt(),
-                                               options.pinned_memory_opt());
+  auto compressed_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(),
+                                                                      "clone_sparse_compressed",
+                                                                      [&]{ return self.crow_indices(); },
+                                                                      [&]{ return self.ccol_indices(); });
+  auto plain_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(),
+                                                                 "clone_sparse_compressed",
+                                                                 [&]{ return self.col_indices(); },
+                                                                 [&]{ return self.row_indices(); });
+  return at::native::_sparse_compressed_tensor_unsafe(
+                                                      compressed_indices.clone(),
+                                                      plain_indices.clone(),
+                                                      self.values().clone(),
+                                                      self.sizes(),
+                                                      optTypeMetaToScalarType(options.dtype_opt()),
+                                                      options.layout_opt(),
+                                                      options.device_opt(),
+                                                      options.pinned_memory_opt());
 }
 
 Tensor empty_like_sparse_csr(
