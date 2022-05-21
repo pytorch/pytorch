@@ -631,7 +631,6 @@ meta_function_skips = {
     torch.diff: {b8},
     torch.functional.cdist: {f32, f64},
     torch.functional.tensordot: {bf16, f32, f64, i16, i32, i64, i8, u8},
-    torch.index_add: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_xor: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
@@ -923,7 +922,6 @@ meta_dispatch_skips = {
     aten.isnan.default: {f64, f32},
     aten.native_batch_norm.default: {f64, f32},  # waiting on https://github.com/pytorch/pytorch/pull/77407
     aten.native_layer_norm.default: {bf16, f64, f32},
-    aten.mul.Scalar: {i64, bf16, f16, f32, i8, f64, i16, i32},  # test_dispatch_meta_gradient_cpu_bfloat16
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
