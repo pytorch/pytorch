@@ -331,17 +331,17 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
   auto ndim = self.dim();
 
   // prefer column major strides
-  auto ld_strides = at::native::batched_matrix_contiguous_strides(self.sizes(), /*column_major=*/true);
-  set_output(0, self.sizes(), ld_strides, self.options(), {}); // LD
+  auto ld_strides = at::native::batched_matrix_contiguous_strides(self.sizes(), /*f-contig=*/true);
+  set_output_raw_strided(0, self.sizes(), ld_strides, self.options(), {}); // LD
 
   auto pivots_shape =
       IntArrayRef(self.sizes().data(), ndim - 1); // self.shape[:-1]
-  set_output(
+  set_output_raw_strided(
       1, pivots_shape, {}, self.options().dtype(ScalarType::Int), {}); // pivots
 
   auto info_shape =
       IntArrayRef(self.sizes().data(), ndim - 2); // self.shape[:-2]
-  set_output(
+  set_output_raw_strided(
       2, info_shape, {}, self.options().dtype(ScalarType::Int), {}); // info
 }
 
@@ -384,7 +384,7 @@ TORCH_META_FUNC(linalg_ldl_solve)
 
   // prefer column major strides
   auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/true);
-  set_output(0, B_broadcast_size, result_strides, B.options(), {});
+  set_output_raw_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
 TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
@@ -401,15 +401,15 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
 
     // make column major strides for BLAS
     const auto solution_strides = at::native::batched_matrix_contiguous_strides(self_broadcast_size, /*f-contig=*/true);
-    set_output(0, self_broadcast_size, solution_strides, self.options(), {});
+    set_output_raw_strided(0, self_broadcast_size, solution_strides, self.options(), {});
 
     // make column major strides for BLAS
     auto clone_A_strides = at::native::batched_matrix_contiguous_strides(A_broadcast_size, /*f_contig=*/true);
-    set_output(1, A_broadcast_size, clone_A_strides, A.options(), {});
+    set_output_raw_strided(1, A_broadcast_size, clone_A_strides, A.options(), {});
   } else if (A.layout() == Layout::SparseCsr || A.layout() == Layout::SparseBsr) {
     // no broadcasting for non-strided layout
-    set_output(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
-    set_output(1, {0}, {}, self.options(), {}); // return 0-sized tensor
+    set_output_raw_strided(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
+    set_output_raw_strided(1, {0}, {}, self.options(), {}); // return 0-sized tensor
   } else {
     TORCH_INTERNAL_ASSERT(false, "triangular_solve: Got an unexpected layout.");
   }
@@ -424,16 +424,16 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
 
   // make column major strides for BLAS
   auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
-  set_output(0, sizes, LU_strides, A.options(), {});
+  set_output_raw_strided(0, sizes, LU_strides, A.options(), {});
 
   // Set sizes to the size of pivots
   sizes.pop_back();
   sizes.back() = std::min(m, n);
-  set_output(1, sizes, {}, A.options().dtype(kInt), {});
+  set_output_raw_strided(1, sizes, {}, A.options().dtype(kInt), {});
 
   // Set sizes to the size of info
   sizes.pop_back();
-  set_output(2, sizes, {}, A.options().dtype(kInt), {});
+  set_output_raw_strided(2, sizes, {}, A.options().dtype(kInt), {});
 }
 
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
@@ -450,7 +450,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   if (compute_uv) {
     sizes.back() = full_matrices ? m : k;
     auto U_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
-    set_output(0, sizes, U_strides, A.options(), {});
+    set_output_raw_strided(0, sizes, U_strides, A.options(), {});
 
     // Prepare sizes for Vh
     sizes.end()[-2] = full_matrices ? n : k;
@@ -460,16 +460,16 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
     // expect F-contig matrices, but they compute V rather than Vh
     const bool use_cusolver = at::native::svd_uses_cusolver(A);
     auto Vh_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
-    set_output(2, sizes, Vh_strides, A.options(), {});
+    set_output_raw_strided(2, sizes, Vh_strides, A.options(), {});
   } else {
-    set_output(0, {0}, {}, A.options(), {});
-    set_output(2, {0}, {}, A.options(), {});
+    set_output_raw_strided(0, {0}, {}, A.options(), {});
+    set_output_raw_strided(2, {0}, {}, A.options(), {});
   }
 
   // Prepare sizes for S. S is always real, even when A is complex.
   sizes.pop_back();
   sizes.end()[-1] = k;
-  set_output(1, sizes, {}, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
+  set_output_raw_strided(1, sizes, {}, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
 }
 
 TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_data, bool unpack_pivots) {
@@ -488,23 +488,23 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (unpack_pivots) {
-    set_output(0, sizes, LU.options());
+    set_output_raw_strided(0, sizes, {}, LU.options(), {});
   } else {
-    set_output(0, {0}, LU.options());
+    set_output_raw_strided(0, {0}, {}, LU.options(), {});
   }
 
   if (unpack_data) {
     // L.shape[-2:] == (m, k)
     sizes.end()[-1] = k;
-    set_output(1, sizes, LU.options());
+    set_output_raw_strided(1, sizes, {}, LU.options(), {});
 
     // U.shape[-2:] == (k, n)
     sizes.end()[-2] = k;
     sizes.end()[-1] = n;
-    set_output(2, sizes, LU.options());
+    set_output_raw_strided(2, sizes, {}, LU.options(), {});
   } else {
-    set_output(1, {0}, LU.options());
-    set_output(2, {0}, LU.options());
+    set_output_raw_strided(1, {0}, {}, LU.options(), {});
+    set_output_raw_strided(2, {0}, {}, LU.options(), {});
   }
 }
 
@@ -519,19 +519,19 @@ TORCH_META_FUNC(linalg_lu)(const Tensor& A, bool pivot) {
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (pivot) {
-    set_output(0, sizes, A.options());
+    set_output_raw_strided(0, sizes, {}, A.options(), {});
   } else {
-    set_output(0, {0}, A.options());
+    set_output_raw_strided(0, {0}, {}, A.options(), {});
   }
 
   // L.shape[-2:] == (m, k)
   sizes.end()[-1] = k;
-  set_output(1, sizes, A.options());
+  set_output_raw_strided(1, sizes, {}, A.options(), {});
 
   // U.shape[-2:] == (k, n)
   sizes.end()[-2] = k;
   sizes.end()[-1] = n;
-  set_output(2, sizes, A.options());
+  set_output_raw_strided(2, sizes, {}, A.options(), {});
 }
 
 } // namespace meta
