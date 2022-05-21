@@ -26,7 +26,7 @@ static void checkData(
     EXPECT_EQ(*(sz.sizes_begin() + idx), x) << "index: " << idx;
     idx++;
   }
-  EXPECT_EQ(sz.sizes_arrayref(), sizes);
+  EXPECT_EQ(asIntArrayRefSlow(sz.sizes_arrayref()), sizes);
 
   idx = 0;
   for (auto x : strides) {
@@ -37,7 +37,7 @@ static void checkData(
 
     idx++;
   }
-  EXPECT_EQ(sz.strides_arrayref(), strides);
+  EXPECT_EQ(asIntArrayRefSlow(sz.strides_arrayref()), strides);
 }
 
 TEST(SizesAndStridesTest, DefaultConstructor) {
@@ -123,14 +123,14 @@ TEST(SizesAndStridesTest, Resize) {
   // getting it right by accident (i.e., because of leftover inline
   // storage when going small to big).
   for (const auto ii : c10::irange(sz.size())) {
-    sz.size_at_unchecked(ii) = ii + 1;
-    sz.stride_at_unchecked(ii) = 2 * (ii + 1);
+    sz.size_at_unchecked(ii) = ii - 1;
+    sz.stride_at_unchecked(ii) = 2 * (ii - 1);
   }
 
-  checkData(sz, {1, 2, 3, 4, 5, 6, 7}, {2, 4, 6, 8, 10, 12, 14});
+  checkData(sz, {-1, 0, 1, 2, 3, 4, 5}, {-2, 0, 2, 4, 6, 8, 10});
 
   sz.resize(5);
-  checkData(sz, {1, 2, 3, 4, 5}, {2, 4, 6, 8, 10});
+  checkData(sz, {-1, 0, 1, 2, 3}, {-2, 0, 2, 4, 6});
 }
 
 TEST(SizesAndStridesTest, SetAtIndex) {
@@ -196,8 +196,8 @@ static SizesAndStrides makeBig(int offset = 0) {
   SizesAndStrides big;
   big.resize(8);
   for (const auto ii : c10::irange(big.size())) {
-    big.size_at_unchecked(ii) = ii + 1 + offset;
-    big.stride_at_unchecked(ii) = 2 * (ii + 1 + offset);
+    big.size_at_unchecked(ii) = ii - 1 + offset;
+    big.stride_at_unchecked(ii) = 2 * (ii - 1 + offset);
   }
 
   return big;
@@ -215,8 +215,8 @@ static void checkSmall(const SizesAndStrides& sm, int offset = 0) {
 static void checkBig(const SizesAndStrides& big, int offset = 0) {
   std::vector<int64_t> sizes(8), strides(8);
   for (const auto ii : c10::irange(8)) {
-    sizes[ii] = ii + 1 + offset;
-    strides[ii] = 2 * (ii + 1 + offset);
+    sizes[ii] = ii - 1 + offset;
+    strides[ii] = 2 * (ii - 1 + offset);
   }
   checkData(big, sizes, strides);
 }
