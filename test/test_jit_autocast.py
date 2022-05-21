@@ -736,5 +736,19 @@ class TestAutocast(JitTestCase):
 
         self.assertTrue(y.dtype == torch.float)
 
+    def test_ignore_amp(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.mm(x, x)
+
+        inp = torch.rand([10, 10], dtype=torch.float)
+        foo._set_ignore_amp(True)
+        with torch.cpu.amp.autocast():
+            foo(inp)
+            foo(inp)
+
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_not("_autocast_to_reduced").run(g)
+
 if __name__ == "__main__":
     run_tests()

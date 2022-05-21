@@ -21,7 +21,11 @@ using namespace std;
 namespace at {
 namespace mps {
 
+//-----------------------------------------------------------------
+//  MPSDevice
+//
 // MPSDevice is a singleton class that returns the default device
+//-----------------------------------------------------------------
 
 class TORCH_API MPSDevice {
  public:
