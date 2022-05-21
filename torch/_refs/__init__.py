@@ -53,7 +53,9 @@ __all__ = [
     "erfc",
     "exp",
     "expm1",
+    "exp2",
     "floor",
+    "frac",
     "isfinite",
     "isinf",
     "isnan",
@@ -61,6 +63,7 @@ __all__ = [
     "log",
     "log1p",
     "log2",
+    "log10",
     "neg",
     "reciprocal",
     "round",  # TODO: model kwargs
@@ -355,9 +358,28 @@ expm1 = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+exp2 = _make_elementwise_unary_reference(
+    prims.exp2,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.exp2,
+)
+
 floor = _make_elementwise_unary_reference(
     prims.floor,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _frac(x: TensorLike) -> TensorLikeType:
+    # frac(x) = x - floor(abs(x)) * sign(x)
+    trunc_x = floor(abs(x))
+    return sub(x, mul(trunc_x, sign(x)))
+
+
+frac = _make_elementwise_unary_reference(
+    _frac,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.frac,
 )
 
 
@@ -424,6 +446,10 @@ log2 = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+log10 = _make_elementwise_unary_reference(
+    prims.log10,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
 
 def _neg_meta(a: TensorLikeType):
     if a.dtype is torch.bool:
