@@ -80,6 +80,8 @@ VIEW_FUNCTIONS = {
     "values": "self",
     "crow_indices": "self",
     "col_indices": "self",
+    "ccol_indices": "self",
+    "row_indices": "self",
     # sparse_coo ctor output should really be views of both indices and values,
     # but we only supports making as view of a single variable, and indices is
     # discrete anyways.

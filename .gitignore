@@ -325,3 +325,7 @@ pr.diff
 .lsp-buck-out/
 .lsp.buckd/
 buck-out/
+
+# Downloaded libraries
+third_party/ruy/
+third_party/glog/
