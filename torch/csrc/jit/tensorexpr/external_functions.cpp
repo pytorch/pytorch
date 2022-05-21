@@ -11,7 +11,7 @@
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/QTensorImpl.h>
-#include <aten/src/ATen/Parallel.h>
+#include <ATen/Parallel.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/ArrayRef.h>
