@@ -1079,22 +1079,34 @@ def amax(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def addr(
-    self: TensorLikeType, vec1: TensorLikeType, vec2: TensorLikeType,
+    self: TensorLikeType,
+    vec1: TensorLikeType,
+    vec2: TensorLikeType,
     beta: NumberType = 1,
-    alpha: NumberType = 1
+    alpha: NumberType = 1,
 ) -> TensorLikeType:
-    check(vec1.ndim == 1, lambda: f"addr: Expected 1-D argument vec1, but got {vec1.ndim}-D")
-    check(vec2.ndim == 1, lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D")
+    check(
+        vec1.ndim == 1,
+        lambda: f"addr: Expected 1-D argument vec1, but got {vec1.ndim}-D",
+    )
+    check(
+        vec2.ndim == 1,
+        lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D",
+    )
     self = self.expand(vec1.shape[0], vec2.shape[0])
-    check(self.ndim == 2, lambda: f"2D tensor expected, got {self.ndim}D tensor for input")
-    check(self.shape[0] == vec1.shape[0] and self.shape[1] == vec2.shape[0],
-        lambda: f"size mismatch, input: {self.shape}, v1: {vec1.shape}, v2: {vec2.shape}")
+    check(
+        self.ndim == 2, lambda: f"2D tensor expected, got {self.ndim}D tensor for input"
+    )
+    check(
+        self.shape[0] == vec1.shape[0] and self.shape[1] == vec2.shape[0],
+        lambda: f"size mismatch, input: {self.shape}, v1: {vec1.shape}, v2: {vec2.shape}",
+    )
     if utils.is_boolean_dtype(self.dtype):
         # TODO: get rid of torch.tensor?  The trouble is that logical_and
         # doesn't accept boolean input
         return torch.logical_or(
             self if beta else torch.full_like(self, False),
-            torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
+            torch.outer(vec1, vec2) if alpha else torch.full_like(self, False),
         )
     else:
         return beta * self + alpha * torch.outer(vec1, vec2)

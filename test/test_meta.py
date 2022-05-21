@@ -270,7 +270,7 @@ class TestMetaConverter(TestCase):
         self.assertEqual(m.dtype, y.dtype)
 
     def test_complex_noncontiguous_bug(self):
-        x = torch.randn((2, 2, 4, 9), dtype=torch.complex32)[:,0,:,:]
+        x = torch.randn((2, 2, 4, 9), dtype=torch.complex32)[:, 0, :, :]
         m = MetaConverter()(x)
         self.assertEqual(m.shape, x.shape)
         self.assertEqual(m.stride(), x.stride())
@@ -630,6 +630,7 @@ meta_function_skips = {
     torch.diff: {b8},
     torch.functional.cdist: {f32, f64},
     torch.functional.tensordot: {bf16, f32, f64, i16, i32, i64, i8, u8},
+    torch.index_add: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.logical_xor: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
