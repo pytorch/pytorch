@@ -898,7 +898,7 @@ def native_layer_norm(
     return (out, mean, rstd)
 
 
-@register_decomposition(aten.native_group_norm.default)
+@register_decomposition(aten.native_group_norm.default, disable_meta=True)
 def native_group_norm(
     input: Tensor,
     weight: Optional[Tensor],
