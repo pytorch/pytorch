@@ -43,6 +43,7 @@ if RUN_NVFUSER and torch.version.cuda is not None:
 
 os.environ['PYTORCH_NVFUSER_DISABLE'] = 'fallback,fma,unroll_with_rng'
 os.environ['PYTORCH_NVFUSER_JIT_OPT_LEVEL'] = '0'
+os.environ['PYTORCH_NVFUSER_ENABLE'] = 'complex'
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_texpr_fuser_enabled(False)
@@ -159,7 +160,9 @@ class TestCudaFuser(JitTestCase):
             torch.float16,
             torch.float32,
             torch.float64,
-            torch.bool
+            torch.bool,
+            torch.complex64,
+            torch.complex128,
         ]
         if TEST_BF16:
             self.support_tensor_dtypes.append(torch.bfloat16)
@@ -609,7 +612,9 @@ class TestCudaFuser(JitTestCase):
             *self.int_types,
             torch.float16,
             torch.float32,
-            torch.float64
+            torch.float64,
+            torch.cfloat,
+            torch.cdouble,
         ]
         if TEST_BF16:
             data_types.append(torch.bfloat16)
@@ -654,7 +659,10 @@ class TestCudaFuser(JitTestCase):
                       torch.tan,
                       torch.tanh,
                       torch.nn.functional.silu]
+        skip_complex = {torch.rsqrt, torch.reciprocal}
         for op, dtype in itertools.product(operations, data_types):
+            if dtype.is_complex and op in skip_complex:
+                continue
             self._unary_test_helper(op, dtype, False)  # test special numbers
             self._unary_test_helper(op, dtype, True)  # test random data
 
@@ -760,12 +768,20 @@ class TestCudaFuser(JitTestCase):
             o = operation(x, y)
             o = 2 + o
             return o
+
+        def t_cdoublex_tensory(x: complex, y: torch.Tensor):
+            o = operation(x, y)
+            o = 2 + o
+            return o
+
         # Omit both scalar cases and swap cases
         assert category1 == "scalar" and category2 != "scalar"
         if dtype_arg1.is_floating_point:
             return t_doublex_tensory
         if dtype_arg1 == torch.int64 or dtype_arg1 == torch.int32:
             return t_intx_tensory
+        if dtype_arg1.is_complex or dtype_arg1 == torch.int32:
+            return t_cdoublex_tensory
         raise NotImplementedError
 
     def _binary_test_helper(self, operation, dtypes, random_data, categories="ndim"):
@@ -905,6 +921,7 @@ class TestCudaFuser(JitTestCase):
                 self.assertEqual(o.dtype, jit_o.dtype)
                 if test_value:
                     self.assertEqual(o, jit_o)
+                print(t_jit.graph_for(x, y))
                 self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
         except Exception as e:
             print("failing test for op: ", operation.__name__)
@@ -917,13 +934,12 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_binary_ops(self):
-        # disabled bf16 / fp16 data types because of accuracy tolerance
         data_types = [
             torch.int32,
             torch.int64,
             torch.float16,
             torch.float32,
-            torch.float64
+            torch.float64,
         ]
         if TEST_BF16:
             data_types.append(torch.bfloat16)
@@ -941,6 +957,29 @@ class TestCudaFuser(JitTestCase):
                       torch.gt,
                       torch.le,
                       torch.lt]
+
+        category_types = [
+            "scalar",
+            "0dim",
+            "0dimcpu",
+            "ndim"
+        ]
+
+        binary_dtype_combinations = list(itertools.combinations(data_types, 2))
+        category_combinations = list(itertools.combinations(category_types, 2))
+
+        for op, dtypes, categories in itertools.product(operations, binary_dtype_combinations, category_combinations):
+            self._binary_test_helper(op, dtypes, True, categories)  # random data
+
+        for op, dtypes in itertools.product(operations, binary_dtype_combinations):
+            self._binary_test_helper(op, dtypes, False)  # special numbers
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_binary_ops_complex(self):
+        data_types = [torch.cfloat, torch.cdouble]
+        operations = [torch.mul, torch.div, torch.pow, torch.eq, torch.ne]
 
         category_types = [
             "scalar",

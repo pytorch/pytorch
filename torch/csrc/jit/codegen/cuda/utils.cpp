@@ -147,6 +147,34 @@ auto parseDisableOptions() {
   return options_map;
 }
 
+auto parseEnableOptions() {
+  std::unordered_map<EnableOption, bool> options_map = {
+      {EnableOption::Complex, false}};
+
+  if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_ENABLE")) {
+    c10::string_view options_view(dump_options);
+    while (!options_view.empty()) {
+      const auto end_pos = options_view.find_first_of(',');
+      const auto token = options_view.substr(0, end_pos);
+      if (token == "complex") {
+        options_map[EnableOption::Complex] = true;
+      } else {
+        TORCH_CHECK(
+            false,
+            "Invalid disable option: '",
+            token,
+            "'\nAvailable options:\n",
+            "\tcomplex");
+      }
+      options_view = (end_pos != c10::string_view::npos)
+          ? options_view.substr(end_pos + 1)
+          : "";
+    }
+  }
+
+  return options_map;
+}
+
 } // namespace
 
 #pragma clang diagnostic push
@@ -237,6 +265,11 @@ bool isDebugDumpEnabled(DebugDumpOption option) {
 
 bool isDisabled(DisableOption option) {
   const static auto options = parseDisableOptions();
+  return options.at(option);
+}
+
+bool isEnabled(EnableOption option) {
+  const static auto options = parseEnableOptions();
   return options.at(option);
 }
 

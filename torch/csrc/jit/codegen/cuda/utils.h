@@ -63,6 +63,16 @@ enum class DisableOption {
 
 TORCH_CUDA_CU_API bool isDisabled(DisableOption option);
 
+//! Types of features to enable
+//!
+//! These can be set through the `PYTORCH_NVFUSER_ENABLE` environment variable
+//!
+enum class EnableOption {
+  Complex, //! Enable complex support on python
+};
+
+TORCH_CUDA_CU_API bool isEnabled(EnableOption option);
+
 // Check if fallback path should be used which will dispatch to eagermode if any
 // errors are encountered. Helpful for debugging.
 bool useFallback();
