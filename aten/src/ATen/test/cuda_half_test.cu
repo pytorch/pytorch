@@ -16,6 +16,11 @@ using namespace at;
 __global__ void kernel(){
   test<Half>();
 
+  __half a = __float2half(3.0f);
+  __half b = __float2half(2.0f);
+  __half c = a - Half(b);
+  assert(static_cast<Half>(c) == Half(1.0));
+
   // test complex<32>
   Half real = 3.0f;
   Half imag = -10.0f;
