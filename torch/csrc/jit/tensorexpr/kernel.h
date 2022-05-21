@@ -295,7 +295,9 @@ class TORCH_API TensorExprKernel {
   std::vector<torch::jit::StrideInput>& getSymbolicStrideDesc(
       const torch::jit::Value* value);
 
-  // Abstract graph optimizations as a single function.
+  // Apply the optimizations to the graph owned by the current fusion group,
+  // like concatenation optimization, post-op fusion, and some other graph-level
+  // optimizations.
   void optimizeOwningGraph();
 
   int64_t nInputs_ = 0;

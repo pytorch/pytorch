@@ -1526,23 +1526,19 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
   // the original memory layout propagation policy for this case. So we
   // check whether the range is empty.
   auto prefer_channels_last = (graph_io_tensors.size() > 0);
-  prefer_channels_last &= std::all_of(
-      graph_io_tensors.begin(),
-      graph_io_tensors.end(),
-      [&](const jit::Value* el) {
-        // If the tensor is neither a complete tensor nor has
-        // symbolic information, do nothing.
-        auto incomplete =
-            (!(el->isCompleteTensor())) && (!(symbolic_strides_.count(el)));
-        if (incomplete)
-          return false;
+  for (auto el : graph_io_tensors) {
+    auto is_complete = el->isCompleteTensor();
+    auto is_symbolic = symbolic_strides_.count(el);
 
-        auto preferred_mem_layout = el->isCompleteTensor()
-            ? _prefer_static_mem(el)
-            : _prefer_symbolic_mem(el, symbolic_strides_[el]);
-        return preferred_mem_layout ==
-            MemoryLayoutPolicy::kChannelsLastNdContiguous;
-      });
+    auto preferred_mem_layout = is_complete
+        ? _prefer_static_mem(el)
+        : (is_symbolic ? _prefer_symbolic_mem(el, symbolic_strides_[el])
+                       : MemoryLayoutPolicy::kContiguous);
+    if (preferred_mem_layout != MemoryLayoutPolicy::kChannelsLastNdContiguous) {
+      prefer_channels_last = false;
+      break;
+    }
+  }
 
   // If the memory layout of all the input and outputs is channels-last
   // contiguous, the propagated memory layout should be channels-last.
@@ -1558,22 +1554,20 @@ void TensorExprKernel::optimizeOwningGraph() {
 
   // We may manipulate output pointers in graph manipulation. So we store the
   // orignal outputs for symbolic strides information synchronization
-  std::vector<jit::Value*> _orignal_graph_outputs;
-  auto graph_outputs = graph_->outputs();
-  std::copy(
-      graph_outputs.begin(),
-      graph_outputs.end(),
-      std::back_inserter(_orignal_graph_outputs));
+  auto _orignal_graph_outputs = graph_->outputs().vec();
 
   // Get the graph device information first. The graph optimization
   // might be device specific.
   device_ = *pickDeviceType(graph_);
 
-  // Optimize the NNC owning graph
+  // Determine the propagated memory layout
+  deduceMemoryLayoutPolicy();
+
+  // Optimize the concatenation
   OptimizeCat(graph_);
 
   // Synchronize the symbolic strides information
-  graph_outputs = graph_->outputs();
+  auto graph_outputs = graph_->outputs();
   TORCH_INTERNAL_ASSERT(graph_outputs.size() == _orignal_graph_outputs.size());
   for (int i : c10::irange(graph_outputs.size())) {
     auto el_orig = _orignal_graph_outputs.at(i);
@@ -1594,9 +1588,6 @@ void TensorExprKernel::compile() {
   nInputs_ = graph_->inputs().size();
   nOutputs_ = graph_->outputs().size();
   genInputDebugNames();
-
-  // Determine the propagated memory layout
-  deduceMemoryLayoutPolicy();
 
   // Bind inputs to buffers.
   auto block = bindAllInputs();
