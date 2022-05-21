@@ -10,6 +10,7 @@ namespace fuser {
 namespace cuda {
 
 class SchedulerRuntimeInfo;
+class ExpressionEvaluator;
 
 namespace scheduler_utils {
 
@@ -110,6 +111,9 @@ struct TvProperties {
   // reduction/normalization.
   int64_t inner_most_dimension_numel = 1;
 
+  // Same thing as above, but the number of dimensions instead of the numel.
+  int64_t inner_most_dimension_ndims = 1;
+
   // Merging neighboring iteration domains, and reduction domains, what's the
   // resulting dimensionality of the problem.
   int64_t dimensionality = 1;
@@ -163,7 +167,9 @@ std::pair<bool, bool> canonicalDimReduction(
 // Return a list of tensor views that are outputs of reduction operations. If
 // multiple outputs of an expression are found, only include one in the list
 // (WelfordOp)
-TORCH_CUDA_CU_API std::vector<TensorView*> getReductionTvs(Fusion* fusion);
+TORCH_CUDA_CU_API std::vector<TensorView*> getReductionTvs(
+    Fusion* fusion,
+    bool ignore_trivial = true);
 
 // Returns a list of TensorViews that are the consumer tv for a view operation.
 std::vector<TensorView*> getViewTVs(Fusion* fusion);
@@ -180,6 +186,17 @@ std::vector<TensorView*> cacheInputs(Fusion* fusion, bool unroll);
 std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
     Fusion* fusion,
     bool unroll);
+
+// Ignores broadcast and reduction, returns iter domain in root domain that's
+// "inner most". If this is an rfactored reduction domain, actually check the
+// root domain, this is because the rfactored reduction tensorview has the
+// vectorized dimension, but that means the rfactor domain could have reordered
+// what we consider the "inner most" allocated position on it if we consider the
+// rfactor dimension.
+//
+// If reduction tv and has rfactor return root domain, otherwise return rfactor
+// domain.
+IterDomain* innerMostRootDim(TensorView* tv);
 
 // Uses a lot of logic from TransformPropagator in the implementation
 class FindAllMappedDims {
@@ -246,7 +263,48 @@ struct BroadcastMultiple {
 // mapped to the corresponding dimension in reference_tv. Count includes
 // reference_tv if reference_tv is an input or output. Count is multiplied by
 // data type size.
-std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv);
+std::vector<BroadcastMultiple> getBroadcastMultiples(
+    TensorView* reference_tv,
+    DataType index_type);
+
+//! Collect maximum vectorization word size of a tensor whose
+//! innermost domain is leaf_merged_domain. Contig merging is taken
+//! into account to expand vectorization if possible.
+size_t collectMaxVectorizeSizeWithContigMerge(
+    TensorView* tv,
+    IterDomain* leaf_merged_domain,
+    size_t max_word_size_in_byte,
+    ExpressionEvaluator& expression_evaluator,
+    DataType index_type);
+
+namespace matmul_utils {
+//! Utilities in this namespace facilitates scheduling matmul kernels with
+//!  hierarchichal tiling specified in MatMulTileOptions.
+
+//! Schedule utility for matmul prolog:
+//!   Use all the threads on a CTA tile to load matmul operands
+//!  into shared memory with the given vectorization word.
+//! TODO:
+//!  will need to add bank conflict removal swizzle in a follow up.
+TORCH_CUDA_CU_API void scheduleContiguousVectorLoad(
+    TensorView* tv,
+    MatMulTileOptions tile,
+    int vector_word);
+
+//! Schedule utility for mma output in matmul main loop:
+//!  Realize the hierarchical tiling based on the given tiling options.
+TORCH_CUDA_CU_API void scheduleWarpTileWithReduction(
+    TensorView* tv,
+    MatMulTileOptions tile);
+
+//! Schedule utility for mma output in matmul main loop:
+//!  Realize the hierarchical tiling based on the given tiling options
+//! on consumers of mma ops in epilog.
+TORCH_CUDA_CU_API void scheduleWarpTileWithNoReduction(
+    TensorView* tv,
+    MatMulTileOptions tile);
+
+} // namespace matmul_utils
 
 } // namespace scheduler_utils
 } // namespace cuda

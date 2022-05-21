@@ -80,7 +80,7 @@ C10_API void UpdateLoggingLevelsFromFlags();
     const char* file,
     const int line,
     const char* condition,
-    detail::CompileTimeEmptyString msg,
+    detail::CompileTimeEmptyString /*msg*/,
     const void* caller = nullptr) {
   ThrowEnforceNotMet(file, line, condition, "", caller);
 }
@@ -103,7 +103,7 @@ C10_API void UpdateLoggingLevelsFromFlags();
     const char* file,
     const int line,
     const char* condition,
-    detail::CompileTimeEmptyString msg,
+    detail::CompileTimeEmptyString /*msg*/,
     const void* caller = nullptr) {
   ThrowEnforceFiniteNotMet(file, line, condition, "", caller);
 }
@@ -304,6 +304,9 @@ namespace detail {
 // Return value is needed to do the static variable initialization trick
 C10_API bool LogAPIUsageFakeReturn(const std::string& context);
 } // namespace detail
+
+// Initializes the c10 logger.
+C10_API void initLogging();
 
 } // namespace c10
 

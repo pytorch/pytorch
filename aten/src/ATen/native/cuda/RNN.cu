@@ -1,10 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <c10/macros/Macros.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_native.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_backward_impl_native.h>
+#include <ATen/ops/_thnn_fused_gru_cell_native.h>
+#include <ATen/ops/_thnn_fused_gru_cell_backward_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -362,6 +375,7 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
 
   dim3 block, grid;
   int64_t numel = cx.numel();
+  if (numel == 0) return;
   getLaunchConfig(&block, &grid, numel);
 
   auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
@@ -399,6 +413,7 @@ void lstm_backward_impl(const Tensor& grad_hy, const Tensor& grad_cy,
   dim3 block, grid;
   int64_t numel = cx.numel();
   getLaunchConfig(&block, &grid, numel);
+  if (numel == 0) return;
 
   auto grad_hyI = tryGetTensorInfo<scalar_t, index_type>(grad_hy);
   auto grad_cyI = tryGetTensorInfo<scalar_t, index_type>(grad_cy);
@@ -433,6 +448,7 @@ void gru_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
 
   dim3 block, grid;
   int64_t numel = hx.numel();
+  if (numel == 0) return;
   getLaunchConfig(&block, &grid, numel);
 
   auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
@@ -466,6 +482,7 @@ void gru_backward_impl(const Tensor& grad_hy, const Tensor& workspace,
 
   dim3 block, grid;
   int64_t numel = grad_hy.numel();
+  if (numel == 0) return;
   getLaunchConfig(&block, &grid, numel);
 
   auto grad_hyI = getTensorInfo<scalar_t, index_type>(grad_hy);
@@ -542,7 +559,7 @@ void checkLSTMBackwardSizes(const TensorArg& grad_hy, const TensorArg& grad_cy,
   checkNumel(c, workspace, exp_size[0] * exp_size[1] * 4);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_cuda( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_impl_cuda( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -551,7 +568,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
   const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
 
   if (!grad_hy.defined() && !grad_cy.defined()) {
-    return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
+    return std::tuple<Tensor, Tensor, Tensor>();
   }
   checkLSTMBackwardSizes({grad_hy, "grad_hy", 1}, {grad_cy, "grad_cy", 2},
                          {cx, "cx", 3}, {cy, "cy", 4},
@@ -568,7 +585,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
   });
 
   auto grad_bias = has_bias ? grad_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
-  return std::make_tuple(grad_gates, grad_gates, grad_cx, grad_bias, grad_bias);
+  return std::make_tuple(grad_gates, grad_cx, grad_bias);
 }
 
 static constexpr int64_t GRU_WORKSPACE_MULTIPLIER = 5;

@@ -1,7 +1,7 @@
 .. _amp-examples:
 
-Automatic Mixed Precision examples
-==================================
+CUDA Automatic Mixed Precision examples
+=======================================
 
 .. currentmodule:: torch.cuda.amp
 

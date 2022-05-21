@@ -181,6 +181,11 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor expand_batching_rule_symint(const Tensor& self, SymIntArrayRef psize, bool implicit) {
+  return expand_batching_rule(self, asIntArrayRefSlow(psize), implicit);
+}
+
+
 std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
@@ -1088,6 +1093,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
   m.impl("diagonal", diagonal_batching_rule);
   m.impl("expand", expand_batching_rule);
+  m.impl("expand.SymInt", expand_batching_rule_symint);
   m.impl("expand_as", native::expand_as); // composite wrt autograd
   m.impl("movedim.intlist", movedim_batching_rule);
   m.impl("movedim.int", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t)>(native::movedim)); // composite wrt autograd
@@ -1105,6 +1111,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
+  m.impl("split.sizes", split_with_sizes_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);

@@ -1,12 +1,12 @@
 #pragma once
 
+#include <ATen/core/custom_class.h>
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/symbol.h>
+#include <ATen/core/type_factory.h>
 #include <ATen/core/qualified_name.h>
-#include <ATen/core/ivalue.h>
-#include <ATen/core/class_type.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
 
@@ -16,8 +16,16 @@
 #include <sstream>
 #include <type_traits>
 
+namespace torch {
+namespace jit {
+struct Function;
+} // namespace jit
+} // namespace torch
+
 namespace c10 {
 
+template<class Key, class Value>
+class Dict;
 struct IValue;
 struct FunctionSchema;
 struct NamedType;
@@ -26,12 +34,32 @@ using OptNameList = c10::optional<std::vector<std::string>>;
 void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill);
 void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten);
 
+inline bool is_contiguous_strides(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
+  int n_dim = static_cast<int>(sizes.size());
+  if (n_dim == 0) {
+    return true;
+  }
+
+  if (strides[n_dim - 1] != 1) {
+    return false;
+  }
+
+  for (int i = n_dim - 2; i >= 0; i--) {
+    if (strides[i] != strides[i + 1] * sizes[i + 1]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 struct AnyType;
-using AnyTypePtr = std::shared_ptr<AnyType>;
+using AnyTypePtr = SingletonTypePtr<AnyType>;
 // Any is the top of the type hierarchy, all other types are subtypes
 // T <: Any, forall T
 struct TORCH_API AnyType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -39,7 +67,7 @@ struct TORCH_API AnyType : public Type {
   }
   static const TypeKind Kind = TypeKind::AnyType;
   // global singleton
-  static const AnyTypePtr& get();
+  static AnyTypePtr get();
 
  private:
   AnyType() : Type(TypeKind::AnyType) {}
@@ -61,7 +89,7 @@ inline bool operator!=(const Type& lhs, const Type& rhs) {
 // common base for all types that have a single sub element
 // e.g. Future[T], Optional[T], List[T]
 template <TypeKind K, typename T>
-struct SingleElementType : public Type {
+struct SingleElementType : public SharedType {
   static const TypeKind Kind = K;
 
   const TypePtr& getElementType() const {
@@ -76,7 +104,7 @@ struct SingleElementType : public Type {
     return elem;
   }
 
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     if (auto rhs_ = rhs.cast<T>()) {
       return *getElementType() == *rhs_->getElementType();
     }
@@ -84,7 +112,7 @@ struct SingleElementType : public Type {
   }
 
  protected:
-  SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {
+  SingleElementType(TypePtr elem) : SharedType(Kind), elem(std::move(elem)) {
     if (!this->elem) {
       throw std::runtime_error(c10::str(
             "Can not create ", typeKindToString(Kind), " with None type"));
@@ -97,7 +125,7 @@ struct SingleElementType : public Type {
 
 struct UnionType;
 using UnionTypePtr = std::shared_ptr<UnionType>;
-struct TORCH_API UnionType : public Type {
+struct TORCH_API UnionType : public SharedType {
   friend struct Type;
 
   static const TypeKind Kind = TypeKind::UnionType;
@@ -108,9 +136,9 @@ struct TORCH_API UnionType : public Type {
 
   static UnionTypePtr create(std::vector<TypePtr> reference);
 
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
 
-  bool isUnionType() const {
+  bool isUnionType() const override {
     return true;
   }
 
@@ -163,15 +191,13 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 //     - None <: Optional[T] for all T
 //     - Optional[T] == Union[T, None] for all T
 struct TORCH_API OptionalType : public UnionType {
-  static OptionalTypePtr create(TypePtr contained) {
-    return OptionalTypePtr(new OptionalType(std::move(contained)));
-  }
+  static OptionalTypePtr create(TypePtr contained);
 
   static const TypeKind Kind = TypeKind::OptionalType;
 
   friend struct Type;
 
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
 
   const TypePtr& getElementType() const {
     return contained_;
@@ -195,12 +221,15 @@ struct TORCH_API OptionalType : public UnionType {
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
-  bool isUnionType() const {
+  bool isUnionType() const override {
     return true;
   }
 
   // common cast Optional[Tensor] for undefined tensor type
-  static OptionalTypePtr ofTensor();
+  static TypePtr ofTensor();
+  //
+  // global singleton
+  static TypePtr get(TypePtr inner);
 
  private:
   explicit OptionalType(TypePtr contained);
@@ -409,6 +438,17 @@ struct TORCH_API SymbolicShape {
     return dims_;
   }
 
+  c10::optional<std::vector<bool>> symbolicDims() const {
+    if (!dims_) {
+      return c10::nullopt;
+    }
+    auto symbolic_dims = std::vector<bool>();
+    for (const ShapeSymbol& s : *dims_) {
+      symbolic_dims.push_back(!s.is_static());
+    }
+    return symbolic_dims;
+  }
+
   // Checks whether the shape is fully defined/complete, ie. rank and sizes
   // of every dimension are known.
   bool isComplete() const {
@@ -430,6 +470,14 @@ struct TORCH_API SymbolicShape {
   // result will be unranked.
   SymbolicShape merge(const SymbolicShape& other) const;
 
+  friend bool operator==(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return lhs.dims_ == rhs.dims_;
+  }
+
+  friend bool operator!=(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return !(lhs == rhs);
+  }
+
   private:
     c10::optional<std::vector<ShapeSymbol>> dims_;
 };
@@ -440,7 +488,7 @@ inline bool isComplete(const Stride& s) {
 }
 
 template<typename T>
-inline bool isComplete(const T& t) {
+inline bool isComplete(const T& /*t*/) {
   return true;
 }
 }
@@ -520,9 +568,10 @@ struct VaryingShape {
 };
 
 struct TensorType;
+// TODO: investigate making this SingletonOrSharedTypePtr<TensorType>
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor with a specific size
-struct TORCH_API TensorType : public Type {
+struct TORCH_API TensorType : public SharedType {
   static TensorTypePtr create(const at::Tensor& t);
 
   // used by TensorType::create(size_t dim) which in turn used by
@@ -585,7 +634,7 @@ struct TORCH_API TensorType : public Type {
     return requires_grad_ ? *requires_grad_ : true;
   }
 
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
   std::string str() const override;
@@ -623,7 +672,6 @@ struct TORCH_API TensorType : public Type {
     return copy;
   }
 
-
   TensorTypePtr withDim(c10::optional<size_t> d) {
     auto copy = clone();
     // withDim is only used by the legacy executor
@@ -631,6 +679,12 @@ struct TORCH_API TensorType : public Type {
     copy->sizes_ = SymbolicShape(d);
     copy->strides_ = VaryingShape<Stride>(d);
     return copy;
+  }
+
+  TensorTypePtr withStrides(VaryingShape<Stride> sstrides) const {
+    auto cloned = clone();
+    cloned->strides_ = sstrides;
+    return cloned;
   }
 
   TensorTypePtr withSizesStrides(
@@ -654,7 +708,7 @@ struct TORCH_API TensorType : public Type {
         sizes, contiguousStridesOf(sizes));
   }
 
-  TensorTypePtr withDevice(at::Device device) const {
+  TensorTypePtr withDevice(const c10::optional<at::Device> device) const {
     auto copy = clone();
     copy->device_ = device;
     return copy;
@@ -732,15 +786,36 @@ struct TORCH_API TensorType : public Type {
 
   static const TypeKind Kind = TypeKind::TensorType;
 
-  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
-    std::vector<int64_t> strides(sizes.size());
-    if (sizes.empty()) // zero-dim case
+  static std::vector<int64_t> contiguousStridesOf(
+      at::IntArrayRef in_sizes,
+      at::MemoryFormat memory_format = MemoryFormat::Contiguous) {
+    auto contiguous_fn = [](const at::IntArrayRef& sizes,
+                            const std::vector<int64_t>& dim_order) {
+      std::vector<int64_t> strides(sizes.size());
+      if (sizes.empty()) // zero-dim case
+        return strides;
+
+      strides[dim_order[0]] = 1;
+      for (size_t i = 1; i < dim_order.size(); i++) {
+        auto cur_dim = dim_order[i];
+        auto pre_dim = dim_order[i - 1];
+        strides[cur_dim] = strides[pre_dim] * sizes[pre_dim];
+      }
       return strides;
-    strides.back() = 1;
-    for (size_t i = strides.size() - 1; i > 0; i--) {
-      strides[i - 1] = strides[i] * sizes[i];
+    };
+
+    std::vector<int64_t> dim_order(in_sizes.size());
+    if (memory_format == MemoryFormat::ChannelsLast) {
+      dim_order = {1, 3, 2, 0};
+    } else if (memory_format == MemoryFormat::ChannelsLast3d) {
+      dim_order = {1, 4, 3, 2, 0};
+    } else {
+      auto ndims = in_sizes.size();
+      for (size_t i = 0; i < ndims; i++) {
+        dim_order[i] = ndims - i - 1; // Reverse
+      }
     }
-    return strides;
+    return contiguous_fn(in_sizes, dim_order);
   }
 
  private:
@@ -808,6 +883,14 @@ struct TORCH_API ListType
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
+  // global singleton
+  // Given an inner type T and an identifier,
+  // this function wil return the global singleton type pointer
+  // the type List<T>.
+  // The extra "identifier" argument is needed beccause we have multiple container types
+  // that all re-use this function (List<T>, array<T, N>, etc.)
+  static TypePtr get(std::string identifier, TypePtr inner);
+
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
   static ListTypePtr ofOptionalTensors();
@@ -829,12 +912,16 @@ struct TORCH_API ListType
 
 struct DictType;
 using DictTypePtr = std::shared_ptr<DictType>;
-struct TORCH_API DictType : public Type {
+struct TORCH_API DictType : public SharedType {
   friend struct Type;
   static const TypeKind Kind = TypeKind::DictType;
 
   static DictTypePtr create(TypePtr key, TypePtr value) {
-    switch (key->kind()) {
+    auto kind = key->kind();
+    if (auto dyn = key->castRaw<DynamicType>()) {
+      kind = dyn->dynamicKind();
+    }
+    switch (kind) {
       case TypeKind::AnyType:
       case TypeKind::IntType:
       case TypeKind::BoolType:
@@ -884,7 +971,7 @@ struct TORCH_API DictType : public Type {
     return types;
   }
 
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     if (auto* dict_rhs = rhs.castRaw<DictType>()) {
       return *getKeyType() == *(dict_rhs->getKeyType()) &&
           *getValueType() == *(dict_rhs->getValueType());
@@ -892,9 +979,17 @@ struct TORCH_API DictType : public Type {
     return false;
   }
 
+  // global singleton
+  // Given an inner type T and an identifier,
+  // this function wil return the global singleton type pointer
+  // the type List<T>.
+  // The extra "identifier" argument is needed beccause we have multiple container types
+  // that all re-use this function (Dict<K, V> and unordered_map<K, V>)
+  static TypePtr get(std::string identifier, TypePtr key, TypePtr val);
+
  private:
   DictType(TypePtr key, TypePtr value)
-      : Type(TypeKind::DictType),
+      : SharedType(TypeKind::DictType),
         has_free_variables(
             key->hasFreeVariables() || value->hasFreeVariables()) {
     types.reserve(2);
@@ -1015,6 +1110,10 @@ struct TORCH_API TupleType : public NamedType {
       const std::vector<std::string>& field_names,
       const std::vector<TypePtr>& field_types);
 
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<c10::string_view>& field_names,
+      const std::vector<TypePtr>& field_types);
+
   static TupleTypePtr create(
       std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
@@ -1030,7 +1129,7 @@ struct TORCH_API TupleType : public NamedType {
     return elements_;
   }
 
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
   bool isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const override;
 
   std::string str() const override;
@@ -1048,10 +1147,18 @@ struct TORCH_API TupleType : public NamedType {
   const std::shared_ptr<FunctionSchema>& schema() const {
     return schema_;
   }
+  c10::optional<std::vector<c10::string_view>> names() const;
 
   static const TypeKind Kind = TypeKind::TupleType;
 
  private:
+  template <typename S>
+  static TupleTypePtr createWithSpec(
+      const c10::optional<c10::QualifiedName>& name,
+      const std::vector<S>& field_names,
+      const std::vector<TypePtr>& field_types,
+      std::vector<IValue>& field_defaults);
+
   TupleType(
       std::vector<TypePtr> elements_,
       c10::optional<c10::QualifiedName> name,
@@ -1082,96 +1189,12 @@ struct TORCH_API TupleType : public NamedType {
   std::shared_ptr<FunctionSchema> schema_;
 };
 
-struct EnumType;
-using EnumTypePtr = std::shared_ptr<EnumType>;
-using EnumNameValue = std::pair<std::string, IValue>;
-struct TORCH_API EnumType : public NamedType {
-  friend struct Type;
-  static const TypeKind Kind = TypeKind::EnumType;
-
-  static EnumTypePtr create(
-      const c10::QualifiedName& qualified_class_name,
-      TypePtr value, std::vector<EnumNameValue> enum_names_values, std::weak_ptr<::torch::jit::CompilationUnit> cu) {
-    switch (value->kind()) {
-      case TypeKind::IntType:
-      case TypeKind::FloatType:
-      case TypeKind::StringType:
-        return EnumTypePtr(new EnumType(qualified_class_name, std::move(value), std::move(enum_names_values), std::move(cu)));
-      default:
-        AT_ERROR(
-            "Cannot create Enum with value type '",
-            value->str(),
-            "', only int, float and string are supported");
-    }
-  }
-
-  std::string str() const override {
-    return "Enum<" + annotation_str() + ">";
-  }
-
-  std::string repr_str() const override {
-    return str();
-  }
-
-  const TypePtr& getValueType() const {
-    return value_type_;
-  }
-
-  bool operator==(const Type& rhs) const override {
-    if (auto* enum_rhs = rhs.castRaw<EnumType>()) {
-      return name().value() == enum_rhs->name().value() &&
-          *getValueType() == *(enum_rhs->getValueType()) &&
-          this->compilation_unit() == enum_rhs->compilation_unit();
-    }
-    return false;
-  }
-
-  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
-
-  std::shared_ptr<const ::torch::jit::CompilationUnit> compilation_unit() const {
-    auto cu = cu_.lock();
-    return cu;
-  }
-
-  const QualifiedName qualifiedClassName() const {
-    return name().value();
-  }
-
-  at::ArrayRef<TypePtr> containedTypes() const override {
-    return value_type_;
-  }
-
-  const at::ArrayRef<EnumNameValue> enumNamesValues() const {
-    return enum_names_values_;
-  }
-
- private:
-  EnumType(
-      c10::QualifiedName qualified_class_name,
-      TypePtr value_type,
-      std::vector<EnumNameValue> enum_names_values,
-      std::weak_ptr<torch::jit::CompilationUnit> cu)
-      : NamedType(TypeKind::EnumType, std::move(qualified_class_name)),
-        value_type_(std::move(value_type)),
-        enum_names_values_(std::move(enum_names_values)),
-        cu_(cu) {}
-
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    const auto& n = name().value();
-    return n.qualifiedName();
-  }
-
-  TypePtr value_type_;
-  std::vector<EnumNameValue> enum_names_values_;
-  std::weak_ptr<::torch::jit::CompilationUnit> cu_;
-};
-
 // the common supertype of all Enums, only used in operator registraion.
 // EnumType <: AnyEnumType for all Enums
 struct AnyEnumType;
-using AnyEnumTypePtr = std::shared_ptr<AnyEnumType>;
-struct TORCH_API AnyEnumType : public Type {
-  bool operator==(const Type& rhs) const override {
+using AnyEnumTypePtr = SingletonTypePtr<AnyEnumType>;
+struct TORCH_API AnyEnumType final : public Type {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1179,21 +1202,26 @@ struct TORCH_API AnyEnumType : public Type {
   }
   static const TypeKind Kind = TypeKind::AnyEnumType;
   // global singleton
-  static const AnyEnumTypePtr& get();
+  static AnyEnumTypePtr get();
 private:
   AnyEnumType()
   : Type(TypeKind::AnyEnumType) {}
 };
 
 struct NumberType;
-using NumberTypePtr = std::shared_ptr<NumberType>;
+using NumberTypePtr = SingletonTypePtr<NumberType>;
 // This type represents a Python number
 // Subtype hierarchy for Number Types (NumberType as the base type):
 // IntType <: NumberType
 // FloatType <: NumberType
 // ComplexType <:NumberType
+//
+// WARNING: if you add a new subtype of NumberType that is not
+// represented by a global singleton, you need to change NumberTypePtr
+// to a SingletonOrSharedTypePtr and deal with NumberType needing to
+// both inherit and not inherit from SharedType!
 struct TORCH_API NumberType : public Type {
-  bool operator==(const Type& rhs) const override;
+  bool equals(const Type& rhs) const override;
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
@@ -1202,12 +1230,13 @@ struct TORCH_API NumberType : public Type {
   }
   static const TypeKind Kind = TypeKind::NumberType;
   // global singleton
-  static const NumberTypePtr& get();
+  static NumberTypePtr get();
 
  protected:
   NumberType(TypeKind kind = TypeKind::NumberType) : Type(kind) {}
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "number"; // technically not a valid python type, but
                      // we need to use it when parsing back in annotations
                      // for implicit conversions
@@ -1215,10 +1244,10 @@ struct TORCH_API NumberType : public Type {
 };
 
 struct FloatType;
-using FloatTypePtr = std::shared_ptr<FloatType>;
+using FloatTypePtr = SingletonTypePtr<FloatType>;
 // This type represents a Python float number
 struct TORCH_API FloatType : public NumberType {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1230,20 +1259,21 @@ struct TORCH_API FloatType : public NumberType {
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
-  static const FloatTypePtr& get();
+  static FloatTypePtr get();
 
  private:
   FloatType() : NumberType(TypeKind::FloatType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "float";
   }
 };
 
 struct ComplexType;
-using ComplexTypePtr = std::shared_ptr<ComplexType>;
+using ComplexTypePtr = SingletonTypePtr<ComplexType>;
 // This type represents a Python float number
 struct TORCH_API ComplexType : public NumberType {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1255,20 +1285,46 @@ struct TORCH_API ComplexType : public NumberType {
   }
   static const TypeKind Kind = TypeKind::ComplexType;
   // global singleton
-  static const ComplexTypePtr& get();
+  static ComplexTypePtr get();
 
  private:
   ComplexType() : NumberType(TypeKind::ComplexType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "complex";
   }
 };
 
+// We need to introduce `SymIntType` to represent the `SymInt` type
+// used in function schemas e.g. `aten::narrow_copy(... SymInt length)
+// `SymInt` will be used to enable tracing arithmetic operations on
+// dimension values. Please see [SymInt.h] for more information
+struct SymIntType;
+using SymIntTypePtr = SingletonTypePtr<SymIntType>;
+struct TORCH_API SymIntType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymInt";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    // TODO: will become a Union[SymbolicIntNode|int] in the near future
+    return "int";
+  }
+  static const TypeKind Kind = TypeKind::SymIntType;
+  // global singleton
+  static SymIntTypePtr get();
+
+ private:
+  SymIntType() : Type(TypeKind::SymIntType) {}
+};
+
 struct IntType;
-using IntTypePtr = std::shared_ptr<IntType>;
+using IntTypePtr = SingletonTypePtr<IntType>;
 // This type represents a Python int number
 struct TORCH_API IntType : public NumberType {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1280,20 +1336,21 @@ struct TORCH_API IntType : public NumberType {
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
-  static const IntTypePtr& get();
+  static IntTypePtr get();
 
  private:
   IntType() : NumberType(TypeKind::IntType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "int";
   }
 };
 
 struct BoolType;
-using BoolTypePtr = std::shared_ptr<BoolType>;
+using BoolTypePtr = SingletonTypePtr<BoolType>;
 // This node represents a Python bool value
 struct TORCH_API BoolType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1301,17 +1358,17 @@ struct TORCH_API BoolType : public Type {
   }
   static const TypeKind Kind = TypeKind::BoolType;
   // global singleton
-  static const BoolTypePtr& get();
+  static BoolTypePtr get();
 
  private:
   BoolType() : Type(TypeKind::BoolType) {}
 };
 
 struct StringType;
-using StringTypePtr = std::shared_ptr<StringType>;
+using StringTypePtr = SingletonTypePtr<StringType>;
 // This type represents a Python string
 struct TORCH_API StringType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1319,31 +1376,33 @@ struct TORCH_API StringType : public Type {
     return annotation_str();
   }
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "str";
   }
   static const TypeKind Kind = TypeKind::StringType;
   // global singleton
-  static const StringTypePtr& get();
+  static StringTypePtr get();
 
  private:
   StringType() : Type(TypeKind::StringType) {}
 };
 
 struct StorageType;
-using StorageTypePtr = std::shared_ptr<StorageType>;
+using StorageTypePtr = SingletonTypePtr<StorageType>;
 struct TORCH_API StorageType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
     return annotation_str();
   }
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "Storage";
   }
   static const TypeKind Kind = TypeKind::StorageType;
   // global singleton
-  static const StorageTypePtr& get();
+  static StorageTypePtr get();
 
  private:
   StorageType() : Type(TypeKind::StorageType) {}
@@ -1356,7 +1415,7 @@ struct TORCH_API FunctionType : public NamedType {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
   }
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     if (auto func_type = rhs.cast<FunctionType>()) {
       return func_type->function_ == function_;
     }
@@ -1374,6 +1433,7 @@ struct TORCH_API FunctionType : public NamedType {
  private:
   FunctionType(torch::jit::Function* function);
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     const auto& n = name().value();
     return n.qualifiedName();
   }
@@ -1381,10 +1441,10 @@ struct TORCH_API FunctionType : public NamedType {
 };
 
 struct NoneType;
-using NoneTypePtr = std::shared_ptr<NoneType>;
+using NoneTypePtr = SingletonTypePtr<NoneType>;
 // This type represents a Python None
 struct TORCH_API NoneType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1394,17 +1454,17 @@ struct TORCH_API NoneType : public Type {
 
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
-  static const NoneTypePtr& get();
+  static NoneTypePtr get();
 
  private:
   NoneType() : Type(TypeKind::NoneType) {}
 };
 
 struct GeneratorType;
-using GeneratorTypePtr = std::shared_ptr<GeneratorType>;
+using GeneratorTypePtr = SingletonTypePtr<GeneratorType>;
 // This type represents a Generator
 struct TORCH_API GeneratorType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1412,17 +1472,17 @@ struct TORCH_API GeneratorType : public Type {
   }
   static const TypeKind Kind = TypeKind::GeneratorType;
   // global singleton
-  static const GeneratorTypePtr& get();
+  static GeneratorTypePtr get();
 
  private:
   GeneratorType() : Type(TypeKind::GeneratorType) {}
 };
 
 struct QuantizerType;
-using QuantizerTypePtr = std::shared_ptr<QuantizerType>;
+using QuantizerTypePtr = SingletonTypePtr<QuantizerType>;
 // This type represents a Quantizer
 struct TORCH_API QuantizerType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1430,17 +1490,17 @@ struct TORCH_API QuantizerType : public Type {
   }
   static const TypeKind Kind = TypeKind::QuantizerType;
   // global singleton
-  static const QuantizerTypePtr& get();
+  static QuantizerTypePtr get();
 
  private:
   QuantizerType() : Type(TypeKind::QuantizerType) {}
 };
 
 struct QSchemeType;
-using QSchemeTypePtr = std::shared_ptr<QSchemeType>;
+using QSchemeTypePtr = SingletonTypePtr<QSchemeType>;
 // This type represents a QScheme
 struct TORCH_API QSchemeType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1448,17 +1508,17 @@ struct TORCH_API QSchemeType : public Type {
   }
   static const TypeKind Kind = TypeKind::QSchemeType;
   // global singleton
-  static const QSchemeTypePtr& get();
+  static QSchemeTypePtr get();
 
  private:
   QSchemeType() : Type(TypeKind::QSchemeType) {}
 };
 
 struct DeviceObjType;
-using DeviceObjTypePtr = std::shared_ptr<DeviceObjType>;
+using DeviceObjTypePtr = SingletonTypePtr<DeviceObjType>;
 // This type represents a Device
 struct TORCH_API DeviceObjType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1466,17 +1526,17 @@ struct TORCH_API DeviceObjType : public Type {
   }
   static const TypeKind Kind = TypeKind::DeviceObjType;
   // global singleton
-  static const DeviceObjTypePtr& get();
+  static DeviceObjTypePtr get();
 
  private:
   DeviceObjType() : Type(TypeKind::DeviceObjType) {}
 };
 
 struct StreamObjType;
-using StreamObjTypePtr = std::shared_ptr<StreamObjType>;
+using StreamObjTypePtr = SingletonTypePtr<StreamObjType>;
 // This type represents a Generator
 struct TORCH_API StreamObjType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1484,7 +1544,7 @@ struct TORCH_API StreamObjType : public Type {
   }
   static const TypeKind Kind = TypeKind::StreamObjType;
   // global singleton
-  static const StreamObjTypePtr& get();
+  static StreamObjTypePtr get();
 
 private:
   StreamObjType() : Type(TypeKind::StreamObjType) {}
@@ -1493,11 +1553,11 @@ private:
 struct VarType;
 using VarTypePtr = std::shared_ptr<VarType>;
 // This type represents a type variable, used in FunctionSchema
-struct VarType : public Type {
+struct VarType : public SharedType {
   static VarTypePtr create(std::string name_) {
     return VarTypePtr(new VarType(std::move(name_)));
   }
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1513,16 +1573,16 @@ struct VarType : public Type {
 
  private:
   VarType(std::string name_)
-      : Type(TypeKind::VarType), name_(std::move(name_)) {}
+      : SharedType(TypeKind::VarType), name_(std::move(name_)) {}
   std::string name_;
 };
 
 struct CapsuleType;
-using CapsuleTypePtr = std::shared_ptr<CapsuleType>;
+using CapsuleTypePtr = SingletonTypePtr<CapsuleType>;
 // This type represents a Python Capsule.
 // It does not appear in the IR and is only used during runtime
 struct TORCH_API CapsuleType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1530,17 +1590,17 @@ struct TORCH_API CapsuleType : public Type {
   }
   static const TypeKind Kind = TypeKind::CapsuleType;
   // global singleton
-  static const CapsuleTypePtr& get();
+  static CapsuleTypePtr get();
 private:
   CapsuleType()
   : Type(TypeKind::CapsuleType) {}
 };
 
 struct PyObjectType;
-using PyObjectTypePtr = std::shared_ptr<PyObjectType>;
+using PyObjectTypePtr = SingletonTypePtr<PyObjectType>;
 // This type represents a PyObject Type
 struct TORCH_API PyObjectType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -1548,7 +1608,7 @@ struct TORCH_API PyObjectType : public Type {
   }
   static const TypeKind Kind = TypeKind::PyObjectType;
   // global singleton
-  static const PyObjectTypePtr& get();
+  static PyObjectTypePtr get();
 private:
   PyObjectType()
   : Type(TypeKind::PyObjectType) {}
@@ -1589,6 +1649,10 @@ inline TypePtr unshapedType(const TypePtr& type) {
   if (type->isSubtypeOf(*TensorType::get())) {
     return TensorType::get();
   }
+  at::ArrayRef<TypePtr> contained = type->containedTypes();
+  if (contained.empty()) {
+    return type;
+  }
   return type->withContained(fmap(type->containedTypes(), unshapedType));
 }
 
@@ -1609,11 +1673,11 @@ inline TypePtr TensorType::fromBoolType() {
 }
 
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const Type& type) {
-  if (&type == FloatType::get().get()) {
+  if (type == *FloatType::get()) {
     return at::typeMetaToScalarType(c10::get_default_dtype());
-  } else if (&type == IntType::get().get()) {
+  } else if (type == *IntType::get()) {
     return at::ScalarType::Long;
-  } else if (&type == BoolType::get().get()) {
+  } else if (type == *BoolType::get()) {
     return at::ScalarType::Bool;
   }
   return c10::nullopt;
@@ -1659,7 +1723,7 @@ namespace detail {
 template <typename T>
 struct getTypePtr_ final {
   static decltype(auto) call() {
-    TypePtr res = []() {
+    return ([]() {
       try {
         return getCustomClassType<T>();
       } catch(const c10::Error&) {
@@ -1670,8 +1734,7 @@ struct getTypePtr_ final {
             " could not be converted to any of the known types."
         );
       }
-    }();
-    return std::dynamic_pointer_cast<Type>(std::move(res));
+    }());
   }
 };
 
@@ -1716,6 +1779,13 @@ template <>
 struct getTypePtr_<int64_t> final {
   static decltype(auto) call() {
     return IntType::get();
+  }
+};
+
+template <>
+struct getTypePtr_<SymInt> final {
+  static decltype(auto) call() {
+    return SymIntType::get();
   }
 };
 template <>
@@ -1763,7 +1833,8 @@ struct getTypePtr_<c10::QScheme> final {
 template <>
 struct getTypePtr_<at::Generator> final {
   static decltype(auto) call() {
-    return OptionalType::create(GeneratorType::get());
+    return TypeFactory::create<OptionalType>(
+        TypeFactory::get<GeneratorType>());
   }
 };
 template <>
@@ -1787,54 +1858,95 @@ struct getTypePtr_<at::Dimname> final {
 template <class T>
 struct getTypePtr_<std::vector<T>> final {
   static const auto& call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    // The "per vector<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = ListType::get("vector", inner_type);
     return type;
   }
 };
 template <class T>
 struct getTypePtr_<c10::ArrayRef<T>> final {
   static const auto& call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    // The "per ArrayRef<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = ListType::get("ArrayRef", inner_type);
+    return type;
+  }
+};
+template <>
+struct getTypePtr_<c10::SymIntArrayRef> final {
+  static const auto& call() {
+    static auto type = ListType::create(getTypePtr_<c10::SymInt>::call());
     return type;
   }
 };
 template <class T>
 struct getTypePtr_<c10::List<T>> final {
   static const auto& call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    // The "per List<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = ListType::get("List", inner_type);
     return type;
   }
 };
 template <class T, size_t N>
 struct getTypePtr_<std::array<T, N>> final {
   static const auto& call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    // The "per array<T, N>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    // (Concatenating the length onto the end of the string because we want a unique
+    // type_ptr created for every std::array<T, N> type).
+    static auto type = ListType::get(std::string("array") + std::to_string(N), inner_type);
     return type;
   }
 };
 template <class K, class V>
 struct getTypePtr_<std::unordered_map<K, V>> final {
   static const auto& call() {
-    static auto type =
-        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
+    static auto inner_key_type = getTypePtr_<K>::call();
+    static auto inner_val_type = getTypePtr_<V>::call();
+    // The "per unordered_map<K, V>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = DictType::get("unordered_map", inner_key_type, inner_val_type);
     return type;
   }
 };
 template <class K, class V>
 struct getTypePtr_<c10::Dict<K, V>> final {
   static const auto& call() {
-    static auto type =
-        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
+    static auto inner_key_type = getTypePtr_<K>::call();
+    static auto inner_val_type = getTypePtr_<V>::call();
+    // The "per Dict<K, V>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = DictType::get("Dict", inner_key_type, inner_val_type);
     return type;
   }
 };
+
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
   static const auto& call() {
-    static auto type = OptionalType::create(getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = OptionalType::get(inner_type);
     return type;
   }
 };
+
+
+template<>
+struct getTypePtr_<at::OptionalIntArrayRef> final {
+  static const auto& call() {
+    static auto type = OptionalType::create(getTypePtr_<IntArrayRef>::call());
+    return type;
+  }
+};
+
 template <class... Contained>
 struct getTypePtr_<std::tuple<Contained...>> final {
   static const auto& call() {
@@ -1905,7 +2017,6 @@ TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
 struct InterfaceType;
 using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
-using ::torch::jit::CompilationUnit;
 
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.
@@ -1918,7 +2029,7 @@ struct TORCH_API InterfaceType : public NamedType {
   static InterfaceTypePtr create(
       QualifiedName qualifiedName, bool is_module=false);
 
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     if (auto user_rhs = rhs.castRaw<InterfaceType>()) {
       return isSubTypeImpl(*this, *user_rhs, nullptr) &&
           isSubTypeImpl(*user_rhs, *this, nullptr);
@@ -1953,6 +2064,7 @@ struct TORCH_API InterfaceType : public NamedType {
       std::ostream* why_not);
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return name()->qualifiedName();
   }
 
@@ -1967,7 +2079,7 @@ template <TypeKind K>
 struct EnumerationType : public Type {
 static const TypeKind Kind = K;
 
-bool operator==(const Type& rhs) const override {
+bool equals(const Type& rhs) const override {
   return rhs.kind() == kind();
 }
 
@@ -1975,42 +2087,58 @@ protected:
 EnumerationType() : Type(Kind) {}
 };
 
-struct LayoutType;
-using LayoutTypePtr = std::shared_ptr<LayoutType>;
-// This type represents a Generator
-struct TORCH_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
-std::string str() const override {
-return "Layout";
-}
-static const TypeKind Kind = TypeKind::LayoutType;
-// global singleton
-static const LayoutTypePtr& get();
-
-private:
-LayoutType() : EnumerationType() {}
-};
+// WARNING: These enumeration types below DO NOT actually get parsed out
+// from the logical schema strings, instead they are mapped as ints.  To
+// observe these types, use real_type() instead of type() on Argument
 
 struct ScalarTypeType;
-using ScalarTypeTypePtr = std::shared_ptr<ScalarTypeType>;
-// This type represents a Generator
+using ScalarTypeTypePtr = SingletonTypePtr<ScalarTypeType>;
 struct TORCH_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
 std::string str() const override {
 return "ScalarType";
 }
 static const TypeKind Kind = TypeKind::ScalarTypeType;
 // global singleton
-static const ScalarTypeTypePtr& get();
+static ScalarTypeTypePtr get();
 
 private:
 ScalarTypeType() : EnumerationType() {}
 };
 
+struct MemoryFormatType;
+using MemoryFormatTypePtr = SingletonTypePtr<MemoryFormatType>;
+struct TORCH_API MemoryFormatType : public EnumerationType<TypeKind::MemoryFormatType> {
+std::string str() const override {
+return "MemoryFormatType";
+}
+static const TypeKind Kind = TypeKind::MemoryFormatType;
+// global singleton
+static MemoryFormatTypePtr get();
+
+private:
+MemoryFormatType() : EnumerationType() {}
+};
+
+struct LayoutType;
+using LayoutTypePtr = SingletonTypePtr<LayoutType>;
+struct TORCH_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
+std::string str() const override {
+return "LayoutType";
+}
+static const TypeKind Kind = TypeKind::LayoutType;
+// global singleton
+static LayoutTypePtr get();
+
+private:
+LayoutType() : EnumerationType() {}
+};
+
 // the common supertype of all lists,
 // List[T] <: AnyList for all T
 struct AnyListType;
-using AnyListTypePtr = std::shared_ptr<AnyListType>;
+using AnyListTypePtr = SingletonTypePtr<AnyListType>;
 struct TORCH_API AnyListType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -2018,7 +2146,7 @@ struct TORCH_API AnyListType : public Type {
   }
   static const TypeKind Kind = TypeKind::AnyListType;
   // global singleton
-  static const AnyListTypePtr& get();
+  static AnyListTypePtr get();
 private:
   AnyListType()
   : Type(TypeKind::AnyListType) {}
@@ -2027,9 +2155,9 @@ private:
 // the common supertype of all tuples,
 // Tuple[T...] <: AnyTuple for all T
 struct AnyTupleType;
-using AnyTupleTypePtr = std::shared_ptr<AnyTupleType>;
+using AnyTupleTypePtr = SingletonTypePtr<AnyTupleType>;
 struct TORCH_API AnyTupleType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
 
@@ -2039,7 +2167,7 @@ struct TORCH_API AnyTupleType : public Type {
   static const TypeKind Kind = TypeKind::AnyTupleType;
 
   // global singleton
-  static const AnyTupleTypePtr& get();
+  static AnyTupleTypePtr get();
 private:
   AnyTupleType()
   : Type(TypeKind::AnyTupleType) {}
@@ -2048,9 +2176,9 @@ private:
 // the common supertype of all classes,
 // ClassType <: AnyClassType for all classes
 struct AnyClassType;
-using AnyClassTypePtr = std::shared_ptr<AnyClassType>;
+using AnyClassTypePtr = SingletonTypePtr<AnyClassType>;
 struct TORCH_API AnyClassType : public Type {
-  bool operator==(const Type& rhs) const override {
+  bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
@@ -2058,48 +2186,35 @@ struct TORCH_API AnyClassType : public Type {
   }
   static const TypeKind Kind = TypeKind::AnyClassType;
   // global singleton
-  static const AnyClassTypePtr& get();
+  static AnyClassTypePtr get();
 private:
   AnyClassType()
   : Type(TypeKind::AnyClassType) {}
 };
 
-inline bool IValue::isDoubleList() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
-}
-
-inline bool IValue::isComplexDoubleList() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexType::Kind;
-}
-
-inline bool IValue::isTensorList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
-}
-
-inline bool IValue::isIntList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
-}
-
-inline bool IValue::isBoolList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
-}
-
 template<>
-inline std::shared_ptr<NamedType> Type::cast() {
+inline typename detail::CastReturnType<NamedType>::type Type::cast<NamedType>() {
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
-    return std::static_pointer_cast<NamedType>(shared_from_this());
+    return std::static_pointer_cast<NamedType>(static_cast<NamedType *>(this)->shared_from_this());
   }
   return nullptr;
 }
 
 template<>
-inline std::shared_ptr<const NamedType> Type::cast<NamedType>() const {
+inline typename detail::CastConstReturnType<NamedType>::type Type::cast<NamedType>() const {
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
-    return std::static_pointer_cast<const NamedType>(shared_from_this());
+    return std::static_pointer_cast<const NamedType>(static_cast<const NamedType *>(this)->shared_from_this());
+  }
+  return nullptr;
+}
+
+template<>
+inline const NamedType* Type::castRaw<NamedType>() const {
+  if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+      kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+    return static_cast<const NamedType*>(this);
   }
   return nullptr;
 }
@@ -2125,5 +2240,7 @@ private:
   TypePtr type_;
   std::string reason_;
 };
+
+TORCH_API bool containsAnyType(const TypePtr& type);
 
 } // namespace c10

@@ -29,6 +29,7 @@
 #include <pybind11/chrono.h>
 
 #include <c10d/comm.hpp>
+#include <c10d/debug.h>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
 
@@ -449,6 +450,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
           py::arg("has_sync_bn"),
+          py::arg("static_graph"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_runtime_stats_and_log",
@@ -478,20 +480,24 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
-  py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
-      An enum whose values correspond to different debug settings of the
-      torch.distributed package. Currently supporting settings are OFF, INFO,
-      and DETAIL, which can be set via the TORCH_DISTRIBUTED_DEBUG environment
-      variable.
+  py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
+      An enum whose values correspond to different debug levels of the
+      torch.distributed package. Currently supporting OFF, INFO, and DETAIL,
+      which can be set via the TORCH_DISTRIBUTED_DEBUG environment variable
+      or via ``set_debug_level()`` function.
   )")
-      .value("OFF", ::c10d::DistributedDebugLevel::OFF)
-      .value("INFO", ::c10d::DistributedDebugLevel::INFO)
-      .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
+      .value("OFF", ::c10d::DebugLevel::Off)
+      .value("INFO", ::c10d::DebugLevel::Info)
+      .value("DETAIL", ::c10d::DebugLevel::Detail);
 
-  module.def(
-      "_get_debug_mode",
-      &::c10d::parseDistDebugLevel,
-      py::call_guard<py::gil_scoped_release>());
+  module
+      .def("get_debug_level", ::c10d::debug_level,
+          R"(Gets the debug level of the torch.distributed package.)")
+      .def("set_debug_level", ::c10d::setDebugLevel,
+          R"(Sets the debug level of the torch.distributed package.)")
+      .def("set_debug_level_from_env", ::c10d::setDebugLevelFromEnvironment,
+          R"(Sets the debug level of the torch.distributed package from the
+          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``AVG``,
@@ -649,11 +655,13 @@ Example::
           .def(
               "get",
               [](::c10d::Store& store, const std::string& key) -> py::bytes {
-                auto value = store.get(key);
+                auto value = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.get(key);
+                }();
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
-              py::call_guard<py::gil_scoped_release>(),
               R"(
 Retrieves the value associated with the given ``key`` in the store. If ``key`` is not
 present in the store, the function will wait for ``timeout``, which is defined
@@ -887,7 +895,7 @@ the server to establish a connection.
 Arguments:
     host_name (str): The hostname or IP Address the server store should run on.
     port (int): The port on which the server store should listen for incoming requests.
-    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates a non-fixed number of store users).
+    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is None (None indicates a non-fixed number of store users).
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
     wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
@@ -906,14 +914,14 @@ Example::
       .def(
           py::init([](const std::string& host,
                       uint16_t port,
-                      int worldSize,
+                      c10::optional<int> worldSize,
                       bool isServer,
                       std::chrono::milliseconds timeout,
                       bool waitWorkers,
                       bool multiTenant) {
             c10::optional<std::size_t> numWorkers = c10::nullopt;
-            if (worldSize > -1) {
-              numWorkers = static_cast<std::size_t>(worldSize);
+            if (worldSize.has_value() && worldSize.value() > -1) {
+              numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
             ::c10d::TCPStoreOptions opts{
@@ -923,7 +931,7 @@ Example::
           }),
           py::arg("host_name"),
           py::arg("port"),
-          py::arg("world_size") = -1,
+          py::arg("world_size") = py::none(),
           // using noconvert() requires this argument to be True or False
           // prevents accidental implicit conversion to bool
           py::arg("is_master").noconvert() = false,
@@ -1423,7 +1431,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout") = kProcessGroupDefaultTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
-              "options", &::c10d::ProcessGroupNCCL::getOptions);
+              "options", &::c10d::ProcessGroupNCCL::getOptions)
+          .def_property_readonly(
+              "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,

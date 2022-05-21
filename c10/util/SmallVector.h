@@ -38,6 +38,11 @@
 #include <type_traits>
 #include <utility>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 namespace c10 {
 
 /// This is all the stuff common to all SmallVectors.
@@ -188,6 +193,8 @@ class SmallVectorTemplateCommon
 
   /// Check whether Elt will be invalidated by resizing the vector to NewSize.
   void assertSafeToReferenceAfterResize(const void* Elt, size_t NewSize) {
+    (void)Elt; // Suppress unused variable warning
+    (void)NewSize; // Suppress unused variable warning
     assert(
         isSafeToReferenceAfterResize(Elt, NewSize) &&
         "Attempting to reference an element of the vector in an operation "
@@ -1455,3 +1462,5 @@ inline void swap(c10::SmallVector<T, N>& LHS, c10::SmallVector<T, N>& RHS) {
 }
 
 } // end namespace std
+
+C10_CLANG_DIAGNOSTIC_POP()

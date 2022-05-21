@@ -1,24 +1,23 @@
 # Owner(s): ["module: onnx"]
 
 # Some standard imports
-import numpy as np
-from torch import nn
-import torch.onnx
-import torch.nn.init as init
-from caffe2.python.model_helper import ModelHelper
-from pytorch_helper import PyTorchModule
 import unittest
-from caffe2.python.core import workspace
 
+import numpy as np
+from pytorch_helper import PyTorchModule
 from test_pytorch_common import skipIfNoLapack
+
+import torch.nn.init as init
+import torch.onnx
+from caffe2.python.core import workspace
+from caffe2.python.model_helper import ModelHelper
+from torch import nn
 
 
 class TestCaffe2Backend(unittest.TestCase):
-
     @skipIfNoLapack
     @unittest.skip("test broken because Lapack was always missing.")
     def test_helper(self):
-
         class SuperResolutionNet(nn.Module):
             def __init__(self, upscale_factor, inplace=False):
                 super(SuperResolutionNet, self).__init__()
@@ -27,7 +26,7 @@ class TestCaffe2Backend(unittest.TestCase):
                 self.conv1 = nn.Conv2d(1, 64, (5, 5), (1, 1), (2, 2))
                 self.conv2 = nn.Conv2d(64, 64, (3, 3), (1, 1), (1, 1))
                 self.conv3 = nn.Conv2d(64, 32, (3, 3), (1, 1), (1, 1))
-                self.conv4 = nn.Conv2d(32, upscale_factor ** 2, (3, 3), (1, 1), (1, 1))
+                self.conv4 = nn.Conv2d(32, upscale_factor**2, (3, 3), (1, 1), (1, 1))
                 self.pixel_shuffle = nn.PixelShuffle(upscale_factor)
 
                 self._initialize_weights()
@@ -53,7 +52,7 @@ class TestCaffe2Backend(unittest.TestCase):
         helper = ModelHelper(name="test_model")
         start = helper.Sigmoid(["the_input"])
         # Embed the ONNX-converted pytorch net inside it
-        toutput, = PyTorchModule(helper, torch_model, (fake_input,), [start])
+        (toutput,) = PyTorchModule(helper, torch_model, (fake_input,), [start])
         output = helper.Sigmoid(toutput)
 
         workspace.RunNetOnce(helper.InitProto())

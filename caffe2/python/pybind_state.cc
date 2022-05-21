@@ -300,7 +300,7 @@ class GetPythonGradient : public GradientMakerBase {
     }
     if (gradOutputIndices.size() > 0) {
       // NOLINTNEXTLINE(modernize-loop-convert)
-      for (int i = 0; i < gradOutputIndices.size(); ++i) {
+      for (unsigned i = 0; i < gradOutputIndices.size(); ++i) {
         int GO_i = gradOutputIndices[i];
         gradientInputs.push_back(GO(GO_i));
       }
@@ -312,7 +312,7 @@ class GetPythonGradient : public GradientMakerBase {
     std::vector<std::string> gradientOutputs;
     if (gradInputIndices.size() > 0) {
       // NOLINTNEXTLINE(modernize-loop-convert)
-      for (int i = 0; i < gradInputIndices.size(); ++i) {
+      for (unsigned i = 0; i < gradInputIndices.size(); ++i) {
         int GI_i = gradInputIndices[i];
         gradientOutputs.push_back(GI(GI_i));
       }
@@ -877,7 +877,7 @@ void addObjectMethods(py::module& m) {
             std::vector<TensorCPU> tensors_data;
 #ifdef USE_NUMPY
             // NOLINTNEXTLINE(modernize-loop-convert)
-            for (auto i = 0; i < inputs.size(); ++i) {
+            for (auto i = 0U; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
@@ -988,7 +988,7 @@ void addObjectMethods(py::module& m) {
             std::vector<Tensor> tensors_data;
 #ifdef USE_NUMPY
             // NOLINTNEXTLINE(modernize-loop-convert)
-            for (auto i = 0; i < inputs.size(); ++i) {
+            for (auto i = 0U; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
@@ -1201,7 +1201,7 @@ void addGlobalMethods(py::module& m) {
   });
   m.def("nearby_opnames", [](const std::string& name) {
     std::vector<std::string> alternatives;
-    int editTolerance = 3;
+    unsigned editTolerance = 3;
     // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto it : caffe2::CPUOperatorRegistry()->Keys()) {
       if (editDistance(it, name, editTolerance) < editTolerance + 1) {

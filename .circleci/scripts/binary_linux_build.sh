@@ -26,7 +26,7 @@ else
   build_script='manywheel/build.sh'
 fi
 
-if [[ "$CIRCLE_BRANCH" == "master" ]] || [[ "$CIRCLE_BRANCH" == release/* ]]; then
+if [[ "$CIRCLE_BRANCH" == "main" ]] || [[ "$CIRCLE_BRANCH" == "master" ]] || [[ "$CIRCLE_BRANCH" == release/* ]]; then
   export BUILD_DEBUG_INFO=1
 fi
 

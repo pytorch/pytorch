@@ -140,6 +140,24 @@ void IRVisitor::visit(ExternalCallPtr v) {
   }
 }
 
+void IRVisitor::visit(ExternalCallWithAllocPtr v) {
+  for (const auto& buf_out_arg : v->buf_out_args()) {
+    buf_out_arg->accept(this);
+  }
+  for (const auto& buf_arg : v->buf_args()) {
+    buf_arg->accept(this);
+  }
+  for (const auto& arg : v->args()) {
+    arg->accept(this);
+  }
+}
+
+void IRVisitor::visit(FreeExtPtr v) {
+  for (const auto& buf : v->bufs()) {
+    buf->accept(this);
+  }
+}
+
 void IRVisitor::visit(BlockPtr v) {
   for (StmtPtr s : *v) {
     s->accept(this);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
@@ -17,9 +17,10 @@ namespace cuda {
 
 class IndexReferenceReplay : public OptInDispatch {
  private:
-  IndexReferenceReplay(const std::vector<kir::ForLoop*>& loop_structure)
-      : loop_structure_(loop_structure),
-        ca_map_(GpuLower::current()->caIndexMap()) {}
+  IndexReferenceReplay(
+      const std::vector<kir::ForLoop*>& loop_structure,
+      const TensorView* consumer_tv)
+      : loop_structure_(loop_structure), consumer_tv_(consumer_tv) {}
 
   // Generate the replay.
   TensorDomain* computeReplay();
@@ -34,12 +35,12 @@ class IndexReferenceReplay : public OptInDispatch {
   // Make a new id for the reference replay based on the provided id
   IterDomain* idCopy(IterDomain* id);
 
-  // Use the compute at map to get the fusion IterDomain from the
-  // kir::IterDomain
-  IterDomain* toFusionID(kir::IterDomain* kir_id);
-
   // Return the concrete entry of the non-reference id
   IterDomain* toConcrete(IterDomain* id);
+
+  //! Remove mappings of reference IDs that do not end up being used
+  //! in the final reference domain
+  void cleanUpMappingsOfUnusedDomains(TensorDomain* reference_domain);
 
   using OptInDispatch::handle;
 
@@ -50,9 +51,8 @@ class IndexReferenceReplay : public OptInDispatch {
  private:
   // Hold the loop structure we're generating a reference for.
   const std::vector<kir::ForLoop*>& loop_structure_;
-
-  // Hold the compute at map used for the replay (index map)
-  const ComputeAtMap& ca_map_;
+  // The indexed or predicated consumer tensor
+  const TensorView* consumer_tv_ = nullptr;
 
   // Keep a vector of all iteration domains used in the reference (includes all
   // transformations)
@@ -73,8 +73,9 @@ class IndexReferenceReplay : public OptInDispatch {
  public:
   // Generate the reference of the provided loop nest structure
   static ReferenceTensor getReference(
-      const std::vector<kir::ForLoop*>& loop_structure) {
-    auto replay = IndexReferenceReplay(loop_structure);
+      const std::vector<kir::ForLoop*>& loop_structure,
+      const TensorView* consumer_tv) {
+    auto replay = IndexReferenceReplay(loop_structure, consumer_tv);
     ReferenceTensor ref;
     ref.domain = replay.computeReplay();
     ref.concrete_to_id = replay.concrete_to_ref_id_;
@@ -87,16 +88,17 @@ class IndexReferenceReplay : public OptInDispatch {
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_domain,
-    std::unordered_map<kir::IterDomain*, kir::Val*> index_map,
-    std::unordered_set<kir::IterDomain*> zero_domains,
+    std::unordered_map<IterDomain*, Val*> index_map,
+    std::unordered_set<IterDomain*> zero_domains,
     std::unordered_set<IterDomain*> preferred_path,
-    std::unordered_map<kir::IterDomain*, kir::Val*> halo_extent_map = {});
+    std::unordered_map<IterDomain*, Val*> halo_extent_map = {});
 
 // Short cut for global TVs. Index into the reference based on all loop indicies
 // in the loop structure.
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
-    TensorDomain* reference_domain);
+    TensorDomain* reference_domain,
+    kir::ForLoop* double_buffer_loop = nullptr);
 
 // When indexing there are sometimes an option to propagate an index down
 // multiple paths. This will return the IterDomains in the history of the

@@ -1,4 +1,5 @@
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/TransposeType.h>
 
 namespace at {
 namespace native {

@@ -1,6 +1,7 @@
 #include <ATen/native/vulkan/api/Context.h>
-#include <ATen/vulkan/Context.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Copy.h>
+#include <ATen/vulkan/Context.h>
 
 #include <sstream>
 
@@ -103,23 +104,19 @@ VkQueue acquire_queue(
 
 } // namespace
 
-Context::Context(const Adapter& adapter)
-    : adapter_(adapter),
-      device_(
-          create_device(
-              adapter.handle,
-              adapter.compute_queue_family_index),
-          &VK_DELETER(Device)),
-      queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
+Context::Context(const VkInstance instance, size_t adapter_i)
+    : instance_(instance),
+      adapter_i_(adapter_i),
+      device_(runtime()->get_adapter(adapter_i).device_handle()),
+      queue_(runtime()->get_adapter(adapter_i).request_queue()),
       shader_(gpu()),
       pipeline_(gpu()),
       threadcontext_(gpu()) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_,
-      "Invalid Vulkan device!");
 }
 
 Context::~Context() {
+  // Let the device know the context is done with the queue
+  runtime()->get_adapter(adapter_i_).return_queue(queue_);
   // Do not call flush() since all per-thread objects will be destroyed as each thread exits
 }
 
@@ -155,12 +152,7 @@ bool available() {
 Context* context() {
   static const std::unique_ptr<Context> context([]() -> Context* {
     try {
-      const Adapter adapter = runtime()->select([](const Adapter& adapter) {
-        // Select the first adapter.
-        return true;
-      });
-
-      return new Context(adapter);
+      return new Context(runtime()->instance(), runtime()->default_adapter_i());
     }
     catch (const std::exception& e) {
       TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());
@@ -196,7 +188,6 @@ Descriptor::Set dispatch_prologue(
     const Shader::Descriptor& shader_descriptor,
     const Shader::WorkGroup& local_work_group_size) {
   Context* const context = api::context();
-  const GPU gpu = context->gpu();
   Descriptor& descriptor = context->descriptor();
   Pipeline& pipeline = context->pipeline();
   Shader& shader = context->shader();

@@ -4,39 +4,12 @@
 #include <vector>
 
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
-
-#ifdef USE_KINETO
-namespace libkineto {
-struct TraceActivity;
-class ActivityTraceInterface;
-}
-#endif
 
 namespace torch {
 namespace autograd {
 namespace profiler {
-
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct KinetoObserverContext : public at::ObserverContext {
-  int64_t startUs;
-  int64_t endUS;
-  uint64_t correlationId;
-  uint64_t startThreadId;
-  uint64_t endThreadId;
-  c10::optional<std::vector<std::vector<int64_t>>> shapes;
-  c10::optional<std::vector<std::string>> dtypes;
-  int64_t sequenceNr;
-  uint64_t fwdThreadId;
-  uint8_t recFunScope;
-  c10::optional<std::vector<std::string>> stack;
-  c10::optional<std::vector<std::string>> module_hierarchy;
-  // Extra arguments for computing op flops
-  c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
-  torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
-  torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;
-  int64_t debug_handle;
-};
 
 struct TORCH_API KinetoEvent {
   uint64_t startThreadId() const {
@@ -299,14 +272,10 @@ struct TORCH_API KinetoEvent {
 // memory allocation events)
 struct TORCH_API ProfilerResult {
   ProfilerResult();
-#ifdef USE_KINETO
   ProfilerResult(
       uint64_t start_time,
       std::vector<KinetoEvent> events,
-      std::unique_ptr<libkineto::ActivityTraceInterface> trace);
-#else
-  ProfilerResult(std::vector<KinetoEvent> events);
-#endif // USE_KINETO
+      torch::profiler::impl::kineto::ActivityTraceWrapper trace);
   ~ProfilerResult();
 
   uint64_t trace_start_us() const {
@@ -317,17 +286,12 @@ struct TORCH_API ProfilerResult {
     return events_;
   }
 
-#ifdef USE_KINETO
   void save(const std::string& path);
-#endif // USE_KINETO
 
  private:
   uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
-#ifdef USE_KINETO
-  std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
-  bool saved_ = false;
-#endif // USE_KINETO
+  torch::profiler::impl::kineto::ActivityTraceWrapper trace_;
 };
 
 /*
@@ -380,10 +344,14 @@ TORCH_API void enableProfiler(
  * callback, via enableProfilerWithEventPostProcess, that takes these debug handles
  * and generates stack trace and module hierarchy information, once profiling is done.
  */
+using post_process_t = std::function<void(
+    /*debug_handle */ int64_t,
+    /*jit_stack    */ std::vector<std::string>&,
+    /*jit_modules  */ std::vector<std::string>&)>;
 TORCH_API void enableProfilerWithEventPostProcess(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities,
-    std::function<void(std::vector<KinetoEvent>&)>&& cb,
+    post_process_t&& cb,
     const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();

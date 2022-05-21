@@ -1,7 +1,10 @@
 import random
 
-from torch.utils.data import MapDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import MapDataPipe
 from typing import Iterator, List, Optional, TypeVar
+
+__all__ = ["ShufflerMapDataPipe", ]
 
 
 T_co = TypeVar('T_co', covariant=True)
@@ -9,21 +12,27 @@ T_co = TypeVar('T_co', covariant=True)
 
 @functional_datapipe('shuffle')
 class ShufflerMapDataPipe(MapDataPipe[T_co]):
-    r""" :class:`ShufflerMapDataPipe`
-
-    Map DataPipe to shuffle the input DataPipe via its indices.
+    r"""
+    Shuffle the input DataPipe via its indices (functional name: ``shuffle``).
 
     When it is used with :class:`~torch.utils.data.DataLoader`, the methods to
     set up random seed are different based on :attr:`num_workers`.
 
     For single-process mode (:attr:`num_workers == 0`), the random seed is set before
     the :class:`~torch.utils.data.DataLoader` in the main process. For multi-process
-    mode (:attr:`num_worker > 0`), `worker_init_fn` is used to set up a random seed
+    mode (:attr:`num_worker > 0`), ``worker_init_fn`` is used to set up a random seed
     for each worker process.
 
     Args:
         datapipe: MapDataPipe being shuffled
         indices: a list of indices of the MapDataPipe. If not provided, we assume it uses 0-based indexing
+
+    Example:
+        >>> from torchdata.datapipes.map import SequenceWrapper
+        >>> dp = SequenceWrapper(range(10))
+        >>> shuffle_dp = dp.shuffle()
+        >>> list(shuffle_dp)
+        [0, 4, 1, 6, 3, 2, 9, 5, 7, 8]
     """
     datapipe: MapDataPipe[T_co]
 

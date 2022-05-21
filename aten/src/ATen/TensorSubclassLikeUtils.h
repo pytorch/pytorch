@@ -28,8 +28,7 @@ constexpr auto kFunctorchWrappedTensors = DispatchKeySet({
 
 constexpr auto kTensorSubclassLike = kFunctorchWrappedTensors | DispatchKeySet({
     DispatchKey::Batched,
-    DispatchKey::SparseCPU,
-    DispatchKey::SparseCUDA,
+    DispatchKey::Sparse,
     DispatchKey::SparseCsrCPU,
     DispatchKey::SparseCsrCUDA,
     DispatchKey::Meta,
@@ -42,6 +41,12 @@ inline bool isTensorSubclassLike(const Tensor& tensor) {
 
 inline bool areAnyTensorSubclassLike(TensorList tensors) {
   return std::any_of(tensors.begin(), tensors.end(), isTensorSubclassLike);
+}
+
+inline bool areAnyOptionalTensorSubclassLike(const c10::List<c10::optional<Tensor>>& tensors) {
+  return std::any_of(tensors.begin(), tensors.end(), [](const optional<Tensor>& opt_tensor) {
+    return (opt_tensor.has_value() && isTensorSubclassLike(opt_tensor.value()));
+    });
 }
 
 }

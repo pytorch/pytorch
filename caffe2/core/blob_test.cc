@@ -1264,7 +1264,7 @@ void TestDataType(
     std::string dataTypeName) {
   LOG(INFO) << dataTypeName;
   FLAGS_caffe2_serialize_using_bytes_as_holder = true;
-  size_t numEl = 1000;
+  int numEl = 1000;
   // Proto with int32
   auto protoInt32 = CreateProtoWithInt32Data(dataType, numEl, false);
   caffe2::Blob blobInt32;

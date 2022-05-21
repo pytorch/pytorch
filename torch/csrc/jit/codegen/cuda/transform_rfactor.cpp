@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
@@ -52,23 +53,26 @@ class ReplayRFactor : public ReplayTransformations {
 
     // Manually replay the split, making reduction = false and rfactor = true
     // outer IterDomain
-    IterDomain* ido = new IterDomain(
-        new Int(0),
+    IterDomain* ido = IrBuilder::create<IterDomain>(
+        s->container(),
+        IrBuilder::create<Int>(s->container(), 0),
         s->innerSplit() ? remainder->as<Int>() : s->factor(),
         ParallelType::Serial,
         rfactor_outer ? IterType::Reduction : IterType::Iteration,
         true); // broadcast
 
     // inner IterDomain
-    IterDomain* idi = new IterDomain(
-        new Int(0),
+    IterDomain* idi = IrBuilder::create<IterDomain>(
+        s->container(),
+        IrBuilder::create<Int>(s->container(), 0),
         s->innerSplit() ? s->factor() : remainder->as<Int>(),
         ParallelType::Serial,
         rfactor_inner ? IterType::Reduction : IterType::Iteration,
         true);
 
     // Generate the split node
-    new Split(ido, idi, mapped, s->factor(), s->innerSplit());
+    IrBuilder::create<Split>(
+        s->container(), ido, idi, mapped, s->factor(), s->innerSplit());
 
     // Remove mapped id from leaf IDs
     leaf_ids_.erase(mapped);
@@ -115,14 +119,16 @@ class ReplayRFactor : public ReplayTransformations {
     Val* merged_id_size =
         mul(id_outer_mapped->extent(), id_inner_mapped->extent());
 
-    IterDomain* merged_id = new IterDomain(
-        new Int(0),
+    IterDomain* merged_id = IrBuilder::create<IterDomain>(
+        m->container(),
+        IrBuilder::create<Int>(m->container(), 0),
         merged_id_size->as<Int>(),
         ParallelType::Serial,
         rfactor_output ? IterType::Reduction : IterType::Iteration,
         true);
 
-    new Merge(merged_id, id_outer_mapped, id_inner_mapped);
+    IrBuilder::create<Merge>(
+        m->container(), merged_id, id_outer_mapped, id_inner_mapped);
 
     // Remove inputs from the leaf IDs
     leaf_ids_.erase(id_outer_mapped);
@@ -227,7 +233,7 @@ TensorDomain* TransformRFactor::runReplay(
         return rfactor_root_id;
       });
 
-  auto orig_td_root = orig_td->getRootDomain();
+  auto orig_td_root = orig_td->getMaybeRFactorDomain();
 
   // Generate a new TensorDomain and set up map from one root to this one.
   std::vector<IterDomain*> new_root(orig_td_root.size(), nullptr);
@@ -238,7 +244,8 @@ TensorDomain* TransformRFactor::runReplay(
     for (auto id : orig_td_root) {
       // If this is an rfactor root, it will be a reduction in this stage
       if (rfactor_root_axes.find(id) != rfactor_root_axes.end()) {
-        new_root[i] = new IterDomain(
+        new_root[i] = IrBuilder::create<IterDomain>(
+            id->container(),
             id->start(),
             id->extent(),
             id->stopOffset(),
@@ -248,7 +255,8 @@ TensorDomain* TransformRFactor::runReplay(
         // If this is not an rfactor root, but a reduction root, it should be
         // turned into an iteration domain
       } else if (id->isReduction()) {
-        new_root[i] = new IterDomain(
+        new_root[i] = IrBuilder::create<IterDomain>(
+            id->container(),
             id->start(),
             id->extent(),
             id->stopOffset(),
@@ -256,7 +264,7 @@ TensorDomain* TransformRFactor::runReplay(
             IterType::Iteration,
             false);
       } else {
-        new_root[i] = id->clone();
+        new_root[i] = id->cloneWithoutRFactor();
       }
       replay_map[id] = new_root[i++];
     }
@@ -296,7 +304,8 @@ TensorDomain* TransformRFactor::runReplay(
     if (dom->isRFactorProduct())
       rfactor_root.push_back(dom);
 
-  return new TensorDomain(
+  return IrBuilder::create<TensorDomain>(
+      orig_td->container(),
       new_root,
       rfactor_root,
       new_domain,
@@ -367,9 +376,9 @@ TensorDomain* TransformRFactor::runReplay2(
   // the domain we're creating
   std::vector<IterDomain*> new_root;
   std::unordered_map<IterDomain*, IterDomain*> replay_root_map;
-  for (auto id : orig_td->getRootDomain()) {
+  for (auto id : orig_td->getMaybeRFactorDomain()) {
     if (rfactor_root_axes.find(id) == rfactor_root_axes.end()) {
-      new_root.push_back(id->clone());
+      new_root.push_back(id->cloneWithoutRFactor());
       replay_root_map[id] = new_root.back();
     }
   }
@@ -392,7 +401,7 @@ TensorDomain* TransformRFactor::runReplay2(
           replayed_id->padToMultipleOfWarp(orig_id->getMaybeSizeAfterPadding());
         }
       } else if (axes_set.find(i) == axes_set.end()) {
-        IterDomain* new_id = orig_id->clone();
+        IterDomain* new_id = orig_id->cloneWithoutRFactor();
         new_domain.push_back(new_id);
         new_root.push_back(new_id);
       }
@@ -400,8 +409,11 @@ TensorDomain* TransformRFactor::runReplay2(
     }
   }
 
-  return new TensorDomain(
-      new_root, new_domain, std::vector<bool>(new_root.size(), true));
+  return IrBuilder::create<TensorDomain>(
+      orig_td->container(),
+      new_root,
+      new_domain,
+      std::vector<bool>(new_root.size(), true));
 }
 
 } // namespace cuda

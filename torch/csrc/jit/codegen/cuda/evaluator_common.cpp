@@ -1,8 +1,10 @@
-#include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+
+#include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 
 namespace torch {
 namespace jit {
@@ -68,8 +70,8 @@ std::vector<VALTYPE*> makeSortedEvaluationList(std::vector<VALTYPE*> input) {
 //! Kernel IR utility, collects all the symbolic integers
 //!  used in allocation nodes.
 void collectBufferSizes(
-    std::vector<kir::Val*>& into,
-    const std::vector<kir::Expr*>& exprs) {
+    std::vector<Val*>& into,
+    const std::vector<Expr*>& exprs) {
   for (auto expr : exprs) {
     if (auto allocate = dynamic_cast<kir::Allocate*>(expr)) {
       into.push_back(allocate->size());
@@ -82,56 +84,44 @@ void collectBufferSizes(
   }
 }
 
-//! Kernel IR utility, collects all the kir symbolic
+//! Kernel IR utility, collects all the kernel symbolic
 //!  integers we will need at runtime, i.e. after the
 //!  generated cuda kernel has already been compiled.
 //!  The values are to be used for runtime logic, like
 //!  `computeLaunchparams`.
-std::vector<kir::Val*> collectRuntimeUsedIntegers(
-    Fusion* fusion,
-    GpuLower* lower) {
-  std::vector<kir::Val*> ret;
-
+std::vector<Val*> collectRuntimeUsedIntegers(kir::Kernel* kernel) {
+  std::vector<Val*> ret;
+  auto all_tvs = ir_utils::allTvs(kernel);
   // Collect extent and integer inputs
-  for (auto val : fusion->usedMathVals()) {
-    auto kir_val = lower->lowerValue(val);
-    if (auto kir_tv = dynamic_cast<kir::TensorView*>(kir_val)) {
-      for (auto id : kir_tv->domain()->domain()) {
-        ret.push_back(id->extent());
-      }
-    } else if (val->isFusionInput()) {
-      if (kir_val->isA<kir::Int>()) {
-        ret.push_back(kir_val);
-      }
+  for (auto tv : all_tvs) {
+    for (auto id : tv->domain()->domain()) {
+      ret.push_back(id->extent());
     }
   }
-
+  for (auto inp : kernel->inputs()) {
+    if (inp->isA<Int>()) {
+      ret.push_back(inp);
+    }
+  }
   // Collect allocation sizes:
-  collectBufferSizes(ret, lower->kernel()->topLevelExprs());
-
+  collectBufferSizes(ret, kernel->topLevelExprs());
   return makeSortedEvaluationList(ret);
 }
-//! Fusion IR utility, collects all the fusionIR symbolic
-//!  integers we will need at runtime, i.e. after the
-//!  generated cuda kernel has already been compiled.
-//!  The values are to be used for runtime logic, like
-//!  `canSchedule` in heuristic look up.
+
 std::vector<Val*> collectRuntimeUsedIntegers(Fusion* fusion) {
   std::vector<Val*> ret;
-
+  auto all_tvs = ir_utils::allTvs(fusion);
   // Collect extent and integer inputs
-  for (auto val : fusion->usedMathVals()) {
-    if (auto tv = dynamic_cast<TensorView*>(val)) {
-      for (auto id : tv->domain()->domain()) {
-        ret.push_back(id->extent());
-      }
-    } else if (val->isFusionInput()) {
-      if (val->isA<Int>()) {
-        ret.push_back(val);
-      }
+  for (auto tv : all_tvs) {
+    for (auto id : tv->domain()->domain()) {
+      ret.push_back(id->extent());
     }
   }
-
+  for (auto inp : fusion->inputs()) {
+    if (inp->isA<Int>()) {
+      ret.push_back(inp);
+    }
+  }
   return makeSortedEvaluationList(ret);
 }
 
@@ -140,7 +130,7 @@ std::vector<Val*> collectRuntimeUsedIntegers(Fusion* fusion) {
 template <typename IRContext>
 void PrecomputedIntegersBase<IRContext>::initializeValueList(
     typename IRContext::EVALUATOR_TYPE& const_evaluator,
-    const std::vector<IR_VAL*>& sorted_value_list) {
+    const std::vector<Val*>& sorted_value_list) {
   // Initialize workspace
   num_of_values_ = sorted_value_list.size();
   defined_ = std::vector<bool>(num_of_values_, false);
@@ -161,7 +151,7 @@ void PrecomputedIntegersBase<IRContext>::initializeValueList(
 
 template <typename IRContext>
 c10::optional<int64_t> PrecomputedIntegersBase<IRContext>::getMaybeValueFor(
-    const IR_VAL* val) {
+    const Val* val) {
   auto index = val->evaluatorIndex();
   if (index < 0) {
     return c10::nullopt;
@@ -170,6 +160,17 @@ c10::optional<int64_t> PrecomputedIntegersBase<IRContext>::getMaybeValueFor(
     return c10::nullopt;
   }
   return values_[index];
+}
+
+template <typename IRContext>
+void PrecomputedIntegersBase<IRContext>::print() const {
+  std::cout << "Precomputed Integers:\n";
+  for (auto i : c10::irange(symbols_.size())) {
+    if (defined_[i]) {
+      std::cout << symbols_[i]->toInlineString() << " = " << values_[i]
+                << std::endl;
+    }
+  }
 }
 
 template <typename IRContext>
@@ -208,10 +209,9 @@ NaiveIntegerMachine<IRContext>::NaiveIntegerMachine(
   for (auto val : precomputed_integers_.symbols_) {
     auto def = val->definition();
     if (def) {
-      if (auto uop = dynamic_cast<typename IRContext::UNARY_OP_TYPE*>(def)) {
+      if (auto uop = dynamic_cast<UnaryOp*>(def)) {
         makeUnaryOp(uop);
-      } else if (
-          auto bop = dynamic_cast<typename IRContext::BINARY_OP_TYPE*>(def)) {
+      } else if (auto bop = dynamic_cast<BinaryOp*>(def)) {
         makeBinaryOp(bop);
       } else {
         TORCH_INTERNAL_ASSERT(false, "Unsupported expr");
@@ -234,8 +234,7 @@ void NaiveIntegerMachine<IRContext>::run() {
 }
 
 template <typename IRContext>
-void NaiveIntegerMachine<IRContext>::makeUnaryOp(
-    typename IRContext::UNARY_OP_TYPE* uop) {
+void NaiveIntegerMachine<IRContext>::makeUnaryOp(UnaryOp* uop) {
   int in = uop->inputs()[0]->evaluatorIndex();
   int out = uop->outputs()[0]->evaluatorIndex();
   TORCH_INTERNAL_ASSERT(in >= 0, "Integer Machine: unknown input: ", uop);
@@ -249,8 +248,7 @@ void NaiveIntegerMachine<IRContext>::makeUnaryOp(
 }
 
 template <typename IRContext>
-void NaiveIntegerMachine<IRContext>::makeBinaryOp(
-    typename IRContext::BINARY_OP_TYPE* bop) {
+void NaiveIntegerMachine<IRContext>::makeBinaryOp(BinaryOp* bop) {
   int in0 = bop->inputs()[0]->evaluatorIndex();
   int in1 = bop->inputs()[1]->evaluatorIndex();
   int out = bop->outputs()[0]->evaluatorIndex();
@@ -377,11 +375,8 @@ void NaiveIntegerMachine<IRContext>::runBinaryOp(int index) {
   precomputed_integers_.defined_[dest_index] = true;
 }
 
-KernelPrecomputedIntegers::KernelPrecomputedIntegers(
-    Fusion* fusion,
-    GpuLower& lower)
-    : lower_(&lower) {
-  loadSymbols(collectRuntimeUsedIntegers(fusion, lower_));
+KernelPrecomputedIntegers::KernelPrecomputedIntegers(kir::Kernel* kernel) {
+  loadSymbols(collectRuntimeUsedIntegers(kernel));
   kir::ExpressionEvaluator evaluator;
   initializeValueList(evaluator, symbols());
   initializeNamedScalars();
@@ -389,11 +384,11 @@ KernelPrecomputedIntegers::KernelPrecomputedIntegers(
 }
 
 void KernelPrecomputedIntegers::bindTensorMetaData(
-    kir::TensorView* tv,
+    TensorView* tv,
     const at::Tensor& at_tensor) {
-  std::vector<std::pair<kir::Val*, int64_t>> ret;
+  std::vector<std::pair<Val*, int64_t>> ret;
   const auto root_domain =
-      kir::TensorDomain::noReductions(tv->domain()->rootDomain());
+      TensorDomain::noReductions(tv->domain()->getMaybeRFactorDomain());
   TORCH_INTERNAL_ASSERT(
       at_tensor.ndimension() == static_cast<int>(root_domain.size()),
       "Something went wrong configuring launch. Inputs do not match.");
@@ -411,7 +406,7 @@ namespace {
 //!  and returns the corresponding parallel type if a match
 //!  is found.
 c10::optional<ParallelType> getMaybeThreadSizeParallelType(
-    kir::NamedScalar* named_scalar) {
+    NamedScalar* named_scalar) {
   auto& var_name = named_scalar->name();
   for (auto ptype : kParallelTypeThreads) {
     if (var_name == stringifyThreadSize(ptype)) {
@@ -425,7 +420,7 @@ c10::optional<ParallelType> getMaybeThreadSizeParallelType(
 
 void KernelPrecomputedIntegers::initializeNamedScalars() {
   for (auto val : symbols()) {
-    if (auto named_scalar = dynamic_cast<kir::NamedScalar*>(val)) {
+    if (auto named_scalar = dynamic_cast<NamedScalar*>(val)) {
       auto maybe_parallel_type = getMaybeThreadSizeParallelType(named_scalar);
       if (maybe_parallel_type.has_value()) {
         auto& index_list =
@@ -440,17 +435,17 @@ void KernelPrecomputedIntegers::initializeNamedScalars() {
 }
 
 void KernelPrecomputedIntegers::bindKernelInputs(
+    kir::Kernel* kernel,
     const at::ArrayRef<IValue>& aten_inputs) {
   if (hasValidValues()) {
     invalidate();
   }
 
-  auto kernel = lower_->kernel();
   const auto& inputs = kernel->inputs();
 
   for (const auto i : c10::irange(inputs.size())) {
     const auto input = inputs[i];
-    if (auto tensor_input = dynamic_cast<kir::TensorView*>(input)) {
+    if (auto tensor_input = dynamic_cast<TensorView*>(input)) {
       const auto aten_tensor = aten_inputs[i].toTensor();
       bindTensorMetaData(tensor_input, aten_tensor);
     } else if (input->isScalar() && input->dtype() == DataType::Int) {

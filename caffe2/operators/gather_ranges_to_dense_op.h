@@ -104,22 +104,23 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     int rangesDataOffset = 0;
     auto itemsize = data.dtype().itemsize();
 
-    auto batchSize = ranges.size(0);
+    const auto batchSize = ranges.size(0);
     vector<int64_t> outputDims{batchSize, 0};
     vector<char*> outputRawData;
+    outputRawData.reserve(OutputSize());
     for (const auto i : c10::irange(OutputSize())) {
-      auto* output = Output(i);
+      auto *const output = Output(i);
       outputDims[1] = lengths_[i];
       output->Resize(outputDims);
-      char* ptr = static_cast<char*>(output->raw_mutable_data(data.dtype()));
+      char *const ptr = static_cast<char*>(output->raw_mutable_data(data.dtype()));
       memset(ptr, 0, output->nbytes());
       outputRawData.push_back(ptr);
     }
 
     for (const auto i : c10::irange(batchSize)) {
       for (const auto j : c10::irange(OutputSize())) {
-        auto rangeStart = rangesData[rangesDataOffset++];
-        auto rangeLength = rangesData[rangesDataOffset++];
+        const auto rangeStart = rangesData[rangesDataOffset++];
+        const auto rangeLength = rangesData[rangesDataOffset++];
 
         if (rangeLength == 0) {
           // empty range, will be filled with zeros
@@ -145,6 +146,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
           auto& key = Input(KEY);
           auto* key_data = key.template data<int64_t>();
           vector<std::pair<int64_t, const char*>> buffer;
+          buffer.reserve(rangeLength);
           for (const auto b_i : c10::irange(rangeLength)) {
             int64_t one_key_item = key_data[rangeStart + b_i];
             auto* one_data_item = rawData + (rangeStart + b_i) * itemsize;

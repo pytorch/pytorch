@@ -3,7 +3,7 @@
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
+#include <ATen/core/class_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/stack.h>
 #include <c10/util/C++17.h>
@@ -314,7 +314,7 @@ class class_ : public ::torch::detail::class_base {
     def("__getstate__", std::forward<GetStateFn>(get_state));
 
     // __setstate__ needs to be registered with some custom handling:
-    // We need to wrap the invocation of of the user-provided function
+    // We need to wrap the invocation of the user-provided function
     // such that we take the return value (i.e. c10::intrusive_ptr<CurrClass>)
     // and assign it to the `capsule` attribute.
     using SetStateTraits =

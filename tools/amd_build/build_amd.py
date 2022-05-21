@@ -4,43 +4,50 @@
 import os
 import argparse
 import sys
-sys.path.append(os.path.realpath(os.path.join(
-    __file__,
-    os.path.pardir,
-    os.path.pardir,
-    os.path.pardir,
-    'torch',
-    'utils')))
+
+sys.path.append(
+    os.path.realpath(
+        os.path.join(
+            __file__, os.path.pardir, os.path.pardir, os.path.pardir, "torch", "utils"
+        )
+    )
+)
 
 from hipify import hipify_python  # type: ignore[import]
 
-parser = argparse.ArgumentParser(description='Top-level script for HIPifying, filling in most common parameters')
+parser = argparse.ArgumentParser(
+    description="Top-level script for HIPifying, filling in most common parameters"
+)
 parser.add_argument(
-    '--out-of-place-only',
-    action='store_true',
-    help="Whether to only run hipify out-of-place on source files")
+    "--out-of-place-only",
+    action="store_true",
+    help="Whether to only run hipify out-of-place on source files",
+)
 
 parser.add_argument(
-    '--project-directory',
+    "--project-directory",
     type=str,
-    default='',
+    default="",
     help="The root of the project.",
-    required=False)
+    required=False,
+)
 
 parser.add_argument(
-    '--output-directory',
+    "--output-directory",
     type=str,
-    default='',
+    default="",
     help="The directory to store the hipified project",
-    required=False)
+    required=False,
+)
 
 parser.add_argument(
-    '--extra-include-dir',
+    "--extra-include-dir",
     type=str,
     default=[],
-    nargs='+',
+    nargs="+",
     help="The list of extra directories in caffe2 to hipify",
-    required=False)
+    required=False,
+)
 
 args = parser.parse_args()
 
@@ -78,8 +85,11 @@ includes = [
     "aten/src/ATen/cuda/*",
     "aten/src/ATen/native/cuda/*",
     "aten/src/ATen/native/cudnn/*",
+    "aten/src/ATen/native/quantized/cudnn/*",
+    "aten/src/ATen/native/nested/cuda/*",
     "aten/src/ATen/native/sparse/cuda/*",
     "aten/src/ATen/native/quantized/cuda/*",
+    "aten/src/ATen/native/transformers/cuda/*",
     "aten/src/THC/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
@@ -89,16 +99,18 @@ includes = [
     "tools/autograd/templates/python_variable_methods.cpp",
 ]
 
+includes = [os.path.join(proj_dir, include) for include in includes]
+
 for new_dir in args.extra_include_dir:
     abs_new_dir = os.path.join(proj_dir, new_dir)
     if os.path.exists(abs_new_dir):
-        new_dir = os.path.join(new_dir, '**/*')
-        includes.append(new_dir)
+        abs_new_dir = os.path.join(abs_new_dir, "**/*")
+        includes.append(abs_new_dir)
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
     "caffe2/operators/pool_op_cudnn.cu",
-    '*/hip/*',
+    "*/hip/*",
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
     "torch/csrc/jit/codegen/cuda/codegen.cpp",
@@ -112,14 +124,17 @@ ignores = [
     "torch/include/*",
 ]
 
+ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]
+
 # Check if the compiler is hip-clang.
 def is_hip_clang() -> bool:
     try:
-        hip_path = os.getenv('HIP_PATH', '/opt/rocm/hip')
-        with open(hip_path + '/lib/.hipInfo') as f:
-            return 'HIP_COMPILER=clang' in f.read()
+        hip_path = os.getenv("HIP_PATH", "/opt/rocm/hip")
+        with open(hip_path + "/lib/.hipInfo") as f:
+            return "HIP_COMPILER=clang" in f.read()
     except IOError:
         return False
+
 
 # TODO Remove once gloo submodule is recent enough to contain upstream fix.
 if is_hip_clang():
@@ -128,7 +143,7 @@ if is_hip_clang():
     if os.path.exists(gloo_cmake_file):
         with open(gloo_cmake_file, "r") as sources:
             lines = sources.readlines()
-        newlines = [line.replace(' hip_hcc ', ' amdhip64 ') for line in lines]
+        newlines = [line.replace(" hip_hcc ", " amdhip64 ") for line in lines]
         if lines == newlines:
             print("%s skipped" % gloo_cmake_file)
         else:
@@ -142,7 +157,7 @@ if os.path.exists(gloo_cmake_file):
     do_write = False
     with open(gloo_cmake_file, "r") as sources:
         lines = sources.readlines()
-    newlines = [line.replace('RCCL_LIBRARY', 'RCCL_LIBRARY_PATH') for line in lines]
+    newlines = [line.replace("RCCL_LIBRARY", "RCCL_LIBRARY_PATH") for line in lines]
     if lines == newlines:
         print("%s skipped" % gloo_cmake_file)
     else:
@@ -158,7 +173,7 @@ if is_hip_clang():
     if os.path.exists(gloo_cmake_file):
         with open(gloo_cmake_file, "r") as sources:
             lines = sources.readlines()
-        newlines = [line.replace('HIP_HCC_FLAGS', 'HIP_CLANG_FLAGS') for line in lines]
+        newlines = [line.replace("HIP_HCC_FLAGS", "HIP_CLANG_FLAGS") for line in lines]
         if lines == newlines:
             print("%s skipped" % gloo_cmake_file)
         else:
@@ -173,4 +188,5 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    hip_clang_launch=is_hip_clang())
+    hip_clang_launch=is_hip_clang(),
+)

@@ -4,6 +4,12 @@
 #include <torch/library.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/to_native.h>
+#endif
+
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
@@ -12,23 +18,45 @@ namespace {
     const auto arguments_begin = stack->size() - num_arguments;
     auto arguments = torch::jit::last(stack, num_arguments);
 
+    auto any_functional_inputs = false;
+    auto any_tensor_inputs = false;
     for (uint64_t idx = 0; idx < num_arguments; ++idx) {
       const auto& ivalue = arguments[idx];
       if (ivalue.isTensor()) {
+        any_tensor_inputs = true;
         auto t = ivalue.toTensor();
-        at::functionalization::impl::sync(t);
-        auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
-        (*stack)[arguments_begin + idx] = t_new;
+        if (at::functionalization::impl::isFunctionalTensor(t)) {
+          any_functional_inputs = true;
+          at::functionalization::impl::sync(t);
+          auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
+          (*stack)[arguments_begin + idx] = t_new;
+        }
       } else if (ivalue.isTensorList()) {
+        any_tensor_inputs = true;
         auto tensors = ivalue.toTensorList();
-        at::functionalization::impl::sync(tensors);
-        auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(tensors));
-        (*stack)[arguments_begin + idx] = t_new;
+        if (at::functionalization::impl::isFunctionalTensor(tensors)) {
+          any_functional_inputs = true;
+          at::functionalization::impl::sync(tensors);
+          auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(tensors));
+          (*stack)[arguments_begin + idx] = t_new;
+        }
+      } else if (ivalue.isOptionalTensorList()) {
+        any_tensor_inputs = true;
+        auto opt_tensors = ivalue.toOptionalTensorList();
+        if (at::functionalization::impl::isFunctionalTensor(opt_tensors)) {
+          any_functional_inputs = true;
+          at::functionalization::impl::sync(opt_tensors);
+          auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
+          (*stack)[arguments_begin + idx] = t_new;
+        }
       }
     }
+    // we should wrap the output if any inputs were wrapped,
+    // OR if we're hitting a factory function (with no tensor inputs)
+    auto should_wrap_outputs = !any_tensor_inputs || any_functional_inputs;
     {
       at::AutoDispatchSkipFunctionalize guard;
-      op.redispatchBoxed(dispatchKeySet & c10::after_func_keyset, stack);
+      op.callBoxed(stack);
     }
     const auto num_returns = schema.returns().size();
     const auto returns_begin = stack->size() - num_returns;
@@ -36,19 +64,32 @@ namespace {
 
     for (const auto idx : c10::irange(num_returns)) {
       const auto& ivalue = returns[idx];
-      if (ivalue.isTensor()) {
+      if (ivalue.isTensor() && should_wrap_outputs) {
         auto t = ivalue.toTensor();
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
         (*stack)[returns_begin + idx] = t_new;
-      } else if (ivalue.isTensorList()) {
+      } else if (ivalue.isTensorList() && should_wrap_outputs) {
         auto tensors = ivalue.toTensorList();
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(tensors));
+        (*stack)[returns_begin + idx] = t_new;
+      } else if (ivalue.isOptionalTensorList() && should_wrap_outputs) {
+        auto opt_tensors = ivalue.toOptionalTensorList();
+        auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(opt_tensors));
         (*stack)[returns_begin + idx] = t_new;
       }
     }
   }
 }
 
+at::Tensor lift_functionalize(const at::Tensor & self) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  return at::functionalization::impl::to_functional_tensor(self);
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
+}
+
+TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
+  m.impl("lift", TORCH_FN(lift_functionalize));
 }

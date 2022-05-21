@@ -31,7 +31,7 @@ class GRUCell(rnn_cell.RNNCell):
     # (reset gate -> output_gate)
     # So, much of the logic to calculate the reset gate output and modified
     # output gate input is set here, in the graph definition.
-    # The remaining logic lives in in gru_unit_op.{h,cc}.
+    # The remaining logic lives in gru_unit_op.{h,cc}.
     def _apply(
         self,
         model,

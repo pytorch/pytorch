@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
+#include <ATen/core/interned_strings.h>
 #include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -68,6 +70,11 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 
 namespace tensorexpr {
 
+OperatorSet& getCustomOperatorSet() {
+  static OperatorSet _g_custom_operator_set{};
+  return _g_custom_operator_set;
+}
+
 static const OperatorSet& supported_non_eltwise_set() {
   // clang-format off
   static const OperatorSet supported_non_eltwise_set{
@@ -100,6 +107,7 @@ bool isSupported(Node* node) {
   if (get_tensorexpr_elementwise_set().contains(node) ||
       node->isMemberOf(supported_non_eltwise_set()) ||
       node->isMemberOf(supported_misc_set) ||
+      node->isMemberOf(getCustomOperatorSet()) ||
       (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
     // We only insert guards on Tensor types, so we rely on the output
     // of a node being uniquely determined by its input types.
@@ -139,7 +147,6 @@ bool isSupported(Node* node) {
 
   return false;
 }
-
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = true;
@@ -184,6 +191,24 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       it->output()->replaceAllUsesWith(it->input());
       auto profiled_type = it->ty(attr::profiled_type)->expect<TensorType>();
 
+      TensorTypePtr input_tensor_type = nullptr;
+      bool input_is_optional = false;
+      if (it->input()->type()->kind() == c10::TypeKind::TensorType) {
+        input_tensor_type = it->input()->type()->expect<TensorType>();
+      } else {
+        input_tensor_type = it->input()
+                                ->type()
+                                ->expectRef<OptionalType>()
+                                .getElementType()
+                                ->expect<TensorType>();
+        input_is_optional = true;
+      }
+
+      if (input_is_optional) {
+        it.destroyCurrent();
+        continue;
+      }
+
       // A value can be profiled with differently typed uses.
       // This can occur from:
       // - having a use which is not executed, so the type will be
@@ -203,18 +228,18 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       if (profiled_type == TensorType::get()) {
         continue;
       }
+
       // If we encounter non-identical profiled types for the same value, merge
       // them.  This situation can happen if, e.g., loop unrolling duplicates
       // profiled types in a loop body in a manner that isn't logically
       // consistent (see TestTEFuser.test_unrolled_cat).
-      auto input_type = it->input()->type()->expect<TensorType>();
-      if (input_type == TensorType::get()) {
+      if (input_tensor_type == TensorType::get()) {
         it->input()->setType(profiled_type);
       } else {
-        it->input()->setType(input_type->merge(*profiled_type));
+        it->input()->setType(input_tensor_type->merge(*profiled_type));
       }
-      it.destroyCurrent();
 
+      it.destroyCurrent();
     } else {
       for (Block* ib : it->blocks()) {
         removeProfileNodesAndSpecializeTypes(ib);
@@ -229,9 +254,9 @@ void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG("After removeProfileNodesAndSpecializeTypes:\n", *graph);
 }
 
-void removeTensorTypeSpecialization(Value* v) {
+bool hasTensorTypeSpecialization(Value* v) {
   if (!v->type()->cast<TensorType>()) {
-    return;
+    return false;
   }
   // Constants & TensorExprGroup will always produce specialized tensor type,
   // TypeCheck are inserted by this pass and only used by fusion groups that
@@ -239,9 +264,18 @@ void removeTensorTypeSpecialization(Value* v) {
   if (v->node()->kind() == prim::Constant ||
       v->node()->kind() == prim::TypeCheck ||
       v->node()->kind() == prim::TensorExprGroup) {
-    return;
+    return false;
   }
-  v->setType(TensorType::get());
+  if (v->type() == TensorType::get()) {
+    return false;
+  }
+  return true;
+}
+
+void removeTensorTypeSpecialization(Value* v) {
+  if (hasTensorTypeSpecialization(v)) {
+    v->setType(TensorType::get());
+  }
 }
 
 void removeTensorTypeSpecializations(Block* block) {
@@ -359,15 +393,32 @@ void insertTypeGuard(
   }
 }
 
+namespace {
+bool has_unsupported_pin_memory(const Node* node) {
+  // cant support non-constant pin_memory or pin_memory = True
+  if (auto maybe_index = node->schema().argumentIndexWithName("pin_memory")) {
+    int index = *maybe_index;
+    auto inp = node->input(index);
+    if (inp->type() != NoneType::get() &&
+        constant_as<bool>(inp).value_or(true)) {
+      return true;
+    }
+  }
+  return false;
+}
+} // namespace
+
 class TensorExprFuser {
  public:
   TensorExprFuser(
       std::shared_ptr<Graph> graph,
       size_t min_group_size,
-      bool disable_shape_checks)
+      bool add_composed_op,
+      bool fuse_to_dynamic_shapes)
       : graph_(std::move(graph)),
         min_group_size_(min_group_size),
-        disable_shape_checks_(disable_shape_checks) {
+        add_composed_op_(add_composed_op),
+        fuse_to_dynamic_shapes_(fuse_to_dynamic_shapes) {
     parseTENotFuseOption();
   }
 
@@ -505,7 +556,7 @@ class TensorExprFuser {
     // fusion is done.
     inlineSmallFusionGroups(graph_->block());
     GRAPH_DUMP("After inlining small fusion groups: ", graph_);
-    if (tensorExprDynamicShapeFusionEnabled()) {
+    if (fuse_to_dynamic_shapes_) {
       VLOG(1) << "TensorExpr fusion with dynamic shapes is enabled"
               << std::endl;
       generalizeFusionGroups(graph_->block());
@@ -513,8 +564,6 @@ class TensorExprFuser {
     } else {
       prepareFusionGroupAndGuardOutputs(graph_->block());
       GRAPH_DUMP("After guarding fusion groups: ", graph_);
-      removeTensorTypeSpecializations(graph_->block());
-      GRAPH_DUMP("After removing tensor type specializations: ", graph_);
     }
   }
 
@@ -583,7 +632,9 @@ class TensorExprFuser {
   // No Ops in eager shouldn't be outputs of Fusion Groups because it
   // will degrade perf and change aliasing relationships
   static bool unexecutedEagerOp(Node* n) {
-    if (n->kind() != aten::to) {
+    if (n->kind() != aten::to &&
+        n->kind() != aten::_autocast_to_reduced_precision &&
+        n->kind() != aten::_autocast_to_full_precision) {
       return false;
     }
 
@@ -707,6 +758,10 @@ class TensorExprFuser {
     }
     // Cleanup the subgraph from duplicated constants while we're at it.
     ConstantPooling(subgraph);
+
+    if (GRAPH_DEBUG_ENABLED) {
+      GRAPH_EXPORT("", subgraph);
+    }
     return false;
   }
 
@@ -799,12 +854,16 @@ class TensorExprFuser {
     if (device->is_cpu()) {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
+#ifndef C10_MOBILE
+      if (fuser::cuda::isEnabled()) {
+        return false;
+      }
+#endif
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
       return false;
-    } else {
-      TORCH_CHECK_NOT_IMPLEMENTED(false, "Unknown device for tensorexpr fuser")
     }
+    return false;
   }
 
   bool isFusableOnDevice(Node* node) {
@@ -836,7 +895,7 @@ class TensorExprFuser {
       "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
     };
-    static const OperatorSet cpu_only_operator_set{
+    static const OperatorSet cpu_compute_heavy_set{
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
     };
@@ -918,7 +977,11 @@ class TensorExprFuser {
     }
 
     // Operator is only supported on CPU.
-    if (node->isMemberOf(cpu_only_operator_set)) {
+    if (node->isMemberOf(cpu_compute_heavy_set)) {
+      if (fuse_to_dynamic_shapes_) {
+        return false;
+      }
+
       auto device = tensorexpr::pickDeviceType(node->inputs());
       if (!device) {
         device = tensorexpr::pickDeviceType(node->outputs());
@@ -956,15 +1019,22 @@ class TensorExprFuser {
           return false;
         }
       }
-      // cant support non-constant pin_memory or pin_memory = True
-      if (auto maybe_index =
-              node->schema().argumentIndexWithName("pin_memory")) {
-        int index = *maybe_index;
-        auto inp = node->input(index);
-        if (inp->type() != NoneType::get() &&
-            constant_as<bool>(inp).value_or(true)) {
+
+      if (has_unsupported_pin_memory(node)) {
+        return false;
+      }
+    }
+
+    if (node->kind() == aten::_autocast_to_reduced_precision ||
+        node->kind() == aten::_autocast_to_full_precision) {
+      for (auto i : c10::irange(1, node->inputs().size())) {
+        if (node->inputs().at(i)->node()->kind() != prim::Constant) {
           return false;
         }
+      }
+
+      if (has_unsupported_pin_memory(node)) {
+        return false;
       }
     }
 
@@ -997,7 +1067,7 @@ class TensorExprFuser {
   }
 
   bool canHandle(Node* node) {
-    REQ(disable_shape_checks_ || allShapesAreKnown(node));
+    REQ(allShapesAreKnown(node));
     REQ(isFusableOnDevice(node));
     REQ(operators_not_to_fuse.find(node->kind()) ==
         operators_not_to_fuse.end());
@@ -1036,11 +1106,13 @@ class TensorExprFuser {
     // A hook to optimizations limitter to allow bisecting the pass
     REQ(JIT_OPT_ALLOWED);
 
-    if (tensorExprDynamicShapeFusionEnabled()) {
+    if (fuse_to_dynamic_shapes_) {
       // Allow only if the node has a shape function defined.
       // ListConstruct node is an exception since that is needed to fuse
       // aten::cat, though it does not have a shape function.
       REQ(node->kind() == prim::ListConstruct ||
+          node->kind() == prim::TensorExprGroup ||
+          node->isMemberOf(tensorexpr::getCustomOperatorSet()) ||
           (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())));
     }
 
@@ -1170,8 +1242,9 @@ class TensorExprFuser {
       }
     }
     for (Node* fusion_group : fusion_groups) {
+      removeOutputsUsedOnlyInSize(fusion_group);
       VLOG(1) << "GenerateGuard for fusion group: " << *fusion_group;
-      if (!GenerateGuard(fusion_group, /*add_composed_op=*/true)) {
+      if (!GenerateGuard(fusion_group, add_composed_op_)) {
         VLOG(1) << "  Unfusing the fusion group because GenerateGuard failed"
                 << std::endl;
         SubgraphUtils::unmergeSubgraph(fusion_group);
@@ -1207,14 +1280,17 @@ class TensorExprFuser {
   std::set<NodeKind> operators_not_to_fuse;
   // Minimal size of a fusion group
   size_t min_group_size_;
-  // If true, shapes are ignored
-  bool disable_shape_checks_;
+  // compose Runtime Type Guard and Kernel in one op
+  bool add_composed_op_;
+  // generalize static shapes to dynamic shapes
+  bool fuse_to_dynamic_shapes_;
 };
 
 void FuseTensorExprs(
     std::shared_ptr<Graph>& graph,
     size_t min_group_size,
-    bool disable_shape_checks) {
+    bool add_composed_op,
+    bool fuse_to_dynamic_shapes) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Temporary change for Block code generation.
@@ -1222,10 +1298,16 @@ void FuseTensorExprs(
     min_group_size = 1;
   }
 
+  if (add_composed_op) {
+    TORCH_INTERNAL_ASSERT(
+        fuse_to_dynamic_shapes, "Fusing static shapes with composed op NYI");
+  }
+
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(graph, min_group_size, disable_shape_checks);
+  TensorExprFuser fuser(
+      graph, min_group_size, add_composed_op, fuse_to_dynamic_shapes);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
@@ -1235,7 +1317,9 @@ void FuseTensorExprs(
 }
 
 Operation createTensorExprOp(const Node* node) {
-  if (!tensorExprDynamicShapeFusionEnabled()) {
+  bool dynamic_shape_fusion_node =
+      node->hasAttribute(attr::striding_inputs_desc);
+  if (!dynamic_shape_fusion_node) {
     auto kernel =
         std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
     return [kernel](Stack& stack) {
@@ -1246,42 +1330,60 @@ Operation createTensorExprOp(const Node* node) {
   }
 
   // Handle the case when dynamic shape fusion is enabled.
-  //
-  // This case is different because the TensorExprGroup node is not part of
-  // the main graph, but it is part of the composed op TensorExprDynamicGroup.
-  // So, every run of the TensorExprDynamicGroup op will end up calling this
-  // function, but that still does not require creating a new TensorExprKernel
-  // for every such call. So, we maintain a cache from the node to the kernels
-  // created.
-  //
-  // TODO: Can we get rid of the cache here and still ensure that we compile
-  // the kernel only once for every op?
-  return [=](Stack& stack) {
-    // A cache from the node to the corresponding kernel.
-    static std::unordered_map<
-        std::string,
-        std::shared_ptr<tensorexpr::TensorExprKernel>>
-        cached_kernels;
-    std::ostringstream node_ss;
-    node->print(node_ss, 0, nullptr);
-    auto node_str = node_ss.str();
-    auto subgraph = node->g(attr::Subgraph);
-    auto it = cached_kernels.find(node_str);
-    std::shared_ptr<tensorexpr::TensorExprKernel> kernel;
-    if (it != cached_kernels.end()) {
-      kernel = it->second;
-    } else {
-      VLOG(1) << "Compiling a new kernel for " << *node;
-      std::vector<int64_t> sym_shapes;
-      if (node->hasAttribute(attr::symbolic_shape_inputs)) {
-        sym_shapes = node->is(attr::symbolic_shape_inputs);
-      }
-      std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
-          custom_lowerings;
-      kernel = std::make_shared<tensorexpr::TensorExprKernel>(
-          subgraph, custom_lowerings, sym_shapes);
-      cached_kernels[node_str] = kernel;
+  VLOG(1) << "Compiling a new kernel for " << *node;
+  std::vector<int64_t> sym_shapes;
+  if (node->hasAttribute(attr::symbolic_shape_inputs)) {
+    sym_shapes = node->is(attr::symbolic_shape_inputs);
+  }
+  bool allow_stack_outputs = false;
+  if (node->hasAttribute(attr::allow_stack_outputs)) {
+    allow_stack_outputs = node->i(attr::allow_stack_outputs) == 1;
+  }
+
+  std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
+      custom_lowerings;
+  auto subgraph = node->g(attr::Subgraph);
+  IValue sym_strides = node->ival(attr::striding_inputs_desc);
+
+  // Striding Descriptor is serialized on the node as a vector of vector of
+  // strings, translate back to StrideInput enum
+  std::vector<std::vector<std::string>> sym_strides_strs =
+      sym_strides.to<std::vector<std::vector<std::string>>>();
+  std::vector<std::vector<StrideInput>> striding_inputs;
+  for (const auto& vec : sym_strides_strs) {
+    std::vector<StrideInput> input_desc;
+    input_desc.reserve(vec.size());
+    for (const std::string& str : vec) {
+      input_desc.push_back(strideInputFromString(str));
     }
+    striding_inputs.push_back(input_desc);
+  }
+  std::unordered_map<const Value*, std::vector<StrideInput>> stride_map;
+  size_t index = 0;
+  for (Value* v : subgraph->inputs()) {
+    if (!v->type()->cast<TensorType>()) {
+      continue;
+    }
+    stride_map[v] = striding_inputs[index];
+    index++;
+  }
+  std::vector<std::string> output_desc =
+      node->ival(attr::striding_outputs_desc).to<std::vector<std::string>>();
+  for (size_t i = 0; i < subgraph->outputs().size(); ++i) {
+    stride_map[subgraph->outputs().at(i)] = {
+        strideInputFromString(output_desc.at(i))};
+  }
+
+  std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
+      std::make_shared<tensorexpr::TensorExprKernel>(
+          subgraph,
+          custom_lowerings,
+          sym_shapes,
+          /*pre_alloc*/ false,
+          stride_map);
+
+  auto num_subgraph_inputs = subgraph->inputs().size();
+  return [kernel, num_subgraph_inputs, allow_stack_outputs](Stack& stack) {
     RECORD_FUNCTION(kernel->getKernelName(), std::vector<c10::IValue>());
 
     // Stack contents:
@@ -1291,8 +1393,7 @@ Operation createTensorExprOp(const Node* node) {
     // outputs are being passed in. Otherwise, output tensors are passed in
     // at the bottom of the stack. So, we call the appropriate run function
     // in TensorExprKernel.
-    auto num_subgraph_inputs = subgraph->inputs().size();
-    if (num_subgraph_inputs == stack.size()) {
+    if (num_subgraph_inputs == stack.size() || !allow_stack_outputs) {
       kernel->run(stack);
     } else {
       kernel->runWithAllocatedOutputs(stack);

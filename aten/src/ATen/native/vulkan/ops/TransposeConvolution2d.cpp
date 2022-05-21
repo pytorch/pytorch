@@ -1,8 +1,10 @@
-#include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -51,7 +53,7 @@ vTensor pack_weights_2d_reverse(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+  for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
     /* Source */
     const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
 
@@ -61,10 +63,10 @@ vTensor pack_weights_2d_reverse(
 
     float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
 
-    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
-      for (int64_t src_ih = 0; src_ih < src_kh_sz; ++src_ih) {
+    for (const auto src_ic : c10::irange(src_filter[Layout::Filter::input])) {
+      for (const auto src_ih : c10::irange(src_kh_sz)) {
         const int64_t dst_h = reversed ? (src_kh_sz - 1 - src_ih) : src_ih;
-        for (int64_t src_iw = 0; src_iw < src_kw_sz; ++src_iw) {
+        for (const auto src_iw : c10::irange(src_kw_sz)) {
           const int64_t dst_w = reversed ? (src_kw_sz - 1 - src_iw) : src_iw;
           const int64_t dst_w_offset = dst_w * stack_depth;
           memcpy(
@@ -85,7 +87,7 @@ vTensor pack_weights(const Tensor& weight_arg) {
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const Tensor weight = at::permute(weight_arg, {1, 0, 2, 3}).contiguous();
 
@@ -104,7 +106,7 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const int64_t src_w = weight.size(Layout::TransposedFilter::output);
   const int64_t packed_w = div_up(src_w, INT64_C(4));
@@ -127,7 +129,7 @@ vTensor pack_biases(
     float* const dst_bias_ptr = v_bias_payload.get();
 
     memset(dst_bias_ptr, 0, v_bias.nbytes());
-    for (int64_t i = 0; i < src_w; ++i) {
+    for (const auto i : c10::irange(src_w)) {
       const int64_t c = i % 4;
       const int64_t x = i / 4;
       dst_bias_ptr[c * packed_w + x] = src_bias_ptr[i];
@@ -251,7 +253,7 @@ static inline std::vector<int64_t> get_conv_transpose_output_size(
   std::vector<int64_t> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
   output_size[1] = weight_size[weight_input_channels_dim];
-  for (size_t d = 2; d < dim; ++d) {
+  for (const auto d : c10::irange(2, dim)) {
     output_size[d] = stride[d - 2] * (input_size[d] - 1) + weight_size[d] - 2 * padding[d - 2] + output_padding[d - 2];
   }
   return output_size;
@@ -352,6 +354,8 @@ void TransposeConv2dOpContext::conv2d_transpose_sliding_window(
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "prepacked::conv2d_transpose_clamp_run (conv2d_transpose_sliding_window)");
+
     const struct Block final {
       uvec3 extents;
       int32_t ic4;

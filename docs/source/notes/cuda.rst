@@ -364,6 +364,26 @@ Available options:
   :meth:`~torch.cuda.memory_summary` methods are useful for tuning.  This
   option should be used as a last resort for a workload that is aborting
   due to 'out of memory' and showing a large amount of inactive split blocks.
+* ``roundup_power2_divisions`` helps with rounding the requested allocation
+  size to nearest power-2 division and making better use of the blocks. In
+  the current CUDACachingAllocator, the sizes are rounded up in multiple
+  of blocks size of 512, so this works fine for smaller sizes. However, this
+  can be inefficient for large near-by allocations as each will go to different
+  size of blocks and re-use of those blocks are minimized. This might create
+  lots of unused blocks and will waste GPU memory capacity. This option enables
+  the rounding of allocation size to nearest power-2 division. For example, if
+  we need to round-up size of 1200 and if number of divisions is 4,
+  the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
+  them, the values are 1024, 1280, 1536, and 1792. So, allocation size of 1200
+  will be rounded to 1280 as the nearest ceiling of power-2 division.
+* ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
+  avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
+  which can be unfavorable to latency-critical GPU applications (e.g., servers).
+  Upon setting this threshold (e.g., 0.8), the allocator will start reclaiming
+  GPU memory blocks if the GPU memory capacity usage exceeds the threshold (i.e.,
+  80% of the total memory allocated to the GPU application). The algorithm prefers
+  to free old & unused blocks first to avoid freeing blocks that are actively being
+  reused. The threshold value should be between greater than 0.0 and less than 1.0.
 
 .. _cufft-plan-cache:
 
@@ -392,6 +412,25 @@ To control and query plan caches of a non-default device, you can index the
 object or a device index, and access one of the above attributes. E.g., to set
 the capacity of the cache for device ``1``, one can write
 ``torch.backends.cuda.cufft_plan_cache[1].max_size = 10``.
+
+.. _cuda-just-in-time-compilation:
+
+Just-in-Time Compilation
+------------------------
+
+PyTorch just-in-time compiles some operations, like torch.special.zeta, when
+performed on CUDA tensors. This compilation can be time consuming
+(up to a few seconds depending on your hardware and software)
+and may occur multiple times for a single operator since many PyTorch operators actually
+select from a variety of kernels, each of which must be compiled once, depending on their input.
+This compilation occurs once per process, or just once if a kernel cache is used.
+
+By default, PyTorch creates a kernel cache in $XDG_CACHE_HOME/torch/kernels if
+XDG_CACHE_HOME is defined and $HOME/.cache/torch/kernels if it's not (except on Windows,
+where the kernel cache is not yet supported). The caching behavior can be directly
+controlled with two environment variables. If USE_PYTORCH_KERNEL_CACHE is set to 0 then no
+cache will be used, and if PYTORCH_KERNEL_CACHE_PATH is set then that path will be used
+as a kernel cache instead of the default location.
 
 Best practices
 --------------

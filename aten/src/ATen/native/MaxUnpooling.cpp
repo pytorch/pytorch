@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/MaxUnpoolKernel.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -14,18 +15,19 @@ Tensor& max_unpooling2d_forward_out_cpu(
   auto owidth = output_size[1];
   TORCH_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64");
+      "elements in indices should be type int64 but got: ", indices_.scalar_type());
   TORCH_CHECK(
       output_size.size() == 2,
-      "There should be exactly two elements (height, width) in output_size");
+      "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
   TORCH_CHECK(
       (self_.ndimension() == 3 || self_.ndimension() == 4),
-      "Input to max_unpooling2d should be a 3d or 4d Tensor");
+      "Input to max_unpooling2d should be a 3d or 4d Tensor, but got a tensor with ", self_.ndimension(), " dimensions.");
   TORCH_CHECK(
       self_.sizes() == indices_.sizes(),
-      "Shape of indices should match shape of input");
+      "Expected shape of indices to be same as that of the input tensor (", self_.sizes(),
+      ") but got indices tensor with shape: ", indices_.sizes());
 
-  for (int64_t i = 1; i < self_.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, self_.ndimension())) {
     TORCH_CHECK(self_.size(i) > 0, "max_unpooling2d_forward_out_cpu(): ",
                 "Expected input to have non-zero size for non-batch dimensions, but got ",
                 self_.sizes(), " with dimension ", i , " being empty.");
@@ -77,22 +79,22 @@ static void max_unpooling3d_shape_check(
       "elements in indices should be type int64");
   TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
-      "Input to max_unpooling3d should be a 4d or 5d Tensor",
-      input.sizes());
+      "Input to max_unpooling3d should be a 4d or 5d Tensor, but got a tensor with ", input.ndimension(), " dimensions.");
   TORCH_CHECK(
       output_size.size() == 3,
-      "There should be exactly three elements (depth, height, width) in output_size");
+      "There should be exactly three elements (depth, height, width) in output_size, but got ", output_size.size(), " elements.");
   TORCH_CHECK(
       stride.size() == 3,
-      "There should be exactly three elements (depth, height, width) in stride");
+      "There should be exactly three elements (depth, height, width) in stride, but got: ", stride.size(), " elements.");
   TORCH_CHECK(
       padding.size() == 3,
-      "There should be exactly three elements (depth, height, width) in padding");
+      "There should be exactly three elements (depth, height, width) in padding, but got: ", padding.size(), " elements.");
   TORCH_CHECK(
       input.sizes() == indices.sizes(),
-      "Shape of indices should match shape of input");
+      "Expected shape of indices to be same as that of the input tensor (", input.sizes(),
+      ") but got indices tensor with shape: ", indices.sizes());
 
-  for (int64_t i = 1; i < input.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, input.ndimension())) {
     TORCH_CHECK(input.size(i) > 0, fn_name,
                 ": Expected input to have non-zero size for non-batch dimensions, but got ",
                 input.sizes(), " with dimension ", i , " being empty.");
@@ -183,130 +185,8 @@ Tensor max_unpooling3d_forward_cpu(
   return output;
 }
 
-Tensor& max_unpooling2d_backward_out_cpu(const Tensor& grad_output_,
-    const Tensor& self,
-    const Tensor& indices_,
-    IntArrayRef output_size,
-    Tensor& grad_input) {
-  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  int64_t oheight = output_size[0];
-  int64_t owidth = output_size[1];
-  int64_t ndim = self.ndimension();
-  int64_t dimh = ndim == 3 ? 1 : 2;
-  int64_t dimw = ndim == 3 ? 2 : 3;
-
-  TORCH_CHECK(
-      indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64");
-  TORCH_CHECK(
-      self.sizes() == indices_.sizes(), "Input shape must match indices shape");
-  TORCH_CHECK(output_size.size() == 2, "Output size must be 2");
-
-  auto memory_format = self.suggest_memory_format();
-  auto grad_output = grad_output_.contiguous(memory_format);
-  auto indices = indices_.contiguous(memory_format);
-
-  grad_input.resize_(self.sizes(), memory_format);
-  grad_input.zero_();
-
-  if (owidth != grad_output.size(dimw) || oheight != grad_output.size(dimh)) {
-    AT_ERROR(
-        "Inconsistent gradOutput size. output height = ",
-        oheight,
-        ", output width = ",
-        owidth,
-        ", gradOutput: ",
-        grad_output.size(dimh),
-        "x",
-        grad_output.size(dimw));
-  }
-
-  if (grad_input.numel() != 0) {
-    max_unpool2d_backward_kernel(kCPU, grad_input, grad_output, indices);
-  }
-
-  return grad_input;
-}
-
-Tensor max_unpooling2d_backward_cpu(
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& indices,
-    IntArrayRef output_size) {
-  auto grad_input = at::empty({0}, self.options());
-  max_unpooling2d_backward_out_cpu(
-      grad_output, self, indices, output_size, grad_input);
-  return grad_input;
-}
-
-Tensor& max_unpooling3d_backward_out_cpu(
-    const Tensor& grad_output_,
-    const Tensor& self,
-    const Tensor& indices_,
-    IntArrayRef output_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    Tensor& grad_input) {
-  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  int64_t oT = output_size[0];
-  int64_t oH = output_size[1];
-  int64_t oW = output_size[2];
-  int64_t ndim = self.ndimension();
-  int64_t dimt = ndim == 4 ? 1 : 2;
-  int64_t dimh = ndim == 4 ? 2 : 3;
-  int64_t dimw = ndim == 4 ? 3 : 4;
-
-  max_unpooling3d_shape_check(
-   self, grad_output_, indices_, output_size, stride, padding, "max_unpooling3d_backward_out_cpu()");
-
-  /* get contiguous gradOutput */
-  auto grad_output = grad_output_.contiguous();
-  auto indices = indices_.contiguous();
-
-  /* resize */
-  grad_input.resize_as_(self);
-  grad_input.zero_();
-
-  if (oW != grad_output.size(dimw) || oH != grad_output.size(dimh) || oT != grad_output.size(dimt)) {
-    AT_ERROR(
-        "Inconsistent gradOutput size. output depth = ",
-        oT,
-        ", output height = ",
-        oH,
-        ", output width = ",
-        oW,
-        ", gradOutput: ",
-        grad_output.size(dimt),
-        "x",
-        grad_output.size(dimh),
-        "x",
-        grad_output.size(dimw));
-  }
-
-  if (grad_input.numel() != 0) {
-    max_unpool3d_backward_kernel(kCPU, grad_input, grad_output, indices);
-  }
-
-  return grad_input;
-}
-
-Tensor max_unpooling3d_backward_cpu(
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& indices,
-    IntArrayRef output_size,
-    IntArrayRef stride,
-    IntArrayRef padding) {
-  auto grad_input = at::empty({0}, self.options());
-  at::native::max_unpooling3d_backward_out_cpu(
-      grad_output, self, indices, output_size, stride, padding, grad_input);
-  return grad_input;
-}
-
 DEFINE_DISPATCH(max_unpool2d_kernel);
-DEFINE_DISPATCH(max_unpool2d_backward_kernel);
 DEFINE_DISPATCH(max_unpool3d_kernel);
-DEFINE_DISPATCH(max_unpool3d_backward_kernel);
 
 } // namespace native
 } // namespace at

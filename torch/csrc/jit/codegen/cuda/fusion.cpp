@@ -8,9 +8,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
-
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 
 namespace torch {
 namespace jit {
@@ -31,19 +30,16 @@ FusionGuard::~FusionGuard() {
 Fusion* FusionGuard::getCurFusion() {
   return ACTIVE_FUSION;
 }
+void FusionGuard::setCurFusion(Fusion* fusion) {
+  ACTIVE_FUSION = fusion;
+}
 
 void swap(Fusion& a, Fusion& b) noexcept {
   FUSER_PERF_SCOPE("Fusion swap");
 
   using std::swap;
 
-  // Swap the content
-  swap(a.val_set_, b.val_set_);
-  swap(a.expr_set_, b.expr_set_);
-  swap(a.val_deque_, b.val_deque_);
-
-  swap(a.val_type_name_map_, b.val_type_name_map_);
-  swap(a.expr_name_counter_, b.expr_name_counter_);
+  swap(static_cast<IrContainer&>(a), static_cast<IrContainer&>(b));
 
   swap(a.inputs_, b.inputs_);
   swap(a.outputs_, b.outputs_);
@@ -51,27 +47,6 @@ void swap(Fusion& a, Fusion& b) noexcept {
   swap(a.io_alias_, b.io_alias_);
   swap(a.permuted_input_map_, b.permuted_input_map_);
   swap(a.permuted_output_map_, b.permuted_output_map_);
-
-  // Fixup the Statement::fusion_ links for a
-  for (auto val : a.val_set_) {
-    val->fusion_ = &a;
-  }
-  for (auto expr : a.expr_set_) {
-    expr->fusion_ = &a;
-  }
-
-  // Fixup the Statement::fusion_ links for b
-  for (auto val : b.val_set_) {
-    val->fusion_ = &b;
-  }
-  for (auto expr : b.expr_set_) {
-    expr->fusion_ = &b;
-  }
-}
-
-Fusion::Fusion(const Fusion& other) {
-  FUSER_PERF_SCOPE("Fusion copy");
-  Fusion::copy(&other, this);
 }
 
 std::unique_ptr<SegmentedFusion> Fusion::segment(
@@ -82,30 +57,21 @@ std::unique_ptr<SegmentedFusion> Fusion::segment(
 
 IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
   to->clear();
-  IrCloner ir_cloner(to);
+  auto ir_cloner = IrContainer::copy(from, to);
 
-  for (auto val : from->val_set_) {
-    to->val_set_.insert(ir_cloner.clone(val));
-  }
-
-  for (auto expr : from->expr_set_) {
-    to->expr_set_.insert(ir_cloner.clone(expr));
-  }
-
-  for (auto val : from->val_deque_) {
-    to->val_deque_.push_back(ir_cloner.clone(val));
-  }
-
-  for (auto val : from->val_set_) {
+  for (auto val : from->vals_) {
     ir_cloner.clone(val)->setDefinition(ir_cloner.clone(val->definition_));
     ir_cloner.clone(val)->setUses(ir_cloner.clone(val->uses_));
   }
 
-  to->val_type_name_map_ = from->val_type_name_map_;
-  to->expr_name_counter_ = from->expr_name_counter_;
-
   to->inputs_ = ir_cloner.clone(from->inputs_);
   to->outputs_ = ir_cloner.clone(from->outputs_);
+  for (auto inp : to->inputs_) {
+    inp->setIsFusionInput(true);
+  }
+  for (auto out : to->outputs_) {
+    out->setIsFusionOutput(true);
+  }
 
   // TODO: put this into ir_cloner instead
   for (const auto& entry : from->io_alias_) {
@@ -117,7 +83,20 @@ IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
   to->permuted_input_map_ = from->permuted_input_map_;
   to->permuted_output_map_ = from->permuted_output_map_;
 
+  to->all_tv_uses_valid_ = from->all_tv_uses_valid_;
+  // This should never be true on copy, but copying for completeness.
+  to->is_during_update_uses_ = from->is_during_update_uses_;
+
   return ir_cloner;
+}
+
+// Clang tidy complains when using default constructor for IrContainer instead
+// of copy constructor. Fusion::copy has a call to IrContainer::copy, so it's
+// redundant to use the IrContainer copy constructor, but it is harmless since
+// Fusion::copy starts by calling clear().
+Fusion::Fusion(const Fusion& other) : IrContainer(other) {
+  FUSER_PERF_SCOPE("Fusion copy");
+  Fusion::copy(&other, this);
 }
 
 Fusion::Fusion(Fusion&& other) noexcept {
@@ -147,36 +126,22 @@ Fusion::~Fusion() {
 void Fusion::clear() noexcept {
   FUSER_PERF_SCOPE("Fusion clear");
 
-  // Free the owned values
-  for (auto ptr : val_set_) {
-    delete ptr;
-  }
-
-  // Free the owned expressions
-  for (auto ptr : expr_set_) {
-    delete ptr;
-  }
-
-  val_set_.clear();
-  val_deque_.clear();
-  expr_set_.clear();
-
-  for (auto& kv : val_type_name_map_) {
-    kv.second = 0;
-  }
-
-  expr_name_counter_ = 0;
+  IrContainer::clear();
 
   inputs_.clear();
   outputs_.clear();
 
   io_alias_.clear();
+
   permuted_input_map_.clear();
   permuted_output_map_.clear();
+
+  all_tv_uses_valid_ = false;
+  is_during_update_uses_ = false;
 }
 
 void Fusion::removeExpr(Expr* expr) {
-  assertInFusion(expr, "Cannot remove expr ");
+  assertInContainer(expr, "Cannot remove expr ");
   // If we hit this error too frequently, we could lighten the restrictions so
   // that removing something that doesn't exist simply does nothing. For now,
   // we're going with the strictest model which errors.
@@ -194,13 +159,11 @@ void Fusion::removeExpr(Expr* expr) {
     }
   }
 
-  expr_set_.erase(expr);
-
-  delete expr;
+  IrContainer::removeExpr(expr);
 }
 
 void Fusion::removeVal(Val* val) {
-  assertInFusion(val, "Cannot remove val ");
+  assertInContainer(val, "Cannot remove val ");
 
   TORCH_CHECK(
       !val->isFusionInput(),
@@ -213,26 +176,26 @@ void Fusion::removeVal(Val* val) {
   if (orig != nullptr)
     removeExpr(val->definition());
 
-  for (Expr* use : unordered_uses(val))
+  for (Expr* use : unordered_uses(val)) {
     removeExpr(use);
-
-  val_set_.erase(val);
-
-  for (auto it = val_deque_.begin(); it != val_deque_.end(); it++)
-    if (*it == val) {
-      val_deque_.erase(it);
-      break;
-    }
-
-  delete val;
+  }
+  IrContainer::removeVal(val);
 }
 
 void Fusion::addInput(Val* input) {
-  assertInFusion(input, "Cannot register input ");
+  assertInContainer(input, "Cannot register input ");
+
+  TORCH_INTERNAL_ASSERT(
+      input->getDataType() != DataType::Index,
+      "Data type Index is a local compile time data type only, it cannot be used as an input in case it was generated from another kernel.");
 
   if (input->getValType().value() == ValType::TensorView) {
     auto tv = input->as<TensorView>();
     tv->setMemoryType(MemoryType::Global);
+  } else if (input->getValType().value() == ValType::Scalar) {
+    TORCH_CHECK(
+        !input->isConst(),
+        "Immediate scalar value cannot be added as an input. It is not necessary to pass it as an input.");
   }
 
   inputs_.push_back(input);
@@ -242,7 +205,20 @@ void Fusion::addInput(Val* input) {
 }
 
 void Fusion::addOutput(Val* output) {
-  assertInFusion(output, "Cannot register output ");
+  // We currently don't support explicitly outputing aliased inputs. This is
+  // because they are already marked as output for in-place update. It's tricky
+  // to allow marking them explicitly as real output, since that requires us to
+  // register/identify output not only by `Val*` pointer, but also by indices;
+  // it also requires us to magically arrange `outputs_` entries in proper order
+  // ^^^ this doesn't look intuitive on `outputs_` in fusion.
+  // I think we can solve this by marking addOutput on io_alias_ keys after
+  // fusion is fully defined. Tracking this in #1488
+  // Apparently we can't do this neither at the time. I think segmentation
+  // unfortunately would call addOutput after we marked io_alias_ map.
+  // TORCH_CHECK(io_alias_.count(output) == 0,
+  //     "can't register aliased output as real output");
+
+  assertInContainer(output, "Cannot register output ");
   if (output->getValType().value() == ValType::TensorView) {
     auto tv = output->as<TensorView>();
     tv->setMemoryType(MemoryType::Global);
@@ -285,7 +261,11 @@ void Fusion::replaceOutput(Val* output, Val* replacement) {
   TORCH_CHECK(find_output != outputs_.end(), "Unable to find output in Fusion");
 
   if (find_output != outputs_.end()) {
-    *find_output = replacement;
+    std::replace_if(
+        outputs_.begin(),
+        outputs_.end(),
+        [&output](Val* v) { return v == output; },
+        replacement);
 
     if (replacement->getValType().value() == ValType::TensorView) {
       replacement->setIsFusionOutput(true);
@@ -307,27 +287,8 @@ void Fusion::replaceOutput(Val* output, Val* replacement) {
   }
 }
 
-bool Fusion::inFusion(const Statement* stmt) const {
-  bool in_fusion = stmt->fusion() == this;
-  Statement* nonconst_stmt = const_cast<Statement*>(stmt); // NOLINT
-
-  if (stmt->isExpr()) {
-    in_fusion &= expr_set_.find(nonconst_stmt->as<Expr>()) != expr_set_.end();
-  }
-  if (stmt->isVal()) {
-    in_fusion &= val_set_.find(nonconst_stmt->as<Val>()) != val_set_.end();
-  }
-
-  return in_fusion;
-}
-
-void Fusion::assertInFusion(const Statement* stmt, const std::string& msg)
-    const {
-  TORCH_CHECK(inFusion(stmt), msg, " it was not found in the active fusion.");
-}
-
 std::vector<Expr*> Fusion::exprs() {
-  return ExprSort::getExprs(this);
+  return StmtSort::getExprs(this);
 }
 
 std::vector<Val*> Fusion::inputsOf(Val* val) {
@@ -341,12 +302,24 @@ void Fusion::validateInputs() {
       all_inputs.insert(input);
     }
   }
+
+  std::unordered_set<Val*> input_dims;
+  auto inp_tvs = ir_utils::filterByType<TensorView>(inputs());
+  for (auto tv : inp_tvs) {
+    for (auto id : tv->getMaybeRFactorDomain()) {
+      input_dims.emplace(id->extent());
+    }
+  }
   for (Val* input : all_inputs) {
     if (!input->isConstScalar()) {
       TORCH_CHECK(
-          hasInput(input) || inFusion(input),
+          input->isFusionInput() ||
+              // TODO: Switch:
+              inContainer(input),
+          // to: input_dims.find(input) != input_dims.end(),
+          // https://github.com/csarofeen/pytorch/issues/1365
           "Could not figure out how ",
-          input,
+          input->toString(),
           " is generated, however it was not specified as an input.");
     }
   }
@@ -365,9 +338,13 @@ void Fusion::print() {
   std::cout << "}\n\n";
 }
 
-void Fusion::printKernel() {
+void Fusion::printKernel(DataType index_type) {
   FUSER_PERF_SCOPE("Fusion::printKernel");
-  std::cout << codegen::generateCudaKernel(GpuLower(this).kernel());
+  TORCH_INTERNAL_ASSERT(
+      !this->isA<kir::Kernel>(),
+      "Cannot \"print kernel\" of a kernel container. ",
+      "This would require lowering during lowering.");
+  std::cout << codegen::generateCudaKernel(GpuLower(this, index_type).kernel());
 }
 
 void Fusion::printMath(bool from_outputs_only) {
@@ -394,7 +371,7 @@ void Fusion::printMath(bool from_outputs_only) {
         leaf_vals.push_back(val);
       }
     }
-    exprs_for_print = ExprSort::getExprs(this, leaf_vals);
+    exprs_for_print = StmtSort::getExprs(this, leaf_vals);
   }
 
   std::cout << "\n%kernel_math {\n";
@@ -412,33 +389,36 @@ void Fusion::printTransforms() {
   t_exprs.handle(this);
 }
 
-StmtNameType Fusion::registerVal(Val* val) {
-  if (val->fusion()) {
-    if (val->fusion() != this) {
-      TORCH_CHECK(false, val, " was not found in the active fusion.");
-    }
-    if (inFusion(val)) {
-      return val->name();
-    }
+void Fusion::registerVal(Val* val) {
+  if (inContainer(val)) {
+    return;
   }
 
-  val_set_.emplace(val);
-  val_deque_.push_back(val);
-  return getValName(*(val->getValType()));
+  if (val->fusion()) {
+    TORCH_CHECK(
+        val->fusion() == this, val, " was not found in the active fusion.");
+  }
+
+  IrContainer::registerVal(val);
 }
 
-StmtNameType Fusion::registerExpr(Expr* expr) {
-  if (expr->fusion()) {
-    if (expr->fusion() != this) {
-      TORCH_CHECK(false, expr, " was not found in the active fusion.");
-    }
-    if (inFusion(expr)) {
-      return expr->name();
-    }
+void Fusion::registerExpr(Expr* expr) {
+  if (inContainer(expr)) {
+    return;
   }
 
+  if (expr->fusion()) {
+    TORCH_CHECK(
+        expr->fusion() == this, expr, " was not found in the active fusion.");
+  }
+
+  IrContainer::registerExpr(expr);
+
+  bool has_tv = false;
+
   for (Val* input : expr->inputs()) {
-    assertInFusion(input, "Input to expr is invalid, ");
+    has_tv = has_tv || input->isA<TensorView>();
+    assertInContainer(input, "Input to expr is invalid, ");
     auto uses_copy = input->uses();
     if (std::find(uses_copy.begin(), uses_copy.end(), expr) ==
         uses_copy.end()) {
@@ -447,34 +427,25 @@ StmtNameType Fusion::registerExpr(Expr* expr) {
     }
   }
 
+  // Kernel is the only container type that is non-ssa. This is mainly (maybe
+  // only) because of initialization expressions which would overwrite tensor
+  // view definitions.
+  bool is_ssa = !this->isA<kir::Kernel>();
+
   for (Val* output : expr->outputs()) {
-    assertInFusion(output, "Output to expr is invalid, ");
-    if (output->definition() != nullptr) {
+    has_tv = has_tv || output->isA<TensorView>();
+    assertInContainer(output, "Output to expr is invalid, ");
+    if (output->definition() != nullptr && is_ssa) {
       removeExpr(output->definition());
     }
-    output->setDefinition(expr);
+    if (is_ssa || (!is_ssa && output->definition() == nullptr)) {
+      output->setDefinition(expr);
+    }
   }
 
-  expr_set_.emplace(expr);
-
-  resetTvUses();
-  return getExprName();
-}
-
-StmtNameType Fusion::registerStatement(Statement* stmt) {
-  if (inFusion(stmt))
-    return stmt->name();
-
-  if (stmt->isVal()) {
-    return registerVal(stmt->as<Val>());
-  } else if (stmt->isExpr()) {
-    return registerExpr(stmt->as<Expr>());
+  if (has_tv) {
+    resetTvUses();
   }
-
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "Could not register statement as Fusion could not recognize its type.");
-  return kInvalidStmName;
 }
 
 void Fusion::resetTvUses() {
@@ -484,8 +455,8 @@ void Fusion::resetTvUses() {
   // getExprs only uses definition, so even if we've modified uses already to
   // remove dead exprs, this could reinsert them. getExprs is also boundeds by
   // inputs as registered inputs will return nullptr as their definition.
-  const auto all_tvs = ir_utils::filterByType<TensorView>(val_set_);
-  const auto used_exprs = ExprSort::getExprs(this);
+  const auto all_tvs = ir_utils::filterByType<TensorView>(vals_);
+  const auto used_exprs = StmtSort::getExprs(this);
 
   for (auto tv : all_tvs) {
     tv->setUses({});
@@ -505,14 +476,6 @@ void Fusion::resetTvUses() {
 
   all_tv_uses_valid_ = true;
   is_during_update_uses_ = false;
-}
-
-const std::unordered_set<Val*>& Fusion::vals() const noexcept {
-  return val_set_;
-}
-
-const std::deque<Val*>& Fusion::deterministic_vals() const noexcept {
-  return val_deque_;
 }
 
 std::vector<Val*> Fusion::usedMathVals() {
@@ -553,35 +516,13 @@ std::vector<Val*> Fusion::usedMathVals() {
   return used_math_vals;
 }
 
-const std::unordered_set<Expr*>& Fusion::unordered_exprs() const noexcept {
-  return expr_set_;
-}
-
 std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
   return std::unordered_set<Expr*>(val->uses().begin(), val->uses().end());
 }
 
 Expr* Fusion::definition(const Val* val) const {
-  assertInFusion(val, "Cannot detect the definition of val, ");
+  assertInContainer(val, "Cannot detect the definition of val, ");
   return val->definition();
-}
-
-bool Fusion::hasInput(const Val* val) const {
-  assertInFusion(val, "Cannot check if val is an input, ");
-  return val->isFusionInput();
-}
-
-bool Fusion::hasOutput(const Val* val) const {
-  assertInFusion(val, "Cannot check if val is an output, ");
-  return val->isFusionOutput();
-}
-
-StmtNameType Fusion::getValName(ValType vtype) {
-  return val_type_name_map_[vtype]++;
-}
-
-StmtNameType Fusion::getExprName() {
-  return expr_name_counter_++;
 }
 
 // Indicate to kernel to set itself up to generate random numbers
@@ -590,28 +531,6 @@ bool Fusion::isStochastic() {
     if (expr->getExprType() == ExprType::UnaryOp)
       if (expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike)
         return true;
-  return false;
-}
-
-bool Fusion::hasReduction() {
-  FUSER_PERF_SCOPE("Fusion::hasReduction");
-
-  for (auto expr : exprs())
-    for (auto out : expr->outputs())
-      if (out->getValType() == ValType::TensorView)
-        if (out->as<TensorView>()->hasReduction())
-          return true;
-
-  return false;
-}
-
-bool Fusion::hasWelford() {
-  FUSER_PERF_SCOPE("Fusion::hasWelford");
-  for (auto expr : exprs()) {
-    if (expr->isA<WelfordOp>()) {
-      return true;
-    }
-  }
   return false;
 }
 
@@ -682,6 +601,33 @@ bool Fusion::isAliasCompatible(Val* left, Val* right) {
 }
 
 void Fusion::aliasOutputToInput(Val* output, Val* input) {
+  // Because we could cast output when input is cast.
+  TORCH_INTERNAL_ASSERT(
+      !output->isFusionOutput(),
+      "Do NOT add aliased output to fusion output outside of `aliasOutputToInput");
+
+  if (!input->isFusionInput()) {
+    auto input_expr = input->definition();
+    // TORCH_INTERNAL_ASSERT(input_def.etype() == ExprType::UnaryOp, "expected
+    // unary op for aliased input");
+    TORCH_INTERNAL_ASSERT(
+        input_expr->isA<UnaryOp>(), "expected unary op for aliased input");
+    auto input_uop = input_expr->as<UnaryOp>();
+    TORCH_INTERNAL_ASSERT(
+        input_uop->getUnaryOpType() == UnaryOpType::Cast,
+        "expected aliased input to be output of cast op");
+    input = input_uop->in();
+  }
+  TORCH_INTERNAL_ASSERT(
+      input->getDataType().has_value() && output->getDataType().has_value(),
+      "requires DataType to be available for aliased output to input");
+
+  if (input->getDataType().value() != output->getDataType().value()) {
+    output = castOp(input->getDataType().value(), output);
+  }
+  // TODO: output should be marked at the end of fusion definition #1488
+  addOutput(output);
+
   TORCH_INTERNAL_ASSERT(
       isAliasCompatible(input, output),
       "The input and output values are not alias-compatible.");
