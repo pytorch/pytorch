@@ -120,8 +120,8 @@ class AllocationInserter : public kir::ExprMutator {
           info.buffer->axis(axis_i)->isBroadcast()) {
         continue;
       }
-      auto concrete_id = gpu_lower->caParallelMap().getConcreteMappedID(
-          info.buffer->axis(axis_i));
+      auto concrete_id = gpu_lower->caMap()->getConcreteMappedID(
+          info.buffer->axis(axis_i), IdMappingMode::LOOP);
       init_dims.push_back(concrete_id);
     }
     Expr* init_expr =
@@ -333,8 +333,8 @@ class AllocationInserter : public kir::ExprMutator {
         continue;
       }
 
-      auto concrete_id = gpu_lower->caParallelMap().getConcreteMappedID(
-          info.buffer->axis(axis_i));
+      auto concrete_id = gpu_lower->caMap()->getConcreteMappedID(
+          info.buffer->axis(axis_i), IdMappingMode::LOOP);
       const bool is_block_dim =
           isParallelTypeBlockDim(concrete_id->getParallelType());
       const bool is_thread_dim =
@@ -436,7 +436,8 @@ class AllocationInserter : public kir::ExprMutator {
 
     // // Found where the allocation needs to be inserted
 
-    for (auto out : expr->outputs()) {
+    for (const auto i : c10::irange(expr->outputs().size())) {
+      auto out = expr->output(i);
       if (!out->isA<TensorView>()) {
         continue;
       }
@@ -450,6 +451,11 @@ class AllocationInserter : public kir::ExprMutator {
             default_val == nullptr,
             "Reduction should not have a default initialization value for predicate elimination.");
         init = expr->as<ReductionOp>()->init();
+      } else if (expr->isA<GroupedReductionOp>() && out_tv->hasReduction()) {
+        TORCH_INTERNAL_ASSERT(
+            default_val == nullptr,
+            "Reduction should not have a default initialization value for predicate elimination.");
+        init = expr->as<GroupedReductionOp>()->initVal(i);
       } else if (expr->isA<MmaOp>()) {
         init = expr->as<MmaOp>()->init();
       } else if (expr->isA<WelfordOp>()) {

@@ -28,7 +28,8 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
   // TODO: Memory use can probably be optimized by re-using kernels across GPUs with
   //   the same compute capability
 
-  int nTensors =  iter.ntensors();
+  int nInputs = iter.ninputs();
+  int nOutputs = iter.noutputs();
   const at::ScalarType common_dtype = iter.common_dtype();
   std::string f_inputs_type_str = at::cuda::jit::typeName(common_dtype);
   std::string compute_type_str = at::cuda::jit::typeName(toOpMathType(common_dtype));
@@ -37,7 +38,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
 
   // The cache key includes all the parameters to generate_code + vec_size + dev_idx
   std::stringstream ss;
-  ss << nTensors << f;
+  ss << nInputs << "_" << nOutputs << f;
   ss << f_inputs_type_str << compute_type_str << result_type_str;
   ss << static_cast<int>(at::cuda::jit::BinaryFuncVariant::NoScalar);
   ss << extra_args_types;
@@ -54,7 +55,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
     const std::lock_guard<std::mutex> lock{_jiterator_mutex};
     if (!fn_ptr->function) { // cache miss!
       // Generates program
-      auto code = at::cuda::jit::generate_code(nTensors, f, name,
+      auto code = at::cuda::jit::generate_code(nInputs, nOutputs, f, name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
@@ -121,7 +122,8 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
   //casting result to int is always safe, intermediate is int64 and won't overflow
   const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
 
-  int nTensors = iter.ntensors();
+  int nInputs = iter.ninputs();
+  int nOutputs = iter.noutputs();
   const at::ScalarType common_dtype = iter.common_dtype();
   std::string f_inputs_type_str = at::cuda::jit::typeName(common_dtype);
   std::string compute_type_str = at::cuda::jit::typeName(toOpMathType(common_dtype));
@@ -130,7 +132,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
 
   // The cache key includes all the parameters to generate_code + dev_idx
   std::stringstream ss;
-  ss << nTensors << f;
+  ss << nInputs << "_" << nOutputs << f;
   ss << f_inputs_type_str << compute_type_str << result_type_str;
   ss << contiguous << dynamic_casting;
   ss << static_cast<int>(at::cuda::jit::BinaryFuncVariant::NoScalar);
@@ -145,7 +147,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
   if (!fn_ptr->function) {
     const std::lock_guard<std::mutex> lock{_jiterator_mutex};
     if (!fn_ptr->function) {
-      auto code = at::cuda::jit::generate_code(nTensors, f, name,
+      auto code = at::cuda::jit::generate_code(nInputs, nOutputs, f, name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                contiguous, dynamic_casting,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
