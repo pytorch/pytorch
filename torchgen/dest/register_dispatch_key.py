@@ -616,6 +616,10 @@ check_inplace(out, sizes, options);
 const auto& out = outputs_[output_idx].get();
 resize_out(out, sizes, strides, options);
 {create_proxy}"""
+        elif k is SchemaKind.mutable:
+            raise AssertionError(
+                "SchemaKind.mutable structured operators are currently not supported"
+            )
         else:
             assert_never(k)
 
@@ -631,6 +635,10 @@ resize_out(out, sizes, strides, options);
             out_args = ", ".join(f"Tensor& out{i}" for i in range(returns))
             out_refs = ", ".join(f"std::ref(out{i})" for i in range(returns))
             return f"{class_name}({out_args}) : outputs_{{ {out_refs} }} {{}}"
+        elif k is SchemaKind.mutable:
+            raise AssertionError(
+                "SchemaKind.mutable structured operators are currently not supported"
+            )
         else:
             assert_never(k)
 
@@ -664,7 +672,8 @@ resize_out(out, sizes, strides, options);
         elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.MPS:
-            guard_field = "c10::OptionalMPSGuard guard_;"
+            # TODO: Move to OptionalMPSGuard.
+            guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""
 
