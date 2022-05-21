@@ -94,6 +94,19 @@ TEST(LazyDynamicOpsTest, NarrowCopy) {
   AllClose(z.cpu(), x.cpu().narrow_copy(X_DIM_INDEX, 0, Y_DIM));
 }
 
+TEST(LazyDynamicOpsTest, NarrowCopyViaSymSizes) {
+  auto xc = torch::rand({10});
+  auto x = xc.to(kLazy);
+  const size_t Y_DIM = 3;
+  const size_t X_DIM_INDEX = 0;
+  auto y = torch::rand({Y_DIM}).to(kLazy);
+  auto z = x.narrow_copy(X_DIM_INDEX, 0, y.sym_sizes()[0]);
+  auto zc = xc.narrow_copy(X_DIM_INDEX, 0, Y_DIM);
+  ASSERT_EQ(z.sizes()[0], xc.sizes()[0]); // note, xc not zc
+  // shape inference assumes narrow_copy can copy the whole tensor
+  AllClose(z.cpu(), zc);
+}
+
 TEST_F(LazyOpsTest, TestScalarTensor) {
   torch::Tensor scalar_tensor = torch::scalar_tensor(
       1., torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
@@ -8986,25 +8999,30 @@ TEST_F(LazyOpsTest, TestBitwiseXorScalarInPlace) {
 
 TEST_F(LazyOpsTest, TestLshift) {
   torch::Tensor input = torch::ones(
-      {4, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+      {4, 2}, torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
   torch::Tensor shift_amount = torch::randint(
-      16, input.sizes(), torch::TensorOptions().device(DefaultDevice()));
+      16,
+      input.sizes(),
+      torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
   torch::Tensor result = torch::__lshift__(input, shift_amount);
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_input = CopyToDevice(input, device);
     torch::Tensor lazy_shift_amount = CopyToDevice(shift_amount, device);
-    torch::Tensor lazy_result = torch::__lshift__(lazy_input, lazy_shift_amount);
+    torch::Tensor lazy_result =
+        torch::__lshift__(lazy_input, lazy_shift_amount);
     AllClose(result, lazy_result);
   });
 }
 
 TEST_F(LazyOpsTest, TestLshiftInPlace) {
   torch::Tensor input = torch::ones(
-      {4, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+      {4, 2}, torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_input = CopyToDevice(input, device);
     torch::Tensor shift_amount = torch::randint(
-        16, input.sizes(), torch::TensorOptions().device(DefaultDevice()));
+        16,
+        input.sizes(),
+        torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
     torch::Tensor result = input.__ilshift__(shift_amount);
     torch::Tensor lazy_shift_amount = CopyToDevice(shift_amount, device);
     torch::Tensor lazy_result = lazy_input.__ilshift__(lazy_shift_amount);
@@ -9015,7 +9033,7 @@ TEST_F(LazyOpsTest, TestLshiftInPlace) {
 
 TEST_F(LazyOpsTest, TestLshiftScalar) {
   torch::Tensor input = torch::ones(
-      {4, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+      {4, 2}, torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
   torch::Scalar shift_amount = 3;
   torch::Tensor result = torch::__lshift__(input, shift_amount);
   ForEachDevice([&](const torch::Device& device) {
@@ -9027,7 +9045,7 @@ TEST_F(LazyOpsTest, TestLshiftScalar) {
 
 TEST_F(LazyOpsTest, TestLshiftScalarInPlace) {
   torch::Tensor input = torch::ones(
-      {4, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+      {4, 2}, torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
   torch::Scalar shift_amount = 3;
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_input = CopyToDevice(input, device);
@@ -9040,25 +9058,30 @@ TEST_F(LazyOpsTest, TestLshiftScalarInPlace) {
 
 TEST_F(LazyOpsTest, TestRshift) {
   torch::Tensor input = torch::ones(
-      {4, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+      {4, 2}, torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
   torch::Tensor shift_amount = torch::randint(
-      16, input.sizes(), torch::TensorOptions().device(DefaultDevice()));
+      16,
+      input.sizes(),
+      torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
   torch::Tensor result = torch::__rshift__(input, shift_amount);
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_input = CopyToDevice(input, device);
     torch::Tensor lazy_shift_amount = CopyToDevice(shift_amount, device);
-    torch::Tensor lazy_result = torch::__rshift__(lazy_input, lazy_shift_amount);
+    torch::Tensor lazy_result =
+        torch::__rshift__(lazy_input, lazy_shift_amount);
     AllClose(result, lazy_result);
   });
 }
 
 TEST_F(LazyOpsTest, TestRshiftInPlace) {
   torch::Tensor input = torch::ones(
-      {4, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+      {4, 2}, torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_input = CopyToDevice(input, device);
     torch::Tensor shift_amount = torch::randint(
-        16, input.sizes(), torch::TensorOptions().device(DefaultDevice()));
+        16,
+        input.sizes(),
+        torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
     torch::Tensor result = input.__irshift__(shift_amount);
     torch::Tensor lazy_shift_amount = CopyToDevice(shift_amount, device);
     torch::Tensor lazy_result = lazy_input.__irshift__(lazy_shift_amount);
@@ -9069,7 +9092,7 @@ TEST_F(LazyOpsTest, TestRshiftInPlace) {
 
 TEST_F(LazyOpsTest, TestRshiftScalar) {
   torch::Tensor input = torch::ones(
-      {4, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+      {4, 2}, torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
   torch::Scalar shift_amount = 3;
   torch::Tensor result = torch::__rshift__(input, shift_amount);
   ForEachDevice([&](const torch::Device& device) {
@@ -9081,7 +9104,7 @@ TEST_F(LazyOpsTest, TestRshiftScalar) {
 
 TEST_F(LazyOpsTest, TestRshiftScalarInPlace) {
   torch::Tensor input = torch::ones(
-      {4, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+      {4, 2}, torch::TensorOptions(torch::kInt32).device(DefaultDevice()));
   torch::Scalar shift_amount = 3;
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_input = CopyToDevice(input, device);

@@ -9,13 +9,14 @@ import torch.distributed._shard.sharding_spec as shard_spec
 from torch.distributed._shard.partial_tensor import _PartialTensor
 
 from .api import (
-    _register_sharded_op,
+    _SHARDED_OPS,
     Shard,
     ShardedTensor,
     ShardedTensorMetadata,
     TensorProperties,
 )
 from .metadata import ShardMetadata  # noqa: F401
+from torch.distributed._shard.op_registry_utils import _decorator_func
 
 
 def empty(sharding_spec: shard_spec.ShardingSpec,
@@ -440,14 +441,11 @@ def sharded_op_impl(func):
         func(Callable): Torch function for which we want to provide a sharded
             implementation (ex: torch.nn.functional.linear)
     """
-    def decorator_sharded_func(wrapped_func):
-        _register_sharded_op(func, wrapped_func)
-
-        @functools.wraps(wrapped_func)
-        def wrapper(*args, **kwargs):
-            return wrapped_func(*args, **kwargs)
-        return wrapper
-    return decorator_sharded_func
+    return functools.partial(
+        _decorator_func,
+        op=func,
+        op_table=_SHARDED_OPS
+    )
 
 # Import all builtin sharded ops
 from ._ops import *  # noqa: F403

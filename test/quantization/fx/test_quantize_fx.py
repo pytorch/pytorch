@@ -4291,11 +4291,17 @@ class TestQuantizeFx(QuantizationTestCase):
                 for name, mod in m.named_modules():
                     if is_activation_post_process(mod) and mod.dtype == torch.quint8:
                         if backend == "fbgemm":
-                            self.assertEqual(mod.quant_min, 0)
-                            self.assertEqual(mod.quant_max, 127)
+                            lower_bnd = 0
+                            upper_bnd = 127
                         else:
-                            self.assertEqual(mod.quant_min, 0)
-                            self.assertEqual(mod.quant_max, 255)
+                            lower_bnd = 0
+                            upper_bnd = 255
+                        if issubclass(type(mod), FakeQuantize):
+                            self.assertEqual(mod.activation_post_process.quant_min, lower_bnd)
+                            self.assertEqual(mod.activation_post_process.quant_max, upper_bnd)
+                        else:
+                            self.assertEqual(mod.quant_min, lower_bnd)
+                            self.assertEqual(mod.quant_max, upper_bnd)
 
     def test_prepare_mode(self):
         class LinearModel(torch.nn.Module):
