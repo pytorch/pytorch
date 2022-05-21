@@ -384,7 +384,7 @@ TORCH_META_FUNC(linalg_ldl_solve)
 
   // prefer column major strides
   auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/true);
-  set_output_raw_strided(0, B_broadcast_size, result_strides, B.options(), {});
+  set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
 TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
@@ -4331,16 +4331,10 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
   auto LD_ = at::native::borrow_else_clone(
       LD.mT().is_contiguous(), LD, LD, /*row_major=*/false);
   result.copy_(B);
-  auto result_ = at::native::borrow_else_clone(
-      result.mT().is_contiguous(), result, result, /*row_major=*/false);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(result) == batchCount(*result_));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(result) == batchCount(result));
 
   ldl_solve_stub(
-      B.device().type(), *LD_, *pivots_, *result_, false, hermitian);
-
-  if (!result.is_same(*result_)) {
-    result.copy_(*result_);
-  }
+      B.device().type(), *LD_, *pivots_, result, false, hermitian);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve_triangular ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
