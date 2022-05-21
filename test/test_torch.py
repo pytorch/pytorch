@@ -3748,9 +3748,9 @@ else:
         self.assertEqual(c, c.index_select(0, ind_empty))
         w = torch.randn((0, 3), device=device)
         self.assertEqual((0, 2), w.index_select(1, ind_01).shape)
-        with self.assertRaisesRegex(RuntimeError, 'out of DATA bounds'):
+        with self.assertRaises(RuntimeError):
             torch.index_select(w, 0, ind_01)
-        with self.assertRaisesRegex(RuntimeError, 'out of DATA bounds'):
+        with self.assertRaises(RuntimeError):
             ind_05 = torch.tensor([0, 5], dtype=torch.int64, device=device)
             torch.index_select(w, 1, ind_05)
         w = torch.randn((3, 0), device=device)
