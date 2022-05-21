@@ -222,12 +222,8 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
     }
   } else {
     if (contiguous) {
-      at::detail::Array<ScalarType, traits::arity> dtypes;
-      for (int i = 0; i < traits::arity; i++) {
-        dtypes[i] = iter.dtype(i + 1);
-      }
-      auto loader = memory::LoadWithCast<traits::arity>(dtypes);
-      auto storer = memory::StoreWithCast(iter.dtype(0));
+      auto loader = memory::LoadWithCast<traits::arity>(iter);
+      auto storer = memory::StoreWithCast<1>(iter);
       auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
       auto output_offset_calculator = TrivialOffsetCalculator<1>();
       launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);

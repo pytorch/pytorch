@@ -283,14 +283,10 @@ void jitted_gpu_kernel_impl(
   // Both require construction of a storer (this asserts 1 output) and one or more loaders
 
   // Creates store cast to output (the zeroth tensor in TensorIterator)
-  auto storer = memory::StoreWithCast(iter.dtype(0));
+  auto storer = memory::StoreWithCast<1>(iter);
 
   // Creates load casts from inputs (note offset indexing into the iterators 1...n tensors)
-  at::detail::Array<ScalarType, arity> dtypes;
-  for (auto i = decltype(arity){0}; i < arity; ++i) {
-    dtypes[i] = iter.dtype(i + 1);
-  }
-  auto loader = memory::LoadWithCast<arity>(dtypes);
+  auto loader = memory::LoadWithCast<arity>(iter);
 
   if (contiguous) {
     // Case 3: dynamic casting and contiguous
