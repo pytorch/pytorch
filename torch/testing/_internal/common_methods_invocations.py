@@ -19050,6 +19050,11 @@ python_ref_db = [
         supports_out=True,
     ),
     ReductionPythonRefInfo(
+        "_refs.mean",
+        torch_opinfo_name="mean",
+        supports_out=True,
+    ),
+    ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
     ),
@@ -19067,7 +19072,15 @@ python_ref_db = [
         torch_opinfo_name="std",
         supports_out=True
     ),
-
+    # std_mean and var_mean are not ReductionInfos
+    PythonRefInfo(
+        "_refs.std_mean",
+        torch_opinfo_name="std_mean",
+    ),
+    PythonRefInfo(
+        "_refs.var_mean",
+        torch_opinfo_name="var_mean",
+    ),
     #
     # Tensor Creation Reference OpInfos
     #
