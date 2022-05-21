@@ -2,13 +2,11 @@
 
 template<typename T>
 __device__ void test(){
-  // test half construction and implicit conversions in device
+  // test half/bfloat16 construction and implicit conversions in device
   assert(T(3) == T(3.0f));
   assert(static_cast<T>(3.0f) == T(3.0f));
   // there is no float <=> __half/__nv_bfloat16 implicit conversion
-  assert(static_cast<T>(3.0f) == 3.0f);
-
-  // asserting if the functions used on
+  assert(static_cast<T>(3.0f) == 3.0f);  // asserting if the  functions used on
   // half types give almost equivalent results when using
   //  functions on double.
   // The purpose of these asserts are to test the device side
@@ -36,7 +34,7 @@ __device__ void test(){
   assert(::abs(::acosh(T(1.0)) - ::acosh(1.0f)) <= threshold);
   assert(::abs(::acosh(T(1.0)) - ::acosh(1.0f)) <= threshold);
   assert(::abs(::asinh(T(1.0)) - ::asinh(1.0f)) <= threshold);
-  assert(::abs(::atanh(T(0.5)) - ::atanh(0.5f)) <= threshold);
+  assert(::abs(::atanh(T(1.0)) - ::atanh(1.0f)) <= threshold);
   assert(::abs(::asin(T(1.0)) - ::asin(1.0f)) <= threshold);
   assert(::abs(::sinh(T(1.0)) - ::sinh(1.0f)) <= threshold);
   assert(::abs(::asinh(T(1.0)) - ::asinh(1.0f)) <= threshold);
