@@ -106,7 +106,7 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   auto options = self.options()
                      .dtype(toRealValueType(opt_dtype.value_or(self.scalar_type())));
 
-  set_output(shape, options);
+  set_output_raw_strided(0, shape, {}, options);
 }
 
 template <typename Meta>
