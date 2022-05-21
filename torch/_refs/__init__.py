@@ -372,8 +372,8 @@ floor = _make_elementwise_unary_reference(
 
 def _frac(x: TensorLikeType) -> TensorLikeType:
     # frac(x) = x - floor(abs(x)) * sign(x)
-    trunc_x = floor(abs(x))
-    return sub(x, mul(trunc_x, sign(x)))
+    trunc_x = mul(floor(abs(x)), sign(x))
+    return sub(x, trunc_x)
 
 
 frac = _make_elementwise_unary_reference(
