@@ -420,6 +420,15 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 _update_weight_fused_dtypes(weight, qualname, node)
                 serialized_dict["weights"].update(weight)
                 weights[qualname] = target
+        elif node.op == "placeholder":
+            ph_type = node.meta.get("ph_type", "")
+            assert (
+                ph_type == "" or ph_type == "input_ph" or ph_type == "output_ph"
+            ), "When present, placeholder type must be 'input_ph' or 'ouput_ph'"
+            if ph_type == "input_ph":
+                node_rep["ph_type"] = "input_ph"
+            elif ph_type == "output_ph":
+                node_rep["ph_type"] = "output_ph"
 
         node_rep["op_code"] = node.op
         node_rep["name"] = node.name
