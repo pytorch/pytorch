@@ -256,7 +256,7 @@ Examples::
   >>> y.requires_grad
   False
 
-.. torchsummary::
+.. autosummary::
     :toctree: generated
     :nosignatures:
 
