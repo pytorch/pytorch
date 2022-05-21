@@ -332,17 +332,17 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
 
   // prefer column major strides
   auto ld_strides = at::native::batched_matrix_contiguous_strides(self.sizes(), /*f-contig=*/true);
-  set_output_raw_strided(0, self.sizes(), ld_strides, self.options(), {}); // LD
+  set_output_strided(0, self.sizes(), ld_strides, self.options(), {}); // LD
 
   auto pivots_shape =
       IntArrayRef(self.sizes().data(), ndim - 1); // self.shape[:-1]
-  set_output_raw_strided(
-      1, pivots_shape, {}, self.options().dtype(ScalarType::Int), {}); // pivots
+  set_output_contiguous(
+      1, pivots_shape, self.options().dtype(ScalarType::Int)); // pivots
 
   auto info_shape =
       IntArrayRef(self.sizes().data(), ndim - 2); // self.shape[:-2]
-  set_output_raw_strided(
-      2, info_shape, {}, self.options().dtype(ScalarType::Int), {}); // info
+  set_output_contiguous(
+      2, info_shape, self.options().dtype(ScalarType::Int)); // info
 }
 
 TORCH_META_FUNC(linalg_ldl_solve)
@@ -4267,14 +4267,7 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
     return;
   }
 
-  auto pivots_ = pivots.expect_contiguous();
-  auto info_ = info.expect_contiguous();
-
-  auto LD_ = at::native::borrow_else_clone(
-      LD.mT().is_contiguous(), LD, self, /*row_major=*/false);
-  if (LD.mT().is_contiguous()) {
-    LD_->copy_(self);
-  }
+  LD.copy_(self);
 
   // We decided not to include upper flag in the API.
   // https://github.com/pytorch/pytorch/pull/69828#issuecomment-1015143819
@@ -4282,24 +4275,14 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   // also from low level functions or add it to the public API.
   bool upper = false;
   if (upper) {
-    LD_->triu_();
+    LD.triu_();
   } else {
-    LD_->tril_();
+    LD.tril_();
   }
 
   // call ldl_factor_stub that fills the result tensors
   ldl_factor_stub(
-      self.device().type(), *LD_, *pivots_, *info_, upper, hermitian);
-
-  if (!LD.is_same(*LD_)) {
-    LD.copy_(*LD_);
-  }
-  if (!info.is_same(*info_)) {
-    info.copy_(*info_);
-  }
-  if (!pivots.is_same(*pivots_)) {
-    pivots.copy_(*pivots_);
-  }
+      self.device().type(), LD, pivots, info, upper, hermitian);
 
   if (check_errors) {
     at::_linalg_check_errors(
