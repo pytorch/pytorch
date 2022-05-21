@@ -1,15 +1,17 @@
 #pragma once
 
-#include <thread>
-#include <mutex>
 #include <atomic>
+#include <mutex>
+#include <thread>
 #include <utility>
 
 #include <c10/macros/Macros.h>
 
 namespace c10 {
 
-// custom c10 call_once implementation to avoid the deadlock in std::call_once. The implementation here is a simplified version from folly and likely much much higher memory footprint.
+// custom c10 call_once implementation to avoid the deadlock in std::call_once.
+// The implementation here is a simplified version from folly and likely much
+// much higher memory footprint.
 template <typename Flag, typename F, typename... Args>
 C10_API inline void call_once(Flag& flag, F&& f, Args&&... args) {
   if (C10_LIKELY(flag.test_once())) {
@@ -51,4 +53,4 @@ class C10_API once_flag {
   std::atomic<bool> init_{false};
 };
 
-}
+} // namespace c10

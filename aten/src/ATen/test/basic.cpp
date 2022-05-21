@@ -476,30 +476,30 @@ TEST(BasicTest, FactoryMethodsTest) {
 }
 
 TEST(BasicTest, BasicStdTestCPU) {
-c10::once_flag flag1, flag2;
+  c10::once_flag flag1, flag2;
 
-auto simple_do_once = [&]()
-{
-    c10::call_once(flag1, [](){ std::cout << "Simple example: called once\n"; });
-};
+  auto simple_do_once = [&]()
+  {
+      c10::call_once(flag1, [](){ std::cout << "Simple example: called once\n"; });
+  };
 
-auto may_throw_function = [&](bool do_throw)
-{
-  if (do_throw) {
-    std::cout << "throw: call_once will retry\n"; // this may appear more than once
-    throw std::exception();
-  }
-  std::cout << "Didn't throw, call_once will not attempt again\n"; // guaranteed once
-};
+  auto may_throw_function = [&](bool do_throw)
+  {
+    if (do_throw) {
+      std::cout << "throw: call_once will retry\n"; // this may appear more than once
+      throw std::exception();
+    }
+    std::cout << "Didn't throw, call_once will not attempt again\n"; // guaranteed once
+  };
 
-auto do_once = [&](bool do_throw)
-{
-  try {
-    c10::call_once(flag2, may_throw_function, do_throw);
-  }
-  catch (...) {
-  }
-};
+  auto do_once = [&](bool do_throw)
+  {
+    try {
+      c10::call_once(flag2, may_throw_function, do_throw);
+    }
+    catch (...) {
+    }
+  };
 
   std::thread st1(simple_do_once);
   std::thread st2(simple_do_once);
