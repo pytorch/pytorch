@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/NonEmptyUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -199,7 +200,9 @@ static C10_UNUSED TensorIterator make_reduction(
   // product of templated kernel launches.
   const bool gpu_lowp_to_f32 = (
     self.is_cuda() && (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) && out_dtype == kFloat);
-  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
+  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type()
+                   : self.is_complex() ? c10::toComplexType(out_dtype)
+                                       : out_dtype;
   return make_reduction(name, result, self, dim, keepdim, in_dtype, out_dtype);
 }
 

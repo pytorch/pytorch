@@ -82,21 +82,25 @@ binary_ops = [
     # add
     torch.add,
     Tensor.add,
+    Tensor.add_,
     Tensor.__add__,
     Tensor.__radd__,
     # sub
     torch.sub,
     Tensor.sub,
+    Tensor.sub_,
     Tensor.__sub__,
     Tensor.__rsub__,
     # mul
     torch.mul,
     Tensor.mul,
+    Tensor.mul_,
     Tensor.__mul__,
     Tensor.__rmul__,
     # div
     torch.div,
     Tensor.div,
+    Tensor.div_,
     Tensor.__div__,
     Tensor.__rdiv__,
 ]

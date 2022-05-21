@@ -1,8 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/mps/MPSDevice.h>
-#include <torch/library.h>
-#include <ATen/native/CPUFallback.h>
 
 namespace at {
 namespace mps {
@@ -23,8 +21,7 @@ MPSDevice::~MPSDevice() {
 }
 
 MPSDevice::MPSDevice() {
-  NSArray* devices = MTLCopyAllDevices();
-  bool allowIntelGPUs = false;
+  NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0 ; i < [devices count] ; i++) {
     id<MTLDevice>  device = devices[i];
     if(![device isLowPower]) { // exclude Intel GPUs
@@ -41,13 +38,4 @@ at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
 }
 
 } // namespace mps
-
-TORCH_LIBRARY_IMPL(_, MPS, m) {
-  static const char *mps_fallback = getenv("PYTORCH_DISABLE_MPS_FALLBACK");
-  if(mps_fallback && std::stoi(mps_fallback) == 1) {
-    return;
-  }
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&native::cpu_fallback>());
-}
-
 } // namespace at
