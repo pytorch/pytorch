@@ -702,13 +702,21 @@ class TestFXExperimental(JitTestCase):
                 torch.testing.assert_close(loaded(x), mttm(x))
 
     def test_proxy_tensor(self):
-        def f(x):
+        def f_grad(x):
             val = x.cos().cos().sum()
             return torch.autograd.grad(val, x)
 
-        traced_graph = make_fx(f)(torch.randn(3, requires_grad=True))
-        inp = torch.randn(3, requires_grad=True)
-        torch.testing.assert_close(traced_graph(inp), f(inp))
+        def f_backward(x):
+            val = x.cos().cos().sum()
+            val.backward()
+            return x.grad
+
+        for f in [f_grad, f_backward]:
+            traced_graph = make_fx(f)(torch.randn(3, requires_grad=True))
+            inp = torch.randn(3, requires_grad=True)
+            traced_graph_out = traced_graph(inp)
+            assert inp.grad is None
+            torch.testing.assert_close(traced_graph_out, f(inp))
 
     def test_mode_tracing_factory_function(self):
         def f(x):
