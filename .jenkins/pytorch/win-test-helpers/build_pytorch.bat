@@ -137,7 +137,7 @@ if not x%BUILD_ENVIRONMENT:cuda11=%==x%BUILD_ENVIRONMENT% (
    set BUILD_SPLIT_CUDA=ON
 )
 
-python setup.py install --cmake && sccache --show-stats && (
+python setup.py install --cmake > nul 2>&1 && sccache --show-stats && (
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (

@@ -86,7 +86,7 @@ jobs:
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
           export COMMIT_MESSAGES
-          .jenkins/pytorch/win-test.sh
+          .jenkins/pytorch/win-test.sh > /dev/null 2>&1
 
       - name: Get workflow job id
         id: get-job-id

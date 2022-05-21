@@ -66,7 +66,7 @@ run_tests() {
         fi
     done
 
-    "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
+    "$SCRIPT_HELPERS_DIR"/test_python_shard.bat > /dev/null 2>&1
     if [[ ( -z "${JOB_BASE_NAME}" || "${JOB_BASE_NAME}" == *-test ) && $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
