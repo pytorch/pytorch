@@ -46,6 +46,28 @@ class TestTesting(TestCase):
             self.assertEqual(a, a_n, rtol=0, atol=0, msg=msg)
             self.assertEqual(a_n, a_n, rtol=0, atol=0, msg=msg)
 
+    def test_assertEqual_longMessage(self):
+        actual = "actual"
+        expected = "expected"
+
+        long_message = self.longMessage
+        try:
+            # Capture the default error message by forcing TestCase.longMessage = False
+            self.longMessage = False
+            try:
+                self.assertEqual(actual, expected)
+            except AssertionError as error:
+                default_msg = str(error)
+            else:
+                raise AssertionError("AssertionError not raised")
+
+            self.longMessage = True
+            extra_msg = "sentinel"
+            with self.assertRaisesRegex(AssertionError, re.escape(f"{default_msg} : {extra_msg}")):
+                self.assertEqual(actual, expected, msg=extra_msg)
+        finally:
+            self.longMessage = long_message
+
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
             a = torch.tensor((test[0],), device=device, dtype=dtype)
@@ -945,7 +967,7 @@ class TestAssertCloseErrorMessage(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape(f"(up to {atol} allowed)")):
                 fn(rtol=0.0, atol=atol)
 
-    def test_msg(self):
+    def test_msg_str(self):
         msg = "Custom error message!"
 
         actual = torch.tensor(1)
@@ -954,6 +976,16 @@ class TestAssertCloseErrorMessage(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=msg)
+
+    def test_msg_callable(self):
+        msg = "Custom error message"
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=lambda _: msg)
 
 
 class TestAssertCloseContainer(TestCase):
