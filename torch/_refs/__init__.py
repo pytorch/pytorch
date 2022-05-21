@@ -370,7 +370,7 @@ floor = _make_elementwise_unary_reference(
 )
 
 
-def _frac(x: TensorLike) -> TensorLikeType:
+def _frac(x: TensorLikeType) -> TensorLikeType:
     # frac(x) = x - floor(abs(x)) * sign(x)
     trunc_x = floor(abs(x))
     return sub(x, mul(trunc_x, sign(x)))
@@ -450,6 +450,7 @@ log10 = _make_elementwise_unary_reference(
     prims.log10,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
+
 
 def _neg_meta(a: TensorLikeType):
     if a.dtype is torch.bool:
