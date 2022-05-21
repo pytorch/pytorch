@@ -143,6 +143,8 @@ __all__ = [
     "chunk",
     "flatten",
     "flip",
+    "fliplr",
+    "flipud",
     "narrow",
     "permute",
     "reshape",
@@ -1132,6 +1134,20 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
     utils.validate_no_repeating_dims(dims)
     return prims.rev(a, dims)
+
+
+def fliplr(a: TensorLikeType) -> TensorLikeType:
+    if a.ndim < 2:
+        raise RuntimeError("Input must be >= 2-d.")
+
+    return flip(a, (1,))
+
+
+def flipud(a: TensorLikeType) -> TensorLikeType:
+    if a.ndim < 1:
+        raise RuntimeError("Input must be >= 1-d.")
+
+    return flip(a, (0,))
 
 
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:

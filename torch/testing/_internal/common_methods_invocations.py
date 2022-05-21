@@ -19121,6 +19121,14 @@ python_ref_db = [
         torch_opinfo_name="flip",
     ),
     PythonRefInfo(
+        "_refs.fliplr",
+        torch_opinfo_name="fliplr",
+    ),
+    PythonRefInfo(
+        "_refs.flipud",
+        torch_opinfo_name="flipud",
+    ),
+    PythonRefInfo(
         "_refs.narrow",
         torch_opinfo_name="narrow",
     ),
