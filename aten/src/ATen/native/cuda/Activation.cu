@@ -80,7 +80,7 @@ __global__ void glu_backward_kernel(
     int numel, scalar_t* gI, const scalar_t* I, const scalar_t* gO,
     OffsetCalc offset_calculator,
     int64_t gI_byte_offset, int64_t I_byte_offset) {
-  using acc_t = at::acc_type<scalar_t, true>;
+  using opmath_t = at::opmath_type<scalar_t>;
 
   const uint32_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_index >= numel) {
@@ -91,12 +91,12 @@ __global__ void glu_backward_kernel(
   // We explicitly iterate over the first half of the input tensor, and
   // gI_byte_offset and I_byte_offset are the offsets to access the
   // corresponding index in the second half of the tensor.
-  const acc_t a = I[offsets[1]];
-  const acc_t b = *byte_offset(I + offsets[1], I_byte_offset);
-  const acc_t gO_val = gO[offsets[2]];
+  const opmath_t a = I[offsets[1]];
+  const opmath_t b = *byte_offset(I + offsets[1], I_byte_offset);
+  const opmath_t gO_val = gO[offsets[2]];
 
-  const auto one = acc_t(1);
-  const acc_t sigmoid = one / (one + std::exp(-b));
+  const auto one = opmath_t(1);
+  const opmath_t sigmoid = one / (one + std::exp(-b));
 
   auto* gA = gI + offsets[0];
   *gA = sigmoid * gO_val;
