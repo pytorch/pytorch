@@ -20,7 +20,7 @@ from torch._prims.wrappers import (
     out_wrapper,
     _maybe_convert_to_dtype,
     _maybe_resize_out,
-    _safe_copy_out
+    _safe_copy_out,
 )
 
 from functools import reduce, partial
@@ -908,7 +908,7 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = all(a.shape[i] for i in dims)
+        valid_shape = a.ndim == 0 or all(a.shape[i] for i in dims)
         if not valid_shape:
             raise RuntimeError(
                 "reducing over zero-size dimension for reduction operation without identity"
@@ -918,11 +918,11 @@ def _reduction(
     )
     a_converted = prims.convert_element_type(a, computation_dtype)
     result = prim(a_converted, dims)
-
     if keepdims:
         output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
         broadcast_dims = [i for i in range(a.ndim) if i not in dims]
         result = prims.broadcast_in_dim(result, output_shape, broadcast_dims)
+
     if out is not None:
         assert result_dtype is not None
         if dtype is not None and result_dtype != out.dtype:
@@ -930,10 +930,11 @@ def _reduction(
                 "Expected the dtype of reduction result and out to match"
             )
         out = _maybe_resize_out(out, result.shape)
-        return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
+        return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
 
     if result.dtype != result_dtype and result_dtype is not None:
         result = prims.convert_element_type(result, result_dtype)
+
     return result
 
 
@@ -1082,6 +1083,7 @@ def std(
     result = sqrt(result)
     return result
 
+
 def mean(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1111,17 +1113,17 @@ def mean(
         raise RuntimeError("result type should be floating point or complex")
     if isinstance(dim, int):
         dim = (dim,)  # type: ignore[assignment]
-    dims = utils.reduction_dims(a.shape, dim)
+    dims = utils.reduction_dims(a.shape, dim)  # type: ignore[arg-type]
     nelem = 1 if a.ndim == 0 else reduce(operator.mul, (a.shape[i] for i in dims), 1)
-    result = true_divide(result,nelem)
+    result = true_divide(result, nelem)
     result_dtype = a.dtype if dtype is None else dtype
-    result = _maybe_convert_to_dtype(result, result_dtype)
+    result = _maybe_convert_to_dtype(result, result_dtype)  # type: ignore[assignment]
     if out is not None:
         assert isinstance(out, TensorLike)
         out = _maybe_resize_out(out, result.shape)
         return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
-        return out
     return result
+
 
 def std_mean(
     a: TensorLikeType,
@@ -1135,6 +1137,7 @@ def std_mean(
     m = mean(a, dim, keepdim)
     return s, m
 
+
 def var_mean(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1146,7 +1149,6 @@ def var_mean(
     v = var(a, dim, unbiased, keepdim, correction=correction)
     m = mean(a, dim, keepdim)
     return v, m
-
 
 
 def as_strided(
