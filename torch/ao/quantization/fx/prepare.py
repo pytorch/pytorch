@@ -34,7 +34,7 @@ from .quantization_patterns import (
 
 from torch.ao.quantization.quantization_types import (
     Pattern,
-    NodePattern
+    NodePattern,
 )
 
 from ._equalize import (
@@ -231,7 +231,7 @@ def prepare_get_standalone_module_configs(
     prepare_custom_config_dict: Dict[str, Any],
     parent_qconfig: QConfigAny,
     parent_backend_config_dict: Optional[Dict[str, Any]],
-) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[Dict[str, Any], Tuple[Any], Dict[str, Any], Dict[str, Any]]:
     """
     Returns the standalone module qconfig_dict and prepare_config_dict
     for `node`, assuming that the module pointed to by `node` is
@@ -239,8 +239,11 @@ def prepare_get_standalone_module_configs(
     """
     standalone_module_name = str(node.target)
     standalone_module_type = type(modules[standalone_module_name])  # type: ignore[index]
-    sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict = \
-        get_standalone_module_configs(standalone_module_name, standalone_module_type, prepare_custom_config_dict)
+    sm_qconfig_dict, sm_example_inputs, sm_prepare_config_dict, \
+        sm_backend_config_dict = get_standalone_module_configs(
+            standalone_module_name,
+            standalone_module_type,
+            prepare_custom_config_dict)
     # fallback to use parent module's qconfig if user didn't specify qconfig dict
     if sm_qconfig_dict is None:
         sm_qconfig_dict = {"": parent_qconfig}
@@ -250,7 +253,7 @@ def prepare_get_standalone_module_configs(
     # as well, this can be added later
     if sm_backend_config_dict is None:
         sm_backend_config_dict = parent_backend_config_dict
-    return sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict
+    return sm_qconfig_dict, sm_example_inputs, sm_prepare_config_dict, sm_backend_config_dict
 
 def qat_swap_modules(
         root: torch.nn.Module,
@@ -529,7 +532,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
     else:
         # custom flow for standalone modules
-        _sm_qconfig_dict, sm_prepare_config_dict, _sm_backend_config_dict = \
+        _sm_qconfig_dict, _, sm_prepare_config_dict, _sm_backend_config_dict = \
             prepare_get_standalone_module_configs(
                 node, modules, prepare_custom_config_dict, qconfig, backend_config_dict)
 
@@ -1301,8 +1304,8 @@ def run_prepare_fx_on_standalone_modules(
         elif not qhandler.is_standalone_module():
             continue
 
-        sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict = \
-            prepare_get_standalone_module_configs(
+        sm_qconfig_dict, sm_example_inputs, sm_prepare_config_dict, \
+            sm_backend_config_dict = prepare_get_standalone_module_configs(
                 root_node, modules, prepare_custom_config_dict, qconfig, backend_config_dict)
 
         standalone_module = modules[root_node.target]
@@ -1313,7 +1316,8 @@ def run_prepare_fx_on_standalone_modules(
                 standalone_module,
                 sm_qconfig_dict,
                 is_qat,
-                sm_prepare_config_dict,
+                example_inputs=sm_example_inputs,
+                prepare_custom_config_dict=sm_prepare_config_dict,
                 backend_config_dict=sm_backend_config_dict)
         preserved_attributes = \
             set(sm_prepare_config_dict.get("preserved_attributes", []))
@@ -1349,6 +1353,7 @@ def prepare(
         qconfig_dict: Any,
         is_qat: bool,
         node_name_to_scope: Dict[str, Tuple[str, type]],
+        example_inputs: Tuple[Any, ...],
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
         equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
