@@ -17,7 +17,7 @@ TORCH_META_FUNC(upsample_bicubic2d) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output_raw_strided(0, full_output_size, {}, input.options());
 }
 
 TORCH_META_FUNC(upsample_bicubic2d_backward) (
@@ -42,7 +42,7 @@ TORCH_META_FUNC(upsample_bicubic2d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options());
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
 TORCH_META_FUNC(_upsample_bicubic2d_aa) (
@@ -56,7 +56,7 @@ TORCH_META_FUNC(_upsample_bicubic2d_aa) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output_raw_strided(0, full_output_size, {}, input.options());
 }
 
 TORCH_META_FUNC(_upsample_bicubic2d_aa_backward) (
@@ -81,7 +81,7 @@ TORCH_META_FUNC(_upsample_bicubic2d_aa_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options());
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
 } // namespace meta

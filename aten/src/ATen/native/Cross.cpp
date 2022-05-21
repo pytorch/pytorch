@@ -18,7 +18,7 @@ TORCH_PRECOMPUTE_META_FUNC(linalg_cross)
   int64_t dim = maybe_wrap_dim(dimension, input.dim()); // default dim = -1
   TORCH_CHECK(input_broadcasted.size(dim) == 3, "dimension ", dimension, " does not have size 3");
 
-  set_output(out_size, input.options());
+  set_output_raw_strided(0, out_size, {}, input.options());
   return TORCH_PRECOMPUTE_STRUCT(linalg_cross)().set_dim(dim);
 }
 

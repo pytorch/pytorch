@@ -326,7 +326,7 @@ static void resize_reduction(
   DimVector dims_(dims);
   maybe_wrap_dims(dims_, self.dim());
   auto shape = get_reduction_shape(self, dims_, keepdim);
-  meta.set_output(shape, self.options().dtype(out_dtype));
+  meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(
       meta.maybe_get_output(), self, dims_, keepdim);
 }
@@ -340,8 +340,8 @@ static void resize_reduction_with_indices(
   DimVector dims_(dims);
   maybe_wrap_dims(dims_, self.dim());
   auto shape = get_reduction_shape(self, dims_, keepdim);
-  meta.set_output(0, shape, self.options().dtype(out_dtype));
-  meta.set_output(1, shape, self.options().dtype(kLong));
+  meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
+  meta.set_output_raw_strided(1, shape, {}, self.options().dtype(kLong));
   namedinference::propagate_names_for_reduction(
       meta.maybe_get_output(0), self, dims_, keepdim);
   namedinference::propagate_names_for_reduction(

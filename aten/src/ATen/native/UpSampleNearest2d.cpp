@@ -18,7 +18,7 @@ TORCH_META_FUNC(upsample_nearest2d) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options().memory_format(input.suggest_memory_format()));
+  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
 }
 
 TORCH_META_FUNC(_upsample_nearest_exact2d) (
@@ -32,7 +32,7 @@ TORCH_META_FUNC(_upsample_nearest_exact2d) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options().memory_format(input.suggest_memory_format()));
+  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
 }
 
 TORCH_META_FUNC(upsample_nearest2d_backward) (
@@ -56,7 +56,7 @@ TORCH_META_FUNC(upsample_nearest2d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options().memory_format(grad_output.suggest_memory_format()));
+  set_output_raw_strided(0, input_size, {}, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
 TORCH_META_FUNC(_upsample_nearest_exact2d_backward) (
@@ -80,7 +80,7 @@ TORCH_META_FUNC(_upsample_nearest_exact2d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options().memory_format(grad_output.suggest_memory_format()));
+  set_output_raw_strided(0, input_size, {}, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
 } // namespace meta

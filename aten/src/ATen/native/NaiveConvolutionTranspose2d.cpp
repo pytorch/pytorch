@@ -216,8 +216,10 @@ TORCH_META_FUNC(slow_conv_transpose2d)
 
   // Resize output
   TensorOptions options(input.options());
-  set_output(
+  set_output_raw_strided(
+      0,
       {batch_size, n_output_plane, output_height, output_width},
+      {},
       options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 }
 } // namespace meta
