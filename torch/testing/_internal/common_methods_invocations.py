@@ -6938,7 +6938,7 @@ def error_inputs_fliplr(op, device, **kwargs):
 
 def error_inputs_flipud(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_tensor((), dtype=torch.float, device=device)),
-                     error_regex= "Input must be >= 1-d.")
+                     error_regex="Input must be >= 1-d.")
 
 # TODO: clamp shares tensors among its sample inputs --- we should prohibit this!
 def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
