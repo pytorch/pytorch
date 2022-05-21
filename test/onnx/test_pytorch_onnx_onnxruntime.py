@@ -3940,14 +3940,6 @@ class _TestONNXRuntime:
         input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), input)
 
-    def test_bitshift_other_fp(self):
-        class BitshiftModel(torch.nn.Module):
-            def forward(self, input):
-                return input << 2.4
-
-        input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
-        self.run_test(BitshiftModel(), input)
-
     # uint8 not implemented in ORT for Mul used in
     # exporting bitshift for opset_version < 10
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -3956,9 +3948,9 @@ class _TestONNXRuntime:
             def forward(self, input, input2):
                 return (
                     input >> 1,
-                    input << 3.0,
+                    input << 3,
                     input2 >> torch.tensor([1, 2], dtype=torch.uint8),
-                    input2 << 4.0,
+                    input2 << 4,
                 )
 
         input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
@@ -12686,6 +12678,32 @@ class _TestONNXRuntime:
                 (input, grid),
                 **atol_rtol,
             )
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_device_eq(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                # exercise both Tensor.device (prim::device)
+                # and torch.device (prim::Constant).
+                if a.device != torch.device("cpu"):
+                    return a
+                return torch.zeros_like(a)
+
+        mod = torch.jit.script(M())  # preserve control flow
+
+        self.run_test(
+            mod,
+            # In order for the ONNX model behavior to match the torch model, we
+            # need to construct input that has the same device that is checked for
+            # in forward(). In ONNX there is no such thing as a device, so the if
+            # condition is always false.
+            torch.randn(3, 3, device="cpu"),
+            # Force dynamic axes so that the output shape depends on the input.
+            # Otherwise the entire model will just return a constant and not have
+            # any inputs.
+            input_names=["a"],
+            dynamic_axes={"a": {0: "a0"}},
+        )
 
 
 def make_test(

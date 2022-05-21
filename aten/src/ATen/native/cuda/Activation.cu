@@ -132,11 +132,12 @@ void launch_glu_backward_kernel(const TensorIteratorBase& iter,
 void launch_log_sigmoid_forward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
                                  "log_sigmoid_forward_cuda", [&] {
-    using acc_t = acc_type<scalar_t, true>;
+    using opmath_t = at::opmath_type<scalar_t>;
+
     gpu_kernel(iter,
         [] GPU_LAMBDA (scalar_t in_) -> scalar_t {
-          const acc_t in = in_;
-          const auto min = std::min(acc_t(0), in);
+          const opmath_t in = in_;
+          const auto min = std::min(opmath_t(0), in);
           const auto z = std::exp(-std::abs(in));
           return min - std::log1p(z);
         });
@@ -150,17 +151,17 @@ void launch_log_sigmoid_forward_kernel(TensorIteratorBase& iter) {
 void log_sigmoid_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
                                  "log_sigmoid_backward_cuda", [&] {
-    using acc_t = acc_type<scalar_t, true>;
+    using opmath_t = at::opmath_type<scalar_t>;
     gpu_kernel(iter,
         [] GPU_LAMBDA (scalar_t in_, scalar_t grad_out_) -> scalar_t {
-          const acc_t in = in_;
-          const acc_t grad_out = grad_out_;
+          const opmath_t in = in_;
+          const opmath_t grad_out = grad_out_;
 
-          auto in_negative = in < acc_t(0);
-          auto max_deriv = in_negative ? acc_t(1) : acc_t(0);
-          auto sign = in_negative ? acc_t(1) : -acc_t(1);
+          auto in_negative = in < opmath_t(0);
+          auto max_deriv = in_negative ? opmath_t(1) : opmath_t(0);
+          auto sign = in_negative ? opmath_t(1) : -opmath_t(1);
           const auto z = std::exp(-std::abs(in));
-          return grad_out * (max_deriv - sign * (z / (acc_t(1) + z)));
+          return grad_out * (max_deriv - sign * (z / (opmath_t(1) + z)));
         });
   });
 }
