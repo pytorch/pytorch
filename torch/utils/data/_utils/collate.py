@@ -136,7 +136,7 @@ def default_collate(batch):
             # If we're in a background process, concatenate directly into a
             # shared memory tensor to avoid an extra copy
             numel = sum(x.numel() for x in batch)
-            storage = elem.storage()._new_shared(numel)
+            storage = elem.storage()._new_shared(numel, device=elem.device)
             out = elem.new(storage).resize_(len(batch), *list(elem.size()))
         return torch.stack(batch, 0, out=out)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
