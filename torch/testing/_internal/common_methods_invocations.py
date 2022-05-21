@@ -18834,6 +18834,20 @@ python_ref_db = [
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.logit",
+        torch_opinfo_name="logit",
+        decorators=(
+            # ATen CPU implementation computes at lower precision
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+            # No meta support for clamp or arithmetic
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',),
+            # RuntimeError: no _refs support for torch.clamp
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',),
+        ),
+    ),
     #
     # Elementwise Unary nn.functional OpInfos
     #
@@ -19169,6 +19183,8 @@ python_ref_db = [
         skips=(
             # TensorMeta doesn't support tolist
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
+            # RuntimeError: no _refs support for torch.Tensor.tolist
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency'),
         )
     ),
     PythonRefInfo(
