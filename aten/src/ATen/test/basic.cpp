@@ -487,7 +487,7 @@ TEST(BasicTest, BasicStdTestCPU) {
   {
     if (do_throw) {
       std::cout << "throw: call_once will retry\n"; // this may appear more than once
-      throw std::exception();
+      TORCH_CHECK(false, "throw exception");
     }
     std::cout << "Didn't throw, call_once will not attempt again\n"; // guaranteed once
   };

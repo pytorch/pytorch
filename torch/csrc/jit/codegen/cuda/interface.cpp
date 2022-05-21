@@ -34,7 +34,7 @@ static std::atomic<bool> cuda_fusion_guard_mode{true};
 class NVFuserEnabler {
  private:
   c10::optional<bool> runtime_assigned_fuser_enabled_ = c10::nullopt;
-  std::once_flag enabled_check_flag_;
+  c10::once_flag enabled_check_flag_;
   std::mutex mutex_;
 
   static bool nvfuserCanBeEnabled() {
@@ -95,7 +95,7 @@ class NVFuserEnabler {
     if (getCachedNNCNotNVFuser()) {
       return false;
     }
-    std::call_once(enabled_check_flag_, [&]() {
+    c10::call_once(enabled_check_flag_, [&]() {
       // if environment variable is setting the value, we must
       if (!runtime_assigned_fuser_enabled_.has_value() &&
           getCachedFuserEnabledEnvVar().has_value()) {
