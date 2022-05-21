@@ -103,10 +103,6 @@ __all__ = [
     "shift_right_logical",  # not implemented
     "sub",
     #
-    # Elementwise ternary prims
-    #
-    "clamp",
-    #
     # View prims
     #
     "as_strided",
