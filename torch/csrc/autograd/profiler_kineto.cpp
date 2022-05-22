@@ -128,11 +128,11 @@ using torch::profiler::impl::stacksToStr;
 
 struct EventFieldsVisitor {
   EventFieldsVisitor(
-      Result& result,
+      std::shared_ptr<Result>& result,
       KinetoEvent& kineto_event,
       const post_process_t& post_process)
       : kineto_event_{kineto_event}, post_process_{post_process} {
-    c10::visit(*this, result.extra_fields_);
+    c10::visit(*this, result->extra_fields_);
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
@@ -322,8 +322,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
     for (auto& e : record_queue_.getRecords(converter)) {
       // `take_data` handles time conversion.
-      int64_t start_us = e.start_time_us_;
-      int64_t end_us = e.endTimeUS();
+      int64_t start_us = e->start_time_us_;
+      int64_t end_us = e->endTimeUS();
 
       if (end_us < start_us) {
         // We initialize end_us_ to the smallest int64_t, so this means that
@@ -333,22 +333,22 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
       kineto_events_.emplace_back();
       kineto_events_.back()
-          .name(e.name())
+          .name(e->name())
           .startUs(start_us)
           .durationUs(end_us - start_us)
-          .correlationId(e.correlationID())
-          .deviceType(e.deviceType())
-          .startThreadId(e.start_tid_);
+          .correlationId(e->correlationID())
+          .deviceType(e->deviceType())
+          .startThreadId(e->start_tid_);
 
       // NB: also sets fields on `kineto_events_.back()`.
       auto visitor = EventFieldsVisitor(
           e, kineto_events_.back(), getEventPostProcessingCallback());
 
       cpu_trace_.addCPUActivity(
-          e.name(),
-          e.kinetoType(),
-          e.kineto_info_,
-          e.correlationID(),
+          e->name(),
+          e->kinetoType(),
+          e->kineto_info_,
+          e->correlationID(),
           start_us,
           end_us,
           visitor.annotations_);

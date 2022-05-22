@@ -109,17 +109,11 @@ static_assert(
     std::is_pod<ExtraFields<EventType::Allocation>>::value,
     "Non-POD member of ExtraFields<EventType::Allocation>.");
 
-struct Result {
-  template <EventType E>
-  Result(
-      int64_t start_time_us,
-      uint64_t start_tid,
-      kineto::DeviceAndResource kineto_info,
-      ExtraFields<E>&& extra_fields)
-      : start_time_us_{start_time_us},
-        start_tid_{start_tid},
-        kineto_info_{kineto_info},
-        extra_fields_{std::move(extra_fields)} {}
+struct TORCH_API Result : public std::enable_shared_from_this<Result> {
+  template <typename... Args>
+  [[nodiscard]] static std::shared_ptr<Result> create(Args... args) {
+    return std::shared_ptr<Result>(new Result(std::forward<Args>(args)...));
+  }
 
   std::string name() const;
   torch::profiler::impl::kineto::KinetoActivityType kinetoType() const;
@@ -136,6 +130,18 @@ struct Result {
       ExtraFields<EventType::Backend>,
       ExtraFields<EventType::Allocation>>
       extra_fields_;
+
+ private:
+  template <EventType E>
+  Result(
+      int64_t start_time_us,
+      uint64_t start_tid,
+      kineto::DeviceAndResource kineto_info,
+      ExtraFields<E>&& extra_fields)
+      : start_time_us_{start_time_us},
+        start_tid_{start_tid},
+        kineto_info_{kineto_info},
+        extra_fields_{std::move(extra_fields)} {}
 };
 
 struct KinetoObserverContext : public at::ObserverContext {
@@ -255,7 +261,8 @@ class TORCH_API RecordQueue {
   ThreadLocalSubqueue* getSubqueue();
 
   // NB: This is a destructive operation.
-  std::deque<Result> getRecords(std::function<time_t(approx_time_t)> time_converter);
+  std::vector<std::shared_ptr<Result>> getRecords(
+      std::function<time_t(approx_time_t)> time_converter);
 
  private:
   uint32_t id_;
