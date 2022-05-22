@@ -19114,6 +19114,14 @@ python_ref_db = [
         "_refs.xlogy",
         torch_opinfo_name="xlogy",
         supports_one_python_scalar=True,
+        skips=(
+            # Stride inconsistency between primtorch meta and aten output when using torch.where
+            # RuntimeError: Stride mismatch! Strides are (12, 2, 1) and (1, 5, 30) (mismatched at 0)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                         device_type='cuda'),
+        ),
     ),
     #
     # Elementwise Binary Special OpInfos
@@ -19122,6 +19130,14 @@ python_ref_db = [
         "_refs.special.xlog1py",
         torch_opinfo_name="special.xlog1py",
         supports_one_python_scalar=True,
+        skips=(
+            # Stride inconsistency between primtorch meta and aten output when using torch.where
+            # RuntimeError: Stride mismatch! Strides are (12, 2, 1) and (1, 5, 30) (mismatched at 0)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
+                         device_type='cuda'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.special.zeta",

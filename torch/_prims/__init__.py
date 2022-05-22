@@ -160,6 +160,7 @@ __all__ = [
     "empty_like",
     "full",
     "full_like",
+    "scalar_tensor",
 ]
 
 #
@@ -769,27 +770,14 @@ lt = _make_elementwise_binary_prim(
 )
 
 
-def _wrap_scalar(
-    a: NumberType, *, dtype: torch.dtype = None, device: torch.device = None
-) -> torch.Tensor:
-    """
-    Wraps a Number into a Tensor of corresponding dtype.
-
-    Note: this should not generally be used, but some torch functions don't
-    accept scalars, so it's necessary for their prims to do so.
-    """
-    dtype = dtype if dtype is not None else utils.type_to_dtype(type(a))
-    return torch.tensor(a, dtype=dtype, device=device)
-
-
 # Note: the following impls are because torch.maximum and torch.mininum do not support scalar inputs
 def _maximum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = _wrap_scalar(b, dtype=a.dtype)
+        b = scalar_tensor(b, dtype=a.dtype)
     elif isinstance(b, TensorLike) and isinstance(a, Number):
-        a = _wrap_scalar(a, dtype=b.dtype)
+        a = scalar_tensor(a, dtype=b.dtype)
 
     return torch.maximum(a, b)  # type: ignore[arg-type]
 
@@ -806,9 +794,9 @@ def _minimum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = _wrap_scalar(b, dtype=a.dtype)
+        b = scalar_tensor(b, dtype=a.dtype)
     elif isinstance(b, TensorLike) and isinstance(a, Number):
-        a = _wrap_scalar(a, dtype=b.dtype)
+        a = scalar_tensor(a, dtype=b.dtype)
 
     return torch.minimum(a, b)  # type: ignore[arg-type]
 
@@ -2117,4 +2105,41 @@ full_like = _make_prim(
     impl_aten=_full_like_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_full_like_doc,
+)
+
+
+def _scalar_tensor_meta(
+    scalar: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> TensorLikeType:
+    shape: ShapeType = []
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _scalar_tensor_aten(
+    scalar: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> Tensor:
+    if isinstance(scalar, complex) and not utils.is_complex_dtype(dtype):
+        raise TypeError("Complex scalar requires complex tensor dtype.")
+    # Note that Mypy thinks torch.scalar can't accept a complex scalar
+    return torch.scalar_tensor(scalar, dtype=dtype, device=device)  # type: ignore[arg-type]
+
+
+_scalar_tensor_doc = """
+    Wraps a Number into a Tensor with the specified dtype and device.
+"""
+
+# TODO: add layout and pin_memory support
+scalar_tensor = _make_prim(
+    schema="scalar_tensor(Scalar s, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
+    meta=_scalar_tensor_meta,
+    impl_aten=_scalar_tensor_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_scalar_tensor_doc,
 )

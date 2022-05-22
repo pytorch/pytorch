@@ -169,6 +169,7 @@ __all__ = [
     "full",
     "full_like",
     "ones_like",
+    "scalar_tensor",
     "zeros_like",
 ]
 
@@ -902,18 +903,18 @@ def _xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, Number
     # TODO Add support for scalar inputs to refs.log (and other elementwise unary ops)
     if isinstance(a, TensorLike):
         if isinstance(b, Number):
-            b = prims._wrap_scalar(b, dtype=a.dtype, device=a.device)
+            b = scalar_tensor(b, dtype=a.dtype, device=a.device)
         elif utils.is_cpu_scalar_tensor(b):
             b = prims.device_put(b, device=a.device)
     elif isinstance(b, TensorLike):
         if isinstance(a, Number):
-            a = prims._wrap_scalar(a, dtype=b.dtype, device=b.device)
+            a = scalar_tensor(a, dtype=b.dtype, device=b.device)
         elif utils.is_cpu_scalar_tensor(a):
             a = prims.device_put(a, device=b.device)
 
     # TODO use refs.where after resolving issue #78050
-    rhs = torch.where(eq(a, 0), 0, mul(a, log(b)))
-    return torch.where(isnan(b), float("nan"), rhs)
+    rhs = where(eq(a, 0), 0, mul(a, log(b)))
+    return where(isnan(b), float("nan"), rhs)
 
 
 # TODO: add docstring
@@ -1693,3 +1694,12 @@ def zeros_like(
     requires_grad: bool = False,
 ) -> TensorLikeType:
     return full_like(a, 0, dtype=dtype, device=device, requires_grad=requires_grad)
+
+
+def scalar_tensor(
+    a: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+) -> TensorLikeType:
+    return prims.scalar_tensor(a, dtype=dtype, device=device)
