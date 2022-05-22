@@ -361,7 +361,6 @@ expm1 = _make_elementwise_unary_reference(
 exp2 = _make_elementwise_unary_reference(
     prims.exp2,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.exp2,
 )
 
 floor = _make_elementwise_unary_reference(
@@ -371,7 +370,6 @@ floor = _make_elementwise_unary_reference(
 
 
 def _frac(x: TensorLikeType) -> TensorLikeType:
-    # frac(x) = x - floor(abs(x)) * sign(x)
     trunc_x = mul(floor(abs(x)), sign(x))
     return sub(x, trunc_x)
 
