@@ -1,7 +1,6 @@
 # Owner(s): ["module: mkldnn"]
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 import unittest
 
@@ -11,15 +10,6 @@ from torch.testing._internal.jit_utils import JitTestCase
 from test_tensorexpr import warmup_and_run_forward
 
 FUSION_GROUP = 'prim::TensorExprGroup'
-
-
-def get_eltwise_fn(name):
-    if hasattr(torch, name):
-        return getattr(torch, name)
-    elif hasattr(F, name):
-        return getattr(F, name)
-    else:
-        raise NameError("Eltwise function %s not found" % name)
 
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
@@ -92,18 +82,14 @@ class TestMkldnnFusion(JitTestCase):
                 x = self.eltwise(x)
                 return x
 
-        for eltwise in ["relu"]:
-            for inplace in [False]:
-                for bias in [True, False]:
-                    eltwise_fn_name = eltwise + "_" if inplace else eltwise
-                    eltwise_fn = get_eltwise_fn(eltwise_fn_name)
+        for eltwise_fn in [torch.relu]:
+            for bias in [True, False]:
+                m = M(eltwise_fn, 3, 10, bias, kernel_size=(3, 3))
+                x = torch.randn(1, 3, 224, 224)
 
-                    m = M(eltwise_fn, 3, 10, bias, kernel_size=(3, 3))
-                    x = torch.randn(1, 3, 224, 224)
-
-                    graph = self._check_model(m, x)
-                    self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn_name])
-                    self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                graph = self._check_model(m, x)
+                self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn.__name__])
+                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
 
 
 if __name__ == "__main__":
