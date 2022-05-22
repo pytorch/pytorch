@@ -389,7 +389,9 @@ class TestCommon(TestCase):
             # Computes the dtype the more precise computatino would occur in
             precise_dtype = torch.bool
             if prims.utils.is_integer_dtype(dtype):
-                precise_dtype = torch.long
+                # Note: bool and integer dtypes do not have more
+                # precise dtypes -- they simply must be close
+                precise_dtype = dtype
             if prims.utils.is_float_dtype(dtype):
                 precise_dtype = torch.double
             if prims.utils.is_complex_dtype(dtype):
