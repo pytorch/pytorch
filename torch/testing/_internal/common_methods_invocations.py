@@ -18553,10 +18553,12 @@ class PythonRefInfo(OpInfo):
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            validate_view_consistency=True,
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        self.validate_view_consistency = validate_view_consistency
         assert isinstance(self.torch_opinfo, OpInfo)
 
         inherited = self.torch_opinfo._original_opinfo_args
@@ -19245,12 +19247,38 @@ python_ref_db = [
         supports_out=True,
     ),
     ReductionPythonRefInfo(
+        "_refs.mean",
+        torch_opinfo_name="mean",
+        supports_out=True,
+    ),
+    ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
     ),
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
+    ),
+    ReductionPythonRefInfo(
+        "_refs.var",
+        torch_opinfo_name="var",
+        supports_out=True
+    ),
+    ReductionPythonRefInfo(
+        "_refs.std",
+        torch_opinfo_name="std",
+        supports_out=True
+    ),
+    # std_mean and var_mean are not ReductionInfos
+    PythonRefInfo(
+        "_refs.std_mean",
+        torch_opinfo_name="std_mean",
+        validate_view_consistency=False
+    ),
+    PythonRefInfo(
+        "_refs.var_mean",
+        torch_opinfo_name="var_mean",
+        validate_view_consistency=False
     ),
     #
     # Tensor Creation Reference OpInfos
