@@ -500,7 +500,7 @@ def canonicalize_device(device: Union[str, torch.device]) -> torch.device:
 # Asserts if any of the following are true:
 #   - a non-scalar or non-Tensor is given
 #   - the shape of any tensors is distinct
-def check_same_shape(*args, allow_cpu_scalar_tensors):
+def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
     """
     Checks that all Tensors in args have the same shape.
 
@@ -530,6 +530,28 @@ def check_same_shape(*args, allow_cpu_scalar_tensors):
                 "Unexpected type when checking for same shape, " + str(type(arg)) + "!"
             )
             raise RuntimeError(msg)
+
+def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
+    shape = None
+    scalar_shape = None
+
+    for arg in args:
+        if isinstance(arg, Number):
+            continue
+        elif isinstance(arg, TensorLike):
+            if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
+                scalar_shape = arg.shape
+                continue
+
+            if shape is None:
+                shape = arg.shape
+
+            if not is_same_shape(shape, arg.shape):
+                return None
+        else:
+            return None
+
+    return shape if shape is not None else scalar_shape
 
 
 def extract_shape_from_varargs(

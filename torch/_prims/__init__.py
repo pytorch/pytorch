@@ -248,7 +248,7 @@ class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
 def _elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
-    args_with_different_dtypes: Tuple[TensorLikeType, ...] = None,
+    args_with_fixed_dtypes: Tuple[TensorLikeType, ...] = None,
 ) -> TensorMeta:
     """
     Meta function for elementwise operations that produce outputs in the same dtype
@@ -262,23 +262,37 @@ def _elementwise_meta(
     utils.check_same_dtype(*args)
 
     args_ = list(args)
-    if args_with_different_dtypes is not None:
-        args_.extend(args_with_different_dtypes)
+    if args_with_fixed_dtypes is not None:
+        args_.extend(args_with_fixed_dtypes)
 
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
 
     strides = utils.compute_elementwise_output_strides(*args_)
+    shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
 
-    tensor = None
-    scalar_tensor = None
+    # Acquires the dtype
+    dtype = None
+    from_scalar_tensor = False
+    for arg in args:
+        if isinstance(arg, TensorLike):
+            if not utils.is_cpu_scalar_tensor(arg):
+                dtype = arg.dtype
+                break
+            else:
+                dtype = arg.dtype
+                from_scalar_tensor = True
+        elif isinstance(arg, Number):
+            if not from_scalar_tensor:
+                dtype = type(arg)
+
+    # Acquires the device (if it exists) or number
+    device = None
     number = None
     for arg in args_:
         if isinstance(arg, TensorLike):
-            if utils.is_cpu_scalar_tensor(arg) and scalar_tensor is None:
-                scalar_tensor = arg
-            if not utils.is_cpu_scalar_tensor(arg) and tensor is None:
-                tensor = arg
+            device = arg.device
+            break
 
         elif isinstance(arg, Number):
             if number is None:
@@ -287,19 +301,18 @@ def _elementwise_meta(
     # NOTE: type promotion behavior here is mostly hidden from tests because
     # references will typically handle the type promotion properly even if this doesn't
     # (but getting it wrong will cause too many casts to be inserted in traces!)
-    if tensor is not None or scalar_tensor is not None:
-        tensor = tensor if tensor is not None else scalar_tensor
-        assert tensor is not None  # appease mypy
+    if device is not None:
         if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT:
-            return TensorMeta(tensor, strides=strides)
-        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
-            return TensorMeta(tensor, strides=strides, dtype=torch.bool)
-        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
-            if utils.is_complex_dtype(tensor.dtype):
-                dtype = utils.corresponding_real_dtype(tensor.dtype)
+            dtype = dtype
+        elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
+            dtype = torch.bool
+        elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
+            if utils.is_complex_dtype(dtype):
+                dtype = utils.corresponding_real_dtype(dtype)
             else:
-                dtype = tensor.dtype
-            return TensorMeta(tensor, strides=strides, dtype=dtype)
+                dtype = dtype
+
+        return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
 
     # Number case
     # NOTE: this case is not currently exercised
@@ -1637,13 +1650,8 @@ def _where_meta(
         a,
         b,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-        args_with_different_dtypes=(pred,),
+        args_with_fixed_dtypes=(pred,),
     )
-
-
-def _where_aten(pred: Tensor, a: Tensor, b: Tensor) -> Tensor:
-    return torch.where(pred, a, b)
-
 
 _where_doc = """
   Selects elements from a and b according to pred.
@@ -1655,7 +1663,7 @@ _where_doc = """
 where = _make_prim(
     schema="where(Tensor pred, Tensor a, Tensor b) -> Tensor",
     meta=_where_meta,
-    impl_aten=_where_aten,
+    impl_aten=torch.where,
     return_type=RETURN_TYPE.NEW,
     doc=_where_doc,
 )
@@ -1981,19 +1989,6 @@ def _empty_strided_meta(
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
 
 
-def _empty_strided_aten(
-    shape: ShapeType,
-    strides: StrideType,
-    *,
-    dtype: torch.dtype,
-    device: torch.device,
-    requires_grad: bool,
-) -> Tensor:
-    return torch.empty_strided(
-        shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
-    )
-
-
 _empty_strided_doc = """
     Creates a tensor with uninitialized values.
 """
@@ -2003,10 +1998,9 @@ empty_strided = _make_prim(
     schema="empty_strided(int[] shape, int[] strides, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
     return_type=RETURN_TYPE.NEW,
     meta=_empty_strided_meta,
-    impl_aten=_empty_strided_aten,
+    impl_aten=torch.empty_strided,
     doc=_empty_strided_doc,
 )
-
 
 def _full_meta(
     shape: ShapeType,
