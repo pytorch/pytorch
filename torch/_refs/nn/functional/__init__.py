@@ -20,7 +20,8 @@ __all__ = [
     "mish",
     "selu",
     "softplus",
-    "margin_ranking_loss"
+    "margin_ranking_loss",
+    "hinge_embedding_loss",
 ]
 
 # celu is implemented specially because it has an alpha argument
@@ -158,27 +159,37 @@ def softplus(
 
     return refs.where(refs.gt(scaled_input, threshold), a, rhs)
 
+
 # Losses
 def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
-    if reduction == 'sum':
+    if reduction == "sum":
         return refs.sum(loss)
-    elif reduction == 'mean':
+    elif reduction == "mean":
         return refs.true_divide(refs.sum(loss), loss.numel())
     else:
         return loss
 
+
 def _check_reduction_value(reduction: str):
-    if reduction not in ('mean', 'sum', 'none'):
+    if reduction not in ("mean", "sum", "none"):
         raise ValueError("{} is not a valid value for reduction".format(reduction))
 
-def margin_ranking_loss(input1: TensorLikeType, input2: TensorLikeType,
-                        target: TensorLikeType, margin=0.0, reduction='mean') -> TensorLikeType:
+
+def margin_ranking_loss(
+    input1: TensorLikeType,
+    input2: TensorLikeType,
+    target: TensorLikeType,
+    margin=0.0,
+    reduction="mean",
+) -> TensorLikeType:
     # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
-    if (input1.ndim != input2.ndim or input1.ndim != target.ndim):
+    if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
             (
                 "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
-                "input1: {}, input2: {}, target: {} ".format(input1.shape, input2.shape, target.shape)
+                "input1: {}, input2: {}, target: {} ".format(
+                    input1.shape, input2.shape, target.shape
+                )
             )
         )
     _check_reduction_value(reduction)
@@ -189,8 +200,10 @@ def margin_ranking_loss(input1: TensorLikeType, input2: TensorLikeType,
     loss = refs.maximum(add_margin, 0)
     return _apply_loss_reduction(loss, reduction)
 
-def hinge_embedding_loss(input: TensorLikeType, target: TensorLikeType,
-                         margin=1.0, reduction='mean') -> TensorLikeType:
+
+def hinge_embedding_loss(
+    input: TensorLikeType, target: TensorLikeType, margin=1.0, reduction="mean"
+) -> TensorLikeType:
     # loss_without_reduction = input if y == 1
     #                        = max(0, margin - input) if y == -1
     _check_reduction_value(reduction)
