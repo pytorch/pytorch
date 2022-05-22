@@ -322,8 +322,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
     for (auto& e : record_queue_.getRecords(converter)) {
       // `take_data` handles time conversion.
-      int64_t start_us = e->start_time_us_;
-      int64_t end_us = e->endTimeUS();
+      int64_t start_us = e->start_time_ns_ / 1000;
+      int64_t end_us = e->endTimeNS() / 1000;
 
       if (end_us < start_us) {
         // We initialize end_us_ to the smallest int64_t, so this means that
