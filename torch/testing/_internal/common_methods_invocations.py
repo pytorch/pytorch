@@ -3816,7 +3816,7 @@ def sample_inputs_fill_(op_info, device, dtype, requires_grad, **kwargs):
 def _fill_np(a, value):
     a = a.copy()
     a.fill(value)
-    return
+    return a
 
 def _fill_aten(a, value):
     t = a * False
