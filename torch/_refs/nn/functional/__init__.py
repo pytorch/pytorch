@@ -208,7 +208,7 @@ def hinge_embedding_loss(
     #                        = max(0, margin - input) if y == -1
     _check_reduction_value(reduction)
     margin_clamp = refs.maximum(refs.sub(margin, input), 0)
-    output_margin = refs.where(refs.ne(target, -1), margin_clamp, 0)
-    output_self = refs.where(refs.ne(target, 1), input, 0)
+    output_margin = refs.where(refs.ne(target, 1), margin_clamp, 0)
+    output_self = refs.where(refs.ne(target, -1), input, 0)
     loss = refs.add(output_margin, output_self)
     return _apply_loss_reduction(loss, reduction)
