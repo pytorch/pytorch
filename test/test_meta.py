@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.logging_tensor import no_dispatch
 from torch.testing._internal.common_methods_invocations import op_db
+import torch._prims as prims
 
 import atexit
 import re
@@ -314,10 +315,11 @@ def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
         test_assert(isinstance(meta_r, torch.Tensor), f"but real {i}th result is Tensor")
         test_assert(meta_r.dtype == r.dtype, f"but real dtype was {r.dtype}")
         test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
-        # NOTE: stride checking is currently disabled
-        # See https://github.com/pytorch/pytorch/issues/78050
-        # same_strides, _ = prims.utils.check_significant_strides(meta_r, r)
-        # test_assert(same_strides, f"but real stride was {r.stride()}")
+        # NOTE: this helper is used instead of a direct stride comparison
+        # because strides of tensors with no elements and dimensions of
+        # length 1 are not computed consistently
+        same_strides, _ = prims.utils.check_significant_strides(meta_r, r)
+        test_assert(same_strides, f"but real stride was {r.stride()}")
         test_assert(
             meta_r.storage_offset() == r.storage_offset(),
             f"but real storage_offset was {r.storage_offset()}")
