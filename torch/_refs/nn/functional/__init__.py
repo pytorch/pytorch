@@ -16,7 +16,6 @@ from typing import Optional
 
 __all__ = [
     "celu",
-    "dropout",
     "elu",
     "mish",
     "selu",
@@ -54,35 +53,6 @@ def celu(
         rhs = refs.expm1(a)
 
     return refs.where(refs.gt(a, 0), a, rhs)
-
-
-# TODO: should we allow the user to set a different dtype for the mask generation?
-def dropout(
-    a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
-) -> TensorLikeType:
-
-    if inplace:
-        raise NotImplementedError
-
-    if not training:
-        return a
-
-    assert p <= 1
-    assert p >= 0
-
-    if p == 1:
-        return refs.zeros_like(a)
-
-    if p == 0:
-        return a
-
-    p1m = 1 - p
-    scale = 1 / p1m
-    mask = refs.lt(
-        refs.uniform(a.shape, low=0.0, high=1.0, dtype=torch.float32, device=a.device),
-        p1m,
-    )
-    return refs.mul(refs.mul(a, mask), scale)
 
 
 # elu is implemented specially because it has an alpha argument
