@@ -267,7 +267,7 @@ void FuseConvWithEltwise(std::shared_ptr<Graph>& graph) {
 #else
 
 void FuseConvWithEltwise(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("MKLDNN Not enabled", graph);
+  GRAPH_DEBUG("MKLDNN Not enabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()
