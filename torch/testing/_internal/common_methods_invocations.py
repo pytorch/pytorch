@@ -3816,7 +3816,7 @@ def sample_inputs_fill_(op_info, device, dtype, requires_grad, **kwargs):
 def _fill_np(a, value):
     a = a.copy()
     a.fill(value)
-    return a
+    return
 
 def _fill_aten(a, value):
     t = a * False
@@ -17573,6 +17573,15 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        decorators=(
+            DecorateInfo(
+                toleranceOverride
+                ({
+                    torch.half: tol(atol=1e-2, rtol=1e-2),
+                    torch.bfloat16: tol(atol=1e-2, rtol=1e-2),
+                }),
+                'TestUnaryUfuncs'),
+        ),
     ),
     OpInfo(
         "linalg.tensorinv",
