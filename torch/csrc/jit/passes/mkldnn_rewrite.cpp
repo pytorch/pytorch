@@ -1,20 +1,11 @@
 #include <ATen/Config.h>
 #include <ATen/code_template.h>
-#include <ATen/core/jit_type.h>
-#include <ATen/native/ConvUtils.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/fold_conv_bn.h>
-#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
-#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/mkldnn_rewrite.h>
-#include <torch/csrc/jit/passes/remove_dropout.h>
-#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
 namespace torch {
