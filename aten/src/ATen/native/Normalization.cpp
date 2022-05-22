@@ -28,7 +28,7 @@ TORCH_META_FUNC(renorm)(const Tensor& self, const Scalar& p, int64_t dim, const 
               "renorm: expected maxnorm to be >= 0 but got ", maxnorm.toDouble());
   const auto ndim = self.dim();
   TORCH_CHECK(ndim > 1, "renorm: input needs at least 2 dimensions, got ", ndim, " dimensions");
-  set_output(self.sizes(), self.options());
+  set_output_raw_strided(0, self.sizes(), {}, self.options());
 }
 
 }  // namespace meta
