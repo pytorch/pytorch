@@ -3814,7 +3814,9 @@ def sample_inputs_fill_(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=args)
 
 def _fill_np(a, value):
-    return a.copy().fill(value)
+    a = a.copy()
+    a.fill(value)
+    return a
 
 def _fill_aten(a, value):
     t = a * False
