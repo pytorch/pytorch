@@ -86,9 +86,11 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
     }
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.get(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   } else {
-    TrivialOffsetCalculatorVariant input_offset_calculator(iter);
+    TrivialOffsetCalculatorVariant input_offset_calculator(iter.ninputs());
     void* ic_ptr = input_offset_calculator.data_ptr();
-    auto oc = TrivialOffsetCalculator<1>();
+    TrivialOffsetCalculatorVariant output_offset_calculator(iter.noutputs());
+    void* oc_ptr = output_offset_calculator.data_ptr();
+
     auto l = memory::LoadWithoutCast();
     auto s = memory::StoreWithoutCast();
 
@@ -98,7 +100,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
     args[0] = static_cast<void*>(&N);
     args[1] = data_ptr;
     args[2] = ic_ptr;
-    args[3] = static_cast<void*>(&oc);
+    args[3] = oc_ptr;
     args[4] = static_cast<void*>(&l);
     args[5] = static_cast<void*>(&s);
     args[6] = static_cast<void*>(&scalar_val);
@@ -186,7 +188,7 @@ void jitted_gpu_kernel_dynamic_impl(
     const std::vector<at::Scalar>& extra_args) {
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
-  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() <= 8);
   TORCH_INTERNAL_ASSERT(iter.ninputs() <= 8);
 
   ArrayVariant data(iter);
@@ -212,10 +214,10 @@ void jitted_gpu_kernel_dynamic_impl(
     }
 
     // Case 2: no dynamic casting and noncontiguous
-    OffsetCalculatorVariant input_offset_calculator(iter);
+    OffsetCalculatorVariant</*is_input=*/true> input_offset_calculator(iter);
     void* ic_ptr = input_offset_calculator.data_ptr();
-    auto output_offset_calculator = make_output_offset_calculator(iter);
-    void* oc_ptr = static_cast<void*>(&output_offset_calculator);
+    OffsetCalculatorVariant</*is_input=*/false> output_offset_calculator(iter);
+    void* oc_ptr = output_offset_calculator.data_ptr();
 
     auto loader = memory::LoadWithoutCast();
     auto storer = memory::StoreWithoutCast();
@@ -230,23 +232,22 @@ void jitted_gpu_kernel_dynamic_impl(
   }
 
   // Cases 3 and 4 are handled below
-  // Both require construction of a storer (this asserts 1 output) and one or more loaders
+  // Both require construction of one or more storers and loaders
 
-  // Creates load casts from inputs (note offset indexing into the iterators 1...n tensors)
+  // Creates load casts from inputs (note offset indexing into the iterators noutpus...n tensors)
   LoadWithCastVariant loader(iter);
   void* l_ptr = loader.data_ptr();
 
-  // Creates store cast to output (the zeroth tensor in TensorIterator)
-  auto storer = memory::StoreWithCast(iter.dtype(0));
-  void* s_ptr = static_cast<void*>(&storer);
+  // Creates store cast to output (the 0...noutpus-1 tensor in TensorIterator)
+  StoreWithCastVariant storer(iter);
+  void* s_ptr = storer.data_ptr();
 
   if (contiguous) {
     // Case 3: dynamic casting and contiguous
-    TrivialOffsetCalculatorVariant input_offset_calculator(iter);
+    TrivialOffsetCalculatorVariant input_offset_calculator(iter.ninputs());
     void* ic_ptr = input_offset_calculator.data_ptr();
-
-    auto output_offset_calculator = TrivialOffsetCalculator<1>();
-    void* oc_ptr = static_cast<void*>(&output_offset_calculator);
+    TrivialOffsetCalculatorVariant output_offset_calculator(iter.noutputs());
+    void* oc_ptr = output_offset_calculator.data_ptr();
 
     launch_jitted_unrolled_kernel_dynamic(
       kernel_name, iter, iter.device().index(), numel, f, data_ptr,
@@ -255,11 +256,10 @@ void jitted_gpu_kernel_dynamic_impl(
   }
 
   // Case 4: dynamic casting and noncontiguous
-  OffsetCalculatorVariant input_offset_calculator(iter);
+  OffsetCalculatorVariant</*is_input=*/true> input_offset_calculator(iter);
   void* ic_ptr = input_offset_calculator.data_ptr();
-
-  auto output_offset_calculator = make_output_offset_calculator(iter);
-  void* oc_ptr = static_cast<void*>(&output_offset_calculator);
+  OffsetCalculatorVariant</*is_input=*/false> output_offset_calculator(iter);
+  void* oc_ptr = output_offset_calculator.data_ptr();
 
   launch_jitted_unrolled_kernel_dynamic(
       kernel_name, iter, iter.device().index(), numel, f, data_ptr,
