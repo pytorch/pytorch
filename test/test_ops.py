@@ -403,7 +403,7 @@ class TestCommon(TestCase):
             go(sample)
             # ...and once rerouting all torch.* function calls to torch._refs.*
             # instead (testing PrimTorch end-to-end)
-            go(sample, lambda: TorchRefsMode.push(strict=False))
+            go(sample, lambda: TorchRefsMode.push(strict=True))
             # TODO: xfail'ing one of these will xfail both, there is no finer
             # granularity at the moment
 

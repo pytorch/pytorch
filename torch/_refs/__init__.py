@@ -137,6 +137,10 @@ __all__ = [
     "sum",
     "amax",
     "amin",
+    "var",
+    "mean",
+    "std_mean",
+    "std_var",
     #
     # View & Shape Ops
     #

@@ -147,6 +147,7 @@ __all__ = [
     "any",
     "prod",
     "sum",
+    "var",
     #
     # Tensor Creation
     #
