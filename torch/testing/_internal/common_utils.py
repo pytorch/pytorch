@@ -2196,15 +2196,6 @@ class TestCase(expecttest.TestCase):
         # Hide this function from `pytest`'s traceback
         __tracebackhide__ = True
 
-        # TODO: the Tensor compare uses bunch of operations which is currently not
-        # supported by MPS. We will remove this move to CPU after all the
-        # support is added. https://github.com/pytorch/pytorch/issues/77144
-        if isinstance(x, torch.Tensor) and (x.is_mps):
-            x = x.to('cpu')
-
-        if isinstance(y, torch.Tensor) and (y.is_mps):
-            y = y.to('cpu')
-
         # numpy's dtypes are a superset of what PyTorch supports. In case we encounter an unsupported dtype, we fall
         # back to an elementwise comparison. Note that this has to happen here and not for example in
         # `TensorOrArrayPair`, since at that stage we can no longer split the array into its elements and perform
