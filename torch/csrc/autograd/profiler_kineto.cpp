@@ -118,6 +118,8 @@ void _push_reverse_order(PyTraceEvent* e, std::vector<std::string>& names) {
 namespace {
 using torch::profiler::impl::ProfilerThreadLocalStateBase;
 using torch::profiler::impl::ActiveProfilerType;
+using torch::profiler::impl::EventType;
+using torch::profiler::impl::ExtraFields;
 using torch::profiler::impl::Result;
 using torch::profiler::impl::kineto::annotation_t;
 using torch::profiler::impl::shapesToStr;
@@ -138,57 +140,61 @@ struct MemoryEventData {
 static_assert(std::is_pod<MemoryEventData>::value, "Non-POD member of MemoryEventData.");
 
 struct EventFieldsVisitor {
-  EventFieldsVisitor(const Result& result, KinetoEvent& kineto_event)
-      : result_{result}, kineto_event_{kineto_event} {
-    handleJIT(result_.get().jit_stack_, result_.get().jit_modules_);
-    c10::visit(*this, result.event_);
+  EventFieldsVisitor(
+      Result& result,
+      KinetoEvent& kineto_event,
+      const post_process_t& post_process)
+      : kineto_event_{kineto_event}, post_process_{post_process} {
+    c10::visit(*this, result.extra_fields_);
   }
 
-  void operator()(const torch::profiler::impl::OpEvent& op_event) {
+  void operator()(ExtraFields<EventType::TorchOp>& op_event) {
+    handleJIT(op_event);
     kineto_event_.get()
-        .endThreadId(op_event.end_thread_id_)
-        .scope(op_event.record_function_scope_)
-        .setAsync(op_event.is_async_)
-        .debugHandle(op_event.debug_handle_);
+        .endThreadId(op_event.end_tid_)
+        .scope((int8_t)op_event.scope_)
+        .debugHandle(op_event.debug_handle_)
+        .setAsync(op_event.is_async_);
 
-    auto& shapes = result_.get().inputs_.shapes_;
+    auto& shapes = op_event.inputs_.shapes_;
     if (!shapes.empty()) {
       kineto_event_.get().shapes(shapes);
       annotations_.emplace_back("Input Dims", shapesToStr(shapes));
     }
 
-    auto& dtypes = result_.get().inputs_.dtypes_;
+    auto& dtypes = op_event.inputs_.dtypes_;
     if (!dtypes.empty()) {
       kineto_event_.get().dtypes(dtypes);
       annotations_.emplace_back("Input type", dtypesToStr(dtypes));
     }
 
-    if (!result_.get().extra_args_.empty()) {
+    if (!op_event.extra_args_.empty()) {
       kineto_event_.get().flops(
-          computeFlops(result_.get().name(), result_.get().extra_args_));
+          computeFlops(op_event.name_, op_event.extra_args_));
     }
     kineto_event_.get().cuda_event_start_ =
-        result_.get().gpu_fallback_.cuda_event_start_;
+        op_event.gpu_fallback_.cuda_event_start_;
     kineto_event_.get().cuda_event_end_ =
-        result_.get().gpu_fallback_.cuda_event_end_;
+        op_event.gpu_fallback_.cuda_event_end_;
 
     // add information about an associated forward op, if a sequence number
     // is available (e.g. during training)
     if (op_event.sequence_number_ >= 0) {
       kineto_event_.get()
           .sequenceNr(op_event.sequence_number_)
-          .fwdThreadId(op_event.forward_thread_id_);
+          .fwdThreadId(op_event.forward_tid_);
       annotations_.emplace_back(
-          "Fwd thread id", std::to_string(op_event.forward_thread_id_));
+          "Fwd thread id", std::to_string(op_event.forward_tid_));
       annotations_.emplace_back(
           "Sequence number", std::to_string(op_event.sequence_number_));
     }
   }
 
-  void operator()(const torch::profiler::impl::BackendEvent& backend_event) {
+  void operator()(ExtraFields<EventType::Backend>& backend_event) {
+    handleJIT(backend_event);
     kineto_event_.get()
-        .endThreadId(result_.get().start_tid_)
-        .scope(backend_event.record_function_scope_)
+        .endThreadId(kineto_event_.get().startThreadId())
+        .scope((int8_t)backend_event.scope_)
         .debugHandle(backend_event.debug_handle_)
         .backend(backend_event.backend_);
 
@@ -198,9 +204,13 @@ struct EventFieldsVisitor {
     }
   }
 
-  void handleJIT(
-      const std::vector<std::string>& jit_stack,
-      const std::vector<std::string>& jit_modules) {
+  template <typename T>
+  void handleJIT(T& fields) {
+    auto& jit_stack = fields.jit_stack_;
+    auto& jit_modules = fields.jit_modules_;
+    if (post_process_.get()) {
+      post_process_.get()(fields.debug_handle_, jit_stack, jit_modules);
+    }
     if (!jit_stack.empty()) {
       // NB: This is only for the JIT stack. The python stack (if applicable)
       //     is constructed later.
@@ -217,8 +227,8 @@ struct EventFieldsVisitor {
     }
   }
 
-  std::reference_wrapper<const Result> result_;
   std::reference_wrapper<KinetoEvent> kineto_event_;
+  std::reference_wrapper<const post_process_t> post_process_;
   annotation_t annotations_;
 };
 
@@ -348,7 +358,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     for (auto& e : record_queue_.getRecords(converter)) {
       // `take_data` handles time conversion.
       int64_t start_us = e.start_time_us_;
-      int64_t end_us = e.end_time_us_;
+      int64_t end_us = e.endTimeUS();
 
       if (end_us < start_us) {
         // We initialize end_us_ to the smallest int64_t, so this means that
@@ -356,36 +366,27 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         continue;
       }
 
-      // Call events post processing callback before finalizing trace, if there
-      // is one.
-      if (getEventPostProcessingCallback()) {
-        getEventPostProcessingCallback()(
-            c10::visit([](const auto& i) { return i.debug_handle_; }, e.event_),
-            e.jit_stack_,
-            e.jit_modules_);
-      }
-
       kineto_events_.emplace_back();
       kineto_events_.back()
           .name(e.name())
           .startUs(start_us)
           .durationUs(end_us - start_us)
-          .correlationId(e.correlation_id())
+          .correlationId(e.correlationID())
           .deviceType(c10::DeviceType::CPU)
           .startThreadId(e.start_tid_);
 
       // NB: also sets fields on `kineto_events_.back()`.
-      auto annotations =
-          EventFieldsVisitor(e, kineto_events_.back()).annotations_;
+      auto visitor = EventFieldsVisitor(
+          e, kineto_events_.back(), getEventPostProcessingCallback());
 
       cpu_trace_.addCPUActivity(
           e.name(),
           e.kinetoType(),
           e.kineto_info_,
-          e.correlation_id(),
+          e.correlationID(),
           start_us,
           end_us,
-          annotations);
+          visitor.annotations_);
     }
   }
 
@@ -711,7 +712,7 @@ void onFunctionExit(const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) 
     static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
   TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
   kineto_ctx_ptr->event_->end_time_ = torch::profiler::impl::getApproximateTime();
-  kineto_ctx_ptr->event_->end_thread_id_ = at::RecordFunction::currentThreadId();
+  kineto_ctx_ptr->event_->basic_fields_.end_tid_ = at::RecordFunction::currentThreadId();
   if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
       auto fallback = kineto_ctx_ptr->fallback_;
@@ -767,13 +768,12 @@ void reportBackendEventToActiveKinetoProfiler(
   }
 
   state_ptr->record_queue_.getSubqueue()->emplace_backend_event(
-    torch::profiler::impl::BackendEvent {
       start_time_us,
       end_time_us,
-      (uint8_t)scope,
       debug_handle,
+      scope,
       event_name,
-      backend_name});
+      backend_name);
 
   /* no support for input shapes now?
   if (config.report_input_shapes) {
