@@ -132,6 +132,7 @@ __all__ = [
     #
     # Elementwise Ternary References
     #
+    "clamp",
     #
     # Conditional references
     #
@@ -187,7 +188,6 @@ __all__ = [
     #
     # Randomness References
     #
-    "randn",
     "uniform",
 ]
 
