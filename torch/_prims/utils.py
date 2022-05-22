@@ -41,6 +41,19 @@ NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
 
 
+torch_function_passthrough = {
+    torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.numel,
+    torch.Tensor.stride,
+    torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+    # For TorchRefsMode only
+    torch.Tensor.__format__,
+    torch.Tensor.__repr__,
+}
+
+
 class TensorMeta(torch.Tensor):
     """
     Model tensor metadata.  Not a stock meta tensor because device is modeled
@@ -121,14 +134,7 @@ class TensorMeta(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
-        if func in {
-            torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.numel,
-            torch.Tensor.stride,
-            torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.device.__get__,  # type: ignore[attr-defined]
-        }:
+        if func in torch_function_passthrough:
             return super().__torch_function__(func, types, args, kwargs)
 
         if not hasattr(func, "meta"):
@@ -799,7 +805,7 @@ _computation_dtype_map = {
 }
 
 
-def _get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
+def get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
     return _computation_dtype_map.get(dtype, dtype)
 
 
@@ -810,6 +816,13 @@ class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     ALWAYS_BOOL = (3,)
     COMPLEX_TO_FLOAT = (4,)
     BOOL_TO_LONG = (5,)
+
+
+class REDUCTION_OUTPUT_TYPE_KIND(Enum):
+    SAME = (0,)
+    COMPLEX_TO_FLOAT = (1,)  # for complex types outputs corresponding real type
+    KEEP_PROMOTED_TYPE = (2,)  # keep output in opmath type, needed for mean
+    ALWAYS_BOOL = (3,)
 
 
 # TODO: document type promotion kinds
@@ -970,29 +983,56 @@ def elementwise_dtypes(
         result_dtype = torch.bool
 
     if type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
-        return _get_computation_dtype(result_dtype), result_dtype
+        return get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH:
         return result_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
         if is_integer_dtype(result_dtype) or is_boolean_dtype(result_dtype):
             result_dtype = torch.get_default_dtype()
-        return _get_computation_dtype(result_dtype), result_dtype
+        return get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
         # NOTE: computation can still occur in a complex dtype
-        computation_dtype = _get_computation_dtype(result_dtype)
+        computation_dtype = get_computation_dtype(result_dtype)
         if is_complex_dtype(result_dtype):
             result_dtype = corresponding_real_dtype(result_dtype)
         return computation_dtype, result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG:
         if is_boolean_dtype(result_dtype):
             return torch.long, torch.long
-        return _get_computation_dtype(result_dtype), result_dtype
+        return get_computation_dtype(result_dtype), result_dtype
     elif type_promotion_kind is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
-        return _get_computation_dtype(result_dtype), torch.bool
+        return get_computation_dtype(result_dtype), torch.bool
     else:
         raise ValueError(
             "Unknown type promotion kind {0}".format(str(type_promotion_kind))
         )
+
+
+def reduction_dtypes(
+    arg,
+    output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND,
+    dtype: Optional[torch.dtype] = None,
+) -> Tuple[torch.dtype, Optional[torch.dtype]]:
+    # even though some reductions, like amin or amax, don't strictly require type promotion,
+    # all the math ops (including comparisons) are still defined only for a computation type,
+    # so promotion will still happen. We are doing it explicitly here
+    inp_dtype = dtype if dtype is not None else arg.dtype
+    computation_dtype = get_computation_dtype(inp_dtype)
+    if (
+        output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME
+        or output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    ):
+        result_dtype = dtype if dtype else arg.dtype
+        if (
+            output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+            and is_complex_dtype(result_dtype)
+        ):
+            result_dtype = corresponding_real_dtype(result_dtype)
+    elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.KEEP_PROMOTED_TYPE:
+        result_dtype = None
+    else:  # ALWAYS_BOOL
+        result_dtype = torch.bool
+    return computation_dtype, result_dtype
 
 
 def wrap_device(d: Union[str, torch.device]) -> torch.device:

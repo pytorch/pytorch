@@ -56,6 +56,7 @@ __all__ = [
     "erfc",
     "exp",
     "expm1",
+    "exp2",
     "floor",
     "is_finite",
     "is_infinite",
@@ -63,6 +64,7 @@ __all__ = [
     "log",
     "log1p",
     "log2",
+    "log10",
     "neg",
     "reciprocal",
     "round",
@@ -100,6 +102,7 @@ __all__ = [
     "shift_left",
     "shift_right_arithmetic",
     "shift_right_logical",  # not implemented
+    "sub",
     #
     # View prims
     #
@@ -146,6 +149,7 @@ __all__ = [
     "any",
     "prod",
     "sum",
+    "var",
     #
     # Tensor Creation
     #
@@ -464,6 +468,13 @@ expm1 = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+exp2 = _make_elementwise_unary_prim(
+    "exp2",
+    impl_aten=torch.special.exp2,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 floor = _make_elementwise_unary_prim(
     "floor",
     impl_aten=torch.floor,
@@ -509,6 +520,13 @@ log1p = _make_elementwise_unary_prim(
 log2 = _make_elementwise_unary_prim(
     "log2",
     impl_aten=torch.log2,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+log10 = _make_elementwise_unary_prim(
+    "log10",
+    impl_aten=torch.log10,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1827,8 +1845,20 @@ def _bool_return_reduction_meta(inp, dims):
     return _reduction_meta(inp, dims, output_dtype=torch.bool)
 
 
+def _var_reduction_meta(inp, dims, *, correction):
+    if utils.is_complex_dtype(inp.dtype):
+        output_dtype = utils.corresponding_real_dtype(inp.dtype)
+    else:
+        output_dtype = inp.dtype
+    return _reduction_meta(inp, dims, output_dtype=output_dtype)
+
+
 _sum_doc = """
     Computes the sum of elements in the input tensor over the list of dimensions
+    specified in the dim argument
+    """
+_prod_doc = """
+    Computes the product of elements in the input tensor over the list of dimensions
     specified in the dim argument
     """
 _amax_doc = """
@@ -1839,6 +1869,9 @@ _amin_doc = """
     Computes the minimum value of elements in the input tensor over the list of dimensions
     specified in the dim argument
     """
+_var_doc = """
+    Computes the biased variance of x over the list of dimensions specified in the dim argument
+    """
 
 
 def _make_reduction_prim(name: str, impl_aten, doc):
@@ -1846,6 +1879,17 @@ def _make_reduction_prim(name: str, impl_aten, doc):
     return _make_prim(
         schema=f"{name}(Tensor inp, int[]? dims, *, ScalarType? output_dtype=None) -> Tensor",
         meta=_reduction_meta,
+        impl_aten=impl_aten,
+        return_type=RETURN_TYPE.NEW,
+        doc=doc,
+    )
+
+
+def _make_var_reduction_prim(name: str, impl_aten, doc):
+    """Creates a reduction prim."""
+    return _make_prim(
+        schema=f"{name}(Tensor inp, int[]? dims, *, int correction, ScalarType? output_dtype=None) -> Tensor",
+        meta=_var_reduction_meta,
         impl_aten=impl_aten,
         return_type=RETURN_TYPE.NEW,
         doc=doc,
@@ -1872,7 +1916,13 @@ sum = _make_reduction_prim(
 prod = _make_reduction_prim(
     name="prod",
     impl_aten=torch.prod,
-    doc=_sum_doc,  # TODO: fixme
+    doc=_sum_doc,
+)
+
+var = _make_var_reduction_prim(
+    name="var",
+    impl_aten=torch.var,
+    doc=_var_doc,
 )
 
 amax = _make_reduction_prim(

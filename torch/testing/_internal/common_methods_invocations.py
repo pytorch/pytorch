@@ -6939,6 +6939,14 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs)
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+def error_inputs_fliplr(op, device, **kwargs):
+    yield ErrorInput(SampleInput(make_tensor((1,), dtype=torch.float, device=device)),
+                     error_regex="Input must be >= 2-d.")
+
+def error_inputs_flipud(op, device, **kwargs):
+    yield ErrorInput(SampleInput(make_tensor((), dtype=torch.float, device=device)),
+                     error_regex="Input must be >= 1-d.")
+
 # TODO: clamp shares tensors among its sample inputs --- we should prohibit this!
 def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     x = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
@@ -11306,6 +11314,7 @@ op_db: List[OpInfo] = [
            op=torch.fliplr,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_fliplr_flipud,
+           error_inputs_func=error_inputs_fliplr,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -11313,6 +11322,7 @@ op_db: List[OpInfo] = [
            op=torch.flipud,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_fliplr_flipud,
+           error_inputs_func=error_inputs_flipud,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -18562,10 +18572,12 @@ class PythonRefInfo(OpInfo):
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            validate_view_consistency=True,
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        self.validate_view_consistency = validate_view_consistency
         assert isinstance(self.torch_opinfo, OpInfo)
 
         inherited = self.torch_opinfo._original_opinfo_args
@@ -18725,8 +18737,16 @@ python_ref_db = [
         torch_opinfo_name="expm1",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.exp2",
+        torch_opinfo_name="exp2",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.floor",
         torch_opinfo_name="floor",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.frac",
+        torch_opinfo_name="frac",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.isfinite",
@@ -18780,6 +18800,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.log1p",
         torch_opinfo_name="log1p",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.log10",
+        torch_opinfo_name="log10",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log2",
@@ -18852,6 +18876,20 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.logit",
+        torch_opinfo_name="logit",
+        decorators=(
+            # ATen CPU implementation computes at lower precision
+            DecorateInfo(toleranceOverride({
+                torch.bfloat16: tol(atol=1e-2, rtol=0),
+            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
+            # No meta support for clamp or arithmetic
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',),
+            # RuntimeError: no _refs support for torch.clamp
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',),
+        ),
     ),
     #
     # Elementwise Unary nn.functional OpInfos
@@ -19154,6 +19192,14 @@ python_ref_db = [
         torch_opinfo_name="flip",
     ),
     PythonRefInfo(
+        "_refs.fliplr",
+        torch_opinfo_name="fliplr",
+    ),
+    PythonRefInfo(
+        "_refs.flipud",
+        torch_opinfo_name="flipud",
+    ),
+    PythonRefInfo(
         "_refs.narrow",
         torch_opinfo_name="narrow",
     ),
@@ -19202,6 +19248,8 @@ python_ref_db = [
         skips=(
             # TensorMeta doesn't support tolist
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
+            # RuntimeError: no _refs support for torch.Tensor.tolist
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency'),
         )
     ),
     PythonRefInfo(
@@ -19232,12 +19280,38 @@ python_ref_db = [
         supports_out=True,
     ),
     ReductionPythonRefInfo(
+        "_refs.mean",
+        torch_opinfo_name="mean",
+        supports_out=True,
+    ),
+    ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
     ),
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
+    ),
+    ReductionPythonRefInfo(
+        "_refs.var",
+        torch_opinfo_name="var",
+        supports_out=True
+    ),
+    ReductionPythonRefInfo(
+        "_refs.std",
+        torch_opinfo_name="std",
+        supports_out=True
+    ),
+    # std_mean and var_mean are not ReductionInfos
+    PythonRefInfo(
+        "_refs.std_mean",
+        torch_opinfo_name="std_mean",
+        validate_view_consistency=False
+    ),
+    PythonRefInfo(
+        "_refs.var_mean",
+        torch_opinfo_name="var_mean",
+        validate_view_consistency=False
     ),
     #
     # Tensor Creation Reference OpInfos
