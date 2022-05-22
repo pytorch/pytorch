@@ -1078,7 +1078,7 @@ void TensorPipeAgent::leaveGroup() {
 }
 
 // TODO: Remove join()
-void TensorPipeAgent::join(bool shutdown) {
+void TensorPipeAgent::join(bool shutdown, float /* unused */) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
   if (!isStaticGroup_) {
     leaveGroup();

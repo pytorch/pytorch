@@ -96,6 +96,7 @@ Indexing, Slicing, Joining, Mutating Ops
     hstack
     index_add
     index_copy
+    index_reduce
     index_select
     masked_select
     movedim
@@ -577,7 +578,6 @@ BLAS and LAPACK Operations
     outer
     pinverse
     qr
-    solve
     svd
     svd_lowrank
     pca_lowrank
@@ -604,6 +604,8 @@ Utilities
     is_deterministic_algorithms_warn_only_enabled
     set_deterministic_debug_mode
     get_deterministic_debug_mode
+    set_float32_matmul_precision
+    get_float32_matmul_precision
     set_warn_always
     is_warn_always_enabled
     vmap

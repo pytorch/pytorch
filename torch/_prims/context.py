@@ -1,13 +1,22 @@
 import string
 from typing import Callable, Sequence, Any, Dict
 from itertools import chain
+import functools
 
 
 import torch
 from torch.fx.graph import Graph, Node
+import torch.overrides
 
-from torch._prims.utils import TensorMeta
+from torch._prims.utils import TensorMeta, torch_function_passthrough
 import torch._refs as refs
+
+import torch._refs
+import torch._refs.nn
+import torch._refs.nn.functional
+import torch._refs.special
+
+import torch._prims
 
 
 # TODO:  automap torch operations to references
@@ -23,7 +32,7 @@ _torch_to_reference_map = {
 }
 
 
-class PrimContext(object):
+class PrimContext(torch.overrides.TorchFunctionMode):
     """
     The prototype prim tracing context.
 
@@ -32,12 +41,12 @@ class PrimContext(object):
     import torch._prims.utils as utils
     from torch._prims.context import PrimContext
     from torch._prims.executor import execute
+    from torch.overrides import push_torch_function_mode
 
     a = torch.randn((2, 2))
     b = torch.randn((2, 2))
 
-    ctx = PrimContext()
-    with ctx:
+    with push_torch_function_mode(PrimContext):
       meta_a = ctx.placeholder(utils.TensorMeta(a))
       meta_b = ctx.placeholder(utils.TensorMeta(b))
       result = torch.add(meta_a, meta_b)
@@ -64,13 +73,6 @@ class PrimContext(object):
         self._shape_name_counter = 0
         self._lowercase = tuple(string.ascii_lowercase)
         self._uppercase = tuple(string.ascii_uppercase)
-
-    def __enter__(self):
-        self.old_ctx = TensorMeta.ctx
-        TensorMeta.ctx = self
-
-    def __exit__(self, type, value, traceback):
-        TensorMeta.ctx = self.old_ctx
 
     @staticmethod
     def _create_name(idx, chars):
@@ -99,7 +101,7 @@ class PrimContext(object):
         if isinstance(a, TensorMeta):
             if a.node is not None:
                 raise ValueError("Attempting to reuse a TensorMeta in a new trace!")
-            a.name = name
+            a.tname = name
             a.node = node
 
         return a
@@ -111,12 +113,12 @@ class PrimContext(object):
         node = self.graph.output(tm)
         self._add_user(tm, node)
 
-    def handle_torch_function(
+    def __torch_function__(
         self,
         func: Callable,
         types: Sequence,
-        args: Sequence[Any],
-        kwargs: Dict,
+        args: Sequence[Any] = (),
+        kwargs: Dict = None,
     ):
         """
         Determines which function to call. The order of which
@@ -126,6 +128,9 @@ class PrimContext(object):
         - if func is a torch operation, its corresponding reference
         - func
         """
+
+        if kwargs is None:
+            kwargs = {}
 
         if hasattr(func, "meta"):
             # TODO: add check that all args/kwargs are 'registered' properly
@@ -141,7 +146,7 @@ class PrimContext(object):
             node = self.graph.create_node(
                 "call_function", func, name=output_name, args=args, kwargs=kwargs
             )
-            output.name = output_name
+            output.tname = output_name
             output.node = node
 
             # Marks uses
@@ -155,6 +160,72 @@ class PrimContext(object):
         # Remaps torch operations to their references
         if func in _torch_to_reference_map:
             fn = _torch_to_reference_map[func]
-            return fn(*args, **kwargs)  # type: ignore[operator]
+            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
+                return fn(*args, **kwargs)  # type: ignore[operator]
 
         return func(*args, **kwargs)
+
+
+@functools.lru_cache(None)
+def torch_to_refs_map():
+    """
+    Mapping of torch API functions to torch._refs functions.
+    E.g. torch_to_refs_map()[torch.add] == torch._refs.add
+    """
+    modules = [
+        (torch, torch._refs),
+        (torch.nn, torch._refs.nn),
+        (torch.nn.functional, torch._refs.nn.functional),
+        (torch.special, torch._refs.special),
+    ]
+    r = {}
+    for mod_torch, mod_refs in modules:
+        for s in mod_refs.__all__:
+            r[mod_torch.__dict__.get(s)] = mod_refs.__dict__.get(s)
+    return r
+
+
+@functools.lru_cache(None)
+def all_prims():
+    """
+    Set of all prim functions, e.g., torch._prims.add in all_prims()
+    """
+    return {torch._prims.__dict__.get(s) for s in torch._prims.__all__}
+
+
+class TorchRefsMode(torch.overrides.TorchFunctionMode):
+    """
+    Switches the interpretation of torch.* functions and Tensor methods to
+    use PrimTorch refs in torch._refs.  (Direct calls to _refs are unaffected.)
+
+    >>> with TorchRefsMode.push():
+    ...     torch.add(x, y)  # calls torch._refs.add(x, y)
+
+    By default, this context manager will fall back on the torch.* if the
+    ref does not exist; set strict=True to error if this occurs.
+    """
+
+    def __init__(self, strict=False):
+        self.strict = strict
+
+    def __torch_function__(
+        self,
+        orig_func: Callable,
+        types: Sequence,
+        args: Sequence[Any] = (),
+        kwargs: Dict = None,
+    ):
+        if kwargs is None:
+            kwargs = {}
+        # For primitive operations, run them as is without interception
+        if orig_func in torch_function_passthrough or orig_func in all_prims():
+            return orig_func(*args, **kwargs)
+        mapping = torch_to_refs_map()
+        func = mapping.get(orig_func, None)
+        if func is not None:
+            return func(*args, **kwargs)
+        if self.strict:
+            raise RuntimeError(
+                f"no _refs support for {torch.overrides.resolve_name(orig_func)}"
+            )
+        return orig_func(*args, **kwargs)

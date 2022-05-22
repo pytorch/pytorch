@@ -67,7 +67,7 @@ def check_file(filename: str) -> Optional[LintMessage]:
                 name="testestTrailing newline",
                 original=None,
                 replacement=None,
-                description="Trailing newline found. Run `lintunner --take NEWLINE -a` to apply changes.",
+                description="Trailing newline found. Run `lintrunner --take NEWLINE -a` to apply changes.",
             )
 
         else:
@@ -103,7 +103,7 @@ def check_file(filename: str) -> Optional[LintMessage]:
                     name="Trailing newline",
                     original=original,
                     replacement=original.rstrip("\n") + "\n",
-                    description="Trailing newline found. Run `lintunner --take NEWLINE -a` to apply changes.",
+                    description="Trailing newline found. Run `lintrunner --take NEWLINE -a` to apply changes.",
                 )
 
 

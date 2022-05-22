@@ -5,7 +5,7 @@ import itertools
 from typing import Iterator
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from functools import partial
-from torch.utils._python_dispatch import enable_python_mode
+from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch.autograd.forward_ad as fwAD
 from torch.overrides import enable_reentrant_dispatch
 import re
@@ -118,7 +118,7 @@ def generate_cct(enable_recursive_torch_dispatch=False,
     #   If True, enable __torch_dispatch__ before calling the func in
     #   CCT's __torch_dispatch__ implementation else call
     #   the func under `no_dispatch`.
-    #   NOTE: We need to disable dispatch under Python Mode,
+    #   NOTE: We need to disable dispatch under Torch Dispatch Mode,
     #   to avoid infinite recursion.
     #   Also, we need to enable dispatch for checking
     #   forward_AD composite compliance
@@ -359,11 +359,11 @@ def check_all_permutations(op, args, kwargs):
                 f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
             )
 
-# Checks via the usage of Python mode certain anti-patterns that
+# Checks via the usage of torch dispatch mode certain anti-patterns that
 # are not composite compliant.
 #
 # In particular, the anti-pattern we are trying to prevent is a user
-# creating an empty tensor and then resize_-ing it. Python Mode helps
+# creating an empty tensor and then resize_-ing it. Torch Dispatch Mode helps
 # here because all factory functions will create tensors that are
 # CompositeCompliantTensor.
 #
@@ -380,7 +380,7 @@ def check_with_mode(op, args, kwargs):
     args = tree_map(wrap, args)
     kwargs = tree_map(wrap, kwargs)
     try:
-        with enable_python_mode(CCT):
+        with enable_torch_dispatch_mode(CCT):
             op(*args, **kwargs)
     # see NOTE: [What errors are Composite Compiance trying to catch?]
     except RuntimeError as err:

@@ -591,4 +591,4 @@ class TestTyping(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError,
                                     r'aka NamedTuple\(logits, aux_logits2, aux_logits1\)'):
-            out = foo(_GoogLeNetOutputs(logits=3, aux_logits2=4, aux_logits1=5))
+            out = foo(_GoogLeNetOutputs(logits="3", aux_logits2="4", aux_logits1="5"))

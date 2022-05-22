@@ -19,5 +19,6 @@ torch.nn.init
 .. autofunction:: xavier_normal_
 .. autofunction:: kaiming_uniform_
 .. autofunction:: kaiming_normal_
+.. autofunction:: trunc_normal_
 .. autofunction:: orthogonal_
 .. autofunction:: sparse_
