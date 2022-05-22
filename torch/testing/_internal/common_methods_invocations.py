@@ -18716,8 +18716,16 @@ python_ref_db = [
         torch_opinfo_name="expm1",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.exp2",
+        torch_opinfo_name="exp2",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.floor",
         torch_opinfo_name="floor",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.frac",
+        torch_opinfo_name="frac",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.isfinite",
@@ -18771,6 +18779,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.log1p",
         torch_opinfo_name="log1p",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.log10",
+        torch_opinfo_name="log10",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log2",

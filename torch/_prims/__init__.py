@@ -56,6 +56,7 @@ __all__ = [
     "erfc",
     "exp",
     "expm1",
+    "exp2",
     "floor",
     "is_finite",
     "is_infinite",
@@ -63,6 +64,7 @@ __all__ = [
     "log",
     "log1p",
     "log2",
+    "log10",
     "neg",
     "reciprocal",
     "round",
@@ -465,6 +467,13 @@ expm1 = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+exp2 = _make_elementwise_unary_prim(
+    "exp2",
+    impl_aten=torch.special.exp2,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 floor = _make_elementwise_unary_prim(
     "floor",
     impl_aten=torch.floor,
@@ -510,6 +519,13 @@ log1p = _make_elementwise_unary_prim(
 log2 = _make_elementwise_unary_prim(
     "log2",
     impl_aten=torch.log2,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+log10 = _make_elementwise_unary_prim(
+    "log10",
+    impl_aten=torch.log10,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
