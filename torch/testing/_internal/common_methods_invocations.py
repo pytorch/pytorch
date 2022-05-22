@@ -8843,6 +8843,11 @@ def _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwa
 
 def sample_inputs_hinge_embedding_loss(op_info, device, dtype, requires_grad, **kwargs):
     for input, target, d in _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
+        # target should contain either 1 or -1 as per docs
+        with torch.no_grad():
+            mask = torch.rand_like(target) > 0.5
+            target[mask] = 1
+            target[~mask] = -1
         d['margin'] = random.uniform(-9, 9)
         yield SampleInput(input, args=(target, ), kwargs=d)
 
