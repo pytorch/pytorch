@@ -20,6 +20,7 @@ __all__ = [
     "mish",
     "selu",
     "softplus",
+    "margin_ranking_loss"
 ]
 
 # celu is implemented specially because it has an alpha argument
@@ -156,3 +157,45 @@ def softplus(
         rhs = refs.log1p(refs.exp(scaled_input))
 
     return refs.where(refs.gt(scaled_input, threshold), a, rhs)
+
+# Losses
+def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
+    if reduction == 'sum':
+        return refs.sum(loss)
+    elif reduction == 'mean':
+        return refs.true_divide(refs.sum(loss), loss.numel())
+    else:
+        return loss
+
+def _check_reduction_value(reduction: str):
+    if reduction not in ('mean', 'sum', 'none'):
+        raise ValueError("{} is not a valid value for reduction".format(reduction))
+
+def margin_ranking_loss(input1: TensorLikeType, input2: TensorLikeType,
+                        target: TensorLikeType, margin=0.0, reduction='mean') -> TensorLikeType:
+    # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
+    if (input1.ndim != input2.ndim or input1.ndim != target.ndim):
+        raise RuntimeError(
+            (
+                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
+                "input1: {}, input2: {}, target: {} ".format(input1.shape, input2.shape, target.shape)
+            )
+        )
+    _check_reduction_value(reduction)
+    neg_target = refs.neg(target)
+    input_diff = refs.sub(input1, input2)
+    mul_target_input = refs.mul(neg_target, input_diff)
+    add_margin = refs.add(mul_target_input, margin)
+    loss = refs.maximum(add_margin, 0)
+    return _apply_loss_reduction(loss, reduction)
+
+def hinge_embedding_loss(input: TensorLikeType, target: TensorLikeType,
+                         margin=1.0, reduction='mean') -> TensorLikeType:
+    # loss_without_reduction = input if y == 1
+    #                        = max(0, margin - input) if y == -1
+    _check_reduction_value(reduction)
+    margin_clamp = refs.maximum(refs.sub(margin, input), 0)
+    output_margin = refs.where(refs.ne(target, -1), margin_clamp, 0)
+    output_self = refs.where(refs.ne(target, 1), input, 0)
+    loss = refs.add(output_margin, output_self)
+    return _apply_loss_reduction(loss, reduction)
