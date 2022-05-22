@@ -176,7 +176,6 @@ def out_wrapper(fn: Callable) -> Callable:
             assert isinstance(out, TensorLike)
             out = _maybe_resize_out(out, result.shape)
             return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
-            return out
         return result
 
     sig = inspect.signature(fn)

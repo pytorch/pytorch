@@ -818,6 +818,13 @@ class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     BOOL_TO_LONG = (5,)
 
 
+class REDUCTION_OUTPUT_TYPE_KIND(Enum):
+    SAME = (0,)
+    COMPLEX_TO_FLOAT = (1,)  # for complex types outputs corresponding real type
+    KEEP_PROMOTED_TYPE = (2,)  # keep output in opmath type, needed for mean
+    ALWAYS_BOOL = (3,)
+
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -999,6 +1006,33 @@ def elementwise_dtypes(
         raise ValueError(
             "Unknown type promotion kind {0}".format(str(type_promotion_kind))
         )
+
+
+def reduction_dtypes(
+    arg,
+    output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND,
+    dtype: Optional[torch.dtype] = None,
+) -> Tuple[torch.dtype, Optional[torch.dtype]]:
+    # even though some reductions, like amin or amax, don't strictly require type promotion,
+    # all the math ops (including comparisons) are still defined only for a computation type,
+    # so promotion will still happen. We are doing it explicitly here
+    inp_dtype = dtype if dtype is not None else arg.dtype
+    computation_dtype = get_computation_dtype(inp_dtype)
+    if (
+        output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME
+        or output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    ):
+        result_dtype = dtype if dtype else arg.dtype
+        if (
+            output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+            and is_complex_dtype(result_dtype)
+        ):
+            result_dtype = corresponding_real_dtype(result_dtype)
+    elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.KEEP_PROMOTED_TYPE:
+        result_dtype = None
+    else:  # ALWAYS_BOOL
+        result_dtype = torch.bool
+    return computation_dtype, result_dtype
 
 
 def wrap_device(d: Union[str, torch.device]) -> torch.device:
