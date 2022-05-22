@@ -17189,7 +17189,8 @@ op_db: List[OpInfo] = [
            ),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)),
     OpInfo('nonzero',
-           dtypes=all_types_and_complex_and(torch.chalf, torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nonzero,
            supports_autograd=False,
            skips=(
