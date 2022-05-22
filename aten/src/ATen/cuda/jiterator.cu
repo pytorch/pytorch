@@ -15,7 +15,7 @@ namespace native {
 static inline void launch_jitted_vectorized_kernel_dynamic(
   const std::string& name, TensorIteratorBase& iter,
   DeviceIndex dev_idx, int64_t N, const std::string& f, void* data_ptr,
-  const std::vector<at::Scalar>& extra_args) {
+  const std::vector<at::Scalar>& extra_args, bool return_by_ref) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   // N is still int64_t for the computation, but it's always safe to cast result to int
   const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
@@ -60,7 +60,8 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
                                                extra_args_types,
-                                               vectorized, vec_size);
+                                               vectorized, vec_size,
+                                               return_by_ref);
       std::string kernel_name = vectorized ? name + "_vectorized" + std::to_string(vec_size) : name;
       // Acquires the program
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, kernel_name);
@@ -118,7 +119,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
   const std::string& name, TensorIteratorBase& iter,
   DeviceIndex dev_idx, int64_t N, const std::string& f, void* data_ptr,
   void* ic_ptr, void* oc_ptr, void* l_ptr, void* s_ptr, bool contiguous, bool dynamic_casting,
-  const std::vector<at::Scalar>& extra_args) {
+  const std::vector<at::Scalar>& extra_args, bool return_by_ref) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   //casting result to int is always safe, intermediate is int64 and won't overflow
@@ -153,7 +154,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                contiguous, dynamic_casting,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
-                                               extra_args_types);
+                                               extra_args_types, return_by_ref);
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
     }
   }
@@ -185,7 +186,8 @@ void jitted_gpu_kernel_dynamic_impl(
     TensorIteratorBase& iter,
     const std::string& f,
     const bool dynamic_casting,
-    const std::vector<at::Scalar>& extra_args) {
+    const std::vector<at::Scalar>& extra_args,
+    bool return_by_ref) {
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.noutputs() <= 8);
@@ -209,7 +211,7 @@ void jitted_gpu_kernel_dynamic_impl(
     if (contiguous) {
       // Case 1: no dynamic casting and contiguous
       launch_jitted_vectorized_kernel_dynamic(kernel_name, iter,
-         iter.device().index(), numel, f, data_ptr, extra_args);
+         iter.device().index(), numel, f, data_ptr, extra_args, return_by_ref);
       return;
     }
 
@@ -226,7 +228,7 @@ void jitted_gpu_kernel_dynamic_impl(
 
     launch_jitted_unrolled_kernel_dynamic(
       kernel_name, iter, iter.device().index(), numel, f, data_ptr,
-      ic_ptr, oc_ptr, l_ptr, s_ptr, contiguous, dynamic_casting, extra_args);
+      ic_ptr, oc_ptr, l_ptr, s_ptr, contiguous, dynamic_casting, extra_args, return_by_ref);
 
     return;
   }
@@ -251,7 +253,7 @@ void jitted_gpu_kernel_dynamic_impl(
 
     launch_jitted_unrolled_kernel_dynamic(
       kernel_name, iter, iter.device().index(), numel, f, data_ptr,
-      ic_ptr, oc_ptr, l_ptr, s_ptr, contiguous, dynamic_casting, extra_args);
+      ic_ptr, oc_ptr, l_ptr, s_ptr, contiguous, dynamic_casting, extra_args, return_by_ref);
     return;
   }
 
@@ -263,7 +265,7 @@ void jitted_gpu_kernel_dynamic_impl(
 
   launch_jitted_unrolled_kernel_dynamic(
       kernel_name, iter, iter.device().index(), numel, f, data_ptr,
-      ic_ptr, oc_ptr, l_ptr, s_ptr, contiguous, dynamic_casting, extra_args);
+      ic_ptr, oc_ptr, l_ptr, s_ptr, contiguous, dynamic_casting, extra_args, return_by_ref);
 }
 
 // Entrypoint for dynamic version of jitted GPU kernels, which accepts dynamic number of inputs
@@ -276,7 +278,8 @@ void jitted_gpu_kernel_dynamic(
     const std::string& kernel_name,
     TensorIteratorBase& iter,
     const std::string& f,
-    const std::vector<at::Scalar>& extra_args) {
+    const std::vector<at::Scalar>& extra_args,
+    bool return_by_ref) {
 
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
@@ -292,7 +295,7 @@ void jitted_gpu_kernel_dynamic(
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      jitted_gpu_kernel_dynamic(kernel_name, sub_iter, f, extra_args);
+      jitted_gpu_kernel_dynamic(kernel_name, sub_iter, f, extra_args, return_by_ref);
     }
     return;
   }
@@ -308,7 +311,7 @@ void jitted_gpu_kernel_dynamic(
     }
   }
 
-  jitted_gpu_kernel_dynamic_impl(kernel_name, iter, f, needs_dynamic_casting, extra_args);
+  jitted_gpu_kernel_dynamic_impl(kernel_name, iter, f, needs_dynamic_casting, extra_args, return_by_ref);
 }
 
 } // namespace native
@@ -320,7 +323,8 @@ std::vector<at::Tensor> CompileAndLaunchKernel(
   const std::string& kernel_name,
   const int num_outputs,
   const std::vector<at::Tensor>& tensors,
-  const std::vector<at::Scalar>& extra_args) {
+  const std::vector<at::Scalar>& extra_args,
+  bool return_by_ref) {
 
   std::vector<Tensor> outs(num_outputs);
   TensorIteratorConfig config;
@@ -340,7 +344,7 @@ std::vector<at::Tensor> CompileAndLaunchKernel(
   TensorIterator iter = config.build();
 
   CUDAGuard guard(iter.device());
-  at::native::jitted_gpu_kernel_dynamic(kernel_name, iter, code_string, extra_args);
+  at::native::jitted_gpu_kernel_dynamic(kernel_name, iter, code_string, extra_args, return_by_ref);
 
   std::vector<Tensor> outputs;
   for (int i = 0; i < num_outputs; ++i) {

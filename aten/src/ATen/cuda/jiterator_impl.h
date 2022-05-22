@@ -16,7 +16,6 @@
 namespace at {
 namespace native {
 
-constexpr int NUM_INPUTS = 8;
 
 #define AT_FOR_8_CASES(_)  \
   _(1)                      \
@@ -113,7 +112,8 @@ struct OffsetCalculatorVariant {
 };
 
 struct ArrayVariant {
-#define DEFINE_CASE(index) at::detail::Array<char*, index>,
+// works for up to 8 input + 8 outputs
+#define DEFINE_CASE(index) at::detail::Array<char*, index>, at::detail::Array<char*, index+8>,
   using ArrayTypes = c10::variant<
     AT_FOR_8_CASES(DEFINE_CASE)
   >;
@@ -122,8 +122,9 @@ struct ArrayVariant {
   ArrayVariant(const TensorIteratorBase& iter) {
     int ntensors = iter.ntensors();
     switch(ntensors) {
-#define DEFINE_CASE(index)                              \
-      case index: array = at::detail::Array<char*, index>{}; break;
+#define DEFINE_CASE(index)                                            \
+      case index: array = at::detail::Array<char*, index>{}; break;   \
+      case index+8: array = at::detail::Array<char*, index+8>{}; break;
 
       AT_FOR_8_CASES(DEFINE_CASE)
 #undef DEFINE_CASE

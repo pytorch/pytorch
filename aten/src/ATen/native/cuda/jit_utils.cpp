@@ -692,7 +692,8 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized,
-    int vec_size) {
+    int vec_size,
+    bool return_by_ref) {
   at::jit::TemplateEnv env;
 
   env.s("index_type", "unsigned int");
@@ -751,11 +752,8 @@ std::string generate_code(
   env.s("args", functor_args.str());
 
   std::string call_functor_template;
-  if (nOutputs == 1) {
-    // retunr by value for single output functor
-    call_functor_template = "out0[j] = ${name}<${compute_type}>(${args} ${extra_args});";
-  } else {
-    // return by reference for multi-output functor
+  if (return_by_ref) {
+    // return by reference
     std::stringstream functor_outs;
     for (int i = 0; i < nOutputs - 1; i++) {
       functor_outs << "out" << std::to_string(i) << "[j], ";
@@ -764,6 +762,9 @@ std::string generate_code(
     env.s("outs", functor_outs.str());
 
     call_functor_template = "${name}<${compute_type}>(${args} ${extra_args}, ${outs});";
+  } else {
+    // retunr by value for single output functor
+    call_functor_template = "out0[j] = ${name}<${compute_type}>(${args} ${extra_args});";
   }
   env.s("call_functor", at::jit::CodeTemplate(call_functor_template).format(env));
 
