@@ -451,6 +451,7 @@ class TestCommon(TestCase):
             for a, b in zip(tree_flatten(torch_result)[0], tree_flatten(precise_result)[0]):
                 torch_distance = torch_distance + _distance(a, b)
 
+            # TODO: consider adding some tolerance to this comparison
             msg = f"Reference result was farther ({ref_distance}) from the precise \
                     computation than the torch result was ({torch_distance})!"
             self.assertTrue(ref_distance <= torch_distance, msg=msg)
@@ -458,7 +459,7 @@ class TestCommon(TestCase):
         # Reports numerical accuracy discrepancies
         if ex is not None:
             msg = "Test passed because the reference was more accurate than the torch operator."
-            print(msg)
+            warnings.warn(msg)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
