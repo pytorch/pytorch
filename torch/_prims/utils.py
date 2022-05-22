@@ -201,12 +201,13 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
             msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
             raise AssertionError(msg)
 
-    same_strides, idx = check_significant_strides(a, b)
-    if not same_strides:
-        msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-            a.stride(), b.stride(), idx
-        )
-        raise RuntimeError(msg)
+    # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
+    # same_strides, idx = check_significant_strides(a, b)
+    # if not same_strides:
+    #     msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+    #         a.stride(), b.stride(), idx
+    #     )
+    # raise RuntimeError(msg)
 
 
 def check_significant_strides(
@@ -532,7 +533,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors):
 
 
 def extract_shape_from_varargs(
-    shape: Union[Tuple[int, ...], Tuple[ShapeType]]
+    shape: Union[ShapeType, Tuple[ShapeType]]
 ) -> Tuple[int, ...]:
     """
     Returns a shape from varargs.

@@ -50,6 +50,8 @@ import torch._refs.special
 
 import torch._prims as prims  # noqa: F401
 
+from torch.utils._pytree import tree_flatten
+
 from distutils.version import LooseVersion
 
 has_scipy_fft = False
@@ -2472,14 +2474,14 @@ class BinaryUfuncInfo(OpInfo):
 
         self._original_binary_ufunc_args = locals().copy()
 
-        # Elementwise binary operations perform the equivalent of test_reference_testing
+        # Elementwise binary operations perform the equivalent of test_numpy_refs
         #   in test_binary_ufuncs, but with additional test granularity. So the
         #   generic test_ops.py test is skipped because it's redundant.
         common_skips = (
             DecorateInfo(
                 unittest.skip("Skipping redundant test."),
                 "TestCommon",
-                "test_reference_testing",
+                "test_numpy_refs",
             ),
         )
         kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
@@ -3887,6 +3889,28 @@ def reference_inputs_cat(op, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput((a, b, a))
     yield SampleInput((a, a, a))
+
+def _elementwise_type_promo_np(*args):
+    def _maybe_torch(x):
+        if isinstance(x, np.ndarray):
+            return torch.from_numpy(x)
+        return x
+
+    flattened = tree_flatten(args)[0]
+    transformed = tuple(_maybe_torch(a) for a in flattened)
+    result_dtype, _ = prims.utils.elementwise_dtypes(
+        *transformed,
+        type_promotion_kind=prims.utils.ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH)
+    return torch_to_numpy_dtype_dict[result_dtype]
+
+def _cat_np(input_seq, dim=0):
+    inputs = tuple(a for a in input_seq if not (a.ndim == 1 and a.size == 0))
+
+    if len(inputs) == 0:
+        np_dtype = _elementwise_type_promo_np(input_seq)
+        return np.empty(0, dtype=np_dtype)
+
+    return np.concatenate(inputs, axis=dim)
 
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **kwargs):
     tensors = [
@@ -10036,7 +10060,7 @@ op_db: List[OpInfo] = [
                                      dtypes=(torch.bool,)),
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestCommon',
-                                     'test_reference_testing',
+                                     'test_numpy_refs',
                                      dtypes=(torch.complex128,)),
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestBinaryUfuncs',
@@ -10135,7 +10159,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=1.3e-05),
                                       torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
-                   'TestCommon', 'test_reference_testing')],
+                   'TestCommon', 'test_numpy_refs')],
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
@@ -11159,7 +11183,7 @@ op_db: List[OpInfo] = [
                      decorators=[
                          DecorateInfo(
                              precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
-                             'TestFFT', 'test_reference_nd')],
+                             'TestFFT', 'test_reference_nd'), ],
                      ),
     SpectralFuncInfo('fft.rfft',
                      aten_name='fft_rfft',
@@ -12653,7 +12677,7 @@ op_db: List[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure,
                                      'TestCommon',
-                                     'test_reference_testing', dtypes=(torch.complex128,)),
+                                     'test_numpy_refs', dtypes=(torch.complex128,)),
                         # RuntimeError: Short did not match Int
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
@@ -13108,7 +13132,7 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
-                   'TestCommon', 'test_reference_testing'
+                   'TestCommon', 'test_numpy_refs'
                )
            ],
            sample_inputs_func=sample_inputs_layer_norm,
@@ -16520,7 +16544,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('cat',
-           ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
+           ref=_cat_np,
            aliases=('concat',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
            sample_inputs_func=sample_inputs_cat_concat,
@@ -18754,18 +18778,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
         torch_opinfo_name="abs",
-        skips=(
-            # On CPU: Output Mismatch as complexhalf uses non-vectorized path vs ref which seems to use
-            # vectorized path
-            # See also : https://github.com/pytorch/pytorch/issues/48486
-            # On CUDA: RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
-            # On CPU: RuntimeError: unsupported Storage type: torch.complex32
-            # On CUDA: RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,)),
-        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
@@ -18818,14 +18830,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.exp",
         torch_opinfo_name="exp",
-        skips=(
-            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, "TestCommon", 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
-            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, "TestCommon", 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,))
-        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.expm1",
@@ -18835,13 +18839,6 @@ python_ref_db = [
         "_refs.fill",
         torch_opinfo_name="fill",
         supports_out=True,
-        skips=(
-            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,)),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.floor",
@@ -18851,29 +18848,11 @@ python_ref_db = [
         "_refs.isfinite",
         torch_opinfo_name="isfinite",
         supports_out=True,
-        skips=(
-            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
-            # Same reason as `test_python_reference_consistency`
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,)),
-        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.isinf",
         torch_opinfo_name="isinf",
         supports_out=True,
-        skips=(
-            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
-            # Same reason as `test_python_reference_consistency`
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,)),
-        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.isnan",
@@ -18887,14 +18866,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.log",
         torch_opinfo_name="log",
-        skips=(
-            # RuntimeError: "masked_fill_" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, "TestCommon", 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
-            # RuntimeError: "masked_fill_" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, "TestCommon", 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,))
-        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log1p",
@@ -18907,18 +18878,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
-        skips=(
-            # On CPU
-            # RuntimeError: unsupported Storage type: torch.complex32
-            # https://github.com/pytorch/pytorch/issues/73502
-            # On CUDA
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
-            # Same reason as `test_python_reference_consistency`
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,)),
-        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.reciprocal",
@@ -18962,11 +18921,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
         torch_opinfo_name="special.i0e",
-        decorators=(
-            DecorateInfo(toleranceOverride({
-                torch.bfloat16: tol(atol=1e-2, rtol=0),
-            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
@@ -18975,16 +18929,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.logit",
         torch_opinfo_name="logit",
-        decorators=(
-            # ATen CPU implementation computes at lower precision
-            DecorateInfo(toleranceOverride({
-                torch.bfloat16: tol(atol=1e-2, rtol=0),
-            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
-            # No meta support for clamp or arithmetic
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',),
-            # RuntimeError: no _refs support for torch.clamp
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',),
-        ),
     ),
     #
     # Elementwise Unary nn.functional OpInfos
@@ -18992,12 +18936,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
-        decorators=(
-            DecorateInfo(toleranceOverride({
-                torch.bfloat16: tol(atol=1e-2, rtol=0),
-                torch.float16: tol(atol=1e-3, rtol=0),
-            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
@@ -19005,7 +18943,10 @@ python_ref_db = [
         decorators=(
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestCommon',
-                         'test_python_reference_consistency'),
+                         'test_python_ref'),
+            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestCommon',
                          'test_out'),
@@ -19026,44 +18967,18 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
-        decorators=(
-            # https://github.com/pytorch/pytorch/issues/77054
-            DecorateInfo(toleranceOverride({
-                torch.bfloat16: tol(atol=1e-2, rtol=0),
-                torch.float16: tol(atol=1e-3, rtol=0),
-            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.mish",
         torch_opinfo_name="nn.functional.mish",
-        decorators=(
-            DecorateInfo(toleranceOverride({
-                torch.bfloat16: tol(atol=1e-2, rtol=0),
-                torch.float16: tol(atol=1e-3, rtol=0),
-            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.selu",
         torch_opinfo_name="nn.functional.selu",
-        decorators=(
-            DecorateInfo(toleranceOverride({
-                torch.bfloat16: tol(atol=1e-2, rtol=0),
-                torch.float16: tol(atol=1e-3, rtol=0),
-            }), 'TestCommon', 'test_python_reference_consistency', device_type='cpu'),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softplus",
         torch_opinfo_name="nn.functional.softplus",
-        decorators=(
-            # FIXME: https://github.com/pytorch/pytorch/issues/77942
-            DecorateInfo(toleranceOverride({
-                torch.bfloat16: tol(atol=1e-2, rtol=0),
-                torch.float16: tol(atol=1e-3, rtol=0),
-            }), 'TestCommon', 'test_python_reference_consistency'),
-        ),
     ),
     #
     # Elementwise Binary Reference OpInfos
@@ -19074,20 +18989,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        decorators=(
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.bfloat16: tol(atol=1, rtol=0),
-                        torch.float16: tol(atol=1e-2, rtol=0),
-                        torch.chalf: tol(atol=1e-2, rtol=0),
-                    }
-                ),
-                "TestCommon",
-                "test_python_reference_consistency",
-                device_type='cpu'
-            ),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
@@ -19119,9 +19020,6 @@ python_ref_db = [
         skips=(
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-            # TODO: FIXME: meta strides for to_dtype are incorrect
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_reference_meta_functions',
-                         device_type='cuda'),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19168,16 +19066,14 @@ python_ref_db = [
         "_refs.maximum",
         torch_opinfo_name="maximum",
         skips=(
-            # refs.maximum supports scalars, unlike torch.maximum
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_errors'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.minimum",
         torch_opinfo_name="minimum",
         skips=(
-            # refs.minimum supports scalars, unlike torch.minimum
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_errors'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -19186,10 +19082,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,), device_type='cuda', active_if=(not TEST_WITH_ROCM)),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.ne",
@@ -19209,20 +19101,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        decorators=(
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.bfloat16: tol(atol=1, rtol=0),
-                        torch.float16: tol(atol=1e-2, rtol=0),
-                        torch.chalf: tol(atol=1e-2, rtol=0),
-                    }
-                ),
-                "TestCommon",
-                "test_python_reference_consistency",
-                device_type='cpu'
-            ),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.true_divide",
@@ -19230,16 +19108,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        skips=(
-            # complex("-501.-501.j")/complex("-501.-infj")
-            # PyTorch jiterated Path : 0
-            # Python : 0
-            # PyTorch non-jiterated path : nan + nanj
-            # See also: https://github.com/pytorch/pytorch/issues/52332
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,), device_type='cuda',
-                         active_if=not TEST_WITH_ROCM),
-        ),
     ),
     #
     # Elementwise Ternary Reference OpInfos
@@ -19247,10 +19115,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.clamp",
         torch_opinfo_name="clamp",
-        skips=(
-            # There appears to be an inconsistency in compute_elementwise_output_strides for elementwise ternary ops
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions', device_type='cuda'),
-        ),
     ),
     #
     # Data Conversion & Data Movement Opinfos
@@ -19258,13 +19122,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.clone",
         torch_opinfo_name="clone",
-        skips=(
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,), device_type='cuda'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,), device_type='cuda'),
-        ),
     ),
     #
     # View & Shape OpInfos
@@ -19277,7 +19134,7 @@ python_ref_db = [
         skips=(
             # TODO: fix and/or update to xfails
             DecorateInfo(unittest.skip("Errors when storage_offset is included"),
-                         'TestCommon', 'test_python_reference_meta_functions'),
+                         'TestCommon', 'test_python_ref_meta'),
             # cloned_mutable_input.is_same(returned_output) INTERNAL ASSERT FAILED
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
@@ -19299,14 +19156,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.flatten",
         torch_opinfo_name="flatten",
-        skips=(
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,), device_type='cuda'),
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,), device_type='cuda'),
-        ),
     ),
     PythonRefInfo(
         "_refs.flip",
@@ -19319,28 +19168,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
-        skips=(
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                         'test_python_reference_consistency', dtypes=(torch.chalf,), device_type='cuda'),
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                         'test_python_reference_meta_functions', dtypes=(torch.chalf,), device_type='cuda'),
-        ),
     ),
     PythonRefInfo(
         "_refs.reshape",
         torch_opinfo_name="reshape",
-        skips=(
-            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_reference_consistency",
-                         dtypes=(torch.chalf,)),
-            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_reference_meta_functions",
-                         dtypes=(torch.chalf,)),
-        ),
     ),
     PythonRefInfo(
         "_refs.stack",
@@ -19360,9 +19191,9 @@ python_ref_db = [
         torch_opinfo_name="tensor_split",
         skips=(
             # TensorMeta doesn't support tolist
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             # RuntimeError: no _refs support for torch.Tensor.tolist
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         )
     ),
     PythonRefInfo(
@@ -19376,13 +19207,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.view",
         torch_opinfo_name="view",
-        skips=(
-            # RuntimeError: "index_select" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions',
-                         dtypes=(torch.chalf,)),
-        ),
     ),
     #
     # Reduction Reference OpInfos
@@ -19409,7 +19233,10 @@ python_ref_db = [
         skips=(
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
-                         'test_python_reference_consistency'),
+                         'test_python_ref'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_out'),
@@ -19433,7 +19260,10 @@ python_ref_db = [
         skips=(
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
-                         'test_python_reference_consistency'),
+                         'test_python_ref'),
+            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_out'),
@@ -19449,8 +19279,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # RuntimeError: "index_select_cuda" not implemented for 'ComplexHalf'
-            DecorateInfo(unittest.expectedFailure, dtypes=(torch.chalf,), device_type='cuda'),
         ),
     ),
     #
@@ -19460,10 +19288,6 @@ python_ref_db = [
         "_refs.where",
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
-        skips=(
-            # There appears to be an inconsistency in compute_elementwise_output_strides for elementwise ternary ops
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions', device_type='cuda'),
-        ),
     ),
 ]
 

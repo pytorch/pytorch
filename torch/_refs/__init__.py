@@ -921,7 +921,7 @@ def clamp(
     a, min, max = _maybe_broadcast(a, min, max)
 
     if min is not None and max is not None:
-        return prims.clamp(a, min, max)
+        return minimum(maximum(a, min), max)
     if min is not None:
         return maximum(a, min)
     if max is not None:
@@ -1551,7 +1551,7 @@ def empty_like(
 # NOTE: slightly divergent from torch.empty_strided, which requires strides
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
 def empty_strided(
-    shape: ShapeType,
+    shape: Union[ShapeType, Tuple[ShapeType]],
     strides: Optional[StrideType] = None,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -1559,7 +1559,7 @@ def empty_strided(
     requires_grad: bool = False,
 ) -> TensorLikeType:
 
-    shape = utils.extract_shape_from_varargs(*shape)
+    shape = utils.extract_shape_from_varargs(shape)
     strides = utils.make_contiguous_strides_for(shape) if strides is None else strides
     dtype = torch.get_default_dtype() if dtype is None else dtype
     device = torch.device("cpu") if device is None else device

@@ -875,38 +875,6 @@ sub = _make_elementwise_binary_prim(
 )
 
 #
-# Elementwise Ternary Prims
-#
-
-
-def _clamp_meta(
-    a: TensorLikeType, min: TensorLikeType, max: TensorLikeType
-) -> TensorLikeType:
-    return _elementwise_meta(
-        a, min, max, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
-    )
-
-
-def _clamp_aten(a: Tensor, min: Tensor, max: Tensor) -> Tensor:
-    return torch.clamp(a, min, max)
-
-
-_clamp_doc = """
-    Clamps the input values between min and max.
-"""
-
-# TODO: clamp can be expressed as a reference but PyTorch's stride propagation
-# (like its type promotion) is NOT associative, so the straightforward
-# reference won't propagate strides as expected!
-clamp = _make_prim(
-    schema="clamp(Tensor self, Tensor min, Tensor max) -> Tensor",
-    return_type=RETURN_TYPE.NEW,
-    meta=_clamp_meta,
-    impl_aten=_clamp_aten,
-    doc=_clamp_doc,
-)
-
-#
 # View operations
 #
 # TODO: model view relationships
