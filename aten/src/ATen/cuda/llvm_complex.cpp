@@ -209,6 +209,12 @@ constexpr
 complex<double>::complex(const complex<float>& __c)
     : __re_(__c.real()), __im_(__c.imag()) {}
 
+
+explicit constexpr operator bool() const {
+    return real() || imag();
+}
+
+
 // 26.3.6 operators:
 
 template<class _Tp>
