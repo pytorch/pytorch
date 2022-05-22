@@ -48,7 +48,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   if (bias->defined()) {
     // for composite compliance use out-of-place version of `add`
     if (isTensorSubclassLike(*bias) ||
-        (*bias)._fw_grad(/*level*/ 0).defined()) {
+        bias->_fw_grad(/*level*/ 0).defined()) {
       output = at::add(output, *bias);
     } else {
       output.add_(*bias);
