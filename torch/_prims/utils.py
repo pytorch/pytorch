@@ -531,6 +531,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
             )
             raise RuntimeError(msg)
 
+
 def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     shape = None
     scalar_shape = None

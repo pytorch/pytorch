@@ -401,6 +401,7 @@ def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
 
     return prims.fill(a, value)
 
+
 floor = _make_elementwise_unary_reference(
     prims.floor,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1714,6 +1715,7 @@ def empty_like(
     return empty_strided(
         a.shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
     )
+
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
 def empty_strided(

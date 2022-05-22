@@ -274,6 +274,7 @@ def _elementwise_meta(
 
     # Acquires the dtype
     dtype = None
+    scalar_type = None
     from_scalar_tensor = False
     for arg in args:
         if isinstance(arg, TensorLike):
@@ -285,7 +286,7 @@ def _elementwise_meta(
                 from_scalar_tensor = True
         elif isinstance(arg, Number):
             if not from_scalar_tensor:
-                dtype = type(arg)
+                scalar_type = type(arg)
 
     # Acquires the device (if it exists) or number
     device = None
@@ -303,6 +304,7 @@ def _elementwise_meta(
     # references will typically handle the type promotion properly even if this doesn't
     # (but getting it wrong will cause too many casts to be inserted in traces!)
     if device is not None:
+        assert dtype is not None
         if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT:
             dtype = dtype
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
@@ -1654,6 +1656,7 @@ def _where_meta(
         args_with_fixed_dtypes=(pred,),
     )
 
+
 _where_doc = """
   Selects elements from a and b according to pred.
 
@@ -2034,6 +2037,7 @@ empty_strided = _make_prim(
     impl_aten=torch.empty_strided,
     doc=_empty_strided_doc,
 )
+
 
 def _full_meta(
     shape: ShapeType,
