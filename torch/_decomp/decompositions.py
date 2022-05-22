@@ -855,7 +855,7 @@ def normalize(input, norm_dims, eps):
     return out, mean, rstd
 
 
-@register_decomposition(aten.native_layer_norm)
+@register_decomposition(aten.native_layer_norm.default)
 def native_layer_norm(
     input: Tensor,
     normalized_shape: List[int],
@@ -886,12 +886,45 @@ def native_layer_norm(
         rstd = rstd.to(dtype=input.dtype)
     return (out, mean, rstd)
 
+
+@register_decomposition(aten.native_group_norm.default, disable_meta=True)
+def native_group_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    orig_shape = input.shape
+    input = input.view(N, group, C // group, HxW)
+    reduction_dims = [2, 3]
+    out, mean, rstd = normalize(input, reduction_dims, eps)
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
+    out = out.view(orig_shape)
+    if weight is not None:
+        weight = _unsqueeze_to_dim(weight, out.dim() - 1)
+        out = out * weight
+    if bias is not None:
+        bias = _unsqueeze_to_dim(bias, out.dim() - 1)
+        out = out + bias
+
+    out = out.to(dtype=input.dtype)
+    mean = mean.to(dtype=input.dtype)
+    rstd = rstd.to(dtype=input.dtype)
+    return (out, mean, rstd)
+
+
 def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
     if x is not None:
         return x.to(dtype)
     return x
 
-# TODO: Correct the type promotion semantics
+
+# TODO: Take a closer look at the type promotion semantics
 @register_decomposition(aten.native_layer_norm_backward)
 def native_layer_norm_backward(
     grad_out: Tensor,
