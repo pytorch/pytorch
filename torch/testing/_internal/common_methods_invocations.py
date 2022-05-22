@@ -16666,6 +16666,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_backward'),
+            DecorateInfo(unittest.skip("No fill_ op"), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("No fill_ op"), 'TestNNCOpInfo'),
         )),
     OpInfo('resize_',
            op=lambda x, shape: x.clone().resize_(shape),
