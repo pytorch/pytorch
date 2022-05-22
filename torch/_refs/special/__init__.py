@@ -1,8 +1,12 @@
 import torch
 
+from torch import Tensor
 import torch._prims as prims
 import torch._prims.utils as utils
+import torch._refs as refs
+
 from typing import Sequence, Optional, Union, Callable, List, Tuple
+from torch._decomp import register_decomposition
 from torch._prims.utils import (
     TensorLike,
     TensorLikeType,
@@ -15,14 +19,11 @@ from torch._refs import (
     _make_elementwise_binary_reference,
 )
 
-import torch._refs as refs
-
-Tensor = torch.Tensor
-
 __all__ = [
     "i1",
     "i0e",
     "i1e",
+    "logit",
     "xlog1py",
     "zeta",
 ]
@@ -45,6 +46,19 @@ i1e = _make_elementwise_unary_reference(
     aten_op=torch.ops.aten.special_i1e,
 )
 
+@register_decomposition(torch.ops.aten.logit)
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def logit(self: Tensor, eps: Optional[float] = None) -> Tensor:
+    if eps is None:
+        eps = -1.0
+    lo = eps
+    hi = 1 - eps
+    self = torch.clamp(self, lo, hi)
+    return (self / (1 - self)).log()
 
 def _xlog1py(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
@@ -64,8 +78,9 @@ def _xlog1py(
         elif utils.is_cpu_scalar_tensor(a):
             a = prims.device_put(a, device=b.device)
 
-    rhs = refs.where(refs.eq(a, 0), 0, refs.mul(a, refs.log1p(b)))
-    return refs.where(refs.isnan(b), float("nan"), rhs)
+    # TODO use refs.where after resolving issue #78050
+    rhs = torch.where(refs.eq(a, 0), 0, refs.mul(a, refs.log1p(b)))
+    return torch.where(refs.isnan(b), float("nan"), rhs)
 
 
 # TODO add docstring

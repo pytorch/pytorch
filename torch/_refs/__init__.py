@@ -13,15 +13,17 @@ from torch._prims.utils import (
     Number,
     NumberType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    REDUCTION_OUTPUT_TYPE_KIND,
 )
 from torch._prims.wrappers import (
     elementwise_type_promotion_wrapper,
     out_wrapper,
     _maybe_convert_to_dtype,
     _maybe_resize_out,
+    _safe_copy_out,
 )
 
-from functools import reduce
+from functools import reduce, partial
 from typing import Sequence, Optional, Union, Callable, List, Tuple
 import operator
 import warnings
@@ -51,7 +53,9 @@ __all__ = [
     "erfc",
     "exp",
     "expm1",
+    "exp2",
     "floor",
+    "frac",
     "isfinite",
     "isinf",
     "isnan",
@@ -60,6 +64,7 @@ __all__ = [
     "log",
     "log1p",
     "log2",
+    "log10",
     "neg",
     "reciprocal",
     "round",  # TODO: model kwargs
@@ -69,6 +74,7 @@ __all__ = [
     "sqrt",
     "square",
     "tan",
+    "tanh",
     #
     # Elementwise Binary References
     #
@@ -131,6 +137,10 @@ __all__ = [
     "sum",
     "amax",
     "amin",
+    "var",
+    "mean",
+    "std_mean",
+    "std_var",
     #
     # View & Shape Ops
     #
@@ -139,6 +149,8 @@ __all__ = [
     "chunk",
     "flatten",
     "flip",
+    "fliplr",
+    "flipud",
     "narrow",
     "permute",
     "reshape",
@@ -161,13 +173,6 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
-
-
-class REDUCTION_OUTPUT_TYPE_KIND(Enum):
-    SAME = (0,)
-    SAME_OR_REAL = (1,)  # for complex types outputs corresponding real type
-    OP_MATH = (2,)  # keep output in opmath type, needed for mean
-    ALWAYS_BOOL = (3,)
 
 
 def _broadcast_shapes(*_shapes):
@@ -351,6 +356,11 @@ expm1 = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+exp2 = _make_elementwise_unary_reference(
+    prims.exp2,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
 floor = _make_elementwise_unary_reference(
     prims.floor,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -360,6 +370,18 @@ i0 = _make_elementwise_unary_reference(
     prims.bessel_i0,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.special_i0,
+)
+
+
+def _frac(x: TensorLikeType) -> TensorLikeType:
+    trunc_x = mul(floor(abs(x)), sign(x))
+    return sub(x, trunc_x)
+
+
+frac = _make_elementwise_unary_reference(
+    _frac,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.frac,
 )
 
 
@@ -426,6 +448,11 @@ log2 = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+log10 = _make_elementwise_unary_reference(
+    prims.log10,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
 
 def _neg_meta(a: TensorLikeType):
     if a.dtype is torch.bool:
@@ -480,6 +507,10 @@ square = _make_elementwise_unary_reference(
 tan = _make_elementwise_unary_reference(
     prims.tan,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+tanh = _make_elementwise_unary_reference(
+    prims.tanh, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
 
@@ -880,8 +911,9 @@ def _xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, Number
         elif utils.is_cpu_scalar_tensor(a):
             a = prims.device_put(a, device=b.device)
 
-    rhs = where(eq(a, 0), 0, mul(a, log(b)))
-    return where(isnan(b), float("nan"), rhs)
+    # TODO use refs.where after resolving issue #78050
+    rhs = torch.where(eq(a, 0), 0, mul(a, log(b)))
+    return torch.where(isnan(b), float("nan"), rhs)
 
 
 # TODO: add docstring
@@ -943,7 +975,7 @@ def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
 
 
 def _reduction(
-    a: Tensor,
+    a: TensorLikeType,
     prim: Callable,
     *,
     has_identity: bool = True,
@@ -953,9 +985,16 @@ def _reduction(
     dtype: Optional[torch.dtype] = None,  # should be specified for ops that support it
     out: Optional[Tensor] = None,
     output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND,
-):  # it is usually SAME, but I want
+) -> TensorLikeType:  # it is usually SAME, but I want
     # ref writers to actually think about what to put here
     assert isinstance(a, TensorLike)
+    if a.ndim > 64:
+        raise RuntimeError(
+            "Received a tensor with {0} dimensions, but only tensors with up to 64 dims are supported!".format(
+                a.ndim
+            )
+        )
+
     if out is not None:
         assert isinstance(out, TensorLike)
         if dtype is not None:
@@ -970,50 +1009,45 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = all(a.shape[i] for i in range(a.ndim) if i in dims)
+        valid_shape = a.ndim == 0 or all(a.shape[i] for i in dims)
         if not valid_shape:
             raise RuntimeError(
                 "reducing over zero-size dimension for reduction operation without identity"
             )
-    # even though some reductions, like amin or amax, don't strictly require type promotion,
-    # all the math ops (including comparisons) are still defined only for a computation type,
-    # so promotion will still happen. We are doing it explicitly here
-    inp_dtype = dtype if dtype is not None else a.dtype
-    computation_dtype = utils.get_computation_dtype(inp_dtype)
+    computation_dtype, result_dtype = utils.reduction_dtypes(
+        a, output_dtype_kind, dtype
+    )
     a_converted = prims.convert_element_type(a, computation_dtype)
     result = prim(a_converted, dims)
-
     if keepdims:
         output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
         broadcast_dims = [i for i in range(a.ndim) if i not in dims]
         result = prims.broadcast_in_dim(result, output_shape, broadcast_dims)
-    if out is not None:
-        if dtype is None:
-            if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
-                if out.dtype != a.dtype:
-                    raise RuntimeError("Expected the dtype for input and out to match")
-            elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.ALWAYS_BOOL:
-                if out.dtype != torch.bool:
-                    raise RuntimeError("Expected the dtype for input and out to match")
-        out = _maybe_resize_out(out, result.shape)
-        return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
-    if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
-        result_dtype = dtype if dtype else a.dtype
-        if result.dtype != result_dtype:
-            result = prims.convert_element_type(result, result_dtype)
+    if out is not None:
+        assert result_dtype is not None
+        if dtype is not None and result_dtype != out.dtype:
+            raise RuntimeError(
+                "Expected the dtype of reduction result and out to match"
+            )
+        out = _maybe_resize_out(out, result.shape)
+        return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
+
+    if result.dtype != result_dtype and result_dtype is not None:
+        result = prims.convert_element_type(result, result_dtype)
+
     return result
 
 
 # TODO: register decomp after stride logic is fixed
 def sum(
-    a: Tensor,
+    a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
     keepdim: bool = False,
     *,
     dtype=None,
     out: Optional[Tensor] = None,
-):
+) -> TensorLikeType:
     if dtype is None:
         if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
             dtype = torch.int64
@@ -1034,22 +1068,15 @@ def sum(
 
 
 def amin(
-    a: Tensor,
+    a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
     keepdim: bool = False,
     *,
     out: Optional[Tensor] = None,
-):
+) -> TensorLikeType:
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
-
-    if a.ndim > 64:
-        raise RuntimeError(
-            "Received a tensor with {0} dimensions, but only tensors with up to 64 dims are supported!".format(
-                a.ndim
-            )
-        )
 
     return _reduction(
         a,
@@ -1064,22 +1091,15 @@ def amin(
 
 
 def amax(
-    a: Tensor,
+    a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
     keepdim: bool = False,
     *,
     out: Optional[Tensor] = None,
-):
+) -> TensorLikeType:
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
-
-    if a.ndim > 64:
-        raise RuntimeError(
-            "Received a tensor with {0} dimensions, only tensors with up to 64 dims are supported!".format(
-                a.ndim
-            )
-        )
 
     return _reduction(
         a,
@@ -1091,6 +1111,145 @@ def amax(
         has_identity=False,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
     )
+
+
+def _set_correction(
+    unbiased: Optional[bool] = None,
+    correction: Optional[int] = None,
+):
+    if correction is not None and unbiased is not None:
+        raise RuntimeError("cannot specify both correction and unbiased arguments")
+    elif correction is None and unbiased is None:
+        correction = 1
+    elif correction is None and unbiased is not None:
+        correction = 0 if unbiased is False else 1
+    if not isinstance(correction, int):
+        raise ValueError("correction argument should be integer")
+    if correction < 0:
+        raise ValueError("correction argument should be non-negative")
+    return correction
+
+
+@out_wrapper
+def var(
+    a: TensorLikeType,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    unbiased: Optional[bool] = None,
+    keepdim: bool = False,
+    *,
+    correction: Optional[int] = None,
+) -> TensorLikeType:
+    correction = _set_correction(unbiased, correction)
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+
+    result = _reduction(
+        a,
+        partial(prims.var, correction=correction),
+        dims=dim,
+        keepdims=keepdim,
+        dtype=None,
+        out=None,
+        has_identity=True,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
+    )
+    return result
+
+
+@out_wrapper
+def std(
+    a: TensorLikeType,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    unbiased: Optional[bool] = None,
+    keepdim: bool = False,
+    *,
+    correction: Optional[int] = None,
+) -> TensorLikeType:
+    correction = _set_correction(unbiased, correction)
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+
+    result = _reduction(
+        a,
+        partial(prims.var, correction=correction),
+        dims=dim,
+        keepdims=keepdim,
+        dtype=None,
+        out=None,
+        has_identity=True,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
+    )
+    result = sqrt(result)
+    return result
+
+
+def mean(
+    a: TensorLikeType,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    dtype=None,
+    out=None,
+) -> TensorLikeType:
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+    if dtype is None:
+        dtype = a.dtype
+    # can't use out wrapper because of this argument
+    if out is not None and out.dtype != dtype:
+        raise RuntimeError("expected out dtype and dtype to match")
+    result = _reduction(
+        a,
+        prims.sum,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=dtype,
+        out=None,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.KEEP_PROMOTED_TYPE,
+    )
+    if utils.is_integer_dtype(dtype):
+        raise RuntimeError("result type should be floating point or complex")
+    if isinstance(dim, int):
+        dim = (dim,)  # type: ignore[assignment]
+    dims = utils.reduction_dims(a.shape, dim)  # type: ignore[arg-type]
+    nelem = 1 if a.ndim == 0 else reduce(operator.mul, (a.shape[i] for i in dims), 1)
+    result = true_divide(result, nelem)
+    result_dtype = a.dtype if dtype is None else dtype
+    result = _maybe_convert_to_dtype(result, result_dtype)  # type: ignore[assignment]
+    if out is not None:
+        assert isinstance(out, TensorLike)
+        out = _maybe_resize_out(out, result.shape)
+        return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
+    return result
+
+
+def std_mean(
+    a: TensorLikeType,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    unbiased: Optional[bool] = None,
+    keepdim: bool = False,
+    *,
+    correction: Optional[int] = None,
+):
+    s = std(a, dim, unbiased, keepdim, correction=correction)
+    m = mean(a, dim, keepdim)
+    return s, m
+
+
+def var_mean(
+    a: TensorLikeType,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    unbiased: Optional[bool] = None,
+    keepdim: bool = False,
+    *,
+    correction: Optional[int] = None,
+):
+    v = var(a, dim, unbiased, keepdim, correction=correction)
+    m = mean(a, dim, keepdim)
+    return v, m
 
 
 def as_strided(
@@ -1158,6 +1317,20 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
     utils.validate_no_repeating_dims(dims)
     return prims.rev(a, dims)
+
+
+def fliplr(a: TensorLikeType) -> TensorLikeType:
+    if a.ndim < 2:
+        raise RuntimeError("Input must be >= 2-d.")
+
+    return flip(a, (1,))
+
+
+def flipud(a: TensorLikeType) -> TensorLikeType:
+    if a.ndim < 1:
+        raise RuntimeError("Input must be >= 1-d.")
+
+    return flip(a, (0,))
 
 
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:

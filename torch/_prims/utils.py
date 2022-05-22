@@ -41,6 +41,19 @@ NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
 
 
+torch_function_passthrough = {
+    torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.numel,
+    torch.Tensor.stride,
+    torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+    # For TorchRefsMode only
+    torch.Tensor.__format__,
+    torch.Tensor.__repr__,
+}
+
+
 class TensorMeta(torch.Tensor):
     """
     Model tensor metadata.  Not a stock meta tensor because device is modeled
@@ -121,14 +134,7 @@ class TensorMeta(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
-        if func in {
-            torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.numel,
-            torch.Tensor.stride,
-            torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
-            torch.Tensor.device.__get__,  # type: ignore[attr-defined]
-        }:
+        if func in torch_function_passthrough:
             return super().__torch_function__(func, types, args, kwargs)
 
         if not hasattr(func, "meta"):
@@ -812,6 +818,13 @@ class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     BOOL_TO_LONG = (5,)
 
 
+class REDUCTION_OUTPUT_TYPE_KIND(Enum):
+    SAME = (0,)
+    COMPLEX_TO_FLOAT = (1,)  # for complex types outputs corresponding real type
+    KEEP_PROMOTED_TYPE = (2,)  # keep output in opmath type, needed for mean
+    ALWAYS_BOOL = (3,)
+
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -924,7 +937,7 @@ def elementwise_dtypes(
     result_dtype = None
 
     def _find_highest_dtype_filtered(
-        args, filter, *, float_as_complex=False, all_tensors_equal=False
+        args, filter, *, float_as_complex=False
     ) -> Optional[torch.dtype]:
         zero_dim_tensor_dtype = None
         one_plus_dim_tensor_dtype = None
@@ -933,12 +946,12 @@ def elementwise_dtypes(
                 _dtype = x.dtype
                 if float_as_complex and is_float_dtype(_dtype):
                     _dtype = corresponding_complex_dtype(_dtype)
-                if x.ndim == 0 and not all_tensors_equal:
+                if x.ndim == 0:
                     zero_dim_tensor_dtype = get_higher_dtype(
                         zero_dim_tensor_dtype, _dtype
                     )
                 else:
-                    # x.ndim > 0 or all_tensors_equal
+                    # x.ndim > 0
                     one_plus_dim_tensor_dtype = get_higher_dtype(
                         one_plus_dim_tensor_dtype, _dtype
                     )
@@ -955,32 +968,11 @@ def elementwise_dtypes(
             torch.get_default_dtype() if result_dtype is None else result_dtype
         )
     elif highest_type is complex:
-        # NOTE: complex x float type promotion is incorrectly implemented in PyTorch today
-        # it will treat zero dim and non-zero-dim float and complex tensors equally
-        # unless there's a non-zero-dim complex tensor
-        # the following captures this oddity
-        has_one_plus_dim_complex_tensor = False
-        for x in args:
-            if isinstance(x, TensorLike) and x.ndim > 0 and is_complex_dtype(x.dtype):
-                has_one_plus_dim_complex_tensor = True
-                break
-
-        if has_one_plus_dim_complex_tensor:
-            result_dtype = _find_highest_dtype_filtered(
-                args,
-                lambda x: is_float_dtype(x) or is_complex_dtype(x),
-                float_as_complex=True,
-            )
-        else:
-            # no complex tensors of rank 1+
-            # NOTE: bugged case where all tensors are equal
-            result_dtype = _find_highest_dtype_filtered(
-                args,
-                lambda x: is_float_dtype(x) or is_complex_dtype(x),
-                float_as_complex=True,
-                all_tensors_equal=True,
-            )
-
+        result_dtype = _find_highest_dtype_filtered(
+            args,
+            lambda x: is_float_dtype(x) or is_complex_dtype(x),
+            float_as_complex=True,
+        )
         if result_dtype is None:
             result_dtype = corresponding_complex_dtype(torch.get_default_dtype())
     elif highest_type is int:
@@ -1014,6 +1006,33 @@ def elementwise_dtypes(
         raise ValueError(
             "Unknown type promotion kind {0}".format(str(type_promotion_kind))
         )
+
+
+def reduction_dtypes(
+    arg,
+    output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND,
+    dtype: Optional[torch.dtype] = None,
+) -> Tuple[torch.dtype, Optional[torch.dtype]]:
+    # even though some reductions, like amin or amax, don't strictly require type promotion,
+    # all the math ops (including comparisons) are still defined only for a computation type,
+    # so promotion will still happen. We are doing it explicitly here
+    inp_dtype = dtype if dtype is not None else arg.dtype
+    computation_dtype = get_computation_dtype(inp_dtype)
+    if (
+        output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME
+        or output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    ):
+        result_dtype = dtype if dtype else arg.dtype
+        if (
+            output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+            and is_complex_dtype(result_dtype)
+        ):
+            result_dtype = corresponding_real_dtype(result_dtype)
+    elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.KEEP_PROMOTED_TYPE:
+        result_dtype = None
+    else:  # ALWAYS_BOOL
+        result_dtype = torch.bool
+    return computation_dtype, result_dtype
 
 
 def wrap_device(d: Union[str, torch.device]) -> torch.device:
