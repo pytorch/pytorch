@@ -78,8 +78,8 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
 }
 
 void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-      at::ScalarType::Half, at::ScalarType::BFloat16,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(
+      kComplexHalf, at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.common_dtype(), "lerp_cuda",
       [&]{
         using opmath_t = at::opmath_type<scalar_t>;
