@@ -275,7 +275,6 @@ def _elementwise_meta(
     # Acquires the dtype
     dtype = None
     scalar_type = None
-    from_scalar_tensor = False
     for arg in args:
         if isinstance(arg, TensorLike):
             if not utils.is_cpu_scalar_tensor(arg):
@@ -283,10 +282,8 @@ def _elementwise_meta(
                 break
             else:
                 dtype = arg.dtype
-                from_scalar_tensor = True
         elif isinstance(arg, Number):
-            if not from_scalar_tensor:
-                scalar_type = type(arg)
+            scalar_type = type(arg)
 
     # Acquires the device (if it exists) or number
     device = None
