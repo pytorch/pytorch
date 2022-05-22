@@ -30,38 +30,14 @@ c10::VaryingShape<int64_t> getSizesOf(Node* n, size_t idx) {
   return tt->sizes();
 }
 
-bool isContiguous(Value* v) {
-  auto const& tt = v->type()->cast<TensorType>();
-  if (!tt) {
-    return false;
-  }
-  if (!tt->isComplete()) {
-    return false;
-  }
-  auto const& sizes = tt->sizes().concrete_sizes();
-  auto const& strides = tt->strides().concrete_sizes();
-  if (!sizes || !strides) {
-    return false;
-  }
-  int ndims = (*sizes).size();
-  // TODO: only support 4D input for now
-  if (ndims != 4) {
-    return false;
-  }
-
-  // TODO: currently only support contiguous input. Channels last contiguous
-  // will be supported as a next step
-  return *strides == TensorType::contiguousStridesOf(*sizes);
-}
-
 void insertPrePackedConvOpForNode(Node* n) {
   constexpr int POS_INPUT = 0;
   constexpr int POS_WEIGHT = 1;
-  if (!isContiguous(n->input(POS_INPUT))) {
+  if (!tensorexpr::isContiguous(n->input(POS_INPUT))) {
     return;
   }
 
-  if (!isContiguous(n->input(POS_WEIGHT))) {
+  if (!tensorexpr::isContiguous(n->input(POS_WEIGHT))) {
     return;
   }
 

@@ -209,9 +209,7 @@ std::vector<int64_t> _pair_int(IValue v) {
   }
 }
 
-static bool isContiguous(
-    const torch::jit::Value* v,
-    at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
+bool isContiguous(const torch::jit::Value* v, at::MemoryFormat memory_format) {
   auto const& tt = v->type()->cast<TensorType>();
   if (!tt) {
     return false;

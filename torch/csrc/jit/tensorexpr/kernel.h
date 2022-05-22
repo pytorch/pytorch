@@ -344,6 +344,10 @@ TORCH_API bool& getOptConditionals();
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);
 
+bool isContiguous(
+    const torch::jit::Value* v,
+    at::MemoryFormat memory_format = at::MemoryFormat::Contiguous);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
