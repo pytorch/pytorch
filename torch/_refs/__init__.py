@@ -56,8 +56,10 @@ __all__ = [
     "erfc",
     "exp",
     "expm1",
+    "exp2",
     "fill",
     "floor",
+    "frac",
     "isfinite",
     "isinf",
     "isnan",
@@ -65,6 +67,7 @@ __all__ = [
     "log",
     "log1p",
     "log2",
+    "log10",
     "neg",
     "reciprocal",
     "round",  # TODO: model kwargs
@@ -151,6 +154,8 @@ __all__ = [
     "chunk",
     "flatten",
     "flip",
+    "fliplr",
+    "flipud",
     "narrow",
     "permute",
     "reshape",
@@ -372,6 +377,11 @@ expm1 = _make_elementwise_unary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
+exp2 = _make_elementwise_unary_reference(
+    prims.exp2,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
 # Fill has its own implementation because it has a value parameter
 @out_wrapper
 @elementwise_type_promotion_wrapper(
@@ -392,10 +402,21 @@ def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
 
     return prims.fill(a, value)
 
-
 floor = _make_elementwise_unary_reference(
     prims.floor,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _frac(x: TensorLikeType) -> TensorLikeType:
+    trunc_x = mul(floor(abs(x)), sign(x))
+    return sub(x, trunc_x)
+
+
+frac = _make_elementwise_unary_reference(
+    _frac,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.frac,
 )
 
 
@@ -459,6 +480,11 @@ log1p = _make_elementwise_unary_reference(
 
 log2 = _make_elementwise_unary_reference(
     prims.log2,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+log10 = _make_elementwise_unary_reference(
+    prims.log10,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
@@ -1229,6 +1255,20 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
     utils.validate_no_repeating_dims(dims)
     return prims.rev(a, dims)
+
+
+def fliplr(a: TensorLikeType) -> TensorLikeType:
+    if a.ndim < 2:
+        raise RuntimeError("Input must be >= 2-d.")
+
+    return flip(a, (1,))
+
+
+def flipud(a: TensorLikeType) -> TensorLikeType:
+    if a.ndim < 1:
+        raise RuntimeError("Input must be >= 1-d.")
+
+    return flip(a, (0,))
 
 
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:

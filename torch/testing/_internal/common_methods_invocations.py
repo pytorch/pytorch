@@ -6996,6 +6996,14 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs)
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+def error_inputs_fliplr(op, device, **kwargs):
+    yield ErrorInput(SampleInput(make_tensor((1,), dtype=torch.float, device=device)),
+                     error_regex="Input must be >= 2-d.")
+
+def error_inputs_flipud(op, device, **kwargs):
+    yield ErrorInput(SampleInput(make_tensor((), dtype=torch.float, device=device)),
+                     error_regex="Input must be >= 1-d.")
+
 # TODO: clamp shares tensors among its sample inputs --- we should prohibit this!
 def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     x = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
@@ -11441,6 +11449,7 @@ op_db: List[OpInfo] = [
            op=torch.fliplr,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_fliplr_flipud,
+           error_inputs_func=error_inputs_fliplr,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -11448,6 +11457,7 @@ op_db: List[OpInfo] = [
            op=torch.flipud,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_fliplr_flipud,
+           error_inputs_func=error_inputs_flipud,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -18836,6 +18846,10 @@ python_ref_db = [
         torch_opinfo_name="expm1",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.exp2",
+        torch_opinfo_name="exp2",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.fill",
         torch_opinfo_name="fill",
         supports_out=True,
@@ -18843,6 +18857,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.floor",
         torch_opinfo_name="floor",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.frac",
+        torch_opinfo_name="frac",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.isfinite",
@@ -18870,6 +18888,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.log1p",
         torch_opinfo_name="log1p",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.log10",
+        torch_opinfo_name="log10",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log2",
@@ -19160,6 +19182,14 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.flip",
         torch_opinfo_name="flip",
+    ),
+    PythonRefInfo(
+        "_refs.fliplr",
+        torch_opinfo_name="fliplr",
+    ),
+    PythonRefInfo(
+        "_refs.flipud",
+        torch_opinfo_name="flipud",
     ),
     PythonRefInfo(
         "_refs.narrow",
