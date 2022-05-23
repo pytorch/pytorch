@@ -11,7 +11,7 @@ namespace native {
 
 Tensor& eye_out_mps(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
-  return at::eye_out_mps(n, n, result);
+  return eye_out_mps(n, n, result);
 }
 
 Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
@@ -20,6 +20,9 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
 
   result.resize_({n, m});
   result.zero_();
+
+  if(result.numel() == 0)
+    return result;
 
   // Get stream
   using namespace mps;
@@ -46,10 +49,14 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
           // Initialize graph
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
+          MPSGraphTensor* onesTensor = [mpsGraph constantWithScalar:1.0f
+                                                              shape:getMPSShape(result)
+                                                           dataType:getMPSDataType(result.scalar_type())];
 
-          MPSGraphTensor* outputTensor = [mpsGraph reLUWithTensor:inputTensor
-                                                             name:nil];
-
+          MPSGraphTensor* outputTensor = [mpsGraph bandPartWithTensor:onesTensor
+                                                             numLower:0
+                                                             numUpper:0
+                                                                 name:nil];
           newCachedGraph->outputTensor_ = outputTensor;
         }
         return newCachedGraph;

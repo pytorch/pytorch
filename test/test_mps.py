@@ -3516,6 +3516,29 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
 
+    # test eye
+    def test_eye(self):
+        def helper(n, m, dtype):
+            cpu_result = None
+            result = None
+
+            if(n == m):
+                cpu_result = torch.eye(n, dtype=dtype, device='cpu')
+                result = torch.eye(n, dtype=dtype, device='mps')
+            else:
+                cpu_result = torch.eye(n, m, device='cpu')
+                result = torch.eye(n, m, device='mps')
+
+            self.assertEqual(result, cpu_result)
+
+        for dtype in [torch.float32, torch.int32, torch.int64]:
+            helper(2,2, dtype)
+            helper(2,3, dtype)
+            helper(0,2, dtype)
+            helper(0,0, dtype)
+            helper(3,8, dtype)
+            helper(8,3, dtype)
+
     # Test diag
     def test_diag(self):
         def helper(shape, diag=0):
