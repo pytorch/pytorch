@@ -258,11 +258,11 @@ def slice(g, self, *args):
         dim = 0
     else:
         raise NotImplementedError("Unknown aten::slice signature")
-    is_start_none = (
-        start.node().kind() == "prim::Constant" and start.type().kind() == "NoneType"
+    is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+        start.type(), type(None)
     )
-    is_end_none = (
-        end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+    is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+        end.type(), type(None)
     )
     is_start_onnx_const = start.node().kind() == "onnx::Constant"
     is_end_onnx_const = end.node().kind() == "onnx::Constant"
