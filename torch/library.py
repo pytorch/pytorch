@@ -17,7 +17,7 @@ class Library:
     override operators in existing libraries from Python.
     A user can optionally pass in a dispatch keyname if they only want to register
     kernels corresponding to only one specific dispatch key.
-    
+
     To create a library to override operators in an existing library (with name ns), set the kind to "IMPL".
     To create a new library (with name ns) to register new operators, set the kind to "DEF".
     Args:
@@ -40,7 +40,6 @@ class Library:
         return "Library(kind={}, ns={}, dispatch_key={})>".format(self.kind, self.ns, self.dispatch_key)
 
     def impl(self, op_name, fn, dispatch_key=''):
-        print("Entering impl ", callable(fn), fn)
         if not callable(fn):
             raise TypeError("Input function is required to be a callable but found type {}".format(type(fn)))
         if dispatch_key == '':
@@ -79,7 +78,7 @@ class Library:
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
-            raise RuntimeError("Invalid alias_analysis type")
+            raise RuntimeError("Invalid alias_analysis type {}", alias_analysis)
         return self.m.define(schema, alias_analysis)
 
     def __del__(self):
