@@ -10,8 +10,8 @@ from typing import (
     cast,
 )
 import copy
+from functools import reduce
 import weakref
-import math
 
 import threading
 import torch
@@ -47,8 +47,11 @@ _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
 _sharded_tensor_map: Dict[int, 'weakref.ReferenceType[ShardedTensor]'] = {}
 
-# Custom sharded ops
+# Default sharded ops
 _SHARDED_OPS: Dict[Callable, Callable] = {}
+
+# Customized user ops
+_CUSTOM_SHARDED_OPS: Dict[Callable, Callable] = {}
 
 def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]], rpc_rank: int):
     with _sharded_tensor_lock:
@@ -281,7 +284,7 @@ class ShardedTensor(torch.Tensor):
             return torch.device(torch.cuda.current_device())
         return torch.device("cpu")
 
-    def gather(
+    def gather(  # type: ignore[override]
         self,
         dst: int = 0,
         out: Optional[torch.Tensor] = None,
@@ -302,7 +305,7 @@ class ShardedTensor(torch.Tensor):
                 Default: ``None``
         """
         def shard_size(shard_md):
-            return math.prod(shard_md.shard_sizes)  # type: ignore[attr-defined]
+            return reduce((lambda x, y: x * y), shard_md.shard_sizes)  # type: ignore[attr-defined]
 
         rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size
@@ -810,6 +813,10 @@ class ShardedTensor(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         def dispatch(st: ShardedTensor, func: Callable):
+            # Dispatch to custom user provided op first if it exists.
+            if func in _CUSTOM_SHARDED_OPS:
+                return _CUSTOM_SHARDED_OPS[func](types, args, kwargs, st._process_group)
+
             # Dispatch to custom sharding spec op if it has one.
             if _has_custom_op(st._sharding_spec, func):
                 return _dispatch_custom_op(
