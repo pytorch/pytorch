@@ -799,7 +799,8 @@ def _logical_xor(a: TensorLikeType, b: TensorLikeType):
         a = ne(a, 0)
     if not utils.is_boolean_dtype(b.dtype):
         b = ne(b, 0)
-    return ne(a, b)
+    return bitwise_xor(a, b)
+
 
 # TODO: skip unnecessary conversion of long to float
 logical_xor = _make_elementwise_binary_reference(
