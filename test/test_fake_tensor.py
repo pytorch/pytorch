@@ -3,10 +3,9 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
-from torch.testing._internal.jit_utils RUN_CUDA
+from torch.testing._internal.jit_utils import RUN_CUDA
+import unittest
 from torch._subclasses import FakeTensor
-
-from torch._subclasses.fake_tensor import FakeTensor
 
 class FakeTensorTest(TestCase):
     def test_basic(self):
