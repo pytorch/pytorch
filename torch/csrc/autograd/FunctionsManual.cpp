@@ -213,19 +213,11 @@ Tensor norm_backward(
   } else if (p == 2.0) {
     return self * (grad / norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
-    const auto self_isnan = self.isnan();
-    const auto norm_isnan = norm.isnan();
-    const auto& self_and_norm_isnan = areAnyTensorSubclassLike({self, norm}) ?
-      self_isnan.logical_and(norm_isnan) :
-      self_isnan.logical_and_(norm_isnan);
-    auto is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
-    self_scaled = self.sgn() * is_eq_max;
-    auto nb_max = is_eq_max.count_nonzero(dim);
-    if (self.dim() != 0) {
-      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
-    }
-    scale_v = grad / nb_max;
-    return self_scaled * scale_v;
+    // Derivative of amax(abs(self), dim, keepdim) but respecting nans
+    // We create a mask of `argmax`: it's argmax if self.abs() == norm or it's NaN
+    auto self_abs = self.abs();
+    auto mask = self_abs.eq(norm).logical_or(self_abs.isnan());
+    return self.sgn() * ((grad / mask.sum(dim, true)) * mask);
   } else if (p < 1.0) {
     self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self == 0, 0);
     return self_scaled * grad * norm.pow(1 - p);
@@ -1618,7 +1610,6 @@ Tensor binary_cross_entropy_double_backward_target(
   return res;
 }
 
-
 Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const c10::optional<Tensor>& weight, const c10::optional<Tensor>& pos_weight, int64_t reduction) {
   Tensor grad_target;
   if (isDefined(pos_weight)) {
@@ -1644,36 +1635,6 @@ Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_outpu
   }
 
   return grad_target;
-}
-
-Tensor binary_cross_entropy_with_logits_jvp(const Tensor& input_t, const Tensor& target_t, const Tensor& input_p, const Tensor& target_p, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
-
-  Tensor grad_input;
-  Tensor grad_target;
-
-  if (pos_weight.defined()) {
-    // pos_weight need to be broadcasted, thus mul(target) is not inplace.
-    auto t = pos_weight.mul(target_p);
-    grad_input = input_t.mul(t.add(1).sub_(target_p).mul_(input_p.sigmoid()).sub_(t));
-  } else {
-    grad_input = input_t.mul(input_p.sigmoid() - target_p);
-  }
-
-  if (pos_weight.defined()) {
-    grad_target = target_t.mul((1. - input_p.sigmoid()).log_().sub_(pos_weight.mul(input_p.sigmoid().log_())));
-  } else {
-    grad_target = -target_t.mul(input_p);
-  }
-
-  if (weight.defined()) {
-    grad_input = grad_input.mul(weight);
-    grad_target = grad_target.mul(weight);
-  }
-  return apply_loss_reduction(grad_target + grad_input, reduction);
 }
 
 Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
