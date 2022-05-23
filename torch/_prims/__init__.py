@@ -1770,8 +1770,9 @@ device_put = _make_prim(
     doc=_device_put_doc,
 )
 
+# NOTE: need to model meta scalars
 # See https://github.com/pytorch/pytorch/issues/78070
-def _item_meta(a: TensorLikeType) -> NumberType:
+def _item_meta(a: TensorLikeType) -> TensorMeta:
     number_type = utils.dtype_to_type(a.dtype)
     return TensorMeta(number_type(-1))
 

@@ -1107,7 +1107,7 @@ def all(
     nelem = 1 if a.ndim == 0 else reduce(operator.mul, (a.shape[i] for i in dims), 1)
 
     a_ = _maybe_convert_to_dtype(a, torch.bool)
-    result = eq(sum(a_, dim=dim, keepdim=keepdim), nelem)
+    result = eq(sum(a_, dim=dim, keepdim=keepdim), nelem)  # type: ignore[arg-type]
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
@@ -1123,7 +1123,7 @@ def any(
     keepdim: bool = False,
 ) -> TensorLikeType:
     a_ = _maybe_convert_to_dtype(a, torch.bool)
-    result = ne(sum(a_, dim=dim, keepdim=keepdim), False)
+    result = ne(sum(a_, dim=dim, keepdim=keepdim), False)  # type: ignore[arg-type]
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
@@ -1856,4 +1856,4 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     if a.numel() == 0:
         return True
 
-    return item(all(eq(a, b)))
+    return item(all(eq(a, b)))  # type: ignore[return-value]
