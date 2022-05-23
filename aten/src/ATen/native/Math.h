@@ -2177,14 +2177,29 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
   }
 }
 
-template<typename T> static inline C10_HOST_DEVICE T beta_forward(T x, T y);
-template<typename T> static inline T beta_negative(int64_t x, T y);
-template<typename T> static inline T gamma_forward(T x);
-template<typename T> static inline T ln_beta_asymptotic_expansion(T x, T y, int *sign);
-template<typename T> static inline T ln_beta_forward(T x, T y);
-template<typename T> static inline T ln_beta_negative(int64_t x, T y);
-template<typename T> static inline T reentrant_ln_gamma(T x, int *sign);
-template<typename T> static inline T stirling_gamma_approximation(T x);
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T beta_forward(T x, T y);
+
+template<typename T>
+static inline T beta_negative(int64_t x, T y);
+
+template<typename T>
+static inline T gamma_forward(T x);
+
+template<typename T>
+static inline T ln_beta_asymptotic_expansion(T x, T y, int *sign);
+
+template<typename T>
+static inline T ln_beta_forward(T x, T y);
+
+template<typename T>
+static inline T ln_beta_negative(int64_t x, T y);
+
+template<typename T>
+static inline T reentrant_ln_gamma(T x, int *sign);
+
+template<typename T>
+static inline T stirling_gamma_approximation(T x);
 
 /*
  *  Adapted from the Cephes implementation provided by SciPy.
