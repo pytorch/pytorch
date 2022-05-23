@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 import torch._C._onnx as _C_onnx
