@@ -3081,7 +3081,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 class TestVmapOperatorsOpInfo(TestCase):
     vmap_fail = {
         # These are things that we either cannot fix or are not actually problems
-        xfail('fill_'),
         xfail('resize_'),
         xfail('resize_as_'),
         xfail('to_sparse'),
@@ -3173,7 +3172,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('complex'),
         xfail('copysign'),
         xfail('eig'),
-        xfail('fill_'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),
