@@ -39,6 +39,7 @@ DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
 NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
+DeviceLikeType = Union[str, torch.device]
 
 
 torch_function_passthrough = {
@@ -164,6 +165,7 @@ class TensorMeta(torch.Tensor):
 TensorLikeType = Union[torch.Tensor, TensorMeta]
 TensorLike = (torch.Tensor, TensorMeta)
 TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
+TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
 
 # TODO: look at using torch.testing.assert_close instead with an option
@@ -199,12 +201,13 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
             msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
             raise AssertionError(msg)
 
-    same_strides, idx = check_significant_strides(a, b)
-    if not same_strides:
-        msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-            a.stride(), b.stride(), idx
-        )
-        raise RuntimeError(msg)
+    # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
+    # same_strides, idx = check_significant_strides(a, b)
+    # if not same_strides:
+    #     msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+    #         a.stride(), b.stride(), idx
+    #     )
+    # raise RuntimeError(msg)
 
 
 def check_significant_strides(
@@ -265,7 +268,6 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
     check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
 
     # Filters the tensors to actual tensors
-    all_tensors = all(isinstance(a, TensorLike) for a in tensors)
     tensors = tuple(
         a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
     )
@@ -318,9 +320,6 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
         permuted_shape[idx] = shape[x]
 
     new_strides = make_contiguous_strides_for(permuted_shape)
-    # print(f"new_strides is {new_strides}")
-    # print(f"shape is {shape}")
-    # print(f"permuted_shape is {permuted_shape}")
     permuted_strides = [-1] * ndim
     for idx, x in enumerate(perm):
         permuted_strides[x] = new_strides[idx]
@@ -490,10 +489,18 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
             raise RuntimeError(msg)
 
 
+def canonicalize_device(device: Union[str, torch.device]) -> torch.device:
+    if isinstance(device, torch.device):
+        return device
+
+    assert isinstance(device, str)
+    return torch.device(device)
+
+
 # Asserts if any of the following are true:
 #   - a non-scalar or non-Tensor is given
 #   - the shape of any tensors is distinct
-def check_same_shape(*args, allow_cpu_scalar_tensors):
+def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
     """
     Checks that all Tensors in args have the same shape.
 
@@ -523,6 +530,58 @@ def check_same_shape(*args, allow_cpu_scalar_tensors):
                 "Unexpected type when checking for same shape, " + str(type(arg)) + "!"
             )
             raise RuntimeError(msg)
+
+
+def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
+    shape = None
+    scalar_shape = None
+
+    for arg in args:
+        if isinstance(arg, Number):
+            continue
+        elif isinstance(arg, TensorLike):
+            if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
+                scalar_shape = arg.shape
+                continue
+
+            if shape is None:
+                shape = arg.shape
+
+            if not is_same_shape(shape, arg.shape):
+                return None
+        else:
+            return None
+
+    return shape if shape is not None else scalar_shape
+
+
+def extract_shape_from_varargs(
+    shape: Union[ShapeType, Tuple[ShapeType]]
+) -> Tuple[int, ...]:
+    """
+    Returns a shape from varargs.
+
+    In PyTorch, operations that accept shapes often accept them as varargs, like
+    foo(*shape). However a user can pass the shape as a sequence of integers,
+    like this:
+
+      foo(1, 2, 3)
+
+    or as a sequence of integers
+
+      foo((1, 2, 3))
+
+    In the first case shape will be a tuple of integers, and in the second case it's a tuple
+    containing a tuple of integers. This validates those inputs and canonicalizes them
+    to a tuple of integers.
+    """
+
+    # Handles tuple unwrapping
+    if len(shape) == 1 and isinstance(shape[0], tuple):
+        shape = shape[0]
+
+    validate_shape(shape)  # type: ignore[arg-type]
+    return shape  # type: ignore[return-value]
 
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
