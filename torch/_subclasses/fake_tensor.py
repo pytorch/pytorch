@@ -20,13 +20,15 @@ _device_not_kwarg_ops = (
     aten.to.device,
     aten.to.prim_Device,
     aten._pin_memory.default,
+    aten._resize_output.functional,
+    aten._resize_output.out,
 )
 
 # this op is never actually used
 _non_kwarg_device_constructors = (torch.ops.aten._list_to_tensor,)
 
 
-def contains_tensor_types(type: torch._C.Type):
+def contains_tensor_types(type):
     tensor_type = torch._C.TensorType.get()
     return type.isSubtypeOf(tensor_type) or any(
         contains_tensor_types(e) for e in type.containedTypes()
@@ -165,7 +167,7 @@ class FakeTensor(BaseTensor):
                 )
 
         if _is_tensor_constructor(func):
-            assert not func in _non_kwarg_device_constructors
+            assert func not in _non_kwarg_device_constructors
             _, new_kwargs = normalize_function(
                 func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
             )
@@ -251,4 +253,4 @@ class FakeTensor(BaseTensor):
         return common_device
 
 class FakeTensorMode(FakeTensor):
-    context = no_dispatch
+    pass
