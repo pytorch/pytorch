@@ -17,6 +17,8 @@ from torch._prims.utils import (
     NumberType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     REDUCTION_OUTPUT_TYPE_KIND,
+    is_weakly_lesser_type,
+    dtype_to_type,
 )
 from torch._prims.wrappers import (
     elementwise_type_promotion_wrapper,
@@ -1358,7 +1360,7 @@ def var_mean(
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "vec1", "vec2"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def addr(
     self: TensorLikeType,
@@ -1376,22 +1378,30 @@ def addr(
         lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D",
     )
     self = self.expand(vec1.shape[0], vec2.shape[0])
-    check(
-        self.ndim == 2, lambda: f"2D tensor expected, got {self.ndim}D tensor for input"
-    )
-    check(
-        self.shape[0] == vec1.shape[0] and self.shape[1] == vec2.shape[0],
-        lambda: f"size mismatch, input: {self.shape}, v1: {vec1.shape}, v2: {vec2.shape}",
-    )
     if utils.is_boolean_dtype(self.dtype):
-        # TODO: get rid of torch.tensor?  The trouble is that logical_and
-        # doesn't accept boolean input
-        return torch.logical_or(
-            self if beta else torch.full_like(self, False),
-            torch.outer(vec1, vec2) if alpha else torch.full_like(self, False),
-        )
+        # Integers are accepted for booleans
+        check(is_weakly_lesser_type(type(beta), int), f"expected bool/int beta but got {type(beta)}")
+        check(is_weakly_lesser_type(type(alpha), int), f"expected bool/int alpha but got {type(beta)}")
+        if not beta:
+            return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
+        else:
+            return torch.logical_or(
+                self, torch.outer(vec1, vec2) if alpha else torch.full_like(self, False),
+            )
     else:
-        return beta * self + alpha * torch.outer(vec1, vec2)
+        check(
+            is_weakly_lesser_type(type(beta), dtype_to_type(self.dtype)),
+            f"cannot safely convert {type(beta)} to {self.dtype}"
+        )
+        check(
+            is_weakly_lesser_type(type(alpha), dtype_to_type(self.dtype)),
+            f"cannot safely convert {type(alpha)} to {self.dtype}"
+        )
+        if beta == 0:
+            # This means NaNs from self are dropped if beta is zero
+            return alpha * torch.outer(vec1, vec2)
+        else:
+            return beta * self + alpha * torch.outer(vec1, vec2)
 
 
 def as_strided(
