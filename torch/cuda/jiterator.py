@@ -53,13 +53,26 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
         code_string (string): CUDA code string to be compiled by jiterator.
         kwargs (Dict, optional): Keyword arguments for generated function
 
-    Examples:
+    Example:
         >>> code_string = "template <typename T> T my_kernel(T x, T y, T alpha) { return  -x + alpha * y; }"
         >>> jitted_fn = create_jit_fn(code_string, alpha=1.0)
         >>> a = torch.rand(3, device='cuda')
         >>> b = torch.rand(3, device='cuda')
         >>> # invoke jitted function like a regular python function
         >>> result = jitted_fn(a, b, alpha=3.14)
+
+
+    Jiterator can be used together with python registration to override an operator's cuda kernel
+
+    Following example is overriding gelu's cuda kernel with relu:
+        >>> code_string = "template <typename T> T my_gelu(T a) { return a > 0 ? a : 0; }"
+        >>> my_gelu = create_jit_fn(code_string)
+        >>> my_lib = torch.library.Library("aten", "IMPL")
+        >>> my_lib.impl('aten::gelu', my_gelu, "CUDA")
+        >>> # torch.nn.GELU and torch.nn.function.gelu are now overridden
+        >>> a = torch.rand(3, device='cuda')
+        >>> torch.allclose(torch.nn.functional.gelu(a), torch.nn.functional.relu(a))
+
 
     .. warning::
         This API is in beta and may change in future releases.

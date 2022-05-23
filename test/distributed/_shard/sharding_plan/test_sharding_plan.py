@@ -270,7 +270,7 @@ class TestShardingPlan(ShardedTensorTestBase):
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).cuda(self.rank)
 
         with self.assertRaisesRegex(
-            TypeError, "Only `ShardingSpec` is supported to shard"
+            TypeError, "Only `ShardingSpec` and `Sharder` are supported to shard"
         ):
             # shard the module with the provided sharding plan
             shard_module(megatron_lm, sharding_plan_wrong_plan)

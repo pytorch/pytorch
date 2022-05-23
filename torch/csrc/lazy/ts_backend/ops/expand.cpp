@@ -3,14 +3,12 @@
 namespace torch {
 namespace lazy {
 
-const OpKind Expand::class_op_kind(at::aten::expand);
-
 Expand::Expand(
     const Value& input,
     std::vector<int64_t> size,
     bool is_scalar_expand)
     : TsNode(
-          OpKind(at::aten::expand),
+          ClassOpKind(),
           {input},
           /*num_outputs=*/1,
           MHash(size, is_scalar_expand)),

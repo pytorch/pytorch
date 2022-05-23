@@ -9,7 +9,9 @@ namespace lazy {
 
 class TORCH_API AsStrided : public TsNode {
  public:
-  static const OpKind class_op_kind;
+  static OpKind ClassOpKind() {
+    return OpKind(at::aten::as_strided);
+  }
 
   AsStrided(
       const Value& input,

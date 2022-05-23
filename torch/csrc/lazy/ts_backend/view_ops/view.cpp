@@ -15,11 +15,9 @@ Shape NodeOutputShape(const Value& input, c10::ArrayRef<int64_t> output_sizes) {
 
 } // namespace
 
-const OpKind View::class_op_kind(at::aten::view);
-
 View::View(const Value& input, std::vector<int64_t> output_size)
     : TsNode(
-          OpKind(at::aten::view),
+          ClassOpKind(),
           {input},
           {NodeOutputShape(input, output_size)},
           /*num_outputs=*/1,

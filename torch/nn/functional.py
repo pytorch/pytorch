@@ -1442,7 +1442,7 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:
     return torch._C._nn.glu(input, dim)
 
 
-def hardtanh(input: Tensor, min_val: float = -1.0, max_val: float = 1.0, inplace: bool = False) -> Tensor:
+def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 

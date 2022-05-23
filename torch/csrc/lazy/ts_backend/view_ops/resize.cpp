@@ -10,11 +10,9 @@ Shape NodeOutputShape(const Value& input, c10::ArrayRef<int64_t> size) {
 
 } // namespace
 
-const OpKind Resize::class_op_kind(at::aten::resize);
-
 Resize::Resize(const Value& input, std::vector<int64_t> size)
     : TsNode(
-          OpKind(at::aten::resize),
+          ClassOpKind(),
           {input},
           [&]() { return NodeOutputShape(input, size); },
           /*num_outputs=*/1,

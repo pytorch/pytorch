@@ -7,7 +7,9 @@ namespace lazy {
 
 class TORCH_API Diagonal : public TsNode {
  public:
-  static const OpKind class_op_kind;
+  static OpKind ClassOpKind() {
+    return OpKind(at::aten::diagonal);
+  }
 
   Diagonal(const Value& input, int64_t offset, int64_t dim1, int64_t dim2);
 

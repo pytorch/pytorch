@@ -10,11 +10,9 @@ namespace lazy {
 
 using at::operator<<;
 
-const OpKind Scalar::class_op_kind(at::prim::Constant);
-
 Scalar::Scalar(const at::Scalar& value, Shape shape)
     : TsNode(
-          OpKind(at::prim::Constant),
+          ClassOpKind(),
           std::move(shape),
           /*num_outputs=*/1,
           ScalarHash(value)),
@@ -22,7 +20,7 @@ Scalar::Scalar(const at::Scalar& value, Shape shape)
 
 Scalar::Scalar(const at::Scalar& value, c10::ScalarType type)
     : TsNode(
-          OpKind(at::prim::Constant),
+          ClassOpKind(),
           {Shape(type, {})},
           /*num_outputs=*/1,
           ScalarHash(value)),
