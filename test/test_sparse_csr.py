@@ -2090,7 +2090,7 @@ class TestSparseCSR(TestCase):
             detached_inp = inp.detach()
             self.assertEqual(inp, detached_inp)
 
-    def _convert_to_layout(self, a, target_layout, blocksize=(2,2)):
+    def _convert_to_layout(self, a, target_layout, blocksize=(2, 2)):
         """
         Helper function to call the correct layout conversion
         with reasonable defaults for the block size. Clearly there
@@ -2166,7 +2166,10 @@ class TestSparseCSR(TestCase):
             # TODO: Remove this once support has been enabled
             return
 
-        for shape in [(0, 10), (6, 0), (6, 10), (0, 0)]:
+        blocksizes = [(2, 2)]
+        if layout is torch.sparse_bsr:
+            blocksizes += [(3, 5), (6, 10)]
+        for shape, blocksize in zip([(0, 10), (6, 0), (6, 10), (0, 0)], blocksizes):
             dense = make_tensor(shape, dtype=torch.float, device=device)
             dense = dense.relu()  # Introduce some sparsity
             sp_matrix = self._construct_sp_matrix(dense, layout)
