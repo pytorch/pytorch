@@ -756,9 +756,6 @@ class DistributedDataParallel(Module, Joinable):
             static_graph,
         )
 
-        # passing a handle to torch.nn.SyncBatchNorm layer
-        self._passing_sync_batchnorm_handle(self.module)
-
     def __getstate__(self):
         self._check_default_group()
         attrs = copy.copy(self.__dict__)
@@ -1645,15 +1642,6 @@ class DistributedDataParallel(Module, Joinable):
             bucket_size,
             authoritative_rank
         )
-
-    def _passing_sync_batchnorm_handle(self, module):
-        for layer in module.modules():
-            if isinstance(layer, torch.nn.modules.SyncBatchNorm):
-                if self.device_type == "cpu":
-                    pass
-                    # self._log_and_throw(
-                    #     ValueError, "SyncBatchNorm layers only work with GPU modules"
-                    # )
 
     def _check_comm_hook(self, hook):
         if not callable(hook):
