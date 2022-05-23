@@ -167,7 +167,7 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
       iter.remove_operand(1);
       pow_scalar_tensor_impl(iter, base);
     } else {
-      // if exp is cpu scalar 
+      // if exp is cpu scalar
       // or both exp and scalar are tensor
       pow_chalf_tensor_tensor_or_scalar_exp_kernel(iter);
     }
