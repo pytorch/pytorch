@@ -9037,6 +9037,10 @@ def sample_inputs_hinge_embedding_loss(op_info, device, dtype, requires_grad, **
         d['margin'] = random.uniform(-9, 9)
         yield SampleInput(input, args=(target, ), kwargs=d)
 
+    # scalar input and target.
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(_make_tensor(()), args=(_make_tensor(()), ))
+
 def error_inputs_hinge_embedding_loss(op, device, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=torch.float32)
     # invalid reduction value
