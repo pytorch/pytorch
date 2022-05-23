@@ -7,6 +7,14 @@ load(
 
 def define_targets(rules):
     rules.cc_library(
+        name = "aten_core_headers",
+        hdrs = aten_core_hdrs(rules = rules),
+        strip_include_prefix = "aten/src/",
+        deps = ["//c10"],
+        visibility = ["//visibility:private"],
+    )
+
+    rules.cc_library(
         name = "caffe2_serialize",
         srcs = [
             "caffe2/serialize/file_adapter.cc",

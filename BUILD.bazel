@@ -213,13 +213,6 @@ header_template_rule(
 )
 
 cc_library(
-    name = "aten_core_headers",
-    hdrs = aten_core_hdrs(rules = rules),
-    strip_include_prefix = "aten/src/",
-    deps = ["//c10:headers"],
-)
-
-cc_library(
     name = "aten_headers",
     hdrs = glob([
         "aten/src/**/*.h",
