@@ -1,19 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
+#include <ATen/cuda/cub_definitions.cuh>
 
-#include <THC/THCThrustAllocator.cuh>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#endif
+
+#include <ATen/cuda/ThrustAllocator.h>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 #include <thrust/device_ptr.h>
+#include <thrust/iterator/constant_iterator.h>
 
 namespace at { namespace native {
 
 void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indices, Tensor &sorted_indices, int64_t num_indices) {
   sorted_indices.copy_(linearIndex);
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   using device_ptr = thrust::device_ptr<int64_t>;
@@ -32,11 +41,13 @@ void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_
   thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, LTOp<int64_t>());
 }
 
+#if !CUB_SUPPORTS_SCAN_BY_KEY()
+
 template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count) {
   using device_ptr = thrust::device_ptr<index_t>;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto num_indices = count.numel();
@@ -72,5 +83,31 @@ template
 void embedding_dense_backward_cuda_scan<int>(Tensor &sorted_indices, Tensor &count);
 template
 void embedding_dense_backward_cuda_scan<int64_t>(Tensor &sorted_indices, Tensor &count);
+
+#endif
+
+template<typename index_t>
+int64_t embedding_backward_cuda_kernel_unique_by_key(const Tensor &sorted_indices, Tensor &segment_offsets) {
+  auto stream = at::cuda::getCurrentCUDAStream();
+  at::cuda::ThrustAllocator allocator;
+  auto policy = thrust::cuda::par(allocator).on(stream);
+  const ptrdiff_t numel = sorted_indices.numel();
+  auto sorted_indices_dev = thrust::device_ptr<index_t>(sorted_indices.data_ptr<index_t>());
+  auto dummy = at::empty_like(sorted_indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto dummy_dev = thrust::device_ptr<index_t>(dummy.data_ptr<index_t>());
+  auto ends = thrust::unique_by_key_copy(
+          policy,
+          sorted_indices_dev,
+          sorted_indices_dev + numel,
+          thrust::make_counting_iterator(0),
+          dummy_dev,
+          thrust::device_ptr<index_t>(segment_offsets.data_ptr<index_t>()));
+  return thrust::get<0>(ends) - dummy_dev;
+}
+
+template
+int64_t embedding_backward_cuda_kernel_unique_by_key<int>(const Tensor &sorted_indices, Tensor &segment_offsets);
+template
+int64_t embedding_backward_cuda_kernel_unique_by_key<int64_t>(const Tensor &sorted_indices, Tensor &segment_offsets);
 
 }}

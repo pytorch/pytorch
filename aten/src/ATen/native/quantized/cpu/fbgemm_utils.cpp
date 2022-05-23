@@ -1,20 +1,21 @@
 #include <ATen/ATen.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/onednn_utils.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <torch/custom_class.h>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+int register_linear_params();
+int register_embedding_params();
 
 #ifdef USE_FBGEMM
 
@@ -47,9 +48,9 @@ void CopyToChannelsLast3dTensor(
     const T* src,
     T* dst) {
   const int64_t inner_size = D * H * W;
-  for (int64_t i = 0; i < N; ++i) {
-    for (int64_t j = 0; j < inner_size; ++j) {
-      for (int64_t k = 0; k < C; ++k) {
+  for (const auto i : c10::irange(N)) {
+    for (const auto j : c10::irange(inner_size)) {
+      for (const auto k : c10::irange(C)) {
         dst[(i * inner_size + j) * C + k] = src[(i * C + k) * inner_size + j];
       }
     }
@@ -69,8 +70,8 @@ void CopyICFirst3dTensorToChannelsLast3dTensor(
   // IC OC/G THW -> G OC/G THW IC/G
   const int64_t inner_size = D * H * W;
   for (int64_t i = 0; i < G * OC_G; ++i) {
-    for (int64_t j = 0; j < inner_size; ++j) {
-      for (int64_t ic = 0; ic < IC_G; ++ic) {
+    for (const auto j : c10::irange(inner_size)) {
+      for (const auto ic : c10::irange(IC_G)) {
         // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         int g = i / OC_G;
         // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
@@ -159,9 +160,10 @@ Tensor MakeStridedQTensorCPU(
       allocator->allocate(size_bytes),
       allocator,
       /* resizable = */ true);
+  constexpr auto quantized_cpu_ks = at::DispatchKeySet(at::DispatchKey::QuantizedCPU);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage,
-      at::DispatchKeySet(at::DispatchKey::QuantizedCPU),
+      quantized_cpu_ks,
       dtype,
       quantizer);
   get_qtensorimpl(tensor)->set_sizes_and_strides(sizes, strides);
@@ -360,12 +362,28 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 
 #endif // USE_FBGEMM
 
-    template <int kSpatialDim = 2>
-    TORCH_API torch::class_<ConvPackedParamsBase<kSpatialDim>>
-    register_conv_params() {
+namespace {
+  // This is really terrible, but couldnt figure out a better way to constexpr convert int to
+  // string and then perform string concatenation on/with it
+  constexpr const char* _hack_int_to_class_name(int x) {
+    switch(x) {
+      case 2:
+        return "Conv2dPackedParamsBase";
+      case 3:
+        return "Conv3dPackedParamsBase";
+      default:
+        assert(false);
+        return "NotAValidDimension";
+    }
+  }
+}
+
+template <int kSpatialDim = 2>
+TORCH_API int
+register_conv_params() {
   static auto register_conv_params =
-    torch::class_<ConvPackedParamsBase<kSpatialDim>>(
-        "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
+    torch::selective_class_<ConvPackedParamsBase<kSpatialDim>>(
+        "quantized", TORCH_SELECTIVE_CLASS(_hack_int_to_class_name(kSpatialDim)))
     .def_pickle(
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
         -> ConvParamsSerializationType { // __getstate__
@@ -397,19 +415,19 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
     .def("dilation", &ConvPackedParamsBase<kSpatialDim>::dilation)
     .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups)
     .def("transpose", &ConvPackedParamsBase<kSpatialDim>::transpose);
-  return register_conv_params;
+  return 0;
 }
 
 template
-TORCH_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
+TORCH_API int register_conv_params<2>();
 template
-TORCH_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+TORCH_API int register_conv_params<3>();
 
-torch::class_<LinearPackedParamsBase> register_linear_params() {
+int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
   static auto register_linear_params =
-      torch::class_<LinearPackedParamsBase>(
-          "quantized", "LinearPackedParamsBase")
+      torch::selective_class_<LinearPackedParamsBase>(
+          "quantized", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
                   -> SerializationType { // __getstate__
@@ -454,6 +472,16 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
                       std::move(weight), std::move(bias));
                 }
 #endif // USE_PYTORCH_QNNPACK
+#if AT_MKLDNN_ENABLED()
+                if (at::globalContext().qEngine() == at::QEngine::ONEDNN) {
+                  TORCH_CHECK(
+                      weight.scalar_type() == at::kQInt8,
+                      "ONEDNN only supports INT8 bit width currently. Got ",
+                      c10::toString(weight.scalar_type()));
+                  return PackedLinearWeightsOnednn::prepack(
+                      std::move(weight), std::move(bias));
+                }
+#endif // #if AT_MKLDNN_ENABLED()
                 TORCH_CHECK(false, "Unknown qengine");
               })
               .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
@@ -463,11 +491,13 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
                    return bias;
                  })
               .def("unpack", &LinearPackedParamsBase::unpack);
-  return register_linear_params;
+  // (1) we can't (easily) return the static initializer itself because it can have a different type because of selective build
+  // (2) we can't return void and be able to call the function in the global scope
+  return 0;
 }
 
 
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
+int register_embedding_params() {
   // Type for __getstate__/__setstate__ serialization
   //
   // Element 0 is the version of the PackedParam structure
@@ -482,8 +512,8 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
     std::vector<int64_t>>;
 
   static auto register_embedding_params =
-    torch::class_<EmbeddingPackedParamsBase>(
-      "quantized", "EmbeddingPackedParamsBase")
+    torch::selective_class_<EmbeddingPackedParamsBase>(
+      "quantized", TORCH_SELECTIVE_CLASS("EmbeddingPackedParamsBase"))
       .def_pickle(
           [](const c10::intrusive_ptr<EmbeddingPackedParamsBase>& params)
               -> EmbeddingParamsSerializationType { // __getstate__ call
@@ -519,14 +549,14 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
       .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
       .def("version", &EmbeddingPackedParamsBase::version);
 
-  return register_embedding_params;
+  return 0;
 }
 
 namespace {
 
-static auto conv2d_params = register_conv_params<2>();
-static auto conv3d_params = register_conv_params<3>();
-static auto linear_params = register_linear_params();
-static auto embedding_params = register_embedding_params();
+static C10_UNUSED auto conv2d_params = register_conv_params<2>();
+static C10_UNUSED auto conv3d_params = register_conv_params<3>();
+static C10_UNUSED auto linear_params = register_linear_params();
+static C10_UNUSED auto embedding_params = register_embedding_params();
 
 } // namespace

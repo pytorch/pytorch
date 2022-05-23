@@ -34,11 +34,12 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(RshiftPtr v) override;
   void visit(CompareSelectPtr v) override;
 #define IMM_PRINT_VISIT(Type, Name) void visit(Name##ImmPtr v) override;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
   void visit(CastPtr v) override;
   void visit(BitCastPtr v) override;
   void visit(VarPtr v) override;
+  void visit(BufPtr v) override;
   void visit(RampPtr v) override;
   void visit(LoadPtr v) override;
   void visit(BroadcastPtr v) override;
@@ -54,12 +55,15 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(AtomicAddPtr v) override;
   void visit(SyncThreadsPtr v) override;
   void visit(ExternalCallPtr v) override;
+  void visit(ExternalCallWithAllocPtr v) override;
   void visit(StorePtr v) override;
   void visit(ForPtr v) override;
   void visit(CondPtr v) override;
   void visit(BlockPtr v) override;
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
+  void visit(FreeExtPtr v) override;
+  void visit(PlacementAllocatePtr v) override;
   void visit(LetPtr v) override;
 
   // A child class may have a difference rule for generating dtype

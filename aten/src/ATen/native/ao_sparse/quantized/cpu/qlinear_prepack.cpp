@@ -2,7 +2,6 @@
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 
-#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
@@ -13,7 +12,7 @@
 namespace ao {
 namespace sparse {
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 #ifdef USE_FBGEMM
 namespace {

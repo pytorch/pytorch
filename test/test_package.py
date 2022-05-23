@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 def load_tests(loader, standard_tests, pattern):
     """Load all tests from `test/pacakge/`
     """

@@ -32,13 +32,13 @@ c10::AliasAnalysisKind aliasAnalysisConservative() {
 }
 
 void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
-  if (!elem_type->isSubtypeOf(NumberType::get()) &&
+  if (!elem_type->isSubtypeOf(*NumberType::get()) &&
       elem_type != BoolType::get()) {
     std::stringstream error;
     error << "Input must be of ints, floats, or bools, "
           << "got " << elem_type->repr_str();
     // special case empty list torch.tensor([])
-    if (elem_type->isSubtypeOf(TensorType::get())) {
+    if (elem_type->isSubtypeOf(*TensorType::get())) {
       if (empty_list) {
         error << "\nEmpty lists default to List[Tensor]. Add a variable "
                  "annotation to the assignment to create an empty list "
@@ -184,7 +184,7 @@ void recursiveStore(
 }
 
 template <bool if_set_requires_grad>
-void createTensorFromList(Stack* stack) {
+void createTensorFromList(Stack& stack) {
   // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
   // we use the template arg to distinguish between these two cases
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -198,12 +198,12 @@ void createTensorFromList(Stack* stack) {
     pop(stack, data, dtype, device);
   }
   auto elem_type = data.type();
-  while (auto list_type = elem_type->cast<ListType>()) {
-    elem_type = list_type->getElementType();
+  while (elem_type->isSubtypeOf(AnyListType::get())) {
+    elem_type = elem_type->containedType(0);
   }
   auto sizes = compute_sizes(data);
   checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
-  at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
+  at::ScalarType initial_scalar_type = scalarTypeFromJitType(*elem_type);
   if (initial_scalar_type == at::ScalarType::Double) {
     initial_scalar_type = typeMetaToScalarType(c10::get_default_dtype());
   }
@@ -245,13 +245,13 @@ void createTensorFromList(Stack* stack) {
 RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::split(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]"),
-        [](Stack* stack) {
+            "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]"),
+        [](Stack& stack) {
           RECORD_FUNCTION("split_with_sizes", last(stack, 3));
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              (std::move(peek(stack, 1, 3))).toIntVector(),
+              (std::move(peek(stack, 1, 3))).toDimVector(),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
           pack(stack, std::move(result));
@@ -264,7 +264,7 @@ RegisterOperators reg({
           "aten::tensor." #operator_type "(" #operator_type                     \
           " t, *, ScalarType? dtype=None, Device? device=None"                  \
           ", bool requires_grad=False) -> Tensor"),                             \
-      [](Stack* stack) {                                                        \
+      [](Stack& stack) {                                                        \
         c_type scalar_val;                                                      \
         IValue dtype;                                                           \
         IValue device;                                                          \
@@ -280,7 +280,7 @@ RegisterOperators reg({
           TORCH_SELECTIVE_SCHEMA(                                               \
               "aten::as_tensor." #operator_type "(" #operator_type              \
               " t, *, ScalarType? dtype=None, Device? device=None) -> Tensor"), \
-          [](Stack* stack) {                                                    \
+          [](Stack& stack) {                                                    \
             c_type scalar_val;                                                  \
             IValue dtype;                                                       \
             IValue device;                                                      \
@@ -319,16 +319,16 @@ RegisterOperators reg({
     // tensor_new.cpp
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA("aten::_infer_size(int[] a, int[] b) -> int[]"),
-        [](Stack* stack) {
+        [](Stack& stack) {
           auto a = pop(stack);
           auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
+          push(stack, at::infer_size(a.toDimVector(), b.toDimVector()));
         },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
             "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor"),
-        [](Stack* stack) {
+        [](Stack& stack) {
           at::Tensor weight;
           at::Tensor input;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -353,7 +353,7 @@ RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
             "aten::as_tensor(Tensor(a) data, *, ScalarType? dtype=None, Device? device=None) -> Tensor(a|b)"),
-        [](Stack* stack) {
+        [](Stack& stack) {
           auto device = pop(stack).toOptional<c10::Device>();
           auto dtype = pop(stack).toOptional<at::ScalarType>();
           at::Tensor data = pop(stack).toTensor();
@@ -377,24 +377,24 @@ RegisterOperators reg({
         TORCH_SELECTIVE_SCHEMA(
             "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, "
             "Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)"),
-        [](Stack* stack) {},
+        [](Stack& stack) {},
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA("aten::_get_tracing_state() -> bool"),
-        [](Stack* stack) { push(stack, false); },
+        [](Stack& stack) { push(stack, false); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA("aten::is_scripting() -> bool"),
-        [](Stack* stack) { push(stack, true); },
+        [](Stack& stack) { push(stack, true); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA("aten::has_torch_function(...) -> bool"),
-        [](Stack* stack) { push(stack, false); },
+        [](Stack& stack) { push(stack, false); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
             "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)"),
-        [](Stack* stack) {
+        [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
 
@@ -410,7 +410,7 @@ RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
             "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)"),
-        [](Stack* stack) {
+        [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
 
@@ -426,7 +426,7 @@ RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
             "aten::_no_grad_fill_(Tensor(a!) tensor, float val) -> Tensor(a!)"),
-        [](Stack* stack) {
+        [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
 
@@ -440,7 +440,7 @@ RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
             "aten::_no_grad_zero_(Tensor(a!) tensor) -> Tensor(a!)"),
-        [](Stack* stack) {
+        [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
 
@@ -451,11 +451,11 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::is_grad_enabled() -> bool",
-        [](Stack* stack) { push(stack, torch::GradMode::is_enabled()); },
+        [](Stack& stack) { push(stack, torch::GradMode::is_enabled()); },
         aliasAnalysisConservative()),
     Operator(
         "aten::set_grad_enabled(bool val) -> ()",
-        [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
+        [](Stack& stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
 });
 } // namespace

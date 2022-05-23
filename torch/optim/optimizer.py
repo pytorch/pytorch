@@ -151,17 +151,19 @@ class Optimizer(object):
                   zip(chain.from_iterable((g['params'] for g in saved_groups)),
                       chain.from_iterable((g['params'] for g in groups)))}
 
-        def cast(param, value):
+        def cast(param, value, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""
             if isinstance(value, torch.Tensor):
                 # Floating-point types are a bit special here. They are the only ones
                 # that are assumed to always match the type of params.
-                if param.is_floating_point():
-                    value = value.to(param.dtype)
-                value = value.to(param.device)
+                # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
+                if (key != "step"):
+                    if param.is_floating_point():
+                        value = value.to(param.dtype)
+                    value = value.to(param.device)
                 return value
             elif isinstance(value, dict):
-                return {k: cast(param, v) for k, v in value.items()}
+                return {k: cast(param, v, key=k) for k, v in value.items()}
             elif isinstance(value, container_abcs.Iterable):
                 return type(value)(cast(param, v) for v in value)
             else:
@@ -201,8 +203,12 @@ class Optimizer(object):
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
+        foreach = self.defaults.get('foreach', False)
+
         if not hasattr(self, "_zero_grad_profile_name"):
             self._hook_for_profile()
+        if foreach:
+            per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:
                 for p in group['params']:
@@ -214,7 +220,14 @@ class Optimizer(object):
                                 p.grad.detach_()
                             else:
                                 p.grad.requires_grad_(False)
-                            p.grad.zero_()
+                            if (not foreach or p.grad.is_sparse):
+                                p.grad.zero_()
+                            else:
+                                per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
+            if foreach:
+                for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                    for grads in per_dtype_grads.values():
+                        torch._foreach_zero_(grads)
 
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).
@@ -237,7 +250,7 @@ class Optimizer(object):
 
         Args:
             param_group (dict): Specifies what Tensors should be optimized along with group
-            specific optimization options.
+                specific optimization options.
         """
         assert isinstance(param_group, dict), "param group must be a dict"
 

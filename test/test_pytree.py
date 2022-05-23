@@ -1,8 +1,11 @@
+# Owner(s): ["module: pytree"]
+
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, LeafSpec
 from torch.utils._pytree import _broadcast_to_and_flatten
 from collections import namedtuple
+from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests
 
 class TestPytree(TestCase):
     def test_treespec_equality(self):
@@ -77,11 +80,18 @@ class TestPytree(TestCase):
         run_test(Point(1., 2))
         run_test(Point(torch.tensor(1.), 2))
 
-    def test_flatten_unflatten_torch_namedtuple_return_type(self):
+    @parametrize("op", [
+        subtest(torch.max, name='max'),
+        subtest(torch.min, name='min'),
+    ])
+    def test_flatten_unflatten_return_type(self, op):
         x = torch.randn(3, 3)
-        expected = torch.max(x, dim=0)
+        expected = op(x, dim=0)
 
         values, spec = tree_flatten(expected)
+        # Check that values is actually List[Tensor] and not (ReturnType(...),)
+        for value in values:
+            self.assertTrue(isinstance(value, torch.Tensor))
         result = tree_unflatten(values, spec)
 
         self.assertEqual(type(result), type(expected))
@@ -201,6 +211,8 @@ class TestPytree(TestCase):
             result = _broadcast_to_and_flatten(pytree, to_spec)
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
 
+
+instantiate_parametrized_tests(TestPytree)
 
 if __name__ == '__main__':
     run_tests()

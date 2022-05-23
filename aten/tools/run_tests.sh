@@ -15,7 +15,9 @@ VALGRIND=${VALGRIND:=ON}
 ./dlconvertor_test
 ./native_test
 ./scalar_tensor_test
-./tensor_interop_test
+if [[ -x ./tensor_interop_test ]]; then
+  ./tensor_interop_test
+fi
 ./undefined_tensor_test
 ./extension_backend_test
 ./lazy_tensor_test
@@ -62,10 +64,14 @@ fi
 if [[ -x ./cuda_cub_test ]]; then
   ./cuda_cub_test
 fi
-if [ "$VALGRIND" == "ON" ]
-then
+if [[ -x ./cuda_atomic_ops_test ]]; then
+  ./cuda_atomic_ops_test
+fi
+if [ "$VALGRIND" == "ON" ]; then
   valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic --gtest_filter='-*CUDA'
-  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./tensor_interop_test
+  if [[ -x ./tensor_interop_test ]]; then
+    valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./tensor_interop_test
+  fi
 fi
 
 popd

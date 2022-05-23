@@ -2,7 +2,7 @@
 
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/macros/Macros.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 // NOTE [Tracing Mode Switches]
 //

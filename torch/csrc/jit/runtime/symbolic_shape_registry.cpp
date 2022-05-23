@@ -1,8 +1,14 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/serialized_shape_function_registry.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
 
 namespace torch {
@@ -10,289 +16,30 @@ namespace jit {
 namespace {
 std::mutex lock;
 
-const std::string shape_compute_functions =
-    R"(
-        ####     SHAPE COMPUTE FUNCTIONS    ###
-        def broadcast(a: List[int], b: List[int]):
-          dimsA = len(a)
-          dimsB = len(b)
-          ndim = max(dimsA, dimsB)
-          expandedSizes : List[int] = []
+// split here to satisfy MSVC++
+// https://docs.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2026?view=msvc-170
+const std::string _xnnpack_shape_compute_functions =
+#ifdef USE_XNNPACK
+    R"(def prepacked_conv2d_clamp_run(input: List[int], conv2dOpContext: Any):
+    assert isinstance(conv2dOpContext, __torch__.torch.classes.xnnpack.Conv2dOpContext)
+    (weight, bias, stride, padding, dilation, groups) = unchecked_cast(
+        Tuple[List[int], Optional[List[int]], List[int], List[int], List[int], int],
+        ops.prepacked.unpack_prepacked_sizes_conv2d(conv2dOpContext),
+    )
+    return conv2d(input, weight, bias, stride, padding, dilation, groups)
 
-          for i in range(ndim):
-            offset = ndim - 1 - i
-            dimA = dimsA - 1 - offset
-            dimB = dimsB - 1 - offset
-            sizeA = a[dimA] if (dimA >= 0) else 1
-            sizeB = b[dimB] if (dimB >= 0) else 1
-
-            if sizeA != sizeB and sizeA != 1 and sizeB != 1:
-                # TODO: only assertion error is bound in C++ compilation right now
-                raise AssertionError("The size of tensor a {} must match the size of tensor b ("
-                                "{}) at non-singleton dimension {}".format(sizeA, sizeB, i))
-
-            expandedSizes.append(sizeB if sizeA == 1 else sizeA)
-
-          return expandedSizes
-
-        def adaptive_avg_pool2d(self: List[int], out: List[int]):
-          assert len(out) == 2
-          assert len(self) == 3 or len(self) == 4
-          for i in range (1, len(self)):
-            assert self[i] != 0
-
-          shape: List[int] = []
-          for i in range(0, len(self) -2):
-            shape.append(self[i])
-          for elem in out:
-            shape.append(elem)
-          return shape
-
-        # TODO: maybe make it customary that extra arguments are unused ?
-        # TODO: return self directly
-        def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
-          out: List[int] = []
-          for elem in self:
-            out.append(elem)
-          return out
-
-        def unary_one_unused_input(self: List[int], inp0: Any):
-          out: List[int] = []
-          for elem in self:
-            out.append(elem)
-          return out
-
-        def unary(self: List[int]):
-          out: List[int] = []
-          for elem in self:
-            out.append(elem)
-          return out
-
-        def view(self: List[int], sizes: List[int]):
-          # TODO: add assertions to check whether requested dims are valid
-          out: List[int] = []
-          for elem in sizes:
-            if elem == -1:
-              # TODO: support -1 in view dimensions
-              raise AssertionError("Shape function doesn't support -1 view dims yet")
-            out.append(elem)
-          return out
-
-        def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt : Any):
-          out: List[int] = []
-          for idx in range(len(self)):
-            is_mean_dim : bool = False
-            for reduce_dim in dims:
-              if idx == maybe_wrap_dim(reduce_dim, len(self)):
-                is_mean_dim = True
-            if is_mean_dim:
-              if keep_dim:
-                out.append(1)
-            else:
-              out.append(self[idx])
-          return out
-
-        def broadcast_one_unused_input(self: List[int], other: List[int], unused: Any):
-          return broadcast(self, other)
-
-        def mm(self: List[int] , mat2: List[int]):
-          assert len(self) == 2, "self must be a matrix"
-          assert len(mat2) == 2, "mat2 must be a matrix"
-
-          assert self[1] == mat2[0]
-          return [self[0], mat2[1]]
-
-        def dot(self: List[int], tensor: List[int]):
-          assert len(self) == 1 and len(tensor) == 1
-          assert self[0] == tensor[0]
-          out: List[int] = []
-          return out
-
-        def mv(self: List[int], vec: List[int]):
-          assert len(self) == 2 and len(vec) == 1
-          assert self[1] == vec[0]
-          # TODO: return self
-          return [self[0]]
-
-        # TODO: optional dim, then expose as a registered shape function
-        def unsqueeze(li: List[int], dim: int):
-          out: List[int] = []
-          for i in range(len(li)):
-            if i == dim:
-              out.append(1)
-            out.append(li[i])
-          return out
-
-        # TODO: optional dim, then expose as a registered shape function
-        def squeeze(li: List[int], dim: int):
-          out: List[int] = []
-          for i in range(len(li)):
-            if i == dim:
-              if li[i] != 1:
-                out.append(li[i])
-            else:
-              out.append(li[i])
-          return out
-
-        def matmul(tensor1: List[int] , tensor2: List[int]):
-          dim_tensor1 = len(tensor1)
-          dim_tensor2 = len(tensor2)
-          if dim_tensor1 == 1 and dim_tensor2 == 1:
-            return dot(tensor1, tensor2)
-          elif dim_tensor1 == 2 and dim_tensor2 == 1:
-            return mv(tensor1, tensor2)
-          elif dim_tensor1 == 1 and dim_tensor2 == 2:
-            return squeeze(mm(unsqueeze(tensor1, 0), tensor2), 0)
-          elif dim_tensor1 == 2 and dim_tensor2 == 2:
-            return mm(tensor1, tensor2)
-          elif dim_tensor1 >= 1 and dim_tensor2 >=1:
-            # We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
-            # we track m1 vs m2 separately even though they must match for nicer error messages
-            n = tensor1[-2] if dim_tensor1 > 1 else 1
-            m1 = tensor1[-1]
-            batch_tensor1 : List[int] = []
-            # TODO: handling of slice
-            for i in range(dim_tensor1 - 2):
-              batch_tensor1.append(tensor1[i])
-            m2 = tensor2[-1] if dim_tensor2 > 1 else 1
-            p = tensor2[-1]
-            batch_tensor2 : List[int] = []
-            # TODO: handling of slice
-            for i in range(dim_tensor2 - 2):
-              batch_tensor2.append(tensor2[i])
-
-            # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
-            expand_batch_portion = broadcast(batch_tensor1, batch_tensor2)
-
-            # todo: copy ?
-            output_shape = expand_batch_portion
-            if dim_tensor1 > 1:
-              output_shape.append(n)
-
-            if dim_tensor2 > 1:
-              output_shape.append(p)
-
-            return output_shape
-          else:
-            assert False, "both  arguments to matmul need to be at least 1D"
-
-        def t(self: List[int]):
-          assert len(self) <= 2
-          self_len = len(self)
-          if self_len == 0:
-            out: List[int] = []
-            return out
-          elif self_len == 1:
-            return [self[0]]
-          else:
-            return [self[1], self[0]]
-
-        def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
-          out = matmul(input, t(weight))
-          if bias is not None:
-            assert broadcast(bias, out) == out
-          return out
-
-        def addmm(self: List[int], mat1: List[int], mat2: List[int], beta: Any, alpha: Any):
-          return broadcast(self, mm(mat1, mat2))
-
-        def check_non_negative(array: List[int]) -> bool:
-          # TODO: look into rewriting with early return and getting loop unrolling to fire
-          non_negative = False
-          for val in array:
-            if val < 0:
-              non_negative = True
-          return non_negative
-
-        def check_shape_forward(input: List[int], weight_sizes: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], groups: int):
-          k = len(input)
-          weight_dim = len(weight_sizes)
-
-          # TODO: assertions could be expanded with the error messages
-          assert not check_non_negative(padding)
-          assert not check_non_negative(stride)
-
-          assert weight_dim == k
-          assert weight_sizes[0] >= groups
-          assert (weight_sizes[0] % groups) == 0
-          # only handling not transposed
-          assert input[1] == weight_sizes[1] * groups
-          assert bias is None or (len(bias) == 1 and bias[0] == weight_sizes[0])
-
-          for i in range(2, k):
-            assert (input[i] + 2 * padding[i - 2]) >= (dilation[i - 2] * (weight_sizes[i] - 1) + 1)
-
-        # this is not handling transposed convolution yet
-        def conv_output_size(input_size: List[int], weight_size: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], groups: int):
-          check_shape_forward(input_size, weight_size, bias, stride, padding, dilation, groups)
-
-          has_dilation = len(dilation) > 0
-          dim = len(input_size)
-          output_size: List[int] = []
-          input_batch_size_dim = 0
-          weight_output_channels_dim = 0
-          output_size.append(input_size[input_batch_size_dim])
-          output_size.append(weight_size[weight_output_channels_dim])
-
-          for d in range(2, dim):
-            dilation_ = dilation[d - 2] if has_dilation else 1
-            kernel = dilation_ * (weight_size[d] - 1) + 1
-            output_size.append((input_size[d] + (2 * padding[d - 2]) - kernel) // stride[d - 2] + 1)
-          return output_size
-
-        def conv1d(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], groups: int):
-          assert len(weight) == 3
-          assert len(input) == 3
-          return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
-
-        def conv2d(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], groups: int):
-          assert len(weight) == 4
-          assert len(input) == 4
-          return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
-
-        def conv3d(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], groups: int):
-          assert len(weight) == 5
-          assert len(input) == 5
-          return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
-
-        def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
-          if dim_post_expr <= 0:
-            assert wrap_scalar
-            dim_post_expr = 1
-          min = -dim_post_expr
-          max = dim_post_expr - 1
-          assert not (dim < min or dim > max)
-          if dim < 0:
-            dim += dim_post_expr
-          return dim
-
-        def multiply_integers(li: List[int]):
-          out = 1
-          for elem in li:
-            out = out * elem
-          return out
-
-        def flatten(input: List[int], start_dim: int, end_dim: int):
-          start_dim = maybe_wrap_dim(start_dim, len(input))
-          end_dim = maybe_wrap_dim(end_dim, len(input))
-          assert start_dim <= end_dim
-          if len(input) == 0:
-            return [1]
-          if (start_dim == end_dim):
-            # TODO: return self
-            out: List[int] = []
-            for elem in input:
-              out.append(elem)
-            return out
-          slice_numel = multiply_integers(input[start_dim:end_dim - start_dim + 1])
-          shape: List[int] = []
-          for i in range(start_dim):
-            shape.append(input[i])
-          shape.append(slice_numel)
-          for i in range(end_dim + 1, len(input)):
-            shape.append(input[i])
-          return shape
-    )";
+def prepacked_linear_clamp_run(input: List[int], linearOpContext: Any):
+    assert isinstance(linearOpContext, __torch__.torch.classes.xnnpack.LinearOpContext)
+    (weight, bias) = unchecked_cast(
+        Tuple[List[int], Optional[List[int]]],
+        ops.prepacked.unpack_prepacked_sizes_linear(linearOpContext),
+    )
+    return linear(input, weight, bias)
+    )"
+#else
+    ""
+#endif
+    ;
 
 // mapping function schema to shape compute graphs allows multiple functions to
 // share the same shape compute graph, which is memory efficient and also will
@@ -308,33 +55,15 @@ const std::string shape_compute_functions =
 
 // wrapped in function so that operators get registered before map is
 // initialized
-static const OperatorMap<std::string>& get_schema_to_function_graph() {
+// Conditionally defined ops not yet supported in python serialized
+// operators
+static const OperatorMap<std::string>& conditionally_defined_ops() {
   // clang-format off
   static const OperatorMap<std::string> schema_to_function_graph{
-      {"aten::mul.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
-      {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
-      {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
-      {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
-      {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
-      {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
-      {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
-      {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
-      {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
-      {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
-      {"aten::matmul(Tensor self, Tensor other) -> Tensor", "matmul"},
-      {"aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", "linear"},
-      {"aten::t(Tensor(a) self) -> Tensor(a)", "t"},
-      {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},
-      {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
-      {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
-      {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
-      {"aten::relu(Tensor self) -> Tensor", "unary"},
-      {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
-      {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
-      {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
-      {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
+#ifdef USE_XNNPACK
+      {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
+      {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y", "prepacked_linear_clamp_run"},
+#endif
   };
   // clang-format on
   return schema_to_function_graph;
@@ -343,37 +72,292 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
 std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     cached_schema_to_graph;
 
+std::unordered_map<const FunctionSchema*, BoundedShapeGraphs>
+    cached_bounded_schema_to_graph;
+
 // CompilationUnit that holds all these Functions and keeps them alive.
-CompilationUnit compilation_unit;
+auto compilation_unit = std::make_shared<CompilationUnit>();
+
+const at::optional<const FunctionSchema*> getInplaceVariant(
+    const FunctionSchema& base_schema) {
+  auto& inplace_variants =
+      getAllOperatorsFor(c10::Symbol::fromQualString(base_schema.name() + "_"));
+
+  for (const auto& variant : inplace_variants) {
+    // Need to check that all args are the same except for the first, which
+    // is almost the same except for the Alias info
+    const FunctionSchema* schema = &variant->schema();
+    if (!schema->isSubtypeOf(base_schema, false)) {
+      continue;
+    }
+
+    Argument self_arg = schema->arguments()[0];
+    if (!self_arg.alias_info()->isWrite()) {
+      continue;
+    }
+
+    Argument ret_arg = schema->returns()[0];
+    if (!ret_arg.alias_info()->isWrite()) {
+      continue;
+    }
+
+    return schema;
+  }
+  return at::nullopt;
+}
+
+TypePtr mapTensorToListOfInts(TypePtr type) {
+  if (type->cast<TensorType>()) {
+    return ListType::ofInts();
+  }
+  at::ArrayRef<TypePtr> contained = type->containedTypes();
+  if (contained.empty()) {
+    return type;
+  }
+  return type->withContained(
+      fmap(type->containedTypes(), mapTensorToListOfInts));
+}
+
+void checkForWhileLoop(
+    const FunctionSchema* schema,
+    std::shared_ptr<Graph> graph) {
+  DepthFirstGraphNodeIterator graph_it(graph);
+  for (auto* node = graph_it.next(); node != nullptr; node = graph_it.next()) {
+    if (node->kind() != prim::Loop) {
+      continue;
+    }
+    LoopView loop(node);
+    if (loop.loopType() != LoopView::For) {
+      TORCH_WARN(
+          "While loops are not yet implemented in unrolling which may make this shape function difficult to partially evaluate: ",
+          *node,
+          " for schema ",
+          *schema);
+    }
+  }
+}
+
+void checkInputReturnedAsOutput(
+    const FunctionSchema* schema,
+    const std::shared_ptr<Graph>& graph) {
+  // Could use alias db here as well but would have to warn because it's
+  // imprecise
+  for (size_t i : c10::irange(graph->inputs().size())) {
+    Value* input = graph->inputs().at(i);
+    for (size_t j : c10::irange(graph->outputs().size())) {
+      Value* output = graph->outputs().at(j);
+      TORCH_CHECK(
+          input != output,
+          "For schema: ",
+          *schema,
+          " input index ",
+          i,
+          " is returned as output index ",
+          j,
+          ". Shape functions must return new unaliased lists");
+    }
+  }
+}
+
+void checkInputAndOutputTypes(
+    const FunctionSchema* schema,
+    const std::shared_ptr<Graph>& graph) {
+  // allow extra unused arguments to map multiple functions to e.g. unary
+  TORCH_CHECK(
+      graph->inputs().size() <= schema->arguments().size(),
+      "Shape function must have fewer arguments than schema. Got ",
+      graph->inputs().size(),
+      " graph arguments and ",
+      schema->arguments().size(),
+      " schema arguments of schema: ",
+      *schema);
+
+  for (auto i : c10::irange(graph->inputs().size())) {
+    auto inp_type = schema->arguments().at(i).type();
+    auto mapped_type = mapTensorToListOfInts(inp_type);
+    auto graph_type = graph->inputs().at(i)->type();
+    TORCH_INTERNAL_ASSERT(
+        mapped_type->isSubtypeOf(graph->inputs().at(i)->type()),
+        "For schema type: ",
+        inp_type->str(),
+        " Expected supertype of ",
+        mapped_type->str(),
+        " but got graph_type ",
+        graph_type->str(),
+        " at index ",
+        i,
+        " of schema: ",
+        *schema);
+  }
+
+  TORCH_CHECK(
+      graph->outputs().size() == schema->returns().size(),
+      "Shape function equal number of outputs as schema. Got ",
+      graph->outputs().size(),
+      " graph outputs and ",
+      schema->returns().size(),
+      " schema returns of schema: ",
+      *schema);
+
+  for (auto i : c10::irange(schema->returns().size())) {
+    auto out_type = schema->returns().at(i).type();
+    auto mapped_type = mapTensorToListOfInts(out_type);
+    auto graph_type = graph->outputs().at(i)->type();
+    TORCH_INTERNAL_ASSERT(
+        mapped_type->isSubtypeOf(graph->outputs().at(i)->type()),
+        "For schema type: ",
+        out_type->str(),
+        " Expected supertype of ",
+        mapped_type->str(),
+        " but got graph_type ",
+        graph_type->str(),
+        " at output index ",
+        i,
+        " of schema: ",
+        *schema);
+  }
+}
+
+void transformShapeFunction(
+    const FunctionSchema* schema_string,
+    std::shared_ptr<Graph> graph) {
+  Inline(*graph);
+
+  // ATEN operators can return multiple unboxed values, this in contrast to
+  // functions defined in TorchScript or User-Registered Operators
+  // Which must use a Tuple
+  // Here, modify the shape graph of aten operators with multiple outputs
+  // so that they correspond to each other
+  if (schema_string->returns().size() > 1) {
+    TORCH_INTERNAL_ASSERT(
+        graph->outputs().size() == 1 &&
+        graph->outputs().at(0)->node()->kind() == prim::TupleConstruct);
+    auto tuple_node = graph->outputs().at(0)->node();
+    graph->eraseOutput(0);
+    for (Value* v : tuple_node->inputs()) {
+      graph->registerOutput(v);
+    }
+  }
+}
+
+std::shared_ptr<Graph> genShapeComputeFn(
+    const FunctionSchema* schema_string,
+    const std::string& shape_compute_function_name,
+    std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
+    const CompilationUnit& module) {
+  std::shared_ptr<Graph> graph;
+  if (reused_functions.count(shape_compute_function_name)) {
+    graph = reused_functions[shape_compute_function_name];
+  } else {
+    Function& shape_compute_function =
+        module.get_function(shape_compute_function_name);
+    graph = toGraphFunction(shape_compute_function).graph();
+
+    transformShapeFunction(schema_string, graph);
+    // NB: we lint the shape functions registered in source
+    // in a test file
+    // LintShapeComputeGraph(schema_string, graph);
+
+    reused_functions[shape_compute_function_name] = graph;
+  }
+  // allow extra unused arguments to map multiple functions to e.g. unary
+  TORCH_INTERNAL_ASSERT(
+      graph->inputs().size() <= schema_string->arguments().size());
+  return graph;
+}
+
+void registerSchema(
+    const FunctionSchema* schema_string,
+    const std::string& shape_compute_function_name,
+    std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
+    const CompilationUnit& module) {
+  auto graph = genShapeComputeFn(
+      schema_string, shape_compute_function_name, reused_functions, module);
+
+  cached_schema_to_graph[schema_string] = graph;
+}
+
+void registerBoundedSchema(
+    const FunctionSchema* schema_string,
+    const std::string& lower_bound_function_name,
+    const std::string& upper_bound_function_name,
+    std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
+    const CompilationUnit& module) {
+  auto lower_graph = genShapeComputeFn(
+      schema_string, lower_bound_function_name, reused_functions, module);
+  auto upper_graph = genShapeComputeFn(
+      schema_string, upper_bound_function_name, reused_functions, module);
+  cached_bounded_schema_to_graph[schema_string] = {lower_graph, upper_graph};
+}
 
 void loadModule(const CompilationUnit& module) {
   std::unordered_map<std::string, std::shared_ptr<Graph>> reused_functions;
 
-  for (const auto& pair :
-       get_schema_to_function_graph().getAllKeysAndValues()) {
+  std::vector<std::pair<std::shared_ptr<Operator>, std::string>>
+      operator_pairs = conditionally_defined_ops().getAllKeysAndValues();
+  auto te_ops = get_tensorexpr_elementwise_set().getAllKeysAndValues();
+  operator_pairs.insert(operator_pairs.end(), te_ops.begin(), te_ops.end());
+  auto more_mappings = GetShapeFunctionMappings().getAllKeysAndValues();
+  operator_pairs.insert(
+      operator_pairs.end(), more_mappings.begin(), more_mappings.end());
+
+  for (const auto& pair : operator_pairs) {
     const FunctionSchema* schema_string = &pair.first->schema();
     const std::string& shape_compute_function_name = pair.second;
 
-    if (reused_functions.count(shape_compute_function_name)) {
-      cached_schema_to_graph[schema_string] =
-          reused_functions[shape_compute_function_name];
-      continue;
+    registerSchema(
+        schema_string, shape_compute_function_name, reused_functions, module);
+
+    // Register the inplace variant if any for functions with common shape forms
+    if (shape_compute_function_name == "unary") {
+      auto inplace_schema = getInplaceVariant(*schema_string);
+      if (inplace_schema.has_value()) {
+        registerSchema(
+            inplace_schema.value(), "unary", reused_functions, module);
+      }
     }
+    if (shape_compute_function_name == "broadcast") {
+      auto inplace_schema = getInplaceVariant(*schema_string);
+      if (inplace_schema.has_value()) {
+        registerSchema(
+            inplace_schema.value(),
+            "broadcast_inplace",
+            reused_functions,
+            module);
+      }
+    }
+  }
 
-    Function& shape_compute_function =
-        module.get_function(shape_compute_function_name);
-    std::shared_ptr<Graph> graph = shape_compute_function.graph();
-    Inline(*graph);
+  // Now register the bounded schemas
+  for (const auto& pair : GetBoundedShapeMappings().getAllKeysAndValues()) {
+    const FunctionSchema* schema_string = &pair.first->schema();
+    const std::string& lower_bound_function_name = pair.second.first;
+    const std::string& upper_bound_function_name = pair.second.second;
 
-    cached_schema_to_graph[schema_string] = graph;
-    reused_functions[shape_compute_function_name] = graph;
+    registerBoundedSchema(
+        schema_string,
+        lower_bound_function_name,
+        upper_bound_function_name,
+        reused_functions,
+        module);
   }
 }
 
 void loadFunctions() {
-  compilation_unit.define(
-      c10::nullopt, shape_compute_functions, nativeResolver(), nullptr);
-  loadModule(compilation_unit);
+  auto shape_compute_functions =
+      GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
+
+  auto src = std::make_shared<Source>(shape_compute_functions);
+  std::stringstream ss;
+  std::vector<at::IValue> constantTable;
+  auto resolver = std::make_shared<SourceImporterImpl>(
+      compilation_unit,
+      &constantTable,
+      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
+      1);
+  compilation_unit->define(
+      c10::nullopt, shape_compute_functions, resolver, nullptr);
+  loadModule(*compilation_unit);
 }
 } // anonymous namespace
 
@@ -392,6 +376,57 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
   GRAPH_DEBUG("Could not find schema: ", schema);
 
   return c10::nullopt;
+}
+
+TORCH_API c10::optional<BoundedShapeGraphs> boundedGraphsForSchema(
+    const FunctionSchema& schema) {
+  std::lock_guard<std::mutex> guard(lock);
+  if (cached_bounded_schema_to_graph.size() == 0) {
+    loadFunctions();
+  }
+  GRAPH_DEBUG("Trying to find schema in bounded graphs: ", schema);
+  auto cache_it = cached_bounded_schema_to_graph.find(&schema);
+  if (cache_it != cached_bounded_schema_to_graph.end()) {
+    return cache_it->second;
+  }
+
+  return c10::nullopt;
+}
+
+void RegisterShapeComputeGraphForSchema(
+    const FunctionSchema& schema,
+    std::shared_ptr<Graph> g) {
+  std::lock_guard<std::mutex> guard(lock);
+  if (cached_schema_to_graph.size() == 0) {
+    loadFunctions();
+  }
+  transformShapeFunction(&schema, g);
+  LintShapeComputeGraph(&schema, g);
+
+  cached_schema_to_graph[&schema] = g;
+}
+
+std::vector<const FunctionSchema*> RegisteredShapeComputeSchemas() {
+  std::lock_guard<std::mutex> guard(lock);
+  if (cached_schema_to_graph.size() == 0) {
+    loadFunctions();
+  }
+
+  std::vector<const FunctionSchema*> schemas;
+  schemas.reserve(cached_schema_to_graph.size());
+  for (const auto& pair : cached_schema_to_graph) {
+    schemas.push_back(pair.first);
+  }
+  return schemas;
+}
+
+void LintShapeComputeGraph(
+    const FunctionSchema* schema,
+    const std::shared_ptr<Graph>& graph) {
+  checkInputAndOutputTypes(schema, graph);
+  checkForWhileLoop(schema, graph);
+  checkInputReturnedAsOutput(schema, graph);
+  // TODO: other checks ? list ops which we don't symbolically optimize, etc ?
 }
 
 } // namespace jit

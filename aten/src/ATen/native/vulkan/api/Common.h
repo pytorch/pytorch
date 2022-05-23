@@ -20,7 +20,11 @@
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 #ifdef USE_VULKAN_WRAPPER
+#ifdef USE_VULKAN_VOLK
+#include <volk.h>
+#else
 #include <vulkan_wrapper.h>
+#endif /* USE_VULKAN_VOLK */
 #else
 #include <vulkan/vulkan.h>
 #endif /* USE_VULKAN_WRAPPER */
@@ -28,7 +32,11 @@
 #define VK_CHECK(function)                                  \
   do {                                                      \
     const VkResult result = (function);                     \
-    TORCH_CHECK(VK_SUCCESS == result, "VkResult:", result); \
+    TORCH_CHECK(                                            \
+        VK_SUCCESS == result,                               \
+        C10_STRINGIZE(__FILE__), " [",                      \
+        C10_STRINGIZE(__LINE__), "] "                       \
+        "VkResult:", result);                               \
   } while (false)
 
 #define VK_CHECK_RELAXED(function)                          \
@@ -57,7 +65,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct Adapter;
+class Adapter;
 struct Command;
 class Context;
 struct Descriptor;
@@ -67,8 +75,10 @@ class Runtime;
 struct Shader;
 
 struct GPU final {
+  VkInstance instance;
   const Adapter* adapter;
   VkDevice device;
+  uint32_t queue_family_index;
   VkQueue queue;
 };
 

@@ -1,6 +1,6 @@
 #pragma once
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
@@ -26,7 +26,7 @@ class TORCH_API IRCloner : public IRMutator {
   ExprPtr mutate(RshiftPtr v) override;
   ExprPtr mutate(CompareSelectPtr v) override;
 #define IMM_MUTATE_DECLARE(Type, Name) ExprPtr mutate(Name##ImmPtr v) override;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_MUTATE_DECLARE);
 #undef IMM_MUTATE_DECLARE
   ExprPtr mutate(CastPtr v) override;
   ExprPtr mutate(BitCastPtr v) override;
@@ -52,6 +52,7 @@ class TORCH_API IRCloner : public IRMutator {
   StmtPtr mutate(AtomicAddPtr v) override;
   StmtPtr mutate(SyncThreadsPtr v) override;
   StmtPtr mutate(ExternalCallPtr v) override;
+  StmtPtr mutate(ExternalCallWithAllocPtr v) override;
 
   StmtPtr mutate(AllocatePtr v) override;
   StmtPtr mutate(FreePtr v) override;

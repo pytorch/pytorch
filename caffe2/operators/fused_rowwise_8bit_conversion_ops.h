@@ -3,6 +3,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/reducer_functors.h"
@@ -82,7 +83,7 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
 
       vector<float> tmp(input_columns);
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (size_t row = 0; row < input_rows; ++row) {
+      for (const auto row : c10::irange(input_rows)) {
         convert(tmp.data(), input_data + row * input_columns, input_columns);
         if (out_sb_half) {
           FloatToFusedNBitRowwiseQuantizedSBHalf(
@@ -163,7 +164,7 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
 
       vector<float> tmp(input_columns);
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (size_t row = 0; row < input_rows; ++row) {
+      for (const auto row : c10::irange(input_rows)) {
         if (in_sb_half) {
           FusedNBitRowwiseQuantizedSBHalfToFloat(
               8,

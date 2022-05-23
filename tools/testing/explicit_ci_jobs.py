@@ -5,6 +5,7 @@ import textwrap
 import subprocess
 import pathlib
 import argparse
+import fnmatch
 
 from typing import Dict, List, Any
 
@@ -22,7 +23,6 @@ WORKFLOWS_TO_CHECK = [
     # "scheduled-ci",
     # "debuggable-scheduled-ci",
     # "slow-gradcheck-scheduled-ci",
-    # "ecr_gc",
     # "promote",
 ]
 
@@ -45,7 +45,13 @@ def add_job(
     if requires is not None:
         for requirement in requires:
             dependency = past_jobs[requirement]
-            add_job(workflows, dependency["workflow_name"], dependency["type"], dependency["job"], past_jobs)
+            add_job(
+                workflows,
+                dependency["workflow_name"],
+                dependency["type"],
+                dependency["job"],
+                past_jobs,
+            )
 
     workflows[workflow_name]["jobs"].append({type: job})
 
@@ -88,13 +94,16 @@ def get_filtered_circleci_config(
 def commit_ci(files: List[str], message: str) -> None:
     # Check that there are no other modified files than the ones edited by this
     # tool
-    stdout = subprocess.run(["git", "status", "--porcelain"], stdout=subprocess.PIPE).stdout.decode()
+    stdout = subprocess.run(
+        ["git", "status", "--porcelain"], stdout=subprocess.PIPE
+    ).stdout.decode()
     for line in stdout.split("\n"):
         if line == "":
             continue
         if line[0] != " ":
-            raise RuntimeError(f"Refusing to commit while other changes are already staged: {line}")
-
+            raise RuntimeError(
+                f"Refusing to commit while other changes are already staged: {line}"
+            )
 
     # Make the commit
     subprocess.run(["git", "add"] + files)
@@ -107,10 +116,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--job", action="append", help="job name", default=[])
     parser.add_argument(
-        "--keep-gha", action="store_true", help="don't delete GitHub actions"
+        "--filter-gha", help="keep only these github actions (glob match)", default=""
     )
     parser.add_argument(
-        "--make-commit", action="store_true", help="add change to git with to a do-not-merge commit"
+        "--make-commit",
+        action="store_true",
+        help="add change to git with to a do-not-merge commit",
     )
     args = parser.parse_args()
 
@@ -118,25 +129,30 @@ if __name__ == "__main__":
     with open(CONFIG_YML, "r") as f:
         config_yml = yaml.safe_load(f.read())
 
-    config_yml["workflows"] = get_filtered_circleci_config(config_yml["workflows"], args.job)
+    config_yml["workflows"] = get_filtered_circleci_config(
+        config_yml["workflows"], args.job
+    )
 
     with open(CONFIG_YML, "w") as f:
         yaml.dump(config_yml, f)
 
-    if not args.keep_gha:
+    if args.filter_gha:
         for relative_file in WORKFLOWS_DIR.iterdir():
-            path = WORKFLOWS_DIR.joinpath(relative_file)
-            touched_files.append(path)
-            path.unlink()
+            path = REPO_ROOT.joinpath(relative_file)
+            if not fnmatch.fnmatch(path.name, args.filter_gha):
+                touched_files.append(path)
+                path.resolve().unlink()
 
     if args.make_commit:
-        jobs_str = '\n'.join([f" * {job}" for job in args.job])
-        message = textwrap.dedent(f"""
+        jobs_str = "\n".join([f" * {job}" for job in args.job])
+        message = textwrap.dedent(
+            f"""
         [skip ci][do not merge] Edit config.yml to filter specific jobs
 
         Filter CircleCI to only run:
         {jobs_str}
 
         See [Run Specific CI Jobs](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#run-specific-ci-jobs) for details.
-        """).strip()
+        """
+        ).strip()
         commit_ci([str(f.relative_to(REPO_ROOT)) for f in touched_files], message)

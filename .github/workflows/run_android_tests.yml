@@ -1,0 +1,67 @@
+name: android-tests
+
+on:
+  push:
+    tags:
+      # Trigger on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/trunk/*'
+      - 'ciflow/android/*'
+    branches:
+      - master
+      - main
+      - release/*
+  workflow_dispatch:
+
+concurrency:
+  group: run-android-tests-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -e -l {0}
+
+jobs:
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      JOB_BASE_NAME: ubuntu-latest-android-tests
+    steps:
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: 3.8
+          activate-environment: build
+
+      - name: Install dependencies
+        run: |
+          conda install -y \
+            cffi \
+            cmake \
+            mkl \
+            mkl-include \
+            ninja \
+            numpy \
+            pyyaml \
+            requests \
+            setuptools \
+            typing_extensions
+
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - name: Build PyTorch Android
+        run: |
+          export ANDROID_NDK="${ANDROID_SDK_ROOT}/ndk-bundle"
+          echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
+          ./scripts/build_pytorch_android.sh x86
+
+      - name: Run tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 25
+          script: ./android/run_tests.sh

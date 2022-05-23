@@ -1,6 +1,6 @@
 #pragma once
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
 namespace torch {
@@ -26,7 +26,7 @@ class TORCH_API IRVisitor {
 
 #define IMM_PRINT_VISIT(Type, Name) virtual void visit(Name##ImmPtr v);
 
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT)
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT)
 #undef IMM_PRINT_VISIT
 
   virtual void visit(CastPtr v);
@@ -43,6 +43,8 @@ class TORCH_API IRVisitor {
   virtual void visit(IntrinsicsPtr v);
   virtual void visit(AllocatePtr v);
   virtual void visit(FreePtr v);
+  virtual void visit(FreeExtPtr v);
+  virtual void visit(PlacementAllocatePtr v);
   virtual void visit(LetPtr v);
   virtual void visit(CondPtr v);
   virtual void visit(TermPtr v);
@@ -54,6 +56,7 @@ class TORCH_API IRVisitor {
   virtual void visit(AtomicAddPtr v);
   virtual void visit(SyncThreadsPtr v);
   virtual void visit(ExternalCallPtr v);
+  virtual void visit(ExternalCallWithAllocPtr v);
 };
 
 } // namespace tensorexpr

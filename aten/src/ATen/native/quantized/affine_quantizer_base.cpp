@@ -1,4 +1,5 @@
 #include <ATen/native/quantized/affine_quantizer_base.h>
+#include <c10/util/irange.h>
 #include <cfenv>
 #include <climits>
 
@@ -114,12 +115,13 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   return static_cast<T>(qvalue);
 }
 
-uint8_t quantize_val_arm(
+template <typename T>
+T quantize_val_arm(
     const float scale,
     const int32_t zero_point,
     const float value) {
-  constexpr int32_t qmin = std::numeric_limits<uint8_t>::min();
-  constexpr int32_t qmax = std::numeric_limits<uint8_t>::max();
+  constexpr int32_t qmin = std::numeric_limits<T>::min();
+  constexpr int32_t qmax = std::numeric_limits<T>::max();
   float inv_scale = 1.0f / scale;
 #ifndef _MSC_VER
   auto r = static_cast<int32_t>(Round(value * inv_scale));
@@ -134,7 +136,7 @@ uint8_t quantize_val_arm(
 #endif
   r = std::max(r, qmin);
   r = std::min(r, qmax);
-  return static_cast<uint8_t>(r);
+  return static_cast<T>(r);
 }
 
 template <typename T, int precision>
@@ -145,16 +147,22 @@ void quantize_vec(
     T* dst,
     size_t count) {
   checkZeroPoint<typename T::underlying>("quantize_vec", zero_point);
-  for (size_t i = 0; i < count; ++i) {
+  for (const auto i : c10::irange(count)) {
     dst[i] = quantize_val<T>(scale, zero_point, src[i]);
   }
 }
 
+template uint8_t quantize_val_arm<uint8_t>(
+    const float scale,
+    const int32_t zero_point,
+    const float value);
+template int8_t quantize_val_arm<int8_t>(
+    const float scale,
+    const int32_t zero_point,
+    const float value);
 template <typename T>
 TORCH_API float dequantize_val(double scale, int64_t zero_point, T value) {
-  // We need to convert the qint8 value to float to ensure the subtraction
-  // subexpression returns a float
-  return (static_cast<float>(value.val_) - zero_point) * scale;
+  return static_cast<float>(scale) * (value.val_ - static_cast<int32_t>(zero_point));
 }
 #endif // USE_FBGEMM
 

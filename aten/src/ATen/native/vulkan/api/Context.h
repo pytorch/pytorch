@@ -9,6 +9,7 @@
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <ATen/native/vulkan/api/ThreadContext.h>
 
 namespace at {
 namespace native {
@@ -26,16 +27,20 @@ namespace api {
 
 class Context final {
  public:
-  explicit Context(const Adapter& adapter);
+  explicit Context(const VkInstance instance, size_t adapter_i);
+
   Context(const Context&) = delete;
-  Context(Context&&) = default;
   Context& operator=(const Context&) = delete;
+
+  Context(Context&&) = default;
   Context& operator=(Context&&) = default;
+
   ~Context();
 
   GPU gpu();
   Command& command();
   Shader& shader();
+  QueryPool& querypool();
   Pipeline& pipeline();
   Descriptor& descriptor();
   Resource& resource();
@@ -56,23 +61,29 @@ class Context final {
 
   void flush();
 
+  // Use this function only for debugging and testing when you want to make sure
+  // all GPU operations get finished before calling flush(). Otherwise, it may crash.
+  void wait(const at::Tensor& src);
+
  private:
   VkDevice device();
   VkQueue queue();
 
  private:
   // Construction and destruction order matters.  Do not move members around.
-  Adapter adapter_;
-  Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
-  VkQueue queue_;
-  Command command_;
+  VkInstance instance_;
+  size_t adapter_i_;
+  VkDevice device_;
+  Adapter::Queue queue_;
   Shader shader_;
   Pipeline pipeline_;
-  Descriptor descriptor_;
-  Resource resource_;
+  ThreadContext threadcontext_;
 };
 
 bool available();
+
+// The global runtime is retrieved using this function, where it is declared as
+// a static local variable.
 Context* context();
 
 //
@@ -81,15 +92,14 @@ Context* context();
 
 inline GPU Context::gpu() {
   // A GPU is simply a (physical device, logical device, device queue) trio.
+  const Adapter* p_adapter = runtime()->get_adapter_p(adapter_i_);
   return {
-    &adapter_,
-    device(),
-    queue(),
+    instance_,
+    p_adapter,
+    device_,
+    queue_.family_index,
+    queue_.handle,
   };
-}
-
-inline Command& Context::command() {
-  return command_;
 }
 
 inline Shader& Context::shader() {
@@ -100,22 +110,28 @@ inline Pipeline& Context::pipeline() {
   return pipeline_;
 }
 
+inline Command& Context::command() {
+  return threadcontext_.command();
+}
+
 inline Descriptor& Context::descriptor() {
-  return descriptor_;
+  return threadcontext_.descriptor();
 }
 
 inline Resource& Context::resource() {
-  return resource_;
+  return threadcontext_.resource();
+}
+
+inline QueryPool& Context::querypool() {
+  return threadcontext_.querypool();
 }
 
 inline VkDevice Context::device() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);
-  return device_.get();
+  return device_;
 }
 
 inline VkQueue Context::queue() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(queue_);
-  return queue_;
+  return queue_.handle;
 }
 
 namespace detail {

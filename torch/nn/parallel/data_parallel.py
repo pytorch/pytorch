@@ -120,7 +120,7 @@ class DataParallel(Module):
 
     def __init__(self, module, device_ids=None, output_device=None, dim=0):
         super(DataParallel, self).__init__()
-
+        torch._C._log_api_usage_once("torch.nn.parallel.DataParallel")
         device_type = _get_available_device_type()
         if device_type is None:
             self.module = module

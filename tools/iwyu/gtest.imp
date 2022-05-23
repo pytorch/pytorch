@@ -1,0 +1,4 @@
+[
+    { include: [ "@<gtest/internal/.*>", private, "<gtest/gtest.h>", public ] },
+    { include: [ "@<gtest/[^/]*>", public, "<gtest/gtest.h>", public ] },
+]

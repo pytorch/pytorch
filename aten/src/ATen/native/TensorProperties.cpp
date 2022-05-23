@@ -1,10 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/TensorProperties.h>
 #include <ATen/NamedTensorUtils.h>
 #include <torch/library.h>
 
 #include <ATen/Config.h>
+#include <c10/util/irange.h>
 namespace at {
 namespace native {
 
@@ -30,7 +31,7 @@ int64_t stride(const Tensor& self, Dimname dim) {
   return self.strides()[pos_dim];
 }
 
-bool cudnn_is_acceptable(const Tensor& self) {
+bool cudnn_is_acceptable(const TensorBase& self) {
   if (!globalContext().userEnabledCuDNN()) return false;
   if (!self.is_cuda()) return false;
   auto st = self.scalar_type();
@@ -45,6 +46,10 @@ bool cudnn_is_acceptable(const Tensor& self) {
   // cuDNN library was actually dynamically linked or not.  I'm not
   // sure if we can actually test this.
   return true;
+}
+
+bool cudnn_is_acceptable(const Tensor& self) {
+  return cudnn_is_acceptable(static_cast<const TensorBase&>(self));
 }
 
 Tensor & detach_(Tensor & self) {
@@ -72,7 +77,7 @@ bool is_set_to(const Tensor& self, const Tensor& src) {
   if (self.storage().unsafeGetStorageImpl() == src.storage().unsafeGetStorageImpl() &&
       self.storage_offset() == src.storage_offset() &&
       self.dim() == src.dim()) {
-    for (int64_t d = 0; d < self.dim(); ++d) {
+    for (const auto d : c10::irange(self.dim())) {
       if (self.size(d) != src.size(d) || self.stride(d) != src.stride(d)) {
         return false;
       }

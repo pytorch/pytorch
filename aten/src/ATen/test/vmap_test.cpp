@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/VmapTransforms.h>
+#include <c10/util/irange.h>
 
 using namespace at;
 
@@ -55,7 +56,7 @@ TEST(VmapTest, TestBatchedTensor) {
 // returns {{lvl=0,dim=0}, {lvl=1,dim=1}, ..., {lvl=kVmapNumLevels-1,dim=kVmapNumLevels-1}};
 static BatchDims maxBatchDimsAtFront() {
   BatchDims result;
-  for (int64_t lvl = 0; lvl < kVmapNumLevels; lvl++) {
+  for (const auto lvl : c10::irange(kVmapNumLevels)) {
     result.emplace_back(lvl, /*dim=*/lvl);
   }
   return result;
@@ -169,7 +170,8 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // ActualDim on kVmapMaxTensorDims sized underlying tensor
     auto tensor = ones({});
-    for (int64_t i = 0; i < kVmapMaxTensorDims; i++) {
+    for (const auto i : c10::irange(kVmapMaxTensorDims)) {
+      (void)i; // Suppress unused variable warning
       tensor = tensor.unsqueeze(0);
     }
     ASSERT_EQ(tensor.dim(), kVmapMaxTensorDims);
@@ -260,7 +262,7 @@ TEST(VmapTest, TestMultiBatchVmapTransform) {
     BatchDims batch_dims = {
       {0, 2}, {1, 1}, {2, kVmapNumLevels - 1}, {3, 5}, {4, 0}, {5, 3}, {6, 4}
     };
-    for (int64_t level = 7; level < kVmapNumLevels; level++ ) {
+    for (const auto level : c10::irange(7, kVmapNumLevels)) {
       batch_dims.emplace_back(level, /*dim=*/level - 1);
     }
     auto tensor = ones(sizes);
@@ -303,7 +305,7 @@ TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDims) {
 
 static void checkBatchDimsEqual(BatchDimsRef bdims, BatchDimsRef expected_bdims) {
   ASSERT_EQ(bdims.size(), expected_bdims.size());
-  for (int64_t idx = 0; idx < bdims.size(); idx++) {
+  for (const auto idx : c10::irange(bdims.size())) {
     ASSERT_EQ(bdims[idx].dim(), expected_bdims[idx].dim());
     ASSERT_EQ(bdims[idx].level(), expected_bdims[idx].level());
   }
@@ -394,7 +396,7 @@ TEST(VmapTest, TestBatchedTensorSum) {
 static void checkBroadcastingVmapTransform(TensorList inputs, TensorList expected_outputs) {
   auto outputs = BroadcastingVmapTransform::logicalToPhysical(inputs);
   ASSERT_EQ(outputs.size(), expected_outputs.size());
-  for (int64_t idx = 0; idx < outputs.size(); idx++) {
+  for (const auto idx : c10::irange(outputs.size())) {
     const auto& output = outputs[idx].tensor();
     ASSERT_EQ(output.data_ptr(), expected_outputs[idx].data_ptr());
     ASSERT_TRUE(at::allclose(output, expected_outputs[idx]));
@@ -726,7 +728,7 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     // logical dim is 0, expand size has same dimensionality as logical dim
     auto tensor = at::randn({2, 3});
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
-    auto batched_out = batched.expand({});
+    auto batched_out = batched.expand(c10::IntArrayRef({}));
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor));
@@ -834,10 +836,10 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
     auto tensor = at::randn({2, 3, 5, 7});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
-    auto batched_out = batched.transpose(-2, -1);
+    auto batched_out = batched.mT();
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
-    ASSERT_TRUE(at::allclose(out, tensor.transpose(-2, -1)));
+    ASSERT_TRUE(at::allclose(out, tensor.mT()));
   }
 }
 
@@ -878,7 +880,7 @@ TEST(VmapTest, TestBatchedTensorPermute) {
 static void checkMultiBatchVmapTransform(TensorList inputs, TensorList expected_outputs) {
   auto outputs = MultiBatchVmapTransform::logicalToPhysical(inputs);
   ASSERT_EQ(outputs.size(), expected_outputs.size());
-  for (int64_t idx = 0; idx < outputs.size(); idx++) {
+  for (const auto idx : c10::irange(outputs.size())) {
     const auto& output = outputs[idx].tensor();
     ASSERT_EQ(output.data_ptr(), expected_outputs[idx].data_ptr());
     ASSERT_EQ(output.sizes(), expected_outputs[idx].sizes());

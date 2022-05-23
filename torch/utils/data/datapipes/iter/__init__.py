@@ -1,3 +1,6 @@
+from torch.utils.data.datapipes.iter.utils import (
+    IterableWrapperIterDataPipe as IterableWrapper,
+)
 from torch.utils.data.datapipes.iter.callable import (
     CollatorIterDataPipe as Collator,
     MapperIterDataPipe as Mapper,
@@ -8,24 +11,23 @@ from torch.utils.data.datapipes.iter.combinatorics import (
 )
 from torch.utils.data.datapipes.iter.combining import (
     ConcaterIterDataPipe as Concater,
+    DemultiplexerIterDataPipe as Demultiplexer,
+    ForkerIterDataPipe as Forker,
+    MultiplexerIterDataPipe as Multiplexer,
     ZipperIterDataPipe as Zipper,
 )
 from torch.utils.data.datapipes.iter.filelister import (
     FileListerIterDataPipe as FileLister,
 )
-from torch.utils.data.datapipes.iter.fileloader import (
+from torch.utils.data.datapipes.iter.fileopener import (
     FileLoaderIterDataPipe as FileLoader,
+    FileOpenerIterDataPipe as FileOpener,
 )
 from torch.utils.data.datapipes.iter.grouping import (
     BatcherIterDataPipe as Batcher,
-    BucketBatcherIterDataPipe as BucketBatcher,
-    ByKeyGrouperIterDataPipe as ByKeyGrouper,
-)
-from torch.utils.data.datapipes.iter.httpreader import (
-    HTTPReaderIterDataPipe as HttpReader,
-)
-from torch.utils.data.datapipes.iter.linereader import (
-    LineReaderIterDataPipe as LineReader,
+    GrouperIterDataPipe as Grouper,
+    ShardingFilterIterDataPipe as ShardingFilter,
+    UnBatcherIterDataPipe as UnBatcher,
 )
 from torch.utils.data.datapipes.iter.routeddecoder import (
     RoutedDecoderIterDataPipe as RoutedDecoder,
@@ -36,34 +38,26 @@ from torch.utils.data.datapipes.iter.selecting import (
 from torch.utils.data.datapipes.iter.streamreader import (
     StreamReaderIterDataPipe as StreamReader,
 )
-from torch.utils.data.datapipes.iter.tararchivereader import (
-    TarArchiveReaderIterDataPipe as TarArchiveReader,
-)
-from torch.utils.data.datapipes.iter.ziparchivereader import (
-    ZipArchiveReaderIterDataPipe as ZipArchiveReader,
-)
-from torch.utils.data.datapipes.iter.utils import (
-    IterableWrapperIterDataPipe as IterableWrapper,
-)
 
 __all__ = ['Batcher',
-           'BucketBatcher',
-           'ByKeyGrouper',
            'Collator',
            'Concater',
+           'Demultiplexer',
            'FileLister',
            'FileLoader',
+           'FileOpener',
            'Filter',
-           'HttpReader',
+           'Forker',
+           'Grouper',
            'IterableWrapper',
-           'LineReader',
            'Mapper',
+           'Multiplexer',
            'RoutedDecoder',
            'Sampler',
+           'ShardingFilter',
            'Shuffler',
            'StreamReader',
-           'TarArchiveReader',
-           'ZipArchiveReader',
+           'UnBatcher',
            'Zipper']
 
 # Please keep this list sorted

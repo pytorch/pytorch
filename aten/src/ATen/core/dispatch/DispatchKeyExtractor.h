@@ -5,6 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Bitset.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/util/irange.h>
 #include <ATen/core/Variadic.h>
 #include <ATen/core/stack.h>
 
@@ -65,12 +66,17 @@ namespace detail {
         ts = ts | x.key_set();
       }
     }
-    void operator()(at::ArrayRef<c10::optional<at::Tensor>> xs) {
-      for (const auto& x : xs) {
+    // Tensor?[] translates to this case.
+    void operator()(const c10::List<c10::optional<at::Tensor>>& xs) {
+      for (c10::optional<at::Tensor> x : xs) {
         if (x.has_value()) {
           ts = ts | x.value().key_set();
         }
       }
+    }
+    void operator()(at::ArrayRef<c10::optional<at::Tensor>>) {
+      // Just checking that the handling of Tensor?[] didn't change.
+      TORCH_INTERNAL_ASSERT(false);
     }
     void operator()(const at::Generator& gen) {
       if (gen.defined()) {
@@ -83,7 +89,7 @@ namespace detail {
       }
     }
     template <typename T>
-    void operator()(const T& x) {
+    void operator()(const T&) {
       // do nothing
     }
   };
@@ -150,14 +156,24 @@ public:
       }
     });
     // Keys that are fallthrough should be skipped
-    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    if (requiresBitsetPerBackend_) {
+      auto backend_idx = ks.getBackendIndex();
+      return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
+    } else {
+      return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    }
   }
 
   template<class... Args>
   DispatchKeySet getDispatchKeySetUnboxed(const Args&... args) const {
     auto ks = detail::multi_dispatch_key_set(args...);
     // Keys that are fallthrough should be skipped
-    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    if (requiresBitsetPerBackend_) {
+      auto backend_idx = ks.getBackendIndex();
+      return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
+    } else {
+      return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    }
   }
 
   void setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough);
@@ -171,14 +187,14 @@ private:
         "The function schema has ", schema.arguments().size(),
         " arguments but this PyTorch build only supports ", c10::utils::bitset::NUM_BITS());
     c10::utils::bitset dispatch_arg_indices_reverse;
-    for (size_t index = 0; index < schema.arguments().size(); ++index) {
-      if (schema.arguments()[index].type()->isSubtypeOf(TensorType::get()) ||
+    for (const auto index : c10::irange(schema.arguments().size())) {
+      if (schema.arguments()[index].type()->isSubtypeOf(*TensorType::get()) ||
           schema.arguments()[index].type()->isSubtypeOf(
-              ListType::ofTensors()) ||
+              *ListType::ofTensors()) ||
           schema.arguments()[index].type()->isSubtypeOf(
-              ListType::ofOptionalTensors()) ||
+              *ListType::ofOptionalTensors()) ||
           schema.arguments()[index].type()->isSubtypeOf(
-              OptionalType::ofTensor())) {
+              *OptionalType::ofTensor())) {
         dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
       }
     }
@@ -187,7 +203,12 @@ private:
 
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
   : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
-  , nonFallthroughKeys_(DispatchKeySet::FULL) {}
+  , nonFallthroughKeys_(DispatchKeySet::FULL)
+  , requiresBitsetPerBackend_(false) {
+    for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
+      nonFallthroughKeysPerBackend_[i] = DispatchKeySet::FULL;
+    }
+  }
 
   // this is a bitset that has ones for each argument index which has to be
   // considered for dispatch. This avoids having to iterate over the stack
@@ -199,8 +220,14 @@ private:
   // fallthrough
   c10::utils::bitset dispatch_arg_indices_reverse_;
 
-  // Set of keys for which the operator does NOT have fallthrough kernel.
+  // Set of functionality keys for which the operator does NOT have fallthrough kernel.
   DispatchKeySet nonFallthroughKeys_;
+  // Set of functionality keys for which the operator does NOT have fallthrough kernel, defined PER BACKEND.
+  // This is only needed if we know that the operator has a different set of fallthroughs defined for some backends.
+  std::array<DispatchKeySet, num_backends> nonFallthroughKeysPerBackend_;
+  // Flag to tell us if we can use the single set of nonFallthroughKeys_ (fast path),
+  // or if we need to fall back to the slower path and check nonFallthroughKeysPerBackend_
+  bool requiresBitsetPerBackend_;
 };
 
 }

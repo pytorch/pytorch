@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
-#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/onednn_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/custom_class.h>
@@ -14,7 +14,7 @@
 #include <algorithm>
 #include <vector>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 #ifdef USE_FBGEMM
 namespace {
@@ -194,6 +194,80 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
 }
 #endif // USE_FBGEMM
 
+#if AT_MKLDNN_ENABLED()
+c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
+    at::Tensor weight,
+    c10::optional<at::Tensor> bias) {
+  TORCH_CHECK(
+      weight.dim() == 2,
+      "The weight tensor for quantized::linear_prepack (onednn) should"
+      " be 2-dimensional.");
+  // Weight
+  std::vector<int64_t> dims = weight.sizes().vec();
+  auto N = weight.size(0);
+  std::vector<int32_t> wgt_zero_points;
+  ideep::scale_t wgt_scales;
+  const auto qtype = weight.qscheme();
+  if (qtype == c10::kPerTensorAffine) {
+    TORCH_CHECK(
+        weight.q_zero_point() == 0,
+        "quantized::linear_prepack: ONEDNN only supports symmetric quantization of weight,"
+        " whose zero point must be 0, but got ", weight.q_zero_point());
+    wgt_zero_points = std::vector<int32_t>(1, weight.q_zero_point());
+    wgt_scales = ideep::scale_t(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
+  } else if (qtype == c10::kPerChannelAffine) {
+    wgt_zero_points.resize(N);
+    wgt_scales.resize(N);
+    for (int i = 0; i < N; ++i) {
+      wgt_zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
+      TORCH_CHECK(
+          wgt_zero_points[i] == 0,
+          "quantized::linear_prepack: ONEDNN only supports symmetric quantization of weight,"
+          " whose zero point must be 0, but got ",  wgt_zero_points[i], ", at index ", i);
+      wgt_scales[i] = 1.0f / weight.q_per_channel_scales()[i].item<float>(); // Scales of ONEDNN and PyTorch are reciprocal
+    }
+  } else {
+    TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
+  }
+
+  // Prepack weight
+  auto weight_copy = weight.clone();
+  ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
+  wgt.transpose_(0, 1); // ONEDNN requires transposed weight
+  auto w_desc = ideep::matmul_forward::expected_weights_desc(wgt.get_dims(), dnnl::memory::data_type::s8,
+                                                             dnnl::memory::data_type::u8);
+  ideep::tensor exp_wgt(w_desc);
+  exp_wgt.feed_from(wgt);
+  ideep::tensor * packed_weight_p = new ideep::tensor(exp_wgt);
+  packed_weight_p->set_scale(wgt_scales);
+  packed_weight_p->set_zero_point(wgt_zero_points);
+  std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
+  // Bias
+  c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
+  if (bias.has_value()) {
+    auto& b = bias.value();
+    auto bias_size = b.sizes().vec();
+    bias_size.insert(bias_size.begin(), 1);
+    TORCH_CHECK(
+        bias_size[1] == weight_ptr->get_dim(1),
+        "bias should have N elements: ",
+        std::to_string(weight_ptr->get_dim(1)),
+        ", but got ", bias_size[1]);
+    auto bias_desc = ideep::tensor::desc(bias_size, dnnl::memory::data_type::f32);
+    ideep::tensor packed_bias;
+    packed_bias.init(bias_desc, b.data_ptr());
+    onednn_bias = c10::optional<ideep::tensor>(packed_bias);
+  }
+  auto ret_ptr = c10::make_intrusive<PackedLinearWeightsOnednn>(
+      PackedLinearWeightsOnednn{
+        std::move(weight_ptr),
+        onednn_bias,
+        weight,
+        bias});
+  return ret_ptr;
+}
+#endif // #if AT_MKLDNN_ENABLED()
+
 namespace at {
 namespace native {
 
@@ -224,6 +298,11 @@ class QLinearPackWeightInt8 final {
           std::move(weight), std::move(bias));
     }
 #endif
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+      return PackedLinearWeightsOnednn::prepack(std::move(weight), std::move(bias));
+    }
+#endif // #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(
         false,
         "Didn't find engine for operation quantized::linear_prepack ",
@@ -238,6 +317,9 @@ class QLinearPackWeightFp16 final {
       c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
+    // temporarily convert weight back to fp32, needs to be fixed
+    // after fbgemm fixes the interface for their prepacking op (take fp16 input0
+    weight = weight.to(ScalarType::Float);
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedLinearWeightFp16::prepack(
           std::move(weight), std::move(bias));
@@ -251,6 +333,14 @@ class QLinearPackWeightFp16 final {
           "not supported by QNNPACK");
     }
 #endif // USE_PYTORCH_QNNPACK
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+      TORCH_CHECK(
+          false,
+          "quantized::linear_prepack_fp16 is currently "
+          "not supported by ONEDNN");
+    }
+#endif // #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(
         false,
         "Didn't find engine for operation quantized::linear_prepack_fp16 ",
@@ -261,63 +351,18 @@ class QLinearPackWeightFp16 final {
 class QLinearPackWeightInt8Legacy final {
  public:
   static Tensor run(at::Tensor weight, c10::optional<Tensor> bias) {
-    auto& ctx = at::globalContext();
-    auto options = weight.options();
-
-#ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
-      auto prepacked =
-          PackedLinearWeight::prepack(std::move(weight), std::move(bias));
-      auto wrapped =
-          std::make_unique<c10::intrusive_ptr<LinearPackedParamsBase>>(
-              std::move(prepacked));
-      return cpp_custom_type_hack::create(std::move(wrapped), options);
-    }
-#endif // USE_FBGEMM
-#ifdef USE_PYTORCH_QNNPACK
-    if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      auto prepacked =
-          PackedLinearWeightsQnnp::prepack(std::move(weight), std::move(bias));
-      auto wrapped =
-          std::make_unique<c10::intrusive_ptr<LinearPackedParamsBase>>(
-              std::move(prepacked));
-      return cpp_custom_type_hack::create(std::move(wrapped), options);
-    }
-#endif // USE_PYTORCH_QNNPACK
-    TORCH_CHECK(
-        false,
-        "Didn't find engine for operation quantized::linear_prepack ",
-        toString(ctx.qEngine()));
+    TORCH_CHECK(false,
+        "This model uses an outdated version of quantized.linear_prepack. "
+        "Please re-export your model using the newer definitions in torch.jit.quantized");
   }
 };
 
 class QLinearPackWeightFp16Legacy final {
  public:
   static Tensor run(at::Tensor weight, c10::optional<Tensor> bias) {
-    auto& ctx = at::globalContext();
-#ifdef USE_FBGEMM
-    auto options = weight.options();
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
-      auto prepacked =
-          PackedLinearWeightFp16::prepack(std::move(weight), std::move(bias));
-      auto wrapped =
-          std::make_unique<c10::intrusive_ptr<LinearPackedParamsBase>>(
-              std::move(prepacked));
-      return cpp_custom_type_hack::create(std::move(wrapped), options);
-    }
-#endif // USE_FBGEMM
-#ifdef USE_PYTORCH_QNNPACK
-    if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      TORCH_CHECK(
-          false,
-          "quantized::linear_prepack_fp16 is currently "
-          "not supported by QNNPACK");
-    }
-#endif // USE_PYTORCH_QNNPACK
-    TORCH_CHECK(
-        false,
-        "Didn't find engine for operation quantized::linear_prepack_fp16 ",
-        toString(ctx.qEngine()));
+    TORCH_CHECK(false,
+        "This model uses an outdated version of quantized.linear_prepack_fp16. "
+        "Please re-export your model using the newer definitions in torch.jit.quantized");
   }
 };
 

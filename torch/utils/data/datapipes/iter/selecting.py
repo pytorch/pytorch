@@ -1,81 +1,106 @@
-from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
-from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
+from typing import Callable, Iterator, Optional, TypeVar
 
-from .callable import MapperIterDataPipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
+from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
+from torch.utils.data.datapipes.utils.common import _check_lambda_fn, _deprecation_warning
+
+__all__ = ["FilterIterDataPipe", ]
 
 T_co = TypeVar('T_co', covariant=True)
 
 
 @functional_datapipe('filter')
-class FilterIterDataPipe(MapperIterDataPipe):
-    r""" :class:`FilterIterDataPipe`.
+class FilterIterDataPipe(IterDataPipe[T_co]):
+    r"""
+    Filters out elements from the source datapipe according to input ``filter_fn`` (functional name: ``filter``).
 
-    Iterable DataPipe to filter elements from datapipe according to filter_fn.
-    args:
+    Args:
         datapipe: Iterable DataPipe being filtered
         filter_fn: Customized function mapping an element to a boolean.
-        fn_args: Positional arguments for `filter_fn`
-        fn_kwargs: Keyword arguments for `filter_fn`
-        drop_empty_batches: By default, drops batch if it is empty after filtering instead of keeping an empty list
-        nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0).
-        This also accepts -1 as input to apply filtering to the lowest nesting level. It currently doesn't support
-        argument < -1.
+        drop_empty_batches (Deprecated): By default, drops a batch if it is empty after filtering instead of keeping an empty list
+        input_col: Index or indices of data which ``filter_fn`` is applied, such as:
+
+            - ``None`` as default to apply ``filter_fn`` to the data directly.
+            - Integer(s) is used for list/tuple.
+            - Key(s) is used for dict.
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> def is_even(n):
+        ...     return n % 2 == 0
+        >>> dp = IterableWrapper(range(5))
+        >>> filter_dp = dp.filter(filter_fn=is_even)
+        >>> list(filter_dp)
+        [0, 2, 4]
     """
+    datapipe: IterDataPipe
+    filter_fn: Callable
     drop_empty_batches: bool
 
-    def __init__(self,
-                 datapipe: IterDataPipe[T_co],
-                 filter_fn: Callable[..., bool],
-                 fn_args: Optional[Tuple] = None,
-                 fn_kwargs: Optional[Dict] = None,
-                 drop_empty_batches: bool = True,
-                 nesting_level: int = 0,
-                 ) -> None:
+    def __init__(
+        self,
+        datapipe: IterDataPipe,
+        filter_fn: Callable,
+        drop_empty_batches: Optional[bool] = None,
+        input_col=None,
+    ) -> None:
+        super().__init__()
+        self.datapipe = datapipe
+
+        _check_lambda_fn(filter_fn)
+        self.filter_fn = filter_fn  # type: ignore[assignment]
+
+        if drop_empty_batches is None:
+            drop_empty_batches = True
+        else:
+            _deprecation_warning(
+                type(self).__name__,
+                deprecation_version="1.12",
+                removal_version="1.14",
+                old_argument_name="drop_empty_batches",
+            )
         self.drop_empty_batches = drop_empty_batches
-        super().__init__(datapipe, fn=filter_fn, fn_args=fn_args, fn_kwargs=fn_kwargs, nesting_level=nesting_level)
+
+        self.input_col = input_col
+
+    def _apply_filter_fn(self, data) -> bool:
+        if self.input_col is None:
+            return self.filter_fn(data)
+        elif isinstance(self.input_col, (list, tuple)):
+            args = tuple(data[col] for col in self.input_col)
+            return self.filter_fn(*args)
+        else:
+            return self.filter_fn(data[self.input_col])
 
     def __iter__(self) -> Iterator[T_co]:
-        res: bool
         for data in self.datapipe:
-            filtered = self._applyFilter(data, self.nesting_level)
+            filtered = self._returnIfTrue(data)
             if self._isNonEmpty(filtered):
                 yield filtered
 
-    def _applyFilter(self, data, nesting_level):
-        if nesting_level == 0:
-            return self._returnIfTrue(data)
-        elif nesting_level > 0:
-            if isinstance(data, DataChunk):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1)
-                                                   for i in data.raw_iterator()])
-                return type(data)(list(result))
-            elif isinstance(data, list):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data])
-                return list(result)
-            else:
-                raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-        else:  # Handling nesting_level == -1
-            if isinstance(data, DataChunk):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data.raw_iterator()])
-                return type(data)(list(result))
-            elif isinstance(data, list):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data])
-                return list(result)
-            else:
-                return self._returnIfTrue(data)
-
     def _returnIfTrue(self, data):
-        condition = self.fn(data, *self.args, **self.kwargs)
+        condition = self._apply_filter_fn(data)
+
+        if df_wrapper.is_column(condition):
+            # We are operating on DataFrames filter here
+            result = []
+            for idx, mask in enumerate(df_wrapper.iterate(condition)):
+                if mask:
+                    result.append(df_wrapper.get_item(data, idx))
+            if len(result):
+                return df_wrapper.concat(result)
+            else:
+                return None
+
         if not isinstance(condition, bool):
-            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe")
+            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe, got", type(condition))
         if condition:
             return data
 
     def _isNonEmpty(self, data):
+        if df_wrapper.is_dataframe(data):
+            return True
         r = data is not None and \
             not (isinstance(data, list) and len(data) == 0 and self.drop_empty_batches)
         return r
-
-
-    def __len__(self):
-        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))

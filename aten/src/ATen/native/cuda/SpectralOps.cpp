@@ -1,17 +1,27 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Utils.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_fft_c2c_native.h>
+#include <ATen/ops/_fft_c2r_native.h>
+#include <ATen/ops/_fft_r2c_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mul.h>
+#endif
 
 #include <cufft.h>
 #include <cufftXt.h>
@@ -28,7 +38,7 @@ using namespace at::native::detail;
 static void exec_cufft_plan(
     const CuFFTConfig &config, void* in_data, void* out_data, bool forward) {
   auto& plan = config.plan();
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   auto value_type = config.data_type();
   if (value_type == kFloat) {
     switch (config.transform_type()) {
@@ -229,7 +239,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   const auto batch_size = input.sizes()[0];
   DimVector signal_size(signal_ndim + 1);
   signal_size[0] = batch_size;
-  for (int64_t i = 0; i < signal_ndim; ++i) {
+  for (const auto i : c10::irange(signal_ndim)) {
     auto in_size = input.sizes()[i + 1];
     auto out_size = out_sizes[dim[i]];
     signal_size[i + 1] = std::max(in_size, out_size);
@@ -241,13 +251,13 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
 
   batched_sizes[0] = batch_size;
   DimVector batched_out_sizes(batched_sizes.begin(), batched_sizes.end());
-  for (size_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     batched_out_sizes[i + 1] = out_sizes[dim[i]];
   }
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
 
   // Create the transform plan (either from cache or locally)
-  const auto value_type = c10::toValueType(input.scalar_type());
+  const auto value_type = c10::toRealValueType(input.scalar_type());
   auto fft_type = GetCuFFTTransformType(input.is_complex(), out.is_complex());
   CuFFTParams Params(input.strides(), out.strides(), signal_size, fft_type, value_type);
   CuFFTParamsLRUCache& plan_cache = cufft_get_plan_cache(input.device().index());
@@ -303,7 +313,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
     out_strides[dim_permute[i]] = batch_numel * out.strides()[0];
     batch_numel *= out_sizes[dim_permute[i]];
   }
-  for (int64_t i = batch_dims; i < ndim; ++i) {
+  for (const auto i : c10::irange(batch_dims, ndim)) {
     out_strides[dim_permute[i]] = out.strides()[1 + (i - batch_dims)];
   }
   return out.as_strided_(out_sizes, out_strides, out.storage_offset());
@@ -444,7 +454,7 @@ Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = lastdim;
 
-  auto output = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
+  auto output = at::empty(out_sizes, self.options().dtype(c10::toRealValueType(self.scalar_type())));
 
   if (use_optimized_cufft_path(dim)) {
     Tensor temp;

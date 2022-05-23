@@ -270,6 +270,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
       bool groupComm_updated = false;
       MPI_Barrier(MPI_COMM_WORLD);
       for (const auto i : c10::irange(kMaxNumRetries)) {
+        (void)i;
         if (MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm)) {
           groupComm_updated = true;
           break;
@@ -309,6 +310,8 @@ ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)
 
   // Start the worker thread accepting MPI calls
   workerThread_ = std::thread(&ProcessGroupMPI::runLoop, this);
+
+  init();
 }
 
 ProcessGroupMPI::~ProcessGroupMPI() {
@@ -694,7 +697,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
         "Tensor's dim 0 does not divide equally across group size");
 
     std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-        [opts, this](std::unique_ptr<WorkEntry>& entry) {
+        [this](std::unique_ptr<WorkEntry>& entry) {
           auto srcdata = (entry->src)[0];
           auto dstdata = (entry->dst)[0];
           c10::DeviceGuard guard(srcdata.device());
@@ -721,7 +724,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
     c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
     std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-        [opts, this, inputSplitSizes, outputSplitSizes](
+        [this, inputSplitSizes, outputSplitSizes](
             std::unique_ptr<WorkEntry>& entry) {
           auto srcdata = (entry->src)[0];
           auto dstdata = (entry->dst)[0];
@@ -768,7 +771,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
       outputTensors.size() == size_,
       "Number of output tensors are not equal to group size");
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-      [opts, this](std::unique_ptr<WorkEntry>& entry) {
+      [this](std::unique_ptr<WorkEntry>& entry) {
         std::vector<int> send_lengths(size_);
         std::vector<int> recv_lengths(size_);
         std::vector<int> send_offsets(size_);

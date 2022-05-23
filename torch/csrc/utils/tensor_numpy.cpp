@@ -130,6 +130,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
       "Can't call numpy() on Tensor that has negative bit set. "
       "Use tensor.resolve_neg().numpy() instead.");
 
+  TORCH_CHECK(!tensor.unsafeGetTensorImpl()->is_python_dispatch(), ".numpy() is not supported for tensor subclasses.");
+
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
@@ -166,6 +168,16 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   return array.release();
 }
 
+void warn_numpy_not_writeable() {
+  TORCH_WARN_ONCE(
+    "The given NumPy array is not writable, and PyTorch does "
+    "not support non-writable tensors. This means writing to this tensor "
+    "will result in undefined behavior. "
+    "You may want to copy the array to protect its data or make it writable "
+    "before converting it to a tensor. This type of warning will be "
+    "suppressed for the rest of this program.");
+}
+
 at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/) {
   if (!is_numpy_available()) {
     throw std::runtime_error("Numpy is not available");
@@ -178,14 +190,7 @@ at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/)
   // warn_if_not_writable is true when a copy of numpy variable is created.
   // the warning is suppressed when a copy is being created.
   if (!PyArray_ISWRITEABLE(array) && warn_if_not_writeable) {
-    TORCH_WARN_ONCE(
-      "The given NumPy array is not writeable, and PyTorch does "
-      "not support non-writeable tensors. This means you can write to the "
-      "underlying (supposedly non-writeable) NumPy array using the tensor. "
-      "You may want to copy the array to protect its data or make it writeable "
-      "before converting it to a tensor. This type of warning will be "
-      "suppressed for the rest of this program.");
-
+    warn_numpy_not_writeable();
   }
 
   int ndim = PyArray_NDIM(array);
@@ -366,7 +371,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   {
     PyObject *py_strides = PyDict_GetItemString(cuda_dict, "strides");
     if (py_strides != nullptr && py_strides != Py_None) {
-      if (PySequence_Length(py_strides) == -1 || PySequence_Length(py_strides) != sizes.size()) {
+      if (PySequence_Length(py_strides) == -1 || static_cast<size_t>(PySequence_Length(py_strides)) != sizes.size()) {
         throw TypeError("strides must be a sequence of the same length as shape");
       }
       strides = seq_to_aten_shape(py_strides);

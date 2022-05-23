@@ -15,6 +15,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Registry.h>
+#include <c10/util/string_view.h>
 #include <c10/util/typeid.h>
 #include <c10/core/Stream.h>
 #include "caffe2/core/blob.h"
@@ -35,6 +36,11 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
+#endif
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 #endif
 
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
@@ -97,7 +103,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
 
   /** @brief Checks if the operator has an argument of the given name.
    */
-  inline bool HasArgument(const string& name) const {
+  inline bool HasArgument(c10::string_view name) const {
     if (isLegacyOperator()) {
       CAFFE_ENFORCE(operator_def_, "operator_def was null!");
       return ArgumentHelper::HasArgument(*operator_def_, name);
@@ -108,7 +114,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
   // Functions that deal with arguments. Basically, this allows us to map an
   // argument name to a specific type of argument that we are trying to access.
   template <typename T>
-  inline T GetSingleArgument(const string& name, const T& default_value) const {
+  inline T GetSingleArgument(c10::string_view name, const T& default_value) const {
     if (isLegacyOperator()) {
       CAFFE_ENFORCE(operator_def_, "operator_def was null!");
       return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
@@ -126,7 +132,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
   }
 
   template <typename T>
-  inline bool HasSingleArgumentOfType(const string& name) const {
+  inline bool HasSingleArgumentOfType(c10::string_view name) const {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
     return ArgumentHelper::HasSingleArgumentOfType<OperatorDef, T>(
         *operator_def_, name);
@@ -141,7 +147,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline vector<T> GetRepeatedArgument(
-      const string& name,
+      c10::string_view name,
       const vector<T>& default_value = {}) const;
 
   // Get the inputs and outputs as specific types.
@@ -654,7 +660,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
   }
 
-  c10::optional<int> argumentIndexWithName(const std::string& name) const;
+  c10::optional<int> argumentIndexWithName(c10::string_view name) const;
 
   // An event used by asynchronous execution.
   std::unique_ptr<Event> event_;
@@ -664,7 +670,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
 
 template <>
 inline NetDef OperatorBase::GetSingleArgument<NetDef>(
-    const std::string& name,
+    c10::string_view name,
     const NetDef& default_value) const {
   if (isLegacyOperator()) {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
@@ -730,14 +736,8 @@ inline vector<int16_t> OperatorBase::GetVectorFromIValueList<int16_t>(
 
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
-// This is a workaround for CUDA9.2 and GCC7
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 9020 && __GNUC__ >= 7
-#define OP_SINGLE_ARG(type, name, variable, default) \
-  variable(this->template GetSingleArgument<type>(name, (default)))
-#else
 #define OP_SINGLE_ARG(type, name, variable, default) \
   variable(OperatorBase::GetSingleArgument<type>(name, (default)))
-#endif
 
 // INPUT_TAGS and OUTPUT_TAGS are optional features to name the indices of the
 // operator's inputs and outputs, in order to avoid confusion. For example, for
@@ -756,7 +756,7 @@ inline vector<int16_t> OperatorBase::GetVectorFromIValueList<int16_t>(
 
 template <typename T>
 inline vector<T> OperatorBase::GetRepeatedArgument(
-    const string& name,
+    c10::string_view name,
     const vector<T>& default_value) const {
   if (isLegacyOperator()) {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
@@ -778,7 +778,7 @@ inline vector<T> OperatorBase::GetRepeatedArgument(
 // int16_t. We need to load it as List<int64_t> and transform to int16_t.
 template <>
 inline vector<int16_t> OperatorBase::GetRepeatedArgument<int16_t>(
-    const string& name,
+    c10::string_view name,
     const vector<int16_t>& default_value) const {
   if (isLegacyOperator()) {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
@@ -1605,5 +1605,7 @@ inline unique_ptr<ExternalTensorFunctionsBase> CreateExternalTensorFunctions(
 #endif // C10_MOBILE
 
 } // namespace caffe2
+
+C10_CLANG_DIAGNOSTIC_POP()
 
 #endif // CAFFE2_CORE_OPERATOR_H_

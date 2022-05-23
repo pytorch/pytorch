@@ -16,6 +16,10 @@ constexpr int64_t kProducedNNCFileFormatVersion = 0x1L;
 
 namespace {
 
+c10::IValue Tup(std::initializer_list<c10::IValue> ivalues) {
+  return c10::ivalue::Tuple::create(ivalues);
+}
+
 c10::IValue Tup(std::vector<c10::IValue>&& ivalues) {
   return c10::ivalue::Tuple::create(ivalues);
 }
@@ -37,13 +41,29 @@ c10::IValue InputSpec::serialize() const {
 }
 
 bool InputSpec::validate(const at::Tensor& input) const {
-  return input.sizes() == sizes_ && input.scalar_type() == dtype_;
+  if (sizes_.size() != input.sizes().size() || input.scalar_type() != dtype_) {
+    return false;
+  }
+  auto spec_sizes = sizes_;
+  for (int i = 0; i < spec_sizes.size(); i++) {
+    // InputSpec size 0 means that the dimension is dynamic
+    if (spec_sizes[i] != 0 && spec_sizes[i] != input.sizes()[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 OutputSpec::OutputSpec(const c10::IValue& value) {
   auto dict = value.toGenericDict();
   sizes_ = dict.at("sizes").toIntVector();
   dtype_ = dict.at("dtype").toScalarType();
+  if (dict.contains("qscale")) {
+    qscale_ = dict.at("qscale").toDouble();
+  }
+  if (dict.contains("qzero")) {
+    qzero_ = dict.at("qzero").toInt();
+  }
 }
 
 c10::IValue OutputSpec::serialize() const {
@@ -51,10 +71,30 @@ c10::IValue OutputSpec::serialize() const {
       at::StringType::get(), at::AnyType::get());
   dict.insert("sizes", sizes_);
   dict.insert("dtype", dtype_);
+  if (qscale_) {
+    dict.insert("qscale", *qscale_);
+  }
+  if (qzero_) {
+    dict.insert("qzero", *qzero_);
+  }
   return dict;
 }
 
 at::Tensor OutputSpec::allocate() const {
+  if (isQIntType(dtype_)) {
+    TORCH_CHECK(
+        qscale_ && qzero_,
+        "Quantized output tensor must have qscale_ and qzero_");
+    return at::_empty_affine_quantized(
+        sizes_,
+        at::TensorOptions()
+            .dtype(dtype_)
+            .layout(at::kStrided)
+            .device(at::kCPU)
+            .requires_grad(false),
+        *qscale_,
+        *qzero_);
+  }
   return at::empty(
       sizes_,
       at::TensorOptions()
@@ -93,18 +133,27 @@ Function::Function(const c10::IValue& value) {
   parameters_ = dict.at("parameters").toList();
 
   // input_specs_
-  for (const auto& input_value : dict.at("input_specs").toTuple()->elements()) {
+  for (const auto& input_value :
+       dict.at("input_specs").toTupleRef().elements()) {
     input_specs_.emplace_back(input_value);
   }
 
   // output_specs_
   for (const auto& output_value :
-       dict.at("output_specs").toTuple()->elements()) {
+       dict.at("output_specs").toTupleRef().elements()) {
     output_specs_.emplace_back(output_value);
   }
 
   // memory_plan_
   memory_plan_ = MemoryPlan(dict.at("memory_plan"));
+
+  // symbolic shape positions
+  for (const auto& sym_shape_pos :
+       dict.at("sym_shape_pos").toTupleRef().elements()) {
+    auto sym_shape_elements = sym_shape_pos.toTupleRef().elements();
+    sym_shape_positions_.emplace_back(
+        sym_shape_elements[0].toInt(), sym_shape_elements[1].toInt());
+  }
 }
 
 c10::IValue Function::serialize() const {
@@ -134,6 +183,15 @@ c10::IValue Function::serialize() const {
 
   // memory_plan_
   dict.insert("memory_plan", memory_plan_.serialize());
+
+  // sym_shape_positions_
+  std::vector<c10::IValue> sym_shape_pos_vec;
+  for (const auto& sym_shape_pos : sym_shape_positions_) {
+    sym_shape_pos_vec.emplace_back(
+        Tup({sym_shape_pos.input_idx_, sym_shape_pos.dim_idx_}));
+  }
+  dict.insert("sym_shape_pos", Tup(std::move(sym_shape_pos_vec)));
+
   return dict;
 }
 
@@ -145,18 +203,20 @@ void Function::init_execution_state() const {
   ExecutionState state;
   memory_plan_.allocate(&state);
 
-  // The arguments vector consists of 4 sections: inputs, outputs, parameters
-  // and buffers.
+  // The arguments vector consists of 5 sections: inputs, symbolic shapes,
+  // outputs, parameters and buffers.
   auto input_args = input_specs_.size();
+  auto sym_shape_args = sym_shape_positions_.size();
   auto output_args = output_specs_.size();
   auto param_args = parameters_.size();
   auto buffer_args = state.preallocations_.size();
 
   auto& arguments = state.arguments_;
-  arguments.reserve(input_args + output_args + param_args + buffer_args);
+  arguments.reserve(
+      input_args + sym_shape_args + output_args + param_args + buffer_args);
 
   // Keep empty slots to fill in inputs/outputs pointers at execution time.
-  arguments.resize(input_args + output_args);
+  arguments.resize(input_args + sym_shape_args + output_args);
 
   // Fill in parameters as untyped raw pointers.
   // The underlying storage of the parameters should be owned by `parameters_`,
@@ -198,13 +258,26 @@ c10::impl::GenericList Function::run(
       input_specs_.size(),
       " actual: ",
       inputs.size());
+  std::vector<int64_t> scalar_values;
+  int offset = 0;
   for (const auto i : c10::irange(inputs.size())) {
     const c10::IValue& input = inputs[i];
+    const auto& spec = input_specs_[i];
     const auto& input_tensor = input.toTensor();
-    TORCH_CHECK(
-        input_specs_[i].validate(input_tensor), "Invalid input at pos: ", i);
+    TORCH_CHECK(spec.validate(input_tensor), "Invalid input at pos: ", i);
     args[i] = input_tensor.data_ptr();
   }
+  offset += inputs.size();
+
+  scalar_values.reserve(sym_shape_positions_.size());
+  for (const auto i : c10::irange(sym_shape_positions_.size())) {
+    const auto& sym_shape_pos = sym_shape_positions_[i];
+    const c10::IValue& input = inputs[sym_shape_pos.input_idx_];
+    auto dim = input.toTensor().size(sym_shape_pos.dim_idx_);
+    scalar_values.push_back(dim);
+    args[i + offset] = &scalar_values[scalar_values.size() - 1];
+  }
+  offset += sym_shape_positions_.size();
 
   // Preallocate and fill in output tensors.
   c10::List<at::Tensor> outputs;
@@ -212,7 +285,7 @@ c10::impl::GenericList Function::run(
   for (const auto i : c10::irange(output_specs_.size())) {
     at::Tensor output = output_specs_[i].allocate();
     outputs.emplace_back(output);
-    args[inputs.size() + i] = output.data_ptr();
+    args[i + offset] = output.data_ptr();
   }
 
   // TODO: check consistency, e.g.: code version, input shape and compiled
@@ -224,8 +297,8 @@ c10::impl::GenericList Function::run(
 }
 
 CompilationUnit::CompilationUnit(const c10::IValue& value) {
-  const auto& root = value.toTuple()->elements();
-  const auto& functions = root[1].toTuple()->elements();
+  const auto& root = value.toTupleRef().elements();
+  const auto& functions = root[1].toTupleRef().elements();
   for (const auto& function : functions) {
     register_function(std::make_unique<Function>(function));
   }

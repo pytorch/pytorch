@@ -77,7 +77,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           1);
 
   int kernel_dims_size = 1;
-  for (int i = 0; i < kernel_.size(); ++i) {
+  for (const auto i : c10::irange(kernel_.size())) {
     CAFFE_ENFORCE(filter.dim32(i + 2) == kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }
@@ -155,8 +155,9 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2col, followed by gemm.
-    for (int image_id = 0; image_id < N; ++image_id) {
-      for (int group_id = 0; group_id < group_; ++group_id) {
+    for (const auto image_id : c10::irange(N)) {
+      (void)image_id; // CUDA-10.2 on Windows crashes when C10_UNUSED macro is used
+      for (const auto group_id : c10::irange(group_)) {
         DeformableIm2col(
             Xdata + group_id * input_offset,
             offset_data,
@@ -271,7 +272,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           1);
 
   int kernel_dims_size = 1;
-  for (int i = 0; i < kernel_.size(); ++i) {
+  for (const auto i : c10::irange(kernel_.size())) {
     CAFFE_ENFORCE(filter.dim32(i + 2) == kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }
@@ -342,8 +343,9 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     math::Set<T, Context>(dX->numel(), 0, dXdata, &context_);
   }
 
-  for (int image_id = 0; image_id < N; ++image_id) {
-    for (int group_id = 0; group_id < group_; ++group_id) {
+  for (const auto image_id : c10::irange(N)) {
+    (void)image_id; // CUDA-10.2 on Windows crashes when C10_UNUSED macro is used
+    for (const auto group_id : c10::irange(group_)) {
       math::Gemm<T, Context>(
           CblasTrans,
           CblasNoTrans,
@@ -378,7 +380,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     DeformableIm2col(
         Xdata, offset_data, X.sizes(), col_buffer_shape, col_buffer_data);
 
-    for (int group_id = 0; group_id < group_; ++group_id) {
+    for (const auto group_id : c10::irange(group_)) {
       math::Gemm<T, Context>(
           CblasNoTrans,
           CblasTrans,

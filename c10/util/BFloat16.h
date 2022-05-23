@@ -19,7 +19,7 @@ inline C10_HOST_DEVICE float f32_from_bits(uint16_t src) {
   uint32_t tmp = src;
   tmp <<= 16;
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   float* tempRes;
 
   // We should be using memcpy in order to respect the strict aliasing rule
@@ -36,7 +36,7 @@ inline C10_HOST_DEVICE float f32_from_bits(uint16_t src) {
 inline C10_HOST_DEVICE uint16_t bits_from_f32(float src) {
   uint32_t res = 0;
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   // We should be using memcpy in order to respect the strict aliasing rule
   // but it fails in the HIP environment.
   uint32_t* tempRes = reinterpret_cast<uint32_t*>(&src);
@@ -49,7 +49,7 @@ inline C10_HOST_DEVICE uint16_t bits_from_f32(float src) {
 }
 
 inline C10_HOST_DEVICE uint16_t round_to_nearest_even(float src) {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
   if (src != src) {
 #elif defined(_MSC_VER)
   if (isnan(src)) {
@@ -74,7 +74,7 @@ struct alignas(2) BFloat16 {
   uint16_t x;
 
   // HIP wants __host__ __device__ tag, CUDA does not
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   C10_HOST_DEVICE BFloat16() = default;
 #else
   BFloat16() = default;
@@ -98,4 +98,4 @@ struct alignas(2) BFloat16 {
 
 } // namespace c10
 
-#include <c10/util/BFloat16-inl.h>
+#include <c10/util/BFloat16-inl.h> // IWYU pragma: keep

@@ -8,8 +8,6 @@
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 
-#include <THC/THC.h>
-
 #include <nccl.h>
 
 #include <limits>
@@ -90,7 +88,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
-#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 301
+#if HAS_NCCL_BF16_DATATYPE
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
 #endif
@@ -652,6 +650,9 @@ void all2all_single_equal_split(at::Tensor& input,
   const auto* sendbuff = reinterpret_cast<char*>(input.data_ptr());
   auto* recvbuff = reinterpret_cast<char *>(output.data_ptr());
   auto comm = to_nccl_comm(_comm);
+#if defined(USE_ROCM) && ROCM_VERSION >= 50000
+  NCCL_CHECK(ncclAllToAll(sendbuff , recvbuff , count,  type, comm, stream));
+#else
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
   for(const auto r : c10::irange(numranks)) {
@@ -663,6 +664,7 @@ void all2all_single_equal_split(at::Tensor& input,
     }
   }
   NCCL_CHECK(ncclGroupEnd());
+#endif
 #else
   AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
@@ -810,6 +812,98 @@ void recv(
   AT_ERROR("PyTorch built without NCCL support");
 #endif
 }
+
+
+void gather(
+    const at::Tensor& inputs,
+    std::vector<at::Tensor>& outputs,
+    ncclComm_t _comm,
+    at::cuda::CUDAStream& stream,
+    int32_t root) {
+#ifdef USE_NCCL
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+  using namespace torch::cuda::nccl::detail;
+
+  auto comm = to_nccl_comm(_comm);
+  int numranks, cur_rank;
+  NCCL_CHECK(ncclCommCount(comm, &numranks));
+  NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
+
+  size_t count = inputs.numel();
+  auto type = to_nccl_data_type(inputs);
+  const auto* sendbuff = reinterpret_cast<char*>(inputs.data_ptr());
+
+  NCCL_CHECK(ncclGroupStart());
+
+  if (cur_rank == root)
+  {
+    for (const auto r : c10::irange(numranks)) {
+      if (r != root) {
+        auto* recvbuff =  reinterpret_cast<char*>(outputs[r].data_ptr());
+        NCCL_CHECK(ncclRecv(recvbuff, count, type, r, comm, stream));
+      } else {
+        // on its own rank, simply copy from the input
+        outputs[r].copy_(inputs);
+      }
+    }
+  } else {
+    NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
+  }
+  NCCL_CHECK(ncclGroupEnd());
+
+#else
+  AT_ERROR("gather is only supported for NCCL lib version >= 2.7.0");
+#endif
+#else
+  AT_ERROR("PyTorch built without NCCL support");
+#endif
+}
+
+void scatter(
+    const std::vector<at::Tensor>& inputs,
+    at::Tensor& outputs,
+    ncclComm_t _comm,
+    at::cuda::CUDAStream& stream,
+    int32_t root) {
+#ifdef USE_NCCL
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+  using namespace torch::cuda::nccl::detail;
+
+  auto comm = to_nccl_comm(_comm);
+  int numranks, cur_rank;
+  NCCL_CHECK(ncclCommCount(comm, &numranks));
+  NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
+
+  NCCL_CHECK(ncclGroupStart());
+  if (cur_rank == root)
+  {
+    for (const auto r : c10::irange(numranks)) {
+      if (r != root) {
+        size_t send_count = inputs[r].numel();
+        auto send_type = to_nccl_data_type(inputs[r]);
+        const auto* sendbuff =  reinterpret_cast<char*>(inputs[r].data_ptr());
+        NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
+      } else {
+        // on its own rank, simply copy it to the output
+        outputs.copy_(inputs[r]);
+      }
+    }
+  } else {
+    size_t recv_count = outputs.numel();
+    auto recv_type = to_nccl_data_type(outputs);
+    auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
+    NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
+  }
+  NCCL_CHECK(ncclGroupEnd());
+
+#else
+  AT_ERROR("scatter is only supported for NCCL lib version >= 2.7.0");
+#endif
+#else
+  AT_ERROR("PyTorch built without NCCL support");
+#endif
+}
+
 
 } // namespace nccl
 } // namespace cuda

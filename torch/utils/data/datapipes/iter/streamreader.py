@@ -1,22 +1,34 @@
 from typing import Tuple
-from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
+
+__all__ = ["StreamReaderIterDataPipe", ]
 
 
+@functional_datapipe('read_from_stream')
 class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
-    r""" :class:`StreamReaderIterDataPipe`
+    r"""
+    Given IO streams and their label names, yields bytes with label
+    name in a tuple (functional name: ``read_from_stream``).
 
-    Iterable DataPipe to load IO stream with label name,
-    and to yield bytes with label name in a tuple
-    args:
-        chunk : bytes to read from stream on each iteration.
-                If None, stream reads to the EOF.
+    Args:
+        datapipe: Iterable DataPipe provides label/URL and byte stream
+        chunk: Number of bytes to be read from stream per iteration.
+            If ``None``, all bytes will be read util the EOF.
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper, StreamReader
+        >>> from io import StringIO
+        >>> dp = IterableWrapper([("alphabet", StringIO("abcde"))])
+        >>> list(StreamReader(dp, chunk=1))
+        [('alphabet', 'a'), ('alphabet', 'b'), ('alphabet', 'c'), ('alphabet', 'd'), ('alphabet', 'e')]
     """
-    def __init__(self, source_datapipe, chunk=None):
-        self.source_datapipe = source_datapipe
+    def __init__(self, datapipe, chunk=None):
+        self.datapipe = datapipe
         self.chunk = chunk
 
     def __iter__(self):
-        for (furl, stream) in self.source_datapipe:
+        for furl, stream in self.datapipe:
             while True:
                 d = stream.read(self.chunk)
                 if not d:

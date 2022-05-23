@@ -31,8 +31,10 @@
     - [Use CCache](#use-ccache)
     - [Use a faster linker](#use-a-faster-linker)
     - [Use pre-compiled headers](#use-pre-compiled-headers)
+    - [Workaround for header dependency bug in nvcc](#workaround-for-header-dependency-bug-in-nvcc)
   - [C++ frontend development tips](#c-frontend-development-tips)
   - [GDB integration](#gdb-integration)
+  - [C++ stacktraces](#c-stacktraces)
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
@@ -47,6 +49,7 @@
 - [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
   - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+- [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
 
@@ -85,7 +88,6 @@ installed`. (You should only have to `pip uninstall` a few times, but
 you can always `uninstall` with `timeout` or in a loop if you're feeling
 lazy.)
 
-
 ```bash
 conda uninstall pytorch -y
 yes | pip uninstall torch
@@ -108,9 +110,7 @@ git submodule update --init --recursive --jobs 0
 
 If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
 
-
 3. Install PyTorch in `develop` mode:
-
 
 The change you have to make is to replace
 
@@ -133,10 +133,6 @@ For example:
 - Install local PyTorch in `develop` mode
 - modify your Python file `torch/__init__.py` (for example)
 - test functionality
-- modify your Python file `torch/__init__.py`
-- test functionality
-- modify your Python file `torch/__init__.py`
-- test functionality
 
 You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
 if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
@@ -147,9 +143,10 @@ torch as it is not installed`; next run `python setup.py clean`. After
 that, you can install in `develop` mode again.
 
 ### Tips and Debugging
+
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
 with `brew install cmake` if you are developing on MacOS or Linux system.
-* Our `setup.py` requires Python >= 3.6
+* Our `setup.py` requires Python >= 3.7
 * If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
   that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
   [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
@@ -188,7 +185,7 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     ```
     this is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
     `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate valid date by running
-    ```
+    ```bash
     openssl x509 -noout -in <cert_file> -dates
     ```
 
@@ -198,6 +195,7 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     ```
     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
 * If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
+* For help with any part of the contributing process, please don’t hesitate to utilize our Zoom office hours! See details [here](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
 ## Nightly Checkout & Pull
 
@@ -242,13 +240,6 @@ into the repo directory.
   directly.)
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
   * [src](aten/src) - [README](aten/src/README.md)
-    * [TH](aten/src/TH)
-      [THC](aten/src/THC) - Legacy library code from the original
-      Torch. Try not to add things here; we're slowly porting these to
-      [native](aten/src/ATen/native).
-      * generic - Contains actual implementations of operators,
-        parametrized over `scalar_t`. Files here get compiled N times
-        per supported scalar type in PyTorch.
     * [ATen](aten/src/ATen)
       * [core](aten/src/ATen/core) - Core functionality of ATen. This
         is migrating to top-level c10 folder.
@@ -353,7 +344,10 @@ The `expecttest` and `hypothesis` libraries must be installed to run the tests. 
 an optional dependency, and `pytest` may help run tests more selectively.
 All these packages can be installed with `conda` or `pip`.
 
+**Weird note:** In our CI (Continuous Integration) jobs, we actually run the tests from the `test` folder and **not** the root of the repo, since there are various dependencies we set up for CI that expects the tests to be run from the test folder. As such, there may be some inconsistencies between local testing and CI testing--if you observe an inconsistency, please [file an issue](https://github.com/pytorch/pytorch/issues/new/choose).
+
 ### Better local unit tests with `pytest`
+
 We don't officially support `pytest`, but it works well with our
 `unittest` tests and offers a number of useful features for local
 developing. Install it via `pip install pytest`.
@@ -368,7 +362,6 @@ pytest test/test_nn.py -k Loss -v
 The above is an example of testing a change to all Loss functions: this
 command runs tests such as `TestNN.test_BCELoss` and
 `TestNN.test_MSELoss` and can be useful to save keystrokes.
-
 
 ### Local linting
 
@@ -407,6 +400,7 @@ make clang-tidy
 ```
 
 To run a lint only on changes, add the `CHANGED_ONLY` option:
+
 ```bash
 make <name of lint> CHANGED_ONLY=--changed-only
 ```
@@ -435,12 +429,12 @@ is `./build/bin/FILENAME --gtest_filter=TESTSUITE.TESTNAME`, where
 `TESTNAME` is the name of the test you'd like to run and `TESTSUITE` is
 the suite that test is defined in.
 
-For example, if you wanted to run the test ` MayContainAlias`, which
+For example, if you wanted to run the test `MayContainAlias`, which
 is part of the test suite `ContainerAliasingTest` in the file
 `test/cpp/jit/test_alias_analysis.cpp`, the command would be:
 
 ```bash
-./build/bin/test_jit --gtest_filter=ContainerAliasingTest.UnionAliasing
+./build/bin/test_jit --gtest_filter=ContainerAliasingTest.MayContainAlias
 ```
 
 
@@ -451,8 +445,9 @@ You can generate a commit that limits the CI to only run a specific job by using
 
 ```bash
 # --job: specify one or more times to filter to a specific job + its dependencies
+# --filter-gha: specify github actions workflows to keep
 # --make-commit: commit CI changes to git with a message explaining the change
-python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
+python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --filter-gha '*generated*gcc5.4*' --make-commit
 
 # Make your changes
 
@@ -468,10 +463,10 @@ of very low signal to reviewers.
 So you want to write some documentation and don't know where to start?
 PyTorch has two main types of documentation:
 - user-facing documentation.
-These are the docs that you see over at [our docs website](pytorch.org/docs).
+These are the docs that you see over at [our docs website](https://pytorch.org/docs).
 - developer facing documentation.
 Developer facing documentation is spread around our READMEs in our codebase and in
-the [PyTorch Developer Wiki](pytorch.org/wiki).
+the [PyTorch Developer Wiki](https://pytorch.org/wiki).
 If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation%3F) on our best practices for where to put it.
 
 The rest of this section is about user-facing documentation.
@@ -500,14 +495,13 @@ pip install -r requirements.txt
 
 > Note that if you are a Facebook employee using a devserver, yarn may be more convenient to install katex:
 
-```
+```bash
 yarn global add katex
 ```
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
 
 ```bash
-cd docs
 make html
 ```
 
@@ -522,7 +516,7 @@ missing file warnings but will still complete. For example, to work on `jit.rst`
 
 ```bash
 cd docs/source
-ls | grep rst | grep -v index | grep -v jit | xargs rm
+find . -type f | grep rst | grep -v index | grep -v jit | xargs rm
 
 # Make your changes, build the docs, etc.
 
@@ -532,6 +526,7 @@ git add index.rst jit.rst
 ```
 
 #### Building C++ Documentation
+
 For C++ documentation (https://pytorch.org/cppdocs), we use
 [Doxygen](http://www.doxygen.nl/) and then convert it to
 [Sphinx](http://www.sphinx-doc.org/) via
@@ -570,12 +565,13 @@ Then navigate to `localhost:8000` in your web browser.
 **Tip:**
 You can start a lightweight HTTP server on the remote machine with:
 
-```
+```bash
 python -m http.server 8000 <path_to_html_output>
 ```
 
 Alternatively, you can run `rsync` on your local machine to copy the files from
 your remote machine:
+
 ```bash
 mkdir -p build cpp/build
 rsync -az me@my_machine:/path/to/pytorch/docs/build/html build
@@ -613,7 +609,7 @@ that has the ability to profile native code and Python code in the same session.
 `py-spy` can be installed via `pip`:
 
 ```bash
-$ pip install py-spy
+pip install py-spy
 ```
 
 To use `py-spy`, first write a Python test script that exercises the
@@ -636,7 +632,7 @@ number of times to get good statistics. The most straightforward way to use
 graph](http://www.brendangregg.com/flamegraphs.html):
 
 ```bash
-$ py-spy record -o profile.svg --native -- python test_tensor_tensor_add.py
+py-spy record -o profile.svg --native -- python test_tensor_tensor_add.py
 ```
 
 This will output a file named `profile.svg` containing a flame graph you can
@@ -705,6 +701,7 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `U
 - `USE_XNNPACK=0` will disable compiling with XNNPACK.
 
 For example:
+
 ```bash
 DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
 ```
@@ -740,8 +737,9 @@ situations where files get rebuilt when a previous compilation was exactly the
 same. Using ccache in a situation like this is a real time-saver.
 
 Before building pytorch, install ccache from your package manager of choice:
+
 ```bash
-conda install ccache -f conda-forge
+conda install ccache -c conda-forge
 sudo apt install ccache
 sudo yum install ccache
 brew install ccache
@@ -763,12 +761,14 @@ build should be substantially and noticeably faster than the first build. If
 this doesn't seem to be the case, check the `CMAKE_<LANG>_COMPILER_LAUNCHER`
 rules in `build/CMakeCache.txt`, where `<LANG>` is `C`, `CXX` and `CUDA`.
 Each of these 3 variables should contain ccache, e.g.
+
 ```
 //CXX compiler launcher
 CMAKE_CXX_COMPILER_LAUNCHER:STRING=/usr/bin/ccache
 ```
 
 If not, you can define these variables on the command line before invoking `setup.py`.
+
 ```bash
 export CMAKE_C_COMPILER_LAUNCHER=ccache
 export CMAKE_CXX_COMPILER_LAUNCHER=ccache
@@ -777,6 +777,7 @@ python setup.py develop
 ```
 
 #### Use a faster linker
+
 If you are editing a single file and rebuilding in a tight loop, the time spent
 linking will dominate. The system linker available in most Linux distributions
 (GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
@@ -785,7 +786,8 @@ People on Mac, follow [this guide](https://stackoverflow.com/questions/42730345/
 
 The easiest way to use `lld` this is download the
 [latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
-```
+
+```bash
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
 
@@ -809,6 +811,20 @@ One caveat is that when enabled, this header gets included in every file by defa
 Which may change what code is legal, for example:
 - internal functions can never alias existing names in `<ATen/ATen.h>`
 - names in `<ATen/ATen.h>` will work even if you don't explicitly include it.
+
+#### Workaround for header dependency bug in nvcc
+If re-building without modifying any files results in several CUDA files being
+re-compiled, you may be running into an `nvcc` bug where header dependencies are
+not converted to absolute paths before reporting it to the build system. This
+makes `ninja` think one of the header files has been deleted, so it runs the
+build again.
+
+A compiler-wrapper to fix this is provided in `tools/nvcc_fix_deps.py`. You can use
+this as a compiler launcher, similar to `ccache`
+```bash
+export CMAKE_CUDA_COMPILER_LAUNCHER="python;`pwd`/tools/nvcc_fix_deps.py;ccache"
+python setup.py develop
+```
 
 ### C++ frontend development tips
 
@@ -861,7 +877,7 @@ tensor([1., 2., 3., 4.], dtype=torch.float64)
 GDB tries to automatically load `pytorch-gdb` thanks to the
 [.gdbinit](.gdbinit) at the root of the pytorch repo. However, auto-loadings is disabled by default, because of security reasons:
 
-```
+```bash
 $ gdb
 warning: File "/path/to/pytorch/.gdbinit" auto-loading has been declined by your `auto-load safe-path' set to "$debugdir:$datadir/auto-load".
 To enable execution of this file add
@@ -879,10 +895,13 @@ For more information about this security protection see the
 As gdb itself suggests, the best way to enable auto-loading of `pytorch-gdb`
 is to add the following line to your `~/.gdbinit` (i.e., the `.gdbinit` file
 which is in your home directory, **not** `/path/to/pytorch/.gdbinit`):
-```
+
+```bash
 add-auto-load-safe-path /path/to/pytorch/.gdbinit
 ```
 
+### C++ stacktraces
+Set `TORCH_SHOW_CPP_STACKTRACES=1` to get the C++ stacktrace when an error occurs in Python.
 
 ## CUDA development tips
 
@@ -1083,8 +1102,7 @@ This internally invokes our driver script and closely mimics how clang-tidy is r
 
 ## Pre-commit tidy/linting hook
 
-We use clang-tidy and flake8 (installed with flake8-bugbear,
-flake8-comprehensions, flake8-pyi, and others) to perform additional
+We use clang-tidy to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
@@ -1092,18 +1110,18 @@ performing these checks, before a commit is created:
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 
-You'll need to install an appropriately configured flake8; see
-[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
-for documentation on how to do this.
-
-If you haven't set up the pre-commit hook and have already committed files and
+If you have already committed files and
 CI reports `flake8` errors, you can run the check locally in your PR branch with:
 
   ```bash
   flake8 $(git diff --name-only $(git merge-base --fork-point master))
   ```
 
-fix the code so that no errors are reported when you re-run the above check again,
+You'll need to install an appropriately configured flake8; see
+[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
+for documentation on how to do this.
+
+Fix the code so that no errors are reported when you re-run the above check again,
 and then commit the fix.
 
 ## Building PyTorch with ASAN
@@ -1118,7 +1136,7 @@ folder (later called `$LLVM_ROOT`).
 
 Then set up the appropriate scripts. You can put this in your `.bashrc`:
 
-```
+```bash
 LLVM_ROOT=<wherever your llvm install is>
 PYTORCH_ROOT=<wherever your pytorch checkout is>
 
@@ -1230,39 +1248,17 @@ Once you submit a PR or push a new commit to a branch that is in
 an active PR, CI jobs will be run automatically. Some of these may
 fail and you will need to find out why, by looking at the logs.
 
-Fairly often, a CI failure might be unrelated to your changes. In this case, you
+Fairly often, a CI failure might be unrelated to your changes. You can
+confirm by going to our [HUD](hud.pytorch.org) and seeing if the CI job
+is failing upstream already. In this case, you
 can usually ignore the failure. See [the following
 subsection](#which-commit-is-used-in-ci) for more details.
 
 Some failures might be related to specific hardware or environment
-configurations. In this case, if the job is run by CircleCI, you can
-ssh into the job's session to perform manual debugging using the
-following steps:
+configurations. In this case, if you're a Meta employee, you can ssh into
+the job's session to perform manual debugging following the instructions in
+our [CI wiki](https://github.com/pytorch/pytorch/wiki/Debugging-using-with-ssh-for-Github-Actions).
 
-1. In the CircleCI page for the failed job, make sure you are logged in
-   and then click the `Rerun` actions dropdown button on the top right.
-   Click `Rerun Job with SSH`.
-
-2. When the job reruns, a new step will be added in the `STEPS` tab
-   labelled `Set up SSH`. Inside that tab will be an ssh command that
-   you can execute in a shell.
-
-3. Once you are connected through ssh, you may need to enter a docker
-   container. Run `docker ps` to check if there are any docker
-   containers running. Note that your CI job might be in the process
-   of initiating a docker container, which means it will not show up
-   yet. It is best to wait until the CI job reaches a step where it is
-   building pytorch or running pytorch tests. If the job does have a
-   docker container, run `docker exec -it IMAGE_ID /bin/bash` to
-   connect to it.
-
-4. Now you can find the pytorch working directory, which could be
-   `~/workspace` or `~/project`, and run commands locally to debug
-   the failure.
-
-For certain Windows failures, it may be useful to have a full [Remote
-Desktop](https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-clients) connection. See detailed instructions [here](https://github.com/pytorch/pytorch/wiki/Debugging-Windows-with-Remote-Desktop-or-CDB-(CLI-windbg)-on-CircleCI)
-for how to set that up after rerunning the job.
 
 ### Which commit is used in CI?
 
@@ -1297,7 +1293,7 @@ This choice depends on several factors; here is the decision tree as of
     - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_cpp_doc_build
       - pytorch_doc_test
-      - pytorch_linux_backward_compatibility_check_test
+      - pytorch_linux_forward_backward_compatibility_check_test
       - pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
       - pytorch_linux_xenial_py3_6_gcc5_4_test
       - pytorch_python_doc_build
@@ -1316,3 +1312,6 @@ your PR branch. If you happen to have write access to this repo, you can choose
 to use `ghstack` to eliminate this nondeterminism for GitHub Actions jobs on
 your PRs, but it will still be present for the select CircleCI jobs listed
 above.
+
+## Dev Infra Office Hours
+[Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any questions regarding developer experience, Green HUD, and CI.

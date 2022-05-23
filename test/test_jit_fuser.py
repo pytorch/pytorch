@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: jit"]
+
 import unittest
 import os
 import sys
@@ -6,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
+from unittest import skipIf
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests, IS_WINDOWS, TemporaryDirectoryName, shell
@@ -36,6 +39,7 @@ def warmup_forward(f, *args):
     return results
 
 
+@skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "skip due to SIGIOT failures, #67646")
 class TestFuser(JitTestCase):
     def assertAllFused(self, graph, except_for=()):
 

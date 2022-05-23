@@ -200,7 +200,7 @@ struct BoxedKernelWrapper<
 // 3. in-place ops take a single non-const Tensor reference
 // as their first argument, and return it.
 //
-// Note: all signatures matching this pattern are are assumed to be for such ops.
+// Note: all signatures matching this pattern are assumed to be for such ops.
 // Because of this, the generated BoxedKernelWrapper specializations simply
 // return the in-place argument.
 //
@@ -260,7 +260,7 @@ struct BoxedKernelWrapper<
 // 4. out of place ops that take a single non-const Tensor reference as their
 // final argument, and also return it.
 //
-// Note: all signatures matching this pattern are are assumed to be for such ops.
+// Note: all signatures matching this pattern are assumed to be for such ops.
 // This assumption permits the generated BoxedKernelWrapper specializations to simply
 // return out arguments.
 //
@@ -300,7 +300,7 @@ struct BoxedKernelWrapper<
 // 5. out of place ops that take multiple non-const Tensor references as their
 // final arguments, and return them in a std::tuple.
 //
-// Note: all signatures matching this pattern are are assumed to be for such ops.
+// Note: all signatures matching this pattern are assumed to be for such ops.
 // This assumption permits the generated BoxedKernelWrapper specializations to simply
 // return the out arguments.
 //

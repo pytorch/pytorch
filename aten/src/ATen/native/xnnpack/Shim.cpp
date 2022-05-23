@@ -31,7 +31,7 @@ bool available() {
 bool use_convolution2d(
     const Tensor&,
     const Tensor&,
-    const Tensor&,
+    const at::OptionalIntArrayRef,
     const IntArrayRef,
     const IntArrayRef,
     const IntArrayRef,

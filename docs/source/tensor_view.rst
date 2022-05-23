@@ -26,10 +26,10 @@ Since views share underlying data with its base tensor, if you edit the data
 in the view, it will be reflected in the base tensor as well.
 
 Typically a PyTorch op returns a new tensor as output, e.g. :meth:`~torch.Tensor.add`.
-But in case of view ops, outputs are views of input tensors to avoid unncessary data copy.
+But in case of view ops, outputs are views of input tensors to avoid unnecessary data copy.
 No data movement occurs when creating a view, view tensor just changes the way
 it interprets the same data. Taking a view of contiguous tensor could potentially produce a non-contiguous tensor.
-Users should be pay additional attention as contiguity might have implicit performance impact.
+Users should pay additional attention as contiguity might have implicit performance impact.
 :meth:`~torch.Tensor.transpose` is a common example.
 
 ::
@@ -48,6 +48,7 @@ Users should be pay additional attention as contiguity might have implicit perfo
 For reference, here’s a full list of view ops in PyTorch:
 
 - Basic slicing and indexing op, e.g. ``tensor[0, 2:, 1:7:2]`` returns a view of base ``tensor``, see note below.
+- :meth:`~torch.Tensor.adjoint`
 - :meth:`~torch.Tensor.as_strided`
 - :meth:`~torch.Tensor.detach`
 - :meth:`~torch.Tensor.diagonal`
@@ -61,6 +62,9 @@ For reference, here’s a full list of view ops in PyTorch:
 - :meth:`~torch.Tensor.transpose`
 - :meth:`~torch.Tensor.t`
 - :attr:`~torch.Tensor.T`
+- :attr:`~torch.Tensor.H`
+- :attr:`~torch.Tensor.mT`
+- :attr:`~torch.Tensor.mH`
 - :attr:`~torch.Tensor.real`
 - :attr:`~torch.Tensor.imag`
 - :meth:`~torch.Tensor.view_as_real`

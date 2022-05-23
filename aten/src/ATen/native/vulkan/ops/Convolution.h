@@ -20,7 +20,6 @@ enum Conv2dMethod {
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
   static Conv2dOpContext create(
-      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
@@ -47,7 +46,6 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
 
  private:
   Conv2dOpContext(
-      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
@@ -63,7 +61,8 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
   void conv2d_sliding_window(
       const api::Shader::Descriptor& shader,
       vTensor& v_output,
-      const vTensor& v_input) const;
+      const vTensor& v_input,
+      const std::string& op_name) const;
 
   void conv2d_winograd_2_3(
       vTensor& v_output,

@@ -13,18 +13,16 @@ namespace ops {
 class LinearOpContext final : public torch::jit::CustomClassHolder {
  public:
   static LinearOpContext create(
-      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias);
 
   using State = std::tuple<Tensor, c10::optional<Tensor>>;
 
-  Tensor run(const Tensor& input, float beta, float alpha) const;
+  Tensor run(const Tensor& input, float beta, float alpha, const std::string& op_name) const;
   State unpack() const;
 
  private:
   LinearOpContext(
-      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias);
 

@@ -13,7 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict, List, Tuple, Union, Callable
+from typing import Any, Dict, List, Set, Tuple, Union, Callable
 
 
 import torch
@@ -26,7 +26,7 @@ from torch.jit._builtins import _register_builtin
 from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
-from torch.jit._fuser import _graph_for
+from torch.jit._fuser import _graph_for, _script_method_graph_for
 from torch.jit._state import (
     _try_get_jit_cached_function,
     _try_get_jit_cached_overloads,
@@ -47,7 +47,7 @@ from torch._classes import classes
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
-torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore[attr-defined]
+torch._C.ScriptMethod.graph_for = _script_method_graph_for  # type: ignore[attr-defined]
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore[attr-defined]
 ScriptFunction = torch._C.ScriptFunction
 ScriptFunction.__doc__ = """
@@ -55,6 +55,13 @@ Functionally equivalent to a :class:`ScriptModule`, but represents a single
 function and does not have any attributes or Parameters.
 """
 set_module(ScriptFunction, "torch.jit")
+
+# Throws an error if a jit function is pickled.
+# Helps to avoid Python crashes for Python versions 3.9.5 + when protocol 0 or 1 is given as an argument.
+def _reduce(cls):
+    raise pickle.PickleError("ScriptFunction cannot be pickled")
+
+ScriptFunction.__reduce__ = _reduce  # type: ignore[assignment]
 
 
 if _enabled:
@@ -68,7 +75,7 @@ Attribute.__doc__ = """
     This method is a pass-through function that returns `value`, mostly
     used to indicate to the TorchScript compiler that the left-hand side
     expression is a class instance attribute with type of `type`. Note that
-    `torch.jit.Attribute` should only be used in `__init__` method of `nn.Module`
+    `torch.jit.Attribute` should only be used in `__init__` method of `jit.ScriptModule`
     subclasses.
 
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
@@ -88,9 +95,9 @@ Attribute.__doc__ = """
         import torch
         from typing import Dict
 
-        class AttributeModule(torch.nn.Module):
+        class AttributeModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super(AttributeModule, self).__init__()
                 self.foo = torch.jit.Attribute(0.1, float)
 
                 # we should be able to use self.foo as a float here
@@ -104,6 +111,27 @@ Attribute.__doc__ = """
         # m will contain two attributes
         # 1. foo of type float
         # 2. names_ages of type Dict[str, int]
+
+    .. testcleanup::
+
+        del AttributeModule
+        del m
+
+    Note: it's now preferred to instead use type annotations instead of `torch.jit.Annotate`:
+
+    .. testcode::
+
+        import torch
+        from typing import Dict
+
+        class AttributeModule(torch.nn.Module):
+            names: Dict[str, int]
+
+            def __init__(self):
+                super(AttributeModule, self).__init__()
+                self.names = {}
+
+        m = AttributeModule()
 
     .. testcleanup::
 
@@ -242,7 +270,7 @@ class ScriptMeta(type):
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
                 cls._methods[k] = v
-            base_constants = getattr(base, "_constants_set", set())
+            base_constants: Set = getattr(base, "_constants_set", set())
             cls._constants_set = cls._constants_set.union(base_constants)
 
         # find all the script methods of the current class
@@ -410,7 +438,7 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__getattr__(attr)  # type: ignore[misc]
 
             if attr in self._props:
-                return self._props[attr].fget()
+                return self._props[attr].fget()  # type: ignore[call-arg, misc]
 
             return getattr(self._c, attr)
 
@@ -419,7 +447,7 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__setattr__(attr, value)
 
             if attr in self._props:
-                return self._props[attr].fset(value)
+                return self._props[attr].fset(value)  # type: ignore[call-arg, misc]
 
             setattr(self._c, attr, value)
 
@@ -449,7 +477,7 @@ if _enabled:
         setattr(RecursiveScriptClass, method_name, method_template)
 
     # this is a Python 'non-data descriptor' that causes the first access
-    # to ScriptModule's forward to lookup the forward method and stash
+    # to ScriptModule's forward to look up the forward method and stash
     # it in the objects dict. Due to the standard rules for attribute lookup,
     # subsequent lookups will just directly return the previously looked up method.
     # This is necessary because nn.Module defines forward as a method. If we
@@ -712,7 +740,7 @@ if _enabled:
             return "original_name={}".format(self.original_name)
 
         def graph_for(self, *args, **kwargs):
-            return self.forward.graph_for(*args, **kwargs)
+            return self.forward.graph_for(self, *args, **kwargs)
 
         @property
         def original_name(self):
@@ -784,13 +812,6 @@ if _enabled:
                 #   s.save()   <--- this doesn't have `python_attr`
                 # It's fairly trivial to save enough info to warn in this case.
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
-
-        def __getstate__(self):
-            raise pickle.PickleError(
-                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. "
-                + "Mixed serialization of script and non-script modules is not supported. "
-                + "For purely script modules use my_script_module.save(<filename>) instead."
-            )
 
         def __copy__(self):
             return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
@@ -881,6 +902,7 @@ if _enabled:
         "forward",
         "register_buffer",
         "register_parameter",
+        "register_module",
         "add_module",
         "_apply",
         "apply",
@@ -1304,8 +1326,12 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
-            obj = obj.__original_fn
+            obj = obj.__original_fn  # type: ignore[union-attr]
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+
+        # some functions are explicitly marked as not supported in script mode
+        if hasattr(obj, "__script_unsupported"):
+            raise RuntimeError("TorchScript error: " + obj.__script_unsupported)
 
         _check_directly_compile_overloaded(obj)
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)

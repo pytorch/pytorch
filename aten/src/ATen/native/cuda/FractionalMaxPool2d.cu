@@ -1,15 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/Dispatch.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCNumerics.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/fractional_max_pool2d_backward_native.h>
+#include <ATen/ops/fractional_max_pool2d_native.h>
+#endif
 
 #include <algorithm>
 #include <cfloat>
@@ -69,7 +77,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
         for (int w = poolW; w < poolW + poolSizeW; ++w) {
           scalar_t val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
-          if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
+          if (val > maxVal || at::_isnan(val)) {
             maxIndex = h * input.size(3) + w;
             maxVal = val;
           }
@@ -79,7 +87,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
           int w = i + poolW;
           scalar_t val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
-          if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
+          if (val > maxVal || at::_isnan(val)) {
             maxIndex = h * input.size(3) + w;
             maxVal = val;
           }
@@ -190,16 +198,19 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
    );
 }
 
-namespace {
-
-void fractional_max_pool2d_backward_out_cuda_template(
-  Tensor& gradInput,
+TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cuda)(
   const Tensor& gradOutput,
   const Tensor& input,
   IntArrayRef pool_size /* unused */,
   IntArrayRef output_size,
-  const Tensor& indices)
+  const Tensor& indices,
+  const Tensor& gradInput)
 {
+
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("fractional_max_pool2d_backward_cuda");
+
   int dimh = 1;
   int dimw = 2;
 
@@ -216,16 +227,10 @@ void fractional_max_pool2d_backward_out_cuda_template(
   int outputH = output_size[0];
   int outputW = output_size[1];
 
-  TORCH_CHECK(outputH == gradOutput.size(dimh),
-           "fractional_max_pool2d(): gradOutput height unexpected");
-  TORCH_CHECK(outputW == gradOutput.size(dimw),
-           "fractional_max_pool2d(): gradOutput width unexpected");
-
-  /* resize */
-  gradInput.resize_as_(input);
   if (gradInput.numel() == 0) {
     return;
   }
+
   gradInput.zero_();
 
   auto gradInput_ = gradInput;
@@ -260,49 +265,6 @@ void fractional_max_pool2d_backward_out_cuda_template(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   );
-}
-
-}// namespace
-
-Tensor& fractional_max_pool2d_backward_out_cuda(const at::Tensor& gradOutput_,
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& indices,
-  at::Tensor& gradInput)
-{
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("fractional_max_pool2d_backward_out_cuda");
-  fractional_max_pool2d_backward_out_cuda_template(
-    gradInput,
-    gradOutput_,
-    input,
-    pool_size,
-    output_size,
-    indices);
-  return gradInput;
-}
-
-Tensor fractional_max_pool2d_backward_cuda(
-  const at::Tensor& gradOutput_,
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& indices)
-{
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("fractional_max_pool2d_backward_cuda");
-  Tensor gradInput = at::empty({0}, input.options());
-  fractional_max_pool2d_backward_out_cuda_template(
-    gradInput,
-    gradOutput_,
-    input,
-    pool_size,
-    output_size,
-    indices);
-  return gradInput;
 }
 
 }// at::native

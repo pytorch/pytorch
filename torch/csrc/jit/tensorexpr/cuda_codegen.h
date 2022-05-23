@@ -10,9 +10,11 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
 namespace torch {
@@ -54,6 +56,7 @@ class CudaAnalysis : public IRVisitor {
 
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
+  void visit(PlacementAllocatePtr v) override;
   void visit(ForPtr v) override;
 
   std::unordered_set<BufPtr> store_targets_;
@@ -220,8 +223,9 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
 
   ~CudaCodeGen() override;
 
-  void call_raw(const std::vector<void*>& args) override;
   void call(const std::vector<CallArg>& args) override;
+  void call_raw(const std::vector<void*>& args) override;
+  void call_with_numel(void** args, int64_t numel) override;
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {
@@ -269,8 +273,19 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   std::unique_ptr<CudaAnalysis> cuda_analysis_;
   std::unique_ptr<GPUMetaVarRewriter> metavar_rewriter_;
   std::unordered_set<std::string> taken_func_names;
+  std::mutex eval_lock_;
   CUfunction function_;
   bool has_random_ = false;
+  int thread_block_size_ = -1;
+
+  std::vector<bool> arg_pos_in_extents_;
+#ifdef TORCH_ENABLE_LLVM
+  std::vector<ExprEval<LLVMCodeGen>> block_extents_eval_;
+  std::vector<ExprEval<LLVMCodeGen>> thread_extents_eval_;
+#else
+  std::vector<ExprEval<SimpleIREvaluator>> block_extents_eval_;
+  std::vector<ExprEval<SimpleIREvaluator>> thread_extents_eval_;
+#endif
 
   std::string GetUniqueFuncName(const std::string& func_prefix);
 };

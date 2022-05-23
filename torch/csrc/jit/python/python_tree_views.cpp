@@ -104,7 +104,8 @@ void initTreeViewBindings(PyObject* module) {
             return SourceRange(self.source_, start, end);
           })
       .def_property_readonly("source", [](const SourceRangeFactory& self) {
-        return self.source_->text();
+        auto text_view = self.source_->text_str().str();
+        return text_view;
       });
 
   py::class_<TreeView>(m, "TreeView")

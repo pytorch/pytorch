@@ -2,36 +2,36 @@
 #define TH_GENERIC_FILE "torch/csrc/generic/serialization.cpp"
 #else
 
-#ifdef THC_GENERIC_FILE
-#include <c10/cuda/CUDAGuard.h>
-#endif
+#include <c10/core/CPUAllocator.h>
 
 // save_save is necessary since the old eager format saved storages as
 // [size + data], but the v1.5 eager format removes this since size is saved in
 // the filesize.
 template <class io>
-void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
+void THPStorage_(writeFileRaw)(c10::StorageImpl *self, io fd, bool save_size, uint64_t element_size)
 {
-#ifdef THC_GENERIC_FILE
-  c10::cuda::CUDAGuard guard(self->device());
-#endif
-
+  c10::DeviceGuard guard(self->device());
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t *data;
-  int64_t size_bytes = self->nbytes();
-  int64_t numel = size_bytes / sizeof(scalar_t);
-#ifndef THC_GENERIC_FILE
-  data = THWStorage_(data)(LIBRARY_STATE self);
-#else
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::unique_ptr<char[]> cpu_data(new char[size_bytes]);
-  data = (scalar_t*)cpu_data.get();
-  THCudaCheck(cudaMemcpy(
-      data,
-      THWStorage_(data)(LIBRARY_STATE self),
-      size_bytes,
-      cudaMemcpyDeviceToHost));
+  std::unique_ptr<char[]> cpu_data;
+  int64_t size_bytes = self->nbytes();
+  int64_t numel = size_bytes / element_size;
+  if (self->device_type() == at::kCPU) {
+    data = self->data<scalar_t>();
+#ifdef USE_CUDA
+  } else if (self->device_type() == at::kCUDA) {
+    cpu_data = std::unique_ptr<char[]>(new char[size_bytes]);
+    data = (scalar_t*)cpu_data.get();
+    C10_CUDA_CHECK(cudaMemcpy(
+        data,
+        self->data<scalar_t>(),
+        size_bytes,
+        cudaMemcpyDeviceToHost));
 #endif
+  } else {
+    TORCH_CHECK(false, "writeFileRaw: Device not recognized: ", self->device_type());
+  }
   if (save_size) {
     if (torch::utils::THP_nativeByteOrder() ==
         torch::utils::THPByteOrder::THP_LITTLE_ENDIAN)
@@ -48,7 +48,7 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
     }
   }
   // fast track for bytes and little endian
-  if (sizeof(scalar_t) == 1 ||
+  if (element_size == 1 ||
       torch::utils::THP_nativeByteOrder() ==
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
     doWrite(fd, data, size_bytes);
@@ -56,83 +56,86 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
     int64_t buffer_size = std::min(numel, (int64_t)5000);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(scalar_t)]);
+    std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * element_size]);
     for (int64_t i = 0; i < numel; i += buffer_size) {
       size_t to_convert = std::min(numel - i, buffer_size);
       // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (sizeof(scalar_t) == 2) {
+      if (element_size == 2) {
         torch::utils::THP_encodeInt16Buffer(
             (uint8_t*)le_buffer.get(),
             (const int16_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
-      } else if (sizeof(scalar_t) == 4) {
+      } else if (element_size == 4) {
         torch::utils::THP_encodeInt32Buffer(
             (uint8_t*)le_buffer.get(),
             (const int32_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
-      } else if (sizeof(scalar_t) == 8) {
+      } else if (element_size == 8) {
         torch::utils::THP_encodeInt64Buffer(
             (uint8_t*)le_buffer.get(),
             (const int64_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       }
-      doWrite(fd, le_buffer.get(), to_convert * sizeof(scalar_t));
+      doWrite(fd, le_buffer.get(), to_convert * element_size);
     }
   }
 }
 
-template void THPStorage_(writeFileRaw<int>)(THWStorage *self, int fd, bool save_size);
-template void THPStorage_(writeFileRaw<PyObject*>)(THWStorage *self, PyObject* fd, bool save_size);
+template void THPStorage_(writeFileRaw<int>)(c10::StorageImpl *self, int fd, bool save_size, uint64_t element_size);
+template void THPStorage_(writeFileRaw<PyObject*>)(c10::StorageImpl *self, PyObject* fd, bool save_size, uint64_t element_size);
 
 template <class io>
-THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
+c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw)(
+    io file, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size)
 {
-#ifdef THC_GENERIC_FILE
-  c10::cuda::OptionalCUDAGuard guard;
-  if (_storage != nullptr) {
-    guard.set_device(_storage->device());
+  c10::OptionalDeviceGuard guard;
+  if (storage.defined()) {
+    guard.reset_device(storage->device());
   }
-#endif
-
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t *data;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t size;
   doRead(file, &size, sizeof(int64_t));
+  int64_t nbytes = element_size * size;
   if (torch::utils::THP_nativeByteOrder() ==
       torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t nsize; // convert little endian storage to big endian cpu
-    nsize = size;
+    nsize = nbytes;
     torch::utils::THP_decodeInt64Buffer(
-        &size, (const uint8_t*)&nsize, torch::utils::THP_nativeByteOrder(), 1);
+        &nbytes, (const uint8_t*)&nsize, torch::utils::THP_nativeByteOrder(), 1);
   }
-  THWStoragePtr storage;
-  if (_storage == nullptr) {
-    storage = THWStorage_(newWithSize)(LIBRARY_STATE size);
+  if (!storage.defined()) {
+    storage = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      nbytes,
+      c10::GetDefaultCPUAllocator(),
+      /*resizable=*/true);
   } else {
-    int64_t _storage_numel = _storage->nbytes() / sizeof(scalar_t);
-    THPUtils_assert(
-        _storage_numel == size,
-        "storage has wrong size: expected %ld got %ld",
-        size,
-        _storage_numel);
-    storage = _storage;
+    int64_t _storage_nbytes = storage->nbytes();
+    TORCH_CHECK(
+        _storage_nbytes == nbytes,
+        "storage has wrong byte size: expected %ld got %ld",
+        nbytes,
+        _storage_nbytes);
   }
 
-#ifndef THC_GENERIC_FILE
-  data = THWStorage_(data)(LIBRARY_STATE storage);
-#else
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::unique_ptr<char[]> cpu_data(new char[size * sizeof(scalar_t)]);
-  data = (scalar_t*)cpu_data.get();
-#endif
+  std::unique_ptr<char[]> cpu_data;
+
+  if (storage->device_type() == at::kCPU) {
+    data = storage->data<scalar_t>();
+  } else {
+    cpu_data = std::unique_ptr<char[]>(new char[nbytes]);
+    data = (scalar_t*)cpu_data.get();
+  }
 
   // fast track for bytes and little endian
-  if (sizeof(scalar_t) == 1 ||
+  if (element_size == 1 ||
       torch::utils::THP_nativeByteOrder() ==
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
     doRead(file, data, storage->nbytes());
@@ -140,27 +143,26 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
     int64_t buffer_size = std::min(size, (int64_t)5000);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(scalar_t)]);
-
+    std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * element_size]);
 
     for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
-      doRead(file, le_buffer.get(), sizeof(scalar_t) * to_convert);
+      doRead(file, le_buffer.get(), element_size * to_convert);
 
       // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (sizeof(scalar_t) == 2) {
+      if (element_size == 2) {
         torch::utils::THP_decodeInt16Buffer(
             (int16_t*)data + i,
             le_buffer.get(),
             torch::utils::THP_nativeByteOrder(),
             to_convert);
-      } else if (sizeof(scalar_t) == 4) {
+      } else if (element_size == 4) {
         torch::utils::THP_decodeInt32Buffer(
             (int32_t*)data + i,
             le_buffer.get(),
             torch::utils::THP_nativeByteOrder(),
             to_convert);
-      } else if (sizeof(scalar_t) == 8) {
+      } else if (element_size == 8) {
         torch::utils::THP_decodeInt64Buffer(
             (int64_t*)data + i,
             le_buffer.get(),
@@ -170,13 +172,17 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
     }
   }
 
-#ifdef THC_GENERIC_FILE
-  THCudaCheck(cudaMemcpy(THWStorage_(data)(LIBRARY_STATE storage), data, size * sizeof(scalar_t), cudaMemcpyHostToDevice));
+#ifdef USE_CUDA
+  if (storage->device_type() == at::kCUDA) {
+    C10_CUDA_CHECK(cudaMemcpy(storage->data<scalar_t>(), data, nbytes, cudaMemcpyHostToDevice));
+  }
 #endif
-  return storage.release();
+  return storage;
 }
 
-template THWStorage* THPStorage_(readFileRaw<int>)(int fd, THWStorage* storage);
-template THWStorage* THPStorage_(readFileRaw<PyObject*>)(PyObject* fd, THWStorage* storage);
+template c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw<int>)(
+    int fd, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size);
+template c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw<PyObject*>)(
+    PyObject* fd, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size);
 
 #endif

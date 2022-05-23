@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 #include <c10/macros/Macros.h>
 
 namespace at { namespace native {
@@ -41,7 +42,7 @@ __device__ void applyOp3(
 // Assume both dense and values are contiguous.
 // Currently only used in add_out_dense_sparse_cuda: add(dense, sparse, scalar).
 template <typename Op, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void sparseElementwiseKernel(
@@ -71,7 +72,7 @@ __global__ void sparseElementwiseKernel(
 // Assume dense is contiguous.
 // Currently only used in add_out_dense_sparse_cuda: add(dense, sparse, scalar).
 template <typename Op, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void sparseElementwiseKernelScalar(
@@ -95,7 +96,7 @@ __global__ void sparseElementwiseKernelScalar(
 }
 
 template <typename OpBoth, typename OpLeft, typename OpRight, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void valueSparseUnionKernel(
@@ -142,7 +143,7 @@ __global__ void valueSparseUnionKernel(
 
 // TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void indexSparseUnionKernel(
@@ -192,7 +193,7 @@ __global__ void indexSparseUnionKernel(
 }
 
 template <typename Op, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void valueSparseIntersectionKernel(
@@ -209,6 +210,13 @@ __global__ void valueSparseIntersectionKernel(
   int64_t match, d;
   int64_t nDimI = r_indices.sizes[0];
   IndexType valueSize = r_values.strides[0];
+  // reset valueSize if a dense dimension is zero:
+  for (d=0; d<r_values.dims; d++) {
+    if (r_values.sizes[d] == 0) {
+      valueSize = 0;
+      break;
+    }
+  }
   IndexType r_i = 0, t_i = 0, s_i = 0;
   while (t_i < t_nnz && s_i < s_nnz) {
     match = 1;
@@ -231,7 +239,7 @@ __global__ void valueSparseIntersectionKernel(
 
 // TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
 #endif
 __global__ void indexSparseIntersectionKernel(
@@ -297,7 +305,7 @@ __global__ void indexSparseIntersectionKernel(
 // }
 
 template <typename Dtype, typename Acctype>
-C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
+C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   Dtype *values, Dtype *newValues,
@@ -321,7 +329,6 @@ __global__ void coalesceValuesKernel(
     for (int row = begin; row < end; row++) {
       const int valueRow = ((int) value_indices[row]) * stride;
 
-
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
@@ -339,6 +346,56 @@ __global__ void coalesceValuesKernel(
       if (featureDim < stride)
       {
         newValues[newValueRow + featureDim] = static_cast<Dtype>(tmp[ii]);
+      }
+    }
+  }
+}
+
+// coalesceValuesKernel when Dtype/Acctype is bool. Can be eliminated using
+// `if constexpr` when CUDA codes will be compiled under C++-17, see
+// gh-56055 for blockers.
+template<typename Dtype>
+C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
+__global__ void coalesceValuesKernel(
+  int64_t *segment_offsets, int64_t *value_indices,
+  bool *values, bool *newValues,
+  int64_t nnz, int64_t newNnz, int64_t stride) {
+
+  int seg = blockIdx.x * 4 + threadIdx.y;
+
+  // Number of values processed by each thread (grain size)
+  const int SZ = 4;
+
+  if (seg < newNnz) {
+    const int newValueRow = seg * stride;
+    const int begin = segment_offsets[seg];
+    const int end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
+    const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+    bool tmp[SZ];
+    #pragma unroll
+    for (int ii = 0; ii < SZ; ii++) {
+      tmp[ii] = 0;
+    }
+    for (int row = begin; row < end; row++) {
+      const int valueRow = ((int) value_indices[row]) * stride;
+
+      #pragma unroll
+      for (int ii = 0; ii < SZ; ii++)
+      {
+        int featureDim = startFeature + ii * C10_WARP_SIZE;
+        if (featureDim < stride)
+        {
+          tmp[ii] |= values[valueRow + featureDim];
+        }
+      }
+    }
+    #pragma unroll
+    for (int ii = 0; ii < SZ; ii++)
+    {
+      int featureDim = startFeature + ii * C10_WARP_SIZE;
+      if (featureDim < stride)
+      {
+        newValues[newValueRow + featureDim] = tmp[ii];
       }
     }
   }

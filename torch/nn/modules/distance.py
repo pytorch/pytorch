@@ -6,7 +6,7 @@ from torch import Tensor
 
 class PairwiseDistance(Module):
     r"""
-    Computes the batchwise pairwise distance between vectors :math:`v_1`, :math:`v_2` using the p-norm:
+    Computes the pairwise distance between vectors :math:`v_1`, :math:`v_2` using the p-norm:
 
     .. math ::
         \Vert x \Vert _p = \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}.
@@ -18,9 +18,10 @@ class PairwiseDistance(Module):
         keepdim (bool, optional): Determines whether or not to keep the vector dimension.
             Default: False
     Shape:
-        - Input1: :math:`(N, D)` where `D = vector dimension`
-        - Input2: :math:`(N, D)`, same shape as the Input1
-        - Output: :math:`(N)`. If :attr:`keepdim` is ``True``, then :math:`(N, 1)`.
+        - Input1: :math:`(N, D)` or :math:`(D)` where `N = batch dimension` and `D = vector dimension`
+        - Input2: :math:`(N, D)` or :math:`(D)`, same shape as the Input1
+        - Output: :math:`(N)` or :math:`()` based on input dimension.
+          If :attr:`keepdim` is ``True``, then :math:`(N, 1)` or :math:`(1)` based on input dimension.
     Examples::
         >>> pdist = nn.PairwiseDistance(p=2)
         >>> input1 = torch.randn(100, 128)

@@ -4,6 +4,133 @@
 
 namespace torch {
 namespace jit {
+
+// A stringlike class backed by a vector of string_view
+// the string represented are logically the concatenation of  the string_views
+// This has advantage of not needing continues memory.
+StringCordView::StringCordView() {
+  accumulated_sizes_.push_back(0);
+}
+
+StringCordView::StringCordView(
+    std::vector<c10::string_view> inputs,
+    std::vector<std::shared_ptr<std::string>> ownerships)
+    : pieces_(std::move(inputs)), owned_strings_(std::move(ownerships)) {
+  accumulated_sizes_.push_back(0);
+  size_t running_sum = 0;
+  for (auto& s : pieces_) {
+    if (s.size() > 0) {
+      running_sum += s.size();
+      accumulated_sizes_.push_back(running_sum);
+    }
+  }
+}
+
+size_t StringCordView::find(const std::string& tok, size_t start) const {
+  if (tok.size() == 0) {
+    return 0;
+  }
+
+  if ((size() - start) < tok.size()) {
+    return std::string::npos;
+  }
+
+  Iterator begin = iter_for_pos(start);
+  Iterator end_iter = end();
+  size_t offset = start;
+  for (; begin != end_iter; ++begin, ++offset) {
+    if (*begin == tok[0]) {
+      auto mis = std::mismatch(begin, end_iter, tok.begin(), tok.end());
+      if (mis.second == tok.end()) {
+        // no mismatch, and second string (tok) is exhausted.
+        return offset;
+      }
+      if (mis.first == end_iter) {
+        // this str is exhausted but tok is not
+        return std::string::npos;
+      }
+    }
+  }
+  return std::string::npos;
+}
+
+StringCordView StringCordView::substr(size_t start, size_t size) const {
+  std::vector<c10::string_view> pieces;
+  std::vector<std::shared_ptr<std::string>> ownerships;
+  if (start >= this->size()) {
+    // out of bounds
+    return StringCordView();
+  }
+  if (start + size >= this->size()) {
+    size = this->size() - start;
+  }
+  Iterator begin = iter_for_pos(start);
+  Iterator end = iter_for_pos(start + size);
+
+  if (begin.line_ == end.line_) {
+    // same line
+    pieces.push_back(pieces_[begin.line_].substr(begin.pos_, size));
+  } else {
+    pieces.push_back(pieces_[begin.line_].substr(begin.pos_));
+
+    size_t last_line = pieces_.size();
+    if (end != this->end() && end.line_ < last_line) {
+      // end is within the string
+      last_line = end.line_;
+    }
+    for (size_t i = begin.line_ + 1; i < last_line; i++) {
+      pieces.push_back(pieces_[i]);
+    }
+    if (end != this->end()) {
+      pieces.push_back(pieces_[end.line_].substr(0, end.pos_));
+    }
+  }
+
+  // share ownership
+  std::copy(
+      owned_strings_.begin(),
+      owned_strings_.end(),
+      std::back_inserter(ownerships));
+
+  return StringCordView(std::move(pieces), std::move(ownerships));
+}
+
+bool StringCordView::operator==(const std::string& rhs) const {
+  if (size() != rhs.size()) {
+    return false;
+  }
+  auto res = std::mismatch(begin(), end(), rhs.begin(), rhs.end());
+  // both need to exhaust
+  return res.first == end() && res.second == rhs.end();
+}
+
+bool StringCordView::operator==(const StringCordView& rhs) const {
+  if (size() != rhs.size()) {
+    return false;
+  }
+  auto res = std::mismatch(begin(), end(), rhs.begin(), rhs.end());
+  // both need to exhaust
+  return res.first == end() && res.second == rhs.end();
+}
+
+StringCordView::Iterator StringCordView::iter_for_pos(size_t pos) const {
+  if (pos == 0) {
+    return begin();
+  }
+  if (pos >= size()) {
+    return end();
+  }
+  auto upper = std::upper_bound(
+      accumulated_sizes_.begin(), accumulated_sizes_.end(), pos);
+  if (upper == accumulated_sizes_.end()) {
+    return end();
+  }
+  size_t line = upper - accumulated_sizes_.begin() - 1;
+  assert(accumulated_sizes_[line] <= pos);
+  assert(accumulated_sizes_[line + 1] > pos);
+  return Iterator(this, line, pos - accumulated_sizes_[line], size() - pos);
+}
+
 size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
   return (
       std::hash<uintptr_t>()(reinterpret_cast<uintptr_t>(key.source().get())) ^
@@ -18,7 +145,7 @@ c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
   return gen_ranges_->findSourceRangeThatGenerated(range);
 }
 
-C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
+void SourceRange::highlight(std::ostream& out) const {
   // Retrieve original SourceRange, if present.
   if (auto orig_source_range = findSourceRangeThatGenerated()) {
     orig_source_range->highlight(out);
@@ -27,7 +154,7 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   print_with_context(out, CONTEXT, true, "");
 }
 
-C10_EXPORT void format_stack_trace(
+void format_stack_trace(
     std::ostream& out,
     const std::vector<StackEntry>& entries) {
   bool has_orig_ranges = false;
@@ -63,17 +190,17 @@ C10_EXPORT void format_stack_trace(
   }
 }
 
-C10_EXPORT void SourceRange::print_with_context(
+void SourceRange::print_with_context(
     std::ostream& out,
     size_t context,
     bool highlight,
     const std::string& funcname) const {
   // This is an empty SourceRange, used as a sentinel value.
-  if (!source_) {
+  if (!source_view_) {
     return;
   }
 
-  const std::string& str = source_->text();
+  auto str = source_view_->text_str().str();
   if (size() == str.size()) {
     // this is just the entire file, not a subset, so print it out.
     // primarily used to print out python stack traces
@@ -141,7 +268,7 @@ C10_EXPORT void SourceRange::print_with_context(
     line_end = start();
     while (line_start < range_end) {
       // move line_end to end of line
-      while (str[line_end] != '\n' && line_end < str.size()) {
+      while (line_end < str.size() && str[line_end] != '\n') {
         ++line_end;
       }
       // print line of code

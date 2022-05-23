@@ -1,11 +1,36 @@
+// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/Reduce.cuh>
-#include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/cuda/Resize.h>
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/batch_norm_backward_elemt_native.h>
+#include <ATen/ops/batch_norm_backward_reduce_native.h>
+#include <ATen/ops/batch_norm_elemt_native.h>
+#include <ATen/ops/batch_norm_gather_stats_native.h>
+#include <ATen/ops/batch_norm_gather_stats_with_counts_native.h>
+#include <ATen/ops/batch_norm_stats_native.h>
+#include <ATen/ops/batch_norm_update_stats_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/native_batch_norm_backward_native.h>
+#include <ATen/ops/native_batch_norm_native.h>
+#include <ATen/ops/scalar_tensor.h>
+#endif
+
+// TODO: Doesn't exist in this branch
+#if 0
+#include <ATen/ops/from_blob.h>
+#else
+#include <ATen/Functions.h>
+#endif
 
 namespace at { namespace native {
 
@@ -648,7 +673,9 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+  if (at::cuda::detail::canUse32BitIndexMath(self) &&
+      batch_norm_use_channels_last_kernels(self) &&
+      batch_norm_use_channels_last_kernels(input))  {
     return batch_norm_backward_elemt_channels_last_cuda_template(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
   }
 

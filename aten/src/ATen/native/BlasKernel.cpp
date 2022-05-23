@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <c10/util/irange.h>
 
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
@@ -151,7 +152,7 @@ inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
     blas_impl::scal_fast_path<scalar_t>(&i_n, &a, x, &i_incx);
     return;
   }
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     if (a == scalar_t(0)) {
       x[i * incx] = 0;
     } else {
@@ -176,11 +177,10 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
   }
 
   if ((trans == 'T') || (trans == 't')) {
-    for (int64_t i = 0; i < n; i++)
-    {
+    for (const auto i : c10::irange(n)) {
       scalar_t sum = 0;
       scalar_t *row_ = a + lda * i;
-      for (int64_t j = 0; j < m; j++) {
+      for (const auto j : c10::irange(m)) {
         sum += x[j * incx] * row_[j];
       }
       if (beta == scalar_t(0)) {
@@ -192,10 +192,10 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
   } else {
     if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
 
-    for (int64_t j = 0; j < n; j++) {
+    for (const auto j : c10::irange(n)) {
       scalar_t *column_ = a + lda * j;
       scalar_t z = alpha * x[j * incx];
-      for (int64_t i = 0; i < m; i++) {
+      for (const auto i : c10::irange(m)) {
         //output values are ignored if beta is 0, and set to 0, nans and infs are not propagated
         if (j==0 && beta==scalar_t(0)) {
          y[i * incy] = scalar_t(0);

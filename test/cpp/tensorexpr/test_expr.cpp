@@ -2,11 +2,13 @@
 
 #include <test/cpp/tensorexpr/test_base.h>
 
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <test/cpp/tensorexpr/test_utils.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/ir_verifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -40,6 +42,133 @@ TEST(Expr, BasicValueTest02) {
   ASSERT_EQ(eval.value<float>(), -4.0f);
 }
 
+TEST(Expr, IsChannelsLastContiguous) {
+  std::vector<VarHandle> vars = {
+      VarHandle("var1", kLong),
+      VarHandle("var2", kLong),
+      VarHandle("var3", kLong),
+      VarHandle("var4", kLong),
+      VarHandle("var5", kLong)};
+
+  // {
+  //   key: ndims,
+  //   value: [
+  //     ...
+  //     [dim_2, dim_1, ..., dim_n]
+  //   ]
+  // }
+  using shapGenInfo = std::unordered_map<int, std::vector<std::vector<int>>>;
+
+  // {
+  //   size: [ExprHandle_1, ExprHandle_2, ..., ExprHandle_n],
+  //   strides: [
+  //     ...
+  //     [ExprHandle_x, ExprHandle_y, ..., ExprHandle_z]
+  //   ]
+  // }
+  using shapeInfo =
+      std::pair<std::vector<ExprHandle>, std::vector<std::vector<ExprHandle>>>;
+
+  std::vector<int> dims = {3, 4, 5};
+
+  std::unordered_map<int, std::vector<ExprHandle>> dims_expr_vec_conf = {
+      {3, std::vector<ExprHandle>(vars.begin(), vars.begin() + 2)},
+      {4, std::vector<ExprHandle>(vars.begin(), vars.begin() + 3)},
+      {5, std::vector<ExprHandle>(vars.begin(), vars.begin() + 4)},
+  };
+
+  shapGenInfo channels_last_cont_shape_conf = {
+      {3, {{1, 2, 0}}}, {4, {{1, 3, 2, 0}}}, {5, {{1, 4, 3, 2, 0}}}};
+  shapGenInfo channels_last_non_cont_shape_conf = {
+      {3, {{2, 1, 0}, {1, 0, 2}}},
+      {4, {{3, 1, 2, 0}, {1, 2, 3, 0}, {1, 0, 2, 3}}},
+      {5, {{4, 3, 2, 1, 0}, {1, 3, 2, 4, 0}, {1, 4, 3, 2, 0}}}};
+
+  shapGenInfo cont_shape_conf = {
+      {3, {{0, 1, 2}}}, {4, {{0, 1, 2, 3}}}, {5, {{0, 1, 2, 3, 4}}}};
+
+  auto shape_gen_fn = [dims_expr_vec_conf](
+                          int ndims, shapGenInfo shape_gen_info) -> shapeInfo {
+    auto dims_expr_vec = dims_expr_vec_conf.at(ndims);
+    std::vector<std::vector<ExprHandle>> strides_expr_vec;
+    for (size_t i = 0; i < strides_expr_vec.size(); i++) {
+      strides_expr_vec[i].resize(ndims);
+    }
+
+    auto stride_gen_fn = [](int indicator, ExprHandle a, ExprHandle b) {
+      if (indicator % 2 == 0) {
+        return a * b;
+      } else {
+        return b * a;
+      }
+    };
+
+    auto stride_order_vec = shape_gen_info.at(ndims);
+    for (size_t i = 0; i < strides_expr_vec.size(); i++) {
+      auto stride_order = stride_order_vec[i];
+
+      strides_expr_vec[i][stride_order[0]] = 1;
+      for (size_t j = 1; j < stride_order.size(); j++) {
+        auto cur_dim_idx = stride_order[j];
+        auto adjacent_dim_idx = stride_order[j - 1];
+
+        strides_expr_vec[i][cur_dim_idx] = stride_gen_fn(
+            i,
+            dims_expr_vec[adjacent_dim_idx],
+            strides_expr_vec[i][adjacent_dim_idx]);
+      }
+    }
+
+    return {dims_expr_vec, strides_expr_vec};
+  };
+
+  auto check_channels_last_fn = [](int ndims, BufHandle buf_handle) -> bool {
+    if (ndims == 3) {
+      return buf_handle.is_channels_last_1d_contiguous();
+    } else if (ndims == 4) {
+      return buf_handle.is_contiguous(at::MemoryFormat::ChannelsLast);
+    } else {
+      return buf_handle.is_contiguous(at::MemoryFormat::ChannelsLast3d);
+    }
+  };
+
+  // channels-last contigous
+  for (size_t i = 0; i < dims.size(); i++) {
+    auto shape_info = shape_gen_fn(dims[i], channels_last_cont_shape_conf);
+    for (size_t j = 0; j < shape_info.second.size(); j++) {
+      BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
+      ASSERT_EQ(check_channels_last_fn(dims[i], buf_handle), true);
+    }
+  }
+
+  // channels-last non-contigous
+  for (size_t i = 0; i < dims.size(); i++) {
+    auto shape_info = shape_gen_fn(dims[i], channels_last_non_cont_shape_conf);
+    for (size_t j = 0; j < shape_info.second.size(); j++) {
+      BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
+      ASSERT_EQ(check_channels_last_fn(dims[i], buf_handle), false);
+    }
+  }
+
+  // contiguous
+  for (size_t i = 0; i < dims.size(); i++) {
+    auto shape_info = shape_gen_fn(dims[i], cont_shape_conf);
+    for (size_t j = 0; j < shape_info.second.size(); j++) {
+      BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
+      ASSERT_EQ(buf_handle.is_contiguous(), true);
+    }
+  }
+
+  // non-contiguous
+  for (size_t i = 0; i < dims.size(); i++) {
+    auto shape_info = shape_gen_fn(dims[i], channels_last_cont_shape_conf);
+    for (size_t j = 0; j < shape_info.second.size(); j++) {
+      BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
+      ASSERT_EQ(buf_handle.is_contiguous(), false);
+    }
+  }
+}
+
 TEST(Expr, LetTest01) {
   VarHandle x("x", kFloat);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
@@ -60,8 +189,8 @@ TEST(Expr, LetTest02) {
 }
 
 TEST(Expr, LetStmtTest01) {
-  Placeholder a_buf("a", kFloat, {1});
-  Placeholder b_buf("b", kFloat, {1});
+  BufHandle a_buf("a", {1}, kFloat);
+  BufHandle b_buf("b", {1}, kFloat);
 
   ExprHandle load_a = a_buf.load(0);
   VarHandle var = VarHandle("v", kFloat);
@@ -157,13 +286,13 @@ TEST(Expr, VectorAdd01) {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  BufHandle a_buf("A", {kTotalSize}, kFloat);
+  BufHandle b_buf("B", {kTotalSize}, kFloat);
+  BufHandle c_buf("C", {kTotalSize}, kFloat);
 
   /*
   Build the following:
-    for (int index = 0; index < kVectorCount; index++) {
+    for (const auto index : c10::irange(kVectorCount)) {
       store(c_buf, ramp(index * 8, 1, 8),
             load(a_buf, ramp(index * 8, 1, 8) +
             load(b_buf, ramp(index * 8, 1, 8))))
@@ -187,7 +316,7 @@ TEST(Expr, VectorAdd01) {
   PaddedBuffer<float> b_v(kTotalSize);
   PaddedBuffer<float> c_v(kTotalSize);
   PaddedBuffer<float> c_ref(kTotalSize);
-  for (int i = 0; i < kTotalSize; i++) {
+  for (const auto i : c10::irange(kTotalSize)) {
     a_v(i) = i * i;
     b_v(i) = i * i * 4;
     c_ref(i) = a_v(i) + b_v(i);
@@ -199,9 +328,9 @@ TEST(Expr, VectorAdd01) {
 
 TEST(Expr, CompareSelectEQ) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -237,9 +366,9 @@ TEST(Expr, CompareSelectDtypes) {
   // different from the output dtype and verifies that it works correctly:
   //   result = ((int)lhs == (int)rhs) ? (float)retval1 : (float)retval2
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kFloat));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kFloat);
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 0.0f);
@@ -275,8 +404,8 @@ TEST(Expr, CompareSelectDtypes) {
 
 TEST(Expr, IntrinsicsDtypes) {
   constexpr int N = 256;
-  Placeholder a(BufHandle("A", {N}, kDouble));
-  Placeholder b(BufHandle("B", {N}, kDouble));
+  BufHandle a("A", {N}, kDouble);
+  BufHandle b("B", {N}, kDouble);
   std::vector<double> a_buffer(N, -10.0);
   std::vector<double> b_buffer(N, 0.0);
   std::vector<double> b_ref(N, 10.0);
@@ -539,9 +668,9 @@ TEST(Expr, BitwiseOps) {
 TEST(Expr, DynamicShapeAdd) {
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Placeholder a(BufHandle("a", {n}, kFloat));
-    Placeholder b(BufHandle("b", {n}, kFloat));
-    Placeholder c(BufHandle("c", {n}, kFloat));
+    BufHandle a("a", {n}, kFloat);
+    BufHandle b("b", {n}, kFloat);
+    BufHandle c("c", {n}, kFloat);
     VarHandle i("i", kInt);
     StmtPtr s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
@@ -555,10 +684,69 @@ TEST(Expr, DynamicShapeAdd) {
   testWithSize(37);
 }
 
+TEST(Expr, OutOfBounds) {
+  ExprHandle N(10);
+  ExprHandle start(0);
+  ExprHandle stop(15);
+  VarHandle i("i", kInt);
+
+  BufHandle X("X", {N}, kInt);
+
+  auto body = Store::make(X, {i}, i);
+  auto stmt = For::make(i, start, stop, body);
+
+  PaddedBuffer<int> data(20);
+
+  EXPECT_ANY_THROW(SimpleIREvaluator(stmt, {X})(data));
+}
+
+TEST(Expr, OutOfBounds2d) {
+  std::vector<std::pair<int, int>> size_options = {{10, 15}, {15, 10}};
+  for (auto sizes : size_options) {
+    ExprHandle N(sizes.first);
+    ExprHandle M(sizes.second);
+    ExprHandle start(0);
+    ExprHandle stopInner(15);
+    ExprHandle stopOuter(15);
+    VarHandle i("i", kInt);
+    VarHandle j("j", kInt);
+
+    BufHandle X("X", {N, M}, kInt);
+
+    auto body = Store::make(X, {i, j}, i);
+    auto inner = For::make(j, start, stopInner, body);
+    auto stmt = For::make(i, start, stopOuter, inner);
+
+    PaddedBuffer<int> data(400);
+
+    EXPECT_ANY_THROW(SimpleIREvaluator(stmt, {X})(data));
+  }
+}
+
+TEST(Expr, OutOfBounds2dFlattenedIndex) {
+  ExprHandle buf_size(149);
+  ExprHandle start(0);
+  ExprHandle stopInner(15);
+  ExprHandle stopOuter(10);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  BufHandle X("X", {buf_size}, kInt);
+
+  auto idx = Add::make(Mul::make(i, stopInner), j);
+  auto body = Store::make(X, {idx}, i);
+  auto inner = For::make(j, start, stopInner, body);
+  auto stmt = For::make(i, start, stopOuter, inner);
+
+  PaddedBuffer<int> data(400);
+
+  EXPECT_ANY_THROW(SimpleIREvaluator(stmt, {X})(data));
+}
+
 void testCond01() {
   const int N = 16;
   PaddedBuffer<float> a_v(N);
-  Placeholder a_buf("a", kFloat, {N});
+  BufHandle a_buf("a", {N}, kFloat);
   VarHandle index = VarHandle("index", kInt);
   StmtPtr assign_x2 = a_buf.store({index}, cast<float>(index) * 2);
   StmtPtr assign_x3 = a_buf.store({index}, cast<float>(index) * 3);
@@ -568,7 +756,7 @@ void testCond01() {
   SimpleIREvaluator(for_stmt, {a_buf})(a_v);
 
   PaddedBuffer<float> a_ref(N);
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     if (i % 2 == 0) {
       a_ref(i) = i * 2;
     } else {
@@ -615,7 +803,7 @@ void testIfThenElse03() {
 void testStmtClone() {
   const int N = 16;
 
-  Placeholder a_buf("a", kInt, {N});
+  BufHandle a_buf("a", {N}, kInt);
   VarHandle index = VarHandle("index", kInt);
   StmtPtr body = a_buf.store({index}, 5);
   StmtPtr loop = For::make(index, 0, N, body);

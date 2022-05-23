@@ -1,319 +1,502 @@
-Quantization Operation coverage
+Quantization API Reference
 -------------------------------
 
+torch.quantization
+~~~~~~~~~~~~~~~~~~
+
+This module contains Eager mode quantization APIs.
+
+.. currentmodule:: torch.quantization
+
+Top level APIs
+^^^^^^^^^^^^^^
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    quantize
+    quantize_dynamic
+    quantize_qat
+    prepare
+    prepare_qat
+    convert
+
+Preparing model for quantization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    fuse_modules
+    QuantStub
+    DeQuantStub
+    QuantWrapper
+    add_quant_dequant
+
+Utility functions
+^^^^^^^^^^^^^^^^^
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    add_observer_
+    swap_module
+    propagate_qconfig_
+    default_eval_fn
+    get_observer_dict
+
+torch.quantization.quantize_fx
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This module contains FX graph mode quantization APIs (prototype).
+
+.. currentmodule:: torch.quantization.quantize_fx
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    prepare_fx
+    prepare_qat_fx
+    convert_fx
+    fuse_fx
+
+torch (quantization related functions)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This describes the quantization related functions of the `torch` namespace.
+
+.. currentmodule:: torch
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    quantize_per_tensor
+    quantize_per_channel
+    dequantize
+
+torch.Tensor (quantization related methods)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 Quantized Tensors support a limited subset of data manipulation methods of the
-regular full-precision tensor. For NN operators included in PyTorch, we
-restrict support to:
+regular full-precision tensor.
 
-   1. 8 bit weights (data\_type = qint8)
-   2. 8 bit activations (data\_type = quint8)
+.. currentmodule:: torch.Tensor
 
-Note that operator implementations currently only
-support per channel quantization for weights of the **conv** and **linear**
-operators. Furthermore the minimum and the maximum of the input data is
-mapped linearly to the minimum and the maximum of the quantized data
-type such that zero is represented with no quantization error.
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-Additional data types and quantization schemes can be implemented through
-the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_.
+    view
+    as_strided
+    expand
+    flatten
+    select
+    ne
+    eq
+    ge
+    le
+    gt
+    lt
+    copy_
+    clone
+    dequantize
+    equal
+    int_repr
+    max
+    mean
+    min
+    q_scale
+    q_zero_point
+    q_per_channel_scales
+    q_per_channel_zero_points
+    q_per_channel_axis
+    resize_
+    sort
+    topk
 
-Many operations for quantized tensors are available under the same API as full
-float version in ``torch`` or ``torch.nn``. Quantized version of NN modules that
-perform re-quantization are available in ``torch.nn.quantized``. Those
-operations explicitly take output quantization parameters (scale and zero\_point) in
-the operation signature.
 
-In addition, we also support fused versions corresponding to common fusion
-patterns that impact quantization at: `torch.nn.intrinsic.quantized`.
+torch.quantization.observer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For quantization aware training, we support modules prepared for quantization
-aware training at `torch.nn.qat` and `torch.nn.intrinsic.qat`
+This module contains observers which are used to collect statistics about
+the values observed during calibration (PTQ) or training (QAT).
 
-.. end-of-part-included-in-quantization.rst
+.. currentmodule:: torch.quantization.observer
 
-The following operation list is sufficient to cover typical CNN and RNN models
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
+    ObserverBase
+    MinMaxObserver
+    MovingAverageMinMaxObserver
+    PerChannelMinMaxObserver
+    MovingAveragePerChannelMinMaxObserver
+    HistogramObserver
+    PlaceholderObserver
+    RecordingObserver
+    NoopObserver
+    get_observer_state_dict
+    load_observer_state_dict
+    default_observer
+    default_placeholder_observer
+    default_debug_observer
+    default_weight_observer
+    default_histogram_observer
+    default_per_channel_weight_observer
+    default_dynamic_quant_observer
+    default_float_qparams_observer
 
-Quantized ``torch.Tensor`` operations
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+torch.quantization.fake_quantize
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Operations that are available from the ``torch`` namespace or as methods on
-Tensor for quantized tensors:
+This module implements modules which are used to perform fake quantization
+during QAT.
 
-* :func:`~torch.quantize_per_tensor` - Convert float tensor to quantized tensor
-  with per-tensor scale and zero point
-* :func:`~torch.quantize_per_channel` - Convert float tensor to quantized
-  tensor with per-channel scale and zero point
-* View-based operations like :meth:`~torch.Tensor.view`,
-  :meth:`~torch.Tensor.as_strided`, :meth:`~torch.Tensor.expand`,
-  :meth:`~torch.Tensor.flatten`, :meth:`~torch.Tensor.select`, python-style
-  indexing, etc - work as on regular tensor (if quantization is not
-  per-channel)
-* Comparators
-    * :meth:`~torch.Tensor.ne` — Not equal
-    * :meth:`~torch.Tensor.eq` — Equal
-    * :meth:`~torch.Tensor.ge` — Greater or equal
-    * :meth:`~torch.Tensor.le` — Less or equal
-    * :meth:`~torch.Tensor.gt` — Greater
-    * :meth:`~torch.Tensor.lt` — Less
-* :meth:`~torch.Tensor.copy_` — Copies src to self in-place
-* :meth:`~torch.Tensor.clone` —  Returns a deep copy of the passed-in tensor
-* :meth:`~torch.Tensor.dequantize` — Convert quantized tensor to float tensor
-* :meth:`~torch.Tensor.equal` — Compares two tensors, returns true if
-  quantization parameters and all integer elements are the same
-* :meth:`~torch.Tensor.int_repr` — Prints the underlying integer representation
-  of the quantized tensor
-* :meth:`~torch.Tensor.max` — Returns the maximum value of the tensor (reduction only)
-* :meth:`~torch.Tensor.mean` — Mean function. Supported variants: reduction, dim, out
-* :meth:`~torch.Tensor.min` — Returns the minimum value of the tensor (reduction only)
-* :meth:`~torch.Tensor.q_scale` — Returns the scale of the per-tensor quantized tensor
-* :meth:`~torch.Tensor.q_zero_point` — Returns the zero_point of the per-tensor
-  quantized zero point
-* :meth:`~torch.Tensor.q_per_channel_scales` — Returns the scales of the
-  per-channel quantized tensor
-* :meth:`~torch.Tensor.q_per_channel_zero_points` — Returns the zero points of
-  the per-channel quantized tensor
-* :meth:`~torch.Tensor.q_per_channel_axis` — Returns the channel axis of the
-  per-channel quantized tensor
-* :meth:`~torch.Tensor.resize_` — In-place resize
-* :meth:`~torch.Tensor.sort` — Sorts the tensor
-* :meth:`~torch.Tensor.topk` — Returns k largest values of a tensor
+.. currentmodule:: torch.quantization.fake_quantize
 
-``torch.nn.functional``
-~~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-Basic activations are supported.
+    FakeQuantizeBase
+    FakeQuantize
+    FixedQParamsFakeQuantize
+    FusedMovingAvgObsFakeQuantize
+    default_fake_quant
+    default_weight_fake_quant
+    default_per_channel_weight_fake_quant
+    default_histogram_fake_quant
+    default_fused_act_fake_quant
+    default_fused_wt_fake_quant
+    default_fused_per_channel_wt_fake_quant
+    disable_fake_quant
+    enable_fake_quant
+    disable_observer
+    enable_observer
 
-* :meth:`~torch.nn.functional.relu` — Rectified linear unit (copy)
-* :meth:`~torch.nn.functional.relu_` — Rectified linear unit (inplace)
-* :meth:`~torch.nn.functional.elu` - ELU
-* :meth:`~torch.nn.functional.max_pool2d` - Maximum pooling
-* :meth:`~torch.nn.functional.adaptive_avg_pool2d` - Adaptive average pooling
-* :meth:`~torch.nn.functional.avg_pool2d` - Average pooling
-* :meth:`~torch.nn.functional.interpolate` - Interpolation
-* :meth:`~torch.nn.functional.hardsigmoid` - Hardsigmoid
-* :meth:`~torch.nn.functional.hardswish` - Hardswish
-* :meth:`~torch.nn.functional.hardtanh` - Hardtanh
-* :meth:`~torch.nn.functional.upsample` - Upsampling
-* :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling
-* :meth:`~torch.nn.functional.upsample_nearest` - Upsampling Nearest
+torch.quantization.qconfig
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``torch.nn.intrinsic``
+This module defines `QConfig` objects which are used
+to configure quantization settings for individual ops.
+
+.. currentmodule:: torch.quantization.qconfig
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    QConfig
+    default_qconfig
+    default_debug_qconfig
+    default_per_channel_qconfig
+    default_dynamic_qconfig
+    float16_dynamic_qconfig
+    float16_static_qconfig
+    per_channel_dynamic_qconfig
+    float_qparams_weight_only_qconfig
+    default_qat_qconfig
+    default_weight_only_qconfig
+    default_activation_only_qconfig
+    default_qat_qconfig_v2
+
+torch.nn.intrinsic
+~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.intrinsic
+.. automodule:: torch.nn.intrinsic.modules
+
+This module implements the combined (fused) modules conv + relu which can
+then be quantized.
+
+.. currentmodule:: torch.nn.intrinsic
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    ConvReLU1d
+    ConvReLU2d
+    ConvReLU3d
+    LinearReLU
+    ConvBn1d
+    ConvBn2d
+    ConvBn3d
+    ConvBnReLU1d
+    ConvBnReLU2d
+    ConvBnReLU3d
+    BNReLU2d
+    BNReLU3d
+
+torch.nn.intrinsic.qat
 ~~~~~~~~~~~~~~~~~~~~~~
-
-Fused modules are provided for common patterns in CNNs. Combining several
-operations together (like convolution and relu) allows for better quantization
-accuracy
+.. automodule:: torch.nn.intrinsic.qat
+.. automodule:: torch.nn.intrinsic.qat.modules
 
 
-* `torch.nn.intrinsic` — float versions of the modules, can be swapped with
-  quantized version 1 to 1:
+This module implements the versions of those fused operations needed for
+quantization aware training.
 
-  * :class:`~torch.nn.intrinsic.ConvBn1d` — Conv1d + BatchNorm1d
-  * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
-  * :class:`~torch.nn.intrinsic.ConvBn3d` — Conv3d + BatchNorm3d
-  * :class:`~torch.nn.intrinsic.ConvBnReLU1d` — Conv1d + BatchNorm1d + ReLU
-  * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
-  * :class:`~torch.nn.intrinsic.ConvBnReLU3d` — Conv3d + BatchNorm3d + ReLU
-  * :class:`~torch.nn.intrinsic.ConvReLU1d` — Conv1d + ReLU
-  * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
-  * :class:`~torch.nn.intrinsic.ConvReLU3d` — Conv3d + ReLU
-  * :class:`~torch.nn.intrinsic.LinearReLU` — Linear + ReLU
+.. currentmodule:: torch.nn.intrinsic.qat
 
-* `torch.nn.intrinsic.qat` — versions of layers for quantization-aware training:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-  * :class:`~torch.nn.intrinsic.qat.ConvBn2d` — Conv2d + BatchNorm
-  * :class:`~torch.nn.intrinsic.qat.ConvBn3d` — Conv3d + BatchNorm3d
-  * :class:`~torch.nn.intrinsic.qat.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
-  * :class:`~torch.nn.intrinsic.qat.ConvBnReLU3d` — Conv3d + BatchNorm3d + ReLU
-  * :class:`~torch.nn.intrinsic.qat.ConvReLU2d` — Conv2d + ReLU
-  * :class:`~torch.nn.intrinsic.qat.ConvReLU3d` — Conv3d + ReLU
-  * :class:`~torch.nn.intrinsic.qat.LinearReLU` — Linear + ReLU
+    LinearReLU
+    ConvBn1d
+    ConvBnReLU1d
+    ConvBn2d
+    ConvBnReLU2d
+    ConvReLU2d
+    ConvBn3d
+    ConvBnReLU3d
+    ConvReLU3d
+    update_bn_stats
+    freeze_bn_stats
 
-* `torch.nn.intrinsic.quantized` — quantized version of fused layers for
-  inference (no BatchNorm variants as it's usually folded into convolution for
-  inference):
-
-  * :class:`~torch.nn.intrinsic.quantized.LinearReLU` — Linear + ReLU
-  * :class:`~torch.nn.intrinsic.quantized.ConvReLU1d` — 1D Convolution + ReLU
-  * :class:`~torch.nn.intrinsic.quantized.ConvReLU2d` — 2D Convolution + ReLU
-  * :class:`~torch.nn.intrinsic.quantized.ConvReLU3d` — 3D Convolution + ReLU
-
-`torch.nn.qat`
-~~~~~~~~~~~~~~
-
-Layers for the quantization-aware training
-
-* :class:`~torch.nn.qat.Linear` — Linear (fully-connected) layer
-* :class:`~torch.nn.qat.Conv2d` — 2D convolution
-* :class:`~torch.nn.qat.Conv3d` — 3D convolution
-
-`torch.quantization`
-~~~~~~~~~~~~~~~~~~~~
-
-* Functions for eager mode quantization:
-
-  * :func:`~torch.quantization.add_observer_` — Adds observer for the leaf
-    modules (if quantization configuration is provided)
-  * :func:`~torch.quantization.add_quant_dequant`— Wraps the leaf child module using :class:`~torch.quantization.QuantWrapper`
-  * :func:`~torch.quantization.convert` — Converts float module with
-    observers into its quantized counterpart. Must have quantization
-    configuration
-  * :func:`~torch.quantization.get_observer_dict` — Traverses the module
-    children and collects all observers into a ``dict``
-  * :func:`~torch.quantization.prepare` — Prepares a copy of a model for
-    quantization
-  * :func:`~torch.quantization.prepare_qat` — Prepares a copy of a model for
-    quantization aware training
-  * :func:`~torch.quantization.propagate_qconfig_` — Propagates quantization
-    configurations through the module hierarchy and assign them to each leaf
-    module
-  * :func:`~torch.quantization.quantize` — Function for eager mode post training static quantization
-  * :func:`~torch.quantization.quantize_dynamic` — Function for eager mode post training dynamic quantization
-  * :func:`~torch.quantization.quantize_qat` — Function for eager mode quantization aware training function
-  * :func:`~torch.quantization.swap_module` — Swaps the module with its
-    quantized counterpart (if quantizable and if it has an observer)
-  * :func:`~torch.quantization.default_eval_fn` — Default evaluation function
-    used by the :func:`torch.quantization.quantize`
-  * :func:`~torch.quantization.fuse_modules`
-
-* Functions for FX graph mode quantization:
-  * :func:`~torch.quantization.quantize_fx.prepare_fx` - Function for preparing the model for post training quantization with FX graph mode quantization
-  * :func:`~torch.quantization.quantize_fx.prepare_qat_fx` - Function for preparing the model for quantization aware training with FX graph mode quantization
-  * :func:`~torch.quantization.quantize_fx.convert_fx` - Function for converting a prepared model to a quantized model with FX graph mode quantization
-
-* Quantization configurations
-    * :class:`~torch.quantization.QConfig` — Quantization configuration class
-    * :attr:`~torch.quantization.default_qconfig` — Same as
-      ``QConfig(activation=default_observer, weight=default_weight_observer)``
-      (See :class:`~torch.quantization.qconfig.QConfig`)
-    * :attr:`~torch.quantization.default_qat_qconfig` — Same as
-      ``QConfig(activation=default_fake_quant,
-      weight=default_weight_fake_quant)`` (See
-      :class:`~torch.quantization.qconfig.QConfig`)
-    * :attr:`~torch.quantization.default_dynamic_qconfig` — Same as
-      ``QConfigDynamic(weight=default_weight_observer)`` (See
-      :class:`~torch.quantization.qconfig.QConfigDynamic`)
-    * :attr:`~torch.quantization.float16_dynamic_qconfig` — Same as
-      ``QConfigDynamic(weight=NoopObserver.with_args(dtype=torch.float16))``
-      (See :class:`~torch.quantization.qconfig.QConfigDynamic`)
-
-* Stubs
-    * :class:`~torch.quantization.DeQuantStub` - placeholder module for
-      dequantize() operation in float-valued models
-    * :class:`~torch.quantization.QuantStub` - placeholder module for
-      quantize() operation in float-valued models
-    * :class:`~torch.quantization.QuantWrapper` — wraps the module to be
-      quantized. Inserts the :class:`~torch.quantization.QuantStub` and
-    * :class:`~torch.quantization.DeQuantStub`
-
-* Observers for computing the quantization parameters
-
-  * Default Observers. The rest of observers are available from
-    ``torch.quantization.observer``:
-
-    * :attr:`~torch.quantization.default_observer` — Same as ``MinMaxObserver.with_args(reduce_range=True)``
-    * :attr:`~torch.quantization.default_weight_observer` — Same as ``MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)``
-
-  * :class:`~torch.quantization.Observer` — Abstract base class for observers
-  * :class:`~torch.quantization.MinMaxObserver` — Derives the quantization
-    parameters from the running minimum and maximum of the observed tensor inputs
-    (per tensor variant)
-  * :class:`~torch.quantization.MovingAverageMinMaxObserver` — Derives the
-    quantization parameters from the running averages of the minimums and
-    maximums of the observed tensor inputs (per tensor variant)
-  * :class:`~torch.quantization.PerChannelMinMaxObserver` — Derives the
-    quantization parameters from the running minimum and maximum of the observed
-    tensor inputs (per channel variant)
-  * :class:`~torch.quantization.MovingAveragePerChannelMinMaxObserver` — Derives
-    the quantization parameters from the running averages of the minimums and
-    maximums of the observed tensor inputs (per channel variant)
-  * :class:`~torch.quantization.HistogramObserver` — Derives the quantization
-    parameters by creating a histogram of running minimums and maximums.
-
-* Observers that do not compute the quantization parameters:
-    * :class:`~torch.quantization.RecordingObserver` — Records all incoming
-      tensors. Used for debugging only.
-    * :class:`~torch.quantization.NoopObserver` — Pass-through observer. Used
-      for situation when there are no quantization parameters (i.e.
-      quantization to ``float16``)
-
-* FakeQuantize module
-    * :class:`~torch.quantization.FakeQuantize` — Module for simulating the
-      quantization/dequantization at training time
-
-`torch.nn.quantized`
-~~~~~~~~~~~~~~~~~~~~
-
-Quantized version of standard NN layers.
-
-* :class:`~torch.nn.quantized.Quantize` — Quantization layer, used to
-  automatically replace :class:`~torch.quantization.QuantStub`
-* :class:`~torch.nn.quantized.DeQuantize` — Dequantization layer, used to
-  replace :class:`~torch.quantization.DeQuantStub`
-* :class:`~torch.nn.quantized.FloatFunctional` — Wrapper class to make
-  stateless float operations stateful so that they can be replaced with
-  quantized versions
-* :class:`~torch.nn.quantized.QFunctional` — Wrapper class for quantized
-  versions of stateless operations like ``torch.add``
-* :class:`~torch.nn.quantized.Conv1d` — 1D convolution
-* :class:`~torch.nn.quantized.Conv2d` — 2D convolution
-* :class:`~torch.nn.quantized.Conv3d` — 3D convolution
-* :class:`~torch.nn.quantized.Linear` — Linear (fully-connected) layer
-* :class:`~torch.nn.MaxPool2d` — 2D max pooling
-* :class:`~torch.nn.quantized.ReLU6` — Rectified linear unit with cut-off at
-  quantized representation of 6
-* :class:`~torch.nn.quantized.ELU` — ELU
-* :class:`~torch.nn.quantized.Hardswish` — Hardswish
-* :class:`~torch.nn.quantized.BatchNorm2d` — BatchNorm2d. *Note: this module is usually fused with Conv or Linear. Performance on ARM is not optimized*.
-* :class:`~torch.nn.quantized.BatchNorm3d` — BatchNorm3d. *Note: this module is usually fused with Conv or Linear. Performance on ARM is not optimized*.
-* :class:`~torch.nn.quantized.LayerNorm` — LayerNorm. *Note: performance on ARM is not optimized*.
-* :class:`~torch.nn.quantized.GroupNorm` — GroupNorm. *Note: performance on ARM is not optimized*.
-* :class:`~torch.nn.quantized.InstanceNorm1d` — InstanceNorm1d. *Note: performance on ARM is not optimized*.
-* :class:`~torch.nn.quantized.InstanceNorm2d` — InstanceNorm2d. *Note: performance on ARM is not optimized*.
-* :class:`~torch.nn.quantized.InstanceNorm3d` — InstanceNorm3d. *Note: performance on ARM is not optimized*.
-
-`torch.nn.quantized.dynamic`
+torch.nn.intrinsic.quantized
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.intrinsic.quantized
+.. automodule:: torch.nn.intrinsic.quantized.modules
 
-Layers used in dynamically quantized models (i.e. quantized only on weights)
 
-* :class:`~torch.nn.quantized.dynamic.Linear` — Linear (fully-connected) layer
-* :class:`~torch.nn.quantized.dynamic.LSTM` — Long-Short Term Memory RNN module
-* :class:`~torch.nn.quantized.dynamic.LSTMCell` — LSTM Cell
-* :class:`~torch.nn.quantized.dynamic.GRUCell` — GRU Cell
-* :class:`~torch.nn.quantized.dynamic.RNNCell` — RNN Cell
+This module implements the quantized implementations of fused operations
+like conv + relu. No BatchNorm variants as it's usually folded into convolution
+for inference.
 
-`torch.nn.quantized.functional`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. currentmodule:: torch.nn.intrinsic.quantized
 
-Functional versions of quantized NN layers (many of them accept explicit
-quantization output parameters)
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-* :func:`~torch.nn.quantized.functional.adaptive_avg_pool2d` — 2D adaptive average pooling
-* :func:`~torch.nn.quantized.functional.avg_pool2d` — 2D average pooling
-* :func:`~torch.nn.quantized.functional.avg_pool3d` — 3D average pooling
-* :func:`~torch.nn.quantized.functional.conv1d` — 1D convolution
-* :func:`~torch.nn.quantized.functional.conv2d` — 2D convolution
-* :func:`~torch.nn.quantized.functional.conv3d` — 3D convolution
-* :func:`~torch.nn.quantized.functional.interpolate` — Down-/up- sampler
-* :func:`~torch.nn.quantized.functional.linear` — Linear (fully-connected) op
-* :func:`~torch.nn.quantized.functional.max_pool2d` — 2D max pooling
-* :func:`~torch.nn.quantized.functional.elu` — ELU
-* :func:`~torch.nn.quantized.functional.hardsigmoid` — Hardsigmoid
-* :func:`~torch.nn.quantized.functional.hardswish` — Hardswish
-* :func:`~torch.nn.quantized.functional.hardtanh` — Hardtanh
-* :func:`~torch.nn.quantized.functional.upsample` — Upsampler. Will be
-  deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
-* :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilinear
-  upsampler. Will be deprecated in favor of
-* :func:`~torch.nn.quantized.functional.interpolate`
-* :func:`~torch.nn.quantized.functional.upsample_nearest` — Nearest neighbor
-  upsampler. Will be deprecated in favor of
-* :func:`~torch.nn.quantized.functional.interpolate`
+    BNReLU2d
+    BNReLU3d
+    ConvReLU1d
+    ConvReLU2d
+    ConvReLU3d
+    LinearReLU
+
+torch.nn.intrinsic.quantized.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.intrinsic.quantized.dynamic
+.. automodule:: torch.nn.intrinsic.quantized.dynamic.modules
+
+This module implements the quantized dynamic implementations of fused operations
+like linear + relu.
+
+.. currentmodule:: torch.nn.intrinsic.quantized.dynamic
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    LinearReLU
+
+torch.nn.qat
+~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.qat
+.. automodule:: torch.nn.qat.modules
+
+This module implements versions of the key nn modules **Conv2d()** and
+**Linear()** which run in FP32 but with rounding applied to simulate the
+effect of INT8 quantization.
+
+.. currentmodule:: torch.nn.qat
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    Conv2d
+    Conv3d
+    Linear
+
+torch.nn.qat.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.qat.dynamic
+.. automodule:: torch.nn.qat.dynamic.modules
+
+This module implements versions of the key nn modules such as **Linear()**
+which run in FP32 but with rounding applied to simulate the effect of INT8
+quantization and will be dynamically quantized during inference.
+
+.. currentmodule:: torch.nn.qat.dynamic
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    Linear
+
+torch.nn.quantized
+~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.quantized
+.. automodule:: torch.nn.quantized.modules
+
+This module implements the quantized versions of the nn layers such as
+~`torch.nn.Conv2d` and `torch.nn.ReLU`.
+
+.. currentmodule:: torch.nn.quantized
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    ReLU6
+    Hardswish
+    ELU
+    LeakyReLU
+    Sigmoid
+    BatchNorm2d
+    BatchNorm3d
+    Conv1d
+    Conv2d
+    Conv3d
+    ConvTranspose1d
+    ConvTranspose2d
+    ConvTranspose3d
+    Embedding
+    EmbeddingBag
+    FloatFunctional
+    FXFloatFunctional
+    QFunctional
+    Linear
+    LayerNorm
+    GroupNorm
+    InstanceNorm1d
+    InstanceNorm2d
+    InstanceNorm3d
+
+torch.nn.quantized.functional
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.quantized.functional
+
+This module implements the quantized versions of the functional layers such as
+~`torch.nn.functional.conv2d` and `torch.nn.functional.relu`. Note:
+:meth:`~torch.nn.functional.relu` supports quantized inputs.
+
+.. currentmodule:: torch.nn.quantized.functional
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    avg_pool2d
+    avg_pool3d
+    adaptive_avg_pool2d
+    adaptive_avg_pool3d
+    conv1d
+    conv2d
+    conv3d
+    interpolate
+    linear
+    max_pool1d
+    max_pool2d
+    celu
+    leaky_relu
+    hardtanh
+    hardswish
+    threshold
+    elu
+    hardsigmoid
+    clamp
+    upsample
+    upsample_bilinear
+    upsample_nearest
+
+torch.nn.quantized.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.nn.quantized.dynamic
+.. automodule:: torch.nn.quantized.dynamic.modules
+
+Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
+:class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and
+:class:`~torch.nn.RNNCell`.
+
+.. currentmodule:: torch.nn.quantized.dynamic
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    Linear
+    LSTM
+    GRU
+    RNNCell
+    LSTMCell
+    GRUCell
 
 Quantized dtypes and quantization schemes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Note that operator implementations currently only
+support per channel quantization for weights of the **conv** and **linear**
+operators. Furthermore, the input data is
+mapped linearly to the the quantized data and vice versa
+as follows:
+
+    .. math::
+
+        \begin{aligned}
+            \text{Quantization:}&\\
+            &Q_\text{out} = \text{clamp}(x_\text{input}/s+z, Q_\text{min}, Q_\text{max})\\
+            \text{Dequantization:}&\\
+            &x_\text{out} = (Q_\text{input}-z)*s
+        \end{aligned}
+
+where :math:`\text{clamp}(.)` is the same as :func:`~torch.clamp` while the
+scale :math:`s` and zero point :math:`z` are then computed
+as decribed in :class:`~torch.ao.quantization.observer.MinMaxObserver`, specifically:
+
+    .. math::
+
+        \begin{aligned}
+            \text{if Symmetric:}&\\
+            &s = 2 \max(|x_\text{min}|, x_\text{max}) /
+                \left( Q_\text{max} - Q_\text{min} \right) \\
+            &z = \begin{cases}
+                0 & \text{if dtype is qint8} \\
+                128 & \text{otherwise}
+            \end{cases}\\
+            \text{Otherwise:}&\\
+                &s = \left( x_\text{max} - x_\text{min}  \right ) /
+                    \left( Q_\text{max} - Q_\text{min} \right ) \\
+                &z = Q_\text{min} - \text{round}(x_\text{min} / s)
+        \end{aligned}
+
+where :math:`[x_\text{min}, x_\text{max}]` denotes the range of the input data while
+:math:`Q_\text{min}` and :math:`Q_\text{max}` are respectively the minimum and maximum values of the quantized dtype.
+
+Note that the choice of :math:`s` and :math:`z` implies that zero is represented with no quantization error whenever zero is within
+the range of the input data or symmetric quantization is being used.
+
+Additional data types and quantization schemes can be implemented through
+the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_.
 
 * :attr:`torch.qscheme` — Type to describe the quantization scheme of a tensor.
   Supported types:
@@ -328,3 +511,8 @@ Quantized dtypes and quantization schemes
   * :attr:`torch.quint8` — 8-bit unsigned integer
   * :attr:`torch.qint8` — 8-bit signed integer
   * :attr:`torch.qint32` — 32-bit signed integer
+
+
+.. These modules are missing docs. Adding them here only for tracking
+.. automodule:: torch.nn.quantizable
+.. automodule:: torch.nn.quantizable.modules

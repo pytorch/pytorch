@@ -6,14 +6,14 @@
 #include <c10/macros/Macros.h>
 #include <ATen/core/Array.h>
 #include <ATen/native/TensorIterator.h>
-#include <THC/THCIntegerDivider.cuh>
+#include <ATen/cuda/detail/IntegerDivider.cuh>
 
 // If element_sizes is nullptr, then the strides will be in bytes, otherwise
 // the strides will be in # of elements.
 // Operands that share the same shape, but may have different strides.
 // OffsetCalculator iterates the tensor in a column-major order
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 constexpr int MAX_DIMS = 16;
 #else
 constexpr int MAX_DIMS = 25;
@@ -36,7 +36,7 @@ struct OffsetCalculator {
   OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides, const int64_t* element_sizes=nullptr) : dims(dims) {
     TORCH_CHECK(dims <= MAX_DIMS, "tensor has too many (>", MAX_DIMS, ") dims");
     for (int i=0; i < dims; i++){
-      sizes_[i] = IntDivider<index_t>(sizes[i]);
+      sizes_[i] = at::cuda::detail::IntDivider<index_t>(sizes[i]);
       for (int arg = 0; arg < NARGS; arg++) {
         int64_t element_size = (element_sizes == nullptr ? 1LL : element_sizes[arg]);
         strides_[i][arg] = strides[arg][i] / element_size;
@@ -69,7 +69,7 @@ struct OffsetCalculator {
   }
 
   int dims;
-  IntDivider<index_t> sizes_[MAX_DIMS];
+  at::cuda::detail::IntDivider<index_t> sizes_[MAX_DIMS];
   stride_t strides_[MAX_DIMS][std::max<int>(NARGS, 1)];
 };
 
