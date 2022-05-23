@@ -167,6 +167,8 @@ __all__ = [
     "narrow",
     "permute",
     "reshape",
+    "rot90",
+    "roll",
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
