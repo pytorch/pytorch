@@ -14,6 +14,7 @@
 /test/allowlist_for_publicAPI.json @albanD @anjali411
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/native_functions.yaml @bdhirsh
+/aten/src/ATen/native/tags.yaml @anjali411
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby

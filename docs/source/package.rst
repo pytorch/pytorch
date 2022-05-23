@@ -379,7 +379,7 @@ API for accessing resources from inside a package.
 ::
 
     with PackageExporter(f) as exporter:
-        # saves text to one/a.txt in the archive
+        # saves text to my_resource/a.txt in the archive
         exporter.save_text("my_resource", "a.txt", "hello world!")
         # saves the tensor to my_pickle/obj.pkl
         exporter.save_pickle("my_pickle", "obj.pkl", torch.ones(2, 2))

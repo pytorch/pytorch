@@ -319,3 +319,13 @@ pr.diff
 
 # coverage files
 */**/.coverage.*
+
+# buck generated files
+.buckd/
+.lsp-buck-out/
+.lsp.buckd/
+buck-out/
+
+# Downloaded libraries
+third_party/ruy/
+third_party/glog/

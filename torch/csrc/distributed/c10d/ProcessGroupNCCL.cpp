@@ -1267,8 +1267,8 @@ void check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors)
     if (t.strides() != first.strides()) {
       TORCH_CHECK(false, "Tensors must have identical strides");
     }
-    if (!t.is_non_overlapping_and_dense()) {
-      TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
+    if (!t.is_contiguous()) {
+      TORCH_CHECK(false, "Tensors must be contiguous");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
@@ -2303,8 +2303,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
       invalidArgument("requires empty output on non-root");
     }
     outputs = {};
-    // append a empty tensor to the list, we don't use it but
-    // collective function requires it to invoke its macros
+    // append a empty tensor to the list, we don't use it but the
+    // `collective` template function requires it to invoke its function
     outputs.emplace_back();
   }
 
@@ -2381,6 +2381,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
       invalidArgument("requires empty input on non-root");
     }
     inputs = {};
+    // append a empty tensor to the list, we don't use it but the
+    // `collective` template function requires it to invoke its function
+    inputs.emplace_back();
   }
 
   return collective(

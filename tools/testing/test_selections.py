@@ -194,10 +194,14 @@ def _query_changed_test_files() -> List[str]:
     return lines
 
 
+# Get sharded test allocation based on historic S3 data.
 def get_shard_based_on_S3(
     which_shard: int, num_shards: int, tests: List[str], test_times_file: str
 ) -> List[str]:
-    """Get sharded test allocation based on historic S3 data."""
+    # Short circuit and don't do any work if there's only 1 shard
+    if num_shards == 1:
+        return tests
+
     jobs_to_times = _query_past_job_times(test_times_file)
 
     # Got no stats from S3, returning early to save runtime

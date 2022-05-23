@@ -57,7 +57,7 @@ class LoggingTensor(torch.Tensor):
         return r
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.elem})"
+        return super().__repr__(tensor_contents=f"{self.elem}")
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -73,7 +73,7 @@ class LoggingTensor(torch.Tensor):
         return rs
 
 class LoggingTensorMode(LoggingTensor):
-    # no_dispatch is only needed if you use enable_python_mode.
+    # no_dispatch is only needed if you use enable_torch_dispatch_mode.
     # It prevents infinite recursion.
     context = no_dispatch
 

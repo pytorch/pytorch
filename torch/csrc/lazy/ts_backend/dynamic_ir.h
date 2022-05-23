@@ -62,6 +62,8 @@ class TORCH_API SizeNode : public DimensionNode {
   int64_t getStaticValue() const override;
   std::string ToString() const override;
   size_t dim_ = 0;
+  virtual TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+                          TSLoweringContext* loctx) const override;
 };
 
 class TORCH_API SizeAdd: public DimensionNode {

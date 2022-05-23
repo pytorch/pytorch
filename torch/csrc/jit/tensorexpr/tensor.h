@@ -73,11 +73,29 @@ class TORCH_API Tensor {
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
+    c10::optional<std::vector<ExprHandle>> strides,
     const std::function<ExprHandle(const VarHandle&)>& body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
+    const std::function<ExprHandle(const VarHandle&)>& body_func);
+TORCH_API Tensor Compute(
+    const std::string& func_name,
+    const std::vector<ExprHandle>& dims,
+    c10::optional<std::vector<ExprHandle>> strides,
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
+        body_func);
+TORCH_API Tensor Compute(
+    const std::string& func_name,
+    const std::vector<ExprHandle>& dims,
+    const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
+        body_func);
+TORCH_API Tensor Compute(
+    const std::string& func_name,
+    const std::vector<ExprHandle>& dims,
+    c10::optional<std::vector<ExprHandle>> strides,
+    const std::function<
+        ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
@@ -88,11 +106,25 @@ TORCH_API Tensor Compute(
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
+    c10::optional<std::vector<ExprHandle>> strides,
     const std::function<ExprHandle(
         const VarHandle&,
         const VarHandle&,
         const VarHandle&,
         const VarHandle&)>& body_func);
+TORCH_API Tensor Compute(
+    const std::string& func_name,
+    const std::vector<ExprHandle>& dims,
+    const std::function<ExprHandle(
+        const VarHandle&,
+        const VarHandle&,
+        const VarHandle&,
+        const VarHandle&)>& body_func);
+TORCH_API Tensor Compute(
+    const std::string& func_name,
+    const std::vector<ExprHandle>& dims,
+    c10::optional<std::vector<ExprHandle>> strides,
+    const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
@@ -114,6 +146,7 @@ template <typename InitFunc, typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
+    c10::optional<std::vector<ExprHandle>> strides,
     const Reducer& reducer,
     const InitFunc& init_func,
     const BodyFunc& body_func,
@@ -125,7 +158,8 @@ Tensor Reduce(
   // copy
   if (reduce_vars.empty()) {
     ExprHandle body = Reducer::getReduceBody(body_func, vars);
-    BufHandle func_result = Buf::make(func_name, dims, body.dtype());
+    BufHandle func_result =
+        Buf::make(func_name, dims, body.dtype(), c10::nullopt, strides);
     return Tensor(func_result, vars, body);
   }
 
@@ -141,7 +175,41 @@ Tensor Reduce(
   Tensor t = Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
   return t;
 }
+template <typename InitFunc, typename BodyFunc>
+Tensor Reduce(
+    const std::string& func_name,
+    const std::vector<ExprHandle>& dims,
+    const Reducer& reducer,
+    const InitFunc& init_func,
+    const BodyFunc& body_func,
+    const std::vector<ExprHandle>& reduce_dims) {
+  return Reduce<InitFunc, BodyFunc>(
+      func_name,
+      dims,
+      c10::nullopt,
+      reducer,
+      init_func,
+      body_func,
+      reduce_dims);
+}
 
+template <typename BodyFunc>
+Tensor Reduce(
+    const std::string& func_name,
+    const std::vector<ExprHandle>& dims,
+    c10::optional<std::vector<ExprHandle>> strides,
+    const Reducer& reducer,
+    const BodyFunc& body_func,
+    const std::vector<ExprHandle>& reduce_dims) {
+  return Reduce(
+      func_name,
+      dims,
+      strides,
+      reducer,
+      [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
+      body_func,
+      reduce_dims);
+}
 template <typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
@@ -149,13 +217,8 @@ Tensor Reduce(
     const Reducer& reducer,
     const BodyFunc& body_func,
     const std::vector<ExprHandle>& reduce_dims) {
-  return Reduce(
-      func_name,
-      dims,
-      reducer,
-      [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
-      body_func,
-      reduce_dims);
+  return Reduce<BodyFunc>(
+      func_name, dims, c10::nullopt, reducer, body_func, reduce_dims);
 }
 
 // Overload which allows inline lambda functions for the body_func.
@@ -163,12 +226,29 @@ template <typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
+    c10::optional<std::vector<ExprHandle>> strides,
     const Reducer& reducer,
     const BodyFunc&& body_func,
     const std::vector<ExprHandle>& reduce_dims) {
-  return Reduce(func_name, dims, reducer, body_func, reduce_dims);
+  return Reduce(func_name, dims, strides, reducer, body_func, reduce_dims);
+}
+template <typename BodyFunc>
+Tensor Reduce(
+    const std::string& func_name,
+    const std::vector<ExprHandle>& dims,
+    const Reducer& reducer,
+    const BodyFunc&& body_func,
+    const std::vector<ExprHandle>& reduce_dims) {
+  return Reduce(func_name, dims, c10::nullopt, reducer, body_func, reduce_dims);
 }
 
+TORCH_API Tensor Reduce(
+    const std::string& name,
+    const std::vector<ExprHandle>& dims,
+    c10::optional<std::vector<ExprHandle>> strides,
+    const Reducer& reducer,
+    const BufHandle& buffer,
+    const std::vector<ExprHandle>& reduce_dims);
 TORCH_API Tensor Reduce(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
@@ -178,6 +258,13 @@ TORCH_API Tensor Reduce(
 
 // Overload for the common case of all dimensions of a prevously Computed
 // Tensor.
+TORCH_API Tensor Reduce(
+    const std::string& func_name,
+    const std::vector<ExprHandle>& dims,
+    c10::optional<std::vector<ExprHandle>> strides,
+    const Reducer& reducer,
+    Tensor tensor,
+    const std::vector<ExprHandle>& reduce_dims);
 TORCH_API Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
