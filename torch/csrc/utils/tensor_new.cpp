@@ -499,7 +499,6 @@ Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarT
     "new(Tensor other, *, Device? device=None)|hidden",  // prevent Tensor matching with IntArrayRef, PyObject*
     "new(IntArrayRef size, *, Device? device=None)",
     "new(PyObject* data, *, Device? device=None)",
-    "new(Tensor other, *, bool dispatch_strides=False, bool dispatch_device=False)|hidden",
   });
 
   if (isSparse(dispatchKeyToBackend(dispatch_key))) {
@@ -508,7 +507,7 @@ Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarT
 
   if (ctor_or_new == CtorOrNew::NEW) check_base_legacy_new(dispatch_key, c10::kStrided);
 
-  ParsedArgs<3> parsed_args;
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
@@ -562,21 +561,6 @@ Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarT
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     return legacy_new_from_sequence(options, scalar_type, deviceOptional, r.pyobject(0));
-  } else if (r.idx == 7) {
-    const auto& other = r.tensor(0);
-    if (ctor_or_new != CtorOrNew::BASE_CTOR) {
-      options = options.dtype(scalar_type);
-      TORCH_CHECK_TYPE(other.options().type_equal(options), "expected ",
-                       options, " (got ", other.options(), ")");
-    }
-    auto alias = other.alias();
-    if (r.toBool(1)) {
-      alias.unsafeGetTensorImpl()->set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
-    }
-    if (r.toBool(2)) {
-      alias.unsafeGetTensorImpl()->set_custom_device(true);
-    }
-    return alias;
   }
   throw std::runtime_error("new(): invalid arguments");
 }
