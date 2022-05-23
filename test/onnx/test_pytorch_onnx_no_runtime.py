@@ -3,9 +3,8 @@
 """Tests for onnx export that don't run the exported model."""
 
 import io
-import typing
 import unittest
-from typing import Optional, Type
+from typing import Dict, Optional, Type
 
 import onnx
 
@@ -428,7 +427,7 @@ class TestONNXExport(TestCase):
 
     def test_export_dict(self):
         class DictModule(torch.nn.Module):
-            def forward(self, x_in: torch.Tensor) -> typing.Dict[str, torch.Tensor]:
+            def forward(self, x_in: torch.Tensor) -> Dict[str, torch.Tensor]:
                 return {"test_key_out": x_in}
 
         x_in = torch.tensor(1)
