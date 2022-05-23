@@ -26,6 +26,7 @@ from torch._prims.wrappers import (
     _safe_copy_out,
 )
 
+from collections.abc import Iterable
 from functools import reduce, partial
 from typing import Sequence, Optional, Union, Callable, List, Tuple
 import operator
@@ -1573,6 +1574,41 @@ def rot90(a: TensorLikeType, k: int = 1, dims: DimsType = (0, 1)) -> TensorLikeT
         return transpose(flip(a, (dims[0],)), dims[0], dims[1])
     else:
         return clone(a)
+
+
+def roll(a: TensorLikeType, shifts: DimsType, dims: Optional[DimsType] = None) -> TensorLikeType:
+    """Reference implementation of :func:`torch.roll`."""
+    # ATen has int[1] type which expands intgers to tuples of length 1
+    if not isinstance(shifts, Iterable):
+        shifts = (shifts,)
+    if dims is not None and not isinstance(dims, Iterable):
+        dims = (dims,)
+
+    len_shifts = len(shifts)
+    len_dims = len(dims)
+    if len_shifts != 1 or len_dims != 1:
+        if len_shifts == 0:
+            raise ValueError("`shifts` required")
+        if len_dims == 0 and len_shifts == 1:
+            return view(roll(flatten(a), shifts, 0), a.shape)
+
+        if len_shifts != len_dims:
+            raise ValueError(f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}")
+        assert len_dims > 1
+        tail_shifts = shifts[1:]
+        tail_dims = dims[1:]
+        first_dim_rolled = roll(a, shifts[0], dims[0])
+        return roll(first_dim_rolled, tail_shifts, tail_dims)
+
+    if a.numel == 0:
+        return clone(a)
+
+    dim = dims[0]
+    size = a.shape[dim]
+    start = (size - shifts[0]) % size
+    t0 = narrow(a, dim, start, size - start)
+    t1 = narrow(a, dim, 0, start)
+    return cat((t0, t1), dim)
 
 
 # update to cat then view instead of unsqueezing each tensor
