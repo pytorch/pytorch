@@ -1064,7 +1064,7 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = a.ndim == 0 or all(a.shape[i] for i in dims)
+        valid_shape = a.ndim == 0 or py_all(a.shape[i] for i in dims)
         if not valid_shape:
             raise RuntimeError(
                 "reducing over zero-size dimension for reduction operation without identity"
@@ -1092,6 +1092,10 @@ def _reduction(
         result = prims.convert_element_type(result, result_dtype)
 
     return result
+
+
+# Saves Python all
+py_all = all
 
 
 @out_wrapper
