@@ -68,7 +68,9 @@ void validateDoubleBufferedTensor(const TensorView* tv) {
   auto def = tv->definition();
   TORCH_INTERNAL_ASSERT(
       def->isA<UnaryOp>() &&
-          def->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Set,
+              def->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Set ||
+          // Load store op should generally support double buffering.
+          def->isA<LoadStoreOp>(),
       "Invalid tensor to double-buffer. Only tensor defined by UnaryOp::Set is supported: ",
       def->toString());
 
@@ -121,6 +123,9 @@ class DoubleBufferFusionInspector : private IterVisitor {
     if (!tv->isDoubleBuffered()) {
       return;
     }
+
+    TORCH_INTERNAL_ASSERT(
+        tv->definition(), "Fusion input shouldn't be double buffered.", tv);
 
     validateDoubleBufferedTensor(tv);
 
@@ -405,7 +410,9 @@ class DoubleBufferInserter : private kir::ExprMutator {
     // RAW sync is not inserted for double buffered tensors. The only
     // exception is the prologue load.
     if (write_to_smem) {
-      auto sync = IrBuilder::create<kir::BlockSync>();
+      // Here the initial sync before entering double buffer loop is
+      //  inserted. It will also need to sync with async gmem loads.
+      auto sync = IrBuilder::create<kir::BlockSync>(false);
       registerInsertBefore(double_buffer_loop, sync);
     }
 

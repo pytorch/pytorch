@@ -729,6 +729,13 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
   }
 }
 
+void IndexLowering::handle(const LoadStoreOp* ldst) {
+  const auto in = lowerSrcIndex(ldst->in(), ldst->out());
+  const auto out = lowerDstIndex(ldst->out());
+  pushBack(IrBuilder::create<LoadStoreOp>(ldst->opType(), out, in));
+  GpuLower::current()->propagateExprInfo(ldst, back());
+}
+
 void IndexLowering::handle(const MmaOp* mma) {
   const auto a = lowerSrcIndex(mma->inA(), mma->out());
   const auto b = lowerSrcIndex(mma->inB(), mma->out());

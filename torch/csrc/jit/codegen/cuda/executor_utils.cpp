@@ -28,6 +28,7 @@
 #include <nvfuser_resources/grid_sync.h>
 #include <nvfuser_resources/helpers.h>
 #include <nvfuser_resources/index_utils.h>
+#include <nvfuser_resources/memory.h>
 #include <nvfuser_resources/random_numbers.h>
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/tensorcore.h>
@@ -98,6 +99,7 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::welford_cu;
   ss << nvfuser_resources::warp_cu;
   ss << nvfuser_resources::tensorcore_cu;
+  ss << nvfuser_resources::memory_cu;
   ss << nvfuser_resources::fused_reduction_cu;
 
   // Random utilities

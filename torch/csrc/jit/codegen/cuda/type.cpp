@@ -304,6 +304,8 @@ static const char* expr_type2string(ExprType t) {
       return "BroadcastOp";
     case ExprType::WelfordOp:
       return "WelfordOp";
+    case ExprType::LoadStoreOp:
+      return "LoadStoreOp";
     case ExprType::MmaOp:
       return "MmaOp";
     case ExprType::TransposeOp:
@@ -748,6 +750,17 @@ static const char* thread_size2string(ParallelType t) {
   }
 }
 
+static const char* load_store_type2string(LoadStoreOpType t) {
+  switch (t) {
+    case LoadStoreOpType::LdMatrix:
+      return "LdMatrix";
+    case LoadStoreOpType::LdMatrixTranspose:
+      return "LdMatrixTranspose";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unexpected parallel type");
+  }
+}
+
 const unsigned int _WORD_SHIFT = 16;
 constexpr unsigned int supported_switch_pair(DataType t1, DataType t2) {
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
@@ -936,6 +949,12 @@ std::ostream& operator<<(std::ostream& out, const MemoryType mtype) {
 
 std::ostream& operator<<(std::ostream& out, const IdMappingMode immtype) {
   return out << id_map_mode_type2string(immtype);
+}
+
+std::ostream& operator<<(
+    std::ostream& out,
+    const LoadStoreOpType load_store_type) {
+  return out << load_store_type2string(load_store_type);
 }
 
 TORCH_CUDA_CU_API std::ostream& operator<<(

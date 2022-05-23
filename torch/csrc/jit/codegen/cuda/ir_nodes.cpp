@@ -891,6 +891,25 @@ ViewOp::ViewOp(const ViewOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
 
+LoadStoreOp::LoadStoreOp(
+    IrBuilderPasskey passkey,
+    LoadStoreOpType op_type,
+    Val* out,
+    Val* in)
+    : Expr(passkey, ExprType::LoadStoreOp),
+      load_store_type_(op_type),
+      out_(out),
+      in_(in) {
+  addOutput(out);
+  addInput(in);
+}
+
+LoadStoreOp::LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      load_store_type_(src->load_store_type_),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {}
+
 IterDomain::IterDomain(
     IrBuilderPasskey passkey,
     Val* start,
@@ -1183,9 +1202,17 @@ void IterDomain::parallelize(ParallelType t) {
   }
 
   if (isMmaSwizzled()) {
+    // Mma swizzled axes represent data representation within a warp
+    //  so only allow updates that keep the parallelization within
+    //  a warp.
+    // Note && TODO: this check is actually used to allow indexing path
+    //  to make copies of the iterdomains. We might eventually just want
+    //  to lock these parallel types and not allowing any changes once
+    //  they are swizzled.
     TORCH_CHECK(
-        t == ParallelType::Vectorize,
-        "Parallel type other than vectorize not allowed for warp mapped ids");
+        t == ParallelType::Vectorize || t == ParallelType::TIDx ||
+            t == ParallelType::Serial,
+        "Parallel type other than serial, tidx, vectorize not allowed for mma swizzled ids");
   }
 
   parallel_type_ = t;

@@ -56,7 +56,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
             "Expecting predicated body to only have one vectorized expression.");
         auto vec_expr = ite->thenBody()[0];
         TORCH_INTERNAL_ASSERT(
-            vec_expr->isA<UnaryOp>(),
+            vec_expr->isA<UnaryOp>() || vec_expr->isA<LoadStoreOp>(),
             "Vectorize predicate exprs only supported on set operations.");
         TORCH_INTERNAL_ASSERT(
             ir_utils::isTvOp(vec_expr),

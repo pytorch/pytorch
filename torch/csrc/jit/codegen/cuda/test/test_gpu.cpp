@@ -22394,7 +22394,9 @@ TEST_F(NVFuserTest, FusionRAWSyncInsertionPlace4_CUDA) {
       // Record number of unary ops that modifies shared memory.
       if (uop->out()->isA<kir::TensorIndex>() &&
           uop->out()->as<kir::TensorIndex>()->view()->getMemoryType() ==
-              MemoryType::Shared) {
+              MemoryType::Shared &&
+          // Filter out initialization expressions
+          uop->in()->isA<kir::TensorIndex>()) {
         number_of_writes_++;
       }
     }

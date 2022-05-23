@@ -111,6 +111,14 @@ kir::Allocate* allocGlobalBufferForGridComm(
     DataType dtype,
     bool zero_init);
 
+//! Returns true if the expression will be lowered to
+//!  a ldmatrix intrinsic.
+bool isLdMatrixOp(const Expr* expr);
+
+//! Returns true if the given expression fills the output
+//!  tensor with a single scalar.
+bool isTensorScalarFillOp(const Expr* expr);
+
 } // namespace ir_utils
 
 namespace loop_utils {

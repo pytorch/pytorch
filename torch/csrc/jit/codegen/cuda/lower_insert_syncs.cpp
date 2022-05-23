@@ -503,7 +503,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         sync_expr = IrBuilder::create<kir::GridSync>(
             sync_bitmap, maybe_alloc->buffer());
       } else {
-        sync_expr = IrBuilder::create<kir::BlockSync>();
+        sync_expr = IrBuilder::create<kir::BlockSync>(false); // is not war sync
       }
 
       // The expressions in last_writes are those we're protecting the read
@@ -671,6 +671,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       }
 
       auto last_smem_writes = isModifiedSharedMemory(smem, expr->inputs());
+
       if (!last_smem_writes.empty()) {
         TORCH_INTERNAL_ASSERT(
             prev_tv_expr != nullptr,

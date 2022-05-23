@@ -88,6 +88,7 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   void handle(const ReductionOp*) final;
   void handle(const GroupedReductionOp*) final;
   void handle(const WelfordOp*) final;
+  void handle(const LoadStoreOp*) final;
   void handle(const MmaOp*) final;
   void handle(const BroadcastOp*) final;
   void handle(const TransposeOp*) final;

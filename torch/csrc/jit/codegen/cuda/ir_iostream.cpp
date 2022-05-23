@@ -430,6 +430,11 @@ void IrPrinter::handle(const WelfordOp* wop) {
   os_ << " )\n";
 }
 
+void IrPrinter::handle(const LoadStoreOp* ldst) {
+  indent() << ldst->out() << " = " << ldst->opType() << "( " << ldst->in()
+           << " )\n";
+}
+
 void IrPrinter::handle(const BroadcastOp* bop) {
   indent() << bop->out() << "\n";
   indent() << "   = broadcast( " << bop->in() << " )\n";

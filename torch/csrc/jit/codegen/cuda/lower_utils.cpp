@@ -94,6 +94,7 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::ReductionOp ||
        expr->getExprType().value() == ExprType::GroupedReductionOp ||
        expr->getExprType().value() == ExprType::WelfordOp ||
+       expr->getExprType().value() == ExprType::LoadStoreOp ||
        expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
@@ -106,6 +107,37 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::GridWelford)) {
     return true;
   }
+  return false;
+}
+
+bool isLdMatrixOp(const Expr* expr) {
+  if (auto ldst = dynamic_cast<const LoadStoreOp*>(expr)) {
+    return ldst->opType() == LoadStoreOpType::LdMatrix ||
+        ldst->opType() == LoadStoreOpType::LdMatrixTranspose;
+  }
+  return false;
+}
+
+bool isTensorScalarFillOp(const Expr* expr) {
+  // Check that the input is a single scalar.
+  if (expr->inputs().size() == 1 && expr->input(0)->isScalar()) {
+    // All load store op with a single scalar input
+    //  should be a scalar filling op. Semantically
+    //  it literally means `Store`'ing a scalar
+    //  into a tensor.
+    if (expr->isA<LoadStoreOp>()) {
+      return true;
+    }
+    // Unary copy op is also a scalar filling op.
+    if (auto uop = dynamic_cast<const UnaryOp*>(expr)) {
+      return uop->getUnaryOpType() == UnaryOpType::Set;
+    }
+  }
+  // Ideally any scalar expression that outputs
+  //  to a tensor should be considered in this function
+  //  but since we currently only limit scope to
+  //  initialization patterns so other scalar expr's
+  //  are low priority and are excluded here to avoid confusion.
   return false;
 }
 
@@ -519,6 +551,15 @@ class ReplaceExprInput : private kir::ExprMutator {
           replaced_inputs.value().at(node->inB()),
           node->init(),
           node->options());
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(LoadStoreOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<LoadStoreOp>(
+          node->opType(), node->out(), node->in());
       registerReplaceWithPredicate(node, replacement);
     }
   }

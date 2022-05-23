@@ -477,6 +477,33 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     TORCH_INTERNAL_ASSERT(false, "Unreachable");
   }
 
+  //! Utility for generating vectorized pointer access in ldsm and
+  //!  cpasync.
+  //! TODO: this access pattern as is could be merged with exisiting
+  //!  vectorization handling logic but this path will be updated in
+  //!  follow ups to optimize the generated assembly so keeping them
+  //!  separate path for now.
+  std::string genVectorPointer(Val* val, DataType dtype, int vec_size) {
+    std::stringstream ss;
+
+    ss << "reinterpret_cast<Array<" << dtype << "," << vec_size << ","
+       << vec_size << ">*>(&" << gen(val) << ")";
+
+    return ss.str();
+  }
+
+  void genLdMatrix(const LoadStoreOp* ldst, int vector_word_size) {
+    auto dtype = ldst->in()->getDataType().value();
+    indent() << "Turing::ldMatrix";
+    if (ldst->opType() == LoadStoreOpType::LdMatrixTranspose) {
+      code_ << "T";
+    }
+    code_ << " (";
+    code_ << "*" << genVectorPointer(ldst->out(), dtype, vector_word_size)
+          << ","
+          << "&" << gen(ldst->in()) << ");\n";
+  }
+
   void handle(const UnaryOp* uop) final {
     bool is_vector_op = false;
     size_t vector_word_size = 1;
@@ -918,7 +945,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (init) {
       ss << "init";
     }
-    ss << toString(options.macro) << toString(options.operand_layout);
+    ss << toString(options.macro);
+
+    if (isVolta(options.macro)) {
+      ss << toString(options.operand_layout);
+    } else if (isTuring(options.macro) || isAmpere(options.macro)) {
+      // mma's in turing and ampere TN only, transpose is handled either
+      //  via ldmatrix for fp16 or explicitly for other types.
+      ss << "TN";
+    }
     // TODO: additional parameter could be removed by swizzling iterdomain
     auto acc_stride = mma->accStride();
     TORCH_INTERNAL_ASSERT(acc_stride > 0);
@@ -1120,6 +1155,49 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           op_type,
           rop->predicate(),
           rop->writePredicate());
+    }
+  }
+
+  void handle(const LoadStoreOp* ldst) {
+    // TODO:
+    //  Need to gradually merge the code path of this
+    //   with UnaryOp::Set for vectorization.
+    //  There is quite a bit of possible clean up.
+    bool vectorize_op = false;
+    size_t vector_word_size = 1;
+    auto ti = ldst->out()->as<kir::TensorIndex>();
+
+    // Check vectorization and set vector word size
+    for (auto id : ti->view()->domain()->domain()) {
+      if (!isParallelTypeVectorize(id->getParallelType())) {
+        continue;
+      }
+
+      ExpressionEvaluator expr_eval(id->fusion());
+      auto vector_size_optional = expr_eval.evaluate(id->extent());
+
+      TORCH_INTERNAL_ASSERT(
+          vector_size_optional.has_value(),
+          "Could not evaluate constant value bound to vectorized dim.");
+
+      TORCH_INTERNAL_ASSERT(
+          id->getParallelType() != ParallelType::MisalignedVectorize,
+          "LoadStoreOp: no support yet for mis-aligned vectorization");
+      vector_word_size = vector_size_optional.value();
+      vectorize_op = true;
+      break;
+    }
+
+    // Dispatch instruction generation:
+    switch (ldst->opType()) {
+      case LoadStoreOpType::LdMatrix:
+      case LoadStoreOpType::LdMatrixTranspose:
+        TORCH_INTERNAL_ASSERT(
+            vectorize_op, "LdMatrix: Vectorization required: ", ldst);
+        genLdMatrix(ldst, vector_word_size);
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "LoadStoreOp: Unknown op type");
     }
   }
 
@@ -2033,7 +2111,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::BlockSync*) final {
+  void handle(const kir::BlockSync* sync) final {
     // Use a custom synchronization method if enabled
     if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
       indent() << "block_sync::sync();\n";
