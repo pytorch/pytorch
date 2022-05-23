@@ -327,13 +327,7 @@ Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
   if (tensor.layout() == c10::kSparse) {
     return tensor._to_dense(dtype);
   }
-  if (tensor.layout() == c10::kSparseCsr) {
-    return tensor._to_dense(dtype);
-  }
-  if (tensor.layout() == c10::kSparseCsc) {
-    return tensor._to_dense(dtype);
-  }
-  if (tensor.layout() == c10::kSparseBsr) {
+  if (tensor.layout() == c10::kSparseCsr || tensor.layout() == c10::kSparseCsc || tensor.layout() == c10::kSparseBsr) {
     return tensor._to_dense(dtype);
   }
   if (tensor.layout() == c10::kMkldnn) {
