@@ -324,17 +324,8 @@
   result: maybe_multiply(self_t, beta) + maybe_multiply(batch1_t.bmm(batch2_p), alpha) + maybe_multiply(batch1_p.bmm(batch2_t), alpha)
 
 - name: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
-  self: zeros_like(grad)
-  result: zeros_like(self_t)
-
-- name: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
-  self: zeros_like(grad)
-  p: zeros_like(p)
-  result: self_t.zero_()
-
-- name: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
-  self: zeros_like(grad)
-  result: self_t.zero_()
+  self: non_differentiable
+  output_differentiability: [False]
 
 - name: bmm(Tensor self, Tensor mat2) -> Tensor
   self: grad.bmm(mat2.transpose(1, 2).conj())
@@ -927,10 +918,6 @@
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
 
-- name: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
-  self: zeros_like(grad)
-  result: self_t.zero_()
-
 - name: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   self: logsumexp_backward(grad, self, result, dim, keepdim)
   result: logsumexp_jvp(self_p, self_t, dim, keepdim)
@@ -1020,11 +1007,11 @@
   result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
+  self: grad.expand(self.sizes()) / self.numel()
   result: auto_linear
 
 - name: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
+  self: mean_backward(grad, self.sizes(), dim, self.numel(), keepdim)
   result: auto_linear
 
 - name: median(Tensor self) -> Tensor
@@ -1197,22 +1184,18 @@
   x2: not_implemented("_cdist_backward")
   cdist: not_implemented("_cdist_backward")
 
-- name: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
-  self: zeros_like(grad)
-  result: self_t.zero_()
-
 - name: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
-  mean: at::zeros(mean.sizes(), grad.options())
-  result: auto_element_wise
+  mean: non_differentiable
+  output_differentiability: [False]
 
 - name: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
-  std: at::zeros(std.sizes(), grad.options())
-  result: auto_element_wise
+  std: non_differentiable
+  output_differentiability: [False]
 
 - name: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
-  mean: at::zeros(mean.sizes(), grad.options())
-  std: at::zeros(std.sizes(), grad.options())
-  result: zeros_like(mean_t)
+  mean: non_differentiable
+  std: non_differentiable
+  output_differentiability: [False]
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   input, tau: householder_product_backward(grad, result, input, tau)
@@ -1228,8 +1211,8 @@
   result: auto_linear
 
 - name: poisson(Tensor self, Generator? generator=None) -> Tensor
-  self: zeros_like(self)
-  result: auto_element_wise
+  self: non_differentiable
+  output_differentiability: [False]
 
 - name: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
   self: pow_backward(grad, self, exponent)
@@ -1265,18 +1248,6 @@
 - name: rad2deg(Tensor self) -> Tensor
   self: rad2deg_backward(grad)
   result: auto_element_wise
-
-- name: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
-  self: zeros_like(grad)
-  result: self_t.zero_()
-
-- name: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
-  self: zeros_like(grad)
-  result: self_t.zero_()
-
-- name: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
-  self: zeros_like(grad)
-  result: self_t.zero_()
 
 - name: reciprocal(Tensor self) -> Tensor
   self: -grad * (result * result).conj()
@@ -1478,10 +1449,14 @@
 
 - name: std.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
   self: std_backward(result, grad, self, dim, correction, keepdim)
-  result: handle_r_to_c(result.scalar_type(), var_jvp(self_t, self_p, result, dim, correction, keepdim) / (2 * result))
+  # pointwise (variance) + sum + sqrt
+  result: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result)).masked_fill_(result == 0, 0)
 
 - name: std_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, dim, correction, keepdim, true)
+  self: std_mean_backward(grads[0], grads[1], self, result0, dim, correction, keepdim)
+  result0: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result0)).masked_fill_(result0 == 0, 0)
+  # linear
+  result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
 - name: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
@@ -1673,10 +1648,14 @@
 
 - name: var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
   self: var_backward(grad, self, dim, correction, keepdim)
-  result: handle_r_to_c(result.scalar_type(), var_jvp(self_t, self_p, result, dim, correction, keepdim))
+  # pointwise + sum
+  result: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
 
 - name: var_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, dim, correction, keepdim, false)
+  self: var_mean_backward(grads[0], grads[1], self, dim, correction, keepdim)
+  result0: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
+  # linear
+  result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
@@ -1747,6 +1726,10 @@
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
   target: binary_cross_entropy_target_backward(grad, self, target, weight, reduction)
+  result: "apply_loss_reduction(
+               binary_cross_entropy_backward(self_t, self_p, target_p, weight, at::Reduction::None)
+             + binary_cross_entropy_target_backward(target_t, self_p, target_p, weight, at::Reduction::None),
+           reduction)"
 
 - name: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
@@ -1756,7 +1739,10 @@
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_with_logits_backward(grad, self, target, weight, pos_weight, reduction)
   target: binary_cross_entropy_with_logits_target_backward(grad, self, target, weight, pos_weight, reduction)
-  result: binary_cross_entropy_with_logits_jvp(self_t, target_t, self_p, target_p, weight, pos_weight, reduction)
+  result: "apply_loss_reduction(
+               binary_cross_entropy_with_logits_backward(self_t, self_p, target_p, weight, pos_weight, at::Reduction::None)
+             + binary_cross_entropy_with_logits_target_backward(target_t, self_p, target_p, weight, pos_weight, at::Reduction::None),
+           reduction)"
 
 - name: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   indices: non_differentiable
@@ -2702,6 +2688,7 @@
   output_differentiability: [False]
 
 - name: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
+  self: non_differentiable
   output_differentiability: [False]
 
 - name: nonzero(Tensor self) -> Tensor

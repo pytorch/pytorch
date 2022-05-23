@@ -113,12 +113,22 @@ at::Tensor native_dropout_double_backward(const at::Tensor& ggI, const at::Tenso
 at::Tensor evenly_distribute_backward(at::Tensor grad, const at::Tensor & input, const at::Tensor & value);
 Tensor sgn_jvp(const Tensor& x, const Tensor& dx, const Tensor& sgn);
 Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
+Tensor mean_backward(const Tensor& grad, IntArrayRef shape, IntArrayRef dim, int64_t numel, bool keepdim);
 at::Tensor var_backward(at::Tensor grad, const at::Tensor& self, at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim);
-at::Tensor var_jvp(const at::Tensor& self_t, const at::Tensor& self_p, const at::Tensor& result, at::OptionalIntArrayRef dim_opt, c10::optional<int64_t> correction_opt, bool keepdim);
 at::Tensor std_backward(const at::Tensor& result, const at::Tensor& grad, const at::Tensor& self, at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim);
-at::Tensor mean_backward(at::Tensor grad, const at::IntArrayRef sizes, at::IntArrayRef dim, bool keepdim);
-at::Tensor mean_backward(at::Tensor grad, const at::IntArrayRef sizes, int64_t numel);
-at::Tensor var_std_mean_backward(const variable_list& grads, const at::Tensor& self, const at::Tensor& r1, const at::Tensor& r2, at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim, bool is_std);
+Tensor var_mean_backward(const Tensor& gvar,
+                         const Tensor& gmean,
+                         const Tensor& self,
+                         at::OptionalIntArrayRef dim_opt,
+                         c10::optional<int64_t> correction_opt,
+                         bool keepdim);
+Tensor std_mean_backward(const Tensor& gstd,
+                         const Tensor& gmean,
+                         const Tensor& self,
+                         const Tensor& std,
+                         at::OptionalIntArrayRef dim_opt,
+                         c10::optional<int64_t> correction_opt,
+                         bool keepdim);
 at::Tensor masked_scatter_backward(const at::Tensor & grad, const at::Tensor & mask, at::IntArrayRef sizes);
 at::Tensor cholesky_backward(const at::Tensor& grad, bool upper, const at::Tensor& L);
 at::Tensor cholesky_jvp(const at::Tensor& input_tangent, const at::Tensor& L, bool upper);
@@ -159,7 +169,6 @@ Tensor binary_cross_entropy_double_backward_target(
   int64_t reduction
 );
 at::Tensor binary_cross_entropy_with_logits_target_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& pos_weight, int64_t reduction);
-at::Tensor binary_cross_entropy_with_logits_jvp(const Tensor& input_t, const Tensor& target_t, const Tensor& input_p, const Tensor& target_p, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction);
 at::Tensor log_sigmoid_double_backward(const at::Tensor & grad, const at::Tensor & input);
 at::Tensor softmax_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, int dim, const at::Tensor & output);
 at::Tensor binary_cross_entropy_double_backward(const at::Tensor & grad_output, const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, const c10::optional<at::Tensor>& weight, int64_t reduction);

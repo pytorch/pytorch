@@ -6,14 +6,11 @@
 
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
-#endif
-
-#if !defined(THC_GENERIC_FILE)
-#include <c10/core/CPUAllocator.h>
-#include <ATen/native/Resize.h>
-#else
 #include <ATen/native/cuda/Resize.h>
 #endif
+
+#include <c10/core/CPUAllocator.h>
+#include <ATen/native/Resize.h>
 
 #ifdef _MSC_VER
 #define LSEEK _lseeki64
@@ -86,14 +83,11 @@ static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
+  c10::Allocator* allocator = self->cdata->allocator();
   auto new_storage = c10::make_intrusive<at::StorageImpl>(
     c10::StorageImpl::use_byte_size_t(),
     0,
-#if defined(THC_GENERIC_FILE)
-    c10::cuda::CUDACachingAllocator::get(),
-#else
-    c10::GetDefaultCPUAllocator(),
-#endif
+    allocator,
     /*resizable=*/true);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -108,16 +102,22 @@ static PyObject * THPStorage_(resize_)(PyObject *_self, PyObject *number_arg)
   THPUtils_assert(THPUtils_checkLong(number_arg), "resize_ expects an int, "
       "but got %s", THPUtils_typename(number_arg));
   int64_t newsize = THPUtils_unpackLong(number_arg);
-#if defined(THC_GENERIC_FILE)
-  ptrdiff_t size_bytes_i = newsize;
-  TORCH_CHECK(!c10::overflows<size_t>(size_bytes_i),
-              "Requested storage size (", size_bytes_i,
-              ") cannot be represented as a size_t");
-  const auto size_bytes = static_cast<size_t>(size_bytes_i);
-  at::native::resize_bytes_cuda(self->cdata, size_bytes);
-#else
-  at::native::resize_bytes_cpu(self->cdata, newsize);
+  c10::DeviceType device_type = self->cdata->device_type();
+  if (device_type == at::kCPU) {
+    at::native::resize_bytes_cpu(self->cdata, newsize);
+#ifdef USE_CUDA
+  } else if (device_type == at::kCUDA) {
+    ptrdiff_t size_bytes_i = newsize;
+    TORCH_CHECK(!c10::overflows<size_t>(size_bytes_i),
+                "Requested storage size (", size_bytes_i,
+                ") cannot be represented as a size_t");
+    const auto size_bytes = static_cast<size_t>(size_bytes_i);
+    at::native::resize_bytes_cuda(self->cdata, size_bytes);
 #endif
+  } else {
+    TORCH_CHECK(false,
+      "_UntypedStorage.resize_: got unexpected device type ", device_type);
+  }
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -138,7 +138,6 @@ static PyObject * THPStorage_(fill_)(PyObject *_self, PyObject *number_arg)
   END_HANDLE_TH_ERRORS
 }
 
-#if !defined(THC_GENERIC_FILE)
 static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyObject *keywds)
 {
   HANDLE_TH_ERRORS
@@ -224,11 +223,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   auto storage = c10::make_intrusive<at::StorageImpl>(
     c10::StorageImpl::use_byte_size_t(),
     size_bytes,
-#if defined(THC_GENERIC_FILE)
-    c10::cuda::CUDACachingAllocator::get(),
-#else
     c10::GetDefaultCPUAllocator(),
-#endif
     /*resizable=*/true);
 
   if (scalar_type == at::kByte || scalar_type == at::kChar) {
@@ -284,7 +279,6 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   return (PyObject*)THPStorage_(New)(storage);
   END_HANDLE_TH_ERRORS
 }
-#endif
 
 static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObject *keywds)
 {
@@ -302,10 +296,6 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   if (shared)
     shared = at::ALLOCATOR_MAPPED_SHARED;
 
-#ifdef THC_GENERIC_FILE
-  TORCH_CHECK(false, "not available yet for CUDA");
-  return nullptr;
-#else
   size_t actual_nbytes = -1;
   auto storage = c10::make_intrusive<at::StorageImpl>(
     c10::StorageImpl::use_byte_size_t(),
@@ -320,7 +310,6 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   }
 
   return (PyObject*)THPStorage_(New)(std::move(storage));
-#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -429,16 +418,6 @@ static PyObject *THPStorage_(setFromFile)(PyObject *_self, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef THC_GENERIC_FILE
-PyObject * THPStorage_(getDevice)(PyObject *_self, PyObject *noargs)
-{
-  HANDLE_TH_ERRORS
-  auto self = (THPStorage*)_self;
-  return THPUtils_packInt32(self->cdata->device().index());
-  END_HANDLE_TH_ERRORS
-}
-#endif
-
 PyObject * THPStorage_(_setCdata)(PyObject *_self, PyObject *new_cdata)
 {
   HANDLE_TH_ERRORS
@@ -473,15 +452,10 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"_write_file", THPStorage_(writeFile), METH_VARARGS, nullptr},
   {"_new_with_file", THPStorage_(newWithFile), METH_VARARGS | METH_STATIC, nullptr},
   {"_set_from_file", THPStorage_(setFromFile), METH_VARARGS, nullptr},
-#if !defined(THC_GENERIC_FILE)
   {"from_buffer", castPyCFunctionWithKeywords(THPStorage_(fromBuffer)),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
-#endif
   {"from_file", castPyCFunctionWithKeywords(THPStorage_(fromFile)),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
-#ifdef THC_GENERIC_FILE
-  {"get_device", THPStorage_(getDevice), METH_NOARGS, nullptr},
-#endif
   {"_set_cdata", THPStorage_(_setCdata), METH_O, nullptr},
   {nullptr}
 };
