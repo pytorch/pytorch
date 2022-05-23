@@ -44,6 +44,12 @@ def define_targets(rules):
               "--gen_lazy_ts_backend",
     )
 
+    rules.cc_library(
+        name = "generated-autograd-headers",
+        hdrs = [":{}".format(h) for h in _GENERATED_AUTOGRAD_CPP_HEADERS + _GENERATED_AUTOGRAD_PYTHON_HEADERS],
+        visibility = ["//visibility:public"],
+    )
+
     rules.genrule(
         name = "version_h",
         srcs = [
@@ -75,8 +81,6 @@ _GENERATED_AUTOGRAD_CPP_HEADERS = [
     "torch/csrc/autograd/generated/VariableType.h",
     "torch/csrc/autograd/generated/variable_factories.h",
 ]
-
-GENERATED_AUTOGRAD_H = _GENERATED_AUTOGRAD_CPP_HEADERS + _GENERATED_AUTOGRAD_PYTHON_HEADERS
 
 GENERATED_TESTING_PY = [
     "torch/testing/_internal/generated/annotated_fn_args.py",
