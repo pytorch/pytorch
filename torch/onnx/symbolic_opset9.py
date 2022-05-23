@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -5006,10 +5006,10 @@ class Prim:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def device(ctx: torch.onnx.SymbolicContext, g, *inputs, **kwargs):
-        n = ctx.cur_node
-
-        if n.output().type().kind() == "DeviceObjType":
+    def device(
+        ctx: torch.onnx.SymbolicContext, g: _C.Graph, *inputs: Any, **kwargs: Any
+    ) -> None:
+        if isinstance(ctx.cur_node.output().type(), _C.DeviceObjType):
             return None
 
         return symbolic_helper._unimplemented(
