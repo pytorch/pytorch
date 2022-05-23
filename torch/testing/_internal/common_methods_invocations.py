@@ -19174,6 +19174,18 @@ python_ref_db = [
     # View & Shape OpInfos
     #
     PythonRefInfo(
+        "_refs.atleast_1d",
+        torch_opinfo_name="atleast_1d",
+    ),
+    PythonRefInfo(
+        "_refs.atleast_2d",
+        torch_opinfo_name="atleast_2d",
+    ),
+    PythonRefInfo(
+        "_refs.atleast_3d",
+        torch_opinfo_name="atleast_3d",
+    ),
+    PythonRefInfo(
         "_refs.as_strided",
         torch_opinfo_name="as_strided",
         # FIXME: doesn't support chalf
