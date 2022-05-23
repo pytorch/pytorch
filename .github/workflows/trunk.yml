@@ -173,8 +173,8 @@ jobs:
       build-environment: macos-11-py3-x86-64
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "macos-12", xcode-version: "13.3.1" },
-          { config: "default", shard: 2, num_shards: 2, runner: "macos-12", xcode-version: "13.3.1" },
+          { config: "default", shard: 1, num_shards: 2, runner: "macos-12" },
+          { config: "default", shard: 2, num_shards: 2, runner: "macos-12" },
         ]}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
