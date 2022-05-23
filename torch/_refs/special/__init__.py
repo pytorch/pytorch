@@ -21,8 +21,8 @@ from torch._refs import (
 
 
 __all__ = [
-    "i1",
     "i0e",
+    "i1",
     "i1e",
     "logit",
     "xlog1py",
