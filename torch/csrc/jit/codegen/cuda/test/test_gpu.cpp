@@ -20975,6 +20975,70 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization4_CUDA) {
 }
 #endif
 
+TEST_F(NVFuserTest, FusionBroadcastConcretization5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(1);
+  fusion.addInput(tv1);
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addInput(tv2);
+  auto tv3 = makeSymbolicTensor(1);
+  fusion.addInput(tv3);
+
+  // Assert tv2 and tv3 have the same shape
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  // Concretize a broadcast domain to multiple non-concrete domains
+  // through a multi-output expression. It should be considered to be
+  // non-uniquely concretized.
+  auto tv5 = broadcast(tv0, {false, true});
+  // Reduce only the non-broadcast domain.
+  auto tvs = Welford(tv5, {0});
+  auto tv9 = add(tvs.avg, tv1);
+  auto tv10 = add(tvs.var_sum, tv2);
+  fusion.addOutput(tv9);
+  fusion.addOutput(tv10);
+
+  // Same pattern as the above, but concretize the broadcast domain
+  // with tv2 and tv3, which have the exactly same shape, so the
+  // broadcast should be considered uniquely concretized.
+  auto tv11 = broadcast(tv0, {false, true});
+  // Reduce only the non-broadcast domain.
+  auto tvs2 = Welford(tv11, {0});
+  auto tv15 = add(tvs2.avg, tv2);
+  auto tv16 = add(tvs2.var_sum, tv3);
+  fusion.addOutput(tv15);
+  fusion.addOutput(tv16);
+
+  // Reduce only the broadcast domain. Since it's reduced, it should
+  // not be considered to be concretized.
+  auto tv17 = broadcast(tv0, {false, true});
+  auto tvs3 = Welford(tv17, {1});
+  fusion.addOutput(tvs3.avg);
+
+  ConcretizedBroadcastDomains bcast_concretization_info;
+  bcast_concretization_info.build(&fusion);
+
+  TORCH_CHECK(
+      bcast_concretization_info.maybeNonUniquelyConcretized(tv5->axis(1)),
+      "Failed to detect non-unique concretization of ",
+      tv5->toString());
+
+  TORCH_CHECK(
+      bcast_concretization_info.isUniquelyConcretized(tv11->axis(1)),
+      "Failed to detect unique concretization of ",
+      tv11->toString());
+
+  TORCH_CHECK(
+      !bcast_concretization_info.isConcretized(tv17->axis(1)),
+      "Failed to detect non-concretization of ",
+      tv17->toString());
+}
+
 TEST_F(NVFuserTest, FusionIssue1430_CUDA) {
   // Derived from an expression sorting issue when using loop map, now expr
   // sorting uses parallel map.
