@@ -3,7 +3,7 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
-from torch.testing._internal.jit_utils RUN_CUDA
+from torch.testing._internal.jit_utils import RUN_CUDA
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch._ops import OpOverload
@@ -69,6 +69,17 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(isinstance(out, FakeTensor))
         self.assertTrue(out.device.type == "cuda")
+
+    def test_fake_mode_caching(self):
+        x = torch.rand([4, 4])
+
+        with enable_torch_dispatch_mode(FakeTensorMode):
+            y = x[0]
+            z = x[1]
+
+        self.assertEqual(torch._C._storage_id(y), torch._C._storage_id(z))
+        self.assertTrue(isinstance(y, FakeTensor))
+        self.assertTrue(isinstance(z, FakeTensor))
 
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
