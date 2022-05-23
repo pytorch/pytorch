@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <type_traits>
 #include <utility>
 
 #include <ATen/Context.h>
@@ -20,7 +21,8 @@ namespace impl {
 
 enum class EventType : uint8_t {
   TorchOp = 0,
-  Backend
+  Backend,
+  Allocation
 };
 
 template <EventType>
@@ -57,21 +59,21 @@ template <>
 struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   ExtraFields(
       TorchOpBasicFields&& f,
-      time_t end_time_us,
+      time_t end_time_ns,
       Inputs&& inputs,
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
       FallbackPair&& gpu_fallback)
       : TorchOpBasicFields(std::move(f)),
-        end_time_us_{end_time_us},
+        end_time_ns_{end_time_ns},
         inputs_{std::move(inputs)},
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
         gpu_fallback_{std::move(gpu_fallback)} {}
 
-  time_t end_time_us_;
+  time_t end_time_ns_;
   Inputs inputs_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
@@ -91,29 +93,55 @@ struct ExtraFields<EventType::Backend> {
   jit_modules_t jit_modules_;
 };
 
-struct Result {
-  template <EventType E>
-  Result(
-      int64_t start_time_us,
-      uint64_t start_tid,
-      kineto::DeviceAndResource kineto_info,
-      ExtraFields<E>&& extra_fields)
-      : start_time_us_{start_time_us},
-        start_tid_{start_tid},
-        kineto_info_{kineto_info},
-        extra_fields_{std::move(extra_fields)} {}
+template <>
+struct ExtraFields<EventType::Allocation> {
+  torch::profiler::impl::approx_time_t start_time_;
+  void* ptr_;
+  int64_t alloc_size_;
+  int64_t total_allocated_;
+  int64_t total_reserved_;
+  c10::DeviceType device_type_;
+  c10::DeviceIndex device_index_;
+};
+
+// For performance.
+static_assert(
+    std::is_pod<ExtraFields<EventType::Allocation>>::value,
+    "Non-POD member of ExtraFields<EventType::Allocation>.");
+
+struct TORCH_API Result : public std::enable_shared_from_this<Result> {
+  template <typename... Args>
+  [[nodiscard]] static std::shared_ptr<Result> create(Args... args) {
+    return std::shared_ptr<Result>(new Result(std::forward<Args>(args)...));
+  }
 
   std::string name() const;
   torch::profiler::impl::kineto::KinetoActivityType kinetoType() const;
   uint64_t correlationID() const;
-  int64_t endTimeUS() const;
+  int64_t endTimeNS() const;
   uint64_t endTID() const;
+  c10::DeviceType deviceType() const;
 
-  int64_t start_time_us_;
+  int64_t start_time_ns_;
   uint64_t start_tid_;
   kineto::DeviceAndResource kineto_info_;
-  c10::variant<ExtraFields<EventType::TorchOp>, ExtraFields<EventType::Backend>>
+  c10::variant<
+      ExtraFields<EventType::TorchOp>,
+      ExtraFields<EventType::Backend>,
+      ExtraFields<EventType::Allocation>>
       extra_fields_;
+
+ private:
+  template <EventType E>
+  Result(
+      int64_t start_time_ns,
+      uint64_t start_tid,
+      kineto::DeviceAndResource kineto_info,
+      ExtraFields<E>&& extra_fields)
+      : start_time_ns_{start_time_ns},
+        start_tid_{start_tid},
+        kineto_info_{kineto_info},
+        extra_fields_{std::move(extra_fields)} {}
 };
 
 struct KinetoObserverContext : public at::ObserverContext {
@@ -181,6 +209,11 @@ class TORCH_API ThreadLocalSubqueue {
     backend_events_.emplace_back(std::forward<Args>(args)...);
   }
 
+  template <class... Args>
+  void emplace_allocation_event(Args&&... args) {
+    allocations_.emplace_back(std::forward<Args>(args)...);
+  }
+
   uint64_t tid() const {
     return tid_;
   }
@@ -216,6 +249,9 @@ class TORCH_API ThreadLocalSubqueue {
 
   // reportBackendEventToActiveKinetoProfiler
   AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
+
+  // reportMemoryUsage
+  AppendOnlyList<ExtraFields<EventType::Allocation>, BlockSize> allocations_;
 };
 
 class TORCH_API RecordQueue {
@@ -225,7 +261,8 @@ class TORCH_API RecordQueue {
   ThreadLocalSubqueue* getSubqueue();
 
   // NB: This is a destructive operation.
-  std::deque<Result> getRecords(std::function<time_t(approx_time_t)> time_converter);
+  std::vector<std::shared_ptr<Result>> getRecords(
+      std::function<time_t(approx_time_t)> time_converter);
 
  private:
   uint32_t id_;
