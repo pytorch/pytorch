@@ -32,7 +32,10 @@ from torchgen.api.types import (
     stringT,
 )
 from torchgen.api import cpp
-from torchgen.gen import parse_native_yaml, get_grouped_by_view_native_functions
+from torchgen.gen import (
+    parse_native_yaml,
+    get_grouped_by_view_native_functions,
+)
 from torchgen.context import with_native_function
 from torchgen.model import (
     FunctionSchema,
@@ -72,7 +75,7 @@ def add_view_copy_derivatives(
 
 
 def load_derivatives(
-    derivatives_yaml_path: str, native_yaml_path: str
+    derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str
 ) -> Sequence[DifferentiabilityInfo]:
     # Do some caching as this is a deterministic function
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
@@ -82,7 +85,7 @@ def load_derivatives(
         with open(derivatives_yaml_path, "r") as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
-        funcs = parse_native_yaml(native_yaml_path).native_functions
+        funcs = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
         # From the parsed native functions, separate out the (generated) view_copy functions,
         # so we can generate derivatives for them separately.
         native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)

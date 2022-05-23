@@ -1,8 +1,11 @@
 #pragma once
 
+#include <sstream>
+
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
+#include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
 namespace torch {
@@ -55,6 +58,12 @@ class TORCH_API TSComputation : public Computation {
     return result_shape_;
   }
 
+  const std::string to_string() const override {
+    std::ostringstream oss;
+    oss << *graph_;
+    return oss.str();
+  }
+
   std::shared_ptr<torch::jit::Graph> graph() const {
     return graph_;
   }
@@ -80,13 +89,6 @@ class TORCH_API TSLoweringContext : public LoweringContext {
       BackendDevice device,
       c10::ArrayRef<Node*> post_order,
       Util::EmissionMap emit_status);
-
-  // TODO(whc) replace these when real impl lands;
-  // I am just landing the interface in this diff, but MSVC won't allow
-  // undefined virtual funcs
-  Shape GetResultShape(size_t index) const override {
-    TORCH_INTERNAL_ASSERT(false, "not implemented");
-  }
 
   size_t AddResult(const Output& output) override {
     return AddResult(GetOutputOp(output));

@@ -50,7 +50,7 @@ static void forked_autograd_child() { in_bad_autograd_fork = true; }
 
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
-#if !defined(WIN32) && !defined(__XROS__)
+#if !defined(WIN32)
   static std::once_flag flag;
   std::call_once(
       flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
@@ -389,6 +389,11 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
   // backwards, user thread), this function is expected to exit once that
   // graph_task complete.
 
+#ifdef USE_ROCM
+  // Keep track of backward pass for rocblas.
+  at::ROCmBackwardPassGuard in_backward;
+#endif
+
   // local_ready_queue should already been initialized when we get into thread_main
   TORCH_INTERNAL_ASSERT(local_ready_queue != nullptr);
   while (graph_task == nullptr || !graph_task->future_result_->completed()) {
@@ -433,7 +438,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
                 c10::str(
                     "autograd::engine::evaluate_function: ",
                     task.fn_.get()->name()),
-                std::vector<c10::IValue>());
+                c10::ArrayRef<const c10::IValue>());
             evaluate_function(
                 local_graph_task,
                 task.fn_.get(),

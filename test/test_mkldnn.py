@@ -241,47 +241,6 @@ class TestMkldnn(TestCase):
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
-    def test_conv2d_nhwc(self):
-        conv_module = torch.nn.Conv2d
-        input_shapes = (224, 224)
-        options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
-        for train, bias, dilation, groups in options:
-            N = torch.randint(3, 10, (1,)).item()
-            M = torch.randint(1, 3, (1,)).item() * groups
-            C = torch.randint(1, 3, (1,)).item() * groups
-            x_shape = (N, C) + input_shapes
-            x = torch.randn(x_shape, dtype=torch.float32)
-            # conv1: mkldnn conv2d in contiguous memory format (nchw)
-            # conv2: mkldnn conv2d in channels last memory format (nhwc)
-            conv1 = conv_module(in_channels=C,
-                                out_channels=M,
-                                kernel_size=3,
-                                stride=2,
-                                padding=1,
-                                dilation=dilation,
-                                bias=bias,
-                                groups=groups).float()
-            conv2 = copy.deepcopy(conv1).to(memory_format=torch.channels_last)
-            x1 = x.clone()
-            x2 = x.clone().to(memory_format=torch.channels_last)
-            if train:
-                x1.requires_grad_()
-                x2.requires_grad_()
-            y1 = conv1(x1)
-            y2 = conv2(x2)
-            self.assertEqual(y1, y2)
-            if train:
-                y1.sum().backward()
-                y2.sum().backward()
-                self.assertTrue(x2.grad.is_contiguous(memory_format=torch.channels_last))
-                self.assertEqual(conv1.weight.grad,
-                                 conv2.weight.grad,
-                                 atol=1e-3,
-                                 rtol=1e-3)
-                if bias:
-                    self.assertEqual(conv1.bias.grad, conv2.bias.grad)
-                self.assertEqual(x1.grad, x2.grad)
-
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_conv_bf16_base(self, dim):
         conv_module = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -323,6 +282,56 @@ class TestMkldnn(TestCase):
 
     def test_conv3d_bf16(self):
         self._test_conv_bf16_base(dim=3)
+
+    def _test_conv2d_nhwc_base(self, dtype):
+        conv_module = torch.nn.Conv2d
+        input_shapes = (224, 224)
+        options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
+        for train, bias, dilation, groups in options:
+            N = torch.randint(3, 10, (1,)).item()
+            M = torch.randint(1, 3, (1,)).item() * groups
+            C = torch.randint(1, 3, (1,)).item() * groups
+            x_shape = (N, C) + input_shapes
+            x = torch.randn(x_shape, dtype=dtype)
+            # conv1: mkldnn conv2d in contiguous memory format (nchw)
+            # conv2: mkldnn conv2d in channels last memory format (nhwc)
+            conv1 = conv_module(in_channels=C,
+                                out_channels=M,
+                                kernel_size=3,
+                                stride=2,
+                                padding=1,
+                                dilation=dilation,
+                                bias=bias,
+                                groups=groups).to(dtype=dtype)
+            conv2 = copy.deepcopy(conv1).to(memory_format=torch.channels_last)
+            x1 = x.clone()
+            x2 = x.clone().to(memory_format=torch.channels_last)
+            if train:
+                x1.requires_grad_()
+                x2.requires_grad_()
+            y1 = conv1(x1)
+            y2 = conv2(x2)
+            self.assertEqual(y1, y2)
+            if train:
+                y1.sum().backward()
+                y2.sum().backward()
+                self.assertTrue(x2.grad.is_contiguous(memory_format=torch.channels_last))
+                self.assertEqual(conv1.weight.grad,
+                                 conv2.weight.grad,
+                                 atol=1e-3,
+                                 rtol=1e-3)
+                if bias:
+                    self.assertEqual(conv1.bias.grad, conv2.bias.grad)
+                self.assertEqual(x1.grad, x2.grad)
+
+    def test_conv2d_nhwc(self):
+        self._test_conv2d_nhwc_base(dtype=torch.float32)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_conv2d_nhwc_bf16(self):
+        # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
+        if has_bf16_support():
+            self._test_conv2d_nhwc_base(dtype=torch.bfloat16)
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -440,6 +449,74 @@ class TestMkldnn(TestCase):
             self.assertRaisesRegex(RuntimeError,
                                    msg,
                                    lambda: m(x2))
+
+    def _test_prelu_base(self, size, num_channels):
+        x = torch.randn(size, dtype=torch.float32)
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        x3 = x.clone().to_mkldnn().requires_grad_()
+        m1 = torch.nn.PReLU(num_channels)
+        m2 = mkldnn_utils.to_mkldnn(copy.deepcopy(m1))
+        m3 = copy.deepcopy(m1)
+        y1 = m1(x1)
+        y2 = m2(x2).to_dense()
+        y3 = m3(x3).to_dense()  # Only convert data to mkldnn, weight is Aten tensor
+        loss1 = y1.sum()
+        loss1.backward()
+        loss2 = y2.sum()
+        loss2.backward()
+        loss3 = y3.sum()
+        loss3.backward()
+        self.assertEqual(y1, y2)
+        self.assertEqual(y1, y3)
+        self.assertEqual(x1.grad, x2.grad.to_dense())
+        self.assertEqual(x1.grad, x3.grad.to_dense())
+
+    def test_prelu(self):
+        self._test_prelu_base(torch.Size([16]), 1)
+        self._test_prelu_base(torch.Size([16, 64]), 1)
+        self._test_prelu_base(torch.Size([16, 64]), 64)
+        self._test_prelu_base(torch.Size([16, 64, 112]), 1)
+        self._test_prelu_base(torch.Size([16, 64, 112]), 64)
+        self._test_prelu_base(torch.Size([16, 64, 112, 112]), 1)
+        self._test_prelu_base(torch.Size([16, 64, 112, 112]), 64)
+        self._test_prelu_base(torch.Size([16, 64, 112, 112, 1]), 1)
+        self._test_prelu_base(torch.Size([16, 64, 112, 112, 1]), 64)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def _test_prelu_bf16_base(self, size, num_channels):
+        if has_bf16_support():
+            x = torch.randn(size, dtype=torch.float32)
+            x_fp32 = x.clone().to_mkldnn().requires_grad_()
+            x_bf16 = x.clone().to_mkldnn(torch.bfloat16).requires_grad_()
+            m = mkldnn_utils.to_mkldnn(torch.nn.PReLU())
+            m_bf16 = mkldnn_utils.to_mkldnn(torch.nn.PReLU(), torch.bfloat16)
+
+            y = m(x_fp32).to_dense()
+            y_bf16 = m_bf16(x_bf16).to_dense()
+            self.assertEqual(y, y_bf16.to(torch.float32), atol=1e-1, rtol=1e-3)
+
+            loss = y.sum()
+            loss.backward()
+            loss_bf16 = y_bf16.sum()
+            loss_bf16.backward()
+            self.assertEqual(x_fp32.grad.to_dense(), x_bf16.grad.to_dense(torch.float32))
+        else:
+            x_bf16 = torch.randn(size, dtype=torch.bfloat16).requires_grad_()
+            m_bf16 = mkldnn_utils.to_mkldnn(torch.nn.PReLU(), torch.bfloat16)
+            msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+            self.assertRaisesRegex(RuntimeError,
+                                   msg,
+                                   lambda: m_bf16(x_bf16))
+
+    def test_prelu_bf16(self):
+        self._test_prelu_bf16_base(torch.Size([16]), 1)
+        self._test_prelu_bf16_base(torch.Size([16, 64]), 1)
+        self._test_prelu_bf16_base(torch.Size([16, 64]), 64)
+        self._test_prelu_bf16_base(torch.Size([16, 64, 112]), 1)
+        self._test_prelu_bf16_base(torch.Size([16, 64, 112]), 64)
+        self._test_prelu_bf16_base(torch.Size([16, 64, 112, 112, 1]), 1)
+        self._test_prelu_bf16_base(torch.Size([16, 64, 112, 112, 1]), 64)
 
     def _test_max_pool_base(self, dim, input):
         pool_module = {2: torch.nn.MaxPool2d, 3: torch.nn.MaxPool3d}

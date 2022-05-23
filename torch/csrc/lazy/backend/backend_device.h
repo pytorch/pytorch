@@ -36,16 +36,13 @@ class TORCH_API BackendDevice {
   BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int64_t ordinal);
 
   int8_t type() const;
-  int64_t ordinal() const { return ordinal_;  }
+  int64_t ordinal() const { return ordinal_; }
 
   bool operator==(const BackendDevice& other) const { return compare(other) == 0; }
   bool operator!=(const BackendDevice& other) const { return compare(other) != 0; }
   bool operator<(const BackendDevice& rhs) const { return compare(rhs) < 0; }
 
   std::string toString() const;
-
-  // The string -> Device conversion should be handled by the backend interface.
-  C10_DEPRECATED explicit BackendDevice(const std::string& device_spec);
 
  private:
   int compare(const BackendDevice& rhs) const;
@@ -65,6 +62,7 @@ TORCH_API c10::Device backendDeviceToAtenDevice(const BackendDevice& device);
 // input is not a lazy tensor.
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors);
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor);
+TORCH_API c10::optional<BackendDevice> GetBackendDevice(const c10::optional<c10::Device> device);
 
 // For variadic template.
 TORCH_API c10::optional<BackendDevice> GetBackendDevice();

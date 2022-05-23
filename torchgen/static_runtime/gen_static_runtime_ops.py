@@ -1,7 +1,7 @@
 from torchgen import gen
 from torchgen.context import native_function_manager
-from torchgen.model import NativeFunctionsGroup
-from torchgen.static_runtime import gen_structured
+from torchgen.model import DispatchKey, NativeFunctionsGroup
+from torchgen.static_runtime import generator
 
 import argparse
 import itertools
@@ -11,6 +11,8 @@ from typing import Sequence
 # Given a list of `grouped_native_functions` sorted by their op names, return a list of
 # lists each of which groups ops that share the base name. For example, `mean` and
 # `mean.dim` are grouped together by this function.
+
+
 def group_functions_by_op_name(
     grouped_native_functions: Sequence[NativeFunctionsGroup],
 ) -> Sequence[Sequence[NativeFunctionsGroup]]:
@@ -22,7 +24,7 @@ def group_functions_by_op_name(
 
     def is_supported(g: NativeFunctionsGroup) -> bool:
         with native_function_manager(g):
-            return gen_structured.is_supported(g)
+            return generator.is_supported(g)
 
     eligible_ops = (g for g in grouped_native_functions if is_supported(g))
     groups = [
@@ -33,6 +35,7 @@ def group_functions_by_op_name(
             )
         )
     ]
+
     return groups
 
 
@@ -122,23 +125,24 @@ def main() -> None:
         "-s",
         "--source-path",
         help="path to source directory for ATen",
-        default="aten/src/ATen",
+        default="caffe2/aten/src/ATen",
     )
     parser.add_argument(
         "-p",
         "--generated-ops-cpp-path",
         help="path to directory to generate op dispatcher .cpp file",
-        default="torch/csrc/jit/runtime/static/generated_ops.cpp",
+        default="caffe2/torch/csrc/jit/runtime/static/generated_ops.cpp",
     )
     parser.add_argument(
         "-t",
         "--generated-ops-test-cpp-path",
         help="path to directory to generate op dispatcher .cpp file",
-        default="benchmarks/static_runtime/test_generated_ops.cc",
+        default="caffe2/benchmarks/static_runtime/test_generated_ops.cc",
     )
     options = parser.parse_args()
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
-    parsed_yaml = gen.parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(options.source_path, "native/tags.yaml")
+    parsed_yaml = gen.parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
@@ -149,14 +153,13 @@ def main() -> None:
     ]
     supported_function_groups = group_functions_by_op_name(structured_native_functions)
 
-    gen_out_variant_dispatcher = gen_structured.GenOutVariantDispatcher()
+    gen_out_variant_dispatcher = generator.GenOutVariantDispatcher()
     result = [
-        gen_out_variant_dispatcher(groups) for groups in supported_function_groups
+        gen_out_variant_dispatcher(groups, backend_indices[DispatchKey.CPU])
+        for groups in supported_function_groups
     ]
 
-    gen_out_variant_dispatcher_test_case = (
-        gen_structured.GenOutVariantDispatcherTestCase()
-    )
+    gen_out_variant_dispatcher_test_case = generator.GenOutVariantDispatcherTestCase()
     test_result = [
         gen_out_variant_dispatcher_test_case(groups)
         for groups in supported_function_groups
