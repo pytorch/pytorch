@@ -1055,6 +1055,40 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cpu(
       });
 }
 
+std::tuple<Tensor, Tensor> batch_norm_gather_stats_cpu(
+    const Tensor& self,
+    const Tensor& mean,
+    const Tensor& invstd,
+    const c10::optional<Tensor>& running_mean_opt,
+    const c10::optional<Tensor>& running_var_opt,
+    double momentum,
+    double epsilon,
+    int64_t count) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> running_mean_maybe_owned =
+      at::borrow_from_optional_tensor(running_mean_opt);
+  const Tensor& running_mean = *running_mean_maybe_owned;
+  const Tensor& running_var =
+      c10::value_or_else(running_var_opt, [] { return Tensor(); });
+
+  std::vector<int64_t> counts(mean.size(0), count);
+  Tensor counts_ = at::from_blob(
+      (void*)counts.data(),
+      {(int64_t)counts.size()},
+      self.options().dtype(at::kLong).device(at::kCPU));
+  counts_ =
+      counts_.to(running_mean.defined() ? running_mean.dtype() : self.dtype());
+  return batch_norm_gather_stats_with_counts_cpu(
+      self,
+      mean,
+      invstd,
+      running_mean,
+      running_var,
+      momentum,
+      epsilon,
+      counts_);
+}
+
 Tensor batch_norm_elemt_cpu(
     const Tensor& self,
     const c10::optional<Tensor>& weight_opt,
