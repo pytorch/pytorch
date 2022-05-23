@@ -18410,6 +18410,7 @@ op_db: List[OpInfo] = [
     ReductionOpInfo(
         '_masked.logsumexp',
         dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         method_variant=None,
         nan_policy='propagate',
         supports_out=False,
