@@ -107,7 +107,6 @@ class ProxyTensor(torch.Tensor):
         )
 
         r.proxy = proxy
-        r.sym_shape = sym_shape
         r.tracer = tracer
         # we would use it to propagate tensor metadata
         r.fake_elem = fake_elem.detach().clone()
@@ -124,38 +123,47 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        #print(func_overload.__name__)
-        args = args if args else ()
-        def get_proxy(x): return x.proxy if isinstance(x, ProxyTensor) else x
-        kwargs = kwargs if kwargs else {}
-        tracer = []
-        def get_tracer(x):
-            if isinstance(x, ProxyTensor):
-                tracer.append(x.tracer)
+        print(func_overload.__name__)
+        try:
+            args = args if args else ()
+            def get_proxy(x): return x.proxy if isinstance(x, ProxyTensor) else x
+            kwargs = kwargs if kwargs else {}
+            tracer = []
+            def get_tracer(x):
+                if isinstance(x, ProxyTensor):
+                    tracer.append(x.tracer)
 
-        def get_fake(x): return x.fake_elem if isinstance(x, ProxyTensor) else x
+            def get_fake(x): return x.fake_elem if isinstance(x, ProxyTensor) else x
 
-        tree_map(get_tracer, (args, kwargs))
-        assert len(tracer) > 0
-        tracer = tracer[0]
-        output_proxy = tracer.graph.call_function(func_overload, tree_map(get_proxy, args), tree_map(get_proxy, kwargs))
-        with no_dispatch():
-            # TODO: we will use a FakeTensor or MetaTensor to compute metadata 
-            out = func_overload(*tree_map(get_fake, args), **tree_map(get_fake, kwargs))
-            assert not isinstance(out, ProxyTensor)
+            tree_map(get_tracer, (args, kwargs))
+            assert len(tracer) > 0
+            tracer = tracer[0]
+            output_proxy = tracer.graph.call_function(func_overload, tree_map(get_proxy, args), tree_map(get_proxy, kwargs))
+            with no_dispatch():
+                # TODO: we will use a FakeTensor or MetaTensor to compute metadata 
+                out = func_overload(*tree_map(get_fake, args), **tree_map(get_fake, kwargs))
+                assert not isinstance(out, ProxyTensor)
 
-        # this should be producing SymInts
-        output_shape = propagate_meta(func_overload, *args, **kwargs)
-        output_shape = [check_sym_int(x) for x in output_shape]
-        sym_strides = ProxyTensor.sym_strides(output_shape)
-        sym_strides = [check_sym_int(x) for x in sym_strides]
-        return ProxyTensor(out, output_proxy, output_shape, ProxyTensor.sym_strides(tracer, output_shape), tracer)
+
+            # this should be producing SymInts
+            output_shape = propagate_meta(func_overload, *args, **kwargs)
+            output_shape = [check_sym_int(x) for x in output_shape]
+            sym_strides = ProxyTensor.sym_strides(tracer, output_shape)
+            sym_strides = [check_sym_int(x) for x in sym_strides]
+            return ProxyTensor(out, output_proxy, output_shape, sym_strides, tracer)
+        except Exception as e:
+            print(f"exception {e}")
+            exit(0)
 
 # EXTENDABLE
 class PySymInt(object):
     def __init__(self, expr, tracer):
         self.expr = expr
         self.tracer = tracer
+
+    def __getattr__(self, name):
+        print(f"Missing attribute {name}")
+        exit(0)
 
     def __bool__(self):
         return bool(self.tracer.evaluate_expr(self.expr))

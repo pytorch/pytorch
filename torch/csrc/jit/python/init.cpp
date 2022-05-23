@@ -1148,6 +1148,10 @@ void initJITBindings(PyObject* module) {
       //return false;
     })
     // FOREACH MACRO?
+    .def("__init__", [](py::object obj) {
+      std::cerr << "calling __init__\n";
+      return std::make_shared<PythonSymbolicIntNode>(obj);
+    })
     .def("__add__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
       return std::shared_ptr<c10::SymbolicIntNode> (a->add(b.get()));
     })
@@ -1163,8 +1167,16 @@ void initJITBindings(PyObject* module) {
     .def("__mod__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
       return std::shared_ptr<c10::SymbolicIntNode> (a->mod(b.get()));
     })
-    .def("__eq__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
-      return std::shared_ptr<c10::SymbolicIntNode> (a->eq(b.get()));
+    .def("__eq__", [](std::shared_ptr<c10::SymbolicIntNode> a, py::object b) -> std::shared_ptr<c10::SymbolicIntNode> {
+      std::cerr << "calling __eq__\n";
+      //return std::shared_ptr<c10::SymbolicIntNode> (a->eq(b.get()));
+      if (torch::is_symint_node(b)) {
+        return std::shared_ptr<c10::SymbolicIntNode>(a->eq(b.cast<c10::SymbolicIntNode*>()));
+      } else {
+        // HACK:
+        auto py_symint = std::dynamic_pointer_cast<PythonSymbolicIntNode>(a);
+        return std::make_shared<PythonSymbolicIntNode>(py_symint->getPyObj().attr("__eq__")(b));
+      }
     })
     .def("__gt__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
       return std::shared_ptr<c10::SymbolicIntNode> (a->gt(b.get()));
