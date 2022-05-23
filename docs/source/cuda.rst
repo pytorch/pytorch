@@ -80,6 +80,7 @@ Graphs (beta)
     :toctree: generated
     :nosignatures:
 
+    is_current_stream_capturing
     graph_pool_handle
     CUDAGraph
     graph

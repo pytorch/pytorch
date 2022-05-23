@@ -21,7 +21,6 @@ from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .qconfig_mapping import QConfigMapping
 
-
 def _check_is_graph_module(model: torch.nn.Module) -> None:
     if not isinstance(model, GraphModule):
         raise ValueError(
@@ -180,6 +179,7 @@ def _prepare_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
     is_qat: bool,
+    example_inputs: Tuple[Any, ...],
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
@@ -264,6 +264,7 @@ forward graph of the parent module,
         qconfig_mapping,
         is_qat,
         tracer.node_name_to_scope,
+        example_inputs=example_inputs,
         prepare_custom_config_dict=prepare_custom_config_dict,
         equalization_config=equalization_config,
         backend_config_dict=backend_config_dict,
@@ -279,6 +280,7 @@ def _prepare_standalone_module_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
     is_qat: bool,
+    example_inputs: Tuple[Any, ...],
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
 ) -> GraphModule:
@@ -308,6 +310,7 @@ def _prepare_standalone_module_fx(
         model,
         qconfig_mapping,
         is_qat,
+        example_inputs,
         prepare_custom_config_dict,
         backend_config_dict=backend_config_dict,
         is_standalone_module=True,
@@ -357,6 +360,7 @@ def fuse_fx(
 def prepare_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
+    example_inputs: Tuple[Any, ...],
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
@@ -364,9 +368,9 @@ def prepare_fx(
     r""" Prepare a model for post training static quantization
 
     Args:
-      * `model`: torch.nn.Module model, must be in eval mode
+      * `model` (required): torch.nn.Module model, must be in eval mode
 
-      * `qconfig_mapping`: mapping from model ops to qconfigs::
+      * `qconfig_mapping` (required): mapping from model ops to qconfigs::
 
           qconfig_mapping = QConfigMapping() \
               .set_global(global_qconfig) \
@@ -378,6 +382,8 @@ def prepare_fx(
               .set_module_name("module1", qconfig1) \
               .set_module_name("module2", qconfig2) \
               .set_module_name_object_type_order("module3", torch.nn.functional.linear, 0, qconfig3)
+
+      * `example_inputs`: (required) Example inputs for forward function of the model
 
       * `prepare_custom_config_dict`: customization configuration dictionary for quantization tool::
 
@@ -464,7 +470,8 @@ def prepare_fx(
                     model(image)
 
         qconfig_mapping = QConfigMapping().set_global(qconfig)
-        prepared_model = prepare_fx(float_model, qconfig_mapping)
+        example_inputs = (torch.randn(1, 3, 224, 224),)
+        prepared_model = prepare_fx(float_model, qconfig_mapping, example_inputs)
         # Run calibration
         calibrate(prepared_model, sample_inference_data)
     """
@@ -473,6 +480,7 @@ def prepare_fx(
         model,
         qconfig_mapping,
         False,  # is_qat
+        example_inputs,
         prepare_custom_config_dict,
         equalization_config,
         backend_config_dict,
@@ -482,6 +490,7 @@ def prepare_fx(
 def prepare_qat_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
+    example_inputs: Tuple[Any, ...],
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
 ) -> ObservedGraphModule:
@@ -490,6 +499,7 @@ def prepare_qat_fx(
     Args:
       * `model`: torch.nn.Module model, must be in train mode
       * `qconfig_mapping`: see :func:`~torch.ao.quantization.prepare_fx`
+      * `example_inputs`: see :func:`~torch.ao.quantization.prepare_fx`
       * `prepare_custom_config_dict`: see :func:`~torch.ao.quantization.prepare_fx`
       * `backend_config_dict`: see :func:`~torch.ao.quantization.prepare_fx`
 
@@ -521,6 +531,7 @@ def prepare_qat_fx(
         model,
         qconfig_mapping,
         True,  # is_qat
+        example_inputs,
         prepare_custom_config_dict,
         backend_config_dict=backend_config_dict,
     )
