@@ -1,12 +1,11 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: meta tensors"]
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
-from torch.testing._internal.jit_utils RUN_CUDA
+from torch.testing._internal.jit_utils import RUN_CUDA
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
-from torch._ops import OpOverload
 import unittest
 
 
