@@ -68,12 +68,21 @@ def _xlog1py(
 ):
     assert isinstance(a, TensorLike) or isinstance(b, TensorLike)
 
+    # 1) Operations derived from elementwise_unary_scalar_wrapper contain non-ref
+    # functions, which causes a runtime error in TorchRefsMode context manager
+    # when strict = True
+    # 2) where requires all tensors to be on the same device
+    # TODO remove scalar_tensor
     if isinstance(a, TensorLike):
         if isinstance(b, Number):
-            b = prims.scalar_tensor(b, dtype=a.dtype, device=a.device)
+            b = refs.scalar_tensor(b, dtype=a.dtype, device=a.device)
+        elif utils.is_cpu_scalar_tensor(b):
+            b = prims.device_put(b, device=a.device)
     elif isinstance(b, TensorLike):
         if isinstance(a, Number):
-            a = prims.scalar_tensor(a, dtype=b.dtype, device=b.device)
+            a = refs.scalar_tensor(a, dtype=b.dtype, device=b.device)
+        elif utils.is_cpu_scalar_tensor(a):
+            a = prims.device_put(a, device=b.device)
 
     rhs = refs.where(refs.eq(a, 0), 0, refs.mul(a, refs.log1p(b)))
     return refs.where(refs.isnan(b), float("nan"), rhs)
