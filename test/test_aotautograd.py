@@ -168,7 +168,7 @@ class PySymInt(object):
         exit(0)
 
     def wrap(self, num):
-        return PySymInt(sympy.Integer(1), self.tracer)
+        return PySymInt(sympy.Integer(num), self.tracer)
 
     def __bool__(self):
         return bool(self.tracer.evaluate_expr(self.expr))
