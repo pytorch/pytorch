@@ -3324,6 +3324,31 @@ def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **k
                                     _make_tensor(shape, requires_grad=False)),
                               kwargs=kwargs)
 
+def reference_inputs_margin_ranking_loss(op, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    for reduction in ('sum', 'mean', 'none'):
+        if dtype.is_floating_point:  # only supports ints and floats
+            # NaN propagation
+            inp1 = make_input((10, ))
+            inp1[2] = float('nan')
+            inp2 = make_input((10, ))
+            target = make_input((10, ))
+            yield SampleInput(inp1, args=(inp2, target), kwargs={'reduction': reduction})
+
+            # Inf handling
+            inp1 = make_input((10, ))
+            inp2 = make_input((10, ))
+            inp2[4] = float('inf')
+            target = make_input((10, ))
+            yield SampleInput(inp1, args=(inp2, target), kwargs={'reduction': reduction})
+
+        # Broadcasting
+        inp1 = make_input((5, 2))
+        inp2 = make_input((5, 1))
+        target = make_input((1, 2))
+        yield SampleInput(inp1, args=(inp2, target), kwargs={'reduction': reduction})
+
 def error_inputs_margin_ranking_loss(op, device, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=torch.float32)
     # invalid reduction value.
@@ -9050,6 +9075,38 @@ def error_inputs_hinge_embedding_loss(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'reduction': 'abc'}),
                      error_type=ValueError, error_regex='is not a valid value')
 
+def reference_inputs_hinge_embedding_loss(op, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    for reduction in ('sum', 'mean', 'none'):
+        if dtype.is_floating_point:  # only supports ints and floats
+            # NaN propagation
+            inp = make_input((10, ))
+            inp[2] = float('nan')
+            target = make_input((10, ))
+            # target should contain either 1 or -1 as per docs
+            mask = torch.rand_like(target) > 0.5
+            target[mask] = -1
+            target[~mask] = 1
+            yield SampleInput(inp, args=(target,), kwargs={'reduction': reduction})
+
+            # Inf Handling
+            inp = make_input((10, ))
+            inp[4] = float('inf')
+            target = make_input((10, ))
+            mask = torch.rand_like(target) > 0.5
+            target[mask] = -1
+            target[~mask] = 1
+            yield SampleInput(inp, args=(target,), kwargs={'reduction': reduction})
+
+        # Broadcasting
+        inp = make_input((5, 5))
+        target = make_input((1, 5))
+        mask = torch.rand_like(target) > 0.5
+        target[mask] = -1
+        target[~mask] = 1
+        yield SampleInput(inp, args=(target,), kwargs={'reduction': reduction})
+
 def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
     for input, target, d in _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
         d['delta'] = random.uniform(1e-3, 9)
@@ -13434,6 +13491,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_margin_ranking_loss,
         error_inputs_func=error_inputs_margin_ranking_loss,
+        reference_inputs_func=reference_inputs_margin_ranking_loss,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
@@ -18488,6 +18546,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_hinge_embedding_loss,
         error_inputs_func=error_inputs_hinge_embedding_loss,
+        reference_inputs_func=reference_inputs_hinge_embedding_loss,
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
         )
