@@ -260,6 +260,25 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_,
   if (sourceBuffer == nil) return dst_;
   NSUInteger destOffset = dst.storage_offset() * dst.itemsize();
 
+  // In case of dtype change, first convert src "inplace"
+  if (src.dtype() != dst.dtype()) {
+    @autoreleasepool {
+      auto srcDType = getMPSDataType(src.scalar_type());
+      auto dstDType = getMPSDataType(dst.scalar_type());
+      auto srcShape = getMPSShape(src);
+      stream->commandBuffer();
+      MPSGraph* mpsGraph = make_mps_graph();
+      MPSGraphTensor* srcTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, src);
+      MPSGraphTensorData* srcData = [[[MPSGraphTensorData alloc]
+                                      initWithMTLBuffer:sourceBuffer shape:srcShape dataType:srcDType]
+                                     autorelease];
+      MPSGraphTensor *resultTensor = [mpsGraph castTensor:srcTensor toType:dstDType name:@"cast"];
+      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{srcTensor: srcData};
+      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{resultTensor: srcData};
+      runMPSGraph(stream, mpsGraph, feeds, results);
+    }
+  }
+
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
