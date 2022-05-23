@@ -375,7 +375,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
   } else {
     src = src_;
     if (src.dtype() != dst_.dtype()) {
-      // Do datatype conversion on source device
+      // In case of dtype change, perform conversion on source device
       src = src.to(dst_.dtype());
     }
   }
