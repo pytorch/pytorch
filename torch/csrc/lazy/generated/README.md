@@ -16,4 +16,3 @@ For more information on codegen, see these resources:
 * Lazy TorchScript backend native functions: [ts_native_functions.yaml](../../../../aten/src/ATen/native/ts_native_functions.yaml)
 * Source of truth for native func definitions [ATen native_functions.yaml](../../../../aten/src/ATen/native/native_functions.yaml)
 * Info about native functions [ATen nativefunc README.md](../../../../aten/src/ATen/native/README.md)
-

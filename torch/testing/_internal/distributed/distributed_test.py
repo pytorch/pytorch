@@ -4849,10 +4849,10 @@ class DistributedTest:
             # single base training setup
             if torch.cuda.is_available():
                 device = torch.device(f"cuda:{gpu_subset[0]}")
-                device_ids=gpu_subset
+                device_ids = gpu_subset
             else:
                 device = torch.device('cpu')
-                device_ids=None
+                device_ids = None
             model_base = copy.deepcopy(model).to(device)
 
             # DDP training setup
@@ -5015,10 +5015,10 @@ class DistributedTest:
             model = ONLY_SBN_NET
             if torch.cuda.is_available():
                 device = torch.device(f"cuda:{rank}")
-                device_ids=[rank]
+                device_ids = [rank]
             else:
                 device = torch.device('cpu')
-                device_ids=None
+                device_ids = None
             model_base = copy.deepcopy(model).to(device)
             model_DDP = nn.parallel.DistributedDataParallel(
                 model_base, device_ids=device_ids
@@ -5136,10 +5136,10 @@ class DistributedTest:
 
             if torch.cuda.is_available():
                 device = torch.device(f"cuda:{gpus[0]}")
-                device_ids=gpus
+                device_ids = gpus
             else:
                 device = torch.device('cpu')
-                device_ids=None
+                device_ids = None
             # single base training setup
             model_base = copy.deepcopy(model).to(device)
 
@@ -5187,10 +5187,10 @@ class DistributedTest:
 
             if torch.cuda.is_available():
                 device = torch.device(f"cuda:{gpus[0]}")
-                device_ids=gpus
+                device_ids = gpus
             else:
                 device = torch.device('cpu')
-                device_ids=None
+                device_ids = None
 
             # single base training setup
             model_base = copy.deepcopy(model).to(device)
@@ -5234,10 +5234,10 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             if torch.cuda.is_available():
                 device = torch.device(f"cuda:{rank}")
-                device_ids=[rank]
+                device_ids = [rank]
             else:
                 device = torch.device('cpu')
-                device_ids=None
+                device_ids = None
             model = nn.parallel.DistributedDataParallel(
                 ONLY_SBN_NET.to(device), device_ids=device_ids
             )
@@ -8640,10 +8640,10 @@ class DistributedTest:
             rank = self.rank
             if torch.cuda.is_available():
                 device = torch.device(f"cuda:{rank}")
-                device_ids=[self.rank]
+                device_ids = [self.rank]
             else:
                 device = torch.device('cpu')
-                device_ids=None
+                device_ids = None
             # single base training setup
             model_base = model.to(device)
             no_sync_bn = torch.nn.parallel.DistributedDataParallel(
