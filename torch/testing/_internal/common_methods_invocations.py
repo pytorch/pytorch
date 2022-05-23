@@ -18653,6 +18653,13 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
+    UnaryUfuncInfo(
+        'special.gamma',
+        ref=scipy.special.gamma if TEST_SCIPY else _NOTHING,
+        dtypes=all_types_and(torch.bool),
+        supports_autograd=False,
+        supports_forward_ad=False,
+    ),
 ]
 
 # NOTE [Python References]
