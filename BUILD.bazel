@@ -221,10 +221,7 @@ cc_library(
 
 cc_library(
     name = "aten_headers",
-    hdrs = [
-        "torch/csrc/Export.h",
-        "torch/csrc/jit/frontend/function_schema_parser.h",
-    ] + glob([
+    hdrs = glob([
         "aten/src/**/*.h",
         "aten/src/**/*.hpp",
         "aten/src/ATen/cuda/**/*.cuh",
