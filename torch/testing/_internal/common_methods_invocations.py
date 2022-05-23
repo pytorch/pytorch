@@ -3303,7 +3303,6 @@ def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
             kwargs=sample.kwargs))
     return tuple(samples)
 
-# TODO: add reduction kwargs
 def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -3314,8 +3313,12 @@ def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **k
         (S, S, S),
     )
 
+    margins = (0., 1.)
+    reductions = ('sum', 'mean', 'none')
+
     for shape in shapes:
-        for kwargs in [{}, {'margin': 1.0}]:
+        for margin, reduction in product(margins, reductions):
+            kwargs = {'margin': margin, 'reduction': reduction}
             yield SampleInput(_make_tensor(shape),
                               args=(_make_tensor(shape, requires_grad=False),
                                     _make_tensor(shape, requires_grad=False)),
