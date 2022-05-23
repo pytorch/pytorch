@@ -202,14 +202,39 @@ class TransformerEncoder(Module):
         """
         output = src
         convert_to_nested = False
-        if hasattr(self.layers[0], "is_fastpath"):
-            if self.layers[0].is_fastpath() and src.dim() == 3 and self.enable_nested_tensor:
-                if src_key_padding_mask is not None and not output.is_nested:
-                    convert_to_nested = True
-                    output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
+        first_layer = self.layers[0]
+        if isinstance(first_layer, torch.nn.TransformerEncoderLayer):
+            if (not first_layer.norm_first and not first_layer.training and
+                    first_layer.self_attn.batch_first and
+                    first_layer.self_attn._qkv_same_embed_dim and first_layer.activation_relu_or_gelu and
+                    first_layer.norm1.eps == first_layer.norm2.eps and
+                    src.dim() == 3 and self.enable_nested_tensor) :
+                if src_key_padding_mask is not None and not output.is_nested and mask is None:
+                    tensor_args = (
+                        src,
+                        first_layer.self_attn.in_proj_weight,
+                        first_layer.self_attn.in_proj_bias,
+                        first_layer.self_attn.out_proj.weight,
+                        first_layer.self_attn.out_proj.bias,
+                        first_layer.norm1.weight,
+                        first_layer.norm1.bias,
+                        first_layer.norm2.weight,
+                        first_layer.norm2.bias,
+                        first_layer.linear1.weight,
+                        first_layer.linear1.bias,
+                        first_layer.linear2.weight,
+                        first_layer.linear2.bias,
+                    )
+                    if not torch.overrides.has_torch_function(tensor_args):
+                        if output.is_cuda or 'cpu' in str(output.device):
+                            convert_to_nested = True
+                            output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
 
         for mod in self.layers:
-            output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
+            if convert_to_nested:
+                output = mod(output, src_mask=mask)
+            else:
+                output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
 
         if convert_to_nested:
             output = output.to_padded_tensor(0.)
@@ -366,14 +391,6 @@ class TransformerEncoderLayer(Module):
             state['activation'] = F.relu
         super(TransformerEncoderLayer, self).__setstate__(state)
 
-    def is_fastpath(self):
-        if (not self.norm_first and not self.training and
-                self.self_attn.batch_first and
-                self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
-                self.norm1.eps == self.norm2.eps):
-            return True
-        return False
-
     def forward(self, src: Tensor, src_mask: Optional[Tensor] = None,
                 src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layer.
@@ -389,7 +406,10 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
-        if (self.is_fastpath() and src.dim() == 3 and
+        if (src.dim() == 3 and not self.norm_first and not self.training and
+            self.self_attn.batch_first and
+            self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
+            self.norm1.eps == self.norm2.eps and
             ((src_mask is None and src_key_padding_mask is None)
              if src.is_nested
              else (src_mask is None or src_key_padding_mask is None))):
